@@ -174,7 +174,6 @@ dependencies:
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
-        #   <VAR>                 -> legacy Copilot syntax (still supported)
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 

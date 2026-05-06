@@ -157,6 +157,12 @@ class TestCopilotEnvVarTranslationInHeaders(unittest.TestCase):
     start, so install-time resolution unnecessarily bakes secrets to disk.
     """
 
+    def setUp(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def tearDown(self):
+        CopilotClientAdapter.reset_install_run_state()
+
     def _adapter(self):
         with (
             patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
@@ -401,6 +407,97 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
                 "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
             )
         self.assertEqual(result, "Bearer literal-value")
+
+
+class TestCopilotInstallRunSummary(unittest.TestCase):
+    """Issue #1152: aggregated post-install diagnostics.
+
+    ``emit_install_run_summary`` consolidates security-upgrade,
+    unset-env-var, and legacy-syntax diagnostics into a single
+    end-of-run block so the user sees one actionable summary even when
+    many servers were configured.
+    """
+
+    def setUp(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def tearDown(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def _adapter(self):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CopilotClientAdapter()
+
+    def test_security_upgrade_warning_when_baked_keys_detected(self):
+        """A server config that previously had literal env values triggers
+        a single security-improvement warning naming the affected keys.
+        """
+        adapter = self._adapter()
+        # Simulate a previously-baked config on disk.
+        with patch.object(
+            CopilotClientAdapter,
+            "_collect_previously_baked_keys",
+            return_value={"GITHUB_TOKEN", "LINEAR_KEY"},
+        ):
+            adapter._collect_previously_baked_keys.__call__  # noqa: B018 - sanity
+            CopilotClientAdapter._security_upgraded_keys.update({"GITHUB_TOKEN", "LINEAR_KEY"})
+
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("Security improvement", joined)
+        self.assertIn("GITHUB_TOKEN", joined)
+        self.assertIn("LINEAR_KEY", joined)
+
+    def test_unset_env_warning_aggregates_across_servers(self):
+        """Two servers contributing different unset env vars produce a
+        single aggregated warning with a copy-pasteable export hint.
+        """
+        CopilotClientAdapter._unset_env_keys_by_server["github-mcp"] = ["GH_TOKEN"]
+        CopilotClientAdapter._unset_env_keys_by_server["linear"] = ["LINEAR_KEY"]
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("GH_TOKEN", joined)
+        self.assertIn("LINEAR_KEY", joined)
+        self.assertIn("export GH_TOKEN=... LINEAR_KEY=...", joined)
+
+    def test_summary_emitted_only_once(self):
+        """Calling ``emit_install_run_summary`` twice in the same process
+        emits the diagnostics exactly once (idempotent guard)."""
+        CopilotClientAdapter._unset_env_keys_by_server["s"] = ["X"]
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+            CopilotClientAdapter.emit_install_run_summary()
+        self.assertEqual(mock_warn.call_count, 1)
+
+    def test_unset_env_emit_summary_records_keys(self):
+        """``_emit_install_summary`` populates the unset-env bucket for
+        keys not present in ``os.environ``; set keys are not recorded.
+        """
+        adapter = self._adapter()
+        adapter._last_env_placeholder_keys = {"DEFINITELY_NOT_SET_VAR_XYZ"}
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DEFINITELY_NOT_SET_VAR_XYZ", None)
+            adapter._emit_install_summary("svc", {"type": "local"})
+        self.assertIn("svc", CopilotClientAdapter._unset_env_keys_by_server)
+        self.assertIn(
+            "DEFINITELY_NOT_SET_VAR_XYZ",
+            CopilotClientAdapter._unset_env_keys_by_server["svc"],
+        )
+
+    def test_set_env_var_not_recorded_as_unset(self):
+        """When the env var IS exported, the unset bucket is not
+        populated for that server."""
+        adapter = self._adapter()
+        adapter._last_env_placeholder_keys = {"PRESENT_VAR"}
+        with patch.dict(os.environ, {"PRESENT_VAR": "value"}, clear=False):
+            adapter._emit_install_summary("svc", {"type": "local"})
+        self.assertNotIn("svc", CopilotClientAdapter._unset_env_keys_by_server)
 
 
 class TestCopilotSelectRemoteWithUrl(unittest.TestCase):

@@ -15,7 +15,7 @@ from ...core.docker_args import DockerArgsProcessor
 from ...core.token_manager import GitHubTokenManager
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from ...utils.console import _rich_info, _rich_success, _rich_warning
+from ...utils.console import _rich_warning
 from ...utils.github_host import is_github_hostname
 from .base import _ENV_VAR_RE, MCPClientAdapter
 
@@ -130,6 +130,11 @@ class CopilotClientAdapter(MCPClientAdapter):
     # baked as plaintext literals on disk and have just been rewritten to
     # ``${KEY}`` placeholders. Drives the security-improvement notice.
     _security_upgraded_keys: ClassVar[set] = set()
+    # Process-wide aggregation of env-var names referenced by configs that
+    # are NOT exported in the current shell. Drives the post-install
+    # actionable warning that lists vars the user must export before
+    # launching ``gh copilot``.
+    _unset_env_keys_by_server: ClassVar[dict] = {}
     # Guard so the post-install summary is emitted at most once per CLI
     # invocation, regardless of how many ``configure_mcp_server`` calls
     # contributed to the aggregation buckets.
@@ -350,16 +355,16 @@ class CopilotClientAdapter(MCPClientAdapter):
         return baked
 
     def _emit_install_summary(self, config_key, server_config):
-        """Emit the per-server install line with an env-var summary
-        parenthetical. The summary references env-var names only -- never
-        their values -- so it is safe to display in any environment.
+        """Record env-var references for the post-install aggregated
+        summary. No per-server line is emitted here; the integrator's
+        tree (``|  +  {name} -> Copilot (configured)``) is the success
+        signal. The summary references env-var names only -- never their
+        values.
         """
-        transport = server_config.get("type", "local") or "local"
-        keys = list(self._last_env_placeholder_keys)
+        if not self._supports_runtime_env_substitution:
+            return
+        keys = set(self._last_env_placeholder_keys)
         if isinstance(server_config, dict):
-            # Scan env block and headers for any ${KEY} references that
-            # the per-method tracker didn't cover (HTTP servers populate
-            # headers, not env, etc.).
             for block_key in ("env", "headers"):
                 block = server_config.get(block_key)
                 if not isinstance(block, dict):
@@ -367,31 +372,30 @@ class CopilotClientAdapter(MCPClientAdapter):
                 for value in block.values():
                     if isinstance(value, str):
                         for match in _ENV_VAR_RE.finditer(value):
-                            name = match.group(1)
-                            if name not in keys:
-                                keys.append(name)
-        if keys and self._supports_runtime_env_substitution:
-            summary = ", ".join(
-                f"{name} {'set' if os.environ.get(name) else 'not set'}" for name in keys
+                            keys.add(match.group(1))
+        unset = sorted(name for name in keys if not os.environ.get(name))
+        if unset:
+            self.__class__._unset_env_keys_by_server.setdefault(config_key, []).extend(
+                u
+                for u in unset
+                if u not in self.__class__._unset_env_keys_by_server.get(config_key, [])
             )
-            _rich_success(
-                f"{config_key} ({transport}) installed for {self._client_label} (env: {summary})"
-            )
-        else:
-            _rich_success(f"{config_key} ({transport}) installed for {self._client_label}")
 
     @classmethod
     def emit_install_run_summary(cls):
         """Emit aggregated cross-server diagnostics at the end of an install
         run. Idempotent: subsequent calls within the same process are no-ops.
 
-        Two diagnostics are emitted (when applicable):
+        Three diagnostics are emitted (when applicable):
 
         1. Security improvement notice -- when the install rewrote
            previously baked literal env values to runtime placeholders.
-           Bypasses ``--quiet`` because it is an action item (the user
+           Emitted as a warning because it is an action item (the user
            must export the affected vars).
-        2. Aggregated legacy ``<VAR>`` deprecation warning -- one line
+        2. Aggregated unset-env warning -- when one or more configured
+           servers reference env vars that are not currently exported.
+           Includes a copy-pasteable ``export`` hint.
+        3. Aggregated legacy ``<VAR>`` deprecation warning -- one line
            naming all affected servers, mirroring the established VS Code
            adapter pattern.
 
@@ -402,13 +406,25 @@ class CopilotClientAdapter(MCPClientAdapter):
             return
         if cls._security_upgraded_keys:
             visible = sorted(k for k in cls._security_upgraded_keys if not k.startswith("("))
-            count = len(cls._security_upgraded_keys)
+            count = len(visible) if visible else len(cls._security_upgraded_keys)
             affected = ", ".join(visible) if visible else "(values previously stored as literals)"
-            _rich_info(
-                f"Security improvement: {count} env var(s) previously stored as plaintext "
-                f"are now resolved at runtime.\n"
+            _rich_warning(
+                f"Security improvement: {count} environment variable(s) previously stored as "
+                f"plaintext in the Copilot config are now resolved at runtime.\n"
                 f"    Affected: {affected}\n"
-                f"    Ensure these are exported in your shell before launching the runtime."
+                f"    Ensure these are exported in your shell before running 'gh copilot'"
+            )
+        if cls._unset_env_keys_by_server:
+            all_unset: set[str] = set()
+            for names in cls._unset_env_keys_by_server.values():
+                all_unset.update(names)
+            sorted_unset = sorted(all_unset)
+            export_hint = " ".join(f"{name}=..." for name in sorted_unset)
+            _rich_warning(
+                f"Copilot CLI will resolve {len(sorted_unset)} environment variable(s) at runtime "
+                f"that are not currently set: {', '.join(sorted_unset)}.\n"
+                f"    Export them in your shell before running 'gh copilot', e.g.:\n"
+                f"      export {export_hint}"
             )
         if cls._legacy_angle_offenders_by_server:
             servers = sorted(cls._legacy_angle_offenders_by_server.keys())
@@ -426,6 +442,7 @@ class CopilotClientAdapter(MCPClientAdapter):
         process."""
         cls._legacy_angle_offenders_by_server = {}
         cls._security_upgraded_keys = set()
+        cls._unset_env_keys_by_server = {}
         cls._install_run_summary_emitted = False
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -449,14 +466,27 @@ class CopilotClientAdapter(MCPClientAdapter):
             "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
         }
 
-        # Self-defined stdio deps carry raw command/args  -- use directly
+        # Self-defined stdio deps carry raw command/args  -- use directly,
+        # but route values through the env-var translation/resolution pipeline
+        # so secrets are not baked into the persisted config when the harness
+        # supports runtime substitution (Copilot CLI).
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
-            config["args"] = raw["args"]
+            resolved_env_for_args = {}
             if raw.get("env"):
-                config["env"] = raw["env"]
+                resolved_env_for_args = self._resolve_environment_variables(
+                    raw["env"], env_overrides=env_overrides
+                )
+                config["env"] = resolved_env_for_args
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Copilot CLI")
+            args = raw.get("args") or []
+            config["args"] = [
+                self._resolve_variable_placeholders(arg, resolved_env_for_args, runtime_vars)
+                if isinstance(arg, str)
+                else arg
+                for arg in args
+            ]
             # Apply tools override if present
             tools_override = server_info.get("_apm_tools_override")
             if tools_override:
@@ -1045,9 +1075,12 @@ class CopilotClientAdapter(MCPClientAdapter):
 
             processed = re.sub(env_pattern, replace_env_var, processed)
 
-        # Replace {runtime_var} with actual values from runtime_vars (for NPM args)
+        # Replace {runtime_var} with actual values from runtime_vars (for NPM args).
+        # Negative lookbehind on `$` so we never re-substitute inside an already-translated
+        # ${VAR} env placeholder (the brace is part of a Copilot CLI runtime substitution,
+        # not an APM template variable).
         if runtime_vars:
-            runtime_pattern = r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
+            runtime_pattern = r"(?<!\$)\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
 
             def replace_runtime_var(match):
                 var_name = match.group(1)

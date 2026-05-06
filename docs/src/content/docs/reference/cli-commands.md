@@ -148,6 +148,26 @@ When installing into `.claude/commands/`, prompt files with an `input:` front-ma
 
 This transformation only applies to the `claude` target. Other targets receive the prompt content unchanged.
 
+**Copilot CLI: env-var translation in `mcp-config.json`:**
+
+When installing MCP servers for the `copilot` target, env-var placeholders in `apm.yml` are **translated** to Copilot CLI's native runtime substitution syntax (`${VAR}`) instead of being resolved to literal values at install time. This applies to HTTP `headers`, stdio `env` blocks, and stdio `args`.
+
+| `apm.yml` syntax    | Written to `~/.copilot/mcp-config.json` |
+|---------------------|------------------------------------------|
+| `${env:VAR}`        | `${VAR}`                                 |
+| `${VAR}`            | `${VAR}` (passthrough)                   |
+| `<VAR>`             | `${VAR}` (with deprecation warning)      |
+| `${VAR:-default}`   | `${VAR:-default}` (passthrough)          |
+| `${input:foo}`      | `${input:foo}` (passthrough)             |
+
+Copilot CLI resolves these at server-start from the host environment, so plaintext secrets are never written to disk. After install, `apm` emits an aggregated summary:
+
+- A **security improvement** warning when overwriting a config that previously stored literal env values, listing the affected variable names.
+- An **unset env var** warning listing every referenced variable not currently exported in your shell, with a copy-pasteable `export KEY=...` hint.
+- A one-line **deprecation** warning when any server still uses the legacy `<VAR>` syntax.
+
+Other targets (`cursor`, `windsurf`, `opencode`, `claude`, `gemini`) continue to resolve env-var placeholders at install time pending per-adapter audits.
+
 **Local `.apm/` Content Deployment:**
 
 After integrating dependencies, `apm install` deploys primitives from the project's own `.apm/` directory (instructions, prompts, agents, skills, hooks, commands) to target directories (`.github/`, `.claude/`, `.cursor/`, etc.). Local content takes priority over dependencies on collision. Deployed files are tracked in the lockfile for cleanup on subsequent installs. This works even with zero dependencies -- just `apm.yml` and `.apm/` content is enough.
