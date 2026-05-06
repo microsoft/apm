@@ -1902,7 +1902,7 @@ class TestGiteaRawUrlDownload:
         assert result == expected
         urls = [c[0][0] for c in mock_get.call_args_list]
         assert urls[0] == "https://gitea.myorg.com/owner/repo/raw/main/README.md"
-        assert "/api/v1/" in urls[1]
+        assert urlparse(urls[1]).path.startswith("/api/v1/")
 
 
 class TestGiteaGogsApiVersionNegotiation:
@@ -1933,8 +1933,8 @@ class TestGiteaGogsApiVersionNegotiation:
 
         assert result == expected
         urls = [c[0][0] for c in mock_get.call_args_list]
-        assert "/api/v1/" in urls[1]
-        assert "/api/v3/" in urls[2]
+        assert urlparse(urls[1]).path.startswith("/api/v1/")
+        assert urlparse(urls[2]).path.startswith("/api/v3/")
         assert len(mock_get.call_args_list) == 3
 
     def test_gitea_v1_succeeds_without_trying_v3(self):
@@ -1950,7 +1950,7 @@ class TestGiteaGogsApiVersionNegotiation:
 
         assert result == expected
         urls = [c[0][0] for c in mock_get.call_args_list]
-        assert all("/api/v3/" not in u for u in urls)
+        assert not any(urlparse(u).path.startswith("/api/v3/") for u in urls)
 
     def test_all_api_versions_404_raises_runtime_error(self):
         """When every API version returns 404 for both refs, a clear error is raised."""
@@ -1975,7 +1975,7 @@ class TestGiteaGogsApiVersionNegotiation:
         assert result == expected
         url_called = mock_get.call_args_list[0][0][0]
         assert url_called.startswith("https://api.github.com/")
-        assert "/api/v4/" not in url_called
+        assert not urlparse(url_called).path.startswith("/api/v4/")
 
 
 if __name__ == '__main__':

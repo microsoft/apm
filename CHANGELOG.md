@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Virtual package support for self-hosted Git services (Gitea, Gogs): `apm install` now resolves subdirectory packages and raw file downloads from generic Git hosts via raw URL and API version negotiation (v1/v3). GitLab nested-group paths (`group/subgroup/repo`) are treated as full repo URLs (dict form required for virtual packages). -- by @ganesanviji (#587)
+
 ### Fixed
 
 - Docs site auto-deploys again after bot-cut releases by correctly detecting tag-push context in `docs.yml`. (#953)
@@ -49,14 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles. (#882)
 - `apm-triage-panel` skill: three-persona panel (DevX UX, Supply Chain Security, APM CEO; conditional OSS Growth Hacker) for issue triage producing single labelled-decision comment with structured JSON tail. Mirrors `apm-review-panel` orchestration model. (#915)
 - CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
-- Virtual package support for self-hosted Git services (Gitea, Gogs): `apm install` now resolves subdirectory packages and raw file downloads from generic Git hosts via raw URL and API version negotiation (v1/v3). GitLab nested-group paths (`group/subgroup/repo`) are treated as full repo URLs (dict form required for virtual packages). -- by @ganesanviji (#587)
-- **Gemini CLI** as a supported APM target (`--target gemini`): auto-detects `.gemini/`, writes MCP config to `.gemini/settings.json`, and adds `apm runtime setup|remove gemini`. (#917)
 - Experimental `cowork` target for Microsoft 365 Copilot Cowork custom-skill deployment via OneDrive (`apm experimental enable cowork`; `apm install --target cowork --global`; persisted via `apm config set cowork-skills-dir`). (#913)
-- `apm experimental` command group (`list` / `enable` / `disable` / `reset`) lets you opt into new behaviour before it graduates to default. Ships with the `verbose-version` flag. (#849)
-- `apm audit --ci` now verifies hash integrity of locally deployed `.apm/` files so hand-edits and config drift fail CI instead of slipping through. (#887)
-- `includes:` manifest field (`auto` or list) gives you explicit control over which local `.apm/` files are deployed; pair with `policy.manifest.require_explicit_includes` to block silent expansion. Audit raises an `includes-consent` advisory while you migrate. (#887)
-- `apm-triage-panel` skill: three-persona issue triage panel (DevX UX, Supply Chain Security, APM CEO) emitting a single labelled-decision comment, mirroring `apm-review-panel`. (#915)
-- `apm-primitives-architect` persona for designing and critiquing `.apm/` skill bundles, plus a `pr-description-skill` that enforces self-sufficient PR bodies (TL;DR/Problem/Approach/Implementation/Diagrams/Trade-offs/Benefits/Validation/How-to-test) with anchored citations and validated mermaid. (#882, #884)
 - New docs guide [`dev-only-primitives`](https://danielmeppiel.github.io/awd-cli/guides/dev-only-primitives/): canonical pattern for maintainer-only primitives that must not ride into your published bundle. (#949)
 - Maintainer tooling: PGS project-board sync workflow keeps issues in lockstep with labels/milestones; `APM Self-Check` CI job dogfoods `apm audit --ci` and regeneration-drift gates. (#919, #885)
 
