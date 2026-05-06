@@ -224,8 +224,4 @@ def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     belongs exclusively in ``apm_modules/`` and must not leak into deploy
     targets when skills are copied out.
     """
-    return [
-        c
-        for c in contents
-        if (Path(directory) / c).is_symlink() or c == _APM_PIN_FILENAME
-    ]
+    return [c for c in contents if (Path(directory) / c).is_symlink() or c == _APM_PIN_FILENAME]

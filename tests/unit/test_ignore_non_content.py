@@ -95,9 +95,7 @@ class TestIgnoreNonContent:
         contains a skill directory with SKILL.md + .apm-pin, and the
         skill integrator copies it into .agents/skills/<name>/.
         """
-        apm_modules = (
-            tmp_path / "apm_modules" / "owner" / "repo" / ".apm" / "skills" / "my-skill"
-        )
+        apm_modules = tmp_path / "apm_modules" / "owner" / "repo" / ".apm" / "skills" / "my-skill"
         apm_modules.mkdir(parents=True)
         (apm_modules / "SKILL.md").write_text(
             "---\nname: my-skill\n---\n# My Skill", encoding="utf-8"
