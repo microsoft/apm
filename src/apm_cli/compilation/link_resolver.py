@@ -437,13 +437,17 @@ class UnifiedLinkResolver:
 
         Returns:
             ``(path_part, suffix)`` where ``suffix`` includes its leading
-            delimiter (``#`` or ``?``) or is the empty string.
+            delimiter (``#`` or ``?``) or is the empty string. When both
+            delimiters are present (e.g. ``doc.md?x=1#sec``), the split
+            occurs at whichever appears first so the full remainder is
+            preserved verbatim.
         """
-        for sep in ("#", "?"):
-            if sep in link_path:
-                idx = link_path.index(sep)
-                return link_path[:idx], link_path[idx:]
-        return link_path, ""
+        candidates = [link_path.find(sep) for sep in ("#", "?")]
+        positions = [idx for idx in candidates if idx != -1]
+        if not positions:
+            return link_path, ""
+        idx = min(positions)
+        return link_path[:idx], link_path[idx:]
 
     def _resolve_in_package_asset_link(
         self, link_path: str, ctx: LinkResolutionContext

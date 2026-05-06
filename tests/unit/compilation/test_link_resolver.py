@@ -545,7 +545,9 @@ class TestInPackageAssetRewriting:
 
         assert "../../apm_modules/_local/producer/standards/style.md" in result
         # And it actually resolves on disk relative to target_file's parent.
-        rewritten = re.search(r"\(([^)]+)\)", result).group(1)
+        match = re.search(r"\(([^)]+)\)", result)
+        assert match is not None, f"No markdown link target found in result: {result!r}"
+        rewritten = match.group(1)
         resolved = (target_file.parent / rewritten).resolve()
         assert resolved.exists()
 
@@ -602,6 +604,25 @@ class TestInPackageAssetRewriting:
         content = "See [section](../../standards/style.md#naming)."
         result = resolver.resolve_links_for_installation(content, source_file, target_file)
         assert "../../apm_modules/_local/producer/standards/style.md#naming" in result
+
+    def test_preserve_query_and_fragment_on_rewritten_link(self, base_dir):
+        """A combined ``?query#fragment`` suffix is preserved verbatim.
+
+        Regression: an earlier ordering bug split on ``#`` before ``?``,
+        so ``doc.md?x=1#sec`` produced ``path_part='doc.md?x=1'`` and the
+        on-disk lookup failed, leaving the link unrewritten.
+        """
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        content = "See [section](../../standards/style.md?v=2#naming)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        assert "../../apm_modules/_local/producer/standards/style.md?v=2#naming" in result
 
     def test_skip_fragment_only_link(self, base_dir):
         """`#anchor` links are not touched."""
