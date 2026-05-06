@@ -377,6 +377,7 @@ test_ghaw_compat() {
         cat > apm.yml <<'APMYML'
 name: ghaw-compat-test
 version: 1.0.0
+target: copilot
 dependencies:
   apm:
     - microsoft/apm-sample-package

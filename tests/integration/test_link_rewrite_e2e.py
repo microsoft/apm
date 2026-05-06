@@ -74,9 +74,14 @@ def _make_consumer(root: Path, *, targets: list[str] | None = None) -> Path:
     consumer = root / "consumer"
     consumer.mkdir()
     (consumer / ".github").mkdir()
-    yml: dict = {"name": "consumer", "version": "1.0.0", "dependencies": {"apm": []}}
+    yml: dict = {
+        "name": "consumer",
+        "version": "1.0.0",
+        "target": "copilot",
+        "dependencies": {"apm": []},
+    }
     if targets:
-        yml["targets"] = targets
+        yml["target"] = ",".join(targets) if len(targets) > 1 else targets[0]
     _write_yaml(consumer / "apm.yml", yml)
     return consumer
 
@@ -375,7 +380,7 @@ class TestMultiTargetLinkRewriting:
             producer / ".apm" / "instructions" / "multi.instructions.md",
             '---\napplyTo: "**/*.py"\n---\n# Multi\n\nSee [style](../../standards/style.md).\n',
         )
-        consumer = _make_consumer(ws)
+        consumer = _make_consumer(ws, targets=["copilot", "claude"])
         # Auto-detect needs both target dirs present.  Copilot
         # instructions deploy to .github/instructions/; Claude
         # instructions deploy to .claude/rules/.

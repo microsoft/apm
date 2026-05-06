@@ -49,7 +49,6 @@ def run(ctx: InstallContext) -> None:
 
     On return ``ctx.targets`` and ``ctx.integrators`` are populated.
     """
-    from dataclasses import replace as _replace
 
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import (
@@ -282,7 +281,13 @@ def run(ctx: InstallContext) -> None:
                         raise SystemExit(1) from None
                     if ctx.logger:
                         ctx.logger.verbose_detail(f"Created {_profile.root_dir}/ ({_tname} target)")
-                _profile = _replace(_profile, resolved_deploy_root=_target_dir)
+                # NOTE: do NOT set resolved_deploy_root on static targets.
+                # That field is reserved for dynamic-root targets (cowork)
+                # and is treated as the final deploy destination by
+                # skill_integrator and base_integrator. Static targets must
+                # follow the standard primitive-mapping path so that
+                # ``deploy_root`` (e.g. .agents) and ``subdir`` (e.g. skills)
+                # are honored.
                 _v2_targets.append(_profile)
 
             # Replace legacy targets with v2 targets for project-scope.
@@ -379,7 +384,6 @@ def run_targets_phase(ctx) -> None:
     This is the three-guard collapse: every resolved target always materializes
     its deploy directory (auto_create=True unconditionally post-resolution).
     """
-    from dataclasses import replace
     from pathlib import Path
 
     from apm_cli.core.target_detection import resolve_targets
@@ -420,8 +424,12 @@ def run_targets_phase(ctx) -> None:
         if not target_dir.exists():
             target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Set resolved_deploy_root so downstream code knows the exact path
-        profile = replace(profile, resolved_deploy_root=target_dir)
+        # NOTE: do NOT set resolved_deploy_root on static targets.
+        # That field is reserved for dynamic-root targets (cowork) and is
+        # treated as the final deploy destination by downstream integrators.
+        # Static targets must follow the standard primitive-mapping path so
+        # that ``deploy_root`` (e.g. .agents) and ``subdir`` (e.g. skills)
+        # are honored.
         profiles.append(profile)
 
     ctx.targets = profiles
