@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Virtual package support for self-hosted Git services (Gitea, Gogs): `apm install` now resolves subdirectory packages and raw file downloads from generic Git hosts via raw URL and API version negotiation (v1/v3). GitLab nested-group paths (`group/subgroup/repo`) are treated as full repo URLs (dict form required for virtual packages). -- by @ganesanviji (#587)
+### Fixed
+
+- Fix `apm install` against a branch ref so it re-downloads when upstream has advanced past the lockfile-recorded SHA, and self-heal lockfiles produced by APM <= 0.12.2 on next install. (#1158)
 
 ## [0.12.2] - 2026-05-05
 

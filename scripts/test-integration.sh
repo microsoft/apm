@@ -402,6 +402,34 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Branch-ref drift + lockfile self-heal regression E2E (#1158).
+    # Defends the heal pipeline (BranchRefDriftHeal,
+    # BuggyLockfileRecoveryHeal) and the supply-chain interlock against
+    # the 3-way drift bug. Uses the public danielmeppiel/apm-update-repro
+    # fixture with mutable refs.
+    log_info "Running #1158 branch-ref drift + heal pipeline E2E..."
+    echo "Command: pytest tests/integration/test_diff_aware_install_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_diff_aware_install_e2e.py -v -s --tb=short; then
+        log_success "#1158 branch-ref drift + heal pipeline E2E passed!"
+    else
+        log_error "#1158 branch-ref drift + heal pipeline E2E failed!"
+        exit 1
+    fi
+
+    # apm deps update CLI E2E -- defends the explicit update workflow
+    # (lockfile bump across all packages, selective package update,
+    # global-scope update, unknown-package error).
+    log_info "Running apm deps update CLI E2E..."
+    echo "Command: pytest tests/integration/test_deps_update_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_deps_update_e2e.py -v -s --tb=short; then
+        log_success "apm deps update CLI E2E passed!"
+    else
+        log_error "apm deps update CLI E2E failed!"
+        exit 1
+    fi
+
     # Run Transport Selection integration tests (issue #778)
     # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
     # when no usable SSH key is available for git@github.com.
