@@ -624,9 +624,17 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         "author": config["author"],
     }
 
-    # Add target field if present in config
-    if "target" in config:
-        apm_yml_data["target"] = config["target"]
+    # Add targets field if present in config (plural list form -- canonical).
+    # Older callers may still pass a singular CSV "target" string; honor that
+    # for backwards compatibility but normalise on disk to plural list form.
+    if config.get("targets"):
+        apm_yml_data["targets"] = list(config["targets"])
+    elif config.get("target"):
+        raw = config["target"]
+        if isinstance(raw, list):
+            apm_yml_data["targets"] = list(raw)
+        else:
+            apm_yml_data["targets"] = [t.strip() for t in str(raw).split(",") if t.strip()]
 
     apm_yml_data["dependencies"] = {"apm": [], "mcp": []}
     # Issue #887: scaffold with explicit consent for local content
@@ -651,18 +659,22 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
     out_file = Path(out_path)
     content = out_file.read_text(encoding="utf-8")
 
-    if "target" in config:
-        # Insert comment before the target: line
-        target_comment = (
+    if "targets" in apm_yml_data:
+        # Insert comment before the targets: line
+        targets_comment = (
             "# Which agent platforms to deploy to.\n"
             "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"
-            "# Accepted values: copilot, claude, cursor, opencode, codex, gemini, windsurf, all\n"
+            "# Accepted values: copilot, claude, cursor, opencode, codex, gemini, "
+            "windsurf, all\n"
         )
-        content = content.replace("target:", target_comment + "target:", 1)
+        content = content.replace("targets:", targets_comment + "targets:", 1)
     else:
         # Insert commented-out skeleton before dependencies:
         skeleton = (
-            "# Which agent platforms to deploy to (uncomment to pin):\n# target: copilot, claude\n"
+            "# Which agent platforms to deploy to (uncomment to pin):\n"
+            "# targets:\n"
+            "#   - copilot\n"
+            "#   - claude\n"
         )
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
 

@@ -148,7 +148,7 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
             logger=logger,
         )
         if resolved_targets is not None:
-            config["target"] = ", ".join(sorted(resolved_targets))
+            config["targets"] = sorted(resolved_targets)
 
         # Plugin mode uses 0.1.0 as default version
         if plugin and yes:
@@ -339,6 +339,20 @@ author: {author}"""
     }
 
 
+def _stdin_is_tty() -> bool:
+    """Return whether sys.stdin is a TTY. Indirection for test patchability.
+
+    The CliRunner's piped stdin reports ``isatty=False`` even when the test
+    intends to exercise the interactive prompt; tests patch this helper to
+    True to traverse the prompt path. Production callers see real terminal
+    state.
+    """
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
 def _resolve_init_targets(
     project_root: Path,
     *,
@@ -377,8 +391,16 @@ def _resolve_init_targets(
                 prechecked.add(sig.target)
                 signal_hints[sig.target] = f"(detected {sig.source})"
 
-    # Case 2: non-interactive (--yes)
-    if yes:
+    # Case 2: non-interactive (--yes OR non-TTY stdin -- never block CI on
+    # this prompt; emit explicit provenance so users see what was chosen).
+    is_tty = _stdin_is_tty()
+    if yes or not is_tty:
+        if not yes and not is_tty:
+            logger.progress(
+                "Non-interactive stdin: skipping target prompt "
+                "(use --yes or --target to silence this notice).",
+                symbol="info",
+            )
         if prechecked:
             targets = sorted(prechecked)
             sources = ", ".join(signal_hints.get(t, "") for t in targets)
@@ -387,20 +409,20 @@ def _resolve_init_targets(
                 symbol="info",
             )
             return targets
-        # No signals, no flag -> omit target (Tier 3 auto-detect)
+        # No signals, no flag -> omit targets (Tier 3 auto-detect at compile/install)
         return None
 
-    # Case 3: interactive prompt
-    # Note: if stdin is not a TTY and --yes was not passed, click.prompt
-    # will still read from piped input (e.g. in test runners). In genuine
-    # headless CI without --yes, the existing _interactive_project_setup
-    # would have already blocked/failed, so reaching here implies input
-    # is available.
+    # Case 3: interactive prompt (TTY confirmed)
     return _prompt_target_selection(prechecked, signal_hints)
 
 
 def _read_existing_targets(project_root: Path) -> list[str]:
-    """Read target field from existing apm.yml if present."""
+    """Read targets/target field from existing apm.yml if present.
+
+    Reads the canonical plural ``targets:`` list first; falls back to the
+    legacy singular ``target:`` CSV/scalar form for backwards compatibility
+    with apm.yml files written before plural became canonical.
+    """
     import yaml
 
     apm_yml_path = project_root / APM_YML_FILENAME
@@ -410,6 +432,13 @@ def _read_existing_targets(project_root: Path) -> list[str]:
         data = yaml.safe_load(apm_yml_path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return []
+        # Canonical plural form
+        raw = data.get("targets")
+        if raw is not None:
+            if isinstance(raw, list):
+                return [str(t).strip() for t in raw if str(t).strip()]
+            return [t.strip() for t in str(raw).split(",") if t.strip()]
+        # Legacy singular form
         raw = data.get("target")
         if raw is None:
             return []

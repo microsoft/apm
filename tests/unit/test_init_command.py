@@ -510,9 +510,15 @@ class TestInitTargetPrompt:
         except FileNotFoundError:
             self.original_dir = str(Path(__file__).parent.parent.parent)
             os.chdir(self.original_dir)
+        # Force TTY=True for interactive-prompt scenarios. The CliRunner's
+        # piped stdin reports isatty=False which would otherwise short-circuit
+        # the new prompt into the non-interactive auto-detect branch.
+        self._isatty_patch = patch("apm_cli.commands.init._stdin_is_tty", return_value=True)
+        self._isatty_patch.start()
 
     def teardown_method(self):
         """Clean up after tests."""
+        self._isatty_patch.stop()
         try:
             os.chdir(self.original_dir)
         except (FileNotFoundError, OSError):
@@ -520,7 +526,7 @@ class TestInitTargetPrompt:
             os.chdir(str(repo_root))
 
     def test_init_target_prompt_no_signals(self):
-        """S1: Empty dir, user toggles targets via numbered input, verify target: in apm.yml."""
+        """S1: Empty dir, user toggles targets via numbered input, verify targets: in apm.yml."""
         with self.runner.isolated_filesystem():
             # Input: name, version, desc(default), author(default), confirm(y),
             # toggle 1(copilot), toggle 2(claude), done
@@ -533,11 +539,11 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
-            assert "target" in data
+            assert "targets" in data
+            assert isinstance(data["targets"], list)
             # Should contain copilot and claude (items 1 and 2 in prompt order)
-            targets = [t.strip() for t in data["target"].split(",")]
-            assert "copilot" in targets
-            assert "claude" in targets
+            assert "copilot" in data["targets"]
+            assert "claude" in data["targets"]
 
     def test_init_target_prompt_precheck(self):
         """S2: Create .claude/, verify pre-check state and target in output."""
@@ -553,8 +559,8 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
-            assert "target" in data
-            assert "claude" in data["target"]
+            assert "targets" in data
+            assert "claude" in data["targets"]
 
     def test_init_target_prompt_multi_sig(self):
         """S3: .claude/ + .cursor/ + copilot-instructions, verify all three pre-checked."""
@@ -573,14 +579,13 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
-            assert "target" in data
-            targets = [t.strip() for t in data["target"].split(",")]
-            assert "copilot" in targets
-            assert "claude" in targets
-            assert "cursor" in targets
+            assert "targets" in data
+            assert "copilot" in data["targets"]
+            assert "claude" in data["targets"]
+            assert "cursor" in data["targets"]
 
     def test_init_yes_autodetect(self):
-        """S4: --yes with copilot signal present, verify target: copilot in output."""
+        """S4: --yes with copilot signal present, verify targets in output."""
         with self.runner.isolated_filesystem():
             Path(".github").mkdir()
             Path(".github/copilot-instructions.md").touch()
@@ -592,11 +597,11 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
-            assert "target" in data
-            assert "copilot" in data["target"]
+            assert "targets" in data
+            assert "copilot" in data["targets"]
 
     def test_init_yes_no_signals(self):
-        """S4b: --yes with no signals, verify NO target: key in apm.yml."""
+        """S4b: --yes with no signals, verify NO targets key in apm.yml."""
         with self.runner.isolated_filesystem():
             result = self.runner.invoke(
                 cli,
@@ -606,6 +611,7 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
+            assert "targets" not in data
             assert "target" not in data
 
     def test_init_target_flag(self):
@@ -619,10 +625,9 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
-            assert "target" in data
-            targets = [t.strip() for t in data["target"].split(",")]
-            assert "claude" in targets
-            assert "cursor" in targets
+            assert "targets" in data
+            assert "claude" in data["targets"]
+            assert "cursor" in data["targets"]
 
     def test_init_target_flag_invalid(self):
         """S5b: --target invalid, exit code non-zero, error message."""
@@ -634,7 +639,7 @@ class TestInitTargetPrompt:
             assert result.exit_code != 0
 
     def test_init_empty_selection(self):
-        """S6: User selects nothing, confirms empty, no target: key."""
+        """S6: User selects nothing, confirms empty, no targets key."""
         with self.runner.isolated_filesystem():
             # Input: name, version, desc, author, confirm(y), done (nothing toggled),
             # confirm empty(y)
@@ -647,15 +652,17 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
+            assert "targets" not in data
             assert "target" not in data
 
-    def test_init_reinit_preserves_target(self):
-        """S7: Re-init with existing apm.yml target: claude, verify pre-check."""
+    def test_init_reinit_preserves_targets_plural(self):
+        """S7: Re-init with existing apm.yml `targets:` list, verify pre-check + plural roundtrip."""
         with self.runner.isolated_filesystem():
-            # Create initial apm.yml with target field
+            # Create initial apm.yml with canonical plural targets list
             Path("apm.yml").write_text(
                 "name: test\nversion: 1.0.0\ndescription: test\n"
-                "author: test\ntarget: claude\ndependencies:\n  apm: []\n  mcp: []\n",
+                "author: test\ntargets:\n  - claude\n"
+                "dependencies:\n  apm: []\n  mcp: []\n",
                 encoding="utf-8",
             )
             # Input: confirm overwrite(y), name, version, desc, author, confirm(y),
@@ -669,8 +676,33 @@ class TestInitTargetPrompt:
             assert result.exit_code == 0
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
-            assert "target" in data
-            assert "claude" in data["target"]
+            assert "targets" in data
+            assert "claude" in data["targets"]
+
+    def test_init_reinit_legacy_singular_target(self):
+        """Backwards compat: existing legacy `target:` CSV is read on re-init and
+        rewritten as canonical plural `targets:` list."""
+        with self.runner.isolated_filesystem():
+            # Create initial apm.yml with legacy singular target field (CSV)
+            Path("apm.yml").write_text(
+                "name: test\nversion: 1.0.0\ndescription: test\n"
+                "author: test\ntarget: claude, cursor\n"
+                "dependencies:\n  apm: []\n  mcp: []\n",
+                encoding="utf-8",
+            )
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="y\nmy-project\n1.0.0\n\n\ny\ndone\n",
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "target" not in data
+            assert "claude" in data["targets"]
+            assert "cursor" in data["targets"]
 
     def test_init_non_tty_skips_prompt(self):
         """Non-TTY: --yes auto-detects targets without showing prompt."""
@@ -686,5 +718,36 @@ class TestInitTargetPrompt:
             assert "Select targets" not in result.output
             content = Path("apm.yml").read_text(encoding="utf-8")
             data = yaml.safe_load(content)
-            assert "target" in data
-            assert "claude" in data["target"]
+            assert "targets" in data
+            assert "claude" in data["targets"]
+
+    def test_init_non_tty_without_yes_auto_detects(self):
+        """Non-TTY without --yes: skip prompt, auto-detect, emit provenance log.
+
+        Real-world scenario: piped stdin in CI / container without --yes.
+        Must NOT block on prompt; must auto-detect and tell the user it did.
+        """
+        # Override the class-level isatty=True patch with isatty=False for
+        # this test to simulate genuine non-interactive stdin (e.g. piped CI).
+        self._isatty_patch.stop()
+        try:
+            with patch("apm_cli.commands.init._stdin_is_tty", return_value=False):
+                with self.runner.isolated_filesystem():
+                    Path(".claude").mkdir()
+                    # Provide --yes so _interactive_project_setup is skipped too;
+                    # the target prompt's non-TTY guard is the unit under test.
+                    result = self.runner.invoke(
+                        cli,
+                        ["init", "--yes"],
+                        catch_exceptions=False,
+                    )
+                    assert result.exit_code == 0
+                    assert "Select targets" not in result.output
+                    content = Path("apm.yml").read_text(encoding="utf-8")
+                    data = yaml.safe_load(content)
+                    assert "targets" in data
+                    assert "claude" in data["targets"]
+        finally:
+            # Restore the class-level patch for any subsequent test in the same
+            # session (setup_method re-starts it next test, but be defensive).
+            self._isatty_patch.start()
