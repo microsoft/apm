@@ -113,15 +113,11 @@ class TestParseRemoteUrl(unittest.TestCase):
 
     def test_ado_ssh_v3_prefix(self):
         """Azure DevOps SSH URLs carry a `v3/` segment that is NOT the org."""
-        result = _parse_remote_url(
-            "git@ssh.dev.azure.com:v3/myorg/myproject/myrepo"
-        )
+        result = _parse_remote_url("git@ssh.dev.azure.com:v3/myorg/myproject/myrepo")
         self.assertEqual(result, ("myorg", "ssh.dev.azure.com"))
 
     def test_ado_ssh_v3_prefix_with_git_suffix(self):
-        result = _parse_remote_url(
-            "git@ssh.dev.azure.com:v3/myorg/myproject/myrepo.git"
-        )
+        result = _parse_remote_url("git@ssh.dev.azure.com:v3/myorg/myproject/myrepo.git")
         self.assertEqual(result, ("myorg", "ssh.dev.azure.com"))
 
 

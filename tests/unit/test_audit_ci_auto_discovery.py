@@ -217,16 +217,12 @@ class TestNoPolicyOutcomesWarn:
         ],
     )
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
-    def test_warn_to_stderr_and_proceeds(
-        self, mock_discover, runner, tmp_path, outcome, needle
-    ):
+    def test_warn_to_stderr_and_proceeds(self, mock_discover, runner, tmp_path, outcome, needle):
         _setup_project_with_unmanaged_file(tmp_path)
         mock_discover.return_value = _make_no_policy_outcome(outcome)
 
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(
-                audit, ["--ci", "--no-drift", "-f", "json"]
-            )
+            result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
 
         assert result.exit_code == 0, result.output
         assert needle in result.stderr
@@ -241,16 +237,12 @@ class TestNoPolicyOutcomesWarn:
 class TestNoPolicyOutcomesBlock:
     """policy.fetch_failure_default=block -> [x] + exit 1 for no-policy outcomes."""
 
-    @pytest.mark.parametrize(
-        "outcome", ["no_git_remote", "absent", "empty"]
-    )
+    @pytest.mark.parametrize("outcome", ["no_git_remote", "absent", "empty"])
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
     def test_block_exits_one(self, mock_discover, runner, tmp_path, outcome):
         _setup_project_with_unmanaged_file(tmp_path)
         # Opt-in to fail closed.
-        apm_yml = (tmp_path / "apm.yml").read_text() + (
-            "policy:\n  fetch_failure_default: block\n"
-        )
+        apm_yml = (tmp_path / "apm.yml").read_text() + ("policy:\n  fetch_failure_default: block\n")
         (tmp_path / "apm.yml").write_text(apm_yml, encoding="utf-8")
         mock_discover.return_value = _make_no_policy_outcome(outcome)
 

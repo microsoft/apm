@@ -492,8 +492,10 @@ def _audit_ci_gate(
                 err=True,
             )
             fetch_result = None
-        elif fetch_result.outcome in fetch_failure_outcomes or fetch_result.error or (
-            auto_discovered and fetch_result.outcome in no_policy_outcomes
+        elif (
+            fetch_result.outcome in fetch_failure_outcomes
+            or fetch_result.error
+            or (auto_discovered and fetch_result.outcome in no_policy_outcomes)
         ):
             project_default = read_project_fetch_failure_default(cfg.project_root)
             source = fetch_result.source

@@ -33,14 +33,21 @@ if TYPE_CHECKING:  # pragma: no cover - type-checking only
     from apm_cli.policy.schema import ApmPolicy
 
 
-# Fetch-failure outcomes that honour the project-side
-# ``policy.fetch_failure_default`` knob.  ``absent`` / ``no_git_remote``
-# / ``empty`` are NOT failures -- they mean "no org policy" and are
-# always fail-open.
+# Outcomes that honour the project-side ``policy.fetch_failure_default``
+# knob.  Pre-#1159, ``absent`` / ``no_git_remote`` / ``empty`` were
+# excluded here -- they meant "no org policy" and were always fail-open
+# even when the project explicitly opted in to ``block``.  That was an
+# install-path silent-skip (governance bypass) symmetrical to the audit
+# bug fixed in the same PR.  They now route through the ``block``
+# branch so a project that asserts "no policy = no install" gets that
+# guarantee on BOTH install and audit paths.
 _FETCH_FAILURE_OUTCOMES = (
     "malformed",
     "cache_miss_fetch_fail",
     "garbage_response",
+    "no_git_remote",
+    "absent",
+    "empty",
 )
 
 
@@ -134,7 +141,7 @@ def route_discovery_outcome(
             and fetch_failure_default == "block"
         ):
             raise PolicyViolationError(
-                "Install blocked: org policy could not be fetched / parsed "
+                "Install blocked: no enforceable org policy was resolved "
                 f"(outcome={outcome}) and project apm.yml has "
                 "policy.fetch_failure_default=block "
                 f"(source={source or 'unknown'})",
