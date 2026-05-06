@@ -516,6 +516,18 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run skill install E2E tests -- requires GITHUB_APM_PAT (pytestmark skips otherwise).
+    # Guards skill install idempotency and .apm-pin no-leak invariant on reinstall.
+    log_info "Running skill install E2E tests..."
+    echo "Command: pytest tests/integration/test_skill_install.py -v -s --tb=short"
+
+    if pytest tests/integration/test_skill_install.py -v -s --tb=short; then
+        log_success "Skill install E2E tests passed!"
+    else
+        log_error "Skill install E2E tests failed!"
+        exit 1
+    fi
+
     # Run unified pack format E2E tests -- offline, no tokens needed
     # Guards the 0.12.0 default flip from --format apm to --format plugin.
     log_info "Running unified pack format E2E tests..."
