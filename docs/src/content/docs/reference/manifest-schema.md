@@ -57,7 +57,10 @@ devDependencies:
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
+marketplace:   <MarketplaceConfig>           # OPTIONAL; marketplace authoring
 ```
+
+`marketplace:` is the source for `apm pack`'s marketplace output and is OPTIONAL. Repositories that do not publish a marketplace omit it entirely. The block, its schema, and the build flow are documented in the [Authoring a marketplace guide](../../guides/marketplace-authoring/). Within `marketplace:`, the inheritable fields `name`, `description`, and `version` default to the top-level values above and SHOULD be omitted unless an override is required.
 
 ---
 
@@ -110,10 +113,10 @@ policy:        <PolicyConfig>
 |---|---|
 | **Type** | `string \| list<string>` |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if multiple target folders exist, `minimal` if none |
-| **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `all` |
+| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `windsurf` if `.windsurf/` exists, `all` if multiple target folders exist, `minimal` if none |
+| **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `gemini` · `windsurf` · `all` |
 
-Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST raise a parse error pointing at the offending token. Auto-detection applies only when `target:` is unset.
 
 ```yaml
 # Single target
@@ -134,6 +137,8 @@ When a list is specified, only those targets are compiled, installed, and packed
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/` |
 | `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/` |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/` |
+| `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` |
+| `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json` |
 | `all` | All targets. Cannot be combined with other values in a list. |
 | `minimal` | AGENTS.md only at project root. **Auto-detected only** -- this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |
 
@@ -254,7 +259,7 @@ local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 | `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to `github.com`. |
 | `port` | OPTIONAL | `1`–`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Not expressible in SCP shorthand. |
 | `owner/repo` | REQUIRED | 2+ path segments of `[a-zA-Z0-9._-]+` | Repository path. GitHub uses exactly 2 segments (`owner/repo`). Non-GitHub hosts MAY use nested groups (e.g. `gitlab.com/group/sub/repo`). |
-| `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory, file, or collection within the repo. See §4.1.3. |
+| `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory or file within the repo. See §4.1.3. |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA | Git reference. Commit SHAs matched by `^[a-f0-9]{7,40}$`. Semver tags matched by `^v?\d+\.\d+\.\d+`. |
 
 **Examples:**
@@ -300,7 +305,7 @@ REQUIRED when the shorthand is ambiguous (e.g. nested-group repos with virtual p
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
 | `git` | `string` | REQUIRED (remote) | HTTPS URL, SSH URL, or FQDN shorthand | Clone URL of the repository. Required for remote dependencies. |
-| `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory, file, or collection (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+| `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
 
@@ -321,14 +326,16 @@ Local path dependency (development only):
 
 #### 4.1.3. Virtual Packages
 
-A dependency MAY target a subdirectory, file, or collection within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:
+A dependency MAY target a subdirectory or a file within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:
 
 | Kind | Detection rule | Example |
 |---|---|---|
 | **File** | `virtual_path` ends in `.prompt.md`, `.instructions.md`, `.agent.md`, or `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
-| **Collection (dir)** | `virtual_path` contains `/collections/` (no collection extension) | `owner/repo/collections/security` |
-| **Collection (manifest)** | `virtual_path` contains `/collections/` and ends with `.collection.yml` or `.collection.yaml` | `owner/repo/collections/security.collection.yml` |
-| **Subdirectory** | `virtual_path` does not match any file, collection, or extension rule above | `owner/repo/skills/security` |
+| **Subdirectory** | `virtual_path` does not match any file extension above | `owner/repo/skills/security` |
+
+Classification is by extension only -- never by path segment. A path like `owner/repo/collections/security` (no extension) is **Subdirectory**: the actual on-disk shape (APM package with `apm.yml`, skill bundle, or plugin) is resolved at fetch time by probing for `apm.yml` first.
+
+> **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any such reference to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
 #### 4.1.4. Canonical Normalisation
 
@@ -356,12 +363,12 @@ A plain registry reference: `io.github.github/github-mcp-server`
 |---|---|---|---|---|
 | `name` | `string` | REQUIRED | Non-empty | Server identifier (registry name or custom name). |
 | `transport` | `enum<string>` | Conditional | `stdio` · `sse` · `http` · `streamable-http` | Transport protocol. REQUIRED when `registry: false`. Values are MCP transport names, not URL schemes: remote variants connect over HTTPS. |
-| `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
+| `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${VAR}`, `${env:VAR}`, or `${input:<id>}` references — see §4.2.4. |
 | `args` | `dict` or `list` | OPTIONAL | | Dict for overlay variable overrides (registry), list for positional args (self-defined). |
 | `version` | `string` | OPTIONAL | | Pin to a specific server version. |
 | `registry` | `bool` or `string` | OPTIONAL | Default: `true` (public registry) | `false` = self-defined (private) server. String = custom registry URL. |
 | `package` | `enum<string>` | OPTIONAL | `npm` · `pypi` · `oci` | Package manager type hint. |
-| `headers` | `map<string, string>` | OPTIONAL | | Custom HTTP headers for remote endpoints. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
+| `headers` | `map<string, string>` | OPTIONAL | | Custom HTTP headers for remote endpoints. Values may contain `${VAR}`, `${env:VAR}`, or `${input:<id>}` references — see §4.2.4. |
 | `tools` | `list<string>` | OPTIONAL | Default: `["*"]` | Restrict which tools are exposed. |
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
 | `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
@@ -397,12 +404,25 @@ dependencies:
         API_KEY: ${{ secrets.KEY }}
 ```
 
-#### 4.2.4. `${input:...}` Variables
+#### 4.2.4. Variable References in `headers` and `env`
 
-Values in `headers` and `env` may contain VS Code input variable references using the syntax `${input:<variable-id>}`. At runtime, VS Code prompts the user for each referenced input before starting the server.
+Values in `headers` and `env` may contain three placeholder syntaxes. APM resolves them per-target so secrets stay out of generated config files where possible.
 
-- **Registry-backed servers** — APM auto-generates input prompts from registry metadata.
+| Syntax | Source | VS Code | Copilot CLI / Codex |
+|---|---|---|---|
+| `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Resolved at install time from env (or interactive prompt) |
+| `${env:VAR}` | host environment | Native — passed through verbatim | Resolved at install time from env (or interactive prompt) |
+| `${input:<id>}` | user prompt | Native — VS Code prompts at runtime | Not supported — use `${VAR}` or `${env:VAR}` instead |
+| `<VAR>` (legacy) | host environment | Not recognized | Resolved at install time (kept for back-compat) |
+
+- **VS Code** has native `${env:VAR}` and `${input:VAR}` interpolation, so APM emits placeholders rather than baking secrets into `mcp.json`. Bare `${VAR}` is normalized to `${env:VAR}` for you.
+- **Copilot CLI** has no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
+- **Codex** currently resolves only the legacy `<VAR>` placeholder at install time; `${VAR}` / `${env:VAR}` are passed through verbatim in the Codex adapter today.
+- **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests — they work on every target that supports remote MCP servers. `<VAR>` is legacy and only resolved by Copilot CLI and Codex; in VS Code it would silently render as literal text in the generated config.
+- **Registry-backed servers** — APM auto-generates input prompts from registry metadata for `${input:...}`.
 - **Self-defined servers** — APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
+
+GitHub Actions templates (`${{ ... }}`) are intentionally left untouched.
 
 ```yaml
 dependencies:
@@ -412,15 +432,10 @@ dependencies:
       transport: http
       url: https://my-server.example.com/mcp/
       headers:
-        Authorization: "Bearer ${input:my-server-token}"
-        X-Project: "${input:my-server-project}"
+        Authorization: "Bearer ${MY_SECRET_TOKEN}"      # bare env-var
+        X-Tenant: "${env:TENANT_ID}"                    # env-prefixed
+        X-Project: "${input:my-server-project}"         # VS Code input prompt
 ```
-
-| Runtime | `${input:...}` support |
-|---------|----------------------|
-| VS Code | Yes — prompts user at runtime |
-| Copilot CLI | No — use environment variables |
-| Codex | No — use environment variables |
 
 ---
 
@@ -432,7 +447,7 @@ dependencies:
 | **Required** | OPTIONAL |
 | **Known keys** | `apm`, `mcp` |
 
-Development-only dependencies installed locally but excluded from plugin bundles (`apm pack --format plugin`). Uses the same structure as [`dependencies`](#4-dependencies).
+Development-only dependencies installed locally but excluded from plugin bundles (`apm pack`, plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
 
 ```yaml
 devDependencies:
@@ -447,7 +462,7 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 apm install --dev owner/test-helpers
 ```
 
-Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
 
 Local-path devDependency example:
 
@@ -465,7 +480,7 @@ The `compilation` key is OPTIONAL. It controls `apm compile` behaviour. All fiel
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `target` | `enum<string>` | `all` | `vscode` · `agents` · `claude` · `codex` · `all` | Output target (same values as §3.6). Defaults to `all` when set explicitly in compilation config. |
+| `target` | `enum<string>` | `all` | `vscode` · `agents` · `claude` · `codex` · `gemini` · `windsurf` · `all` | Output target (same values as §3.6). Defaults to `all` when set explicitly in compilation config. |
 | `strategy` | `enum<string>` | `distributed` | `distributed` · `single-file` | `distributed` generates per-directory AGENTS.md files. `single-file` generates one monolithic file. |
 | `single_file` | `bool` | `false` | | Legacy alias. When `true`, overrides `strategy` to `single-file`. |
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
@@ -516,7 +531,7 @@ dependencies:                              # YAML list (not a map)
     is_virtual:      <bool>                # True for virtual (file/subdirectory) packages
     depth:           <int>                 # 1 = direct, 2+ = transitive
     resolved_by:     <string>              # Parent dependency (transitive only)
-    package_type:    <string>              # Package type (e.g. "apm_package", "marketplace_plugin")
+    package_type:    <string>              # Package type (e.g. "apm_package", "marketplace_plugin", "meta_package")
     content_hash:    <string>              # SHA-256 of package file tree (e.g. "sha256:a1b2c3...")
     is_dev:          <bool>                # True for devDependencies
     deployed_files:  <list<string>>        # Workspace-relative paths of installed files

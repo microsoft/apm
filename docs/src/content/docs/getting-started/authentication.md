@@ -20,6 +20,8 @@ Results are cached per-process — the same `(host, org)` pair is resolved once.
 
 All token-bearing requests use HTTPS. Tokens are never sent over unencrypted connections.
 
+`apm install <package>` validation walks the same chain as the actual install: an authenticated attempt with the resolved token first, then a credential-helper fallback (plain HTTPS where the system credential helper provides the token). This means `apm install` from the CLI never rejects a package the lockfile-driven install would accept -- useful when an env-var PAT has narrower SSO/EMU access than the token your `gh auth setup-git` / OS keychain has cached.
+
 ## Token lookup
 
 | Priority | Variable | Scope | Notes |
@@ -126,6 +128,15 @@ Setting `GITHUB_HOST` makes bare package names (without explicit host) resolve a
 
 ## Azure DevOps
 
+The recommended way to authenticate with Azure DevOps is via `az login`:
+
+```bash
+az login --tenant <your-tenant-id>
+apm install dev.azure.com/myorg/myproject/myrepo
+```
+
+Alternatively, set an explicit PAT:
+
 ```bash
 export ADO_APM_PAT=your_ado_pat
 apm install dev.azure.com/myorg/myproject/myrepo
@@ -136,6 +147,9 @@ ADO is always auth-required. Uses 3-segment paths (`org/project/repo`). No `ADO_
 ```bash
 apm install dev.azure.com/myorg/myproject/myrepo#main
 apm install mycompany.visualstudio.com/org/project/repo  # legacy URL
+
+# Sub-path inside an ADO repo, pinned to a tag (use the _git form for sub-paths):
+apm install dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
 ```
 
 If your ADO project or repository name contains spaces, URL-encode them as `%20`:
@@ -156,6 +170,8 @@ When your org has disabled PAT creation (managed-identity-only orgs, locked-down
 az login --tenant <your-tenant-id>
 apm install dev.azure.com/myorg/myproject/myrepo
 ```
+
+**Finding your tenant ID:** if you are unsure which tenant owns the ADO org, visit `https://dev.azure.com/{org}/_settings/organizationAad` in a browser, or ask your admin. You can also run `az login` without `--tenant` and inspect `az account show --query tenantId -o tsv`.
 
 **Resolution precedence for ADO hosts** (`dev.azure.com`, `*.visualstudio.com`):
 
@@ -178,6 +194,10 @@ apm install dev.azure.com/myorg/myproject/myrepo
 ```
 
 Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../../enterprise/security/#token-handling) for the full posture.
+
+### Auth-failure diagnostics
+
+When authentication fails, APM prints a targeted diagnostic instead of a generic "not accessible or doesn't exist" message. The diagnostic tells you exactly which path failed and what to do next. For `--update` operations, APM verifies auth *before* modifying any files -- if the pre-flight check fails, you will see `No files were modified` and your `apm.yml`, `apm.lock.yaml`, and `apm_modules/` directory remain untouched.
 
 ## Package source behavior
 

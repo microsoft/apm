@@ -5,12 +5,13 @@ correct paths at both project and user scope, across all targets.
 Uses real integrators against temp directories -- no mocks.
 """
 
+import os
 import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -19,6 +20,24 @@ from apm_cli.integration.targets import KNOWN_TARGETS, resolve_targets
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
+
+
+def _set_home(monkeypatch, home: Path) -> None:
+    """Set the user's home directory portably across POSIX and Windows.
+
+    ``Path.home()`` consults ``HOME`` on POSIX but ``USERPROFILE`` (with
+    ``HOMEDRIVE`` + ``HOMEPATH`` fallback) on Windows. Setting only ``HOME``
+    is a no-op on Windows and causes ``relative_to(Path.home())`` checks in
+    code under test to compare against the real user's profile.
+    """
+    home_str = str(home)
+    monkeypatch.setenv("HOME", home_str)
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", home_str)
+        drive, _, tail = home_str.partition(":")
+        if tail:
+            monkeypatch.setenv("HOMEDRIVE", f"{drive}:")
+            monkeypatch.setenv("HOMEPATH", tail)
 
 
 def _make_package_info(install_path, name="test-pkg"):
@@ -81,12 +100,7 @@ class TestCopilotScopeResolution:
         )
 
         assert result.files_integrated == 1
-        deployed = (
-            self.project_root
-            / ".github"
-            / "instructions"
-            / "python.instructions.md"
-        )
+        deployed = self.project_root / ".github" / "instructions" / "python.instructions.md"
         assert deployed.exists()
         assert not (self.project_root / ".copilot").exists()
 
@@ -117,9 +131,7 @@ class TestCopilotScopeResolution:
         )
 
         assert result.files_integrated == 1
-        assert (
-            self.project_root / ".copilot" / "agents" / "reviewer.agent.md"
-        ).exists()
+        assert (self.project_root / ".copilot" / "agents" / "reviewer.agent.md").exists()
         assert not (self.project_root / ".github" / "agents").exists()
 
 
@@ -161,13 +173,7 @@ class TestOpenCodeScopeResolution:
 
         assert result.files_integrated == 1
         # opencode agents mapping uses .md extension, not .agent.md
-        expected = (
-            self.project_root
-            / ".config"
-            / "opencode"
-            / "agents"
-            / "helper.md"
-        )
+        expected = self.project_root / ".config" / "opencode" / "agents" / "helper.md"
         assert expected.exists()
         assert not (self.project_root / ".opencode" / "agents").exists()
 
@@ -191,37 +197,42 @@ class TestOpenCodeScopeResolution:
 
         assert result.files_integrated == 1
         # opencode agents mapping uses .md extension
-        assert (
-            self.project_root / ".opencode" / "agents" / "helper.md"
-        ).exists()
+        assert (self.project_root / ".opencode" / "agents" / "helper.md").exists()
 
 
-# -- Codex exclusion at user scope -------------------------------------------
+# -- Codex user-scope behavior ----------------------------------------------
 
 
-class TestCodexScopeExclusion:
-    """Verify Codex is excluded at user scope."""
+class TestCodexUserScope:
+    """Verify Codex participates in user-scope target resolution."""
 
-    def test_for_scope_returns_none(self):
+    def test_for_scope_returns_profile(self):
         codex = KNOWN_TARGETS["codex"]
-        assert codex.user_supported is False
-        assert codex.for_scope(user_scope=True) is None
+        assert codex.user_supported == "partial"
+        resolved = codex.for_scope(user_scope=True)
+        assert resolved is not None
+        assert resolved.root_dir == ".codex"
+        assert "agents" in resolved.primitives
+        assert "skills" in resolved.primitives
+        assert "hooks" in resolved.primitives
 
-    def test_resolve_targets_excludes_codex_at_user_scope(self):
+    def test_resolve_targets_includes_codex_at_user_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             targets = resolve_targets(root, user_scope=True, explicit_target="all")
             names = {t.name for t in targets}
-            assert "codex" not in names
+            assert "codex" in names
 
 
 # -- Claude same-root behavior -----------------------------------------------
 
 
 class TestClaudeScopeResolution:
-    """Verify Claude uses .claude at both scopes (user_root_dir is None)."""
+    """Verify Claude's scope resolution, including the CLAUDE_CONFIG_DIR
+    override at user scope."""
 
-    def test_project_and_user_scope_same_root(self):
+    def test_project_and_user_scope_same_root(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         claude = KNOWN_TARGETS["claude"]
         project = claude.for_scope(user_scope=False)
         user = claude.for_scope(user_scope=True)
@@ -235,6 +246,47 @@ class TestClaudeScopeResolution:
         assert "instructions" in resolved.primitives
         assert "agents" in resolved.primitives
 
+    def test_user_scope_expands_tilde(self, tmp_path, monkeypatch):
+        _set_home(monkeypatch, tmp_path)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/.config/claude")
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        assert scoped.root_dir == ".config/claude"
+
+    def test_user_scope_blank_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "   ")
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        assert scoped.root_dir == ".claude"
+
+    def test_user_scope_outside_home_keeps_absolute(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        outside = tmp_path / "elsewhere"
+        _set_home(monkeypatch, home)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(outside))
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        # Paths outside $HOME remain absolute and are resolved/normalized.
+        assert scoped.root_dir == str(outside.resolve(strict=False))
+
+    def test_user_scope_collapses_dotdot_segments(self, tmp_path, monkeypatch):
+        # ``..`` must be resolved before relative_to(home) so traversal
+        # cannot leak into root_dir and later escape project_root / root_dir.
+        home = tmp_path / "home"
+        home.mkdir()
+        _set_home(monkeypatch, home)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".." / "outside"))
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        assert ".." not in scoped.root_dir
+        assert scoped.root_dir == str((tmp_path / "outside").resolve())
+
+    def test_project_scope_ignores_env_var(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/should/not/be/used")
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=False)
+        assert scoped is KNOWN_TARGETS["claude"]
+        assert scoped.root_dir == ".claude"
+
 
 # -- resolve_targets consistency ----------------------------------------------
 
@@ -242,14 +294,13 @@ class TestClaudeScopeResolution:
 class TestResolveTargetsConsistency:
     """Verify resolve_targets produces correct profiles for all targets."""
 
-    def test_all_targets_at_user_scope_have_correct_roots(self):
+    def test_all_targets_at_user_scope_have_correct_roots(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         with tempfile.TemporaryDirectory() as tmp:
-            targets = resolve_targets(
-                Path(tmp), user_scope=True, explicit_target="all"
-            )
+            targets = resolve_targets(Path(tmp), user_scope=True, explicit_target="all")
             root_map = {t.name: t.root_dir for t in targets}
-            # Codex should be excluded
-            assert "codex" not in root_map
+            # Codex keeps .codex at user scope
+            assert root_map["codex"] == ".codex"
             # Copilot should use .copilot
             if "copilot" in root_map:
                 assert root_map["copilot"] == ".copilot"
@@ -262,9 +313,7 @@ class TestResolveTargetsConsistency:
 
     def test_unsupported_primitives_filtered_at_user_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
-            targets = resolve_targets(
-                Path(tmp), user_scope=True, explicit_target="all"
-            )
+            targets = resolve_targets(Path(tmp), user_scope=True, explicit_target="all")
             for t in targets:
                 if t.name == "copilot":
                     assert "prompts" not in t.primitives
@@ -273,15 +322,83 @@ class TestResolveTargetsConsistency:
                     assert "instructions" not in t.primitives
                 if t.name == "opencode":
                     assert "hooks" not in t.primitives
+                if t.name == "windsurf":
+                    assert "instructions" not in t.primitives
 
     def test_project_scope_preserves_all_primitives(self):
         with tempfile.TemporaryDirectory() as tmp:
-            targets = resolve_targets(
-                Path(tmp), user_scope=False, explicit_target="all"
-            )
+            targets = resolve_targets(Path(tmp), user_scope=False, explicit_target="all")
             copilot = next(t for t in targets if t.name == "copilot")
             assert "prompts" in copilot.primitives
             assert "instructions" in copilot.primitives
+
+
+# -- Windsurf scope resolution ------------------------------------------------
+
+
+class TestWindsurfScopeResolution:
+    """Verify Windsurf deploys to .windsurf at project scope, .codeium/windsurf at user scope."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project_root = Path(self.temp_dir)
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_project_scope_uses_windsurf_root(self):
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=False)
+        assert resolved.root_dir == ".windsurf"
+        assert "instructions" in resolved.primitives
+        assert "agents" in resolved.primitives
+
+    def test_user_scope_uses_codeium_windsurf_root(self):
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=True)
+        assert resolved.root_dir == ".codeium/windsurf"
+
+    def test_user_scope_filters_instructions(self):
+        """At user scope, instructions are filtered out (unsupported)."""
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=True)
+        assert "instructions" not in resolved.primitives
+
+    def test_user_scope_keeps_skills_and_commands(self):
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=True)
+        assert "skills" in resolved.primitives
+        assert "commands" in resolved.primitives
+        assert "hooks" in resolved.primitives
+        assert "agents" in resolved.primitives
+
+    def test_project_scope_deploys_instructions(self):
+        """At project scope, instructions deploy to .windsurf/rules/."""
+        (self.project_root / ".windsurf").mkdir()
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=False)
+
+        pkg = self.project_root / "apm_modules" / "test-pkg"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n\n# Python rules"
+        )
+        pkg_info = _make_package_info(pkg)
+
+        integrator = InstructionIntegrator()
+        result = integrator.integrate_instructions_for_target(
+            resolved,
+            pkg_info,
+            self.project_root,
+        )
+
+        assert result.files_integrated == 1
+        deployed = self.project_root / ".windsurf" / "rules" / "python.md"
+        assert deployed.exists()
+        content = deployed.read_text()
+        assert "trigger: glob" in content
+        assert 'globs: "**/*.py"' in content
 
 
 # -- Skill deploy at user scope ----------------------------------------------
@@ -322,10 +439,9 @@ class TestSkillScopeDeployment:
         )
 
         assert result.skill_created
-        assert (
-            self.project_root / ".copilot" / "skills" / "my-skill" / "SKILL.md"
-        ).exists()
+        assert (self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md").exists()
         assert not (self.project_root / ".github" / "skills").exists()
+        assert not (self.project_root / ".copilot" / "skills").exists()
 
 
 # -- auto_create guard -------------------------------------------------------
@@ -382,6 +498,4 @@ class TestAutoCreateGuard:
         )
 
         assert result.files_integrated == 1
-        assert (
-            self.project_root / ".github" / "agents" / "helper.agent.md"
-        ).exists()
+        assert (self.project_root / ".github" / "agents" / "helper.agent.md").exists()

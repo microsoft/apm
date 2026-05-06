@@ -1,16 +1,16 @@
 """Tests for SHA-256 content integrity hashing."""
 
-import os
-from pathlib import Path
+import os  # noqa: F401
+from pathlib import Path  # noqa: F401
 
 import pytest
 
 from apm_cli.utils.content_hash import compute_package_hash, verify_package_hash
 
-
 # ---------------------------------------------------------------------------
 # compute_package_hash
 # ---------------------------------------------------------------------------
+
 
 class TestComputePackageHash:
     def test_basic_hash(self, tmp_path):
@@ -72,6 +72,43 @@ class TestComputePackageHash:
 
         assert hash_before == hash_after
 
+    def test_skips_apm_pin_marker(self, tmp_path):
+        """``.apm-pin`` cache-pin marker is excluded from hashing.
+
+        Regression test for the v0.12.2 release-blocking bug: the
+        ``.apm-pin`` marker (introduced in PR #1137 for drift-replay
+        cache verification) is written to the package root AFTER the
+        install-time hash is recorded in the lockfile. Including it in
+        :func:`compute_package_hash` made every subsequent ``apm
+        install`` of the same package observe a hash mismatch against
+        the lockfile, falsely tripping the supply-chain content-hash
+        check in ``FreshDependencySource.acquire`` and
+        ``safe_rmtree``-ing the package directory.
+
+        Exclusion is scoped to the package root: a nested
+        ``subdir/.apm-pin`` (which the install pipeline never writes)
+        MUST still be hashed so a malicious package cannot smuggle
+        bytes past the integrity check by burying them under that
+        name.
+        """
+        (tmp_path / "apm.yml").write_text("name: x\n")
+        hash_before = compute_package_hash(tmp_path)
+
+        (tmp_path / ".apm-pin").write_text('{"schema_version": 1, "resolved_commit": "deadbeef"}')
+        hash_after = compute_package_hash(tmp_path)
+
+        assert hash_before == hash_after
+
+        # A nested .apm-pin (never written by the install pipeline) is
+        # NOT excluded -- defense against using the marker name as a
+        # blind spot in the integrity hash.
+        nested = tmp_path / "subdir"
+        nested.mkdir()
+        (nested / ".apm-pin").write_text("smuggled bytes")
+        hash_with_nested = compute_package_hash(tmp_path)
+
+        assert hash_with_nested != hash_after
+
     def test_empty_directory(self, tmp_path):
         """Empty directory returns a well-known hash."""
         empty = tmp_path / "empty"
@@ -80,12 +117,14 @@ class TestComputePackageHash:
         assert result.startswith("sha256:")
         # Empty hash is the SHA-256 of an empty bytestring
         import hashlib
+
         expected = "sha256:" + hashlib.sha256(b"").hexdigest()
         assert result == expected
 
     def test_nonexistent_directory(self, tmp_path):
         """Non-existent path returns the empty hash."""
         import hashlib
+
         expected = "sha256:" + hashlib.sha256(b"").hexdigest()
         assert compute_package_hash(tmp_path / "nope") == expected
 
@@ -116,7 +155,7 @@ class TestComputePackageHash:
         (tmp_path / "f.txt").write_text("x")
         result = compute_package_hash(tmp_path)
         assert result.startswith("sha256:")
-        hex_part = result[len("sha256:"):]
+        hex_part = result[len("sha256:") :]
         # Validate it's a valid hex string
         int(hex_part, 16)
 
@@ -143,6 +182,7 @@ class TestComputePackageHash:
 # ---------------------------------------------------------------------------
 # verify_package_hash
 # ---------------------------------------------------------------------------
+
 
 class TestVerifyPackageHash:
     def test_matching_hash(self, tmp_path):
@@ -178,10 +218,12 @@ class TestVerifyPackageHash:
 # Lockfile integration
 # ---------------------------------------------------------------------------
 
+
 class TestLockfileContentHash:
     def test_content_hash_serialized(self):
         """content_hash appears in lockfile YAML output."""
         from apm_cli.deps.lockfile import LockedDependency
+
         dep = LockedDependency(
             repo_url="owner/repo",
             content_hash="sha256:abc123",
@@ -192,23 +234,30 @@ class TestLockfileContentHash:
     def test_content_hash_deserialized(self):
         """content_hash is read back from lockfile."""
         from apm_cli.deps.lockfile import LockedDependency
-        dep = LockedDependency.from_dict({
-            "repo_url": "owner/repo",
-            "content_hash": "sha256:abc123",
-        })
+
+        dep = LockedDependency.from_dict(
+            {
+                "repo_url": "owner/repo",
+                "content_hash": "sha256:abc123",
+            }
+        )
         assert dep.content_hash == "sha256:abc123"
 
     def test_missing_content_hash_backward_compat(self):
         """Old lockfiles without content_hash parse fine (None)."""
         from apm_cli.deps.lockfile import LockedDependency
-        dep = LockedDependency.from_dict({
-            "repo_url": "owner/repo",
-        })
+
+        dep = LockedDependency.from_dict(
+            {
+                "repo_url": "owner/repo",
+            }
+        )
         assert dep.content_hash is None
 
     def test_content_hash_none_not_emitted(self):
         """content_hash=None is not written to YAML."""
         from apm_cli.deps.lockfile import LockedDependency
+
         dep = LockedDependency(
             repo_url="owner/repo",
             content_hash=None,
@@ -218,7 +267,8 @@ class TestLockfileContentHash:
 
     def test_content_hash_roundtrip_yaml(self, tmp_path):
         """content_hash survives a full write/read YAML cycle."""
-        from apm_cli.deps.lockfile import LockFile, LockedDependency
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
         lockfile = LockFile(apm_version="test")
         dep = LockedDependency(
             repo_url="owner/repo",

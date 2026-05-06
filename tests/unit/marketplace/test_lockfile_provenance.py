@@ -1,6 +1,6 @@
 """Tests for lockfile provenance fields -- serialization round-trip and backward compat."""
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.deps.lockfile import LockedDependency
 
@@ -36,11 +36,13 @@ class TestLockedDependencyProvenance:
         assert dep.marketplace_plugin_name is None
 
     def test_from_dict_with_fields(self):
-        dep = LockedDependency.from_dict({
-            "repo_url": "owner/repo",
-            "discovered_via": "acme-tools",
-            "marketplace_plugin_name": "security-checks",
-        })
+        dep = LockedDependency.from_dict(
+            {
+                "repo_url": "owner/repo",
+                "discovered_via": "acme-tools",
+                "marketplace_plugin_name": "security-checks",
+            }
+        )
         assert dep.discovered_via == "acme-tools"
         assert dep.marketplace_plugin_name == "security-checks"
 
@@ -60,13 +62,15 @@ class TestLockedDependencyProvenance:
 
     def test_backward_compat_existing_fields(self):
         """Ensure existing fields still work alongside new provenance fields."""
-        dep = LockedDependency.from_dict({
-            "repo_url": "owner/repo",
-            "resolved_commit": "abc123",
-            "content_hash": "sha256:def456",
-            "is_dev": True,
-            "discovered_via": "mkt",
-        })
+        dep = LockedDependency.from_dict(
+            {
+                "repo_url": "owner/repo",
+                "resolved_commit": "abc123",
+                "content_hash": "sha256:def456",
+                "is_dev": True,
+                "discovered_via": "mkt",
+            }
+        )
         assert dep.resolved_commit == "abc123"
         assert dep.content_hash == "sha256:def456"
         assert dep.is_dev is True

@@ -51,11 +51,11 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from pathlib import Path  # noqa: F401
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set  # noqa: F401, UP035
 
 if TYPE_CHECKING:
-    from apm_cli.deps.lockfile import LockFile, LockedDependency
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.apm_package import DependencyReference
 
 
@@ -63,9 +63,10 @@ if TYPE_CHECKING:
 # Ref drift
 # ---------------------------------------------------------------------------
 
+
 def detect_ref_change(
-    dep_ref: "DependencyReference",
-    locked_dep: "Optional[LockedDependency]",
+    dep_ref: DependencyReference,
+    locked_dep: LockedDependency | None,
     *,
     update_refs: bool = False,
     logger=None,
@@ -109,8 +110,9 @@ def detect_ref_change(
 # Orphan drift
 # ---------------------------------------------------------------------------
 
+
 def detect_orphans(
-    existing_lockfile: "Optional[LockFile]",
+    existing_lockfile: LockFile | None,
     intended_dep_keys: builtins.set,
     *,
     only_packages: builtins.list,
@@ -148,6 +150,7 @@ def detect_orphans(
 # File-level stale detection (intra-package)
 # ---------------------------------------------------------------------------
 
+
 def detect_stale_files(
     old_deployed: builtins.list,
     new_deployed: builtins.list,
@@ -178,9 +181,10 @@ def detect_stale_files(
 # Config drift (integrator-agnostic)
 # ---------------------------------------------------------------------------
 
+
 def detect_config_drift(
-    current_configs: Dict[str, dict],
-    stored_configs: Dict[str, dict],
+    current_configs: dict[str, dict],
+    stored_configs: dict[str, dict],
     logger=None,
 ) -> builtins.set:
     """Return names of entries whose current config differs from the stored baseline.
@@ -210,14 +214,15 @@ def detect_config_drift(
 # Download ref construction
 # ---------------------------------------------------------------------------
 
+
 def build_download_ref(
-    dep_ref: "DependencyReference",
-    existing_lockfile: "Optional[LockFile]",
+    dep_ref: DependencyReference,
+    existing_lockfile: LockFile | None,
     *,
     update_refs: bool,
     ref_changed: bool,
     logger=None,
-) -> "DependencyReference":
+) -> DependencyReference:
     """Build the dependency reference passed to the package downloader.
 
     Returns a :class:`DependencyReference` (not a flat string) so that
@@ -243,7 +248,7 @@ def build_download_ref(
     if existing_lockfile and not update_refs and not ref_changed:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
         if locked_dep:
-            overrides: Dict[str, Any] = {}
+            overrides: dict[str, Any] = {}
 
             # Prefer the lockfile host so re-installs fetch from the exact same
             # source (proxy host preserved) — fixes air-gapped reproducibility.
@@ -253,14 +258,15 @@ def build_download_ref(
             if locked_dep.registry_prefix and locked_dep.host:
                 overrides["host"] = locked_dep.host
                 overrides["artifactory_prefix"] = locked_dep.registry_prefix
-            elif isinstance(getattr(locked_dep, "host", None), str) and locked_dep.host != dep_ref.host:
+            elif (
+                isinstance(getattr(locked_dep, "host", None), str)
+                and locked_dep.host != dep_ref.host
+            ):
                 overrides["host"] = locked_dep.host
 
             if getattr(locked_dep, "is_insecure", False) is True:
                 overrides["is_insecure"] = True
-                overrides["allow_insecure"] = getattr(
-                    locked_dep, "allow_insecure", False
-                )
+                overrides["allow_insecure"] = getattr(locked_dep, "allow_insecure", False)
 
             # Use locked commit SHA for byte-for-byte reproducibility.
             if locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":

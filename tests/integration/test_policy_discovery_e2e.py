@@ -9,6 +9,7 @@ When running locally without the env var, these tests are SKIPPED.
 When running with APM_POLICY_E2E_TESTS=1 but without GITHUB_APM_PAT,
 tests that require API access are skipped.
 """
+
 from __future__ import annotations
 
 import os
@@ -127,9 +128,7 @@ class TestPolicyDiscoveryE2E(unittest.TestCase):
 
         # File override wins regardless of cache state
         fixture = FIXTURES_DIR / "org-policy.yml"
-        result = discover_policy(
-            self.project_root, policy_override=str(fixture), no_cache=True
-        )
+        result = discover_policy(self.project_root, policy_override=str(fixture), no_cache=True)
         self.assertTrue(result.found)
         self.assertEqual(result.policy.name, "devexpgbb-test-policy")
 
@@ -167,9 +166,7 @@ class TestPolicyDiscoveryE2E(unittest.TestCase):
         self.assertIn("untrusted-vendor/*", merged.dependencies.deny)
         self.assertIn("test-blocked/*", merged.dependencies.deny)
         # Require lists are unioned
-        self.assertIn(
-            "contoso-governance/coding-standards", merged.dependencies.require
-        )
+        self.assertIn("contoso-governance/coding-standards", merged.dependencies.require)
         self.assertIn("DevExpGbb/required-standards", merged.dependencies.require)
         # Allow list is intersected: common entries between enterprise and org
         self.assertIn("microsoft/*", merged.dependencies.allow)
@@ -208,7 +205,9 @@ class TestPolicyDiscoveryLiveAPI(unittest.TestCase):
         from apm_cli.policy.discovery import _fetch_from_repo
 
         result = _fetch_from_repo("DevExpGbb/.github", self.project_root, no_cache=True)
-        self.assertTrue(result.found, f"Expected policy from DevExpGbb/.github, got error: {result.error}")
+        self.assertTrue(
+            result.found, f"Expected policy from DevExpGbb/.github, got error: {result.error}"
+        )
         self.assertEqual(result.policy.name, "devexpgbb-test-policy")
         self.assertIn("DevExpGbb/*", result.policy.dependencies.allow)
         self.assertEqual(result.policy.enforcement, "warn")
@@ -233,10 +232,16 @@ class TestPolicyDiscoveryLiveAPI(unittest.TestCase):
         # Clone the fixture repo into temp dir
         clone_dir = self.project_root / "fixture-clone"
         result = subprocess.run(
-            ["git", "clone", "--depth=1",
-             "https://github.com/DevExpGbb/apm-policy-test-fixture.git",
-             str(clone_dir)],
-            capture_output=True, text=True, timeout=30,
+            [
+                "git",
+                "clone",
+                "--depth=1",
+                "https://github.com/DevExpGbb/apm-policy-test-fixture.git",
+                str(clone_dir),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode != 0:
             self.skipTest(f"Clone failed: {result.stderr}")
@@ -277,6 +282,7 @@ class TestPolicyDiscoveryLiveAPI(unittest.TestCase):
 
         # Fetch repo override content
         from apm_cli.policy.discovery import _fetch_github_contents
+
         content, error = _fetch_github_contents(
             "DevExpGbb/apm-policy-test-fixture",
             ".github/apm-policy.yml",

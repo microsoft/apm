@@ -179,7 +179,7 @@ scannable.
 | 6 | Diagrams | 1-3 validated mermaid blocks, each with a legend; diagram type chosen per intent (`assets/mermaid-conventions.md`) |
 | 7 | Trade-offs | 3-5 bullets (1-2 if mechanical) |
 | 8 | Benefits | 3-5 numbered, measurable items |
-| 9 | Validation | Real command output, ideally inside `<details>` if long |
+| 9 | Validation | Real command output, ideally inside `<details>` if long; **MUST include the Scenario Evidence subsection** (`assets/scenario-evidence-rubric.md`) for any behavior-change PR -- maps each user-promise scenario this PR touches to the test that proves it works, tagged with the APM principle the scenario serves |
 | 10 | How to test | Max 5 numbered or task-list steps |
 
 The Trade-offs (7) and How to test (10) sections are non-skippable
@@ -201,6 +201,7 @@ in these inputs.
 | CHANGELOG entry, if any | inspect `CHANGELOG.md` Unreleased section | yes |
 | Linked issue / motivation | user-provided or referenced in commits | yes |
 | Validation evidence | output of `apm audit --ci`, `uv run pytest`, or equivalent | yes |
+| Scenario-test mapping | author-supplied or derived from diff: per user-promise scenario the PR touches, the test path proving it, plus the APM principle the scenario serves (taxonomy in `assets/scenario-evidence-rubric.md`) | conditional (required for any behavior-change PR; may be skipped for docs-only / asset-bump / pure-refactor per the rubric's skip clause, with the skip case stated in trade-offs) |
 | Mirror parity check, if applicable | `apm install --target copilot` output | conditional |
 
 If any required input is missing, the orchestrator MUST stop and
@@ -214,6 +215,11 @@ complete.
 Run these steps in order. Tick each before moving on.
 
 1. [ ] Confirm every row of the activation contract is filled in.
+   Defense-in-depth gate: before drafting the body, confirm the
+   repo's lint contract is green (canonical commands and lifecycle
+   binding live in `.apm/instructions/linting.instructions.md`). If lint is red,
+   STOP, fix, re-run; a PR body claiming green CI while lint fails
+   is a credibility tax we refuse to take on.
 2. [ ] Read the diff in full. Identify per-file change summary,
        new files, deleted files, behavior changes at module
        boundaries.

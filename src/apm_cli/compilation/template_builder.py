@@ -1,73 +1,132 @@
 """Template building system for AGENTS.md compilation."""
 
-import re
+import re  # noqa: F401
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-from ..primitives.models import Instruction, Chatmode
+from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
+
+from ..primitives.models import Chatmode, Instruction
 from ..utils.paths import portable_relpath
+
+GLOBAL_INSTRUCTIONS_HEADING = "## Global Instructions"
 
 
 @dataclass
 class TemplateData:
     """Data structure for template generation."""
+
     instructions_content: str
     # Removed volatile timestamp for deterministic builds
     version: str
-    chatmode_content: Optional[str] = None
-    
+    chatmode_content: str | None = None
 
-def build_conditional_sections(instructions: List[Instruction]) -> str:
+
+def render_instructions_block(
+    instructions: list[Instruction],
+    *,
+    base_dir: Path,
+    emit_instruction: Callable[[Instruction], list[str]],
+    global_heading: str = GLOBAL_INSTRUCTIONS_HEADING,
+) -> list[str]:
+    """Render the body lines of an instructions section.
+
+    Renders global instructions (those with no ``applyTo`` pattern) under a
+    single ``global_heading`` block, then renders pattern-scoped instructions
+    grouped under ``## Files matching `<pattern>``` headings (sorted by
+    pattern). Within each group, instructions are sorted by file path
+    relative to ``base_dir`` for deterministic output.
+
+    The caller controls per-instruction emission via ``emit_instruction`` so
+    each renderer keeps its own source-attribution format unchanged.
+
+    Args:
+        instructions: Mixed global and scoped instructions (any order).
+        base_dir: Directory used as the anchor for stable sort keys.
+        emit_instruction: Callback that returns the lines to emit for one
+            instruction. Typically the source-attribution comment, the
+            instruction body, and a trailing blank line. Empty-content
+            instructions are filtered out before this is invoked.
+        global_heading: Heading line for the global section.
+
+    Returns:
+        Lines that the caller will join. Empty list when ``instructions`` is
+        empty.
+    """
+    if not instructions:
+        return []
+
+    sections: list[str] = []
+
+    def _sort_key(inst: Instruction) -> str:
+        return portable_relpath(inst.file_path, base_dir)
+
+    globals_: list[Instruction] = []
+    pattern_groups: dict[str, list[Instruction]] = {}
+    for instruction in instructions:
+        if not instruction.apply_to:
+            globals_.append(instruction)
+        else:
+            pattern_groups.setdefault(instruction.apply_to, []).append(instruction)
+
+    if globals_:
+        sections.append(global_heading)
+        sections.append("")
+        for instruction in sorted(globals_, key=_sort_key):
+            if instruction.content.strip():
+                sections.extend(emit_instruction(instruction))
+
+    for pattern, pattern_instructions in sorted(pattern_groups.items()):
+        sections.append(f"## Files matching `{pattern}`")
+        sections.append("")
+        for instruction in sorted(pattern_instructions, key=_sort_key):
+            if instruction.content.strip():
+                sections.extend(emit_instruction(instruction))
+
+    return sections
+
+
+def build_conditional_sections(instructions: list[Instruction]) -> str:
     """Build sections grouped by applyTo patterns.
-    
+
     Args:
         instructions (List[Instruction]): List of instruction primitives.
-    
+
     Returns:
         str: Formatted conditional sections content.
     """
     if not instructions:
         return ""
-    
-    # Group instructions by pattern - use raw patterns
-    pattern_groups = _group_instructions_by_pattern(instructions)
-    
-    sections = []
-    
-    for pattern, pattern_instructions in sorted(pattern_groups.items()):
-        sections.append(f"## Files matching `{pattern}`")
-        sections.append("")
 
-        # Combine content from all instructions for this pattern
-        for instruction in sorted(pattern_instructions, key=lambda i: portable_relpath(i.file_path, Path.cwd())):
-            content = instruction.content.strip()
-            if content:
-                # Add source file comment before the content
-                try:
-                    # Try to get relative path for cleaner display
-                    if instruction.file_path.is_absolute():
-                        relative_path = portable_relpath(instruction.file_path, Path.cwd())
-                    else:
-                        relative_path = str(instruction.file_path)
-                except (ValueError, OSError):
-                    # Fall back to absolute or given path if relative fails
-                    relative_path = instruction.file_path.as_posix()
-                
-                sections.append(f"<!-- Source: {relative_path} -->")
-                sections.append(content)
-                sections.append(f"<!-- End source: {relative_path} -->")
-                sections.append("")
-    
+    cwd = Path.cwd()
+
+    def emit(instruction: Instruction) -> list[str]:
+        try:
+            if instruction.file_path.is_absolute():
+                relative_path = portable_relpath(instruction.file_path, cwd)
+            else:
+                relative_path = str(instruction.file_path)
+        except (ValueError, OSError):
+            relative_path = instruction.file_path.as_posix()
+
+        return [
+            f"<!-- Source: {relative_path} -->",
+            instruction.content.strip(),
+            f"<!-- End source: {relative_path} -->",
+            "",
+        ]
+
+    sections = render_instructions_block(instructions, base_dir=cwd, emit_instruction=emit)
     return "\n".join(sections)
 
 
-def find_chatmode_by_name(chatmodes: List[Chatmode], chatmode_name: str) -> Optional[Chatmode]:
+def find_chatmode_by_name(chatmodes: list[Chatmode], chatmode_name: str) -> Chatmode | None:
     """Find a chatmode by name.
-    
+
     Args:
         chatmodes (List[Chatmode]): List of available chatmodes.
         chatmode_name (str): Name of the chatmode to find.
-    
+
     Returns:
         Optional[Chatmode]: The found chatmode, or None if not found.
     """
@@ -77,63 +136,39 @@ def find_chatmode_by_name(chatmodes: List[Chatmode], chatmode_name: str) -> Opti
     return None
 
 
-def _group_instructions_by_pattern(instructions: List[Instruction]) -> Dict[str, List[Instruction]]:
-    """Group instructions by applyTo patterns.
-    
-    Args:
-        instructions (List[Instruction]): List of instructions to group.
-    
-    Returns:
-        Dict[str, List[Instruction]]: Grouped instructions with raw patterns as keys.
-    """
-    pattern_groups: Dict[str, List[Instruction]] = {}
-    
-    for instruction in instructions:
-        if not instruction.apply_to:
-            continue
-        
-        pattern = instruction.apply_to
-        
-        if pattern not in pattern_groups:
-            pattern_groups[pattern] = []
-        
-        pattern_groups[pattern].append(instruction)
-    
-    return pattern_groups
-
-
 def generate_agents_md_template(template_data: TemplateData) -> str:
     """Generate the complete AGENTS.md file content.
-    
+
     Args:
         template_data (TemplateData): Data for template generation.
-    
+
     Returns:
         str: Complete AGENTS.md file content.
     """
     sections = []
-    
+
     # Header
     sections.append("# AGENTS.md")
-    sections.append(f"<!-- Generated by APM CLI from .apm/ primitives -->")
+    sections.append("<!-- Generated by APM CLI from .apm/ primitives -->")
     from .constants import BUILD_ID_PLACEHOLDER
+
     sections.append(BUILD_ID_PLACEHOLDER)
     sections.append(f"<!-- APM Version: {template_data.version} -->")
     sections.append("")
-    
+
     # Chatmode content (if provided)
     if template_data.chatmode_content:
         sections.append(template_data.chatmode_content.strip())
         sections.append("")
-    
+
     # Instructions content (grouped by patterns)
     if template_data.instructions_content:
         sections.append(template_data.instructions_content)
-    
+
     # Footer
     sections.append("---")
     sections.append("*This file was generated by APM CLI. Do not edit manually.*")
-    sections.append("*To regenerate: `specify apm compile`*")
+    sections.append("*To regenerate: `apm compile`*")
     sections.append("")
-    
+
     return "\n".join(sections)

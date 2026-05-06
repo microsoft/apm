@@ -136,6 +136,21 @@ and only after the first diagram passes mmdc validation.>
 
 </details>
 
+### Scenario Evidence
+
+<Required for any PR that changes behavior. Skip ONLY for the
+three cases enumerated in `assets/scenario-evidence-rubric.md`
+(docs-only, asset-bump-only, pure refactor with no test changes
+needed) -- and state which one applies in trade-offs. The table
+maps each user promise this PR touches to the test that proves
+it works, tagged with the APM principle the scenario serves.
+Full rubric and worked example: `assets/scenario-evidence-rubric.md`.>
+
+| # | Scenario (user promise) | Principle(s) | Test(s) proving it | Type |
+|---|------------------------|--------------|--------------------|------|
+| 1 | <One-line user-facing scenario, in the user's words.> | <Portability / Secure by default / Governed by policy / Multi-harness / Vendor-neutral / DevX / OSS> | `<path/to/test_file.py::test_name>` | unit / integration / e2e |
+| 2 | <Scenario.> | <Principle.> | `<path>` | <type> |
+
 ## How to test
 
 <Max 5 numbered or task-list steps. Each step has an action and an

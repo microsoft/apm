@@ -6,7 +6,7 @@ from apm_cli.utils.console — no new output primitives.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 from apm_cli.utils.console import (
     _rich_echo,
@@ -86,6 +86,37 @@ class CommandLogger:
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
 
+    def mcp_lookup_heartbeat(self, count: int):
+        """Emit a single batch heartbeat before MCP registry validation
+        (F4, microsoft/apm#1116).
+
+        Surfaces a static ``[>] Looking up N MCP server(s) in
+        registry...`` line so the user sees the install moving forward
+        during the (sometimes multi-second) registry round trip. Static
+        line, not a transient progress bar, so it survives in CI logs
+        and ``2>&1 | tee`` pipelines.
+
+        Skipped silently when ``count <= 0`` to avoid noisy zero-batch
+        output on installs with no registry MCP deps.
+        """
+        if count <= 0:
+            return
+        noun = "server" if count == 1 else "servers"
+        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+
+    def info(self, message: str, symbol: str = "info"):
+        """Log static advisory / informational context.
+
+        Distinct from :meth:`progress` only at the semantic level:
+        ``progress`` narrates an in-flight step (may be suppressed in
+        ``--quiet``/CI), while ``info`` carries persistent advisory
+        context such as recovery hints that must survive quiet-mode
+        suppression. Both currently delegate to ``_rich_info``; the
+        split exists so future quiet-mode policy can drop ``progress``
+        without dropping advisory context.
+        """
+        _rich_info(message, symbol=symbol)
+
     def success(self, message: str, symbol: str = "sparkles"):
         """Log successful completion."""
         _rich_success(message, symbol=symbol)
@@ -110,6 +141,10 @@ class CommandLogger:
         continuation lines, not standalone status messages.
         """
         _rich_echo(message, color="green")
+
+    def blank_line(self):
+        """Log a blank line through the shared console output path."""
+        _rich_echo("")
 
     def package_inline_warning(self, message: str):
         """Log an inline warning under a package block (verbose only).
@@ -152,9 +187,7 @@ class CommandLogger:
             token_type = getattr(ctx, "token_type", "unknown")
             has_token = getattr(ctx, "token", None) is not None
             if has_token:
-                _rich_echo(
-                    f"  auth: resolved via {source} (type: {token_type})", color="dim"
-                )
+                _rich_echo(f"  auth: resolved via {source} (type: {token_type})", color="dim")
             else:
                 _rich_echo("  auth: no credentials available", color="dim")
 
@@ -173,9 +206,7 @@ class InstallLogger(CommandLogger):
     full install (all deps from apm.yml). Adjusts messages accordingly.
     """
 
-    def __init__(
-        self, verbose: bool = False, dry_run: bool = False, partial: bool = False
-    ):
+    def __init__(self, verbose: bool = False, dry_run: bool = False, partial: bool = False):
         super().__init__("install", verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
@@ -210,9 +241,7 @@ class InstallLogger(CommandLogger):
         if outcome.has_failures:
             failed_count = len(outcome.invalid)
             noun = "package" if failed_count == 1 else "packages"
-            _rich_warning(
-                f"{failed_count} {noun} failed validation and will be skipped."
-            )
+            _rich_warning(f"{failed_count} {noun} failed validation and will be skipped.")
 
         return True
 
@@ -222,9 +251,7 @@ class InstallLogger(CommandLogger):
         """Log start of dependency resolution."""
         if self.partial:
             noun = "package" if to_install_count == 1 else "packages"
-            _rich_info(
-                f"Installing {to_install_count} new {noun}...", symbol="running"
-            )
+            _rich_info(f"Installing {to_install_count} new {noun}...", symbol="running")
             if lockfile_count > 0 and self.verbose:
                 _rich_echo(
                     f"  ({lockfile_count} existing dependencies in lockfile)",
@@ -233,9 +260,7 @@ class InstallLogger(CommandLogger):
         else:
             _rich_info("Installing dependencies from apm.yml...", symbol="running")
             if lockfile_count > 0:
-                _rich_info(
-                    f"Using apm.lock.yaml ({lockfile_count} locked dependencies)"
-                )
+                _rich_info(f"Using apm.lock.yaml ({lockfile_count} locked dependencies)")
 
     def nothing_to_install(self):
         """Log when there's nothing to install — context-aware message."""
@@ -253,8 +278,30 @@ class InstallLogger(CommandLogger):
         elif self.verbose:
             _rich_info(f"  Downloading: {dep_name}", symbol="download")
 
+    def resolving_heartbeat(self, dep_name: str):
+        """Emit a per-dependency progress heartbeat during BFS resolve.
+
+        Surfaces an immediate ``[>] Resolving <name>...`` line so the
+        user sees the install moving forward instead of staring at
+        silence while transitive lookups happen behind the scenes
+        (F1, microsoft/apm#1116). The line is static (not a Rich
+        transient progress bar) so it survives in CI logs and behind
+        ``2>&1 | tee`` pipelines, which the duck critique flagged as
+        the must-survive surface.
+
+        Called from the MAIN thread by the resolver/download callback
+        BEFORE network work begins; F7's parallel BFS keeps emission
+        on the main thread so output ordering is deterministic even
+        when downloads are dispatched to a worker pool.
+        """
+        _rich_info(f"Resolving {dep_name}...", symbol="running")
+
     def download_complete(
-        self, dep_name: str, ref: str = "", sha: str = "", cached: bool = False,
+        self,
+        dep_name: str,
+        ref: str = "",
+        sha: str = "",
+        cached: bool = False,
         # Legacy compat: if callers pass ref_suffix= we handle it
         ref_suffix: str = "",
     ):
@@ -372,7 +419,7 @@ class InstallLogger(CommandLogger):
         source: str,
         cached: bool,
         enforcement: str,
-        age_seconds: Optional[int] = None,
+        age_seconds: int | None = None,
     ):
         """Log policy discovery outcome.
 
@@ -409,8 +456,8 @@ class InstallLogger(CommandLogger):
         self,
         outcome: str,
         source: str = "",
-        error: Optional[str] = None,
-        host_org: Optional[str] = None,
+        error: str | None = None,
+        host_org: str | None = None,
     ):
         """Log a policy-discovery non-success outcome.
 
@@ -450,8 +497,7 @@ class InstallLogger(CommandLogger):
             if not self.verbose:
                 return
             _rich_info(
-                "Could not determine org from git remote; "
-                "policy auto-discovery skipped",
+                "Could not determine org from git remote; policy auto-discovery skipped",
                 symbol="info",
             )
             return
@@ -459,8 +505,7 @@ class InstallLogger(CommandLogger):
         if outcome == "empty":
             src = source or "this project"
             _rich_warning(
-                f"Org policy at {src} is present but empty; "
-                "no enforcement applied",
+                f"Org policy at {src} is present but empty; no enforcement applied",
                 symbol="warning",
             )
             return
@@ -527,7 +572,7 @@ class InstallLogger(CommandLogger):
         dep_ref: str,
         reason: str,
         severity: str,
-        source: Optional[str] = None,
+        source: str | None = None,
     ):
         """Record a policy violation for a dependency.
 
@@ -545,14 +590,14 @@ class InstallLogger(CommandLogger):
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
         """
-        from apm_cli.utils.diagnostics import CATEGORY_POLICY
+        from apm_cli.utils.diagnostics import CATEGORY_POLICY  # noqa: F401
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
         # (the detail strings produced by policy_checks.py do this).
         # Strip it defensively so the inline error reads cleanly.
         prefix = f"{dep_ref}: "
         if reason.startswith(prefix):
-            reason = reason[len(prefix):]
+            reason = reason[len(prefix) :]
 
         self.diagnostics.policy(
             message=reason,
@@ -603,10 +648,7 @@ class InstallLogger(CommandLogger):
     @staticmethod
     def _policy_reason_malformed(source: str) -> str:
         """Actionable reason for malformed policy file."""
-        return (
-            f"Policy at {source} is malformed "
-            "-- contact your org admin to fix the policy file"
-        )
+        return f"Policy at {source} is malformed -- contact your org admin to fix the policy file"
 
     @staticmethod
     def _policy_reason_blocked(dep_ref: str, source: str) -> str:
@@ -625,6 +667,7 @@ class InstallLogger(CommandLogger):
         mcp_count: int,
         errors: int = 0,
         stale_cleaned: int = 0,
+        elapsed_seconds: float | None = None,
     ):
         """Log final install summary.
 
@@ -635,6 +678,10 @@ class InstallLogger(CommandLogger):
             stale_cleaned: Total stale + orphan files removed during
                 this install. Reported as a parenthetical so existing
                 callers and assertion patterns continue to work.
+            elapsed_seconds: Wall-clock duration of the install command.
+                When provided, appended as `` in {x:.1f}s`` before the
+                terminating period so the user can see how long the
+                whole command took (F5, microsoft/apm#1116).
         """
         parts = []
         if apm_count > 0:
@@ -649,18 +696,38 @@ class InstallLogger(CommandLogger):
             file_noun = "file" if stale_cleaned == 1 else "files"
             cleanup_suffix = f" ({stale_cleaned} stale {file_noun} cleaned)"
 
+        timing_suffix = ""
+        if elapsed_seconds is not None:
+            timing_suffix = f" in {elapsed_seconds:.1f}s"
+
         if parts:
             summary = " and ".join(parts)
             if errors > 0:
                 _rich_warning(
-                    f"Installed {summary}{cleanup_suffix} with {errors} error(s).",
+                    f"Installed {summary}{cleanup_suffix}{timing_suffix} with {errors} error(s).",
                     symbol="warning",
                 )
             else:
                 _rich_success(
-                    f"Installed {summary}{cleanup_suffix}.", symbol="sparkles"
+                    f"Installed {summary}{cleanup_suffix}{timing_suffix}.",
+                    symbol="sparkles",
                 )
         elif errors > 0:
             _rich_error(
-                f"Installation failed with {errors} error(s).", symbol="error"
+                f"Installation failed with {errors} error(s){timing_suffix}.",
+                symbol="error",
             )
+
+    def install_interrupted(self, elapsed_seconds: float):
+        """Log a minimal elapsed-time line when the normal summary did
+        not render (errors, KeyboardInterrupt, click.UsageError).
+
+        Emitted from the outer ``finally`` in ``commands.install.install``
+        so users always see how long the failed/interrupted command ran
+        (F5, microsoft/apm#1116). Best-effort: callers swallow any
+        exception so a render failure cannot mask the original error.
+        """
+        _rich_warning(
+            f"Install interrupted after {elapsed_seconds:.1f}s.",
+            symbol="warning",
+        )

@@ -48,6 +48,19 @@ Both Copilot CLI and Claude Code `marketplace.json` formats are supported. Copil
 
 npm sources are not supported. Copilot CLI format uses `"repository"` and optional `"ref"` fields instead of `"source"`.
 
+### Source key aliases
+
+The install resolver accepts both legacy (Copilot CLI) and current (Claude Code) key names in `marketplace.json` source objects:
+
+| Current key | Legacy alias | Notes |
+|---|---|---|
+| `source` (discriminator) | `type` | Values: `github`, `git-subdir`, `url` |
+| `repo` | `repository` | Must be `owner/repo` format |
+| `sha` | `commit` | Resolved commit SHA |
+| `repo` (git-subdir) | `url` | Must be `owner/repo`, not a full URL |
+
+Marketplace authors should use the current keys (emitted by `apm pack`). Legacy aliases are accepted for backward compatibility with older manifests.
+
 ### Plugin root directory
 
 Marketplaces can declare a `metadata.pluginRoot` field to specify the base directory for bare-name sources:
@@ -86,8 +99,30 @@ apm marketplace add acme/plugin-marketplace
 
 This registers the marketplace and fetches its `marketplace.json`. By default APM tracks the `main` branch.
 
+:::tip[Create your own marketplace]
+You can author and publish your own marketplace registry.
+See the [Marketplace Authoring Guide](../marketplace-authoring/) for details.
+:::
+
+### Default alias resolution
+
+When `--name` is not provided, APM resolves the local alias in this order:
+
+1. `name` field declared in the marketplace's `marketplace.json` (if present and valid)
+2. Repository name (fallback)
+
+This ensures parity with Claude Code install instructions -- if a marketplace's `marketplace.json` declares `"name": "addy-agent-skills"`, APM registers it under that alias and shows a hint:
+
+```
+[*] Registering marketplace 'addy-agent-skills'...
+[+] Marketplace 'addy-agent-skills' registered (1 plugins)
+[i] Install plugins with: apm install <plugin>@addy-agent-skills
+```
+
+Use `--name` to override the alias explicitly.
+
 **Options:**
-- `--name/-n` -- Custom display name for the marketplace
+- `--name/-n` -- Override the local alias (defaults to the `marketplace.json` `name` field, then repo name)
 - `--branch/-b` -- Branch to track (default: `main`)
 - `--host` -- Git host FQDN for non-github.com hosts (default: `github.com` or `GITHUB_HOST` env var)
 
@@ -258,3 +293,55 @@ Shadow detection runs automatically during install -- no configuration required.
 - **Use commit SHAs as refs** -- tags and branches can be moved; commit SHAs cannot.
 - **Keep plugin names unique across marketplaces** -- avoids shadow warnings and reduces confusion.
 - **Review immutability warnings** -- a changed ref for an existing version is a strong signal of tampering.
+
+## Authoring: monorepo workflows
+
+When building a marketplace that tracks packages from a monorepo (multiple packages inside one Git repository), use `--subdir` to point each entry at its subdirectory:
+
+```bash
+apm marketplace package add acme/monorepo --subdir plugins/eslint-rules --name eslint-rules
+apm marketplace package add acme/monorepo --subdir plugins/formatter --name formatter
+```
+
+### Ref auto-resolution
+
+Mutable git refs (`HEAD`, branch names) are automatically resolved to concrete 40-character SHAs before being stored in `apm.yml`. This ensures supply-chain safety -- the entry always pins to an immutable commit.
+
+**Default behaviour (no `--ref`):** When neither `--version` nor `--ref` is provided, the current `HEAD` SHA is pinned automatically:
+
+```bash
+# Resolves HEAD to its current SHA and stores it
+apm marketplace package add acme/code-review
+```
+
+**Explicit `HEAD`:** Passing `--ref HEAD` warns that HEAD is mutable, then resolves:
+
+```bash
+apm marketplace package add acme/code-review --ref HEAD
+# [!] 'HEAD' is a mutable ref. Resolving to current SHA for safety.
+# [i] Resolved HEAD to abc123def456
+```
+
+**Branch names:** Branch names that match `refs/heads/*` on the remote are also resolved:
+
+```bash
+apm marketplace package add acme/code-review --ref main
+# [!] 'main' is a branch (mutable ref). Resolving to current SHA for safety.
+# [i] Resolved main to abc123def456
+```
+
+**Updating pinned SHAs:** Use `package set` with `--ref HEAD` to re-pin to the latest commit:
+
+```bash
+apm marketplace package set code-review --ref HEAD
+```
+
+Tags and concrete SHAs are stored as-is without resolution.
+
+:::note
+Ref auto-resolution requires network access. When using `--no-verify`, you must provide an explicit SHA with `--ref`.
+:::
+
+## Creating your own marketplace
+
+If you want to create and maintain your own marketplace registry, see the [Marketplace Authoring Guide](../../guides/marketplace-authoring/).

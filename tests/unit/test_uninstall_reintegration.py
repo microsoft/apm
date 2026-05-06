@@ -4,20 +4,21 @@ When a package is uninstalled, all -apm suffixed integrated files are nuked,
 then remaining packages are re-integrated from apm_modules/.
 """
 
-import pytest
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from apm_cli.integration import PromptIntegrator, AgentIntegrator
-from apm_cli.integration.skill_integrator import SkillIntegrator
+import pytest  # noqa: F401
+
+from apm_cli.integration import AgentIntegrator, PromptIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
+from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.models.apm_package import (
-    PackageInfo,
     APMPackage,
-    ResolvedReference,
     GitReferenceType,
-    PackageType,
     PackageContentType,
+    PackageInfo,
+    PackageType,
+    ResolvedReference,
 )
 
 
@@ -36,9 +37,7 @@ def _make_package(
     pkg_path.mkdir(parents=True, exist_ok=True)
 
     type_line = f"\ntype: {pkg_type.value}" if pkg_type else ""
-    (pkg_path / "apm.yml").write_text(
-        f"name: {name}\nversion: 1.0.0{type_line}\n"
-    )
+    (pkg_path / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0{type_line}\n")
 
     if prompts:
         prompts_dir = pkg_path / ".apm" / "prompts"
@@ -94,11 +93,15 @@ class TestUninstallPreservesOtherPackagePrompts:
 
         # Two packages, each with a prompt
         pkg_a = _make_package(
-            tmp_path, "owner", "pkg-a",
+            tmp_path,
+            "owner",
+            "pkg-a",
             prompts={"review.prompt.md": "---\nname: review\n---\n# Review A"},
         )
         pkg_b = _make_package(
-            tmp_path, "owner", "pkg-b",
+            tmp_path,
+            "owner",
+            "pkg-b",
             prompts={"lint.prompt.md": "---\nname: lint\n---\n# Lint B"},
         )
 
@@ -145,11 +148,15 @@ class TestUninstallPreservesOtherPackageAgents:
         (project_root / ".github").mkdir()
 
         pkg_a = _make_package(
-            tmp_path, "owner", "pkg-a",
+            tmp_path,
+            "owner",
+            "pkg-a",
             agents={"security.agent.md": "---\nname: security\n---\n# Security A"},
         )
         pkg_b = _make_package(
-            tmp_path, "owner", "pkg-b",
+            tmp_path,
+            "owner",
+            "pkg-b",
             agents={"planner.agent.md": "---\nname: planner\n---\n# Planner B"},
         )
 
@@ -193,12 +200,16 @@ class TestUninstallPreservesOtherPackageSkills:
         (project_root / ".github").mkdir()
 
         pkg_a = _make_package(
-            tmp_path, "owner", "skill-a",
+            tmp_path,
+            "owner",
+            "skill-a",
             skill_md="---\nname: skill-a\ndescription: test A\n---\n# Skill A",
             pkg_type=PackageContentType.SKILL,
         )
         pkg_b = _make_package(
-            tmp_path, "owner", "skill-b",
+            tmp_path,
+            "owner",
+            "skill-b",
             skill_md="---\nname: skill-b\ndescription: test B\n---\n# Skill B",
             pkg_type=PackageContentType.SKILL,
         )
@@ -208,19 +219,36 @@ class TestUninstallPreservesOtherPackageSkills:
         skill_int.integrate_package_skill(pkg_a, project_root)
         skill_int.integrate_package_skill(pkg_b, project_root)
 
-        skills_dir = project_root / ".github" / "skills"
+        skills_dir = project_root / ".agents" / "skills"
         assert (skills_dir / "skill-a").is_dir()
         assert (skills_dir / "skill-b").is_dir()
+
+        # Write a lockfile so the .agents/ ownership check (which guards
+        # against deleting foreign skills placed by other tools) recognises
+        # both skill dirs as APM-owned and allows orphan cleanup.
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/owner/skill-a",
+                deployed_files=[".agents/skills/skill-a/SKILL.md"],
+            )
+        )
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/owner/skill-b",
+                deployed_files=[".agents/skills/skill-b/SKILL.md"],
+            )
+        )
+        lockfile.write(get_lockfile_path(project_root))
 
         # Build an APMPackage that only lists skill-b as a remaining dependency.
         # sync_integration derives expected names from get_apm_dependencies().
         # We use a real APMPackage loaded from a manifest that references skill-b only.
         remaining_manifest = tmp_path / "remaining_apm.yml"
         remaining_manifest.write_text(
-            "name: root\nversion: 0.0.0\n"
-            "dependencies:\n"
-            "  apm:\n"
-            "    - owner/skill-b\n"
+            "name: root\nversion: 0.0.0\ndependencies:\n  apm:\n    - owner/skill-b\n"
         )
         root_pkg = APMPackage.from_apm_yml(remaining_manifest)
 
@@ -299,7 +327,9 @@ class TestUninstallLastPackageLeavesCleanDirs:
         (project_root / ".github").mkdir()
 
         pkg = _make_package(
-            tmp_path, "owner", "only-pkg",
+            tmp_path,
+            "owner",
+            "only-pkg",
             prompts={"guide.prompt.md": "---\nname: guide\n---\n# Guide"},
             agents={"helper.agent.md": "---\nname: helper\n---\n# Helper"},
         )

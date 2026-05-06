@@ -4,20 +4,20 @@ Tests the full install/uninstall/deps workflow using local path dependencies.
 These tests create real file structures and invoke CLI commands via subprocess.
 """
 
-import os
+import os  # noqa: F401
 import shutil
 import subprocess
-import sys
-import tempfile
+import sys  # noqa: F401
+import tempfile  # noqa: F401
 from pathlib import Path
 
 import pytest
 import yaml
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def apm_command():
@@ -57,22 +57,30 @@ def temp_workspace(tmp_path):
     # Consumer project
     consumer = workspace / "consumer"
     consumer.mkdir()
-    (consumer / "apm.yml").write_text(yaml.dump({
-        "name": "consumer-project",
-        "version": "1.0.0",
-        "dependencies": {"apm": []},
-    }))
+    (consumer / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "consumer-project",
+                "version": "1.0.0",
+                "dependencies": {"apm": []},
+            }
+        )
+    )
     # Create .github directory for instructions deployment
     (consumer / ".github").mkdir()
 
     # Local skills package
     skills_pkg = workspace / "packages" / "local-skills"
     skills_pkg.mkdir(parents=True)
-    (skills_pkg / "apm.yml").write_text(yaml.dump({
-        "name": "local-skills",
-        "version": "1.0.0",
-        "description": "Local test skills package",
-    }))
+    (skills_pkg / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "local-skills",
+                "version": "1.0.0",
+                "description": "Local test skills package",
+            }
+        )
+    )
     instructions_dir = skills_pkg / ".apm" / "instructions"
     instructions_dir.mkdir(parents=True)
     (instructions_dir / "test-skill.instructions.md").write_text(
@@ -82,11 +90,15 @@ def temp_workspace(tmp_path):
     # Local prompts package
     prompts_pkg = workspace / "packages" / "local-prompts"
     prompts_pkg.mkdir(parents=True)
-    (prompts_pkg / "apm.yml").write_text(yaml.dump({
-        "name": "local-prompts",
-        "version": "1.0.0",
-        "description": "Local test prompts package",
-    }))
+    (prompts_pkg / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "local-prompts",
+                "version": "1.0.0",
+                "description": "Local test prompts package",
+            }
+        )
+    )
     prompts_dir = prompts_pkg / ".apm" / "prompts"
     prompts_dir.mkdir(parents=True)
     (prompts_dir / "review.prompt.md").write_text(
@@ -140,10 +152,7 @@ class TestLocalInstall:
             lock_data = yaml.safe_load(f)
         deps = lock_data.get("dependencies", [])
         # Local deps have source: local
-        assert any(
-            d.get("source") == "local"
-            for d in deps
-        ), f"No local source in lockfile: {deps}"
+        assert any(d.get("source") == "local" for d in deps), f"No local source in lockfile: {deps}"
 
     def test_install_local_package_absolute_path(self, temp_workspace, apm_command):
         """Install a local package using an absolute path."""
@@ -178,10 +187,9 @@ class TestLocalInstall:
 
         # Check instructions deployed
         deployed = consumer / ".github" / "instructions" / "test-skill.instructions.md"
-        all_files = list((consumer / '.github').rglob('*'))
+        all_files = list((consumer / ".github").rglob("*"))
         assert deployed.exists(), (
-            f"Instructions not deployed. Files in .github/: {all_files}\n"
-            f"stdout: {result.stdout}"
+            f"Instructions not deployed. Files in .github/: {all_files}\nstdout: {result.stdout}"
         )
 
     def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_command):
@@ -226,13 +234,17 @@ class TestLocalInstall:
         consumer = temp_workspace / "consumer"
 
         # Write apm.yml with local dep
-        (consumer / "apm.yml").write_text(yaml.dump({
-            "name": "consumer-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": ["../packages/local-skills"],
-            },
-        }))
+        (consumer / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "consumer-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": ["../packages/local-skills"],
+                    },
+                }
+            )
+        )
 
         result = subprocess.run(
             [apm_command, "install"],
@@ -261,8 +273,17 @@ class TestLocalInstall:
         )
 
         # Modify source file
-        skill_file = temp_workspace / "packages" / "local-skills" / ".apm" / "instructions" / "test-skill.instructions.md"
-        skill_file.write_text("---\napplyTo: '**'\n---\n# Updated Test Skill\nThis skill was updated.")
+        skill_file = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        skill_file.write_text(
+            "---\napplyTo: '**'\n---\n# Updated Test Skill\nThis skill was updated."
+        )
 
         # Re-install
         result = subprocess.run(
@@ -275,7 +296,15 @@ class TestLocalInstall:
         assert result.returncode == 0
 
         # Verify updated content in apm_modules
-        copied_file = consumer / "apm_modules" / "_local" / "local-skills" / ".apm" / "instructions" / "test-skill.instructions.md"
+        copied_file = (
+            consumer
+            / "apm_modules"
+            / "_local"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
         assert "Updated Test Skill" in copied_file.read_text()
 
 
@@ -357,22 +386,30 @@ class TestLocalPackMixed:
         consumer = temp_workspace / "consumer"
 
         # Write apm.yml with local dep
-        (consumer / "apm.yml").write_text(yaml.dump({
-            "name": "consumer-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": ["../packages/local-skills"],
-            },
-        }))
+        (consumer / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "consumer-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": ["../packages/local-skills"],
+                    },
+                }
+            )
+        )
 
         # Create a valid lockfile via the LockFile API
-        from apm_cli.deps.lockfile import LockFile as _LF, LockedDependency as _LD
+        from apm_cli.deps.lockfile import LockedDependency as _LD
+        from apm_cli.deps.lockfile import LockFile as _LF
+
         _lock = _LF()
-        _lock.add_dependency(_LD(
-            repo_url="_local/local-skills",
-            source="local",
-            local_path="../packages/local-skills",
-        ))
+        _lock.add_dependency(
+            _LD(
+                repo_url="_local/local-skills",
+                source="local",
+                local_path="../packages/local-skills",
+            )
+        )
         _lock.write(consumer / "apm.lock.yaml")
 
         result = subprocess.run(
@@ -401,11 +438,15 @@ class TestRootProjectPrimitives:
         project.mkdir()
 
         deps_section = {"apm": apm_deps} if apm_deps else {}
-        (project / "apm.yml").write_text(yaml.dump({
-            "name": "my-project",
-            "version": "1.0.0",
-            "dependencies": deps_section,
-        }))
+        (project / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "my-project",
+                    "version": "1.0.0",
+                    "dependencies": deps_section,
+                }
+            )
+        )
 
         instructions_dir = project / ".apm" / "instructions"
         instructions_dir.mkdir(parents=True)
@@ -437,14 +478,11 @@ class TestRootProjectPrimitives:
 
         deployed = project / ".claude" / "rules" / "local-rules.md"
         assert deployed.exists(), (
-            f"Root .apm/ rules were NOT deployed to .claude/rules/.\n"
-            f"Output:\n{combined}"
+            f"Root .apm/ rules were NOT deployed to .claude/rules/.\nOutput:\n{combined}"
         )
         assert "Local Rules" in deployed.read_text()
 
-    def test_root_apm_primitives_deployed_alongside_external_dep(
-        self, tmp_path, apm_command
-    ):
+    def test_root_apm_primitives_deployed_alongside_external_dep(self, tmp_path, apm_command):
         """root apm.yml with external dep + root .apm/ -> both rule sets deployed.
 
         This is the exact scenario from #714: external dependencies in apm.yml
@@ -453,10 +491,14 @@ class TestRootProjectPrimitives:
         """
         ext_pkg = tmp_path / "ext-pkg"
         ext_pkg.mkdir()
-        (ext_pkg / "apm.yml").write_text(yaml.dump({
-            "name": "ext-pkg",
-            "version": "1.0.0",
-        }))
+        (ext_pkg / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "ext-pkg",
+                    "version": "1.0.0",
+                }
+            )
+        )
         ext_instr = ext_pkg / ".apm" / "instructions"
         ext_instr.mkdir(parents=True)
         (ext_instr / "ext-rules.instructions.md").write_text(
@@ -490,21 +532,29 @@ class TestRootProjectPrimitives:
 
         agent_dir = project / "agent"
         agent_dir.mkdir()
-        (agent_dir / "apm.yml").write_text(yaml.dump({
-            "name": "my-project-agent",
-            "version": "1.0.0",
-        }))
+        (agent_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "my-project-agent",
+                    "version": "1.0.0",
+                }
+            )
+        )
         agent_instr = agent_dir / ".apm" / "instructions"
         agent_instr.mkdir(parents=True)
         (agent_instr / "agent-rules.instructions.md").write_text(
             "---\napplyTo: '**'\n---\n# Agent Rules\nFrom sub-package stub."
         )
 
-        (project / "apm.yml").write_text(yaml.dump({
-            "name": "my-project",
-            "version": "1.0.0",
-            "dependencies": {"apm": ["./agent"]},
-        }))
+        (project / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "my-project",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": ["./agent"]},
+                }
+            )
+        )
         (project / ".claude" / "rules").mkdir(parents=True)
 
         result = subprocess.run(
@@ -532,9 +582,7 @@ class TestRootProjectPrimitives:
                 text=True,
                 timeout=60,
             )
-            assert result.returncode == 0, (
-                f"Run {run + 1} failed:\n{result.stdout + result.stderr}"
-            )
+            assert result.returncode == 0, f"Run {run + 1} failed:\n{result.stdout + result.stderr}"
 
         assert (project / ".claude" / "rules" / "local-rules.md").exists()
 
@@ -547,10 +595,14 @@ class TestRootProjectPrimitives:
         project = tmp_path / "project"
         project.mkdir()
 
-        (project / "apm.yml").write_text(yaml.dump({
-            "name": "my-project",
-            "version": "1.0.0",
-        }))
+        (project / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "my-project",
+                    "version": "1.0.0",
+                }
+            )
+        )
 
         hooks_dir = project / ".apm" / "hooks"
         hooks_dir.mkdir(parents=True)
@@ -586,13 +638,15 @@ class TestRootProjectPrimitives:
         project = tmp_path / "project"
         project.mkdir()
 
-        (project / "apm.yml").write_text(yaml.dump({
-            "name": "my-project",
-            "version": "1.0.0",
-        }))
-        (project / "SKILL.md").write_text(
-            "# My Skill\nThis skill does something useful."
+        (project / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "my-project",
+                    "version": "1.0.0",
+                }
+            )
         )
+        (project / "SKILL.md").write_text("# My Skill\nThis skill does something useful.")
 
         # Create .claude/ so claude target is auto-detected
         (project / ".claude").mkdir(parents=True)

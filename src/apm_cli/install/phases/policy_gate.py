@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 __all__ = ["PolicyViolationError", "run"]
 
 
-def run(ctx: "InstallContext") -> None:
+def run(ctx: InstallContext) -> None:
     """Execute the policy-gate phase.
 
     On return ``ctx.policy_fetch`` holds the full
@@ -80,9 +80,7 @@ def run(ctx: "InstallContext") -> None:
     # enforcement: off -- nothing to do
     if enforcement == "off":
         if logger:
-            logger.verbose_detail(
-                "Policy enforcement is off; dependency checks skipped"
-            )
+            logger.verbose_detail("Policy enforcement is off; dependency checks skipped")
         ctx.policy_enforcement_active = False
         return
 
@@ -102,9 +100,7 @@ def run(ctx: "InstallContext") -> None:
     extra_kwargs = {}
     apm_package = getattr(ctx, "apm_package", None)
     if apm_package is not None:
-        extra_kwargs["manifest_includes"] = getattr(
-            apm_package, "includes", None
-        )
+        extra_kwargs["manifest_includes"] = getattr(apm_package, "includes", None)
 
     audit_result = run_dependency_policy_checks(
         ctx.deps_to_install,
@@ -165,7 +161,7 @@ def run(ctx: "InstallContext") -> None:
 # ------------------------------------------------------------------
 
 
-def _is_policy_disabled(ctx: "InstallContext") -> bool:
+def _is_policy_disabled(ctx: InstallContext) -> bool:
     """Check escape hatches: ctx.no_policy flag and APM_POLICY_DISABLE env."""
     logger = ctx.logger
 
@@ -182,7 +178,7 @@ def _is_policy_disabled(ctx: "InstallContext") -> bool:
     return False
 
 
-def _read_project_fetch_failure_default(ctx: "InstallContext") -> str:
+def _read_project_fetch_failure_default(ctx: InstallContext) -> str:
     """Resolve project-side ``policy.fetch_failure_default`` (closes #829).
 
     Reads from ctx attribute first (test-friendly override) then falls
@@ -196,7 +192,7 @@ def _read_project_fetch_failure_default(ctx: "InstallContext") -> str:
     return read_project_fetch_failure_default(ctx.project_root)
 
 
-def _discover_with_chain(ctx: "InstallContext"):
+def _discover_with_chain(ctx: InstallContext):
     """Run chain-aware discovery via the shared seam in ``discovery.py``.
 
     Delegates to :func:`~apm_cli.policy.discovery.discover_policy_with_chain`

@@ -143,9 +143,23 @@ dependencies:
       alias: review                      # local alias (controls install directory name)
     - git: ssh://git@bitbucket.example.com:7999/project/repo.git  # Bitbucket Datacenter (custom SSH port)
       ref: v1.0
+    # Azure DevOps with sub-path and ref pin
+    - git: https://dev.azure.com/myorg/myproject/_git/myrepo
+      path: instructions/security
+      ref: v2.0
 ```
 
 Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS, HTTP or SSH clone URL.
+
+:::note[Azure DevOps + sub-path + ref]
+The shorthand form for the same ADO entry is:
+
+```yaml
+- dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
+```
+
+Use the **shorthand** or the **object form** for ADO sub-paths. The full `https://dev.azure.com/<org>/<project>/_git/<repo>/<sub-path>` URL form is not yet accepted by the parser. If you copy the URL straight from your ADO browser tab, switch to one of the two forms above. Spaces in project / repo names must be URL-encoded as `%20`.
+:::
 
 Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
 
@@ -267,9 +281,9 @@ devDependencies:
     - source: owner/test-helpers
 ```
 
-Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack --format plugin` output. See [Pack & Distribute](../pack-distribute/) for details.
+Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack` plugin output. See [Pack & Distribute](../pack-distribute/) for details.
 
-**Important:** plain `apm install` (no flag) deploys both `dependencies` and `devDependencies` -- there is currently no `--omit=dev` flag. The dev/prod separation kicks in at `apm pack --format plugin`. Maintainer-only primitives that you author yourself MUST live outside `.apm/` to be excluded from plugin bundles, because the local-content scanner operates on `.apm/` regardless of the devDep marker. See [Dev-only Primitives](../dev-only-primitives/) for the canonical pattern.
+**Important:** plain `apm install` (no flag) deploys both `dependencies` and `devDependencies` -- there is currently no `--omit=dev` flag. The dev/prod separation kicks in at `apm pack` (plugin format, the default). Maintainer-only primitives that you author yourself MUST live outside `.apm/` to be excluded from plugin bundles, because the local-content scanner operates on `.apm/` regardless of the devDep marker. See [Dev-only Primitives](../dev-only-primitives/) for the canonical pattern.
 
 ## Local Path Dependencies
 
@@ -298,6 +312,21 @@ dependencies:
 - Local packages are validated the same as remote packages (must have `apm.yml` or `SKILL.md`)
 - `apm compile` works identically regardless of dependency source
 - Transitive dependencies are resolved recursively (local packages can depend on remote packages)
+- **Anchor rule:** a `local_path` declared **inside another local package** is resolved relative to **that package's own directory**, not the consumer's project root. This matches npm/pip/cargo workspace behaviour and is what makes mono-repos with sibling helper packages portable across consumers. Sibling layouts that resolve **outside** the consuming project root (e.g. `../sibling-pkg` from a local dep at the project edge) are supported -- the consuming developer authored the manifest chain and trusts the layout. The security boundary lives upstream: see the next bullet.
+
+  ```yaml
+  # apm.yml at /repo/apm.yml
+  dependencies:
+    apm:
+      - ./packages/specialized
+
+  # apm.yml at /repo/packages/specialized/apm.yml
+  dependencies:
+    apm:
+      - ../base   # resolves to /repo/packages/base, NOT /repo/base
+  ```
+
+- **Remote packages may not declare local dependencies.** A package fetched from `owner/repo` cannot depend on a `local_path` -- such an entry would reach into the consumer's filesystem in unpredictable ways. Both relative and absolute local paths are rejected at `ERROR` severity. Authors of remote packages must publish their dependencies (or vendor them via subdirectory packages).
 
 **Re-install behavior:** Local deps are always re-copied on `apm install` since there is no commit SHA to cache against. This ensures you always get the latest local changes.
 
@@ -335,13 +364,15 @@ Coverage varies by target and primitive type:
 
 | Target | Status | User-level dir | Primitives | Not supported |
 |--------|--------|---------------|------------|---------------|
-| Claude Code | Supported | `~/.claude/` | Skills, agents, commands, hooks, instructions | -- |
+| Claude Code | Supported | `~/.claude/` (or `$CLAUDE_CONFIG_DIR`) | Skills, agents, commands, hooks, instructions | -- |
 | Copilot CLI | Partial | `~/.copilot/` | Skills, agents, hooks | Prompts, instructions |
 | Cursor | Partial | `~/.cursor/` | Skills, agents, hooks | Rules |
 | OpenCode | Partial | `~/.config/opencode/` | Skills, agents, commands | Hooks |
 
 Target detection mirrors project scope: APM auto-detects by `~/.<target>/` directory presence,
 falling back to Copilot. Security scanning runs for global installs.
+
+For Claude Code, if `CLAUDE_CONFIG_DIR` is set (and points inside `$HOME`), `apm install -g --target claude` deploys there instead of `~/.claude/` so primitives land where Claude Code reads them.
 
 ### When to use each scope
 
@@ -640,7 +671,7 @@ APM automatically retries failed HTTP requests with exponential backoff and jitt
 
 #### Parallel Downloads
 
-APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For subdirectory packages in monorepos, APM attempts git sparse-checkout (git 2.25+) to download only the needed directory, falling back to a shallow clone if sparse-checkout is unavailable.
+APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For sibling subdirectory packages from the same monorepo and ref (e.g. two skills under `skills/` in `github/awesome-copilot`), APM clones the repo bare exactly once into a shared cache and materializes each consumer's working tree from that cache via `git clone --local --shared --no-checkout`. This eliminates redundant network fetches and prevents the parallel races that affected earlier sparse-checkout based fetches.
 
 ### File Processing and Content Merging
 

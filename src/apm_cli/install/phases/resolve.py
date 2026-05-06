@@ -19,13 +19,19 @@ This is the first phase of the install pipeline.  It covers:
 from __future__ import annotations
 
 import builtins
+import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
+_logger = logging.getLogger(__name__)
 
-def run(ctx: "InstallContext") -> None:
+
+def run(ctx: InstallContext) -> None:
     """Execute the resolve phase.
 
     On return every field listed in the *Resolve phase outputs* section of
@@ -33,11 +39,12 @@ def run(ctx: "InstallContext") -> None:
     """
     from apm_cli.core.auth import AuthResolver
     from apm_cli.core.scope import InstallScope, get_modules_dir
-    from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps import github_downloader as _ghd_mod
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.install.phases.local_content import _copy_local_package
     from apm_cli.models.apm_package import DependencyReference
+
     # ------------------------------------------------------------------
     # 1. Lockfile loading
     # ------------------------------------------------------------------
@@ -45,35 +52,30 @@ def run(ctx: "InstallContext") -> None:
     ctx.lockfile_path = lockfile_path
     existing_lockfile = None
     lockfile_count = 0
-    if lockfile_path.exists():
+    if ctx.early_lockfile is not None:
+        existing_lockfile = ctx.early_lockfile
+    elif lockfile_path.exists():
         existing_lockfile = LockFile.read(lockfile_path)
-        if existing_lockfile and existing_lockfile.dependencies:
-            lockfile_count = len(existing_lockfile.dependencies)
-            if ctx.logger:
-                if ctx.update_refs:
-                    ctx.logger.verbose_detail(
-                        f"Loaded apm.lock.yaml for SHA comparison ({lockfile_count} dependencies)"
+    if existing_lockfile and existing_lockfile.dependencies:
+        lockfile_count = len(existing_lockfile.dependencies)
+        if ctx.logger:
+            if ctx.update_refs:
+                ctx.logger.verbose_detail(
+                    f"Loaded apm.lock.yaml for SHA comparison ({lockfile_count} dependencies)"
+                )
+            else:
+                ctx.logger.verbose_detail(
+                    f"Using apm.lock.yaml ({lockfile_count} locked dependencies)"
+                )
+            if ctx.logger.verbose:
+                for locked_dep in existing_lockfile.get_all_dependencies():
+                    _sha = format_short_sha(locked_dep.resolved_commit)
+                    _ref = (
+                        locked_dep.resolved_ref
+                        if hasattr(locked_dep, "resolved_ref") and locked_dep.resolved_ref
+                        else ""
                     )
-                else:
-                    ctx.logger.verbose_detail(
-                        f"Using apm.lock.yaml ({lockfile_count} locked dependencies)"
-                    )
-                if ctx.logger.verbose:
-                    for locked_dep in existing_lockfile.get_all_dependencies():
-                        _sha = (
-                            locked_dep.resolved_commit[:8]
-                            if locked_dep.resolved_commit
-                            else ""
-                        )
-                        _ref = (
-                            locked_dep.resolved_ref
-                            if hasattr(locked_dep, "resolved_ref")
-                            and locked_dep.resolved_ref
-                            else ""
-                        )
-                        ctx.logger.lockfile_entry(
-                            locked_dep.get_unique_key(), ref=_ref, sha=_sha
-                        )
+                    ctx.logger.lockfile_entry(locked_dep.get_unique_key(), ref=_ref, sha=_sha)
     ctx.existing_lockfile = existing_lockfile
 
     # ------------------------------------------------------------------
@@ -96,17 +98,51 @@ def run(ctx: "InstallContext") -> None:
     )
     ctx.downloader = downloader
 
+    # WS2a (#1116): attach a per-run shared clone cache so subdirectory
+    # deps from the same upstream repo+ref share a single git clone.
+    # The cache is cleaned up in the resolve phase's finally-equivalent
+    # (after resolution completes, whether success or failure).
+    from apm_cli.deps.shared_clone_cache import SharedCloneCache
+
+    shared_cache = SharedCloneCache()
+    downloader.shared_clone_cache = shared_cache
+
+    # WS3 (#1116): attach persistent cross-run git cache unless disabled
+    # via APM_NO_CACHE environment variable.
+    import os as _os
+
+    if not _os.environ.get("APM_NO_CACHE"):
+        from apm_cli.cache.paths import get_cache_root
+
+        try:
+            from apm_cli.cache.git_cache import GitCache
+
+            _cache_root = get_cache_root()
+            downloader.persistent_git_cache = GitCache(
+                _cache_root,
+                refresh=getattr(ctx, "refresh", False),
+            )
+        except (OSError, ValueError):
+            pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
+
     # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)
     # ------------------------------------------------------------------
     # direct_dep_keys is phase-local (only read inside download_callback)
-    direct_dep_keys = builtins.set(
-        dep.get_unique_key() for dep in ctx.all_apm_deps
-    )
+    direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
     # These three escape to later phases via ctx
     callback_downloaded: builtins.dict = {}
     transitive_failures: builtins.list = []
     callback_failures: builtins.set = builtins.set()
+    # F7 (#1116): the resolver may dispatch ``download_callback`` calls
+    # across a worker pool. CPython's GIL makes individual dict/set/list
+    # mutations atomic, but logging emission and the read+update on
+    # ``callback_downloaded`` (e.g. duplicate-key races) are not. A single
+    # narrow lock around the result-recording sites is sufficient and
+    # cheap; the heavy I/O work runs OUTSIDE the lock.
+    import threading as _threading
+
+    callback_lock = _threading.Lock()
 
     # ------------------------------------------------------------------
     # 5. Download callback for transitive resolution
@@ -117,9 +153,9 @@ def run(ctx: "InstallContext") -> None:
     project_root = ctx.project_root
     update_refs = ctx.update_refs
     logger = ctx.logger
-    verbose = ctx.verbose
+    verbose = ctx.verbose  # noqa: F841
 
-    def download_callback(dep_ref, modules_dir, parent_chain=""):
+    def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
         """Download a package during dependency resolution.
 
         Args:
@@ -127,33 +163,81 @@ def run(ctx: "InstallContext") -> None:
             modules_dir: Target apm_modules directory.
             parent_chain: Human-readable breadcrumb (e.g. "root > mid")
                 showing which dependency path led to this transitive dep.
+            parent_pkg: APMPackage that declared *dep_ref*, or None for direct
+                deps from the root project. For local deps we use its
+                ``source_path`` as the anchor for relative paths so a
+                transitive ``../sibling`` resolves against the declaring
+                package's directory rather than the root consumer (#857).
         """
         install_path = dep_ref.get_install_path(modules_dir)
         if install_path.exists():
             return install_path
+        # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
+        # users see the install advancing past silent transitive lookups.
+        # Under F7's parallel BFS this callback may run on a worker
+        # thread, so serialise the emission via ``callback_lock`` to
+        # keep heartbeat lines from interleaving with each other.
+        # Workstream B (#1116): when the shared InstallTui is painting
+        # the Live region, the static heartbeat line would interleave
+        # with the spinner -- route the heartbeat to the TUI's
+        # task_started instead and skip the static line.
+        if logger:
+            with callback_lock:
+                _display = dep_ref.get_display_name()
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_started(dep_ref.get_unique_key(), f"resolve {_display}")
+                if _tui is None or not _tui.is_animating():
+                    logger.resolving_heartbeat(_display)
         try:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
-                if scope is InstallScope.USER:
-                    # Cannot resolve local paths at user scope.
+                if (
+                    scope is InstallScope.USER
+                    and not Path(dep_ref.local_path).expanduser().is_absolute()
+                ):
+                    # At user scope, relative local paths have no meaningful
+                    # root (cwd is arbitrary, $HOME is not a project).  Only
+                    # absolute paths are unambiguous; reject relative refs.
                     # Note: callback_failures is a set (see line ~105),
                     # so use .add() rather than dict-style assignment.
-                    callback_failures.add(dep_ref.get_unique_key())
+                    with callback_lock:
+                        callback_failures.add(dep_ref.get_unique_key())
+                    _tui = getattr(ctx, "tui", None)
+                    if _tui is not None:
+                        _tui.task_failed(dep_ref.get_unique_key())
                     return None
+                # Anchor relative paths on the *declaring* package's source
+                # directory when available (#857). Falls back to project_root
+                # for direct deps and for parents that predate source_path.
+                base_dir = (
+                    parent_pkg.source_path
+                    if parent_pkg is not None and parent_pkg.source_path is not None
+                    else project_root
+                )
                 result_path = _copy_local_package(
-                    dep_ref, install_path, project_root, logger=logger
+                    dep_ref,
+                    install_path,
+                    base_dir,
+                    project_root=project_root,
+                    logger=logger,
                 )
                 if result_path:
-                    callback_downloaded[dep_ref.get_unique_key()] = None
+                    with callback_lock:
+                        callback_downloaded[dep_ref.get_unique_key()] = None
+                    _tui = getattr(ctx, "tui", None)
+                    if _tui is not None:
+                        _tui.task_completed(dep_ref.get_unique_key())
                     return result_path
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_failed(dep_ref.get_unique_key())
                 return None
 
             # T5: Use locked commit if available (reproducible installs)
             locked_ref = None
             if existing_lockfile:
-                locked_dep = existing_lockfile.get_dependency(
-                    dep_ref.get_unique_key()
-                )
+                locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
                 if (
                     locked_dep
                     and locked_dep.resolved_commit
@@ -174,13 +258,14 @@ def run(ctx: "InstallContext") -> None:
             result = downloader.download_package(download_dep, install_path)
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
-            if (
-                result
-                and hasattr(result, "resolved_reference")
-                and result.resolved_reference
-            ):
+            if result and hasattr(result, "resolved_reference") and result.resolved_reference:
                 resolved_sha = result.resolved_reference.resolved_commit
-            callback_downloaded[dep_ref.get_unique_key()] = resolved_sha
+            callback_downloaded_value = resolved_sha
+            with callback_lock:
+                callback_downloaded[dep_ref.get_unique_key()] = callback_downloaded_value
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_completed(dep_ref.get_unique_key())
             return install_path
         except Exception as e:
             dep_display = dep_ref.get_display_name()
@@ -190,26 +275,25 @@ def run(ctx: "InstallContext") -> None:
             # Distinguish direct vs transitive failure messages so users
             # don't see a misleading "transitive dep" label for top-level deps.
             if is_direct:
-                fail_msg = (
-                    f"Failed to download dependency "
-                    f"{dep_ref.repo_url}: {e}"
-                )
+                fail_msg = f"Failed to download dependency {dep_ref.repo_url}: {e}"
             else:
-                chain_hint = (
-                    f" (via {parent_chain})" if parent_chain else ""
-                )
-                fail_msg = (
-                    f"Failed to resolve transitive dep "
-                    f"{dep_ref.repo_url}{chain_hint}: {e}"
-                )
+                chain_hint = f" (via {parent_chain})" if parent_chain else ""
+                fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
 
             # Verbose: inline detail via logger (single output path).
             # Deferred diagnostics below cover the non-logger case.
-            if logger:
-                logger.verbose_detail(f"  {fail_msg}")
-            # Collect for deferred diagnostics summary (always, even non-verbose)
-            callback_failures.add(dep_key)
-            transitive_failures.append((dep_display, fail_msg))
+            # F7 (#1116): single critical section for both the logger
+            # emission and the result-recording so concurrent failures
+            # don't interleave their lines.
+            with callback_lock:
+                if logger:
+                    logger.verbose_detail(f"  {fail_msg}")
+                # Collect for deferred diagnostics summary (always, even non-verbose)
+                callback_failures.add(dep_key)
+                transitive_failures.append((dep_display, fail_msg))
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_failed(dep_key)
             return None
 
     # ------------------------------------------------------------------
@@ -223,6 +307,14 @@ def run(ctx: "InstallContext") -> None:
     dependency_graph = resolver.resolve_dependencies(ctx.apm_dir)
     ctx.dependency_graph = dependency_graph
 
+    # Fold remote-parent local_path rejections into ``callback_failures`` so
+    # the integrate phase skips them via the same gate used for download
+    # failures (PR #1111 review C2). The resolver has already emitted the
+    # red ERROR notice; here we just propagate the dep_key.
+    rejected_remote_local = getattr(resolver, "_rejected_remote_local_keys", set())
+    if rejected_remote_local:
+        callback_failures.update(rejected_remote_local)
+
     # Verbose: show resolved tree summary
     if ctx.logger:
         tree = dependency_graph.dependency_tree
@@ -235,9 +327,7 @@ def run(ctx: "InstallContext") -> None:
             )
             for node in tree.nodes.values():
                 if node.depth > 1:
-                    ctx.logger.verbose_detail(
-                        f"    {node.get_ancestor_chain()}"
-                    )
+                    ctx.logger.verbose_detail(f"    {node.get_ancestor_chain()}")
         else:
             ctx.logger.verbose_detail(
                 f"Resolved {direct_count} direct dependencies (no transitive)"
@@ -291,11 +381,7 @@ def run(ctx: "InstallContext") -> None:
             if node.dependency_ref.get_identity() in only_identities:
                 _collect_descendants(node)
 
-        deps_to_install = [
-            dep
-            for dep in deps_to_install
-            if dep.get_identity() in only_identities
-        ]
+        deps_to_install = [dep for dep in deps_to_install if dep.get_identity() in only_identities]
 
     from apm_cli.install.insecure_policy import (
         _check_insecure_dependencies,
@@ -324,11 +410,70 @@ def run(ctx: "InstallContext") -> None:
     ctx.deps_to_install = deps_to_install
 
     # ------------------------------------------------------------------
+    # 7.5 Build dep_key -> parent source_path map for transitive locals
+    # ------------------------------------------------------------------
+    # Local deps declared by a transitive parent must be anchored on the
+    # parent's source dir, not on the consumer's project root (#857). We
+    # walk the dependency tree once here and stash the per-dep base_dir
+    # for the integrate phase to consume.
+    #
+    # Keying caveat (PR #1111 review C3): the map is keyed by
+    # ``dep_ref.get_unique_key()``, which for local deps is the raw
+    # ``local_path`` string. Two different parents that both declare the
+    # same relative ``local_path`` (e.g. both write ``../base``) collapse
+    # to the same key. In the current architecture this collision is
+    # latent: the BFS walk in ``APMDependencyResolver`` already dedupes
+    # by ``get_unique_key()`` so only one node ever exists for that key,
+    # and ``DependencyReference.get_install_path`` shares the same
+    # ``apm_modules/_local/<basename>`` slot regardless of the parent.
+    # That means today the "second parent wins" question never actually
+    # fires -- the second occurrence is dropped at queue-time. We still
+    # detect divergent-anchor writes here and warn loudly, both because
+    # silent first-wins behaviour would mask a real bug if BFS dedup ever
+    # changes, and because the warning gives the user a path to diagnose
+    # surprising layouts (e.g. ``../base`` from two parents resolving to
+    # different absolute directories).
+    dep_base_dirs: builtins.dict[str, Path] = {}
+    try:
+        tree = dependency_graph.dependency_tree
+        for node in tree.nodes.values():
+            parent_node = node.parent
+            if parent_node is None or parent_node.package is None:
+                continue
+            anchor = (
+                parent_node.package.source_path
+                if parent_node.package.source_path is not None
+                else project_root
+            )
+            key = node.dependency_ref.get_unique_key()
+            existing = dep_base_dirs.get(key)
+            if existing is not None and existing != anchor:
+                # Divergent anchors for the same dep key. Keep the first
+                # (deterministic) and surface the conflict so the user can
+                # rename one of the colliding refs or use absolute paths.
+                _logger.warning(
+                    "Local dep %r is referenced from two parents with "
+                    "different anchors (%s vs %s). Using the first; "
+                    "rename one of the local_path values or use absolute "
+                    "paths to disambiguate.",
+                    key,
+                    existing,
+                    anchor,
+                )
+                continue
+            dep_base_dirs[key] = anchor
+    except (AttributeError, KeyError):
+        # Tree shape may differ across releases; fall back to empty map
+        # (callers default to project_root anchoring, matching legacy).
+        # Narrow set: real bugs (TypeError/NameError) should surface, not
+        # silently degrade to legacy anchoring.
+        dep_base_dirs = {}
+    ctx.dep_base_dirs = dep_base_dirs
+
+    # ------------------------------------------------------------------
     # 8. Orphan detection: intended_dep_keys
     # ------------------------------------------------------------------
-    ctx.intended_dep_keys = builtins.set(
-        d.get_unique_key() for d in deps_to_install
-    )
+    ctx.intended_dep_keys = builtins.set(d.get_unique_key() for d in deps_to_install)
 
     # ------------------------------------------------------------------
     # Write ancillary state to ctx for later phases
@@ -336,3 +481,8 @@ def run(ctx: "InstallContext") -> None:
     ctx.callback_downloaded = callback_downloaded
     ctx.callback_failures = callback_failures
     ctx.transitive_failures = transitive_failures
+
+    # WS2a (#1116): release shared clone temp dirs now that all subdir
+    # deps have extracted their subpaths.  Safe to call even if no
+    # subdir deps were processed (no-op in that case).
+    shared_cache.cleanup()

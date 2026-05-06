@@ -36,6 +36,7 @@ apm init [PROJECT_NAME] [OPTIONS]
 **Options:**
 - `-y, --yes` - Skip interactive prompts and use auto-detected defaults
 - `--plugin` - Initialize as a plugin authoring project (creates `plugin.json` + `apm.yml` with `devDependencies`)
+- `--marketplace` - Seed `apm.yml` with a `marketplace:` authoring block. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
 
 **Examples:**
 ```bash
@@ -53,6 +54,9 @@ apm init my-project --yes
 
 # Initialize a plugin authoring project
 apm init my-plugin --plugin
+
+# Initialize a project that also publishes a marketplace
+apm init my-marketplace --marketplace
 ```
 
 **Behavior:**
@@ -84,11 +88,13 @@ apm install [PACKAGES...] [OPTIONS]
 - `PACKAGES` - Optional APM packages to add and install. Accepts shorthand (`owner/repo`), HTTPS URLs, SSH URLs, FQDN shorthand (`host/owner/repo`), local filesystem paths (`./path`, `../path`, `/absolute/path`, `~/path`), or marketplace references (`NAME@MARKETPLACE[#ref]`). All forms are normalized to canonical format in `apm.yml`.
 
 **Options:**
-- `--runtime TEXT` - Target specific runtime only (copilot, codex, gemini, vscode)
+- `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude,windsurf)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|gemini|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+- `--target [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with `agent-skills` for both.
+  - `windsurf` - Windsurf/Cascade (`.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`)
   - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag)
+  - `vscode`, `agents` - Deprecated aliases for `copilot` (`.github/`). Still accepted by the parser; prefer `copilot` for GitHub Copilot deployment, or `agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
@@ -102,7 +108,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--header KEY=VALUE` - HTTP header for remote MCP servers (only with `--mcp`). Repeatable. Requires `--url`.
 - `--mcp-version VER` - Pin a registry MCP entry to a specific version (only with `--mcp`).
 - `--registry URL` - Custom MCP registry URL (`http://` or `https://`) for resolving the registry-form `--mcp NAME`. Overrides `MCP_REGISTRY_URL`. Persisted to `apm.yml` for reproducible installs. Not valid with `--url` or a stdio command. Only with `--mcp`.
-- `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
+- `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack` plugin output (and from `apm pack --format apm` bundles too).
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
 - `--allow-insecure` - Allow HTTP (insecure) dependencies. Required when adding or installing dependencies that use an `http://` URL.
 - `--allow-insecure-host HOSTNAME` - Allow transitive HTTP (insecure) dependencies from `HOSTNAME`. Repeat the flag to allow multiple hosts.
@@ -112,6 +118,8 @@ apm install [PACKAGES...] [OPTIONS]
 - `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
 - `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
+- `--as ALIAS` - Override the log/display label used when reporting a local-bundle install. Only valid when `PACKAGES` is a single local-bundle path (directory or `.tar.gz`); rejected on registry installs. Falls back to `plugin.json["id"]`, then to the bundle directory name when omitted. Note: this label affects log output only -- the lockfile records `local_deployed_files` (paths) and does not currently namespace by alias.
+- `--legacy-skill-paths` - Restore per-client skill directories (`.github/skills/`, `.cursor/skills/`, etc.) instead of the converged `.agents/skills/` routing. Equivalent env var: `APM_LEGACY_SKILL_PATHS=1`.
 
 **Transport env vars:**
 
@@ -127,6 +135,18 @@ See [Dependencies: Transport selection](../../guides/dependencies/#transport-sel
 - `apm install <package>`: Installs **only** the specified package (adds to `apm.yml` if not present)
 - Each `http://` dependency is warned at install time before any fetch begins
 - Transitive `http://` dependencies are allowed automatically when they use the same host as a direct insecure dependency you approved with `--allow-insecure`; other transitive hosts require `--allow-insecure-host HOSTNAME`
+
+**Claude Code: prompt `input:` -> slash command `arguments:`:**
+
+When installing into `.claude/commands/`, prompt files with an `input:` front-matter key are transformed so Claude Code can surface typed argument hints in the slash-command picker:
+
+- `input:` is mapped to Claude's `arguments:` front-matter (preserving order).
+- An `argument-hint:` is auto-generated as `<name1> <name2> ...` unless the prompt already sets one explicitly.
+- `${input:name}` references in the body are rewritten to Claude-style `$name` placeholders (double-brace `${{input:name}}` is also accepted).
+- Argument names are restricted to `^[A-Za-z][\w-]{0,63}$`; names containing YAML-significant characters are rejected with a warning and dropped from the output.
+- A short install-time message lists the mapped arguments per file so the transformation is visible without `--verbose`.
+
+This transformation only applies to the `claude` target. Other targets receive the prompt content unchanged.
 
 **Local `.apm/` Content Deployment:**
 
@@ -204,6 +224,13 @@ apm install --dev owner/test-helpers
 # Install from a local path (copies to apm_modules/_local/)
 apm install ./packages/my-shared-skills
 apm install /home/user/repos/my-ai-package
+
+# Deploy a local APM bundle (directory or .tar.gz produced by `apm pack`).
+# Bundles are an imperative, air-gapped deploy: no apm.yml mutation,
+# no network, no policy / MCP / dependency-resolver involvement.
+apm install ./build/my-bundle
+apm install ./my-bundle.tar.gz
+apm install ./my-bundle --as custom-name   # override the log/display label
 
 # Install to user scope (available across all projects)
 apm install -g microsoft/apm-sample-package
@@ -289,7 +316,7 @@ When you run `apm install`, APM automatically integrates primitives from install
 After installation completes, APM prints a grouped diagnostic summary instead of inline warnings. Categories include collisions (skipped files), cross-package skill replacements, warnings, and errors.
 
 - **Normal mode**: Shows counts and actionable tips (e.g., "9 files skipped -- use `apm install --force` to overwrite")
-- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, full error details, and **the resolved auth source per remote host** (e.g., `[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)` or `[i] github.com -- token from GITHUB_APM_PAT`). Useful for diagnosing PAT vs. Entra-ID-bearer behaviour against Azure DevOps.
+- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, full error details, and **the resolved auth source per remote host** (e.g., `[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)` or `[i] github.com -- token from GITHUB_APM_PAT`). Useful for diagnosing PAT vs. Entra-ID-bearer behaviour against Azure DevOps. For subdirectory packages with an explicit `#ref` (e.g. `owner/repo/sub#v1.2.0`), `--verbose` also shows each validation probe attempt -- marker-file lookups, the Contents API directory probe, and the `git ls-remote` fallback -- including which auth step (token, credential-helper, SSH) resolved the ref.
 
 ```bash
 # See exactly which files were skipped or had issues, and which auth source was used
@@ -369,6 +396,7 @@ apm uninstall -g microsoft/apm-sample-package
 | Claude hook settings | `.claude/settings.json` (hooks key cleaned) |
 | Cursor rules | `.cursor/rules/*.mdc` |
 | Cursor agents | `.cursor/agents/*.md` |
+| Cursor commands | `.cursor/commands/*.md` (Cursor 1.6+) |
 | Cursor skills | `.cursor/skills/{folder-name}/` |
 | Cursor hooks | `.cursor/hooks.json` (hooks key cleaned) |
 | OpenCode agents | `.opencode/agents/*.md` |
@@ -431,11 +459,12 @@ apm audit [PACKAGE] [OPTIONS]
 - `-v, --verbose` - Show info-level findings and file details
 - `-f, --format [text|json|sarif|markdown]` - Output format: `text` (default), `json` (machine-readable), `sarif` (GitHub Code Scanning), `markdown` (step summaries). Cannot be combined with `--strip` or `--dry-run`.
 - `-o, --output PATH` - Write report to file. Auto-detects format from extension (`.sarif`, `.sarif.json` → SARIF; `.json` → JSON; `.md` → Markdown) when `--format` is not specified.
-- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set. Runs the 7 baseline checks: lockfile presence, ref consistency, deployed files present, no orphaned packages, MCP config consistency, content integrity (Unicode + hash drift on every deployed file including local content), includes consent (advisory).
-- `--policy SOURCE` - *(Experimental)* Override discovery: `org` (auto-discover from org), file path, or URL. Without this flag, `--ci` auto-discovers.
+- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set. Runs the 7 baseline checks: lockfile presence, ref consistency, deployed files present, no orphaned packages, MCP config consistency, content integrity (Unicode + hash drift on every deployed file including local content), includes consent (advisory). Integration drift detection runs by default alongside the baseline checks and contributes to the exit code (use `--no-drift` to opt out).
+- `--policy SOURCE` - *(Experimental)* Policy source. Accepts: `org` (auto-discover from your project's git remote), `owner/repo` (defaults to github.com), an `https://` URL, or a local file path. Used with `--ci` for policy checks. Without this flag, `--ci` auto-discovers.
 - `--no-policy` - Skip policy discovery and enforcement entirely. Equivalent to `APM_POLICY_DISABLE=1`.
 - `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with policy discovery active.
 - `--no-fail-fast` - Run all checks even after a failure. By default, CI mode stops at the first failing check to save time.
+- `--no-drift` - Skip integration drift detection. Drift detection is on by default (whole-project audit only) and replays the install pipeline into a scratch tree to catch missed `apm install` runs, hand-edited deployed files, and orphaned files. Mutually exclusive with `--strip`/`--file`. See the [Drift Detection guide](../../guides/drift-detection/).
 
 **Examples:**
 ```bash
@@ -520,7 +549,7 @@ apm policy status [OPTIONS]
 ```
 
 **Options:**
-- `--policy-source SOURCE` - Override discovery: `org`, file path, or URL. Same shape as `apm install --policy`.
+- `--policy-source SOURCE` - Override discovery. Accepts: `org` (auto-discover from your project's git remote), `owner/repo` (defaults to github.com), an `https://` URL, or a local file path.
 - `--no-cache` - Force fresh fetch (skip cache).
 - `--json` / `-o json` - Machine-readable output for SIEM ingestion or CI inspection.
 - `--check` - Exit non-zero (1) when no usable policy is found. Default is always 0; use `--check` for CI pre-checks.
@@ -552,51 +581,72 @@ apm policy status --policy-source ./draft-policy.yml
 apm policy status --check
 ```
 
-### `apm pack` - Create a portable bundle
+### `apm pack` - Pack distributable artifacts
 
-Create a self-contained bundle from installed APM dependencies using the `deployed_files` recorded in `apm.lock.yaml` as the source of truth.
+Pack distributable artifacts from your APM project. The manifest drives what gets produced:
+
+- `dependencies:` block in `apm.yml` -> bundle (directory or `.tar.gz`)
+- `marketplace:` block in `apm.yml` -> `.claude-plugin/marketplace.json`
+- both blocks present -> both artifacts in a single run
+
+The lockfile (`apm.lock.yaml`) pins bundle contents. An enriched copy is embedded in each bundle.
 
 ```bash
 apm pack [OPTIONS]
 ```
 
 **Options:**
-- `-o, --output PATH` - Output directory (default: `./build`)
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
-- `--archive` - Produce a `.tar.gz` archive instead of a directory
-- `--dry-run` - List files that would be packed without writing anything
-- `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`
-- `--force` - On collision (plugin format), last writer wins instead of first
+- `-o, --output PATH` - Bundle output directory (default: `./build`). Does not affect `marketplace.json` path.
+- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|windsurf|all]` - Filter bundle files by target. Accepts comma-separated values (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if omitted. `vscode` is an alias for `copilot`. No-op for marketplace output.
+- `--archive` - Produce a `.tar.gz` archive instead of a directory. Bundle only.
+- `--format [plugin|apm]` - Bundle format (default: `plugin`). `plugin` emits a Claude Code plugin directory with a schema-conformant `plugin.json` ([official schema](https://json.schemastore.org/claude-code-plugin.json)). `apm` produces the legacy APM bundle layout (consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling). No-op for marketplace output.
+- `--force` - On collision (plugin format), last writer wins instead of first. Bundle only.
+- `--dry-run` - Preview outputs without writing anything.
+- `--offline` - Marketplace: use cached refs only (skip `git ls-remote`).
+- `--include-prerelease` - Marketplace: allow pre-release tags to satisfy version ranges.
+- `--marketplace-output PATH` - Marketplace: override the output path (default: `.claude-plugin/marketplace.json`).
+- `-v, --verbose` - Detailed output from every producer.
+
+Flags whose scope does not match the detected outputs are silent no-ops, not errors. CI scripts can pass `--offline` unconditionally even when some projects only produce a bundle.
+
+**Exit codes:**
+- `0` - Success
+- `1` - Build or runtime error (network failure, ref not found, no tag matches a range, etc.)
+- `2` - Schema validation error in `apm.yml`
 
 **Examples:**
 ```bash
-# Pack to ./build/<name>-<version>/
+# Bundle only (apm.yml has dependencies:, no marketplace:)
+apm pack                              # plugin format (default)
+apm pack --target claude --archive
+apm pack --format apm -o ./dist       # legacy APM bundle layout
+
+# Marketplace only (apm.yml has marketplace:, no dependencies:)
 apm pack
+apm pack --offline --dry-run
 
-# Pack as a .tar.gz archive
-apm pack --archive
+# Both blocks present -- one command, both artifacts
+apm pack
+apm pack --archive --offline
 
-# Pack only VS Code / Copilot files
-apm pack --target vscode
-
-# Export as a standalone plugin directory
-apm pack --format plugin
-
-# Preview what would be packed
-apm pack --dry-run
-
-# Custom output directory
-apm pack -o dist/
+# Override marketplace.json path (rare; default matches Anthropic spec)
+apm pack --marketplace-output ./build/marketplace.json
 ```
 
-**Behavior:**
+**Bundle behaviour:**
 - Reads `apm.lock.yaml` to enumerate all `deployed_files` from installed dependencies
-- Scans files for hidden Unicode characters before bundling — warns if findings are detected (non-blocking; consumers are protected by `apm install`/`apm unpack` which block on critical)
-- Copies files preserving directory structure
-- Writes an enriched `apm.lock.yaml` inside the bundle with a `pack:` metadata section (the project's own `apm.lock.yaml` is never modified)
-- **Plugin format** (`--format plugin`): Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, etc.), generates or updates `plugin.json`, merges hooks into a single `hooks.json`. `devDependencies` are also excluded from plugin bundles. See [Pack & Distribute](../../guides/pack-distribute/#plugin-format) for the full mapping table
+- Scans files for hidden Unicode characters before bundling -- warns if findings are detected (non-blocking; consumers are protected by `apm install`/`apm unpack` which block on critical)
+- **Plugin format (default):** Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`); generates or updates a schema-conformant `plugin.json` (convention-dir keys are stripped because Claude Code auto-discovers them); merges hooks into a single `hooks.json`. `devDependencies` are excluded. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format).
+- **APM format (`--format apm`):** Copies files preserving the install-time directory structure; writes an enriched `apm.lock.yaml` inside the bundle with a `pack:` metadata section (the project's own `apm.lock.yaml` is never modified). Consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling.
 
-**Target filtering:**
+**Marketplace behaviour:**
+- Reads the `marketplace:` block from `apm.yml` (falls back to legacy `marketplace.yml` with a deprecation warning when no block is present; both files present is a hard error)
+- Resolves each remote plugin's version range against `git ls-remote`; emits local-path entries verbatim
+- Writes `.claude-plugin/marketplace.json` atomically -- this is where Claude Code reads the file from the repo root
+- Creates `.claude-plugin/` if absent; never scaffolds other files there
+- See the [Authoring a marketplace guide](../../guides/marketplace-authoring/) for the full schema and workflow
+
+**Bundle target filtering:**
 
 | Target | Includes paths starting with |
 |--------|------------------------------|
@@ -621,6 +671,12 @@ dependencies:
 ```
 
 ### `apm unpack` - Extract a bundle
+
+> **Deprecated (since 0.12).** Prefer `apm install <bundle-path>` for deploying
+> local bundles -- it shares the same air-gapped path with no network I/O,
+> integrates with target resolution, and records deployed files in the
+> project lockfile (`local_deployed_files`). `apm unpack` remains available
+> for raw archive extraction without integration semantics.
 
 Extract an APM bundle into the current project with optional completeness verification.
 
@@ -964,7 +1020,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--verbose, -v` - Show detailed update information
 - `--force` - Overwrite locally-authored files on collision
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
-- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, gemini, vscode, agents, all
+- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, vscode, agents (deprecated), all. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` excludes agent-skills.
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
 **Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
@@ -1125,11 +1181,15 @@ Register a GitHub repository as a plugin marketplace.
 ```bash
 apm marketplace add OWNER/REPO [OPTIONS]
 apm marketplace add HOST/OWNER/REPO [OPTIONS]
+apm marketplace add HOST/group/sub/.../REPO [OPTIONS]
+apm marketplace add https://HOST/owner/.../repo[.git] [OPTIONS]
 ```
 
 **Arguments:**
 - `OWNER/REPO` - GitHub repository containing `marketplace.json`
 - `HOST/OWNER/REPO` - Repository on a non-github.com host (e.g., GitHub Enterprise)
+- `HOST/group/sub/.../REPO` - Repository nested under sub-paths (e.g., GHES org/team/repo)
+- `https://HOST/owner/.../repo[.git]` - Full HTTPS URL pasted from the browser. The `.git` suffix is stripped.
 
 **Options:**
 - `-n, --name TEXT` - Custom display name for the marketplace
@@ -1137,17 +1197,25 @@ apm marketplace add HOST/OWNER/REPO [OPTIONS]
 - `--host TEXT` - Git host FQDN (default: github.com or `GITHUB_HOST` env var)
 - `-v, --verbose` - Show detailed output
 
+> **Supported hosts.** `apm marketplace add` currently fetches `marketplace.json` via the GitHub Contents API, so only `github.com`, GitHub Enterprise Cloud (`*.ghe.com`), and the host configured via `GITHUB_HOST` are accepted. GitLab, Bitbucket, and other generic Git hosts are rejected at registration time with an actionable error -- this prevents silent fetch failures and avoids forwarding GitHub credentials to unintended hosts. Native non-GitHub support is tracked separately.
+
 **Examples:**
 ```bash
 # Register a marketplace
 apm marketplace add acme/plugin-marketplace
 
+# Register from a full HTTPS URL pasted from the browser
+apm marketplace add https://github.com/acme/plugin-marketplace
+
 # Register with a custom name and branch
 apm marketplace add acme/plugin-marketplace --name acme-plugins --branch release
 
-# Register from a GitHub Enterprise host
+# Register from a GitHub Enterprise host (Cloud or Server)
 apm marketplace add acme/plugin-marketplace --host ghes.corp.example.com
 apm marketplace add ghes.corp.example.com/acme/plugin-marketplace
+
+# Register a repo nested under sub-paths on a GHES instance
+apm marketplace add ghes.corp.example.com/org/team/plugin-marketplace
 ```
 
 #### `apm marketplace list` - List registered marketplaces
@@ -1255,6 +1323,260 @@ apm marketplace validate acme-plugins
 
 # Verbose output
 apm marketplace validate acme-plugins --verbose
+```
+
+#### `apm marketplace init` - Add a marketplace block to apm.yml
+
+Add a `marketplace:` block to the project's `apm.yml`. If `apm.yml` is absent, a minimal one is scaffolded first. The block is richly commented and ready to be edited. Build the marketplace with [`apm pack`](#apm-pack---pack-distributable-artifacts). See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+
+```bash
+apm marketplace init [OPTIONS]
+```
+
+**Options:**
+- `--force` - Overwrite an existing `marketplace:` block in `apm.yml`
+- `--no-gitignore-check` - Skip the `.gitignore` staleness check
+- `--name TEXT` - Marketplace/package name (defaults to `my-marketplace` when scaffolding apm.yml)
+- `--owner TEXT` - Owner name for the marketplace block
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Block written
+- `1` - Block already exists (without `--force`) or write failure
+
+**Examples:**
+```bash
+apm marketplace init
+apm marketplace init --force --owner acme-org
+```
+
+`apm init --marketplace` is the equivalent shortcut at project-creation time: it seeds a fresh `apm.yml` with the `marketplace:` block already in place.
+
+#### `apm marketplace migrate` - Fold marketplace.yml into apm.yml
+
+One-shot conversion of a legacy standalone `marketplace.yml` into the `marketplace:` block of `apm.yml`. Inheritable fields (`name`, `description`, `version`) are dropped from the block when they match `apm.yml`'s top-level values, and emitted as overrides when they differ. The legacy `marketplace.yml` is deleted on success.
+
+```bash
+apm marketplace migrate [OPTIONS]
+```
+
+**Options:**
+- `--force`, `--yes`, `-y` - Overwrite an existing `marketplace:` block in `apm.yml` (the three flags are aliases)
+- `--dry-run` - Print the proposed change without writing
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Migration applied (or dry run complete)
+- `1` - Migration failed (legacy file missing, conflict without `--force`, write failure)
+
+**Examples:**
+```bash
+apm marketplace migrate --dry-run
+apm marketplace migrate --yes
+```
+
+#### `apm marketplace outdated` - Report available upgrades
+
+List packages in the `marketplace:` block whose source repositories have newer tags available. Range-aware: distinguishes "latest in range" (picked up by next `build`) from "latest overall" (requires a manual range bump). Local-path packages and `ref:`-pinned entries show `--` in the range columns.
+
+```bash
+apm marketplace outdated [OPTIONS]
+```
+
+**Options:**
+- `--offline` - Use cached refs only
+- `--include-prerelease` - Include pre-release tags
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Report rendered (even if upgrades are available)
+- `1` - Unable to query refs
+- `2` - Schema error in the `marketplace:` block
+
+**Examples:**
+```bash
+apm marketplace outdated
+apm marketplace outdated --include-prerelease
+```
+
+#### `apm marketplace check` - Validate marketplace entries
+
+Validate the `marketplace:` schema and verify that every package entry is resolvable (ref exists, at least one tag satisfies the range). Intended for CI use before publishing.
+
+```bash
+apm marketplace check [OPTIONS]
+```
+
+**Options:**
+- `--offline` - Schema and cached-ref checks only (no network)
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - All entries OK
+- `1` - One or more entries are unreachable or unresolvable
+- `2` - Schema error in the `marketplace:` block
+
+**Examples:**
+```bash
+apm marketplace check
+apm marketplace check --offline
+```
+
+#### `apm marketplace doctor` - Environment diagnostics
+
+Check git, network reachability, authentication, `gh` CLI availability, and the presence of a marketplace config (in `apm.yml` or legacy `marketplace.yml`). Run this first when `apm pack` or `publish` fails in an unfamiliar environment.
+
+```bash
+apm marketplace doctor [OPTIONS]
+```
+
+**Options:**
+- `-v, --verbose` - Per-check detail
+
+**Exit codes:**
+- `0` - All checks pass
+- `1` - One or more checks failed
+
+**Examples:**
+```bash
+apm marketplace doctor
+apm marketplace doctor --verbose
+```
+
+#### `apm marketplace publish` - Open PRs on consumer repositories
+
+Drive the compiled `marketplace.json` out to consumer repositories listed in a `consumer-targets.yml` file, opening a pull request on each. Requires an authenticated `gh` CLI unless `--no-pr` is used. Run `apm pack` first to (re)build `marketplace.json`. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/#publishing-to-consumers) for the full workflow.
+
+```bash
+apm marketplace publish [OPTIONS]
+```
+
+**Options:**
+- `--targets PATH` - Path to the targets file (default: `./consumer-targets.yml`)
+- `--dry-run` - Preview without pushing or opening PRs
+- `--no-pr` - Push branches but skip PR creation
+- `--draft` - Create PRs as drafts
+- `--allow-downgrade` - Allow pushing a lower version than the target currently references
+- `--allow-ref-change` - Allow switching ref types (for example, branch to SHA)
+- `--parallel N` - Maximum concurrent target updates (default: `4`)
+- `-y, --yes` - Skip the confirmation prompt (required in non-interactive sessions)
+- `-v, --verbose` - Per-target detail
+
+**Exit codes:**
+- `0` - All targets succeeded (or were already up to date)
+- `1` - One or more targets failed, or prerequisites missing
+
+**Examples:**
+```bash
+# Preview the publish plan
+apm marketplace publish --dry-run --yes
+
+# Publish with PRs
+apm marketplace publish
+
+# Push branches only (no gh CLI needed)
+apm marketplace publish --no-pr
+```
+
+Run history and PR URLs are recorded in `.apm/publish-state.json` so re-runs can detect existing PRs.
+
+#### `apm marketplace package add` - Add a package entry
+
+Add a package entry to the `marketplace.packages` list in `apm.yml`.
+
+```bash
+apm marketplace package add SOURCE [OPTIONS]
+```
+
+**Arguments:**
+- `SOURCE` - GitHub `owner/repo` reference
+
+**Options:**
+- `--version TEXT` - Semver range constraint (e.g. `">=1.0.0"`)
+- `--ref TEXT` - Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA
+- `-d`, `--description TEXT` - Short description for the entry
+- `-s`, `--subdir TEXT` - Subdirectory inside source repo
+- `--include-prerelease` - Include pre-release versions
+- `--no-verify` - Skip remote repository verification
+- `--verbose` - Enable verbose output
+
+`--version` and `--ref` are mutually exclusive. When neither is provided, the current `HEAD` SHA is pinned automatically.
+
+**Examples:**
+```bash
+# Add a package with a version range
+apm marketplace package add acme/code-review --version ">=1.0.0"
+
+# Pin to a specific tag
+apm marketplace package add acme/code-review --ref v2.1.0
+
+# Pin to current HEAD (auto-resolved to SHA)
+apm marketplace package add acme/code-review
+
+# Add with description and skip verification (requires explicit --ref SHA)
+apm marketplace package add acme/code-review --ref abc123...40chars \
+  --description "Code review skill" --no-verify
+```
+
+#### `apm marketplace package set` - Update a package entry
+
+Update fields on an existing package entry in the `marketplace.packages` list of `apm.yml`.
+
+```bash
+apm marketplace package set NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Name of the existing package entry
+
+**Options:**
+- `--version TEXT` - New semver range constraint
+- `--ref TEXT` - New git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA
+- `--description TEXT` - New description
+- `--include-prerelease` - Enable pre-release version inclusion
+- `--verbose` - Enable verbose output
+
+`--version` and `--ref` are mutually exclusive. At least one field option must be specified.
+
+**Examples:**
+```bash
+# Widen the version range
+apm marketplace package set code-review --version ">=2.0.0"
+
+# Switch from version to pinned ref
+apm marketplace package set code-review --ref abc1234
+
+# Re-pin to current HEAD SHA
+apm marketplace package set code-review --ref HEAD
+
+# Update the description
+apm marketplace package set code-review --description "Updated review skill"
+```
+
+#### `apm marketplace package remove` - Remove a package entry
+
+Remove a package entry from the `marketplace.packages` list in `apm.yml`.
+
+```bash
+apm marketplace package remove NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Name of the package entry to remove
+
+**Options:**
+- `--yes` - Skip confirmation prompt
+- `--verbose` - Enable verbose output
+
+Prompts for confirmation unless `--yes` is passed. In non-interactive environments (CI), use `--yes`.
+
+**Examples:**
+```bash
+# Remove with confirmation prompt
+apm marketplace package remove code-review
+
+# Skip confirmation (CI-friendly)
+apm marketplace package remove code-review --yes
 ```
 
 ### `apm search` - Search plugins in a marketplace
@@ -1372,7 +1694,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|gemini|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
+- `-t, --target [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `vscode` and `agents` are accepted as deprecated aliases for `copilot` (removal in v1.0). `agent-skills` is a no-op for compile (skills-only target). Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1394,6 +1716,7 @@ When `--target` is not specified, APM auto-detects based on existing project str
 | `.claude/` exists only | `claude` | CLAUDE.md + .claude/ |
 | `.codex/` exists | `codex` | AGENTS.md + .codex/ + .agents/ |
 | `.gemini/` exists | `gemini` | GEMINI.md + .gemini/ |
+| `.windsurf/` exists | `windsurf` | AGENTS.md + .windsurf/ |
 | Both folders exist | `all` | All outputs |
 | Neither folder exists | `minimal` | AGENTS.md only |
 
@@ -1419,7 +1742,10 @@ target: [claude, copilot]  # multiple targets -- only these are compiled/install
 | `codex` | AGENTS.md, .agents/skills/, .codex/agents/, .codex/hooks.json | Codex CLI |
 | `opencode` | AGENTS.md, .opencode/agents/, .opencode/commands/, .opencode/skills/ | OpenCode |
 | `gemini` | GEMINI.md, .gemini/commands/, .gemini/skills/ | Gemini CLI |
-| `all` | All of the above | Universal compatibility |
+| `windsurf` | AGENTS.md, .windsurf/rules/, .windsurf/skills/, .windsurf/workflows/ | Windsurf/Cascade |
+| `agent-skills` | .agents/skills/ only | Cross-client shared skills |
+| `agents` | *(deprecated)* alias for `vscode` | Use `copilot` or `agent-skills` instead |
+| `all` | All of the above (excludes `agent-skills`) | Universal compatibility |
 
 **Examples:**
 ```bash
@@ -1445,13 +1771,13 @@ apm compile --watch
 apm compile --watch --dry-run
 
 # Target specific agent formats
-apm compile --target vscode    # AGENTS.md + .github/ only
+apm compile --target vscode    # AGENTS.md + .github/ (incl. copilot-instructions.md)
 apm compile --target claude    # CLAUDE.md + .claude/ only
 apm compile --target opencode  # AGENTS.md + .opencode/ only
 apm compile --target all       # All formats (default)
 
 # Multiple targets (comma-separated)
-apm compile -t claude,copilot  # Both CLAUDE.md and AGENTS.md
+apm compile -t claude,copilot  # CLAUDE.md + AGENTS.md + .github/copilot-instructions.md
 
 # Compile injecting Spec Kit constitution (auto-detected)
 apm compile --with-constitution
@@ -1475,6 +1801,9 @@ apm compile --no-constitution
 
 **Content Scanning:**
 Compiled output is scanned for hidden Unicode characters before writing to disk. Critical findings cause `apm compile` to exit with code 1 — defense-in-depth since source files are already scanned during `apm install`.
+
+**`.github/copilot-instructions.md` generation:**
+When the resolved target is `copilot` (alias `vscode`), `all`, or any multi-target list containing `copilot`, `apm compile` assembles all *global* instructions (entries in `.apm/instructions/` without an `apply_to` field) into `.github/copilot-instructions.md` -- the file VS Code and GitHub Copilot read automatically with zero user configuration. Generated content is wrapped with an APM-only marker (literal first line: `<!-- Generated by APM CLI from .apm/ primitives -->`). Switching to a non-Copilot target (e.g. `apm compile -t claude`) cleans up the file only when the marker is present; a hand-authored `.github/copilot-instructions.md` is left untouched on both write and cleanup paths. To adopt APM management of an existing hand-authored file, delete (or rename) it and re-run `apm compile`, or prepend the marker line `<!-- Generated by APM CLI from .apm/ primitives -->` to the top of the file and re-run `apm compile`.
 
 **Configuration Integration:**
 The compile command supports configuration via `apm.yml`:
@@ -1517,6 +1846,7 @@ Command-line options always override `apm.yml` settings. Priority order:
   - Markers: `<!-- SPEC-KIT CONSTITUTION: BEGIN -->` / `<!-- SPEC-KIT CONSTITUTION: END -->`
   - Second line includes `hash: <sha256_12>` for drift detection
   - Entire raw file content in between (Phase 0: no summarization)
+- **(Optional) Global Instructions Section** - Instructions without an `applyTo` pattern are emitted under a single `## Global Instructions` heading (applies to every file)
 - **Pattern-based Sections** - Content grouped by exact `applyTo` patterns from instruction context files (e.g., "Files matching `**/*.py`")
 - **Footer** - Regeneration instructions
 
@@ -1718,7 +2048,7 @@ apm runtime setup llm
 **Default Behavior:**
 - Installs runtime binary from official sources
 - Configures with GitHub Models (free) as APM default
-- Creates configuration file at `~/.codex/config.toml` or similar
+- Creates Codex runtime configuration (global `~/.codex/config.toml`; project MCP config is managed separately in `.codex/config.toml`)
 - Provides clear logging about what's being configured
 
 **Vanilla Behavior (`--vanilla` flag):**

@@ -1,9 +1,10 @@
 """Unit tests for apm_cli.bundle.lockfile_enrichment."""
 
+import pytest
 import yaml
 
 from apm_cli.bundle.lockfile_enrichment import enrich_lockfile_for_pack
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
 def _make_lockfile() -> LockFile:
@@ -237,7 +238,7 @@ class TestFilterFilesByTarget:
         # A crafted file path with traversal should only remap the prefix,
         # the traversal components remain as literal path segments
         files = [".github/skills/../../etc/passwd"]
-        filtered, mappings = _filter_files_by_target(files, "claude")
+        filtered, mappings = _filter_files_by_target(files, "claude")  # noqa: RUF059
         # The mapping still happens (prefix replacement) but the packer's
         # bundle-escape check will catch the bad destination path
         if filtered:
@@ -245,6 +246,74 @@ class TestFilterFilesByTarget:
                 assert f.startswith(".claude/skills/")
         # Either way, the original .github/ path should not sneak through
         assert ".github/skills/../../etc/passwd" not in filtered
+
+    # -- agent-skills target (#737) ---------------------------------------
+
+    def test_filter_files_agent_skills_target(self):
+        """agent-skills returns .agents/skills entries directly and remaps
+        .github/skills/ -> .agents/skills/.  Other prefixes (.github/agents/)
+        are NOT included -- agent-skills is skills-only."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [
+            ".agents/skills/x/SKILL.md",
+            ".github/agents/a.md",
+            ".github/skills/y/SKILL.md",
+        ]
+        filtered, mappings = _filter_files_by_target(files, "agent-skills")
+
+        # Direct match on the .agents/ prefix.
+        assert ".agents/skills/x/SKILL.md" in filtered
+        # Cross-target remap from .github/skills/ -> .agents/skills/.
+        assert ".agents/skills/y/SKILL.md" in filtered
+        assert mappings[".agents/skills/y/SKILL.md"] == ".github/skills/y/SKILL.md"
+        # .github/agents/ is NOT remapped -- agent-skills has no agents primitive.
+        assert ".github/agents/a.md" not in filtered
+        assert ".agents/agents/a.md" not in filtered
+        # Every surviving entry lives under the agent-skills prefix.
+        for f in filtered:
+            assert f.startswith(".agents/")
+
+    def test_filter_files_agent_skills_remap_escape_rejected(self):
+        """A crafted .github/skills/ path with traversal cannot escape the
+        .agents/ prefix when remapped for the agent-skills target."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/../../etc/passwd"]
+        filtered, mappings = _filter_files_by_target(files, "agent-skills")  # noqa: RUF059
+
+        # Original .github/ path must never appear directly.
+        assert ".github/skills/../../etc/passwd" not in filtered
+        # The containment guard must reject traversal -- either the entry is
+        # dropped entirely or every surviving path is well-formed.
+        for f in filtered:
+            assert f.startswith(".agents/")
+            assert ".." not in f.split("/"), (
+                f"traversal segment leaked through containment guard: {f}"
+            )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            ".github/skills/x/../../etc/passwd",
+            ".github/skills/../foo/SKILL.md",
+            ".github/skills/x/./../../y/SKILL.md",
+        ],
+        ids=["double-dot-escape", "parent-traverse", "dot-mixed-traverse"],
+    )
+    def test_filter_files_agent_skills_traversal_payloads_rejected(self, payload: str):
+        """Parametrized traversal payloads must be rejected or normalised safely."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        filtered, _mappings = _filter_files_by_target([payload], "agent-skills")
+
+        # Either the entry was rejected entirely …
+        if not filtered:
+            return
+        # … or every surviving path is well-formed (no '..' segments).
+        for f in filtered:
+            parts = f.split("/")
+            assert ".." not in parts, f"traversal segment leaked for payload {payload!r}: {f}"
 
 
 class TestFilterFilesByTargetList:
@@ -275,7 +344,7 @@ class TestFilterFilesByTargetList:
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 
         files = [".claude/skills/s1/SKILL.md", ".cursor/rules/r.md", ".github/agents/a.md"]
-        filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])
+        filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])  # noqa: RUF059
         assert ".claude/skills/s1/SKILL.md" in filtered
         assert ".cursor/rules/r.md" in filtered
         # .github/ is not a direct prefix for either claude or cursor
@@ -350,3 +419,126 @@ class TestEnrichLockfileListTarget:
             parsed_list["dependencies"][0]["deployed_files"]
             == parsed_str["dependencies"][0]["deployed_files"]
         )
+
+
+class TestWindsurfTargetParity:
+    """Regression: --target windsurf must filter and cross-map correctly.
+
+    Before the targets-registry refactor, ``_TARGET_PREFIXES`` and
+    ``_CROSS_TARGET_MAPS`` both omitted ``"windsurf"``, so
+    ``apm pack --target windsurf`` silently dropped every ``.windsurf/``
+    file from the bundle lockfile.
+    """
+
+    def _lockfile_with(self, files: list[str]) -> LockFile:
+        lf = LockFile()
+        lf.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                version="1.0.0",
+                deployed_files=files,
+            )
+        )
+        return lf
+
+    def test_windsurf_target_includes_windsurf_prefix(self):
+        lf = self._lockfile_with(
+            [
+                ".windsurf/skills/x/SKILL.md",
+                ".unrelated/foo",
+            ]
+        )
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".unrelated/foo" not in deployed
+
+    def test_windsurf_cross_map_skills_from_github(self):
+        """``.github/skills/`` files are remapped under ``.windsurf/skills/``."""
+        lf = self._lockfile_with([".github/skills/x/SKILL.md"])
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+
+    def test_windsurf_cross_map_agents_collapse_to_skills(self):
+        """``.github/agents/`` is intentionally remapped to ``.windsurf/skills/``
+        because windsurf has no native agent surface (lossy conversion).
+        """
+        lf = self._lockfile_with([".github/agents/a.md"])
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/a.md" in deployed
+
+    def test_target_all_includes_windsurf_files(self):
+        """``--target all`` must include ``.windsurf/`` files (was missing pre-refactor)."""
+        lf = self._lockfile_with(
+            [
+                ".windsurf/skills/x/SKILL.md",
+                ".github/agents/a.md",
+                ".gemini/extensions/GEMINI.md",
+            ]
+        )
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="all")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".github/agents/a.md" in deployed
+        # Gemini was also missing from the legacy "all" list -- registry derivation fixes that
+        assert ".gemini/extensions/GEMINI.md" in deployed
+
+    def test_multi_target_windsurf_plus_claude(self):
+        lf = self._lockfile_with(
+            [
+                ".windsurf/skills/x/SKILL.md",
+                ".claude/commands/c.md",
+                ".cursor/rules/r.md",
+            ]
+        )
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target=["windsurf", "claude"])
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".claude/commands/c.md" in deployed
+        assert ".cursor/rules/r.md" not in deployed
+
+    def test_existing_targets_unchanged(self):
+        """Regression: every legacy single-target prefix still works."""
+        cases = [
+            ("copilot", ".github/agents/a.md"),
+            ("claude", ".claude/commands/c.md"),
+            ("cursor", ".cursor/rules/r.md"),
+            ("opencode", ".opencode/agents/a.md"),
+            ("codex", ".codex/agents/a.md"),
+            ("agent-skills", ".agents/skills/x/SKILL.md"),
+        ]
+        for target, path in cases:
+            lf = self._lockfile_with([path, ".unrelated/foo"])
+            result = enrich_lockfile_for_pack(lf, fmt="apm", target=target)
+            deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+            assert path in deployed, f"{target}: {path} dropped after refactor"
+            assert ".unrelated/foo" not in deployed, f"{target}: leaked unrelated file"
+
+    def test_target_all_includes_every_deployable_target_prefix(self):
+        """Structural guard: ``--target all`` must include the prefixes for
+        every deployable target in KNOWN_TARGETS, not a hard-coded subset.
+
+        This is the general-pattern guard for the silent-drop class of
+        bug that originally hid ``.windsurf/`` and ``.gemini/`` from
+        ``--target all``.  Adding a new deployable target (one with
+        ``detect_by_dir or auto_create``) automatically extends this
+        assertion -- if a future target's prefix is not picked up by
+        ``_all_target_prefixes()``, this test fails immediately at
+        registration time rather than silently in user output.
+        """
+        from apm_cli.bundle.lockfile_enrichment import _all_target_prefixes
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        all_prefixes = _all_target_prefixes()
+        for name, profile in KNOWN_TARGETS.items():
+            if not (profile.detect_by_dir or profile.auto_create):
+                continue
+            for expected in profile.effective_pack_prefixes:
+                assert expected in all_prefixes, (
+                    f"target {name!r} prefix {expected!r} missing from "
+                    f"_all_target_prefixes(); --target all would silently drop "
+                    f"its files"
+                )

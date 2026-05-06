@@ -1,10 +1,10 @@
 """Tests for active_targets() resolution in targets.py."""
 
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 
-from apm_cli.integration.targets import active_targets, KNOWN_TARGETS
+from apm_cli.integration.targets import KNOWN_TARGETS, active_targets
 
 
 class TestActiveTargets:
@@ -76,8 +76,10 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["claude"]
 
     def test_explicit_all_returns_every_known_target(self):
+        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
         targets = active_targets(self.root, explicit_target="all")
-        assert len(targets) == len(KNOWN_TARGETS)
+        assert len(targets) == len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS)
 
     def test_explicit_vscode_alias(self):
         targets = active_targets(self.root, explicit_target="vscode")
@@ -94,9 +96,19 @@ class TestActiveTargets:
         targets = active_targets(self.root, explicit_target="claude")
         assert [t.name for t in targets] == ["claude"]
 
-    def test_explicit_unknown_returns_empty(self):
-        targets = active_targets(self.root, explicit_target="nonexistent")
-        assert targets == []
+    def test_unknown_target_raises_at_parse_time(self):
+        """Unknown tokens in apm.yml or --target must fail at the parser.
+
+        Replaces the previous ``test_explicit_unknown_returns_empty`` --
+        the silent-empty contract was the root cause of #820 (apm install
+        and apm compile exited 0 while deploying nothing).
+        """
+        import pytest
+
+        from apm_cli.core.target_detection import parse_target_field
+
+        with pytest.raises(ValueError, match="not a valid target"):
+            parse_target_field("nonexistent")
 
     # -- codex detection --
 
@@ -135,17 +147,35 @@ class TestActiveTargets:
         names = {t.name for t in targets}
         assert names == {"gemini", "claude"}
 
-    def test_all_six_dirs_returns_all_six(self):
-        for d in (".github", ".claude", ".cursor", ".opencode", ".codex", ".gemini"):
+    def test_all_seven_dirs_returns_all_seven(self):
+        for d in (".github", ".claude", ".cursor", ".opencode", ".codex", ".gemini", ".windsurf"):
             (self.root / d).mkdir()
         targets = active_targets(self.root)
-        assert len(targets) == 6
+        assert len(targets) == 7
 
     def test_all_five_dirs_returns_all_five(self):
         for d in (".github", ".claude", ".cursor", ".opencode", ".codex"):
             (self.root / d).mkdir()
         targets = active_targets(self.root)
         assert len(targets) == 5
+
+    # -- windsurf detection --
+
+    def test_only_windsurf_returns_windsurf(self):
+        (self.root / ".windsurf").mkdir()
+        targets = active_targets(self.root)
+        assert [t.name for t in targets] == ["windsurf"]
+
+    def test_explicit_windsurf(self):
+        targets = active_targets(self.root, explicit_target="windsurf")
+        assert [t.name for t in targets] == ["windsurf"]
+
+    def test_windsurf_and_github_returns_both(self):
+        (self.root / ".windsurf").mkdir()
+        (self.root / ".github").mkdir()
+        targets = active_targets(self.root)
+        names = {t.name for t in targets}
+        assert names == {"windsurf", "copilot"}
 
     # -- explicit list of targets --
 
@@ -163,20 +193,34 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["copilot"]
 
     def test_explicit_list_with_all_returns_every_known_target(self):
+        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
         targets = active_targets(self.root, explicit_target=["all"])
-        assert len(targets) == len(KNOWN_TARGETS)
+        assert len(targets) == len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS)
 
     def test_explicit_list_all_mixed_returns_every_known_target(self):
         """'all' anywhere in the list wins."""
-        targets = active_targets(self.root, explicit_target=["claude", "all"])
-        assert len(targets) == len(KNOWN_TARGETS)
+        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
 
-    def test_explicit_list_unknown_targets_falls_back_to_copilot(self):
+        targets = active_targets(self.root, explicit_target=["claude", "all"])
+        assert len(targets) == len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS)
+
+    def test_explicit_list_all_unknown_returns_empty(self):
+        """When the parser is bypassed and all tokens are unknown, the
+        result is an empty list -- the old asymmetric ``[copilot]`` fallback
+        was removed in #820 because the parser
+        (:func:`apm_cli.core.target_detection.parse_target_field`) now
+        rejects unknown tokens at the entry point."""
         targets = active_targets(self.root, explicit_target=["nonexistent", "bogus"])
-        assert [t.name for t in targets] == ["copilot"]
+        assert targets == []
 
     def test_explicit_list_mixed_known_unknown(self):
-        """Known targets are included, unknown ones are silently skipped."""
+        """Known targets are included, unknown ones are skipped (no fallback).
+
+        In normal use the parser rejects this input upstream; this test
+        exercises the post-parser invariant that the loop only adds known
+        profiles.
+        """
         targets = active_targets(self.root, explicit_target=["claude", "nonexistent"])
         assert [t.name for t in targets] == ["claude"]
 
@@ -198,11 +242,93 @@ class TestActiveTargets:
 
     def test_explicit_list_preserves_order(self):
         """Result order matches input order."""
-        targets = active_targets(
-            self.root, explicit_target=["cursor", "claude", "copilot"]
-        )
+        targets = active_targets(self.root, explicit_target=["cursor", "claude", "copilot"])
         assert [t.name for t in targets] == ["cursor", "claude", "copilot"]
 
     def test_explicit_list_codex_at_project_scope(self):
         targets = active_targets(self.root, explicit_target=["codex"])
         assert [t.name for t in targets] == ["codex"]
+
+    def test_copilot_profile_lists_root_generated_file(self):
+        profile = KNOWN_TARGETS["copilot"]
+        assert "copilot-instructions.md" in profile.generated_files
+
+
+# ---------------------------------------------------------------------------
+# Skill routing convergence (convergence §1)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultSkillRouting:
+    """Assert that the 4 documented clients route skills to .agents/ by default."""
+
+    def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
+        """copilot, cursor, opencode, codex, gemini all have deploy_root='.agents' on skills."""
+        expected = {
+            "copilot": ".agents",
+            "cursor": ".agents",
+            "opencode": ".agents",
+            "codex": ".agents",
+            "gemini": ".agents",
+            "claude": None,  # not documented as .agents/-aware
+        }
+        for name, want_root in expected.items():
+            profile = KNOWN_TARGETS[name]
+            skills_pm = profile.primitives.get("skills")
+            assert skills_pm is not None, f"{name} should have skills primitive"
+            assert skills_pm.deploy_root == want_root, (
+                f"{name}: expected deploy_root={want_root!r}, got {skills_pm.deploy_root!r}"
+            )
+
+    def test_legacy_skill_paths_flag_restores_per_client_routing(self):
+        """With apply_legacy_skill_paths(), deploy_root is reset to None."""
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        profiles = [
+            KNOWN_TARGETS[n] for n in ("copilot", "cursor", "opencode", "codex", "claude", "gemini")
+        ]
+        restored = apply_legacy_skill_paths(profiles)
+
+        # All 6 should have deploy_root=None after legacy restore
+        for profile in restored:
+            skills_pm = profile.primitives.get("skills")
+            assert skills_pm is not None, f"{profile.name} should have skills"
+            assert skills_pm.deploy_root is None, (
+                f"{profile.name}: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
+            )
+
+    def test_claude_skills_unchanged_by_default(self):
+        """Explicit guard: claude keeps its native skill routing."""
+        profile = KNOWN_TARGETS["claude"]
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.deploy_root is None, (
+            f"claude: deploy_root should be None (native routing), got {skills_pm.deploy_root!r}"
+        )
+
+    def test_gemini_skill_routing_uses_agents_dir_by_default(self):
+        """Gemini CLI docs list .agents/skills/ as the preferred alias."""
+        profile = KNOWN_TARGETS["gemini"]
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.deploy_root == ".agents", (
+            f"gemini: expected deploy_root='.agents', got {skills_pm.deploy_root!r}"
+        )
+
+    def test_gemini_legacy_skill_paths_restores_per_client_routing(self):
+        """With apply_legacy_skill_paths(), gemini deploy_root is reset to None."""
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        profiles = [KNOWN_TARGETS["gemini"]]
+        restored = apply_legacy_skill_paths(profiles)
+        skills_pm = restored[0].primitives["skills"]
+        assert skills_pm.deploy_root is None, (
+            f"gemini: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
+        )
+
+    def test_apply_legacy_does_not_mutate_known_targets(self):
+        """apply_legacy_skill_paths must not mutate the global KNOWN_TARGETS."""
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        original_root = KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root
+        profiles = [KNOWN_TARGETS["copilot"]]
+        apply_legacy_skill_paths(profiles)
+        assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root

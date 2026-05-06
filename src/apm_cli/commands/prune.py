@@ -6,20 +6,23 @@ from pathlib import Path
 
 import click
 
-from ..constants import APM_LOCK_FILENAME, APM_MODULES_DIR, APM_YML_FILENAME
+from ..constants import APM_LOCK_FILENAME, APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
 from ..core.command_logger import CommandLogger
-from ..utils.path_security import PathTraversalError, safe_rmtree
-from ._helpers import _build_expected_install_paths, _scan_installed_packages
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..models.apm_package import APMPackage
+from ..utils.path_security import PathTraversalError, safe_rmtree  # noqa: F401
+from ._helpers import (
+    _build_expected_install_paths,
+    _expand_with_ancestors,
+    _scan_installed_packages,
+    _standalone_installed_packages,
+)
 
 
 @click.command(help="Remove APM packages not listed in apm.yml")
-@click.option(
-    "--dry-run", is_flag=True, help="Show what would be removed without removing"
-)
+@click.option("--dry-run", is_flag=True, help="Show what would be removed without removing")
 @click.pass_context
 def prune(ctx, dry_run):
     """Remove installed APM packages that are not listed in apm.yml (like npm prune).
@@ -51,25 +54,40 @@ def prune(ctx, dry_run):
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
             declared_deps = apm_package.get_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
-            expected_installed = _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir)
+            expected_installed = _build_expected_install_paths(
+                declared_deps, lockfile, apm_modules_dir
+            )
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
 
         installed_packages = _scan_installed_packages(apm_modules_dir)
-        orphaned_packages = [p for p in installed_packages if p not in expected_installed]
+        # Mirror _check_orphaned_packages: filter installed paths to
+        # real standalone packages (lockfile-membership + apm.yml
+        # fallback) so ancestor expansion does NOT silently mask a
+        # genuinely orphaned ``owner/repo`` package when a sibling
+        # subdirectory dep shares the same install root.
+        # ``apm prune`` is a destructive command -- it MUST behave
+        # identically to its advisory display path.
+        standalone_installed = _standalone_installed_packages(
+            installed_packages, apm_modules_dir, lockfile=lockfile
+        )
+        expected_with_ancestors = _expand_with_ancestors(expected_installed, standalone_installed)
+        orphaned_packages = sorted(
+            p for p in installed_packages if p not in expected_with_ancestors
+        )
 
         if not orphaned_packages:
             logger.success("No orphaned packages found. apm_modules/ is clean.", symbol="check")
             return
 
         # Show what will be removed
-        logger.progress(f"Found {len(orphaned_packages)} orphaned package(s):")
+        logger.warning(f"Found {len(orphaned_packages)} orphaned package(s):")
         for pkg_name in orphaned_packages:
             if dry_run:
-                logger.progress(f"  - {pkg_name} (would be removed)")
+                logger.warning(f"  - {pkg_name} (would be removed)")
             else:
-                logger.progress(f"  - {pkg_name}")
+                logger.warning(f"  - {pkg_name}")
 
         if dry_run:
             logger.success("Dry run complete - no changes made")
@@ -93,6 +111,7 @@ def prune(ctx, dry_run):
 
         # Batch parent cleanup  -- single bottom-up pass
         from ..integration.base_integrator import BaseIntegrator
+
         BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
 
         # Clean deployed files for pruned packages and update lockfile

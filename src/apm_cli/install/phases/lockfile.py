@@ -39,7 +39,7 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     for _rel in rel_paths or ():
         _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
-            try:
+            try:  # noqa: SIM105
                 out[_rel] = compute_file_hash(_full)
             except Exception:
                 pass
@@ -67,9 +67,16 @@ class LockfileBuilder:
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
         if not self.ctx.installed_packages:
+            # Even with nothing newly installed, a pre-existing
+            # lockfile may need its cache pin markers refreshed --
+            # e.g. user upgraded APM and their cache pre-dates the
+            # marker contract. Sync best-effort against the on-disk
+            # lockfile.
+            self._sync_cache_pin_markers_from_disk()
             return
         try:
-            from apm_cli.deps.lockfile import LockFile as _LF, get_lockfile_path
+            from apm_cli.deps.lockfile import LockFile as _LF
+            from apm_cli.deps.lockfile import get_lockfile_path
 
             lockfile = _LF.from_installed_packages(
                 self.ctx.installed_packages, self.ctx.dependency_graph
@@ -104,6 +111,13 @@ class LockfileBuilder:
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
             self._write_if_changed(lockfile, lockfile_path, _LF)
+            # Self-heal cache pin markers EVERY install, regardless of
+            # whether the lockfile YAML changed. This unblocks users
+            # whose caches pre-date the supply-chain hardening (PR
+            # #1137 follow-up): if their lockfile is already current,
+            # _write_if_changed is a no-op, but markers must still be
+            # written so the next `apm audit` drift replay succeeds.
+            self._sync_cache_pin_markers(lockfile)
         except Exception as e:
             self._handle_failure(e)
 
@@ -117,8 +131,8 @@ class LockfileBuilder:
                 # cleanup so the recorded hashes match what is now
                 # deployed (provenance for the next install's stale
                 # cleanup).
-                lockfile.dependencies[dep_key].deployed_file_hashes = (
-                    compute_deployed_hashes(dep_files, self.ctx.project_root)
+                lockfile.dependencies[dep_key].deployed_file_hashes = compute_deployed_hashes(
+                    dep_files, self.ctx.project_root
                 )
 
     def _attach_package_types(self, lockfile: LockFile) -> None:
@@ -136,7 +150,7 @@ class LockfileBuilder:
         if not self.ctx.skill_subset:
             return  # No CLI override; dep_ref.skill_subset already flows through
         effective = sorted(set(self.ctx.skill_subset))
-        for dep_key, locked_dep in lockfile.dependencies.items():
+        for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
                 locked_dep.skill_subset = effective
 
@@ -150,7 +164,9 @@ class LockfileBuilder:
             for dep_key, prov in self.ctx.marketplace_provenance.items():
                 if dep_key in lockfile.dependencies:
                     lockfile.dependencies[dep_key].discovered_via = prov.get("discovered_via")
-                    lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get("marketplace_plugin_name")
+                    lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get(
+                        "marketplace_plugin_name"
+                    )
 
     def _merge_existing(self, lockfile: LockFile) -> None:
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
@@ -168,7 +184,7 @@ class LockfileBuilder:
         if self.ctx.only_packages:
             existing = _LF.read(lockfile_path)
             if existing:
-                for key, dep in lockfile.dependencies.items():
+                for key, dep in lockfile.dependencies.items():  # noqa: B007
                     existing.add_dependency(dep)
                 lockfile = existing
         return lockfile
@@ -185,13 +201,59 @@ class LockfileBuilder:
         else:
             lockfile.save(lockfile_path)
             if self.ctx.logger:
-                self.ctx.logger.verbose_detail(f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies")
+                self.ctx.logger.verbose_detail(
+                    f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies"
+                )
 
     def _handle_failure(self, e: Exception) -> None:
         _lock_msg = f"Could not generate apm.lock.yaml: {e}"
         self.ctx.diagnostics.error(_lock_msg)
         if self.ctx.logger:
             self.ctx.logger.error(_lock_msg)
+
+    def _sync_cache_pin_markers(self, lockfile: LockFile) -> None:
+        """Write ``.apm-pin`` markers for every cached remote dep.
+
+        Idempotent and best-effort: a missing or unwritable cache
+        directory is silently skipped at the marker-helper level and
+        will surface during the next ``apm audit`` drift replay.
+        Wrapped in a broad except because lockfile assembly success
+        must not be undone by a marker write failure.
+        """
+        try:
+            from apm_cli.install.cache_pin import sync_markers_for_lockfile
+
+            apm_modules_dir = self.ctx.apm_modules_dir
+            if apm_modules_dir is None:
+                return
+            written = sync_markers_for_lockfile(lockfile, self.ctx.project_root, apm_modules_dir)
+            if self.ctx.logger and written:
+                self.ctx.logger.verbose_detail(
+                    f"Wrote {written} cache pin marker(s) for drift replay"
+                )
+        except Exception as exc:
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(f"Cache pin marker sync skipped: {exc}")
+
+    def _sync_cache_pin_markers_from_disk(self) -> None:
+        """Self-heal markers from the on-disk lockfile when no install ran.
+
+        This handles the upgrade path: user installed an older APM,
+        runs the new APM with no manifest changes, expects the next
+        ``apm audit`` to find every remote dep correctly marked.
+        """
+        try:
+            from apm_cli.deps.lockfile import LockFile as _LF
+            from apm_cli.deps.lockfile import get_lockfile_path
+
+            lockfile_path = get_lockfile_path(self.ctx.apm_dir)
+            if not lockfile_path.exists():
+                return
+            lockfile = _LF.load_or_create(lockfile_path)
+            self._sync_cache_pin_markers(lockfile)
+        except Exception as exc:
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(f"Cache pin marker self-heal skipped: {exc}")
 
     def compute_deployed_hashes(self, rel_paths) -> dict[str, str]:
         """Delegate to the module-level canonical implementation."""

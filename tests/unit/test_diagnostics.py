@@ -2,7 +2,7 @@
 
 import threading
 from dataclasses import FrozenInstanceError
-from unittest.mock import call, patch
+from unittest.mock import call, patch  # noqa: F401
 
 import pytest
 
@@ -222,14 +222,20 @@ class TestDiagnosticCollectorRendering:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_render_summary_verbose_shows_file_paths(
+    def test_render_summary_verbose_skipped_no_longer_lists_paths(
         self, mock_info, mock_warning, mock_echo, mock_console
     ):
+        # A4: collision footer is now a global count summary; per-dep
+        # attribution lives in the integrate phase output. Even with
+        # verbose=True, the diagnostics renderer no longer enumerates
+        # individual collided file paths.
         dc = DiagnosticCollector(verbose=True)
         dc.skip("a.md", package="p1")
         dc.render_summary()
         echo_texts = [str(c) for c in mock_echo.call_args_list]
-        assert any("a.md" in t for t in echo_texts)
+        assert not any("a.md" in t for t in echo_texts)
+        warning_texts = [str(c) for c in mock_warning.call_args_list]
+        assert any("1 file skipped" in t for t in warning_texts)
 
     @patch(f"{_MOCK_BASE}._get_console", return_value=None)
     @patch(f"{_MOCK_BASE}._rich_echo")
@@ -400,10 +406,12 @@ class TestInfoCategory:
     def test_info_renders_in_summary(self):
         dc = DiagnosticCollector()
         dc.info("2 dependencies have no pinned version -- pin with #tag")
-        with patch(f"{_MOCK_BASE}._get_console", return_value=None), \
-             patch(f"{_MOCK_BASE}._rich_echo") as mock_echo, \
-             patch(f"{_MOCK_BASE}._rich_warning"), \
-             patch(f"{_MOCK_BASE}._rich_info") as mock_info:
+        with (
+            patch(f"{_MOCK_BASE}._get_console", return_value=None),
+            patch(f"{_MOCK_BASE}._rich_echo") as mock_echo,  # noqa: F841
+            patch(f"{_MOCK_BASE}._rich_warning"),
+            patch(f"{_MOCK_BASE}._rich_info") as mock_info,
+        ):
             dc.render_summary()
             mock_info.assert_any_call(
                 "  [i] 2 dependencies have no pinned version -- pin with #tag"
@@ -415,10 +423,17 @@ class TestInfoCategory:
         dc.warn("a warning", package="pkg")
 
         call_order = []
-        with patch(f"{_MOCK_BASE}._get_console", return_value=None), \
-             patch(f"{_MOCK_BASE}._rich_echo") as mock_echo, \
-             patch(f"{_MOCK_BASE}._rich_warning", side_effect=lambda *a, **k: call_order.append("warning")), \
-             patch(f"{_MOCK_BASE}._rich_info", side_effect=lambda *a, **k: call_order.append("info")):
+        with (
+            patch(f"{_MOCK_BASE}._get_console", return_value=None),
+            patch(f"{_MOCK_BASE}._rich_echo") as mock_echo,  # noqa: F841
+            patch(
+                f"{_MOCK_BASE}._rich_warning",
+                side_effect=lambda *a, **k: call_order.append("warning"),
+            ),
+            patch(
+                f"{_MOCK_BASE}._rich_info", side_effect=lambda *a, **k: call_order.append("info")
+            ),
+        ):
             dc.render_summary()
         # Warning must render before info
         warn_idx = next(i for i, c in enumerate(call_order) if c == "warning")
@@ -427,28 +442,25 @@ class TestInfoCategory:
 
     def test_info_unpinned_deps_singular(self):
         dc = DiagnosticCollector()
-        dc.info(
-            "1 dependency has no pinned version "
-            "-- pin with #tag or #sha to prevent drift"
-        )
-        with patch(f"{_MOCK_BASE}._get_console", return_value=None), \
-             patch(f"{_MOCK_BASE}._rich_echo"), \
-             patch(f"{_MOCK_BASE}._rich_info") as mock_info:
+        dc.info("1 dependency has no pinned version -- pin with #tag or #sha to prevent drift")
+        with (
+            patch(f"{_MOCK_BASE}._get_console", return_value=None),
+            patch(f"{_MOCK_BASE}._rich_echo"),
+            patch(f"{_MOCK_BASE}._rich_info") as mock_info,
+        ):
             dc.render_summary()
             mock_info.assert_any_call(
-                "  [i] 1 dependency has no pinned version "
-                "-- pin with #tag or #sha to prevent drift"
+                "  [i] 1 dependency has no pinned version -- pin with #tag or #sha to prevent drift"
             )
 
     def test_info_unpinned_deps_plural(self):
         dc = DiagnosticCollector()
-        dc.info(
-            "3 dependencies have no pinned version "
-            "-- pin with #tag or #sha to prevent drift"
-        )
-        with patch(f"{_MOCK_BASE}._get_console", return_value=None), \
-             patch(f"{_MOCK_BASE}._rich_echo"), \
-             patch(f"{_MOCK_BASE}._rich_info") as mock_info:
+        dc.info("3 dependencies have no pinned version -- pin with #tag or #sha to prevent drift")
+        with (
+            patch(f"{_MOCK_BASE}._get_console", return_value=None),
+            patch(f"{_MOCK_BASE}._rich_echo"),
+            patch(f"{_MOCK_BASE}._rich_info") as mock_info,
+        ):
             dc.render_summary()
             mock_info.assert_any_call(
                 "  [i] 3 dependencies have no pinned version "
@@ -491,9 +503,7 @@ class TestAuthCategory:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_auth_render_singular(
-        self, mock_info, mock_warning, mock_echo, mock_console
-    ):
+    def test_auth_render_singular(self, mock_info, mock_warning, mock_echo, mock_console):
         dc = DiagnosticCollector()
         dc.auth("token expired", package="pkg-x")
         dc.render_summary()
@@ -504,9 +514,7 @@ class TestAuthCategory:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_auth_render_plural(
-        self, mock_info, mock_warning, mock_echo, mock_console
-    ):
+    def test_auth_render_plural(self, mock_info, mock_warning, mock_echo, mock_console):
         dc = DiagnosticCollector()
         dc.auth("issue 1", package="p1")
         dc.auth("issue 2", package="p2")
@@ -531,9 +539,7 @@ class TestAuthCategory:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_auth_verbose_renders_detail(
-        self, mock_info, mock_warning, mock_echo, mock_console
-    ):
+    def test_auth_verbose_renders_detail(self, mock_info, mock_warning, mock_echo, mock_console):
         dc = DiagnosticCollector(verbose=True)
         dc.auth("fallback used", package="pkg", detail="GITHUB_APM_PAT → unauthenticated")
         dc.render_summary()
@@ -544,9 +550,7 @@ class TestAuthCategory:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_auth_non_verbose_shows_hint(
-        self, mock_info, mock_warning, mock_echo, mock_console
-    ):
+    def test_auth_non_verbose_shows_hint(self, mock_info, mock_warning, mock_echo, mock_console):
         dc = DiagnosticCollector(verbose=False)
         dc.auth("credential issue", detail="secret detail")
         dc.render_summary()
@@ -560,18 +564,20 @@ class TestAuthCategory:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_auth_renders_before_collision(
-        self, mock_info, mock_warning, mock_echo, mock_console
-    ):
+    def test_auth_renders_before_collision(self, mock_info, mock_warning, mock_echo, mock_console):
         dc = DiagnosticCollector()
         dc.skip("collision.md", package="p1")
         dc.auth("auth issue", package="p2")
         call_order = []
 
-        with patch(f"{_MOCK_BASE}._get_console", return_value=None), \
-             patch(f"{_MOCK_BASE}._rich_echo"), \
-             patch(f"{_MOCK_BASE}._rich_warning", side_effect=lambda *a, **k: call_order.append(str(a))), \
-             patch(f"{_MOCK_BASE}._rich_info"):
+        with (
+            patch(f"{_MOCK_BASE}._get_console", return_value=None),
+            patch(f"{_MOCK_BASE}._rich_echo"),
+            patch(
+                f"{_MOCK_BASE}._rich_warning", side_effect=lambda *a, **k: call_order.append(str(a))
+            ),
+            patch(f"{_MOCK_BASE}._rich_info"),
+        ):
             dc.render_summary()
 
         auth_idx = next(i for i, t in enumerate(call_order) if "authentication" in t)

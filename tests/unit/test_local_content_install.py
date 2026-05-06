@@ -8,11 +8,10 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.commands.install import _has_local_apm_content, _integrate_local_content
 from apm_cli.deps.lockfile import LockFile
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -283,7 +282,11 @@ class TestLockFileLocalDeployedFiles:
         """from_yaml with no local_deployed_files key defaults to empty list."""
         import yaml
 
-        raw = {"lockfile_version": "1", "generated_at": "2024-01-01T00:00:00+00:00", "dependencies": []}
+        raw = {
+            "lockfile_version": "1",
+            "generated_at": "2024-01-01T00:00:00+00:00",
+            "dependencies": [],
+        }
         lock = LockFile.from_yaml(yaml.dump(raw))
         assert lock.local_deployed_files == []
 

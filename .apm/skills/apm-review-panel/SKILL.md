@@ -1,263 +1,415 @@
 ---
 name: apm-review-panel
 description: >-
-  Use this skill to run a six-agent panel review (plus one conditional
-  auth specialist) for non-trivial PRs, design proposals, release
-  decisions, and other cross-cutting changes in microsoft/apm. Emit one
-  synthesized verdict comment.
+  Use this skill to run a multi-persona expert advisory review on a labelled
+  pull request in microsoft/apm. The panel fans out to five mandatory
+  specialists plus a test-coverage specialist (active on every PR that
+  touches src/) plus two conditional specialists (auth, doc-writer),
+  all running in their own agent threads, and a CEO
+  synthesizer. The orchestrator is the sole writer to the PR: ONE
+  recommendation comment, no verdict labels, no merge gating. The panel
+  is advisory -- it surfaces findings, prioritizes follow-ups, and renders
+  a ship-recommendation that the maintainer and author weigh. Activate
+  when a non-trivial PR needs a cross-cutting recommendation
+  (architecture, CLI logging, DevX UX, supply-chain security,
+  growth/positioning, optionally auth, docs, and test coverage, with CEO
+  arbitration).
 ---
 
-# APM Review Panel -- Expert Review Orchestration
+# APM Review Panel - Fan-Out Advisory Review
 
-The panel is fixed at **5 mandatory specialist lenses + 1 conditional
-auth lens + 1 arbiter lens = up to 7 persona sections in one verdict
-comment**. You play each lens in turn from inside a single agent loop
-(progressive-disclosure skill model -- no sub-agent dispatch). Routing
-chooses *which* lenses execute; it never changes which headings appear
-in the final verdict.
+The panel is FAN-OUT + SYNTHESIZER. Each persona runs in its own agent
+thread (via the `task` tool) and returns JSON matching
+`assets/panelist-return-schema.json`. The orchestrator schema-validates
+each return, hands all returns to the apm-ceo synthesizer (also a task
+thread, returns JSON matching `assets/ceo-return-schema.json`), then
+renders ONE recommendation comment from `assets/recommendation-template.md`.
+
+This skill is ADVISORY by design. It does not compute a binary verdict, it
+does not apply verdict labels, and it does not gate merge. The panel
+surfaces findings; the maintainer and the PR author decide ship.
+
+## Architecture invariants
+
+- **Advisory regime, not gate regime.** There is no `APPROVE` / `REJECT`,
+  no `panel-approved` / `panel-rejected` label, no deterministic verdict
+  computation. The CEO returns a `ship_recommendation.stance` (`ship_now`
+  / `ship_with_followups` / `needs_discussion` / `needs_rework`); this is
+  prose for the human reviewer, never auto-applied as a label or status
+  check. This is the architectural fix for the previous regime's
+  over-strictness: removing the binary gate removes the incentive for
+  panelists to inflate `required[]` defensively.
+- **Three severity buckets, none of them gate.** Findings carry
+  `severity: blocking | recommended | nit`. `blocking` is the highest
+  signal a panelist can send and renders prominently in the comment; it
+  still does not block merge. `recommended` is the default for substantive
+  feedback. `nit` is one-line polish. The orchestrator never reads
+  severity to gate anything.
+- **Single-writer interlock.** Only the orchestrator writes to the PR:
+  exactly one `add-comment` and one `remove-labels` call. The
+  `remove-labels` call always sweeps `panel-review` (trigger
+  idempotency) AND defensively removes `panel-approved` /
+  `panel-rejected` if present (legacy verdict labels from the
+  pre-advisory regime; they have no meaning here and would mislead
+  readers if left on a PR after a fresh advisory pass). NO `add-labels`
+  call -- there are no verdict labels to apply. Panelist subagents and
+  the CEO subagent return JSON only and MUST NOT call any `gh` write
+  command, post comments, apply labels, or touch the PR state.
+- **Single-emission discipline.** Exactly one comment per panel run,
+  rendered from `assets/recommendation-template.md` after all subagents
+  return.
 
 ## Agent roster
 
-| Agent | Persona | Always active? |
-|-------|---------|----------------|
-| [Python Architect](../../agents/python-architect.agent.md) | Architectural Reviewer | Yes |
+| Agent | Role | Always active? |
+|-------|------|----------------|
+| [Python Architect](../../agents/python-architect.agent.md) | Architectural Reviewer + supplies mermaid diagrams | Yes |
 | [CLI Logging Expert](../../agents/cli-logging-expert.agent.md) | Output UX Reviewer | Yes |
 | [DevX UX Expert](../../agents/devx-ux-expert.agent.md) | Package-Manager UX | Yes |
 | [Supply Chain Security Expert](../../agents/supply-chain-security-expert.agent.md) | Threat-Model Reviewer | Yes |
-| [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Yes (side-channel to CEO) |
-| [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Conditional (see "Conditional panelist" below) |
-| [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Owner / Arbiter | Yes (always arbitrates) |
+| [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Yes |
+| [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Conditional (see below) |
+| [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
+| [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Yes (skipped only on docs-only PRs -- see below) |
+| [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Yes |
 
-## Routing topology
+## Topology
 
 ```
-  python-architect    cli-logging-expert    devx-ux-expert    supply-chain-security-expert
-        \_______________________|______________________________/
-                                |   <-- auth-expert (conditional)
-                                v
-                            apm-ceo               <----  oss-growth-hacker
-                       (final call / arbiter)           (annotates findings;
-                                                         updates growth-strategy)
+   apm-review-panel SKILL (orchestrator thread)
+                      |
+   FAN-OUT via task tool (panelists in parallel)
+                      |
+   +-----+-------+-------+-----+-----+------+-----------+----------+
+   v     v       v       v     v     v      v           v          v (cond.)
+  py    cli     dx-ux   sec   grw   auth   doc-writer  test-cov
+   |     |       |       |     |     |      |           |
+   |   each returns JSON per panelist-return-schema.json
+   +-----+-------+-------+-----+-----+------+-----------+----------+
+                      |
+                      v   <-- S4 schema-validate
+                      v   <-- on malformed: re-spawn that persona
+                      v
+   task: apm-ceo synthesizer
+   - aggregates findings across panelists
+   - resolves dissent
+   - emits headline + arbitration prose + principle alignment
+   - emits curated recommended_followups (prioritized)
+   - emits ship_recommendation (stance + prose)
+   - returns ceo-return-schema.json
+                      |
+                      v   <-- S4 schema-validate
+                      v
+   orchestrator (sole writer)
+            |               |
+            v               v
+        add-comment    remove-labels
+        (max:2)        [panel-review,
+                        panel-approved,
+                        panel-rejected]
+                       (trigger reset +
+                        legacy verdict sweep)
 ```
 
-- **Specialists raise findings independently** -- no implicit consensus.
-- **CEO arbitrates** when specialists disagree or when a finding has
-  strategic implications (positioning, breaking change, naming, scope).
-- **Growth Hacker is a side-channel** to the CEO: never blocks a
-  specialist finding; annotates it with growth implications and
-  escalates to the CEO when relevant.
+## Conditional panelists
 
-## Conditional panelist: Auth Expert
+Two personas are conditional (auth, doc-writer). A third
+(test-coverage) is mandatory on every PR that touches `src/` and only
+skipped on documentation-only PRs -- see its section below for why.
+The orchestrator ALWAYS spawns ALL three tasks to keep the schema
+return shape uniform; the prompt instructs the subagent to set
+`active: false` with an `inactive_reason` if the condition does not
+hold.
 
-Auth Expert is the only conditional panelist. Activate `auth-expert`
-if either rule below matches.
+### Auth Expert
 
-1. **Fast-path file trigger.** Activate the Auth Expert lens
-   immediately when the PR changes any of:
-   - `src/apm_cli/core/auth.py`
-   - `src/apm_cli/core/token_manager.py`
-   - `src/apm_cli/core/azure_cli.py`
-   - `src/apm_cli/deps/github_downloader.py`
-   - `src/apm_cli/marketplace/client.py`
-   - `src/apm_cli/utils/github_host.py`
-   - `src/apm_cli/install/validation.py`
-   - `src/apm_cli/deps/registry_proxy.py`
+Activate when the PR changes any of:
+- `src/apm_cli/core/auth.py`
+- `src/apm_cli/core/token_manager.py`
+- `src/apm_cli/core/azure_cli.py`
+- `src/apm_cli/deps/github_downloader.py`
+- `src/apm_cli/marketplace/client.py`
+- `src/apm_cli/utils/github_host.py`
+- `src/apm_cli/install/validation.py`
+- `src/apm_cli/install/pipeline.py`
+- `src/apm_cli/deps/registry_proxy.py`
 
-2. **Fallback self-check.** If no fast-path file matched, answer this
-   before activating the lens:
+Fallback self-check (when no fast-path file matched): "Does this PR
+change authentication behavior, token management, credential resolution,
+host classification used by `AuthResolver`, git or HTTP authorization
+headers, or remote-host fallback semantics? If unsure, answer YES."
 
-   > Does this PR change authentication behavior, token management,
-   > credential resolution, host classification used by `AuthResolver`,
-   > git or HTTP authorization headers, or remote-host fallback
-   > semantics? Answer YES or NO with one sentence citing the file(s).
-   > If unsure, answer YES.
+### Doc Writer
 
-Routing rule:
+Activate when the PR changes any of:
+- `README.md`
+- `CHANGELOG.md`
+- `MANIFESTO.md`
+- `docs/src/content/docs/**`
+- `.apm/skills/**/*.md`
+- `.apm/agents/**/*.md`
+- `.github/skills/**/*.md`
+- `.github/agents/**/*.md`
+- `.github/instructions/**/*.md`
+- `.github/workflows/*.md` (gh-aw natural-language workflows)
+- `packages/apm-guide/**`
 
-- **YES** -> take the Auth Expert lens (per the Persona pass
-  procedure) and capture its findings.
-- **NO**  -> record `Auth Expert inactive reason: <one sentence
-  citing the touched files>` in working notes; do not take the lens.
-- Never use wildcard heuristics like `*auth*`, `*token*`, or
-  `*credential*` as the sole trigger.
+Fallback self-check (when no fast-path file matched): "Does this PR
+change user-facing documentation, agent or skill prose, instruction
+files, CHANGELOG entries, README claims, or any natural-language
+artifact a reader will rely on? If unsure, answer YES."
 
-## Routing matrix
+When the doc-writer is active and the PR includes documentation changes,
+the persona reviews them for: (a) consistency with the existing voice
+and structure, (b) accuracy against the code being changed, (c)
+completeness for the typical reader (no orphan claims, no missing
+prerequisites), (d) discoverability (cross-links, sidebar order if
+Starlight content). When the doc-writer is active because of code
+changes that SHOULD have updated docs but did not, the persona surfaces
+that gap as a finding.
 
-These routes choose which specialists are emphasised for a given PR
-type. They do **not** change the verdict shape. The final comment
-always uses every persona heading in `assets/verdict-template.md`;
-the only persona that can render as `Not activated -- <reason>` is
-Auth Expert (per the conditional rule above).
+### Test Coverage Expert
 
-### Code review (architecture + logging)
-1. Python Architect reviews structure / patterns / cross-file impact.
-2. CLI Logging Expert reviews any output / logger changes.
-3. CEO ratifies if the two disagree on abstraction vs consistency.
+**Active by default on every PR that touches `src/**/*.py`.** The only
+condition that flips this persona to `active: false` is a
+documentation-only PR -- the diff contains zero `src/**/*.py` files.
+In that case set `inactive_reason: "documentation-only PR -- no
+runtime code paths to defend"`.
 
-### CLI UX review
-1. DevX UX Expert reviews command surface, flags, help, error wording.
-2. CLI Logging Expert reviews how outputs are emitted (logger methods).
-3. Growth Hacker annotates if the change affects first-run conversion.
-4. CEO ratifies any naming / positioning calls.
+The activation rule is intentionally narrow: under the advisory regime,
+test outcomes are LOAD-BEARING for CEO arbitration (passed / failed /
+missing test evidence outranks opinion-only findings -- see
+`apm-ceo.agent.md` and `panelist-return-schema.json` evidence block).
+A persona whose findings carry that weight cannot be silently skipped
+on a heuristic. Better to spawn it on a pure refactor and have it
+return a single `nit`-severity "no behavior surface touched -- no
+coverage finding" line than to skip it and leave the CEO without
+evidence to weigh. (Earlier revisions of this skill paired test-coverage
+with auth and doc-writer as conditional for symmetry; that symmetry
+broke when test evidence became load-bearing.)
 
-### Security review
-1. Supply Chain Security Expert maps the change to the threat model.
-2. DevX UX Expert flags any ergonomics regression from the mitigation.
-3. CEO arbitrates trade-offs; bias toward security on default behavior.
+The test-coverage-expert is paired with the devx-ux-expert lens and
+defends the user-promise contracts the DevX persona enumerates (CLI
+surface, error wording, install idempotency, lockfile determinism, auth
+resolution). It MUST verify "no test exists" claims with `view`/`grep`
+on the test tree before emitting a finding -- false-positive coverage
+findings destroy trust in the field. It does NOT compute coverage
+percentages, does NOT flag tests for pure refactors, and does NOT
+duplicate python-architect on test-code design.
 
-### Auth review (only when the conditional Auth Expert is activated)
-1. Auth Expert maps the change against AuthResolver, token precedence,
-   host classification, and credential helpers.
-2. Supply Chain Security Expert checks for token-scoping or credential
-   leakage implications.
-3. CEO ratifies any default-behavior change.
+## Routing matrix (CEO synthesis emphasis only)
 
-### Release / comms review
-1. CEO grounds the release framing in `gh` CLI stats.
-2. Growth Hacker drafts hook + story angle; updates
-   `WIP/growth-strategy.md` (gitignored maintainer-local; create if absent).
-3. Specialists sanity-check any technical claims in release notes.
+These routes describe WHICH specialist's findings the CEO weights more
+heavily for a given PR type. They do NOT change which personas run --
+every mandatory persona always runs. Routing is a CEO synthesis hint.
 
-### Full panel review (non-trivial change)
-1. Each mandatory specialist produces independent findings.
-2. Auth Expert participates if the conditional rule above activates it.
-3. Growth Hacker annotates findings with growth implications.
-4. CEO synthesizes, resolves disagreements, makes the final call.
-5. Surface decision and rationale to the author via the single verdict
-   comment.
-
-## Quality gates
-
-A non-trivial change passes when:
-
-- [ ] Python Architect: structure / patterns OK (or change explicitly
-      justified)
-- [ ] CLI Logging Expert: output paths route through CommandLogger,
-      no direct `_rich_*` in commands
-- [ ] DevX UX Expert: command surface familiar to npm/pip/cargo users,
-      every error has a next action
-- [ ] Supply Chain Security Expert: no new path / auth / integrity
-      surface left unguarded; fails closed
-- [ ] Auth Expert (only if activated): no regression to AuthResolver
-      precedence, host classification, or credential leakage surface
-- [ ] APM CEO: trade-offs ratified, breaking changes have CHANGELOG +
-      migration line
-- [ ] OSS Growth Hacker: conversion surfaces unaffected or improved;
-      `WIP/growth-strategy.md` updated if relevant (maintainer-local;
-      gitignored, never committed)
-
-## Notes
-
-- This skill orchestrates a panel **in your own context** -- you are
-  the only agent. You load each persona's `.agent.md` reference file
-  on demand (progressive disclosure), assume that persona's lens to
-  produce its findings, then move to the next persona. Do NOT spawn
-  sub-agents (no `task` tool dispatch) -- the panel is a sequence of
-  reasoning passes inside one agent loop, not a multi-agent fan-out.
-- Persona detail lives in the linked `.agent.md` files. Read each
-  one when you switch to that persona; do not pre-load all of them.
+- **Architecture-heavy PR** -> CEO weights Python Architect on
+  abstraction calls; CLI Logging on consistency.
+- **CLI UX PR** -> CEO weights DevX UX on command surface; CLI Logging
+  on output paths; Growth Hacker on first-run conversion.
+- **Security PR** -> CEO biases toward Supply Chain Security on default
+  behavior; DevX UX flags ergonomics regression from any mitigation.
+- **Auth PR** (auth-expert active) -> CEO weights Auth Expert on
+  AuthResolver / token precedence; Supply Chain on token-scoping.
+- **Docs / release / comms PR** (doc-writer active) -> CEO weights Doc
+  Writer on accuracy and voice; Growth Hacker on hook and story angle.
+- **Behavior-change PR** (test-coverage active) -> CEO weights Test
+  Coverage Expert on regression-trap presence; DevX UX on which user
+  promises the change touches. A blocking-severity coverage finding on
+  a critical-promise surface (auth, lockfile, install, marketplace,
+  hooks) is the highest signal in this routing.
+- **Full panel** (default) -> CEO synthesizes equally; calls out any
+  dissent in `dissent_notes`.
 
 ## Execution checklist
 
-When this skill is activated for a PR review, work through these
-steps in order, in a single agent loop. Do not skip ahead and do not
-emit any output before the final step.
+Work through these steps in order. Do not skip ahead. Do not emit any
+output to the PR before step 6.
 
-1. Read the PR context (title, body, labels, changed files, diff).
-   The orchestrating workflow already fetches this with `gh pr view`
-   / `gh pr diff` -- do not re-fetch.
-2. Resolve the **Auth Expert conditional case** using the rule in
-   "Conditional panelist: Auth Expert" above. Record either an
-   activation decision (and proceed to step 3) or an `Auth Expert
-   inactive reason: <one sentence>` in working notes.
-3. For each mandatory persona (plus `auth-expert` if activated),
-   follow the **Persona pass procedure** below, one persona at a
-   time. Do not try to play multiple personas in a single pass.
-4. Run the **pre-arbitration completeness gate**:
-   - Findings exist in working notes for the 5 mandatory specialists
-     (Python Architect, CLI Logging Expert, DevX UX Expert, Supply
-     Chain Security Expert, OSS Growth Hacker).
-   - Exactly one of `Auth Expert findings` or `Auth Expert inactive
-     reason` exists (neither = incomplete; both = inconsistent
-     routing).
-   - The Python Architect notes contain the OO / class mermaid
-     diagram, the execution-flow mermaid diagram, and the Design
-     patterns subsection declared in
-     `../../agents/python-architect.agent.md`.
-   - No persona section is missing or empty.
-   If any check fails, redo that persona's pass and repeat the gate.
-   Do not proceed to step 5 until the gate passes.
-5. Take the **APM CEO** lens (load
-   `../../agents/apm-ceo.agent.md`) and arbitrate over the collected
-   findings -- still in your own context. CEO arbitration may run
-   only after the completeness gate has passed.
-6. Now (and only now) load `assets/verdict-template.md` and fill it
-   in with the collected findings + arbitration.
-7. Emit the filled template as exactly ONE comment via the workflow's
-   `safe-outputs.add-comment` channel. Never call the GitHub API
-   directly. This is the ONLY output emission for the entire panel
-   run -- no per-persona comments, no progress comments.
+1. **Read PR context** (the orchestrating workflow already fetched it
+   via `gh pr view` / `gh pr diff`). Identify changed files for the
+   conditional panelist routing decisions (auth-expert and doc-writer).
 
-### Persona pass procedure
+2. **Resolve the conditional panelists** using the rules above. Decide
+   for EACH conditional persona: spawn active OR spawn with
+   `active: false` + an `inactive_reason`. Either way, all three
+   conditional personas ARE spawned -- the schema requires uniform
+   return shape.
 
-For each persona, run this exact procedure in your own context:
+3. **Fan out panelist tasks.** Spawn the following tasks in PARALLEL
+   via the `task` tool, one task per persona:
+   - `python-architect` (also asked to supply `extras.diagrams`:
+     `class_diagram` (mermaid `classDiagram`), `component` (mermaid
+     `flowchart TD`), and OPTIONAL `sequence` (mermaid
+     `sequenceDiagram`) blocks per the persona's section 1/2/3 contract)
+   - `cli-logging-expert`
+   - `devx-ux-expert`
+   - `supply-chain-security-expert`
+   - `oss-growth-hacker`
+   - `auth-expert` (always - active per step 2)
+   - `doc-writer` (always - active per step 2)
+   - `test-coverage-expert` (always - active per step 2)
 
-1. Open the persona's `.agent.md` file (linked in the roster) and
-   read its scope, lens, anti-patterns, and required return shape.
-2. From that persona's lens, review the PR title/body/diff against
-   the scope declared in the file.
-3. Write the findings to working notes under
-   `<persona-name>: <findings>` (or, for an inactive Auth Expert,
-   `Auth Expert inactive reason: <one sentence>`).
-4. Drop the persona lens before moving on. Do not emit any comment
-   from inside a persona pass; persona findings stay in working
-   notes until step 7 synthesizes them.
+   Each task prompt MUST:
+   - Reference its persona file by relative path so the subagent loads
+     its own scope, lens, and anti-patterns.
+   - Include the PR number, title, body, and diff (passed inline).
+   - Cite `assets/panelist-return-schema.json` and require the subagent
+     to emit JSON matching that schema as its FINAL message.
+   - State the calibrated severity contract: "Use `severity: blocking`
+     ONLY for correctness regressions, security/auth bypasses, or
+     architectural faults that compound, with explicit rationale.
+     Default substantive feedback to `recommended`. Use `nit` for
+     one-line polish. The panel is advisory; nothing you return blocks
+     merge -- pick the severity that honestly matches your signal
+     strength."
+   - Restate the output contract: NO `gh` write commands, NO posting
+     comments, NO label changes, NO touching PR state. JSON return only.
 
-## Output contract
+4. **S4 schema gate.** When each panelist task returns, parse the JSON
+   and validate against `assets/panelist-return-schema.json`. On
+   validation failure:
+   - Re-spawn that ONE panelist with an explicit error message pointing
+     at the violated rule.
+   - Maximum two re-spawn attempts per panelist. If still malformed,
+     synthesize a placeholder
+     `{persona: "<slug>", active: true, summary: "Schema failure -- see
+     extras.", findings: [], extras: {schema_failure: "<reason>"}}`
+     and surface the failure in the CEO arbitration prompt.
 
-This contract is non-negotiable -- it is the difference between a
-panel review that lands as one cohesive verdict and one that fragments
-into per-persona noise.
+5. **Spawn the CEO synthesizer task.** Pass the full set of validated
+   panelist JSON returns to a `task` invocation that loads
+   `../../agents/apm-ceo.agent.md`. The prompt MUST:
+   - Provide all panelist returns as structured input.
+   - Ask for: headline, arbitration prose, principle alignment (only
+     applicable principles), curated recommended_followups (prioritized
+     by signal, NOT a re-listing of every finding), ship_recommendation
+     (stance + prose).
+   - Cite `assets/ceo-return-schema.json` and require JSON return.
+   - Restate the contract: the panel is advisory. The CEO does NOT pick
+     a verdict label. The `ship_recommendation.stance` is prose for the
+     human reviewer, not a gate. NO `gh` write commands.
 
-- Produce **exactly one** comment per panel run. The
-  `safe-outputs.add-comment.max` cap in the workflow is a fail-soft
-  ceiling (currently 7, one per persona slot); the one-comment
-  discipline lives here.
-- Use `assets/verdict-template.md` as the comment body. Keep its
-  section headings exactly as written. Adapt the body of each section
-  to the PR. Do not invent new top-level sections or drop existing
-  ones.
-- CEO arbitration may run only after the completeness gate passes.
-- Never emit findings as separate comments, intermediate progress
-  comments, or "I will now invoke X" status comments.
-- Load `assets/verdict-template.md` **at synthesis time only** (step
-  6 above) -- not at activation, not while collecting findings.
+   Validate the CEO return against `assets/ceo-return-schema.json`. On
+   failure, re-spawn once with the violation cited.
+
+6. **Resolve the notification audience.** The advisory comment must
+   surface in the inboxes of the people who will act on it. Run:
+
+   ```
+   gh pr view <PR_NUMBER> --json author,reviewRequests
+   ```
+
+   Build `notify_audience` as the deduplicated list:
+   - the PR author's `@login` (always included);
+   - every requested reviewer's `@login` (these are the
+     CODEOWNERS-resolved reviewers GitHub auto-requested for the
+     touched paths, plus any explicitly-requested human reviewers);
+   - every requested team's `@org/team-slug` (CODEOWNERS team
+     entries).
+
+   Filter out:
+   - bot logins (login ending in `[bot]` or matching
+     `dependabot|github-actions|copilot-pull-request-reviewer`);
+   - the orchestrator's own identity (avoid self-ping).
+
+   Cap the final list at 6 handles to avoid notification noise (PR
+   author + up to 5 reviewers/teams). If the cap trims, prefer team
+   handles over individual logins. Pass the resulting list to the
+   template renderer as `notify_audience`.
+
+   This step replaces the maintainer-notification signal that the
+   pre-advisory verdict labels carried. It is the only mechanism by
+   which a fresh panel pass announces itself.
+
+7. **Render the comment.** Load `assets/recommendation-template.md`,
+   fill the placeholders from the panelist + CEO JSON, and emit it as
+   exactly ONE comment.
+
+   Filling rules:
+   - The per-persona summary table renders ONLY active panelists, one
+     row per persona, with finding counts by severity and the persona's
+     `summary` field.
+   - The mermaid diagrams come from `python-architect.extras.diagrams`.
+     If absent, render the placeholder lines from the template (do NOT
+     invent diagrams).
+   - The recommended follow-ups list renders the CEO's curated subset,
+     not every finding. Full per-persona findings collapse at the bottom.
+   - NEVER render the words "Verdict", "APPROVE", "REJECT", "blocked",
+     "merge gate", or any equivalent. The panel is advisory.
+
+8. **Sweep labels** via `safe-outputs.remove-labels`. The list MUST be
+   `[panel-review, panel-approved, panel-rejected]` -- always all three,
+   regardless of which are currently on the PR. `panel-review` is the
+   re-run idempotency reset; the other two are LEGACY VERDICT LABELS
+   from the pre-advisory regime that have no meaning under the advisory
+   contract and would mislead readers if left on a freshly-reviewed PR.
+   `safe-outputs.remove-labels` is idempotent on missing labels, so
+   sweeping all three on every run is safe and self-healing. NO
+   verdict labels are applied.
+
+## Output contract (non-negotiable)
+
+- Exactly ONE comment per panel run, rendered from
+  `assets/recommendation-template.md`. The `safe-outputs.add-comment.max:
+  2` is a fail-soft ceiling; the discipline lives here.
+- Exactly ONE `remove-labels` call sweeping
+  `[panel-review, panel-approved, panel-rejected]`.
+- NO `add-labels` call. The advisory regime has no verdict to encode.
+- Subagents (panelists + CEO) NEVER write to PR state, NEVER call `gh
+  pr comment`, NEVER call `gh pr edit --add-label`. They return JSON.
+  The orchestrator is the sole writer.
+- Never invent new top-level template sections or drop existing ones.
 
 ## Gotchas
 
-- **Roster invariant.** The frontmatter description, the roster
-  table, the conditional-panelist rule, the verdict template, and the
-  quality gates MUST agree on the persona set. If you change one,
-  change all of them in the same edit. Description, roster, and
-  template are the three places drift most often appears.
+- **Roster invariant.** The frontmatter description, the roster table,
+  the conditional rules, the recommendation template, and the JSON
+  schema MUST agree on the persona set. If you change one, change all
+  in the same edit.
+- **Calibrated severity discipline.** The advisory regime relies on
+  panelists honestly distinguishing `blocking` from `recommended`. If a
+  panelist marks everything `blocking`, the comment becomes noisy and
+  the maintainer learns to ignore the field. The panelist prompts state
+  the contract explicitly; the CEO arbitration prose is the safety
+  valve when a panelist over-flags.
+- **Mermaid diagrams are template-required.** The python-architect
+  persona is asked to supply `extras.diagrams.class_diagram`,
+  `extras.diagrams.component`, and the OPTIONAL
+  `extras.diagrams.sequence`. The template renders nothing when they
+  are missing -- it does NOT invent diagrams. Real diagrams are
+  what makes the comment scannable for the human reviewer.
+- **Mermaid `classDiagram` `:::cssClass` shorthand gotcha.** GitHub's
+  mermaid renderer rejects `:::cssClass` appended to relationship
+  lines (e.g. `A *-- B:::touched`); use standalone
+  `class Name:::cssClass` declarations instead. Authority:
+  `python-architect.agent.md:146-154`.
+- **Doc-writer detects DRIFT, not just edits.** When the PR changes
+  user-facing code that SHOULD have updated docs but did not, doc-writer
+  surfaces that as a finding. The conditional rule above is necessary
+  but not sufficient -- doc-writer reasons about doc consistency given
+  the diff, not just whether doc files were touched.
 - **False-negative auth gotcha.** Auth regressions can be introduced
-  from non-auth files that change the *inputs* to auth -- for
-  example host classification, dependency parsing, clone URL
-  construction, HTTP authorization headers, or call sites that
-  bypass `AuthResolver`. If a diff changes how a remote host, org,
-  token source, or fallback path is selected and you are not certain
-  it is auth-neutral, activate `auth-expert`.
-- **Bundle layout on the runner.** When this skill runs inside the
-  PR-review agentic workflow, the APM bundle is unpacked under
-  `.github/skills/apm-review-panel/` first, with `.apm/skills/...`
-  as a fallback. The asset path is the same relative to the skill
-  root (`assets/verdict-template.md`) in both layouts -- prefer the
-  `.github/...` path when present.
-- **No multi-persona-in-one-pass.** Each persona has its own
-  `.agent.md` for a reason -- read it when you take that lens, write
-  the findings, then drop the lens before moving on. Trying to be all
-  personas in one reasoning pass is the most common cause of dropped
-  findings and mixed voices.
-- **Single-emission discipline is fragile under interruption.** If
-  you find yourself wanting to "post a quick partial verdict and
-  then update it", don't. Buffer in working notes; emit once.
+  from non-auth files that change the inputs to auth -- host
+  classification, dependency parsing, clone URL construction, HTTP
+  authorization headers, or call sites that bypass `AuthResolver`. If
+  a diff changes how a remote host, org, token source, or fallback path
+  is selected and you are not certain it is auth-neutral, activate
+  auth-expert as `active: true`.
+- **Test-coverage probe is mandatory.** The test-coverage-expert MUST
+  verify "no test exists for X" via `view`/`grep` on the `tests/` tree
+  before emitting a finding. A false-positive coverage finding (test
+  exists but persona claimed it does not) destroys maintainer trust in
+  the field. The persona scope file enforces this; the orchestrator
+  passes the diff and trusts the persona to probe.
+- **Subagent write enforcement is contract-based, not sandbox-based.**
+  Tool permissions are workflow-scoped, not subagent-scoped, so every
+  spawned task technically inherits the same `gh` toolset. The
+  "subagents must not write" rule is enforced by the prompt contract in
+  each `.agent.md` plus the `safe-outputs.add-comment.max: 2`
+  fail-soft. If a subagent ever tries to post a comment, the cap
+  catches it.
+- **No verdict-label reset workflow.** The previous regime had a
+  companion workflow `pr-panel-label-reset.yml` that stripped verdict
+  labels on every push. The advisory regime has no verdict labels to
+  strip; that workflow is removed.

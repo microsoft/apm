@@ -10,18 +10,17 @@ Covers W1-logger deliverables from issue #827:
 - _render_policy_group renders blocked vs warn items correctly
 """
 
-from unittest.mock import call, patch
+from unittest.mock import call, patch  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.core.command_logger import InstallLogger
 from apm_cli.utils.diagnostics import (
+    _CATEGORY_ORDER,
     CATEGORY_POLICY,
     CATEGORY_SECURITY,
     DiagnosticCollector,
-    _CATEGORY_ORDER,
 )
-
 
 # ── CATEGORY_POLICY placement in _CATEGORY_ORDER ───────────────────
 
@@ -111,9 +110,7 @@ class TestPolicyDiscoveryMiss:
     @patch("apm_cli.core.command_logger._rich_info")
     def test_absent_explicit_host_org(self, mock_info):
         logger = InstallLogger(verbose=True)
-        logger.policy_discovery_miss(
-            outcome="absent", source="ignored", host_org="explicit/org"
-        )
+        logger.policy_discovery_miss(outcome="absent", source="ignored", host_org="explicit/org")
         msg = mock_info.call_args[0][0]
         assert "explicit/org" in msg
 
@@ -146,9 +143,7 @@ class TestPolicyDiscoveryMiss:
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_empty_warns(self, mock_warning):
         logger = InstallLogger()
-        logger.policy_discovery_miss(
-            outcome="empty", source="org:acme/.github"
-        )
+        logger.policy_discovery_miss(outcome="empty", source="org:acme/.github")
         mock_warning.assert_called_once()
         msg = mock_warning.call_args[0][0]
         assert "org:acme/.github" in msg
@@ -219,12 +214,15 @@ class TestPolicyDiscoveryMiss:
         """All wording in the canonical table is ASCII-only."""
         logger = InstallLogger(verbose=True)
         for outcome in (
-            "absent", "no_git_remote", "empty", "malformed",
-            "cache_miss_fetch_fail", "garbage_response", "cached_stale",
+            "absent",
+            "no_git_remote",
+            "empty",
+            "malformed",
+            "cache_miss_fetch_fail",
+            "garbage_response",
+            "cached_stale",
         ):
-            logger.policy_discovery_miss(
-                outcome=outcome, source="org:acme/.github", error="boom"
-            )
+            logger.policy_discovery_miss(outcome=outcome, source="org:acme/.github", error="boom")
         for mock in (_info, _warning):
             for c in mock.call_args_list:
                 msg = c[0][0]
@@ -249,10 +247,7 @@ class TestPolicyViolationBlockNextStep:
         )
         mock_error.assert_called_once()
         # Secondary dim line should mention apm.yml and --no-policy
-        dim_calls = [
-            c for c in mock_echo.call_args_list
-            if c[1].get("color") == "dim"
-        ]
+        dim_calls = [c for c in mock_echo.call_args_list if c[1].get("color") == "dim"]
         assert len(dim_calls) == 1
         dim_text = dim_calls[0][0][0]
         assert "apm.yml" in dim_text
@@ -269,10 +264,7 @@ class TestPolicyViolationBlockNextStep:
             severity="block",
         )
         mock_error.assert_called_once()
-        dim_calls = [
-            c for c in mock_echo.call_args_list
-            if c[1].get("color") == "dim"
-        ]
+        dim_calls = [c for c in mock_echo.call_args_list if c[1].get("color") == "dim"]
         assert dim_calls == []
 
     @patch("apm_cli.core.command_logger._rich_echo")
@@ -320,10 +312,7 @@ class TestPolicyViolationDedupePrefix:
             reason="acme/evil: denied by pattern: acme/*",
             severity="warn",
         )
-        diags = [
-            d for d in logger.diagnostics._diagnostics
-            if d.category == CATEGORY_POLICY
-        ]
+        diags = [d for d in logger.diagnostics._diagnostics if d.category == CATEGORY_POLICY]
         assert len(diags) == 1
         assert diags[0].message == "denied by pattern: acme/*"
 
@@ -601,9 +590,7 @@ class TestPolicyReasonHelpers:
         assert "org admin" in msg
 
     def test_reason_blocked(self):
-        msg = InstallLogger._policy_reason_blocked(
-            "acme/evil-pkg", "acme/.github/apm-policy.yml"
-        )
+        msg = InstallLogger._policy_reason_blocked("acme/evil-pkg", "acme/.github/apm-policy.yml")
         assert "acme/evil-pkg" in msg
         assert "acme/.github/apm-policy.yml" in msg
         assert "--no-policy" in msg
@@ -627,7 +614,8 @@ class TestRenderPolicyGroup:
 
         # Find the red bold call for the block header
         red_bold_calls = [
-            c for c in mock_echo.call_args_list
+            c
+            for c in mock_echo.call_args_list
             if c[1].get("color") == "red" and c[1].get("bold") is True
         ]
         assert len(red_bold_calls) >= 1
@@ -646,8 +634,7 @@ class TestRenderPolicyGroup:
 
         # Warning header via _rich_warning
         warning_calls = [
-            c for c in mock_warning.call_args_list
-            if "policy warning" in str(c).lower()
+            c for c in mock_warning.call_args_list if "policy warning" in str(c).lower()
         ]
         assert len(warning_calls) >= 1
 
@@ -682,10 +669,7 @@ class TestRenderPolicyGroup:
         )
         dc.render_summary()
 
-        detail_calls = [
-            c for c in mock_echo.call_args_list
-            if "Use --no-policy" in str(c)
-        ]
+        detail_calls = [c for c in mock_echo.call_args_list if "Use --no-policy" in str(c)]
         assert len(detail_calls) >= 1
 
     @patch("apm_cli.utils.diagnostics._rich_echo")
@@ -703,10 +687,7 @@ class TestRenderPolicyGroup:
         )
         dc.render_summary()
 
-        detail_calls = [
-            c for c in mock_echo.call_args_list
-            if "Consider removing" in str(c)
-        ]
+        detail_calls = [c for c in mock_echo.call_args_list if "Consider removing" in str(c)]
         assert len(detail_calls) == 0
 
     @patch("apm_cli.utils.diagnostics._rich_echo")
@@ -724,10 +705,7 @@ class TestRenderPolicyGroup:
         )
         dc.render_summary()
 
-        detail_calls = [
-            c for c in mock_echo.call_args_list
-            if "Consider removing" in str(c)
-        ]
+        detail_calls = [c for c in mock_echo.call_args_list if "Consider removing" in str(c)]
         assert len(detail_calls) >= 1
 
 

@@ -158,9 +158,7 @@ class TestPruneCommand:
             result = self.runner.invoke(cli, ["prune", "--dry-run"])
             assert result.exit_code == 0
             assert "orphan-org/orphan-repo" in result.output
-            assert (
-                orphan_dir.exists()
-            ), "Package dir must NOT be removed in dry-run mode"
+            assert orphan_dir.exists(), "Package dir must NOT be removed in dry-run mode"
 
     def test_dry_run_says_no_changes_made(self):
         """--dry-run output should indicate no changes were made."""
@@ -214,9 +212,7 @@ class TestPruneCommand:
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
             # Output should mention the removal (count or package name)
-            assert (
-                "Pruned" in result.output or "orphan-org/orphan-repo" in result.output
-            )
+            assert "Pruned" in result.output or "orphan-org/orphan-repo" in result.output
 
     def test_prune_removes_multiple_orphans(self):
         """prune removes all orphaned packages in one pass."""
@@ -228,6 +224,79 @@ class TestPruneCommand:
             assert result.exit_code == 0
             assert not dir1.exists()
             assert not dir2.exists()
+
+    def test_prune_removes_real_orphan_with_sibling_subdir_dep(self):
+        """Regression: the destructive ``apm prune`` command must
+        delete a genuinely orphaned ``owner/repo`` package even when
+        a sibling subdirectory dep ``owner/repo/.apm/skills/foo`` is
+        declared in apm.yml.
+
+        Previously, ``prune.py`` called ``_expand_with_ancestors``
+        without the ``standalone_installed`` guard, so ``owner/repo``
+        was added to the expected set as an ancestor of the subdir
+        dep -- silently suppressing deletion of a real orphan and
+        diverging from the advisory display path. ``apm prune`` is a
+        safety command; missing a real orphan is a correctness bug.
+        """
+        with self._chdir_tmp() as tmp:
+            # Declare ONLY the subdirectory dep. The standalone
+            # owner/repo package is not declared anywhere.
+            (tmp / "apm.yml").write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - git: github.example.com/owner/repo\n"
+                "      path: .apm/skills/foo\n"
+            )
+            # Real installed standalone package (apm.yml + .apm marker).
+            pkg_dir = tmp / "apm_modules" / "owner" / "repo"
+            pkg_dir.mkdir(parents=True)
+            (pkg_dir / "apm.yml").write_text("name: repo\nversion: 1.0\n")
+            # Subdirectory dep content cohabits the same install root.
+            skill_dir = pkg_dir / ".apm" / "skills" / "foo"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Skill\n")
+
+            result = self.runner.invoke(cli, ["prune"])
+            assert result.exit_code == 0, result.output
+            # Real orphan MUST be deleted -- this is the security
+            # invariant the panel flagged as a required fix.
+            assert not (pkg_dir / "apm.yml").exists(), (
+                "Real orphan owner/repo (apm.yml) must be removed even "
+                "when a sibling subdir dep shares the same root"
+            )
+            # Subdir dep content collateral-damages because the whole
+            # owner/repo tree is the orphan's filesystem footprint;
+            # the user is expected to re-install. This matches the
+            # advisory display path in deps/cli.py.
+            assert not skill_dir.exists()
+
+    def test_prune_dry_run_lists_real_orphan_with_sibling_subdir_dep(self):
+        """Dry-run path must also surface the real orphan (display
+        parity with the advisory check).
+        """
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - git: github.example.com/owner/repo\n"
+                "      path: .apm/skills/foo\n"
+            )
+            pkg_dir = tmp / "apm_modules" / "owner" / "repo"
+            pkg_dir.mkdir(parents=True)
+            (pkg_dir / "apm.yml").write_text("name: repo\nversion: 1.0\n")
+            skill_dir = pkg_dir / ".apm" / "skills" / "foo"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Skill\n")
+
+            result = self.runner.invoke(cli, ["prune", "--dry-run"])
+            assert result.exit_code == 0, result.output
+            assert "owner/repo" in result.output
+            # No deletion occurred.
+            assert (pkg_dir / "apm.yml").exists()
 
     # ------------------------------------------------------------------
     # Parse error in apm.yml
@@ -353,9 +422,9 @@ dependencies:
             _write_lockfile(tmp, lockfile_content)
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
-            assert not (
-                tmp / "apm.lock.yaml"
-            ).exists(), "apm.lock.yaml should be deleted when empty"
+            assert not (tmp / "apm.lock.yaml").exists(), (
+                "apm.lock.yaml should be deleted when empty"
+            )
 
     def test_prune_preserves_lockfile_for_remaining_packages(self):
         """prune keeps lockfile entries for packages that are NOT pruned."""

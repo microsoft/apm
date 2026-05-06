@@ -366,6 +366,17 @@ run_e2e_tests() {
         log_error "MCP registry tests failed!"
         exit 1
     fi
+
+    # Run MCP env-var headers E2E tests (regression guard for ${VAR} -> ${env:VAR})
+    log_info "Running MCP env-var headers E2E tests..."
+    echo "Command: pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short; then
+        log_success "MCP env-var headers tests passed!"
+    else
+        log_error "MCP env-var headers tests failed!"
+        exit 1
+    fi
     
     # Run APM Dependencies integration tests (NEW - Task 8A)
     log_info "Running APM Dependencies integration tests with real repositories..."
@@ -377,7 +388,20 @@ run_e2e_tests() {
         log_error "APM Dependencies integration tests failed!"
         exit 1
     fi
-    
+
+    # Subdirectory dedup race E2E (#1126): two sibling subdirs of the
+    # same upstream repo+ref must install in parallel without the
+    # "Subdirectory ... not found" race the v1 cache produced.
+    log_info "Running #1126 parallel subdir dedup E2E..."
+    echo "Command: pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration"
+
+    if pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration; then
+        log_success "#1126 subdir dedup E2E passed!"
+    else
+        log_error "#1126 subdir dedup E2E failed!"
+        exit 1
+    fi
+
     # Run Transport Selection integration tests (issue #778)
     # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
     # when no usable SSH key is available for git@github.com.
@@ -388,6 +412,53 @@ run_e2e_tests() {
         log_success "Transport Selection integration tests passed!"
     else
         log_error "Transport Selection integration tests failed!"
+        exit 1
+    fi
+
+    # Run global-scope (--global / -g) E2E tests -- offline, no tokens needed
+    log_info "Running global-scope E2E tests..."
+    echo "Command: pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short; then
+        log_success "Global-scope E2E tests passed!"
+    else
+        log_error "Global-scope E2E tests failed!"
+        exit 1
+    fi
+
+    # Run Claude Code MCP schema-fidelity tests -- offline, golden fixtures
+    # captured from the upstream `claude` CLI (see fixtures/README.md)
+    log_info "Running Claude Code MCP schema-fidelity tests..."
+    echo "Command: pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short; then
+        log_success "Claude Code MCP schema-fidelity tests passed!"
+    else
+        log_error "Claude Code MCP schema-fidelity tests failed!"
+        exit 1
+    fi
+
+    # Run local-bundle install E2E tests -- offline, no tokens needed
+    log_info "Running local-bundle install E2E tests..."
+    echo "Command: pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short; then
+        log_success "Local-bundle install E2E tests passed!"
+    else
+        log_error "Local-bundle install E2E tests failed!"
+        exit 1
+    fi
+
+    # Run cache lockfile-parity test (requires GITHUB_APM_PAT or GITHUB_TOKEN).
+    # Asserts byte-identical apm.lock.yaml across cold / warm / no-cache
+    # regimes -- the worst silent regression the cache layer could introduce.
+    log_info "Running cache lockfile-parity E2E test..."
+    echo "Command: pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short; then
+        log_success "Cache lockfile-parity E2E test passed!"
+    else
+        log_error "Cache lockfile-parity E2E test failed!"
         exit 1
     fi
 
@@ -405,7 +476,82 @@ run_e2e_tests() {
     else
         log_info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
     fi
-    
+
+    # Run agent-skills target E2E tests -- offline, no tokens needed
+    log_info "Running agent-skills target E2E tests..."
+    echo "Command: pytest tests/integration/test_agent_skills_target.py -v -s --tb=short"
+
+    if pytest tests/integration/test_agent_skills_target.py -v -s --tb=short; then
+        log_success "Agent-skills target E2E tests passed!"
+    else
+        log_error "Agent-skills target E2E tests failed!"
+        exit 1
+    fi
+
+    # Run unified pack format E2E tests -- offline, no tokens needed
+    # Guards the 0.12.0 default flip from --format apm to --format plugin.
+    log_info "Running unified pack format E2E tests..."
+    echo "Command: pytest tests/integration/test_pack_unified.py -v -s --tb=short"
+
+    if pytest tests/integration/test_pack_unified.py -v -s --tb=short; then
+        log_success "Unified pack format E2E tests passed!"
+    else
+        log_error "Unified pack format E2E tests failed!"
+        exit 1
+    fi
+
+    # Run Copilot compile target E2E tests -- offline, no tokens needed
+    # Guards .github/copilot-instructions.md generation + idempotent cleanup.
+    log_info "Running Copilot compile target E2E tests..."
+    echo "Command: pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short"
+
+    if pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short; then
+        log_success "Copilot compile target E2E tests passed!"
+    else
+        log_error "Copilot compile target E2E tests failed!"
+        exit 1
+    fi
+
+    # Run transitive local-path chain E2E tests -- offline, no tokens needed
+    # Guards local_path anchoring across multi-level local dependency chains.
+    log_info "Running transitive local-path chain E2E tests..."
+    echo "Command: pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short; then
+        log_success "Transitive local-path chain E2E tests passed!"
+    else
+        log_error "Transitive local-path chain E2E tests failed!"
+        exit 1
+    fi
+
+    # Run drift-detection integration tests -- offline, no tokens needed
+    # Guards `apm audit` drift replay (Phase D) across all 9 drift cases,
+    # multi-target, --no-drift opt-out, and false-positive guards
+    # (CRLF, BOM, Build ID line). Pinning these tests prevents silent
+    # regression of the drift contract.
+    log_info "Running drift detection integration tests..."
+    echo "Command: pytest tests/integration/test_drift_check.py -v -s --tb=short"
+
+    if pytest tests/integration/test_drift_check.py -v -s --tb=short; then
+        log_success "Drift detection integration tests passed!"
+    else
+        log_error "Drift detection integration tests failed!"
+        exit 1
+    fi
+
+    # Run drift-detection E2E tests -- offline, no tokens needed
+    # Verifies the no-write contract, air-gap proof, performance smoke,
+    # and JSON/SARIF output shapes for the `apm audit` drift surface.
+    log_info "Running drift detection E2E tests..."
+    echo "Command: pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short; then
+        log_success "Drift detection E2E tests passed!"
+    else
+        log_error "Drift detection E2E tests failed!"
+        exit 1
+    fi
+
     log_success "All integration test suites completed successfully!"
     
 

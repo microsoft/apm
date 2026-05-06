@@ -76,6 +76,7 @@ export default defineConfig({
 						{ label: 'Private Packages', slug: 'guides/private-packages' },
 						{ label: 'Org-Wide Packages', slug: 'guides/org-packages' },
 						{ label: 'Marketplaces', slug: 'guides/marketplaces' },
+						{ label: 'Marketplace Authoring', slug: 'guides/marketplace-authoring' },
 						{ label: 'CI Policy Enforcement', slug: 'guides/ci-policy-setup' },
 						{ label: 'Agent Workflows (Experimental)', slug: 'guides/agent-workflows' },
 					],

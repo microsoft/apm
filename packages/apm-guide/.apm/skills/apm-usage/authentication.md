@@ -42,26 +42,34 @@ For SSO-protected orgs, authorize the token under Settings > Tokens > Configure 
 
 ## Azure DevOps (ADO)
 
-ADO supports two auth modes; the GitHub token chain does not apply. Resolution order:
+ADO supports two auth modes; the GitHub token chain does not apply. The recommended
+approach is `az login`; explicit PATs are also supported. Resolution order:
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer from `az account get-access-token` if `az` is installed and signed in
-3. Otherwise: auth-failed error
+3. Otherwise: auth-failed error with actionable diagnostic
 
 ```bash
-# PAT mode
-export ADO_APM_PAT=your_ado_pat
+# Recommended: bearer mode (no env var needed)
+az login --tenant <tenant-id>
 apm install dev.azure.com/org/project/_git/repo
 
-# Bearer mode (no env var needed)
-az login --tenant <tenant-id>
+# Alternative: PAT mode
+export ADO_APM_PAT=your_ado_pat
 apm install dev.azure.com/org/project/_git/repo
 ```
 
 ADO paths use the 3-segment format: `org/project/repo`. Auth is always required.
 
+**Finding your tenant ID:** visit `https://dev.azure.com/{org}/_settings/organizationAad`,
+or run `az login` and inspect `az account show --query tenantId -o tsv`.
+
 If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` bearer and warns:
 `[!] ADO_APM_PAT was rejected for {host} (HTTP 401); fell back to az cli bearer.`
+
+When auth fails entirely, APM prints a targeted diagnostic (not a generic "not accessible"
+message). For `--update` operations, a pre-flight auth check runs before any files are
+modified -- on failure you see `No files were modified`.
 
 ### ADO auth troubleshooting
 
@@ -78,6 +86,7 @@ If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` 
 export GITHUB_HOST=github.company.com
 export GITHUB_APM_PAT_MYORG=ghp_ghes_token
 apm install myorg/internal-package       # resolves to github.company.com
+apm pack                                 # marketplace.json also resolves against github.company.com
 ```
 
 ## GHE Cloud data residency (*.ghe.com)
@@ -107,6 +116,26 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
 never contacts GitHub directly.
+
+## Install validation chain
+
+`apm install <package>` validates a virtual subdirectory package (`owner/repo/path#ref`) before writing it to `apm.yml`. The chain mirrors the actual clone auth path so a credential that succeeds for `git clone` is never false-rejected by the installer:
+
+1. **Marker-file probes** via raw content -- `apm.yml`, `SKILL.md`, `plugin.json`, `README.md`. Fast positive signal; absence is not a failure.
+2. **Contents API directory probe** -- `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}`. Confirms the directory exists at the ref.
+3. **`git ls-remote`** with the install auth chain (PAT header-injected, then plain HTTPS w/ credential helper, then SSH if `--ssh` or `--allow-protocol-fallback`). Confirms the ref exists.
+4. **Shallow `git fetch --depth=1 --filter=tree:0` + `git ls-tree`** at the resolved ref -- the path probe that confirms the subdirectory exists at that ref. Required to close the fail-open hole where step 3 would otherwise pass any successful repo handshake.
+
+Steps 3 and 4 only run for explicit `#ref` pins (not for unpinned default-branch deps), and only when the API steps fail. Azure DevOps tokens (PAT or AAD bearer) are injected via `http.extraheader` (`Authorization: Bearer ...`) and never embedded in the clone URL.
+
+**Yellow signal:** when steps 1-2 fail and steps 3-4 succeed, APM emits a stderr warning -- `[!] API validation skipped for {pkg}; resolved via git credential fallback.` This is security-relevant: a scoped fine-grained PAT may have *correctly* rejected a package on the API surface and the broader git credential chain accepted it. Operators should be able to see that signal in default CI logs.
+
+**Terminal error** when all four steps fail: `[x] all probes failed (marker-file, Contents API, git ls-remote, shallow-fetch) -- verify the path and ref exist and that your credentials have read access (run with --verbose for the full probe log)`.
+
+```bash
+# See the full probe log when validation fails
+apm install --verbose owner/repo/path#v1.2.0
+```
 
 ## Troubleshooting
 

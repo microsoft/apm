@@ -14,14 +14,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.commands.uninstall.engine import (
+    _build_children_index,
     _cleanup_stale_mcp,
     _dry_run_uninstall,
     _parse_dependency_entry,
     _remove_packages_from_disk,
     _validate_uninstall_packages,
 )
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,9 +96,7 @@ class TestValidateUninstallPackages:
     def test_missing_package_goes_to_not_found(self):
         """Package not in deps ends up in not_found list."""
         logger = _make_logger()
-        to_remove, not_found = _validate_uninstall_packages(
-            ["org/missing"], ["org/other"], logger
-        )
+        to_remove, not_found = _validate_uninstall_packages(["org/missing"], ["org/other"], logger)
         assert to_remove == []
         assert "org/missing" in not_found
         logger.warning.assert_called_once()
@@ -105,9 +104,7 @@ class TestValidateUninstallPackages:
     def test_invalid_format_no_slash_logs_error(self):
         """Package without slash is rejected with an error message."""
         logger = _make_logger()
-        to_remove, not_found = _validate_uninstall_packages(
-            ["badpackage"], ["org/repo"], logger
-        )
+        to_remove, not_found = _validate_uninstall_packages(["badpackage"], ["org/repo"], logger)
         assert to_remove == []
         assert not_found == []
         logger.error.assert_called_once()
@@ -116,9 +113,7 @@ class TestValidateUninstallPackages:
         """Some packages matched, others not."""
         logger = _make_logger()
         deps = ["org/a", "org/b", "org/c"]
-        to_remove, not_found = _validate_uninstall_packages(
-            ["org/a", "org/missing"], deps, logger
-        )
+        to_remove, not_found = _validate_uninstall_packages(["org/a", "org/missing"], deps, logger)
         assert "org/a" in to_remove
         assert len(to_remove) == 1
         assert "org/missing" in not_found
@@ -140,9 +135,7 @@ class TestValidateUninstallPackages:
             "apm_cli.commands.uninstall.engine._parse_dependency_entry",
             side_effect=ValueError("parse failed"),
         ):
-            to_remove, not_found = _validate_uninstall_packages(
-                ["org/repo"], ["org/repo"], logger
-            )
+            to_remove, not_found = _validate_uninstall_packages(["org/repo"], ["org/repo"], logger)
         assert "org/repo" in to_remove
         assert not_found == []
         logger.error.assert_not_called()
@@ -151,9 +144,7 @@ class TestValidateUninstallPackages:
         """DependencyReference objects in deps list are matched correctly."""
         logger = _make_logger()
         ref = DependencyReference.parse("org/repo")
-        to_remove, not_found = _validate_uninstall_packages(
-            ["org/repo"], [ref], logger
-        )
+        to_remove, not_found = _validate_uninstall_packages(["org/repo"], [ref], logger)
         assert ref in to_remove
         assert not_found == []
 
@@ -255,12 +246,15 @@ class TestDryRunUninstall:
         """Dry run logs number of packages that would be removed."""
         logger = _make_logger()
 
-        with patch(
-            "apm_cli.deps.lockfile.get_lockfile_path",
-            return_value=tmp_path / "apm.lock.yaml",
-        ), patch(
-            "apm_cli.deps.lockfile.LockFile.read",
-            return_value=None,
+        with (
+            patch(
+                "apm_cli.deps.lockfile.get_lockfile_path",
+                return_value=tmp_path / "apm.lock.yaml",
+            ),
+            patch(
+                "apm_cli.deps.lockfile.LockFile.read",
+                return_value=None,
+            ),
         ):
             _dry_run_uninstall(["org/repo"], tmp_path / "apm_modules", logger)
 
@@ -275,12 +269,15 @@ class TestDryRunUninstall:
         pkg_dir.mkdir(parents=True)
         logger = _make_logger()
 
-        with patch(
-            "apm_cli.deps.lockfile.get_lockfile_path",
-            return_value=tmp_path / "apm.lock.yaml",
-        ), patch(
-            "apm_cli.deps.lockfile.LockFile.read",
-            return_value=None,
+        with (
+            patch(
+                "apm_cli.deps.lockfile.get_lockfile_path",
+                return_value=tmp_path / "apm.lock.yaml",
+            ),
+            patch(
+                "apm_cli.deps.lockfile.LockFile.read",
+                return_value=None,
+            ),
         ):
             _dry_run_uninstall(["org/repo"], modules, logger)
 
@@ -291,12 +288,15 @@ class TestDryRunUninstall:
         """Success message is always emitted at the end of dry run."""
         logger = _make_logger()
 
-        with patch(
-            "apm_cli.deps.lockfile.get_lockfile_path",
-            return_value=tmp_path / "apm.lock.yaml",
-        ), patch(
-            "apm_cli.deps.lockfile.LockFile.read",
-            return_value=None,
+        with (
+            patch(
+                "apm_cli.deps.lockfile.get_lockfile_path",
+                return_value=tmp_path / "apm.lock.yaml",
+            ),
+            patch(
+                "apm_cli.deps.lockfile.LockFile.read",
+                return_value=None,
+            ),
         ):
             _dry_run_uninstall(["org/repo"], tmp_path / "apm_modules", logger)
 
@@ -305,7 +305,8 @@ class TestDryRunUninstall:
 
     def test_orphans_listed_when_lockfile_present(self, tmp_path):
         """Transitive orphans are mentioned when lockfile has dependents."""
-        from apm_cli.deps.lockfile import LockFile as _LF, LockedDependency
+        from apm_cli.deps.lockfile import LockedDependency
+        from apm_cli.deps.lockfile import LockFile as _LF
 
         lockfile = _LF()
         orphan = LockedDependency(
@@ -318,19 +319,20 @@ class TestDryRunUninstall:
 
         logger = _make_logger()
 
-        with patch(
-            "apm_cli.deps.lockfile.get_lockfile_path",
-            return_value=tmp_path / "apm.lock.yaml",
-        ), patch(
-            "apm_cli.deps.lockfile.LockFile.read",
-            return_value=lockfile,
+        with (
+            patch(
+                "apm_cli.deps.lockfile.get_lockfile_path",
+                return_value=tmp_path / "apm.lock.yaml",
+            ),
+            patch(
+                "apm_cli.deps.lockfile.LockFile.read",
+                return_value=lockfile,
+            ),
         ):
             _dry_run_uninstall(["org/repo"], tmp_path / "apm_modules", logger)
 
         # At least one progress call should mention the transitive dep
-        all_progress_msgs = " ".join(
-            call[0][0] for call in logger.progress.call_args_list
-        )
+        all_progress_msgs = " ".join(call[0][0] for call in logger.progress.call_args_list)
         assert "org/transitive" in all_progress_msgs
 
 
@@ -358,9 +360,7 @@ class TestCleanupStaleMcp:
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"stale-server"}
 
-        with patch(
-            "apm_cli.commands.uninstall.engine.MCPIntegrator"
-        ) as mock_mcp:
+        with patch("apm_cli.commands.uninstall.engine.MCPIntegrator") as mock_mcp:
             mock_mcp.collect_transitive.return_value = []
             mock_mcp.deduplicate.return_value = []
             mock_mcp.get_server_names.return_value = set()
@@ -368,11 +368,19 @@ class TestCleanupStaleMcp:
             mock_mcp.update_lockfile = MagicMock()
 
             _cleanup_stale_mcp(
-                apm_package, lockfile, lockfile_path, old_servers,
+                apm_package,
+                lockfile,
+                lockfile_path,
+                old_servers,
                 modules_dir=tmp_path / "apm_modules",
             )
 
-        mock_mcp.remove_stale.assert_called_once_with({"stale-server"}, scope=None)
+        mock_mcp.remove_stale.assert_called_once_with(
+            {"stale-server"},
+            project_root=None,
+            user_scope=False,
+            scope=None,
+        )
         mock_mcp.update_lockfile.assert_called_once()
 
     def test_non_stale_server_not_removed(self, tmp_path):
@@ -383,9 +391,7 @@ class TestCleanupStaleMcp:
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"live-server"}
 
-        with patch(
-            "apm_cli.commands.uninstall.engine.MCPIntegrator"
-        ) as mock_mcp:
+        with patch("apm_cli.commands.uninstall.engine.MCPIntegrator") as mock_mcp:
             mock_mcp.collect_transitive.return_value = []
             mock_mcp.deduplicate.return_value = []
             mock_mcp.get_server_names.return_value = {"live-server"}
@@ -393,7 +399,10 @@ class TestCleanupStaleMcp:
             mock_mcp.update_lockfile = MagicMock()
 
             _cleanup_stale_mcp(
-                apm_package, lockfile, lockfile_path, old_servers,
+                apm_package,
+                lockfile,
+                lockfile_path,
+                old_servers,
                 modules_dir=tmp_path / "apm_modules",
             )
 
@@ -407,9 +416,7 @@ class TestCleanupStaleMcp:
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"stale"}
 
-        with patch(
-            "apm_cli.commands.uninstall.engine.MCPIntegrator"
-        ) as mock_mcp:
+        with patch("apm_cli.commands.uninstall.engine.MCPIntegrator") as mock_mcp:
             mock_mcp.collect_transitive.return_value = []
             mock_mcp.deduplicate.return_value = []
             mock_mcp.get_server_names.return_value = set()
@@ -417,11 +424,19 @@ class TestCleanupStaleMcp:
             mock_mcp.update_lockfile = MagicMock()
 
             _cleanup_stale_mcp(
-                apm_package, lockfile, lockfile_path, old_servers,
+                apm_package,
+                lockfile,
+                lockfile_path,
+                old_servers,
                 scope="user",
             )
 
-        mock_mcp.remove_stale.assert_called_once_with({"stale"}, scope="user")
+        mock_mcp.remove_stale.assert_called_once_with(
+            {"stale"},
+            project_root=None,
+            user_scope=False,
+            scope="user",
+        )
 
     def test_get_mcp_dependencies_exception_handled(self, tmp_path):
         """Exception from apm_package.get_mcp_dependencies is swallowed."""
@@ -431,9 +446,7 @@ class TestCleanupStaleMcp:
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"stale"}
 
-        with patch(
-            "apm_cli.commands.uninstall.engine.MCPIntegrator"
-        ) as mock_mcp:
+        with patch("apm_cli.commands.uninstall.engine.MCPIntegrator") as mock_mcp:
             mock_mcp.collect_transitive.return_value = []
             mock_mcp.deduplicate.return_value = []
             mock_mcp.get_server_names.return_value = set()
@@ -442,6 +455,93 @@ class TestCleanupStaleMcp:
 
             # Should not raise
             _cleanup_stale_mcp(
-                apm_package, lockfile, lockfile_path, old_servers,
+                apm_package,
+                lockfile,
+                lockfile_path,
+                old_servers,
                 modules_dir=tmp_path / "apm_modules",
             )
+
+
+# ===========================================================================
+# _build_children_index
+# ===========================================================================
+
+
+class TestBuildChildrenIndex:
+    """Tests for _build_children_index."""
+
+    def test_basic_parent_child_mapping(self):
+        """Index maps parent URLs to their child dependency objects."""
+        lockfile = LockFile()
+        dep_a = LockedDependency(repo_url="org/a", resolved_commit="aaa")
+        dep_b = LockedDependency(
+            repo_url="org/b",
+            resolved_by="org/a",
+            resolved_commit="bbb",
+        )
+        dep_c = LockedDependency(
+            repo_url="org/c",
+            resolved_by="org/b",
+            resolved_commit="ccc",
+        )
+        lockfile.add_dependency(dep_a)
+        lockfile.add_dependency(dep_b)
+        lockfile.add_dependency(dep_c)
+
+        index = _build_children_index(lockfile)
+
+        assert "org/a" in index
+        assert len(index["org/a"]) == 1
+        assert index["org/a"][0].repo_url == "org/b"
+
+        assert "org/b" in index
+        assert len(index["org/b"]) == 1
+        assert index["org/b"][0].repo_url == "org/c"
+
+        # dep_a has no parent, dep_c has no children
+        assert "org/c" not in index
+
+    def test_empty_lockfile_returns_empty_dict(self):
+        """Empty lockfile produces an empty index."""
+        lockfile = LockFile()
+
+        index = _build_children_index(lockfile)
+
+        assert index == {}
+
+    def test_deps_without_resolved_by_are_not_indexed(self):
+        """Dependencies with no resolved_by field are excluded from index."""
+        lockfile = LockFile()
+        dep_a = LockedDependency(repo_url="org/a", resolved_commit="aaa")
+        dep_b = LockedDependency(repo_url="org/b", resolved_commit="bbb")
+        lockfile.add_dependency(dep_a)
+        lockfile.add_dependency(dep_b)
+
+        index = _build_children_index(lockfile)
+
+        assert index == {}
+
+    def test_multiple_children_same_parent(self):
+        """Parent with multiple children collects all of them."""
+        lockfile = LockFile()
+        dep_root = LockedDependency(repo_url="org/root", resolved_commit="rrr")
+        dep_x = LockedDependency(
+            repo_url="org/x",
+            resolved_by="org/root",
+            resolved_commit="xxx",
+        )
+        dep_y = LockedDependency(
+            repo_url="org/y",
+            resolved_by="org/root",
+            resolved_commit="yyy",
+        )
+        lockfile.add_dependency(dep_root)
+        lockfile.add_dependency(dep_x)
+        lockfile.add_dependency(dep_y)
+
+        index = _build_children_index(lockfile)
+
+        assert len(index["org/root"]) == 2
+        child_urls = {d.repo_url for d in index["org/root"]}
+        assert child_urls == {"org/x", "org/y"}

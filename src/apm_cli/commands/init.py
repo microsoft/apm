@@ -24,6 +24,7 @@ from ._helpers import (
     _validate_project_name,
 )
 
+
 @click.command(help="Initialize a new APM project")
 @click.argument("project_name", required=False)
 @click.option(
@@ -32,13 +33,20 @@ from ._helpers import (
 @click.option(
     "--plugin", is_flag=True, help="Initialize as plugin author (creates plugin.json + apm.yml)"
 )
+@click.option(
+    "--marketplace",
+    "marketplace_flag",
+    is_flag=True,
+    help="Seed apm.yml with a 'marketplace:' authoring block",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, verbose):
+def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
     With --plugin, also creates plugin.json for plugin authors.
+    With --marketplace, also seeds apm.yml with a marketplace authoring block.
     """
     logger = CommandLogger("init", verbose=verbose)
     try:
@@ -110,6 +118,27 @@ def init(ctx, project_name, yes, plugin, verbose):
         if plugin:
             _create_plugin_json(config)
 
+        # Append marketplace authoring block when requested.
+        if marketplace_flag:
+            from ..marketplace.init_template import render_marketplace_block
+
+            apm_yml_path = Path.cwd() / APM_YML_FILENAME
+            try:
+                existing = apm_yml_path.read_text(encoding="utf-8")
+                if not existing.endswith("\n"):
+                    existing += "\n"
+                # Owner is intentionally left to the template default
+                # (acme-org placeholder). Deriving it from the project
+                # name produced misleading https://github.com/<project>
+                # URLs; the user is expected to edit the placeholder.
+                block = render_marketplace_block()
+                apm_yml_path.write_text(existing + "\n" + block, encoding="utf-8")
+            except OSError as exc:
+                logger.warning(
+                    f"Failed to append marketplace block to apm.yml: {exc}",
+                    symbol="warning",
+                )
+
         logger.success("APM project initialized successfully!")
 
         # Display created file info
@@ -135,14 +164,14 @@ def init(ctx, project_name, yes, plugin, verbose):
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
-                "Pack as plugin:          apm pack --format plugin",
+                "Pack as plugin:          apm pack",
             ]
         else:
             next_steps = [
                 "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
                 "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
                 "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
-                "Author your own plugin:         apm pack --format plugin",
+                "Author your own plugin:         apm pack",
             ]
 
         try:
@@ -155,6 +184,14 @@ def init(ctx, project_name, yes, plugin, verbose):
             logger.progress("Next steps:")
             for step in next_steps:
                 click.echo(f"  * {step}")
+
+        # Codex tip: suggest agent-skills target when .codex/ exists
+        if Path(".codex").is_dir():
+            logger.progress(
+                "Tip: Use '--target agent-skills' to also deploy skills to "
+                ".agents/skills/ for other clients.",
+                symbol="info",
+            )
 
         # Footer with links
         try:
@@ -172,8 +209,7 @@ def init(ctx, project_name, yes, plugin, verbose):
                 )
         except (ImportError, NameError):
             click.echo(
-                "  Docs: https://microsoft.github.io/apm  |  "
-                "Star: https://github.com/microsoft/apm"
+                "  Docs: https://microsoft.github.io/apm  |  Star: https://github.com/microsoft/apm"
             )
 
     except Exception as e:
@@ -216,9 +252,7 @@ def _interactive_project_setup(default_name, logger):
 version: {version}
 description: {description}
 author: {author}"""
-        console.print(
-            Panel(summary_content, title="About to create", border_style="cyan")
-        )
+        console.print(Panel(summary_content, title="About to create", border_style="cyan"))
 
         if not Confirm.ask("\nIs this OK?", default=True):
             console.print("[info]Aborted.[/info]")

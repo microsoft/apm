@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -65,8 +65,9 @@ def _deployed_path_entry(
             for _t in targets:
                 if _t.resolved_deploy_root is not None:
                     from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+
                     return to_lockfile_path(target_path, _t.resolved_deploy_root)
-        raise RuntimeError(
+        raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
             f"target matched. This is a bug — please report it."
@@ -86,12 +87,13 @@ def integrate_package_primitives(
     hook_integrator: Any,
     force: bool,
     managed_files: Any,
-    diagnostics: "DiagnosticCollector",
+    diagnostics: DiagnosticCollector,
     package_name: str = "",
-    logger: Optional["InstallLogger"] = None,
-    scope: Optional["InstallScope"] = None,
-    skill_subset: "Optional[tuple]" = None,
-    ctx: Optional["InstallContext"] = None,
+    logger: InstallLogger | None = None,
+    scope: InstallScope | None = None,
+    skill_subset: tuple | None = None,
+    ctx: InstallContext | None = None,
+    scratch_root: Path | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -129,6 +131,23 @@ def integrate_package_primitives(
     if not targets:
         return result
 
+    # ------------------------------------------------------------------
+    # Drift-replay safety guard (#drift): when ``scratch_root`` is set,
+    # the caller is replaying integration into an isolated directory.
+    # We assert it exists and is NOT inside ``project_root`` to keep the
+    # read-only contract of ``apm audit --check drift`` enforceable.
+    # The ``project_root`` passed in will already point at ``scratch_root``
+    # (so all writes redirect via target.deploy_path), so this check is
+    # purely defense-in-depth against accidental misuse.
+    # ------------------------------------------------------------------
+    if scratch_root is not None:
+        from apm_cli.utils.path_security import ensure_path_within
+
+        scratch_root = Path(scratch_root).resolve()
+        # ``project_root`` is the redirect target; it must equal scratch_root
+        # OR sit inside it.  ensure_path_within(child, parent) raises if not.
+        ensure_path_within(Path(project_root).resolve(), scratch_root)
+
     # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
     _cowork_active = any(t.name == "copilot-cowork" for t in targets)
     if _cowork_active and ctx is not None and not ctx.cowork_nonsupported_warned:
@@ -144,7 +163,8 @@ def integrate_package_primitives(
             # misleading duplicate warnings.
         }
         _found_types = [
-            ptype for ptype, subdir in _NON_SKILL_DIRS.items()
+            ptype
+            for ptype, subdir in _NON_SKILL_DIRS.items()
             if (_apm_dir / subdir).is_dir() and any((_apm_dir / subdir).iterdir())
         ]
         if _found_types:
@@ -164,6 +184,39 @@ def integrate_package_primitives(
         if logger:
             logger.tree_item(msg)
 
+    def _format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
+        """Apply the 1/2/3+ multi-target collapse rule.
+
+        Returns a tuple ``(suffix, expansion_lines)``:
+
+        * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
+        * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
+          AFTER the aggregate line when ``verbose`` is True. Empty list when
+          collapsed.
+
+        The rule:
+          1 target  -> ``<path1>``
+          2 targets -> ``<path1>, <path2>``
+          3+        -> ``N targets`` (verbose forces full enumeration)
+        """
+        deduped: list[str] = []
+        seen: set = builtins.set()
+        for p in paths:
+            if p not in seen:
+                seen.add(p)
+                deduped.append(p)
+        if verbose and len(deduped) >= 2:
+            return "", [f"  |     -> {p}" for p in deduped]
+        if len(deduped) == 0:
+            return "", []
+        if len(deduped) == 1:
+            return deduped[0], []
+        if len(deduped) == 2:
+            return f"{deduped[0]}, {deduped[1]}", []
+        return f"{len(deduped)} targets", []
+
+    _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
+
     _INTEGRATOR_KWARGS = {
         "prompts": prompt_integrator,
         "agents": agent_integrator,
@@ -173,48 +226,86 @@ def integrate_package_primitives(
         "skills": skill_integrator,
     }
 
-    for _target in targets:
-        for _prim_name, _mapping in _target.primitives.items():
-            _entry = _dispatch.get(_prim_name)
-            if not _entry or _entry.multi_target:
-                continue  # skills handled below
+    # Aggregate per-primitive across targets so we emit ONE line per kind
+    # (per the 1/2/3+ collapse rule), not one per target.
+    # Structure: { prim_name: {"files": int, "label": str, "paths": [str]} }
+    _per_kind: dict[str, dict[str, Any]] = {}
 
-            _integrator = _INTEGRATOR_KWARGS[_prim_name]
+    for _prim_name, _entry in _dispatch.items():
+        if _entry.multi_target:
+            continue  # skills handled separately
+        _integrator = _INTEGRATOR_KWARGS[_prim_name]
+        _agg_files = 0
+        _agg_paths: list[str] = []
+        _label = _prim_name
+        for _target in targets:
+            _mapping = _target.primitives.get(_prim_name)
+            if _mapping is None:
+                continue
             _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target, package_info, project_root,
-                force=force, managed_files=managed_files,
+                _target,
+                package_info,
+                project_root,
+                force=force,
+                managed_files=managed_files,
                 diagnostics=diagnostics,
             )
-
-            if _int_result.files_integrated > 0:
-                result[_entry.counter_key] += _int_result.files_integrated
-                _effective_root = _mapping.deploy_root or _target.root_dir
-                _deploy_dir = f"{_effective_root}/{_mapping.subdir}/" if _mapping.subdir else f"{_effective_root}/"
-                if _prim_name == "instructions" and _mapping.format_id in ("cursor_rules", "claude_rules"):
-                    _label = "rule(s)"
-                elif _prim_name == "instructions":
-                    _label = "instruction(s)"
-                elif _prim_name == "hooks":
-                    if _target.name == "claude":
-                        _deploy_dir = ".claude/settings.json"
-                    elif _target.name == "cursor":
-                        _deploy_dir = ".cursor/hooks.json"
-                    elif _target.name == "codex":
-                        _deploy_dir = ".codex/hooks.json"
-                    _label = "hook(s)"
-                else:
-                    _label = _prim_name
-                _log_integration(
-                    f"  |-- {_int_result.files_integrated} {_label} integrated -> {_deploy_dir}"
-                )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
+            if _int_result.files_integrated <= 0:
+                continue
+            _agg_files += _int_result.files_integrated
+            result[_entry.counter_key] += _int_result.files_integrated
+            _effective_root = _mapping.deploy_root or _target.root_dir
+            _deploy_dir = (
+                f"{_effective_root}/{_mapping.subdir}/"
+                if _mapping.subdir
+                else f"{_effective_root}/"
+            )
+            if _prim_name == "instructions" and _mapping.format_id in (
+                "cursor_rules",
+                "claude_rules",
+            ):
+                _label = "rule(s)"
+            elif _prim_name == "instructions":
+                _label = "instruction(s)"
+            elif _prim_name == "hooks":
+                if _target.hooks_config_display:
+                    _deploy_dir = _target.hooks_config_display
+                _label = "hook(s)"
+            else:
+                _label = _prim_name
+            _agg_paths.append(_deploy_dir)
+
+        if _agg_files > 0:
+            _per_kind[_prim_name] = {
+                "files": _agg_files,
+                "label": _label,
+                "paths": _agg_paths,
+            }
+
+    # Emit aggregated per-kind lines in dispatch order so output is stable.
+    for _prim_name in _dispatch:
+        if _prim_name not in _per_kind:
+            continue
+        _info = _per_kind[_prim_name]
+        _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
+        if _expansion:
+            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated:")
+            for line in _expansion:
+                _log_integration(line)
+        else:
+            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated -> {_suffix}")
 
     skill_result = skill_integrator.integrate_package_skill(
-        package_info, project_root,
-        diagnostics=diagnostics, managed_files=managed_files, force=force,
-        targets=targets, skill_subset=skill_subset,
+        package_info,
+        project_root,
+        diagnostics=diagnostics,
+        managed_files=managed_files,
+        force=force,
+        targets=targets,
+        skill_subset=skill_subset,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -225,16 +316,39 @@ def integrate_package_primitives(
         except ValueError:
             # Dynamic-root target (copilot-cowork) -- path is outside project tree.
             _skill_target_dirs.add("copilot-cowork")
-    _skill_targets = sorted(_skill_target_dirs)
-    _skill_target_str = ", ".join(f"{d}/skills/" for d in _skill_targets) or "skills/"
+    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
+    if not _skill_target_paths:
+        _skill_target_paths = ["skills/"]
+    _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1
-        _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
+        if _skill_expansion:
+            _log_integration("  |-- Skill integrated:")
+            for line in _skill_expansion:
+                _log_integration(line)
+        else:
+            _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
-        _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}")
+        if _skill_expansion:
+            _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:")
+            for line in _skill_expansion:
+                _log_integration(line)
+        else:
+            _log_integration(
+                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
+            )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
+
+    # A3: warm-cache visibility. If nothing was integrated for any kind AND
+    # no skill was created, emit one annotation so the user knows the dep
+    # was evaluated (the [+] header above already carries the SHA).
+    _total_integrated = sum(_info["files"] for _info in _per_kind.values())
+    _total_integrated += int(skill_result.skill_created)
+    _total_integrated += int(skill_result.sub_skills_promoted)
+    if _total_integrated == 0:
+        _log_integration("  |-- (files unchanged)")
 
     return result
 
@@ -251,10 +365,10 @@ def integrate_local_content(
     hook_integrator: Any,
     force: bool,
     managed_files: Any,
-    diagnostics: "DiagnosticCollector",
-    logger: Optional["InstallLogger"] = None,
-    scope: Optional["InstallScope"] = None,
-    ctx: Optional["InstallContext"] = None,
+    diagnostics: DiagnosticCollector,
+    logger: InstallLogger | None = None,
+    scope: InstallScope | None = None,
+    ctx: InstallContext | None = None,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 
@@ -307,3 +421,232 @@ def integrate_local_content(
 # imports/patches in tests and elsewhere that use the old names.
 _integrate_package_primitives = integrate_package_primitives
 _integrate_local_content = integrate_local_content
+
+
+# ---------------------------------------------------------------------------
+# Local bundle integration (issue #1098)
+# ---------------------------------------------------------------------------
+
+
+def integrate_local_bundle(
+    bundle_info: Any,
+    project_root: Path,
+    *,
+    targets: Any,
+    force: bool = False,
+    dry_run: bool = False,
+    diagnostics: DiagnosticCollector | None = None,
+    logger: InstallLogger | None = None,
+    scope: InstallScope | None = None,
+    alias: str | None = None,
+) -> dict:
+    """Integrate a detected local bundle into project / user scope.
+
+    Local bundles are produced by ``apm pack`` and shipped (via shared file,
+    USB, etc.) to environments that cannot reach the source registry.  This
+    orchestrator deploys the bundle's plugin-format files into each active
+    target's deploy root and returns a result dict mirroring
+    ``integrate_local_content()``'s shape so the caller can persist
+    ``local_deployed_files`` / ``local_deployed_file_hashes`` into the
+    project lockfile.
+
+    The bundle is treated as a *synthetic* package -- its slug derives from
+    *alias* (``--as``) when provided, else from ``bundle_info.package_id``.
+
+    Important contract: this function does **NOT** mutate ``apm.yml``.  Local
+    bundles are imperative deploys, not declarative dependencies.
+
+    Args:
+        bundle_info: ``LocalBundleInfo`` describing the verified bundle.
+        project_root: Workspace root (or ``Path.home()`` for ``--global``).
+        targets: Resolved ``TargetProfile`` instances from
+            ``resolve_targets()``.
+        force: When ``True``, overwrite locally-modified files on collision.
+        dry_run: When ``True``, report what would be deployed without
+            writing to disk.
+        diagnostics: Diagnostic collector for structured warnings.
+        logger: Install-flow logger.
+        scope: ``InstallScope`` (project vs user) for downstream consumers.
+        alias: Slug override from ``--as``.
+
+    Returns:
+        Dict with keys ``deployed_files`` (list[str]),
+        ``deployed_file_hashes`` (dict[str, str]), ``skipped`` (int), and
+        per-primitive counters (``skills``, ``agents``, ``commands``, ...).
+    """
+    import hashlib
+    import shutil
+
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    from ..core.scope import InstallScope
+    from ..utils.path_security import (
+        PathTraversalError,
+        ensure_path_within,
+        validate_path_segments,
+    )
+
+    bundle_dir: Path = bundle_info.source_dir
+    pack_files: dict[str, str] = {}
+    if bundle_info.lockfile:
+        pack = bundle_info.lockfile.get("pack") or {}
+        bf = pack.get("bundle_files") or {}
+        if isinstance(bf, dict):
+            pack_files = {str(k): str(v) for k, v in bf.items()}
+
+    if not pack_files:
+        # Fallback: walk bundle and hash everything except apm.lock.yaml
+        # and plugin.json.  Prevents zero-deploy when an older bundle
+        # without bundle_files lands.
+        for fp in bundle_dir.rglob("*"):
+            if not fp.is_file() or fp.is_symlink():
+                continue
+            rel = fp.relative_to(bundle_dir).as_posix()
+            if rel in ("apm.lock.yaml", "plugin.json"):
+                continue
+            pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+
+    deployed_files: list[str] = []
+    deployed_hashes: dict[str, str] = {}
+    skipped = 0
+
+    slug = alias or bundle_info.package_id
+    if logger:
+        logger.verbose_detail(
+            f"Integrating local bundle '{slug}' "
+            f"({len(pack_files)} file(s), targets={[t.name for t in targets]})"
+        )
+
+    # NOTE(M-arch-1): Local bundles intentionally do NOT route through
+    # ``integrate_package_primitives`` -- they are an imperative deploy of
+    # opaque files keyed by ``pack.bundle_files`` rather than a primitive
+    # tree.  Revisit when local-bundle install needs to share collision /
+    # link-resolution logic with the dependency-resolver pipeline.
+    # TODO(#1098-v0.13): unify with integrate_package_primitives if/when
+    # the bundle format grows primitive-typed transforms.
+    for target in targets:
+        # Resolve deploy root for this target.  Cowork targets can return
+        # a dynamically-resolved path; fall back to root_dir under
+        # project_root otherwise.
+        resolved_root = getattr(target, "resolved_deploy_root", None)
+        if resolved_root is not None:
+            default_deploy_root = Path(resolved_root)
+        else:
+            default_deploy_root = project_root / target.root_dir
+
+        # Build a primitive→deploy_root lookup so bundle entries that fall
+        # under a primitive with an explicit ``deploy_root`` (e.g.
+        # skills→.agents) are routed to the converged directory rather
+        # than the per-client ``target.root_dir``.
+        _primitive_roots: dict[str, Path] = {}
+        for prim_name, prim_mapping in (target.primitives or {}).items():
+            if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
+                _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
+
+        for rel, expected_hash in sorted(pack_files.items()):
+            # CR1: bundle_files keys come from untrusted lockfile YAML
+            # inside the bundle.  Reject traversal sequences before
+            # constructing any filesystem path, then assert the resolved
+            # destination stays inside ``deploy_root``.
+            try:
+                validate_path_segments(str(rel), context="bundle_files key")
+            except PathTraversalError as exc:
+                if logger is not None:
+                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+                skipped += 1
+                continue
+            src = bundle_dir / rel
+            if not src.is_file() or src.is_symlink():
+                skipped += 1
+                continue
+
+            # Route the file to the correct deploy root.  If the first
+            # path segment matches a primitive with an explicit
+            # ``deploy_root`` (e.g. ``skills/`` → ``.agents/``), use
+            # the converged directory.  Otherwise fall back to the
+            # target's default root.
+            _first_seg = rel.split("/", 1)[0] if "/" in rel else ""
+            deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
+
+            dest = deploy_root / rel
+            try:
+                ensure_path_within(dest, deploy_root)
+            except PathTraversalError as exc:
+                if logger is not None:
+                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+                skipped += 1
+                continue
+            try:
+                if scope == InstallScope.USER:
+                    # User scope: record absolute paths.
+                    record = dest.as_posix()
+                else:
+                    # Project scope: record paths relative to project_root.
+                    record = (
+                        dest.relative_to(project_root).as_posix()
+                        if dest.is_relative_to(project_root)
+                        else dest.as_posix()
+                    )
+            except ValueError:
+                record = dest.as_posix()
+
+            if dry_run:
+                deployed_files.append(record)
+                # Normalize to "sha256:<hex>" so the dry-run lockfile preview
+                # matches the format written by ``compute_file_hash`` on the
+                # real deploy path.  ``expected_hash`` here is bare hex from
+                # ``pack.bundle_files``; without the prefix, downstream
+                # exact-match comparisons (e.g. ``cleanup.py`` provenance
+                # check) treat the file as user-edited and skip cleanup.
+                deployed_hashes[record] = f"sha256:{expected_hash}"
+                if logger:
+                    logger.verbose_detail(f"[dry-run] would deploy {record}")
+                continue
+
+            # Collision handling: skip if file exists and content differs
+            # and not force.  Idempotent (same content) writes are silent.
+            if dest.exists() and not force:
+                try:
+                    existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
+                except OSError:
+                    existing_hash = None
+                if existing_hash and existing_hash != expected_hash:
+                    skipped += 1
+                    msg = (
+                        f"Skipped {record}: file exists with different "
+                        "content. Re-run with --force to overwrite."
+                    )
+                    if diagnostics is not None:
+                        diagnostics.warn(msg)
+                    elif logger is not None:
+                        logger.warning(msg)
+                    continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest, follow_symlinks=False)
+            # IM4: hash the deployed file (post-copy) rather than trusting
+            # the source bundle's expected_hash.  Today the integrator is a
+            # raw copy so the values match, but documenting deployed-file
+            # provenance now keeps the lockfile honest if future transforms
+            # (frontmatter injection, etc.) mutate content during deploy.
+            deployed_files.append(record)
+            # Use ``compute_file_hash`` so the recorded value carries the
+            # canonical ``sha256:<hex>`` prefix.  Matches the format written
+            # by the regular install pipeline (``compute_deployed_hashes``)
+            # so subsequent stale-cleanup provenance checks compare equal
+            # instead of mis-classifying these files as user-edited.
+            deployed_hashes[record] = compute_file_hash(dest)
+            if logger:
+                logger.verbose_detail(f"deployed {record}")
+
+    return {
+        "deployed_files": deployed_files,
+        "deployed_file_hashes": deployed_hashes,
+        "skipped": skipped,
+        "skills": 0,
+        "agents": 0,
+        "commands": 0,
+        "hooks": 0,
+        "instructions": 0,
+        "prompts": 0,
+        "sub_skills": 0,
+    }

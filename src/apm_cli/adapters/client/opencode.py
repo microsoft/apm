@@ -41,10 +41,12 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     """
 
     supports_user_scope: bool = False
+    target_name: str = "opencode"
+    mcp_servers_key: str = "mcpServers"
 
     def get_config_path(self):
         """Return the path to ``opencode.json`` in the repository root."""
-        return str(Path(os.getcwd()) / "opencode.json")
+        return str(self.project_root / "opencode.json")
 
     def update_config(self, config_updates, enabled=True):
         """Merge *config_updates* into the ``mcp`` section of ``opencode.json``.
@@ -55,7 +57,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         Translates Copilot-format entries (``command``/``args``/``env``) into
         OpenCode format (``command`` array / ``environment``).
         """
-        opencode_dir = Path(os.getcwd()) / ".opencode"
+        opencode_dir = self.project_root / ".opencode"
         if not opencode_dir.is_dir():
             return
 
@@ -76,9 +78,9 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         if not os.path.exists(config_path):
             return {}
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return {}
 
     def configure_mcp_server(
@@ -99,7 +101,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             print("Error: server_url cannot be empty")
             return False
 
-        opencode_dir = Path(os.getcwd()) / ".opencode"
+        opencode_dir = self.project_root / ".opencode"
         if not opencode_dir.is_dir():
             return False
 
@@ -120,14 +122,10 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             else:
                 config_key = server_url
 
-            server_config = self._format_server_config(
-                server_info, env_overrides, runtime_vars
-            )
+            server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config}, enabled=enabled)
 
-            print(
-                f"Successfully configured MCP server '{config_key}' for OpenCode"
-            )
+            print(f"Successfully configured MCP server '{config_key}' for OpenCode")
             return True
 
         except Exception as e:
@@ -147,7 +145,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         cmd = copilot_entry.get("command", "")
         args = copilot_entry.get("args", [])
         if cmd:
-            entry["command"] = [cmd] + list(args)
+            entry["command"] = [cmd] + list(args)  # noqa: RUF005
         elif "url" in copilot_entry:
             entry["type"] = "remote"
             entry["url"] = copilot_entry["url"]

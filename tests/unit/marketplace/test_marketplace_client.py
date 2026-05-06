@@ -1,14 +1,32 @@
 """Tests for marketplace client -- HTTP mock, caching, TTL, auth, auto-detection, proxy."""
 
 import json
+import re
 import time
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
-from apm_cli.marketplace import client as client_mod
+
+
+def _quoted_hosts(text: str) -> set[str]:
+    """Extract host tokens from `Host '<host>'` patterns in error text.
+
+    Each token is normalised through ``urllib.parse.urlparse`` so callers
+    compare on parsed hostnames (set equality), not raw substrings -- which
+    is what CodeQL's ``py/incomplete-url-substring-sanitization`` rule
+    requires (see ``.github/instructions/tests.instructions.md``).
+    """
+    hosts: set[str] = set()
+    for m in re.finditer(r"Host '([^']+)'", text, re.IGNORECASE):
+        parsed = urlparse(f"https://{m.group(1)}")
+        if parsed.hostname:
+            hosts.add(parsed.hostname)
+    return hosts
 
 
 @pytest.fixture(autouse=True)
@@ -135,9 +153,7 @@ class TestFetchMarketplace:
         mock_resolver.try_with_fallback.side_effect = Exception("Network error")
         mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
 
-        manifest = client_mod.fetch_marketplace(
-            source, auth_resolver=mock_resolver
-        )
+        manifest = client_mod.fetch_marketplace(source, auth_resolver=mock_resolver)
         assert manifest.name == "Stale"  # Falls back to stale cache
 
     def test_no_cache_no_network_raises(self, tmp_path):
@@ -147,9 +163,7 @@ class TestFetchMarketplace:
         mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
 
         with pytest.raises(MarketplaceFetchError):
-            client_mod.fetch_marketplace(
-                source, force_refresh=True, auth_resolver=mock_resolver
-            )
+            client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=mock_resolver)
 
 
 class TestAutoDetectPath:
@@ -201,7 +215,7 @@ class TestAutoDetectPath:
 class TestProxyAwareFetch:
     """Proxy-aware marketplace fetch via Artifactory Archive Entry Download."""
 
-    _MARKETPLACE_JSON = {"name": "Test", "plugins": [{"name": "p1", "repository": "o/r"}]}
+    _MARKETPLACE_JSON = {"name": "Test", "plugins": [{"name": "p1", "repository": "o/r"}]}  # noqa: RUF012
 
     def _make_cfg(self, enforce_only=False):
         cfg = MagicMock()
@@ -217,8 +231,12 @@ class TestProxyAwareFetch:
         source = _make_source()
         cfg = self._make_cfg()
         raw = json.dumps(self._MARKETPLACE_JSON).encode()
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw) as mock_fetch:
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw
+            ) as mock_fetch,
+        ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
         assert result == self._MARKETPLACE_JSON
@@ -237,8 +255,10 @@ class TestProxyAwareFetch:
         """Proxy returns None, no enforce_only -- falls through to GitHub API."""
         source = _make_source()
         cfg = self._make_cfg(enforce_only=False)
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None),
+        ):
             mock_resolver = MagicMock()
             mock_resolver.try_with_fallback.return_value = self._MARKETPLACE_JSON
             mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
@@ -251,8 +271,10 @@ class TestProxyAwareFetch:
         """Proxy returns None + enforce_only -- returns None, no GitHub call."""
         source = _make_source()
         cfg = self._make_cfg(enforce_only=True)
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None),
+        ):
             mock_resolver = MagicMock()
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=mock_resolver)
 
@@ -274,8 +296,13 @@ class TestProxyAwareFetch:
         """Proxy returns non-JSON bytes -- treated as failure, falls to GitHub."""
         source = _make_source()
         cfg = self._make_cfg(enforce_only=False)
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=b"\x89PNG binary"):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
+                return_value=b"\x89PNG binary",
+            ),
+        ):
             mock_resolver = MagicMock()
             mock_resolver.try_with_fallback.return_value = self._MARKETPLACE_JSON
             mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
@@ -297,8 +324,12 @@ class TestProxyAwareFetch:
 
         mock_resolver = MagicMock()
         mock_resolver.try_with_fallback.return_value = None
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", side_effect=mock_entry):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive", side_effect=mock_entry
+            ),
+        ):
             path = client_mod._auto_detect_path(source, auth_resolver=mock_resolver)
 
         assert path == ".github/plugin/marketplace.json"
@@ -308,8 +339,10 @@ class TestProxyAwareFetch:
         source = _make_source()
         cfg = self._make_cfg()
         raw = json.dumps(self._MARKETPLACE_JSON).encode()
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw),
+        ):
             manifest = client_mod.fetch_marketplace(source, force_refresh=True)
 
         assert manifest.name == "Test"
@@ -327,7 +360,7 @@ class TestPrivateRepoAuth:
     is used on the first attempt.
     """
 
-    _MARKETPLACE_JSON = {"name": "Private Plugins", "plugins": []}
+    _MARKETPLACE_JSON = {"name": "Private Plugins", "plugins": []}  # noqa: RUF012
 
     def test_fetch_file_private_repo_auth_first(self, _proxy):
         """_fetch_file passes unauth_first=False so private repos are reached via auth first."""
@@ -414,3 +447,83 @@ class TestCacheKey:
         s1 = MarketplaceSource(name="mkt", owner="o", repo="r", host="a.com")
         s2 = MarketplaceSource(name="mkt", owner="o", repo="r", host="b.com")
         assert client_mod._cache_key(s1) != client_mod._cache_key(s2)
+
+
+class TestCacheUtf8RoundTrip:
+    """Cache I/O preserves non-ASCII content (Windows cp1252/cp950 guard)."""
+
+    def test_write_and_read_non_ascii(self, tmp_path):
+        data = {
+            "name": "Marketplace -- cafe",
+            "description": "\u4e2d\u6587 description",
+            "plugins": [{"name": "skill-\u958b\u59cb", "author": "cafe"}],
+        }
+        client_mod._write_cache("utf8-mkt", data)
+
+        cached = client_mod._read_cache("utf8-mkt")
+        assert cached is not None
+        assert cached["name"] == "Marketplace -- cafe"
+        assert cached["description"] == "\u4e2d\u6587 description"
+        assert cached["plugins"][0]["name"] == "skill-\u958b\u59cb"
+
+    def test_stale_cache_read_non_ascii(self, tmp_path):
+        import os as _os
+
+        data = {"plugins": [{"name": "\u4e2d\u6587-skill"}]}
+        client_mod._write_cache("stale-mkt", data)
+
+        # Drop the meta file so _read_cache treats the entry as missing and
+        # _read_stale_cache is the only path that returns content.
+        _os.remove(client_mod._cache_meta_path("stale-mkt"))
+        assert client_mod._read_cache("stale-mkt") is None
+
+        stale = client_mod._read_stale_cache("stale-mkt")
+        assert stale is not None
+        assert stale["plugins"][0]["name"] == "\u4e2d\u6587-skill"
+
+
+class TestFetchFileHostKindGuard:
+    """Defense-in-depth: _fetch_file refuses non-GitHub hosts.
+
+    Marketplace registration already gates non-trusted hosts, but if a
+    legacy registry entry or future caller bypasses that gate, we MUST NOT
+    issue a GitHub Contents API request to a non-GitHub host -- doing so
+    would attach Authorization: token <github_pat> headers to a request
+    aimed at an unrelated host, leaking credentials.
+    """
+
+    def test_generic_host_rejected_before_request(self):
+        """A 'generic' kind host (e.g. gitlab.com) raises and never fetches."""
+        from unittest.mock import patch
+
+        source = MarketplaceSource(
+            name="evil",
+            owner="acme",
+            repo="plugins",
+            branch="main",
+            host="gitlab.com",
+        )
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client.requests.get") as mock_get,
+            pytest.raises(MarketplaceFetchError) as excinfo,
+        ):
+            client_mod._fetch_file(source, "marketplace.json")
+
+        # No HTTP request should have been issued (no credential leakage).
+        mock_get.assert_not_called()
+        assert _quoted_hosts(str(excinfo.value)) == {"gitlab.com"}
+        assert "not a supported marketplace source" in str(excinfo.value)
+
+    def test_github_host_passes_guard(self):
+        """github.com sources are untouched by the guard."""
+        from unittest.mock import MagicMock, patch
+
+        source = _make_source()
+        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
+            mock_resolver = MagicMock()
+            mock_resolver.try_with_fallback.return_value = {"name": "ok", "plugins": []}
+            mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
+            result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=mock_resolver)
+
+        assert result == {"name": "ok", "plugins": []}

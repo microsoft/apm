@@ -10,11 +10,17 @@ class MarketplaceError(Exception):
 class MarketplaceNotFoundError(MarketplaceError):
     """Raised when a registered marketplace cannot be found."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, host: str = "github.com"):
         self.name = name
+        self.host = host
+        # Interpolate the active host so GHES users get a copy-paste-ready
+        # URL that works for them. Callers should pass the current host
+        # (e.g. default_host()); fall back to github.com to preserve the
+        # public-cloud default.
         super().__init__(
             f"Marketplace '{name}' is not registered. "
-            f"Run 'apm marketplace add OWNER/REPO' to register it, "
+            f"Run 'apm marketplace add https://{host}/OWNER/REPO' "
+            f"or 'apm marketplace add OWNER/REPO' to register it, "
             f"or 'apm marketplace list' to see registered marketplaces."
         )
 
@@ -31,6 +37,14 @@ class PluginNotFoundError(MarketplaceError):
         )
 
 
+class MarketplaceYmlError(MarketplaceError):
+    """Raised when marketplace.yml validation or parsing fails."""
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
 class MarketplaceFetchError(MarketplaceError):
     """Raised when fetching marketplace data fails."""
 
@@ -41,4 +55,78 @@ class MarketplaceFetchError(MarketplaceError):
         super().__init__(
             f"Failed to fetch marketplace '{name}'{detail}. "
             f"Run 'apm marketplace update {name}' to retry."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Builder errors (used by builder.py and ref_resolver.py)
+# ---------------------------------------------------------------------------
+
+
+class BuildError(MarketplaceError):
+    """Base class for errors raised during marketplace build."""
+
+    def __init__(self, message: str, *, package: str = ""):
+        self.package = package
+        super().__init__(message)
+
+
+class NoMatchingVersionError(BuildError):
+    """No remote tag satisfies the requested semver range."""
+
+    def __init__(self, package: str, version_range: str, *, detail: str = ""):
+        self.version_range = version_range
+        extra = f" ({detail})" if detail else ""
+        super().__init__(
+            f"No tag matching version '{version_range}' found for package '{package}'{extra}",
+            package=package,
+        )
+
+
+class RefNotFoundError(BuildError):
+    """An explicit ref (tag/branch/SHA) was not found on the remote."""
+
+    def __init__(self, package: str, ref: str, remote: str):
+        self.ref = ref
+        self.remote = remote
+        super().__init__(
+            f"Ref '{ref}' not found on remote '{remote}' for package '{package}'",
+            package=package,
+        )
+
+
+class HeadNotAllowedError(BuildError):
+    """Resolved ref is HEAD or a branch name and allow_head is False."""
+
+    def __init__(self, package: str, ref: str):
+        self.ref = ref
+        super().__init__(
+            f"Package '{package}' resolves to branch/HEAD ref '{ref}'. "
+            f"Branch refs are mutable and not recommended for reproducible builds. "
+            f"Pin to a tag or SHA, or pass --allow-head to override.",
+            package=package,
+        )
+
+
+class OfflineMissError(BuildError):
+    """Offline mode requested but the ref cache has no entry for the remote."""
+
+    def __init__(self, package: str, remote: str):
+        self.remote = remote
+        super().__init__(
+            f"Offline mode: no cached refs for '{remote}' "
+            f"(package '{package}'). Run a build online first.",
+            package=package,
+        )
+
+
+class GitLsRemoteError(BuildError):
+    """git ls-remote failed (wraps TranslatedGitError)."""
+
+    def __init__(self, package: str, summary: str, hint: str):
+        self.summary_text = summary
+        self.hint = hint
+        super().__init__(
+            f"{summary} {hint}",
+            package=package,
         )

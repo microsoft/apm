@@ -52,7 +52,7 @@ def setup(runtime_name, version, vanilla):
 
 
 @runtime.command(help="List available and installed runtimes")
-def list():
+def list():  # noqa: F811
     """List all available runtimes and their installation status."""
     logger = CommandLogger("runtime list")
     try:
@@ -78,9 +78,7 @@ def list():
 
             for name, info in runtimes.items():
                 status_icon = (
-                    STATUS_SYMBOLS["check"]
-                    if info["installed"]
-                    else STATUS_SYMBOLS["cross"]
+                    STATUS_SYMBOLS["check"] if info["installed"] else STATUS_SYMBOLS["cross"]
                 )
                 status_text = "Installed" if info["installed"] else "Not installed"
 
@@ -91,9 +89,7 @@ def list():
                         details_list.append(f"Version: {info['version']}")
                     details = "\n".join(details_list)
 
-                table.add_row(
-                    f"{status_icon} {status_text}", name, info["description"], details
-                )
+                table.add_row(f"{status_icon} {status_text}", name, info["description"], details)
 
             console.print(table)
 
@@ -124,7 +120,12 @@ def list():
 
 @runtime.command(help="Remove an installed runtime")
 @click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm", "gemini"]))
-@click.confirmation_option("--yes", "-y", prompt="Are you sure you want to remove this runtime?", help="Confirm the action without prompting")
+@click.confirmation_option(
+    "--yes",
+    "-y",
+    prompt="Are you sure you want to remove this runtime?",
+    help="Confirm the action without prompting",
+)
 def remove(runtime_name):
     """Remove an installed runtime from APM management."""
     logger = CommandLogger("runtime remove")
@@ -159,9 +160,9 @@ def status():
 
         try:
             # Create a nice status display
-            status_content = f"""Preference order: {' -> '.join(preference)}
+            status_content = f"""Preference order: {" -> ".join(preference)}
 
-Active runtime: {available_runtime if available_runtime else 'None available'}"""
+Active runtime: {available_runtime if available_runtime else "None available"}"""
 
             if not available_runtime:
                 status_content += f"\n\n{STATUS_SYMBOLS['info']} Run 'apm runtime setup copilot' to install the primary runtime"
@@ -179,9 +180,7 @@ Active runtime: {available_runtime if available_runtime else 'None available'}""
                 logger.success(f"Active runtime: {available_runtime}")
             else:
                 logger.error("No runtimes available")
-                logger.progress(
-                    "Run 'apm runtime setup copilot' to install the primary runtime"
-                )
+                logger.progress("Run 'apm runtime setup copilot' to install the primary runtime")
 
     except Exception as e:
         logger.error(f"Error checking runtime status: {e}")

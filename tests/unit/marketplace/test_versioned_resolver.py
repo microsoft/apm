@@ -24,10 +24,10 @@ from apm_cli.marketplace.resolver import (
     resolve_plugin_source,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_plugin(
     name="my-plugin",
@@ -141,9 +141,7 @@ class TestResolveMarketplacePlugin:
     def test_raw_ref_overrides_source(self):
         """version_spec is treated as raw git ref override."""
         plugin = _make_plugin()
-        canonical, resolved = self._resolve(
-            plugin, version_spec="develop"
-        )
+        canonical, resolved = self._resolve(plugin, version_spec="develop")  # noqa: RUF059
         assert canonical == "acme-org/my-plugin#develop"
 
     def test_ref_tag_override(self):
@@ -169,9 +167,9 @@ class TestResolveMarketplacePlugin:
                 "apm_cli.marketplace.resolver.fetch_or_cache",
                 return_value=manifest,
             ),
+            pytest.raises(PluginNotFoundError),
         ):
-            with pytest.raises(PluginNotFoundError):
-                resolve_marketplace_plugin("nonexistent", "test-mkt")
+            resolve_marketplace_plugin("nonexistent", "test-mkt")
 
 
 # ---------------------------------------------------------------------------
@@ -193,10 +191,15 @@ class TestCanonicalString:
         assert canonical == "acme-org/my-plugin#main"
 
     def test_plugin_root_applied(self):
-        plugin = _make_plugin(name="reviewer")
+        plugin = _make_plugin(name="reviewer")  # noqa: F841
         plugin_with_subdir = MarketplacePlugin(
             name="reviewer",
-            source={"type": "git-subdir", "repo": "acme-org/mono", "ref": "main", "subdir": "plugins/reviewer"},
+            source={
+                "type": "git-subdir",
+                "repo": "acme-org/mono",
+                "ref": "main",
+                "subdir": "plugins/reviewer",
+            },
         )
         canonical = resolve_plugin_source(
             plugin_with_subdir,

@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
-from apm_cli.models.apm_package import APMPackage, DependencyReference
+from apm_cli.models.apm_package import APMPackage, DependencyReference  # noqa: F401
 
 
 @pytest.mark.integration
@@ -95,9 +95,11 @@ class TestGenericGitUrlInstallation:
 
     def test_object_format_git_url_with_path(self):
         """Install a skill from awesome-copilot using object format with path."""
-        self._write_apm_yml([
-            {"git": "https://github.com/github/awesome-copilot.git", "path": "skills/aspire"},
-        ])
+        self._write_apm_yml(
+            [
+                {"git": "https://github.com/github/awesome-copilot.git", "path": "skills/aspire"},
+            ]
+        )
 
         pkg = APMPackage.from_apm_yml(self.apm_yml_path)
         deps = pkg.get_apm_dependencies()
@@ -110,9 +112,11 @@ class TestGenericGitUrlInstallation:
 
         dl = GitHubPackageDownloader()
         # Virtual packages install at the full path including the virtual sub-path
-        install_dir = self.test_dir / "apm_modules" / "github" / "awesome-copilot" / "skills" / "aspire"
+        install_dir = (
+            self.test_dir / "apm_modules" / "github" / "awesome-copilot" / "skills" / "aspire"
+        )
         install_dir.mkdir(parents=True)
-        result = dl.download_package(str(dep), install_dir)
+        result = dl.download_package(str(dep), install_dir)  # noqa: F841
 
         assert install_dir.exists()
         assert (install_dir / "SKILL.md").exists()
@@ -123,13 +127,15 @@ class TestGenericGitUrlInstallation:
 
     def test_object_format_with_ref(self):
         """Install with pinned ref via object format."""
-        self._write_apm_yml([
-            {
-                "git": "https://github.com/github/awesome-copilot.git",
-                "path": "skills/review-and-refactor",
-                "ref": "main",
-            },
-        ])
+        self._write_apm_yml(
+            [
+                {
+                    "git": "https://github.com/github/awesome-copilot.git",
+                    "path": "skills/review-and-refactor",
+                    "ref": "main",
+                },
+            ]
+        )
 
         pkg = APMPackage.from_apm_yml(self.apm_yml_path)
         deps = pkg.get_apm_dependencies()
@@ -139,9 +145,16 @@ class TestGenericGitUrlInstallation:
         assert dep.virtual_path == "skills/review-and-refactor"
 
         dl = GitHubPackageDownloader()
-        install_dir = self.test_dir / "apm_modules" / "github" / "awesome-copilot" / "skills" / "review-and-refactor"
+        install_dir = (
+            self.test_dir
+            / "apm_modules"
+            / "github"
+            / "awesome-copilot"
+            / "skills"
+            / "review-and-refactor"
+        )
         install_dir.mkdir(parents=True)
-        result = dl.download_package(str(dep), install_dir)
+        result = dl.download_package(str(dep), install_dir)  # noqa: F841
 
         assert install_dir.exists()
         assert (install_dir / "SKILL.md").exists()
@@ -152,10 +165,12 @@ class TestGenericGitUrlInstallation:
 
     def test_mixed_string_and_object_deps(self):
         """Install a mix of string shorthand and object-style deps."""
-        self._write_apm_yml([
-            "microsoft/apm-sample-package",
-            {"git": "https://github.com/github/awesome-copilot.git", "path": "skills/aspire"},
-        ])
+        self._write_apm_yml(
+            [
+                "microsoft/apm-sample-package",
+                {"git": "https://github.com/github/awesome-copilot.git", "path": "skills/aspire"},
+            ]
+        )
 
         pkg = APMPackage.from_apm_yml(self.apm_yml_path)
         deps = pkg.get_apm_dependencies()
@@ -174,7 +189,7 @@ class TestGenericGitUrlInstallation:
 @pytest.mark.integration
 class TestNormalizeOnWriteRoundtrip:
     """Integration tests for normalize-on-write CLI roundtrip.
-    
+
     Verifies that:
     - apm install <URL> stores canonical form in apm.yml (not raw input)
     - apm uninstall <shorthand> finds and removes the canonical entry
@@ -205,10 +220,12 @@ class TestNormalizeOnWriteRoundtrip:
     def test_install_https_url_stores_canonical(self):
         """apm install https://github.com/o/r.git → apm.yml stores 'o/r'."""
         from unittest.mock import patch
+
         self._write_apm_yml()
 
         with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
             from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
             validated, _outcome = _validate_and_add_packages_to_apm_yml(
                 ["https://github.com/microsoft/apm-sample-package.git"]
             )
@@ -217,19 +234,23 @@ class TestNormalizeOnWriteRoundtrip:
         data = yaml.safe_load(self.apm_yml_path.read_text())
         assert "microsoft/apm-sample-package" in data["dependencies"]["apm"]
         # Verify raw URL is NOT stored
-        assert "https://github.com/microsoft/apm-sample-package.git" not in data["dependencies"]["apm"]
+        assert (
+            "https://github.com/microsoft/apm-sample-package.git" not in data["dependencies"]["apm"]
+        )
 
     # -----------------------------------------------------------------------
-    # Normalize-on-write: SSH URL → canonical shorthand 
+    # Normalize-on-write: SSH URL → canonical shorthand
     # -----------------------------------------------------------------------
 
     def test_install_ssh_url_stores_canonical(self):
         """apm install git@github.com:o/r.git → apm.yml stores 'o/r'."""
         from unittest.mock import patch
+
         self._write_apm_yml()
 
         with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
             from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
             validated, _outcome = _validate_and_add_packages_to_apm_yml(
                 ["git@github.com:microsoft/apm-sample-package.git"]
             )
@@ -245,10 +266,12 @@ class TestNormalizeOnWriteRoundtrip:
     def test_no_duplicate_when_already_in_canonical_form(self):
         """Installing 'o/r' when 'o/r' already exists → no duplicate."""
         from unittest.mock import patch
+
         self._write_apm_yml(["microsoft/apm-sample-package"])
 
         with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
             from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
             validated, _outcome = _validate_and_add_packages_to_apm_yml(
                 ["microsoft/apm-sample-package"]
             )
@@ -260,10 +283,12 @@ class TestNormalizeOnWriteRoundtrip:
     def test_no_duplicate_when_url_matches_existing_canonical(self):
         """Installing HTTPS URL when shorthand already exists → no duplicate."""
         from unittest.mock import patch
+
         self._write_apm_yml(["microsoft/apm-sample-package"])
 
         with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
             from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
             validated, _outcome = _validate_and_add_packages_to_apm_yml(
                 ["https://github.com/microsoft/apm-sample-package.git"]
             )

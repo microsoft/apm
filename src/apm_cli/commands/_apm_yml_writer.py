@@ -6,7 +6,7 @@ field.  Keeps write-back logic isolated and unit-testable.
 """
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional  # noqa: F401, UP035
 
 from ..models.dependency.reference import DependencyReference
 from ..utils.yaml_io import dump_yaml, load_yaml
@@ -15,7 +15,7 @@ from ..utils.yaml_io import dump_yaml, load_yaml
 def set_skill_subset_for_entry(
     manifest_path: Path,
     repo_url: str,
-    subset: Optional[List[str]],
+    subset: list[str] | None,
 ) -> bool:
     """Promote entry to dict form and set/clear skills: field.
 
@@ -62,7 +62,7 @@ def _entry_matches(entry, repo_url: str) -> bool:
         return False
 
 
-def _apply_subset(entry, subset: Optional[List[str]]):
+def _apply_subset(entry, subset: list[str] | None):
     """Apply skill subset to an entry, promoting to dict form if needed."""
     # Parse current entry to get canonical info
     if isinstance(entry, str):

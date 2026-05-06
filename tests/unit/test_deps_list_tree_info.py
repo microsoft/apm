@@ -8,7 +8,7 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -169,7 +169,9 @@ class TestDepsListCommand(_DepsCmdBase):
             with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
                 result = self.runner.invoke(cli, ["deps", "list"])
         assert result.exit_code == 0
-        assert "orphaned" in result.output.lower()
+        # Match the specific orphan-warning header (avoids false-positive
+        # match against unrelated 'orphan' substrings in future output).
+        assert "orphaned package(s) found" in result.output
 
     def test_list_version_shown(self):
         """Version from apm.yml should appear in fallback text output."""
@@ -279,6 +281,48 @@ class TestDepsListCommand(_DepsCmdBase):
         assert result.exit_code == 0
         assert "No insecure APM dependencies installed" in result.output
 
+    def test_list_subdirectory_parent_not_orphaned(self):
+        """Parent dir of a subdirectory virtual package is not flagged orphaned.
+
+        Per panel feedback (test fixture nit): the simpler -- and more
+        accurate -- representation of the subdir-dep bug uses NO
+        ``apm.yml`` at the ``owner/repo`` parent (only the ``.apm/``
+        marker created by the clone). With ``apm.yml`` present at
+        ``owner/repo`` the directory is a real standalone package and
+        the new ``standalone_installed`` guard correctly flags it as
+        orphaned (it is not declared anywhere). Drop the conflated
+        ``apm.yml`` to test the intended scenario.
+        """
+        with self._chdir_tmp() as tmp:
+            # Declare a dict-form dependency with path: pointing into .apm/skills/
+            (tmp / "apm.yml").write_text(
+                "name: test-project\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - git: github.example.com/owner/repo\n"
+                "      path: .apm/skills/my-skill\n",
+                encoding="utf-8",
+            )
+
+            # Simulate installed layout: owner/repo/ with NO apm.yml --
+            # only the cloned .apm/ subtree. ``owner/repo`` is a pure
+            # filesystem intermediary, not a standalone package.
+            repo_dir = tmp / "apm_modules" / "owner" / "repo"
+            repo_dir.mkdir(parents=True)
+            skill_dir = repo_dir / ".apm" / "skills" / "my-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+
+            assert result.exit_code == 0
+            # Assertion targets the deps-specific orphan header
+            # (deps says "orphaned package(s) found", prune says
+            # "Found N orphaned package(s)").
+            assert "orphaned package(s) found" not in result.output
+
 
 class TestDepsTreeCommand(_DepsCmdBase):
     """Tests for apm deps tree."""
@@ -351,10 +395,11 @@ class TestDepsTreeCommand(_DepsCmdBase):
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
 
-            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback(), patch(
-                "apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile
-            ), patch(
-                "apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=tmp),
+                _force_rich_fallback(),
+                patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+                patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path),
             ):
                 result = self.runner.invoke(cli, ["deps", "tree"])
 
@@ -378,7 +423,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
         an internal representation of the project's own local content, not a
         dependency. apm deps tree must skip it.
         """
-        from apm_cli.deps.lockfile import LockFile, LockedDependency
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
 
         with self._chdir_tmp() as tmp:
             self._make_package(tmp, "realorg", "realrepo")
@@ -423,8 +468,7 @@ class TestDepsInfoCommand(_DepsCmdBase):
         description = kwargs.get("description", "A test package")
         author = kwargs.get("author", "TestAuthor")
         content = (
-            f"name: {repo}\nversion: {version}\n"
-            f"description: {description}\nauthor: {author}\n"
+            f"name: {repo}\nversion: {version}\ndescription: {description}\nauthor: {author}\n"
         )
         (pkg_dir / "apm.yml").write_text(content)
         return pkg_dir
@@ -531,13 +575,9 @@ class TestDepsInfoCommand(_DepsCmdBase):
             )
             os.chdir(tmp)
             with _force_rich_fallback():
-                result_deps = self.runner.invoke(
-                    cli, ["deps", "info", "compatorg/compatrepo"]
-                )
+                result_deps = self.runner.invoke(cli, ["deps", "info", "compatorg/compatrepo"])
             with _force_rich_fallback():
-                result_info = self.runner.invoke(
-                    cli, ["info", "compatorg/compatrepo"]
-                )
+                result_info = self.runner.invoke(cli, ["info", "compatorg/compatrepo"])
 
         assert result_deps.exit_code == 0
         assert result_info.exit_code == 0

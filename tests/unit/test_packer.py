@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from apm_cli.bundle.packer import pack_bundle, PackResult, _filter_files_by_target
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.bundle.packer import PackResult, _filter_files_by_target, pack_bundle  # noqa: F401
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
 def _setup_project(tmp_path: Path, deployed_files: list[str], *, target: str | None = None) -> Path:
@@ -248,7 +248,7 @@ class TestPackBundle:
         )
         out = tmp_path / "build"
 
-        with pytest.raises(FileNotFoundError, match="apm.lock.yaml not found"):
+        with pytest.raises(FileNotFoundError, match="apm.lock.yaml not found"):  # noqa: RUF043
             pack_bundle(project, out)
 
     def test_pack_missing_deployed_file(self, tmp_path):
@@ -339,9 +339,7 @@ class TestPackBundle:
 
         result = pack_bundle(project, out, target="claude")
 
-        lock_yaml = yaml.safe_load(
-            (result.bundle_path / "apm.lock.yaml").read_text()
-        )
+        lock_yaml = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())
         bundle_deployed = lock_yaml["dependencies"][0]["deployed_files"]
         assert ".claude/skills/x/SKILL.md" in bundle_deployed
         assert ".claude/agents/a.md" in bundle_deployed
@@ -425,7 +423,7 @@ class TestPackSecurityScan:
 
         # Inject a Unicode tag character (U+E0001) into the file
         sneaky = project / ".github/agents/sneaky.md"
-        sneaky.write_text(f"Hello \U000E0001 world", encoding="utf-8")
+        sneaky.write_text("Hello \U000e0001 world", encoding="utf-8")
 
         out = tmp_path / "build"
 
@@ -446,7 +444,7 @@ class TestPackSecurityScan:
 
         # Create a file with hidden chars inside the project tree
         poisoned = project / ".github/agents/poisoned.md"
-        poisoned.write_text(f"hidden \U000E0001 payload", encoding="utf-8")
+        poisoned.write_text("hidden \U000e0001 payload", encoding="utf-8")
 
         # Replace link.md with a symlink to the poisoned file (within project)
         link_file = project / ".github/agents/link.md"
@@ -496,7 +494,7 @@ class TestFilterFilesByTargetList:
     def test_list_copilot_vscode_dedup(self):
         """copilot and vscode share .github/ prefix -- should not duplicate."""
         files = [".github/agents/a.md"]
-        result, mappings = _filter_files_by_target(files, ["copilot", "vscode"])
+        result, mappings = _filter_files_by_target(files, ["copilot", "vscode"])  # noqa: RUF059
         assert result == [".github/agents/a.md"]
 
     def test_list_single_element_matches_string(self):
@@ -542,9 +540,7 @@ class TestPackBundleMultiTarget:
 
         result = pack_bundle(project, out, target=["claude", "vscode"])
 
-        lock_yaml = yaml.safe_load(
-            (result.bundle_path / "apm.lock.yaml").read_text()
-        )
+        lock_yaml = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())
         assert lock_yaml["pack"]["target"] == "claude,vscode"
 
     def test_pack_list_config_target_when_no_explicit(self, tmp_path):
@@ -725,8 +721,7 @@ class TestPackSourceLocalGuard:
         # through the deps loop, we'd see a collision (deps run before own).
         own_matches = [f for f in result.files if f.endswith("own.md")]
         assert len(own_matches) == 1, (
-            f"Self-entry should not be re-processed via deps loop; "
-            f"files={result.files}"
+            f"Self-entry should not be re-processed via deps loop; files={result.files}"
         )
 
     def test_plugin_format_self_entry_with_is_dev_false_would_leak(self, tmp_path):
@@ -828,9 +823,7 @@ class TestPackBundleStripsLocalFields:
             assert f not in result.files
 
         # Bundle lockfile: must not carry packager-side local-content metadata
-        bundle_lock_text = (result.bundle_path / "apm.lock.yaml").read_text(
-            encoding="utf-8"
-        )
+        bundle_lock_text = (result.bundle_path / "apm.lock.yaml").read_text(encoding="utf-8")
         bundle_lock = yaml.safe_load(bundle_lock_text)
         assert "local_deployed_files" not in bundle_lock
         assert "local_deployed_file_hashes" not in bundle_lock
@@ -953,7 +946,9 @@ class TestPackHybridDescriptionWarning:
     noise on `apm install`.
     """
 
-    def _build_hybrid(self, tmp_path: Path, *, apm_desc: str | None, skill_desc: str | None) -> Path:
+    def _build_hybrid(
+        self, tmp_path: Path, *, apm_desc: str | None, skill_desc: str | None
+    ) -> Path:
         project = tmp_path / "project"
         project.mkdir()
         apm_yml: dict = {"name": "genesis", "version": "1.0.0"}

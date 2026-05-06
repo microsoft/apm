@@ -5,7 +5,8 @@ This module must NOT import from any command module.
 
 import builtins
 import os
-import tempfile
+import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 import click
@@ -14,16 +15,18 @@ from colorama import init as colorama_init
 
 from ..constants import (
     APM_DIR,
-    APM_LOCK_FILENAME,
+    APM_LOCK_FILENAME,  # noqa: F401
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
-from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..update_policy import get_update_hint_message, is_self_update_enabled
-from ..version import get_build_sha, get_version
+from ..utils.atomic_io import atomic_write_text as _atomic_write  # noqa: F401
+from ..utils.console import _rich_echo, _rich_info, _rich_warning
+from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
+from ..version import get_build_sha, get_version
 
 # CRITICAL: Shadow Click commands at module level to prevent namespace collision
 # When Click commands like 'config set' are defined, calling set() can invoke the command
@@ -43,6 +46,17 @@ INFO = f"{Fore.BLUE}"
 WARNING = f"{Fore.YELLOW}"
 HIGHLIGHT = f"{Fore.MAGENTA}{Style.BRIGHT}"
 RESET = Style.RESET_ALL
+
+
+# -------------------------------------------------------------------
+# TTY detection
+# -------------------------------------------------------------------
+
+
+def _is_interactive():
+    """Return True when both stdin and stdout are attached to a TTY."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
 
 # Lazy loading for Rich components to improve startup performance
 _console = None
@@ -88,7 +102,7 @@ def _lazy_yaml():
 
         return yaml
     except ImportError:
-        raise ImportError("PyYAML is required but not installed")
+        raise ImportError("PyYAML is required but not installed")  # noqa: B904
 
 
 def _lazy_prompt():
@@ -115,6 +129,7 @@ def _lazy_confirm():
 # Shared orphan-detection helpers
 # ------------------------------------------------------------------
 
+
 def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path) -> set:
     """Build expected package paths under *apm_modules_dir*.
 
@@ -122,7 +137,7 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
     (depth > 1 from ``apm.lock``), using ``get_install_path()`` for
     consistency with how packages are actually installed.
     """
-    expected = builtins.set()
+    expected = set()
     for dep in declared_deps:
         install_path = dep.get_install_path(apm_modules_dir)
         try:
@@ -142,6 +157,85 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
                 except ValueError:
                     pass
     return expected
+
+
+def _expand_with_ancestors(
+    paths: Iterable[str], installed: Iterable[str] | None = None
+) -> set[str]:
+    """Expand a set of expected paths to include ancestor prefixes.
+
+    Given ``{"owner/repo/.apm/skills/my-skill"}``, returns a set containing
+    the original path plus all intermediate path prefixes with 2+ segments
+    (e.g., ``"owner/repo"``, ``"owner/repo/.apm"``,
+    ``"owner/repo/.apm/skills"``, plus the original
+    ``"owner/repo/.apm/skills/my-skill"``).
+    This allows O(1) membership checks when determining whether a scanned
+    directory is an ancestor of an expected package path.
+
+    Ancestor expansion exists because a subdirectory dependency
+    (``git: owner/repo, path: .apm/skills/x``) is installed by cloning the
+    entire repo to ``apm_modules/owner/repo/``. Intermediate filesystem
+    directories created by that clone are required parts of the install --
+    not stale leftovers.
+
+    Real-orphan safety: when *installed* is supplied, an ancestor that
+    matches one of the installed paths is NOT added to the expansion
+    unless that path is also directly declared in *paths*. Callers should
+    pass only the subset of installed paths that look like *real
+    standalone packages* (i.e., directories that ship their own
+    ``apm.yml``) -- not filesystem intermediaries (which typically have
+    only a ``.apm/`` subtree from a cloned subdir dep). This preserves
+    orphan detection for the case where a user has a genuinely orphaned
+    ``owner/repo`` package on disk alongside a declared sibling
+    subdirectory dep (``owner/repo/.apm/skills/foo``): only filesystem
+    intermediaries are suppressed, never real installed packages.
+
+    Security contract -- ancestor depth cap: ``get_install_path()``
+    anchors installs at the 2-segment repo root (GitHub) or 3-segment
+    root (ADO). Anything deeper is a filesystem-intermediary path
+    (``.apm/``, ``skills/``, ...) that ``_scan_installed_packages``
+    skips, so emitting ancestors past depth 3 would only widen the
+    orphan-suppression surface without serving any real lookup. The
+    loop is therefore capped at depth 3 (``min(4, len(parts))``), which
+    bounds the number of paths an attacker-influenced ``apm.yml`` dep
+    declaration can hide from orphan detection. If the install strategy
+    ever grows deeper roots, lift this cap and document the new
+    invariant here.
+
+    Traversal guard: any input path that fails
+    :func:`apm_cli.utils.path_security.validate_path_segments` (which
+    rejects both ``.`` and ``..`` segments after backslash
+    normalisation) is kept in the result as-is (membership check) but
+    produces no ancestors. Routing through the canonical guard --
+    rather than a hand-rolled ``".." in parts`` check -- ensures
+    single-dot segments (``owner/./repo``) are also caught and keeps
+    the project's path-validation contract centralised.
+    """
+    materialized = list(paths)
+    materialized_set = set(materialized)
+    expanded = set(materialized)
+    installed_set = set(installed) if installed is not None else set()
+    for p in materialized:
+        try:
+            validate_path_segments(p, context="ancestor expansion")
+        except PathTraversalError:
+            continue
+        # Normalise backslashes so Windows-style tokens split into the
+        # same parts as POSIX inputs for the depth-capped loop below.
+        normalised = p.replace("\\", "/")
+        parts = normalised.split("/")
+        # Cap at depth 3 -- the ADO install-root depth -- to bound the
+        # ancestor-suppression surface (see security contract above).
+        for i in range(2, min(4, len(parts))):
+            ancestor = "/".join(parts[:i])
+            # Do not mask a real installed package via ancestor expansion;
+            # only filesystem intermediaries should be added. A real
+            # installed package that is also directly declared remains in
+            # expanded via materialized_set.
+            if ancestor in installed_set and ancestor not in materialized_set:
+                continue
+            expanded.add(ancestor)
+    return expanded
 
 
 def _scan_installed_packages(apm_modules_dir: Path) -> list:
@@ -167,6 +261,52 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
     return installed
 
 
+def _standalone_installed_packages(
+    installed: Iterable[str], apm_modules_dir: Path, lockfile=None
+) -> list:
+    """Filter *installed* to entries that look like real standalone packages.
+
+    Determination order (tamper-evident first):
+
+    1. Path appears as a dependency key in *lockfile* -- the canonical
+       record of what APM installed. The lockfile is integrity-checked
+       and not forgeable by dropping/omitting files in ``apm_modules/``.
+    2. Fallback: path has its own ``apm.yml``. Used when the lockfile
+       is absent (older installs / fresh checkouts) or does not list
+       the key. A directory with only a ``.apm/`` marker is treated as
+       a filesystem intermediary, not a standalone package.
+
+    Combining both signals closes the suppression-via-absence gap
+    (panel finding: forgeable ``apm.yml`` heuristic) while preserving
+    behaviour for projects that pre-date the lockfile or have not yet
+    re-installed.
+
+    Failure mode: only narrowly-typed shape errors against
+    ``lockfile.dependencies`` (``AttributeError`` / ``TypeError`` /
+    ``KeyError``) are absorbed and degrade to the ``apm.yml``-only
+    fallback. Any other exception (e.g. lockfile parse / I/O failure)
+    propagates so the outer caller can decide whether to log or fail
+    closed -- preventing a corrupted or attacker-crafted lockfile from
+    silently disabling the tamper-evident standalone check.
+    """
+    lockfile_keys: set[str] = set()
+    if lockfile is not None:
+        try:
+            for dep_key in lockfile.dependencies:
+                if dep_key:
+                    lockfile_keys.add(dep_key)
+        except (AttributeError, TypeError, KeyError):
+            lockfile_keys = set()
+    standalone: list = []
+    for p in installed:
+        if p in lockfile_keys:
+            standalone.append(p)
+            continue
+        if (apm_modules_dir / p / APM_YML_FILENAME).exists():
+            standalone.append(p)
+    return standalone
+
+
 def _check_orphaned_packages():
     """Check for packages in apm_modules/ that are not declared in apm.yml or apm.lock.
 
@@ -186,8 +326,8 @@ def _check_orphaned_packages():
             return []
 
         try:
-            from ..models.apm_package import APMPackage
             from ..deps.lockfile import LockFile, get_lockfile_path
+            from ..models.apm_package import APMPackage
 
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
             declared_deps = apm_package.get_apm_dependencies()
@@ -197,7 +337,19 @@ def _check_orphaned_packages():
             return []
 
         installed = _scan_installed_packages(apm_modules_dir)
-        return [p for p in installed if p not in expected]
+        # Combined lockfile-membership + apm.yml fallback determines
+        # which installed paths are real standalone packages (and so
+        # must NOT be masked by ancestor expansion). The lockfile is
+        # the canonical, tamper-evident record; apm.yml-existence is
+        # the fallback for projects without a lockfile yet.
+        # See _expand_with_ancestors for the user-safety rationale.
+        standalone_installed = _standalone_installed_packages(
+            installed, apm_modules_dir, lockfile=lockfile
+        )
+        expected_with_ancestors = _expand_with_ancestors(expected, standalone_installed)
+        # Sort for deterministic, diffable output across runs (rglob
+        # traversal order is filesystem-dependent).
+        return sorted(p for p in installed if p not in expected_with_ancestors)
     except Exception:
         return []
 
@@ -219,14 +371,10 @@ def print_version(ctx, param, value):
                 f"[bold cyan]Agent Package Manager (APM) CLI[/bold cyan] version {version_str}"
             )
         except Exception:
-            click.echo(
-                f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}"
-            )
+            click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
     else:
         # Graceful fallback when Rich isn't available (e.g., stripped automation environment)
-        click.echo(
-            f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}"
-        )
+        click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
 
     # Gated verbose-version output (experimental flag)
     try:
@@ -286,21 +434,6 @@ def _check_and_notify_updates():
         pass
 
 
-def _atomic_write(path: Path, data: str) -> None:
-    """Atomically write text data to path (best-effort)."""
-    fd, tmp_name = tempfile.mkstemp(prefix="apm-write-", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(data)
-        os.replace(tmp_name, path)
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
-
-
 def _update_gitignore_for_apm_modules(logger=None):
     """Add apm_modules/ to .gitignore if not already present."""
     gitignore_path = Path(GITIGNORE_FILENAME)
@@ -310,7 +443,7 @@ def _update_gitignore_for_apm_modules(logger=None):
     current_content = []
     if gitignore_path.exists():
         try:
-            with open(gitignore_path, "r", encoding="utf-8") as f:
+            with open(gitignore_path, encoding="utf-8") as f:
                 current_content = [line.rstrip("\n\r") for line in f.readlines()]
         except Exception as e:
             if logger:
@@ -346,10 +479,12 @@ def _update_gitignore_for_apm_modules(logger=None):
 # Script / config helpers (shared by run, list, config commands)
 # ------------------------------------------------------------------
 
+
 def _load_apm_config():
     """Load configuration from apm.yml."""
     if Path(APM_YML_FILENAME).exists():
         from ..utils.yaml_io import load_yaml
+
         return load_yaml(APM_YML_FILENAME)
     return None
 
@@ -374,13 +509,18 @@ def _list_available_scripts():
 # Init helpers (shared by init and install commands)
 # ------------------------------------------------------------------
 
+
 def _auto_detect_author():
     """Auto-detect author from git config."""
     import subprocess
 
     try:
         result = subprocess.run(
-            ["git", "config", "user.name"], capture_output=True, text=True, encoding="utf-8", timeout=5
+            ["git", "config", "user.name"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -442,9 +582,10 @@ def _validate_project_name(name):
     """
     if "/" in name or "\\" in name:
         return False
-    if name == "..":
+    if name == "..":  # noqa: SIM103
         return False
     return True
+
 
 def _create_plugin_json(config):
     """Create plugin.json file with package metadata.
@@ -496,5 +637,6 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
 
     # Write apm.yml
     from ..utils.yaml_io import dump_yaml
+
     out_path = target_path or APM_YML_FILENAME
     dump_yaml(apm_yml_data, out_path)

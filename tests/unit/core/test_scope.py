@@ -1,14 +1,14 @@
 """Tests for installation scope resolution."""
 
-import os
+import os  # noqa: F401
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from apm_cli.core.scope import (
-    InstallScope,
     USER_APM_DIR,
+    InstallScope,
     ensure_user_dirs,
     get_apm_dir,
     get_deploy_root,
@@ -19,7 +19,6 @@ from apm_cli.core.scope import (
     warn_unsupported_user_scope,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
-
 
 # ---------------------------------------------------------------------------
 # InstallScope enum
@@ -158,7 +157,17 @@ class TestTargetProfileUserScope:
     """Validate user-scope metadata on TargetProfile in KNOWN_TARGETS."""
 
     def test_all_known_targets_present(self):
-        expected = {"copilot", "claude", "cursor", "opencode", "codex", "gemini", "copilot-cowork"}
+        expected = {
+            "copilot",
+            "claude",
+            "cursor",
+            "opencode",
+            "codex",
+            "gemini",
+            "windsurf",
+            "copilot-cowork",
+            "agent-skills",
+        }
         assert set(KNOWN_TARGETS.keys()) == expected
 
     def test_each_target_has_user_supported(self):
@@ -227,6 +236,25 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["opencode"].supports_at_user_scope("commands") is True
         assert KNOWN_TARGETS["opencode"].supports_at_user_scope("hooks") is False
 
+    def test_windsurf_is_partially_supported(self):
+        assert KNOWN_TARGETS["windsurf"].user_supported == "partial"
+        assert KNOWN_TARGETS["windsurf"].user_root_dir == ".codeium/windsurf"
+        assert "instructions" in KNOWN_TARGETS["windsurf"].unsupported_user_primitives
+
+    def test_supports_at_user_scope_windsurf_partial(self):
+        # Windsurf supports skills, commands, hooks, agents at user scope but not instructions
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("skills") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("commands") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("hooks") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("agents") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("instructions") is False
+
+    def test_windsurf_effective_root_project_scope(self):
+        assert KNOWN_TARGETS["windsurf"].effective_root(user_scope=False) == ".windsurf"
+
+    def test_windsurf_effective_root_user_scope(self):
+        assert KNOWN_TARGETS["windsurf"].effective_root(user_scope=True) == ".codeium/windsurf"
+
     def test_unsupported_targets_have_no_user_root(self):
         for name, profile in KNOWN_TARGETS.items():
             if profile.user_supported is False:
@@ -272,6 +300,8 @@ class TestScopeWarnings:
         assert "cursor (instructions)" in msg
         # OpenCode excludes hooks
         assert "opencode (hooks)" in msg
+        # Windsurf excludes instructions
+        assert "windsurf (instructions)" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -284,12 +314,14 @@ class TestActiveTargetsUserScope:
 
     def test_explicit_copilot(self):
         from apm_cli.integration.targets import active_targets_user_scope
+
         result = active_targets_user_scope(explicit_target="copilot")
         assert len(result) == 1
         assert result[0].name == "copilot"
 
     def test_explicit_all_returns_all_user_capable(self):
         from apm_cli.integration.targets import active_targets_user_scope
+
         result = active_targets_user_scope(explicit_target="all")
         names = {t.name for t in result}
         assert "copilot" in names
@@ -297,13 +329,21 @@ class TestActiveTargetsUserScope:
         assert "cursor" in names
         assert "opencode" in names
 
-    def test_explicit_unknown_returns_empty(self):
-        from apm_cli.integration.targets import active_targets_user_scope
-        result = active_targets_user_scope(explicit_target="nonexistent")
-        assert result == []
+    def test_unknown_target_raises_at_parse_time(self):
+        """Unknown tokens fail at the parser, not silently in the
+        user-scope resolver.  Mirrors the project-scope contract change
+        from #820 -- both entry points share one validator
+        (:func:`apm_cli.core.target_detection.parse_target_field`)."""
+        import pytest
+
+        from apm_cli.core.target_detection import parse_target_field
+
+        with pytest.raises(ValueError, match="not a valid target"):
+            parse_target_field("nonexistent")
 
     def test_explicit_vscode_alias(self):
         from apm_cli.integration.targets import active_targets_user_scope
+
         result = active_targets_user_scope(explicit_target="vscode")
         assert len(result) == 1
         assert result[0].name == "copilot"
@@ -311,6 +351,7 @@ class TestActiveTargetsUserScope:
     def test_auto_detect_by_dir_presence(self, tmp_path):
         """When cursor dir exists at ~/, it should be detected."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         (tmp_path / ".cursor").mkdir()
         with patch("pathlib.Path.home", return_value=tmp_path):
             result = active_targets_user_scope()
@@ -320,6 +361,7 @@ class TestActiveTargetsUserScope:
     def test_auto_detect_multiple_dirs(self, tmp_path):
         """Detects all targets with existing home dirs."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         (tmp_path / ".cursor").mkdir()
         (tmp_path / ".claude").mkdir()
         with patch("pathlib.Path.home", return_value=tmp_path):
@@ -331,6 +373,7 @@ class TestActiveTargetsUserScope:
     def test_fallback_to_copilot(self, tmp_path):
         """When no target dirs exist, falls back to copilot."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         with patch("pathlib.Path.home", return_value=tmp_path):
             result = active_targets_user_scope()
         assert len(result) == 1
@@ -339,6 +382,7 @@ class TestActiveTargetsUserScope:
     def test_opencode_nested_dir(self, tmp_path):
         """OpenCode uses ~/.config/opencode/ which is nested."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         (tmp_path / ".config" / "opencode").mkdir(parents=True)
         with patch("pathlib.Path.home", return_value=tmp_path):
             result = active_targets_user_scope()
