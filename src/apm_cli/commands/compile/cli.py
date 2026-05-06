@@ -314,6 +314,13 @@ def _resolve_compile_target(target):
         "need per-client skill layouts."
     ),
 )
+@click.option(
+    "--all",
+    "compile_all",
+    is_flag=True,
+    default=False,
+    help="Compile for all canonical targets. Equivalent to --target all.",
+)
 @click.pass_context
 def compile(
     ctx,
@@ -330,6 +337,7 @@ def compile(
     local_only,
     clean,
     legacy_skill_paths,
+    compile_all,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -350,6 +358,23 @@ def compile(
     * --clean: Remove orphaned AGENTS.md files that are no longer generated
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
+
+    # --all flag: equivalent to --target all, with deprecation path
+    if compile_all:
+        if target is not None:
+            logger.error("Cannot use --all together with --target")
+            sys.exit(2)
+        target = "all"
+    elif (isinstance(target, str) and target == "all") or (
+        isinstance(target, list) and "all" in target
+    ):
+        import warnings as _w
+
+        _w.warn(
+            "'--target all' is deprecated; use '--all' instead.",
+            DeprecationWarning,
+            stacklevel=1,
+        )
 
     try:
         # Check if this is an APM project first
