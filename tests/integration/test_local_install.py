@@ -691,3 +691,94 @@ class TestLocalMixedWithRemote:
             data = yaml.safe_load(f)
         apm_deps = data.get("dependencies", {}).get("apm", [])
         assert "../packages/local-skills" in apm_deps
+
+
+class TestLocalInstallSiblingLinkRewriting:
+    """Reproduce issue #1147 end-to-end.
+
+    A package shipping an instruction at .apm/instructions/ with a
+    relative markdown link to a sibling asset (outside .apm/) used to
+    deploy the instruction with the link verbatim, breaking after the
+    .agents/.github split (PR #1103). The link resolver now rewrites
+    such in-package references to apm_modules/ at install time.
+    """
+
+    @pytest.fixture
+    def workspace_with_sibling_link(self, tmp_path):
+        """Build a producer + consumer reproducing #1147 exactly."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+
+        # Producer: instruction references a sibling under standards/.
+        producer = ws / "producer"
+        (producer / ".apm" / "instructions").mkdir(parents=True)
+        (producer / "standards").mkdir(parents=True)
+        (producer / "apm.yml").write_text(
+            yaml.dump({"name": "producer", "version": "1.0.0"}), encoding="utf-8"
+        )
+        (producer / "standards" / "style.md").write_text(
+            "# Style guide\nUse 2-space indents.\n", encoding="utf-8"
+        )
+        (producer / ".apm" / "instructions" / "foo.instructions.md").write_text(
+            '---\napplyTo: "**/*.py"\n---\n'
+            "# Foo\n\nFollow the [style guide](../../standards/style.md).\n",
+            encoding="utf-8",
+        )
+
+        # Consumer with .github/ to receive Copilot instructions.
+        consumer = ws / "consumer"
+        consumer.mkdir()
+        (consumer / ".github").mkdir()
+        (consumer / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "consumer",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return consumer, producer
+
+    def test_sibling_link_is_rewritten_to_apm_modules(
+        self, workspace_with_sibling_link, apm_command
+    ):
+        """Issue #1147: link to sibling asset survives install via rewrite."""
+        consumer, producer = workspace_with_sibling_link
+
+        result = subprocess.run(
+            [apm_command, "install", str(producer)],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
+
+        # The instruction landed at .github/instructions/.
+        deployed = consumer / ".github" / "instructions" / "foo.instructions.md"
+        assert deployed.exists(), f"Instruction not deployed. stdout: {result.stdout}"
+
+        body = deployed.read_text(encoding="utf-8")
+
+        # The original sibling link was rewritten to point at the package's
+        # install location under apm_modules/.
+        assert "../../standards/style.md" not in body, (
+            f"Original broken link survived install:\n{body}"
+        )
+        assert "apm_modules/_local/producer/standards/style.md" in body, (
+            f"Link not rewritten to apm_modules/ form:\n{body}"
+        )
+
+        # And the rewritten link actually resolves on disk.
+        import re as _re
+
+        match = _re.search(r"\[style guide\]\(([^)]+)\)", body)
+        assert match, f"Could not find rewritten link in:\n{body}"
+        rewritten = match.group(1)
+        resolved = (deployed.parent / rewritten).resolve()
+        assert resolved.exists(), (
+            f"Rewritten link does not resolve on disk: {rewritten} -> {resolved}"
+        )
+        assert resolved.read_text(encoding="utf-8").startswith("# Style guide")

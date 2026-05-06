@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix `apm install` against a branch ref so it re-downloads when upstream has advanced past the lockfile-recorded SHA, and self-heal lockfiles produced by APM <= 0.12.2 on next install. (#1158)
+- Fix broken sibling links from instructions/prompts/agents to in-package assets after the `.agents/.github` split. The link resolver now rewrites any in-package relative markdown link to its `apm_modules/` location at install time, so cross-tool deploy paths no longer break intra-package references. (#1147)
 
 ## [0.12.2] - 2026-05-05
 

@@ -506,3 +506,226 @@ class TestResolvePathInputGuards:
         """The happy path: a syntactically-valid relative target resolves even if the target file is missing."""
         result = _resolve_path("does/not/exist.md", base_dir)
         assert result == base_dir / "does/not/exist.md"
+
+
+# ---------------------------------------------------------------------------
+# In-package asset link rewriting (#1147)
+# ---------------------------------------------------------------------------
+
+
+class TestInPackageAssetRewriting:
+    """Generalized in-package asset link rewriting (#1147).
+
+    Verifies the install-time rewriting of links in primitive bodies
+    that point at sibling files inside the source package (assets,
+    standards, schemas) so they survive the host-tool path split.
+    """
+
+    def _make_pkg(self, base: Path) -> Path:
+        """Build a minimal apm_modules/_local/<pkg>/ layout with a sibling asset."""
+        pkg_root = base / "apm_modules" / "_local" / "producer"
+        (pkg_root / ".apm" / "instructions").mkdir(parents=True)
+        (pkg_root / "standards").mkdir(parents=True)
+        (pkg_root / "standards" / "style.md").write_text("# Style", encoding="utf-8")
+        (pkg_root / "apm.yml").write_text("name: producer\n", encoding="utf-8")
+        return pkg_root
+
+    def test_rewrite_in_package_sibling_link(self, base_dir):
+        """Link to a sibling asset is rewritten to apm_modules-relative path."""
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        content = "See [style](../../standards/style.md)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+
+        assert "../../apm_modules/_local/producer/standards/style.md" in result
+        # And it actually resolves on disk relative to target_file's parent.
+        rewritten = re.search(r"\(([^)]+)\)", result).group(1)
+        resolved = (target_file.parent / rewritten).resolve()
+        assert resolved.exists()
+
+    def test_preserve_link_when_target_missing(self, base_dir):
+        """Links whose target does not exist are left untouched."""
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        content = "See [missing](../../standards/does-not-exist.md)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        assert "../../standards/does-not-exist.md" in result
+
+    def test_preserve_link_escaping_package_root(self, base_dir):
+        """Links that resolve outside the package root are NOT rewritten.
+
+        Critical security/correctness boundary: a primitive must not be
+        able to make a deployed file reach back to consumer-side files.
+        """
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        # File outside the package, but reachable via `..`.
+        outside_dir = base_dir / "consumer-area"
+        outside_dir.mkdir()
+        (outside_dir / "secret.md").write_text("secret", encoding="utf-8")
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        # Walk up out of the package: pkg_root has 4 segments under base_dir.
+        content = "See [escape](../../../../consumer-area/secret.md)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        # Original link preserved (no rewrite).
+        assert "../../../../consumer-area/secret.md" in result
+        assert "consumer-area" in result  # not stripped or rewritten
+
+    def test_preserve_fragments_on_rewritten_link(self, base_dir):
+        """A trailing #fragment is preserved verbatim on the rewritten target."""
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        content = "See [section](../../standards/style.md#naming)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        assert "../../apm_modules/_local/producer/standards/style.md#naming" in result
+
+    def test_skip_fragment_only_link(self, base_dir):
+        """`#anchor` links are not touched."""
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        content = "See [anchor](#section)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        assert "[anchor](#section)" in result
+
+    def test_skip_scheme_links(self, base_dir):
+        """Scheme links (mailto:, file:, javascript:) are not touched."""
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        for raw in ("mailto:a@b.com", "file:///etc/passwd", "javascript:alert(1)"):
+            content = f"See [x]({raw})."
+            result = resolver.resolve_links_for_installation(content, source_file, target_file)
+            assert raw in result
+
+    def test_skip_root_absolute_link(self, base_dir):
+        """Root-absolute links (`/docs/...`) are consumer-side, not package."""
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        resolver.package_root = pkg_root
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        content = "See [docs](/docs/style.md)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        assert "[docs](/docs/style.md)" in result
+
+    def test_no_rewrite_when_package_root_unset(self, base_dir):
+        """Without package_root (compile / legacy path), asset rewrite is OFF."""
+        resolver = UnifiedLinkResolver(base_dir)
+        pkg_root = self._make_pkg(base_dir)
+        # Intentionally do NOT set resolver.package_root.
+
+        source_file = pkg_root / ".apm" / "instructions" / "foo.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "foo.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        content = "See [style](../../standards/style.md)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        # Unchanged: no rewrite happened.
+        assert "../../standards/style.md" in result
+        assert "apm_modules" not in result
+
+    def test_subdirectory_package_does_not_overreach(self, base_dir):
+        """Nested-subdir package: rewrite respects the explicit package root.
+
+        Layout:
+          apm_modules/owner/repo/packages/foo/        <-- package_root
+              .apm/instructions/x.instructions.md
+              sibling.md               (in-package)
+          apm_modules/owner/repo/packages/bar/
+              elsewhere.md             (NOT in-package for foo)
+
+        A link from x.instructions.md to ../../bar/elsewhere.md must NOT
+        be rewritten because it escapes the explicit package root.
+        """
+        resolver = UnifiedLinkResolver(base_dir)
+        repo_root = base_dir / "apm_modules" / "owner" / "repo"
+        foo_root = repo_root / "packages" / "foo"
+        bar_root = repo_root / "packages" / "bar"
+        (foo_root / ".apm" / "instructions").mkdir(parents=True)
+        (foo_root / "sibling.md").write_text("ok", encoding="utf-8")
+        bar_root.mkdir(parents=True)
+        (bar_root / "elsewhere.md").write_text("nope", encoding="utf-8")
+        resolver.package_root = foo_root
+
+        source_file = foo_root / ".apm" / "instructions" / "x.instructions.md"
+        target_file = base_dir / ".github" / "instructions" / "x.instructions.md"
+        target_file.parent.mkdir(parents=True)
+
+        # Sibling inside the package: rewritten.
+        content = "[ok](../../sibling.md) and [nope](../../../bar/elsewhere.md)"
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        # Inside package -> rewritten to apm_modules path under foo.
+        assert "apm_modules/owner/repo/packages/foo/sibling.md" in result
+        # Outside package -> preserved.
+        assert "../../../bar/elsewhere.md" in result
+        assert "packages/bar" not in result.replace("../../../bar/elsewhere.md", "")
+
+
+class TestCompilationNotBroadened:
+    """Regression: asset rewriting must NOT activate during compilation."""
+
+    def test_compilation_does_not_rewrite_asset_links(self, base_dir):
+        """resolve_links_for_compilation must leave non-context links alone.
+
+        Even when an in-package-shaped path exists on disk, compilation
+        path has no per-link source provenance so generalized rewriting
+        would mis-resolve.
+        """
+        resolver = UnifiedLinkResolver(base_dir)
+        # Set a package_root to prove compile-path explicitly disables asset rewrite.
+        pkg_root = base_dir / "apm_modules" / "_local" / "producer"
+        (pkg_root / "standards").mkdir(parents=True)
+        (pkg_root / "standards" / "style.md").write_text("x", encoding="utf-8")
+        resolver.package_root = pkg_root
+
+        # Place a file matching the link target so the rewriter could find it.
+        compiled_dir = base_dir / "compiled"
+        compiled_dir.mkdir()
+        (compiled_dir / "AGENTS.md").write_text("placeholder", encoding="utf-8")
+
+        content = "See [style](../apm_modules/_local/producer/standards/style.md)."
+        result = resolver.resolve_links_for_compilation(
+            content,
+            source_file=compiled_dir,
+            compiled_output=compiled_dir / "AGENTS.md",
+        )
+        # Unchanged: compile must not generalize.
+        assert content == result

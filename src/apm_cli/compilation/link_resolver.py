@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 from urllib.parse import urlparse
 
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
 list = builtins.list
@@ -31,6 +33,16 @@ class LinkResolutionContext:
     target_location: Path  # Where file will live (directory or file)
     base_dir: Path  # Project root
     available_contexts: builtins.dict[str, Path]  # Map of context name -> actual path
+    # Authoritative source-package root (e.g. apm_modules/<owner>/<repo>/ or
+    # apm_modules/_local/<name>/). When set, in-package asset links may be
+    # rewritten to point at the package's install location. None disables
+    # generalized asset rewriting (compile path, legacy callers).
+    package_root: Path | None = None
+    # Whether to attempt generalized in-package asset link rewriting (#1147).
+    # Only enabled by ``resolve_links_for_installation`` where source/target
+    # are a true 1:1 pair. Compilation must leave this False because the
+    # source_file is a synthetic AGENTS.md output dir, not per-link provenance.
+    enable_asset_rewrite: bool = False
 
 
 class UnifiedLinkResolver:
@@ -56,6 +68,11 @@ class UnifiedLinkResolver:
         """
         self.base_dir = Path(base_dir)
         self.context_registry: builtins.dict[str, Path] = {}
+        # Authoritative source-package root, set by integrators after
+        # init_link_resolver(). Used by generalized in-package asset
+        # rewriting (#1147). None for compile / legacy callers disables
+        # the generalization safely.
+        self.package_root: Path | None = None
 
     def register_contexts(self, primitives) -> None:
         """Build registry of all available context files.
@@ -84,7 +101,17 @@ class UnifiedLinkResolver:
     ) -> str:
         """Resolve links when copying files during installation.
 
-        Called when copying .prompt.md/.agent.md from apm_modules/ to .github/
+        Called when copying .prompt.md/.agent.md/.instructions.md from
+        ``apm_modules/`` to the host's deploy directory (e.g. ``.github/``).
+
+        Two rewrite passes apply:
+
+        1. Context/memory link rewriting (existing behaviour).
+        2. Generalized in-package asset link rewriting (#1147), enabled
+           when ``self.package_root`` is set. Rewrites any relative link
+           whose target file exists inside the source package tree to a
+           stable path under ``apm_modules/`` so the deployed file's
+           sibling references survive the host-tool path split.
 
         Args:
             content: File content to process
@@ -100,6 +127,8 @@ class UnifiedLinkResolver:
             target_location=target_file.parent,
             base_dir=self.base_dir,
             available_contexts=self.context_registry,
+            package_root=self.package_root,
+            enable_asset_rewrite=self.package_root is not None,
         )
 
         return self._rewrite_markdown_links(content, ctx)
@@ -137,6 +166,12 @@ class UnifiedLinkResolver:
             target_location=target_location,
             base_dir=self.base_dir,
             available_contexts=self.context_registry,
+            # Compilation must NOT enable asset rewrite: source_file here is
+            # a synthetic AGENTS.md output dir aggregating multiple sources,
+            # so per-link source provenance is lost. Generalized rewriting
+            # would mis-resolve consumer-repo-relative links. (#1147)
+            package_root=None,
+            enable_asset_rewrite=False,
         )
 
         return self._rewrite_markdown_links(content, ctx)
@@ -168,7 +203,12 @@ class UnifiedLinkResolver:
     def _rewrite_markdown_links(self, content: str, ctx: LinkResolutionContext) -> str:
         """Core link rewriting logic.
 
-        Process markdown links and rewrite context file references.
+        Process markdown links and rewrite:
+
+        1. Context/memory file references (existing behaviour, all callers).
+        2. In-package asset references (#1147), enabled only when
+           ``ctx.enable_asset_rewrite`` is True and ``ctx.package_root`` is
+           set. Skipped otherwise to preserve compile/legacy semantics.
 
         Args:
             content: Content to process
@@ -186,18 +226,26 @@ class UnifiedLinkResolver:
             if self._is_external_url(link_path):
                 return match.group(0)  # Return unchanged
 
-            # Only process context/memory files
-            if not self._is_context_file(link_path):
-                return match.group(0)  # Return unchanged
-
-            # Try to resolve the link
-            resolved_path = self._resolve_context_link(link_path, ctx)
-
-            if resolved_path:
-                return f"[{link_text}]({resolved_path})"
-            else:
-                # Can't resolve - preserve original
+            # Context / memory files: existing behaviour
+            if self._is_context_file(link_path):
+                resolved_path = self._resolve_context_link(link_path, ctx)
+                if resolved_path:
+                    return f"[{link_text}]({resolved_path})"
                 return match.group(0)
+
+            # Generalized in-package asset link rewriting (#1147).
+            # Strictly opt-in: requires both the context flag AND a
+            # package_root, which only ``resolve_links_for_installation``
+            # provides. Compile callers leave both unset.
+            if ctx.enable_asset_rewrite and ctx.package_root is not None:
+                if not self._is_rewritable_relative_link(link_path):
+                    return match.group(0)
+                rewritten = self._resolve_in_package_asset_link(link_path, ctx)
+                if rewritten:
+                    return f"[{link_text}]({rewritten})"
+                return match.group(0)
+
+            return match.group(0)
 
         return self.LINK_PATTERN.sub(replace_link, content)
 
@@ -335,6 +383,125 @@ class UnifiedLinkResolver:
         """
         path_lower = path.lower()
         return any(path_lower.endswith(ext) for ext in self.CONTEXT_EXTENSIONS)
+
+    # ------------------------------------------------------------------
+    # In-package asset link rewriting (#1147)
+    # ------------------------------------------------------------------
+
+    def _is_rewritable_relative_link(self, link_path: str) -> bool:
+        """Decide whether a link is a candidate for in-package asset rewrite.
+
+        Filters out everything that obviously is not a relative filesystem
+        path inside the package: empty links, fragment-only links, links
+        with any URL scheme, root-absolute paths, and protocol-relative
+        URLs. The remaining links are *relative paths* that may resolve
+        to a sibling file inside the source package.
+
+        Args:
+            link_path: Raw link target as it appears in the markdown.
+
+        Returns:
+            True if the link should be considered for asset rewriting.
+        """
+        if not link_path:
+            return False
+        stripped = link_path.strip()
+        if not stripped:
+            return False
+        if stripped.startswith("#"):
+            return False
+        if stripped.startswith("//"):
+            return False
+        if stripped.startswith("/"):
+            # Root-absolute paths are consumer-side, not package-relative.
+            return False
+        # Any URL scheme (http:, mailto:, file:, javascript:, ...): skip.
+        try:
+            parsed = urlparse(stripped)
+        except Exception:
+            return False
+        return not parsed.scheme
+
+    @staticmethod
+    def _split_link_target(link_path: str) -> tuple[str, str]:
+        """Split a markdown link target into ``(path, suffix)``.
+
+        Preserves a trailing ``#fragment`` or ``?query`` so the resolver
+        can rewrite only the path component and re-append the suffix
+        verbatim. Markdown link titles (``"title"`` after a space) are
+        intentionally NOT stripped here -- the existing ``LINK_PATTERN``
+        treats the whole inside of the parentheses as a single group, so
+        a title would be embedded in ``link_path``. Such links are passed
+        through unchanged by ``_is_rewritable_relative_link`` indirectly
+        (they typically contain a space and resolve to nothing).
+
+        Returns:
+            ``(path_part, suffix)`` where ``suffix`` includes its leading
+            delimiter (``#`` or ``?``) or is the empty string.
+        """
+        for sep in ("#", "?"):
+            if sep in link_path:
+                idx = link_path.index(sep)
+                return link_path[:idx], link_path[idx:]
+        return link_path, ""
+
+    def _resolve_in_package_asset_link(
+        self, link_path: str, ctx: LinkResolutionContext
+    ) -> str | None:
+        """Rewrite an in-package relative link to its post-install location.
+
+        Resolves ``link_path`` relative to ``ctx.source_file.parent``,
+        validates the resolved path lies inside ``ctx.package_root`` via
+        :func:`ensure_path_within` (which also normalises symlinks and
+        Windows extended prefixes), and returns the relative path from
+        ``ctx.target_location`` to the resolved file. Preserves any
+        ``#fragment`` or ``?query`` suffix.
+
+        Returns ``None`` if any of the following hold; the caller
+        preserves the original link unchanged:
+
+        * ``ctx.package_root`` is not a directory (defensive).
+        * The candidate file does not exist or is not a regular file.
+        * The candidate escapes ``ctx.package_root`` (symlink traversal,
+          ``..`` chains, etc.).
+        * Path computation raises (broken filesystem, encoding, ...).
+        """
+        if ctx.package_root is None:
+            return None
+        if not ctx.package_root.is_dir():
+            return None
+
+        path_part, suffix = self._split_link_target(link_path)
+        if not path_part:
+            return None
+
+        try:
+            source_dir = (
+                ctx.source_file.parent if ctx.source_file.is_file() else ctx.source_location
+            )
+        except OSError:
+            return None
+
+        try:
+            candidate = (source_dir / path_part).resolve()
+        except (OSError, ValueError):
+            return None
+
+        if not candidate.exists() or not candidate.is_file():
+            return None
+
+        try:
+            ensure_path_within(candidate, ctx.package_root)
+        except PathTraversalError:
+            return None
+
+        try:
+            relative_path = os.path.relpath(candidate, ctx.target_location)
+        except (OSError, ValueError):
+            return None
+
+        rewritten = relative_path.replace(os.sep, "/")
+        return f"{rewritten}{suffix}"
 
 
 # Legacy functions for backward compatibility
