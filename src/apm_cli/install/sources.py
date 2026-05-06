@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
 
 from apm_cli.utils.console import _rich_error, _rich_success
+from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -156,7 +157,19 @@ class LocalDependencySource(DependencySource):
                     )
                 return None
 
-        result_path = _copy_local_package(dep_ref, install_path, ctx.project_root, logger=logger)
+        # Determine the anchor for relative ``local_path`` (#857). For direct
+        # deps from the root project this is project_root. For transitive
+        # deps declared inside another local package, it is the parent
+        # package's source directory -- captured during resolve via
+        # ``ctx.dep_base_dirs``.
+        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.project_root
+        result_path = _copy_local_package(
+            dep_ref,
+            install_path,
+            base_dir,
+            project_root=ctx.project_root,
+            logger=logger,
+        )
         if not result_path:
             diagnostics.error(
                 f"Failed to copy local package: {dep_ref.local_path}",
@@ -167,10 +180,27 @@ class LocalDependencySource(DependencySource):
         if logger:
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
-        # Build minimal PackageInfo for integration
+        # Build minimal PackageInfo for integration. Anchor source_path on
+        # the *original* user source directory (not the apm_modules copy) so
+        # any transitive ``../sibling`` dep declared inside this package
+        # resolves against where the developer wrote the path (#857).
         local_apm_yml = install_path / "apm.yml"
         if local_apm_yml.exists():
-            local_pkg = APMPackage.from_apm_yml(local_apm_yml)
+            original_src = Path(dep_ref.local_path).expanduser()
+            if not original_src.is_absolute():
+                # For TRANSITIVE local deps the relative path is anchored on
+                # the parent package's directory (base_dir above), not on
+                # the consumer's project root. Reusing base_dir here keeps
+                # the source_path stamped on the loaded APMPackage in lock-
+                # step with where _copy_local_package actually copied from.
+                original_src = (base_dir / original_src).resolve()
+            else:
+                original_src = original_src.resolve()
+            local_pkg = APMPackage.from_apm_yml(local_apm_yml, source_path=original_src)
+            # TODO(#940): post-construction mutation of .source has the same
+            # cache-poisoning shape as the bug fixed in this PR. Today the
+            # cache key is (apm.yml, source_path) so mutating .source is
+            # safe, but keep this in mind when reworking the source field.
             if not local_pkg.source:
                 local_pkg.source = dep_ref.local_path
         else:
@@ -244,10 +274,18 @@ class CachedDependencySource(DependencySource):
         dep_key: str,
         resolved_ref: Any,
         dep_locked_chk: Any,
+        fetched_this_run: bool = False,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
         self.resolved_ref = resolved_ref
         self.dep_locked_chk = dep_locked_chk
+        # F2 (#1116): when the resolver callback fetched this package
+        # earlier in the SAME install run, we still hit the cached
+        # source path (skip_download=True), but the install line should
+        # NOT say "(cached)" -- bytes were just downloaded. The integrate
+        # phase passes True here when the dep_key is in
+        # ctx.callback_downloaded.
+        self.fetched_this_run = fetched_this_run
 
     def acquire(self) -> Materialization | None:
         from apm_cli.constants import APM_YML_FILENAME
@@ -271,15 +309,20 @@ class CachedDependencySource(DependencySource):
 
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _ref = dep_ref.reference or ""
-        _sha = ""
-        if (
-            dep_locked_chk
-            and dep_locked_chk.resolved_commit
-            and dep_locked_chk.resolved_commit != "cached"
-        ):
-            _sha = dep_locked_chk.resolved_commit[:8]
+        # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+        # Prefer the lockfile-recorded SHA when present; otherwise fall
+        # back to the SHA captured by the parallel resolver callback in
+        # this same install run (cold-path case where no lockfile exists
+        # yet, but the resolver already learned the resolved commit).
+        _sha = format_short_sha(dep_locked_chk.resolved_commit) if dep_locked_chk else ""
+        if not _sha:
+            _callback_sha = ctx.callback_downloaded.get(dep_key)
+            if _callback_sha:
+                _sha = format_short_sha(_callback_sha)
         if logger:
-            logger.download_complete(display_name, ref=_ref, sha=_sha, cached=True)
+            logger.download_complete(
+                display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
+            )
 
         deltas: dict[str, int] = {"installed": 1}
         if not dep_ref.reference:
@@ -297,10 +340,14 @@ class CachedDependencySource(DependencySource):
                 deltas=deltas,
             )
 
-        # Load package from apm.yml
+        # Load package from apm.yml. Anchor source_path on the clone location
+        # so transitive ``local_path`` deps inside this remote package resolve
+        # from there (#857).
         apm_yml_path = install_path / APM_YML_FILENAME
         if apm_yml_path.exists():
-            cached_package = APMPackage.from_apm_yml(apm_yml_path)
+            cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
+            # TODO(#940): see note in _materialize_local for the same caveat
+            # about post-construction mutation of .source.
             if not cached_package.source:
                 cached_package.source = dep_ref.repo_url
         else:
@@ -406,7 +453,7 @@ class FreshDependencySource(DependencySource):
         resolved_ref: Any,
         dep_locked_chk: Any,
         ref_changed: bool,
-        progress: Any,
+        progress: Any = None,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
         self.resolved_ref = resolved_ref
@@ -435,10 +482,19 @@ class FreshDependencySource(DependencySource):
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
-            task_id = progress.add_task(
-                description=f"Fetching {short_name}",
-                total=None,
-            )
+            # Workstream B (#1116): per-dep progress is owned by the
+            # shared InstallTui ``ctx.tui``; legacy local Progress is
+            # only wired when integrate is invoked outside the install
+            # pipeline (no callers do this today, but the parameter is
+            # kept for back-compat).
+            task_id = None
+            if progress is not None:
+                task_id = progress.add_task(
+                    description=f"Fetching {short_name}",
+                    total=None,
+                )
+            if ctx.tui is not None:
+                ctx.tui.task_started(dep_key, f"fetch {short_name}")
 
             download_ref = build_download_ref(
                 dep_ref,
@@ -458,8 +514,11 @@ class FreshDependencySource(DependencySource):
                 )
 
             # CRITICAL: hide progress BEFORE printing success to avoid overlap
-            progress.update(task_id, visible=False)
-            progress.refresh()
+            if progress is not None and task_id is not None:
+                progress.update(task_id, visible=False)
+                progress.refresh()
+            if ctx.tui is not None:
+                ctx.tui.task_completed(dep_key)
 
             deltas: dict[str, int] = {"installed": 1}
 
@@ -469,7 +528,8 @@ class FreshDependencySource(DependencySource):
                 _sha = ""
                 if resolved:
                     _ref = resolved.ref_name if resolved.ref_name else ""
-                    _sha = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                    # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+                    _sha = format_short_sha(resolved.resolved_commit)
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
                 if ctx.auth_resolver:
                     try:
@@ -487,7 +547,7 @@ class FreshDependencySource(DependencySource):
                 _ref_suffix = ""
                 if resolved:
                     _r = resolved.ref_name if resolved.ref_name else ""
-                    _s = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                    _s = format_short_sha(resolved.resolved_commit)
                     if _r and _s:
                         _ref_suffix = f" #{_r} @{_s}"
                     elif _r:
@@ -593,6 +653,7 @@ def make_dependency_source(
     dep_locked_chk: Any = None,
     ref_changed: bool = False,
     skip_download: bool = False,
+    fetched_this_run: bool = False,
     progress: Any = None,
 ) -> DependencySource:
     """Factory: pick the right ``DependencySource`` for *dep_ref*.
@@ -600,6 +661,11 @@ def make_dependency_source(
     Caller is responsible for resolving the download strategy (cached vs
     fresh) before invoking the factory; the resolved-ref and
     locked-checksum data flow into the appropriate source.
+
+    ``fetched_this_run`` (F2): when ``skip_download=True`` AND the
+    package was actually downloaded earlier in this run by the resolver
+    callback, set this to ``True`` so the cached source emits the
+    download-complete line WITHOUT the misleading ``(cached)`` suffix.
     """
     if dep_ref.is_local and dep_ref.local_path:
         return LocalDependencySource(ctx, dep_ref, install_path, dep_key)
@@ -611,6 +677,7 @@ def make_dependency_source(
             dep_key,
             resolved_ref,
             dep_locked_chk,
+            fetched_this_run=fetched_this_run,
         )
     return FreshDependencySource(
         ctx,

@@ -1,67 +1,64 @@
-# Evals: apm-review-panel
+# apm-review-panel evals
 
-Per genesis Step 8 evals gate. Two categories:
+Two complementary evals live here.
 
-1. **TRIGGER EVALS** validate the dispatch description correctly
-   discriminates should-trigger queries from near-miss should-NOT
-   queries. Validation split is the ship gate (>= 0.5 on positives,
-   < 0.5 on negatives).
+## 1. `render_eval.py` (content / output-shape eval)
 
-2. **CONTENT EVALS** validate that the skill, when activated, produces
-   the JSON-derived top-loaded verdict comment in the shape declared
-   by `assets/verdict-template.md`. Run with-skill vs without-skill;
-   if the deltas are not visible, the skill is not adding value.
+Renders fixture JSON against the rendering rules of
+`assets/recommendation-template.md`. The script is a SPECIFICATION
+TEST -- it implements the same rendering rules a panel orchestrator
+LLM applies in production, so we can eyeball the output offline
+without spending a panel run.
 
-## Files
+Run:
 
-- `trigger-evals.json` -- 16 queries (8 should-trigger + 8 should-NOT),
-  60/40 train/val split.
-- `content-eval-clean-pr.md` -- synthetic clean PR scenario; expected
-  verdict = APPROVE, all panelists return `required: []`.
-- `content-eval-rejected-pr.md` -- synthetic PR with one architectural
-  smell + one nit; expected verdict = REJECT, python-architect returns
-  one `required` finding.
-- `run-verdict-harness.py` -- DETERMINISTIC harness covering the
-  parts of the panel that do NOT require an LLM: JSON schema
-  validation (S4 gate) and verdict computation. Five cases: two
-  positive (clean-pr APPROVE, rejected-pr REJECT) and three negative
-  (missing-nits, unknown-persona, disposition-leak). All five MUST
-  pass before merging any change to schemas, the SKILL.md execution
-  checklist verdict rule, or the persona output contracts.
-
-## How to run
-
-### Deterministic harness (free, runs anywhere)
-
-```
-uv run --with jsonschema python3 \
-    .apm/skills/apm-review-panel/evals/run-verdict-harness.py
+```bash
+python3 render_eval.py
 ```
 
-Expected: `RESULT: ALL PASS`. Proves schemas reject malformed shapes
-and verdict math is correct. Does NOT prove the LLM panelists will
-return well-formed JSON in practice -- that requires a real run.
+Outputs `<fixture>.rendered.md` next to each fixture in `fixtures/`
+and prints a summary line per scenario including ASCII-only lint
+(per repo encoding rule).
 
-### Full end-to-end (option B, branch-pin test)
+### Fixtures
 
-The gh-aw workflow imports the panel skill from `microsoft/apm#main`
-for security (anti-self-approval). Pre-merge validation requires a
-temporary branch pin:
+- `01-ship-now-pr1084-shape.json` -- PR #1084 shape: surgical
+  bug-fix, all panelists APPROVE with at most polish nits, CEO
+  recommends `ship_now`. Verifies the COMMON case (most PRs) is
+  short, scannable, and doesn't bury the lede.
+- `02-needs-rework-shape.json` -- PR with two correctness
+  regressions (path-traversal + Windows-encoding) + an architecture
+  smell. CEO recommends `needs_rework` with explicit blocking-
+  severity tags on the top follow-ups. Verifies the panel can be
+  HONEST about high-signal feedback without reverting to a binary
+  gate.
 
-1. On the feature branch, change `imports.packages` in
-   `.github/workflows/pr-review-panel.md` from `microsoft/apm#main`
-   to `microsoft/apm#<feature-branch>`.
-2. `gh aw compile pr-review-panel`.
-3. Commit as `chore: TEMP pin to branch for end-to-end test`.
-4. Open a tiny throwaway PR; label it `panel-review`.
-5. Observe: 6 task threads spawn, JSON returns, verdict label
-   applied, `panel-review` removed, `panel-approved` (or
-   `panel-rejected`) set. Push a commit and watch the
-   deterministic `pr-panel-label-reset.yml` strip the verdict
-   label.
-6. Revert the temp-pin commit before merge.
+### What "passing" looks like
 
-### Trigger evals
+A maintainer scanning the rendered output for ~30 seconds gets:
+- the stance pill (top of comment),
+- the headline + 2-4 paragraph CEO synthesis,
+- the per-persona summary table (one row each),
+- the top-N curated follow-ups,
+- and, where supplied, the architecture diagrams.
 
-Trigger evals can be run via the genesis evals harness or any
-dispatcher that loads the skill description and queries it.
+Full per-persona findings live inside `<details>`. Open them when
+you want depth, ignore them when you don't.
+
+### Adding a fixture
+
+Drop `<NN>-<scenario>-shape.json` into `fixtures/`. Schema follows
+`assets/panelist-return-schema.json` (under `panelists[]`) and
+`assets/ceo-return-schema.json` (under `ceo`). Re-run
+`python3 render_eval.py` and inspect the new `.rendered.md`.
+
+## 2. `trigger-evals.json` (dispatch description eval)
+
+8 should-trigger + 8 should-NOT-trigger queries split 60/40
+train/val. The validation split is the ship gate per the genesis
+MODULE ENTRYPOINT spec: rate >= 0.5 on should-trigger AND < 0.5 on
+should-NOT-trigger.
+
+This is a manual eval against the dispatch description in
+`SKILL.md`'s frontmatter -- run by reading the description as if
+you were the harness's dispatcher LLM and classifying each query.

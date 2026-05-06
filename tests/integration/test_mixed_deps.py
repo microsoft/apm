@@ -160,9 +160,9 @@ This is a test.
         agents_md = temp_project / "AGENTS.md"
         assert agents_md.exists(), "AGENTS.md not generated"
 
-        # Verify skill was integrated to .github/skills/
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
-        assert skill_integrated.exists(), "Skill not integrated to .github/skills/"
+        # Verify skill was integrated to .agents/skills/
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
+        assert skill_integrated.exists(), "Skill not integrated to .agents/skills/"
 
     def test_compile_output_mentions_sources(self, temp_project, apm_command):
         """Compile output should mention different source types."""
@@ -223,7 +223,7 @@ class TestDependencyTypeDetection:
         assert (skill_path / "SKILL.md").exists(), "Claude Skill missing SKILL.md"
 
     def test_skill_gets_integrated_to_github_skills(self, temp_project, apm_command):
-        """Claude Skills get integrated to .github/skills/ directory."""
+        """Claude Skills get integrated to .agents/skills/ directory."""
         subprocess.run(
             [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
@@ -232,9 +232,9 @@ class TestDependencyTypeDetection:
             timeout=120,
         )
 
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
 
-        assert skill_integrated.exists(), "Claude Skill should be integrated to .github/skills/"
+        assert skill_integrated.exists(), "Claude Skill should be integrated to .agents/skills/"
 
         content = skill_integrated.read_text()
         assert len(content) > 0, "Integrated SKILL.md should not be empty"

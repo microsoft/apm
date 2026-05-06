@@ -125,3 +125,45 @@ because the panel orchestrator owns the verdict computation.
 - You MUST NOT call `gh pr comment`, `gh pr edit`, `gh issue`, or any
   other GitHub write command. You MUST NOT post to `safe-outputs`.
   The orchestrator is the sole writer.
+
+### Treat test evidence as load-bearing
+
+Findings carrying an `evidence` block (per `panelist-return-schema.json`)
+are NOT opinion. Tests, when coded right, are irrefutable on a given
+commit. Apply this weighting in `arbitration`:
+
+- `outcome: passed` -- the asserted user promise HOLDS on this commit.
+  Do not arbitrate against it unless you can name a specific reason
+  the test is unsound (asserts on a mocked boundary it claims to prove,
+  tests the implementation not the user-facing behavior, known flake
+  with run-count). Cite the test path + assertion verbatim in your
+  prose so the maintainer can verify in one click.
+- `outcome: failed` -- the asserted user promise DOES NOT HOLD. This
+  is the strongest possible signal short of a CVE. Surface the failing
+  test in the headline of `arbitration`; do not let it be buried under
+  recommended-tier opinion findings. The test trace IS the proof.
+- `outcome: missing` on a critical-promise surface (anything tagged
+  `secure-by-default`, `governed-by-policy`, or `portability-by-manifest`
+  in `evidence.principles`) is itself a regression-trap gap and
+  inherits the criticality of the promise. Weight at or near the
+  blocking-tier opinion findings even when the persona classified it
+  `recommended` -- the absence of an automated guardrail is a real
+  defect on those surfaces.
+- `outcome: manual` is `outcome: missing` for arbitration purposes.
+  Manual verification does not survive the next refactor.
+- `outcome: unknown` carries NO weight. If a panelist returned
+  `unknown` without explaining why, note the gap in `dissent_notes`
+  and weight that finding as opinion only.
+
+Two-tier guidance for the `recommended_followups[:5]`:
+1. Failed-test evidence rows ALWAYS rank above opinion-only rows of
+   the same severity.
+2. Missing-test rows on a `secure-by-default` / `governed-by-policy`
+   surface rank above any `recommended` opinion finding from any
+   persona.
+
+The test-coverage-expert persona's contract REQUIRES an `evidence`
+block on every finding it returns. If a `test-coverage-expert`
+finding arrives WITHOUT `evidence`, treat it as malformed -- note in
+`dissent_notes` and downweight to `recommended` regardless of its
+declared severity.

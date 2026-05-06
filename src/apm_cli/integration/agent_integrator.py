@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
 
+import yaml
+
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.paths import portable_relpath
 
@@ -150,6 +152,10 @@ class AgentIntegrator(BaseIntegrator):
             if mapping.format_id == "codex_agent":
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
+            elif mapping.format_id == "windsurf_agent_skill":
+                links_resolved = self._write_windsurf_agent_skill(
+                    source_file, target_path, diagnostics=diagnostics
+                )
             else:
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
@@ -256,8 +262,6 @@ class AgentIntegrator(BaseIntegrator):
         if fm_match:
             body = content[fm_match.end() :]
             try:
-                import yaml
-
                 fm = yaml.safe_load(fm_match.group(1)) or {}
                 name = fm.get("name", name)
                 description = fm.get("description", description)
@@ -270,6 +274,75 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         target.write_text(_toml.dumps(doc), encoding="utf-8")
+
+    # ------------------------------------------------------------------
+    # Windsurf agent-skill transformer (agent.md -> skills/<name>/SKILL.md)
+    # ------------------------------------------------------------------
+
+    def _write_windsurf_agent_skill(
+        self, source: Path, target: Path, diagnostics=None
+    ) -> int:  # not @staticmethod: needs self.resolve_links()
+        """Transform an ``.agent.md`` file to a Windsurf Skill (``SKILL.md``).
+
+        Windsurf Skills are the closest equivalent to a specialist persona:
+        - Invocable with ``@skill-name`` (like ``@agent-name`` in Copilot)
+        - Auto-invoked by Cascade when the description matches the task
+        - Support a directory with supplementary resource files
+
+        The conversion:
+        - Keeps ``name`` (or derives from filename) and ``description``.
+        - Strips agent-specific keys (``model``, ``tools``) and emits a
+          diagnostic warning when those fields are dropped.
+        - Preserves the markdown body verbatim.
+        """
+        content = source.read_text(encoding="utf-8")
+
+        stem = source.name
+        if stem.endswith(".agent.md"):
+            stem = stem[:-9]
+        elif stem.endswith(".chatmode.md"):
+            stem = stem[:-12]
+        else:
+            stem = Path(stem).stem
+
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+        else:
+            body = content
+            fm = {}
+
+        dropped = [k for k in ("tools", "model") if fm.get(k)]
+        if dropped and diagnostics is not None:
+            diagnostics.warn(
+                f"Windsurf skill conversion dropped frontmatter field(s) "
+                f"{', '.join(dropped)} from {source.name}",
+                detail="Windsurf Skills do not support agent-only fields; "
+                "only name, description, and body are preserved.",
+            )
+
+        name = fm.get("name", stem)
+        description = fm.get("description", "")
+
+        # Use yaml.safe_dump to safely serialize values -- prevents YAML key
+        # injection via multi-line name/description strings.
+
+        fm_data: dict = {"name": name}
+        if description:
+            fm_data["description"] = description
+        fm_yaml = yaml.safe_dump(  # yaml-io-exempt: serializes to string, not file handle
+            fm_data, default_flow_style=False, allow_unicode=True
+        ).rstrip("\n")
+
+        result = f"---\n{fm_yaml}\n---\n" + body
+        result, links_resolved = self.resolve_links(result, source, target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(result, encoding="utf-8")
+        return links_resolved
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(

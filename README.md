@@ -4,7 +4,7 @@
 
 Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent configuration.
 
-GitHub Copilot · Claude Code · Cursor · OpenCode · Codex · Gemini
+GitHub Copilot · Claude Code · Cursor · OpenCode · Codex · Gemini · Windsurf
 
 **[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[Roadmap](https://github.com/orgs/microsoft/projects/2304)**
 
@@ -67,7 +67,7 @@ One command, no configuration -- VS Code and GitHub Copilot read the file automa
 
 One `apm.yml` describes every primitive your agents need — instructions, skills, prompts, agents, hooks, plugins, MCP servers — and `apm install` reproduces the exact same setup across every client on every machine. `apm.lock.yaml` pins the resolved tree the way `package-lock.json` does for npm.
 
-- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — declared once, deployed across Copilot, Claude, Cursor, OpenCode, Codex, Gemini
+- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — declared once, deployed across Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf
 - **[Install from anywhere](https://microsoft.github.io/apm/guides/dependencies/)** — GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, any git host
 - **[Transitive dependencies](https://microsoft.github.io/apm/guides/dependencies/)** — packages can depend on packages; APM resolves the full tree
 - **[Author plugins](https://microsoft.github.io/apm/guides/plugins/)** — build Copilot, Claude, and Cursor plugins with dependency management, then export standard `plugin.json`
@@ -81,6 +81,7 @@ Agent context is executable in effect — a prompt is a program for an LLM. APM 
 
 - **[Content security](https://microsoft.github.io/apm/enterprise/security/)** — `apm install` blocks compromised packages before agents read them; `apm audit` runs the same checks on demand
 - **[Lockfile integrity](https://microsoft.github.io/apm/enterprise/governance/)** — `apm.lock` records resolved sources and content hashes for full provenance
+- **[Drift detection](https://microsoft.github.io/apm/guides/drift-detection/)** — `apm audit` rebuilds your agent context in scratch and diffs it against your working tree to catch hand-edits before they ship
 - **[MCP trust boundaries](https://microsoft.github.io/apm/guides/mcp-servers/)** — transitive MCP servers require explicit consent
 
 ### 3. Governed by policy
@@ -161,7 +162,7 @@ apm marketplace add github/awesome-copilot
 apm install azure-cloud-development@awesome-copilot
 ```
 
-Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, and Gemini):
+Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, Gemini, and Windsurf):
 
 ```bash
 apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS

@@ -147,6 +147,9 @@ ADO is always auth-required. Uses 3-segment paths (`org/project/repo`). No `ADO_
 ```bash
 apm install dev.azure.com/myorg/myproject/myrepo#main
 apm install mycompany.visualstudio.com/org/project/repo  # legacy URL
+
+# Sub-path inside an ADO repo, pinned to a tag (use the _git form for sub-paths):
+apm install dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
 ```
 
 If your ADO project or repository name contains spaces, URL-encode them as `%20`:

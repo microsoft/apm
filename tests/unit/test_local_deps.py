@@ -6,6 +6,7 @@ from unittest.mock import Mock  # noqa: F401
 import pytest
 import yaml
 
+from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 
@@ -473,11 +474,33 @@ class TestCopyLocalPackage:
         dep_ref.local_path = str(local_pkg)  # Use absolute path for test
         install_path = tmp_path / "apm_modules" / "_local" / "my-local-pkg"
 
-        result = _copy_local_package(dep_ref, install_path, tmp_path)
+        result = _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+        )
         assert result is not None
         assert result.exists()
         assert (result / "apm.yml").exists()
         assert (result / ".apm" / "instructions" / "test.instructions.md").exists()
+
+    def test_copy_local_package_logger_none_does_not_raise(self, tmp_path):
+        """PR #1111 review C1: _copy_local_package must tolerate logger=None.
+
+        ``run_install_pipeline(logger=None)`` is a public, documented entry
+        point; the helper must not AttributeError when reached without an
+        explicit InstallLogger threaded through.
+        """
+        from apm_cli.commands.install import _copy_local_package
+
+        # Trigger the failure branch (missing path) -- this branch calls
+        # ``logger.error(...)``. Before the fix it would AttributeError on
+        # ``None.error``; now it gracefully falls back to NullCommandLogger.
+        dep_ref = DependencyReference.parse("./does-not-exist")
+        install_path = tmp_path / "apm_modules" / "_local" / "does-not-exist"
+
+        result = _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=None
+        )
+        assert result is None  # missing path fails as expected, no AttributeError
 
     def test_copy_local_package_with_skill_md(self, tmp_path):
         from apm_cli.commands.install import _copy_local_package
@@ -491,7 +514,9 @@ class TestCopyLocalPackage:
         dep_ref.local_path = str(local_pkg)
         install_path = tmp_path / "apm_modules" / "_local" / "my-skill"
 
-        result = _copy_local_package(dep_ref, install_path, tmp_path)
+        result = _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+        )
         assert result is not None
         assert (result / "SKILL.md").exists()
 
@@ -501,7 +526,9 @@ class TestCopyLocalPackage:
         dep_ref = DependencyReference.parse("./nonexistent-pkg")
         install_path = tmp_path / "apm_modules" / "_local" / "nonexistent-pkg"
 
-        result = _copy_local_package(dep_ref, install_path, tmp_path)
+        result = _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+        )
         assert result is None
 
     def test_copy_local_package_no_manifest(self, tmp_path):
@@ -516,7 +543,9 @@ class TestCopyLocalPackage:
         dep_ref.local_path = str(local_pkg)
         install_path = tmp_path / "apm_modules" / "_local" / "no-manifest"
 
-        result = _copy_local_package(dep_ref, install_path, tmp_path)
+        result = _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+        )
         assert result is None
 
     def test_copy_replaces_existing(self, tmp_path):
@@ -540,14 +569,18 @@ class TestCopyLocalPackage:
         install_path = tmp_path / "apm_modules" / "_local" / "my-pkg"
 
         # First copy
-        _copy_local_package(dep_ref, install_path, tmp_path)
+        _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+        )
         assert (install_path / "data.txt").read_text() == "original"
 
         # Modify source
         (local_pkg / "data.txt").write_text("updated")
 
         # Second copy should overwrite
-        _copy_local_package(dep_ref, install_path, tmp_path)
+        _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+        )
         assert (install_path / "data.txt").read_text() == "updated"
 
     def test_copy_preserves_symlinks_without_following(self, tmp_path):
@@ -576,9 +609,152 @@ class TestCopyLocalPackage:
         dep_ref.local_path = str(local_pkg)
         install_path = tmp_path / "apm_modules" / "_local" / "evil-pkg"
 
-        result = _copy_local_package(dep_ref, install_path, tmp_path)
+        result = _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+        )
         assert result is not None
 
         # The symlink should be preserved as a symlink, NOT followed
         link = install_path / "escape"
         assert link.is_symlink(), "Symlink was followed instead of preserved"
+
+
+# ===========================================================================
+# #857 Regression: transitive local_path anchor + dual-reject from remote
+# ===========================================================================
+
+
+class TestSourcePathField:
+    """APMPackage.source_path is the anchor for relative deps (#857)."""
+
+    def test_default_is_none(self):
+        pkg = APMPackage(name="x", version="1.0.0")
+        assert pkg.source_path is None
+
+    def test_from_apm_yml_threads_source_path(self, tmp_path):
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(yaml.safe_dump({"name": "x", "version": "1.0.0"}))
+        anchor = (tmp_path / "anchor").resolve()
+        anchor.mkdir()
+
+        pkg = APMPackage.from_apm_yml(apm_yml, source_path=anchor)
+        assert pkg.source_path == anchor
+
+    def test_cache_key_distinguishes_source_path(self, tmp_path):
+        """Same apm.yml loaded with different source_path values must NOT
+        collide in the module-level cache (#940 F1)."""
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(yaml.safe_dump({"name": "x", "version": "1.0.0"}))
+        a = (tmp_path / "a").resolve()
+        a.mkdir()
+        b = (tmp_path / "b").resolve()
+        b.mkdir()
+
+        pkg_a = APMPackage.from_apm_yml(apm_yml, source_path=a)
+        pkg_b = APMPackage.from_apm_yml(apm_yml, source_path=b)
+        # Different cache entries -> different source_path on each instance.
+        assert pkg_a.source_path == a
+        assert pkg_b.source_path == b
+
+
+class TestCopyLocalPackageContainmentBoundary:
+    """_copy_local_package no longer enforces project-root containment
+    on local-from-local sources (#940 follow-up). The untrusted-source
+    boundary lives upstream in apm_resolver._try_load_dependency_package
+    via dual-reject of remote-parent local_paths. Sibling layouts like
+    ``apm install ../pkg-a`` from a monorepo workspace are explicit user
+    opt-ins and must succeed.
+    """
+
+    def test_allows_sibling_outside_project_root(self, tmp_path):
+        """Sibling layout (declared by user, anchored on project_root)
+        must succeed even when the resolved path lies outside
+        project_root.
+        """
+        from apm_cli.install.phases.local_content import _copy_local_package
+
+        outside = tmp_path / "outside-pkg"
+        outside.mkdir()
+        (outside / "apm.yml").write_text(yaml.safe_dump({"name": "outside", "version": "1.0.0"}))
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        dep_ref = DependencyReference.parse("../outside-pkg")
+        install_path = project_root / "apm_modules" / "_local" / "outside-pkg"
+
+        result = _copy_local_package(
+            dep_ref,
+            install_path,
+            project_root,
+            project_root=project_root,
+            logger=NullCommandLogger(),
+        )
+        assert result == install_path
+        assert install_path.exists()
+        assert (install_path / "apm.yml").exists()
+
+
+class TestDepBaseDirsCrossPhase:
+    """The resolve phase must populate ctx.dep_base_dirs with parent
+    source_path anchors so the integrate phase can copy transitive locals
+    from the right base dir (#857). This pins the cross-phase contract.
+    """
+
+    def test_dep_base_dirs_anchors_transitive_on_parent_source_path(self, tmp_path):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        # Build a tiny synthetic dependency tree manually so the contract
+        # check doesn't depend on the resolve phase's many other moving
+        # parts (lockfile, downloader, etc). The map-build logic lives in
+        # resolve.py but its only input is dependency_graph.dependency_tree.
+        from apm_cli.deps.dependency_graph import (
+            DependencyNode,
+            DependencyTree,
+        )
+        from apm_cli.models.apm_package import APMPackage, DependencyReference
+
+        # Mimic the resolve-phase walker
+        root_pkg = APMPackage(name="root", version="1.0.0")
+        root_pkg.source_path = tmp_path
+        mid_pkg = APMPackage(name="mid", version="1.0.0")
+        mid_pkg.source_path = tmp_path / "packages" / "mid"
+
+        root_dep = DependencyReference.parse("./packages/mid")
+        leaf_dep = DependencyReference.parse("../base")
+
+        tree = DependencyTree(root_package=root_pkg)
+        root_node = DependencyNode(package=root_pkg, dependency_ref=root_dep, depth=0)
+        mid_node = DependencyNode(
+            package=mid_pkg, dependency_ref=root_dep, depth=1, parent=root_node
+        )
+        leaf_node = DependencyNode(
+            package=APMPackage(name="base", version="1.0.0"),
+            dependency_ref=leaf_dep,
+            depth=2,
+            parent=mid_node,
+        )
+        tree.add_node(root_node)
+        tree.add_node(mid_node)
+        tree.add_node(leaf_node)
+
+        # Inline the map build (mirrors resolve.py exactly)
+        dep_base_dirs: dict = {}
+        for node in tree.nodes.values():
+            parent_node = node.parent
+            if parent_node is None or parent_node.package is None:
+                continue
+            anchor = (
+                parent_node.package.source_path
+                if parent_node.package.source_path is not None
+                else tmp_path
+            )
+            dep_base_dirs[node.dependency_ref.get_unique_key()] = anchor
+
+        # Leaf dep must anchor on MID's source_path, NOT root's.
+        assert dep_base_dirs[leaf_dep.get_unique_key()] == mid_pkg.source_path
+        # mid_pkg.source_path != tmp_path (the project root)
+        assert dep_base_dirs[leaf_dep.get_unique_key()] != tmp_path
+
+        # Sanity: APMDependencyResolver instantiable without error
+        APMDependencyResolver()

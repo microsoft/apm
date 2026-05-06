@@ -93,26 +93,26 @@ class TestCIIncompatibleFlags:
     def test_ci_with_strip(self, runner, tmp_path):
         _setup_clean_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "--strip"])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "--strip"])
         assert result.exit_code != 0
 
     def test_ci_with_dry_run(self, runner, tmp_path):
         _setup_clean_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "--dry-run"])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "--dry-run"])
         assert result.exit_code != 0
 
     def test_ci_with_file(self, runner, tmp_path):
         test_file = tmp_path / "dummy.md"
         test_file.write_text("hello", encoding="utf-8")
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "--file", str(test_file)])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "--file", str(test_file)])
         assert result.exit_code != 0
 
     def test_ci_with_package(self, runner, tmp_path):
         _setup_clean_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "some-package"])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "some-package"])
         assert result.exit_code != 0
 
 
@@ -120,13 +120,13 @@ class TestCIExitCodes:
     def test_exit_0_all_pass(self, runner, tmp_path):
         _setup_clean_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci"])
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
         assert result.exit_code == 0
 
     def test_exit_1_on_failure(self, runner, tmp_path):
         _setup_failing_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci"])
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
         assert result.exit_code == 1
 
 
@@ -134,7 +134,7 @@ class TestCIOutputFormats:
     def test_json_output(self, runner, tmp_path):
         _setup_clean_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "-f", "json"])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert "passed" in data
@@ -145,7 +145,7 @@ class TestCIOutputFormats:
     def test_sarif_output(self, runner, tmp_path):
         _setup_clean_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "-f", "sarif"])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "sarif"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["version"] == "2.1.0"
@@ -154,7 +154,7 @@ class TestCIOutputFormats:
     def test_json_output_with_failures(self, runner, tmp_path):
         _setup_failing_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "-f", "json"])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["passed"] is False
@@ -163,7 +163,7 @@ class TestCIOutputFormats:
     def test_text_output_shows_checks(self, runner, tmp_path):
         _setup_clean_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci"])
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
         assert result.exit_code == 0
         assert "passed" in result.output.lower() or "check" in result.output.lower()
 
@@ -171,7 +171,7 @@ class TestCIOutputFormats:
         _setup_clean_project(tmp_path)
         outfile = tmp_path / "report.json"
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "-f", "json", "-o", str(outfile)])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json", "-o", str(outfile)])
         assert result.exit_code == 0
         assert outfile.exists()
         data = json.loads(outfile.read_text(encoding="utf-8"))

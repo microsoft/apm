@@ -26,6 +26,8 @@ class CursorClientAdapter(CopilotClientAdapter):
     """
 
     supports_user_scope: bool = False
+    target_name: str = "cursor"
+    mcp_servers_key: str = "mcpServers"
 
     # ------------------------------------------------------------------ #
     # Config path

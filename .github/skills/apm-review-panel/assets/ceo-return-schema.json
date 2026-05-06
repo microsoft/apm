@@ -1,23 +1,78 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ceo-return-schema.json",
-  "title": "APM Review Panel - CEO Synthesizer Return Shape",
-  "description": "Shape the apm-ceo persona MUST return when invoked as the panel synthesizer. CEO writes ARBITRATION PROSE only - never picks the verdict. The orchestrator derives verdict deterministically from aggregated panelist required-counts (APPROVE iff sum(required) == 0, REJECT otherwise).",
+  "title": "APM Review Panel - CEO Synthesizer Return Shape (advisory regime)",
+  "description": "Shape the apm-ceo synthesizer MUST return when invoked by the apm-review-panel skill. The CEO produces ARBITRATION and SHIP-RECOMMENDATION prose. The CEO does NOT pick a binary verdict; the panel is advisory. The orchestrator renders these fields into the comment template.",
   "type": "object",
-  "required": ["arbitration"],
+  "required": ["headline", "arbitration", "principle_alignment", "ship_recommendation"],
   "additionalProperties": false,
   "properties": {
+    "headline": {
+      "type": "string",
+      "description": "One-sentence framing of what this PR does and why it matters. Top of the comment. Under 240 chars; ASCII only."
+    },
     "arbitration": {
       "type": "string",
-      "description": "One-to-three paragraph synthesis. Resolve any disagreement between specialists. Surface strategic implications (positioning, breaking change, naming, scope). If specialists agreed and the change is uncontroversial, say so plainly. ASCII only."
+      "description": "One to three paragraphs of strategic framing: what the PR unlocks, how the panel signals converge, dissent (if any) and how to weigh it. Plain markdown."
     },
     "dissent_notes": {
       "type": "string",
-      "description": "Optional. When two or more panelists disagreed on whether a finding is REQUIRED vs NIT, name the disagreement and state which side the CEO sided with and why. Empty / omitted when no dissent."
+      "description": "Optional. One or two sentences naming explicit dissent between panelists and how the CEO weighs it. Empty string if all panelists agree."
     },
-    "growth_signal": {
+    "principle_alignment": {
+      "type": "object",
+      "description": "Per-APM-principle one-liner. Skip principles that don't apply (omit the key). Keys are stable; values are short prose.",
+      "additionalProperties": false,
+      "properties": {
+        "portable_by_manifest": { "type": "string" },
+        "secure_by_default": { "type": "string" },
+        "governed_by_policy": { "type": "string" },
+        "multi_harness_multi_host": { "type": "string" },
+        "oss_community_driven": { "type": "string" },
+        "pragmatic_as_npm": { "type": "string" }
+      }
+    },
+    "growth_amplification": {
       "type": "string",
-      "description": "Optional. CEO surface for the side-channel note from oss-growth-hacker (conversion, narrative, breaking-change comms). Empty / omitted when not relevant."
+      "description": "Optional. One short paragraph on adoption/contributor signal worth amplifying (drawn from oss-growth-hacker's findings or extras.growth_strategy_note). Empty string if not applicable."
+    },
+    "recommended_followups": {
+      "type": "array",
+      "description": "Ordered list of post-merge or in-PR follow-ups, highest signal first. Each item names the originating persona and why it matters. NONE of these block merge. Empty list is valid (nothing to follow up on).",
+      "items": {
+        "type": "object",
+        "required": ["from_persona", "summary", "why"],
+        "additionalProperties": false,
+        "properties": {
+          "from_persona": {
+            "type": "string",
+            "description": "The panelist whose finding this follow-up condenses."
+          },
+          "summary": { "type": "string" },
+          "why": { "type": "string" },
+          "blocking": {
+            "type": "boolean",
+            "description": "Optional. Set true ONLY if the underlying finding was severity=blocking. The orchestrator still does not gate; this only affects rendering emphasis.",
+            "default": false
+          }
+        }
+      }
+    },
+    "ship_recommendation": {
+      "type": "object",
+      "required": ["stance", "prose"],
+      "additionalProperties": false,
+      "properties": {
+        "stance": {
+          "type": "string",
+          "enum": ["ship_now", "ship_with_followups", "needs_discussion", "needs_rework"],
+          "description": "Advisory stance. NEVER auto-applied as a label or verdict. The maintainer reads this as one input among many."
+        },
+        "prose": {
+          "type": "string",
+          "description": "One short paragraph naming the recommended next action and the highest-signal follow-up to track. Plain markdown."
+        }
+      }
     }
   }
 }

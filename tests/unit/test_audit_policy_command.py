@@ -82,7 +82,7 @@ class TestCiWithPolicyFlag:
 
         result = runner.invoke(
             audit,
-            ["--ci", "--policy", str(policy_path)],
+            ["--ci", "--no-drift", "--policy", str(policy_path)],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -95,7 +95,7 @@ class TestCiWithPolicyFlag:
 
         result = runner.invoke(
             audit,
-            ["--ci", "--policy", str(policy_path), "-f", "json"],
+            ["--ci", "--no-drift", "--policy", str(policy_path), "-f", "json"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -123,7 +123,7 @@ class TestCiWithPolicyFlag:
 
         result = runner.invoke(
             audit,
-            ["--ci", "--policy", str(policy_path)],
+            ["--ci", "--no-drift", "--policy", str(policy_path)],
             catch_exceptions=False,
         )
         assert result.exit_code == 1
@@ -142,7 +142,7 @@ class TestCiWithPolicyOrg:
         ) as mock_disc:
             result = runner.invoke(
                 audit,
-                ["--ci", "--policy", "org"],
+                ["--ci", "--no-drift", "--policy", "org"],
                 catch_exceptions=False,
             )
             mock_disc.assert_called_once()
@@ -162,7 +162,7 @@ class TestCiPolicyNotFound:
         with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result):
             result = runner.invoke(
                 audit,
-                ["--ci", "--policy", "org"],
+                ["--ci", "--no-drift", "--policy", "org"],
                 catch_exceptions=False,
             )
             assert result.exit_code == 0
@@ -188,7 +188,7 @@ class TestCiPolicyFetchError:
         with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result):
             result = runner.invoke(
                 audit,
-                ["--ci", "--policy", "org"],
+                ["--ci", "--no-drift", "--policy", "org"],
                 catch_exceptions=False,
             )
             assert result.exit_code == 1
@@ -208,7 +208,7 @@ class TestNoCacheFlag:
         ) as mock_disc:
             result = runner.invoke(
                 audit,
-                ["--ci", "--policy", "org", "--no-cache"],
+                ["--ci", "--no-drift", "--policy", "org", "--no-cache"],
                 catch_exceptions=False,
             )
             mock_disc.assert_called_once()
@@ -222,7 +222,7 @@ class TestNoCacheFlag:
 
         result = runner.invoke(
             audit,
-            ["--ci", "--no-cache"],
+            ["--ci", "--no-drift", "--no-cache"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -236,7 +236,7 @@ class TestCiWithoutPolicy:
 
         result = runner.invoke(
             audit,
-            ["--ci", "-f", "json"],
+            ["--ci", "--no-drift", "-f", "json"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0

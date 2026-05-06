@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
@@ -171,6 +172,11 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         target_key="gemini",
         require_dir=True,
     ),
+    "windsurf": _MergeHookConfig(
+        config_filename="hooks.json",
+        target_key="windsurf",
+        require_dir=True,
+    ),
 }
 
 
@@ -183,6 +189,7 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
     "claude-hooks": {"claude"},
     "codex-hooks": {"codex"},
     "gemini-hooks": {"gemini"},
+    "windsurf-hooks": {"windsurf"},
 }
 
 
@@ -351,6 +358,9 @@ class HookIntegrator(BaseIntegrator):
             scripts_base = f"{base_root}/hooks/{package_name}"
         elif target == "codex":
             base_root = root_dir or ".codex"
+            scripts_base = f"{base_root}/hooks/{package_name}"
+        elif target == "windsurf":
+            base_root = root_dir or ".windsurf"
             scripts_base = f"{base_root}/hooks/{package_name}"
         else:
             base_root = root_dir or ".claude"
@@ -588,6 +598,7 @@ class HookIntegrator(BaseIntegrator):
             # Copy referenced scripts (individual file tracking)
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
+                ensure_path_within(target_script, project_root)
                 if self.check_collision(
                     target_script, target_rel, managed_files, force, diagnostics=diagnostics
                 ):
@@ -768,6 +779,7 @@ class HookIntegrator(BaseIntegrator):
             # Copy referenced scripts
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
+                ensure_path_within(target_script, project_root)
                 if self.check_collision(
                     target_script,
                     target_rel,

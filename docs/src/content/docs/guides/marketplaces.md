@@ -48,6 +48,19 @@ Both Copilot CLI and Claude Code `marketplace.json` formats are supported. Copil
 
 npm sources are not supported. Copilot CLI format uses `"repository"` and optional `"ref"` fields instead of `"source"`.
 
+### Source key aliases
+
+The install resolver accepts both legacy (Copilot CLI) and current (Claude Code) key names in `marketplace.json` source objects:
+
+| Current key | Legacy alias | Notes |
+|---|---|---|
+| `source` (discriminator) | `type` | Values: `github`, `git-subdir`, `url` |
+| `repo` | `repository` | Must be `owner/repo` format |
+| `sha` | `commit` | Resolved commit SHA |
+| `repo` (git-subdir) | `url` | Must be `owner/repo`, not a full URL |
+
+Marketplace authors should use the current keys (emitted by `apm pack`). Legacy aliases are accepted for backward compatibility with older manifests.
+
 ### Plugin root directory
 
 Marketplaces can declare a `metadata.pluginRoot` field to specify the base directory for bare-name sources:

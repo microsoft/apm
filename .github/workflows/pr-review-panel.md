@@ -1,6 +1,6 @@
 ---
 name: PR Review Panel
-description: Multi-persona expert panel review of labelled PRs, posting a single synthesized verdict comment.
+description: Multi-persona expert panel review of labelled PRs, posting a single synthesized advisory recommendation comment.
 
 # Triggers (cost-gated, fork-safe, GHES-compatible):
 #
@@ -31,14 +31,15 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #        persona definitions are trusted, not from the PR)
 #      - write surfaces are tightly scoped:
 #          add-comment max 2 (one CEO comment + one safety overflow)
-#          add-labels allowed [panel-approved, panel-rejected] max 1
-#            (mutually exclusive verdict; orchestrator emits exactly one)
-#          remove-labels allowed [panel-review] max 1
-#            (clear the trigger label after the run so re-applying it
-#             re-runs the panel idempotently)
-#        The verdict labels themselves are stripped on every new push
-#        by the deterministic companion workflow pr-panel-label-reset.yml
-#        (plain GitHub Actions, no LLM).
+#          remove-labels allowed [panel-review, panel-approved,
+#            panel-rejected] max 3
+#            (clear the trigger label so re-applying it re-runs the
+#             panel idempotently; ALSO drop legacy verdict labels left
+#             over from the pre-advisory regime so a PR previously
+#             labelled `panel-rejected` does not carry a stale gate
+#             after a fresh advisory pass.)
+#        Verdict labels are NOT written: the panel is advisory and
+#        does not gate merge. The maintainer ships.
 #      - `roles: [admin, maintainer, write]` ensures only repo
 #        maintainers can trigger -- matches the trust model that
 #        applying the `panel-review` label requires write access.
@@ -104,17 +105,17 @@ safe-outputs:
   # one-comment discipline lives inside the apm-review-panel skill.
   add-comment:
     max: 2
-  # Verdict label. Mutually exclusive (orchestrator picks exactly one).
-  # The companion workflow pr-panel-label-reset.yml strips both on every
-  # new push so a stale verdict can never linger past a code change.
-  add-labels:
-    allowed: [panel-approved, panel-rejected]
-    max: 1
-  # Trigger label cleanup. Removed after the run so re-applying
-  # `panel-review` re-triggers the panel cleanly.
+  # Label cleanup. The orchestrator MUST always remove `panel-review`
+  # (re-applying it is the idempotent re-run trigger). It MUST ALSO
+  # remove `panel-approved` / `panel-rejected` if present -- those are
+  # legacy verdict labels from the pre-advisory regime and have no
+  # meaning under the advisory contract; leaving them on a PR after a
+  # fresh advisory pass would mislead readers into thinking a binary
+  # gate is still in effect. The advisory regime never WRITES these
+  # labels (no `add-labels` block), only sweeps them away.
   remove-labels:
-    allowed: [panel-review]
-    max: 1
+    allowed: [panel-review, panel-approved, panel-rejected]
+    max: 3
 
 timeout-minutes: 30
 ---
@@ -146,7 +147,10 @@ gh pr diff "$PR"
 
 Load the **apm-review-panel** skill and follow its execution checklist
 and output contract exactly. The skill owns reviewer routing, persona
-dispatch, the Auth Expert conditional rule, the pre-arbitration
-completeness gate, CEO arbitration, template loading, verdict shape,
-and the one-comment emission contract -- including writing the final
-comment to `safe-outputs.add-comment` rather than the GitHub API.
+dispatch, the Auth Expert and Doc Writer conditional rules, the
+pre-arbitration completeness gate, CEO arbitration, template loading,
+the advisory recommendation shape, and the one-comment emission
+contract -- including writing the final comment to
+`safe-outputs.add-comment` rather than the GitHub API and the
+defensive sweep of legacy verdict labels via
+`safe-outputs.remove-labels`.

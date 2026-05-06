@@ -470,3 +470,140 @@ class TestDependencyGraphDataStructures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ===========================================================================
+# #857 / #940 v2 regression: parent_pkg threading + dual-reject
+# ===========================================================================
+
+
+class TestIsRemoteParentHeuristic(unittest.TestCase):
+    """_is_remote_parent must NOT misclassify _local/<name> as remote (#940)."""
+
+    def setUp(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        self.resolver = APMDependencyResolver()
+
+    def test_local_underscore_prefix_is_local(self):
+        from apm_cli.models.apm_package import APMPackage
+
+        pkg = APMPackage(name="specialized", version="1.0.0")
+        pkg.source = "_local/specialized"
+        self.assertFalse(self.resolver._is_remote_parent(pkg))
+
+    def test_owner_repo_slash_is_remote(self):
+        from apm_cli.models.apm_package import APMPackage
+
+        pkg = APMPackage(name="thing", version="1.0.0")
+        pkg.source = "microsoft/apm-sample-package"
+        self.assertTrue(self.resolver._is_remote_parent(pkg))
+
+    def test_no_source_is_local(self):
+        from apm_cli.models.apm_package import APMPackage
+
+        pkg = APMPackage(name="root", version="1.0.0")
+        self.assertFalse(self.resolver._is_remote_parent(pkg))
+
+
+class TestSignatureFallback(unittest.TestCase):
+    """_signature_accepts_parent_pkg falls back to False on failure (SR1)."""
+
+    def test_callable_without_introspectable_signature(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        resolver = APMDependencyResolver()
+        # Built-ins typically raise ValueError on inspect.signature.
+        self.assertFalse(resolver._signature_accepts_parent_pkg(len))
+
+    def test_callback_with_parent_pkg(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        resolver = APMDependencyResolver()
+
+        def cb(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+            return None
+
+        self.assertTrue(resolver._signature_accepts_parent_pkg(cb))
+
+    def test_legacy_callback_without_parent_pkg(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        resolver = APMDependencyResolver()
+
+        def cb(dep_ref, modules_dir, parent_chain=""):
+            return None
+
+        self.assertFalse(resolver._signature_accepts_parent_pkg(cb))
+
+
+class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
+    """Remote-parent local_path rejection must record the dep_key so the
+    integrate phase skips it (PR #1111 review C2)."""
+
+    def test_rejected_remote_local_keys_populated(self):
+        import tempfile
+        from pathlib import Path
+
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+        from apm_cli.models.apm_package import APMPackage
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            resolver = APMDependencyResolver(apm_modules_dir=Path(tmpdir))
+            self.assertEqual(resolver._rejected_remote_local_keys, set())
+
+            # Remote parent (owner/repo source) declaring a local_path dep.
+            remote_parent = APMPackage(name="thing", version="1.0.0")
+            remote_parent.source = "microsoft/apm-sample-package"
+
+            local_dep = DependencyReference(
+                repo_url="",
+                local_path="../../etc/passwd",
+                is_local=True,
+            )
+
+            result = resolver._try_load_dependency_package(
+                local_dep,
+                parent_chain="root > thing",
+                parent_pkg=remote_parent,
+            )
+            self.assertIsNone(result)
+            self.assertIn(
+                local_dep.get_unique_key(),
+                resolver._rejected_remote_local_keys,
+            )
+
+    def test_local_parent_local_path_not_rejected_or_tracked(self):
+        """A local parent declaring a local_path is legitimate (sibling/monorepo)
+        -- it MUST NOT be marked as a rejection."""
+        import tempfile
+        from pathlib import Path
+
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+        from apm_cli.models.apm_package import APMPackage
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            resolver = APMDependencyResolver(apm_modules_dir=Path(tmpdir))
+            local_parent = APMPackage(name="specialized", version="1.0.0")
+            local_parent.source = "_local/specialized"
+
+            local_dep = DependencyReference(
+                repo_url="",
+                local_path="../base",
+                is_local=True,
+            )
+
+            # No download callback registered, so the call returns None for
+            # different reasons (nothing to materialize). The point of this
+            # test is that the rejection set MUST stay empty.
+            resolver._try_load_dependency_package(
+                local_dep,
+                parent_chain="root > specialized",
+                parent_pkg=local_parent,
+            )
+            self.assertNotIn(
+                local_dep.get_unique_key(),
+                resolver._rejected_remote_local_keys,
+            )

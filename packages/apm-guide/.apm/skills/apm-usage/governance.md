@@ -208,7 +208,7 @@ Successful install (verbose) under `enforcement: block`:
 $ apm install --verbose
 [i] Resolving dependencies...
 [i] Policy: org:contoso/.github (cached, fetched 12m ago) -- enforcement=block
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 Block: denied dependency aborts the install before integration:
@@ -226,7 +226,7 @@ Warn: same dep, `enforcement: warn` -- install succeeds, violation flows to summ
 ```shell
 $ apm install
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 
 [!] Policy
     acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
@@ -238,7 +238,7 @@ Escape hatches (`--no-policy` flag and `APM_POLICY_DISABLE=1` env var) emit the 
 $ apm install --no-policy
 [!] Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 `--dry-run` previews violations (capped at five per severity bucket; overflow collapses):
@@ -270,7 +270,7 @@ Transitive MCP server blocked -- APM packages stay installed, MCP configs are no
 $ apm install
 [i] Resolving dependencies...
 [!] Policy: org:contoso/.github -- enforcement=block
-[+] Installed 4 APM dependencies
+[+] Installed 4 APM dependencies in 0.8s
 [x] Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
 ```
 

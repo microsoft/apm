@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 import click
 
 from ..core.command_logger import CommandLogger
-from ..deps.lockfile import LockFile, get_lockfile_path  # noqa: F401
+from ..deps.lockfile import LockFile, get_lockfile_path
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
 from ..security.file_scanner import scan_lockfile_packages
@@ -398,16 +398,17 @@ def _audit_ci_gate(
     no_cache: bool,
     no_policy: bool,
     no_fail_fast: bool,
+    no_drift: bool = False,
 ) -> None:
     """Handle ``apm audit --ci`` -- lockfile consistency gate.
 
-    Runs baseline lockfile checks and (optionally) org-policy checks,
-    then emits a structured report and exits with 0 (clean) or 1
-    (violations).
+    Runs baseline lockfile checks, drift detection (unless ``--no-drift``),
+    and (optionally) org-policy checks, then emits a structured report
+    and exits with 0 (clean) or 1 (violations).
     """
     logger = cfg.logger
 
-    from ..policy.ci_checks import run_baseline_checks
+    from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
     fail_fast = not no_fail_fast
@@ -484,6 +485,31 @@ def _audit_ci_gate(
                         )
                     )
 
+    # -- Drift detection (default-on per ADR-02) --------------------
+    drift_findings: list = []
+    if not no_drift and (cfg.project_root / "apm.yml").exists():
+        from ..deps.lockfile import LockFile, get_lockfile_path
+
+        lockfile_path = get_lockfile_path(cfg.project_root)
+        if lockfile_path.exists():
+            lockfile = LockFile.read(lockfile_path)
+            if lockfile is not None:
+                drift_check, drift_findings = _check_drift(
+                    cfg.project_root,
+                    lockfile,
+                    cache_only=True,
+                    verbose=cfg.verbose,
+                )
+                ci_result.checks.append(drift_check)
+    elif no_drift and cfg.output_format == "text":
+        # In structured output (json/sarif), --no-drift is implicit from
+        # the absence of the drift check entry; no need to pollute output.
+        click.echo(
+            f"{STATUS_SYMBOLS['warning']} drift detection skipped (--no-drift); "
+            "coverage reduced -- hand-edits and missing integrations will not be caught",
+            err=True,
+        )
+
     # Resolve effective format
     effective_format = cfg.output_format
     if cfg.output_path and effective_format == "text":
@@ -494,7 +520,17 @@ def _audit_ci_gate(
     if effective_format in ("json", "sarif"):
         import json as _json
 
-        payload = ci_result.to_sarif() if effective_format == "sarif" else ci_result.to_json()
+        from ..install.drift import render_drift_json, render_drift_sarif
+
+        if effective_format == "sarif":
+            payload = ci_result.to_sarif()
+            if drift_findings:
+                payload["runs"][0]["results"].extend(render_drift_sarif(drift_findings))
+        else:
+            payload = ci_result.to_json()
+            if drift_findings or not no_drift:
+                payload["drift"] = render_drift_json(drift_findings)
+
         output = _json.dumps(payload, indent=2)
         if cfg.output_path:
             Path(cfg.output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -504,6 +540,11 @@ def _audit_ci_gate(
             click.echo(output)
     else:
         _render_ci_results(ci_result)
+        if drift_findings:
+            from ..install.drift import render_drift_text
+
+            click.echo("")
+            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose))
 
     sys.exit(0 if ci_result.passed else 1)
 
@@ -514,6 +555,7 @@ def _audit_content_scan(
     file_path: str | None,
     strip: bool,
     dry_run: bool,
+    no_drift: bool = False,
 ) -> None:
     """Handle default ``apm audit`` -- content integrity scanning.
 
@@ -585,6 +627,54 @@ def _audit_content_scan(
             logger.progress("Nothing to clean -- no strippable characters found")
         sys.exit(0)
 
+    # -- Drift detection (default-on per ADR-02) --------------------
+    # Drift only applies to whole-project audit (not --file or --strip
+    # modes; not single-package scoped).  Mutex on no_drift+strip/file
+    # is enforced earlier via UsageError.
+    drift_findings: list = []
+    drift_failed = False
+    if (
+        not no_drift
+        and not strip
+        and not file_path
+        and not package
+        and (project_root / "apm.yml").exists()
+    ):
+        from ..policy.ci_checks import _check_drift
+
+        lockfile_path = get_lockfile_path(project_root)
+        if lockfile_path.exists():
+            lockfile = LockFile.read(lockfile_path)
+            if lockfile is not None:
+                drift_check, drift_findings = _check_drift(
+                    project_root,
+                    lockfile,
+                    cache_only=True,
+                    verbose=cfg.verbose,
+                )
+                drift_failed = not drift_check.passed
+                # Bare `apm audit` is advisory: drift_failed does not gate
+                # the exit code (that lives in --ci). But silence on a
+                # cache-pin / cache-miss failure is a UX trap: the user
+                # cannot tell whether drift was clean or whether it was
+                # never attempted. Surface the failure reason on stderr
+                # whenever the drift check failed without producing
+                # findings (CacheMissError, CachePinError, missing lockfile).
+                if drift_failed and not drift_findings:
+                    click.echo(
+                        f"{STATUS_SYMBOLS['warning']} drift check could not run: "
+                        f"{drift_check.message}",
+                        err=True,
+                    )
+    elif no_drift and cfg.output_format == "text":
+        # In structured output (json/sarif), --no-drift is implicit from
+        # the absence of the drift check entry; no need to pollute output.
+        click.echo(
+            f"{STATUS_SYMBOLS['warning']} drift detection skipped (--no-drift); "
+            "coverage reduced -- hand-edits and missing integrations will not be caught",
+            err=True,
+        )
+
     # -- Display findings --
     # Determine exit code first (shared by all formats)
     if not findings_by_file or not _has_actionable_findings(findings_by_file):
@@ -592,6 +682,11 @@ def _audit_content_scan(
     else:
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
+
+    # Note: bare `apm audit` is advisory for drift; drift findings are
+    # rendered (text/json/sarif) but DO NOT escalate the exit code. Use
+    # `apm audit --ci` (handled in _audit_ci_gate) to gate on drift.
+    _ = drift_failed  # retained for symmetry; gate path lives in --ci.
 
     if effective_format == "text":
         if cfg.output_path:
@@ -603,6 +698,11 @@ def _audit_content_scan(
         if findings_by_file:
             _render_findings_table(findings_by_file, verbose=cfg.verbose)
         _render_summary(findings_by_file, files_scanned, logger)
+        if drift_findings:
+            from ..install.drift import render_drift_text
+
+            click.echo("")
+            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose))
     elif effective_format == "markdown":
         from ..security.audit_report import findings_to_markdown
 
@@ -717,6 +817,15 @@ def _audit_content_scan(
     is_flag=True,
     help="Run all checks even after a failure (default: stop at first failure).",
 )
+@click.option(
+    "--no-drift",
+    "no_drift",
+    is_flag=True,
+    help=(
+        "Skip the install-replay drift check. Reduces coverage; "
+        "use only for performance-constrained CI loops."
+    ),
+)
 @click.pass_context
 def audit(
     ctx,
@@ -732,6 +841,7 @@ def audit(
     no_cache,
     no_policy,
     no_fail_fast,
+    no_drift,
 ):
     """Scan deployed prompt files for hidden Unicode characters.
 
@@ -739,23 +849,31 @@ def audit(
     prompt, instruction, and rules files. Dangerous and suspicious
     characters can be removed with --strip.
 
-    With --ci, runs lockfile consistency checks instead of content scanning.
-    This validates that the on-disk state matches what the lockfile declares,
-    suitable for CI/CD pipeline gates.
+    By default, also runs install-replay drift detection: catches
+    hand-edits to deployed files, missing integrations, and orphaned
+    files vs the lockfile.  Use --no-drift to skip (reduces coverage).
+
+    With --ci, runs lockfile consistency checks AND drift in machine-
+    readable format, suitable for CI/CD pipeline gates.
 
     \b
     Exit codes:
-        0  Clean, info-only findings, or successful strip
-        1  Critical findings detected (or --ci with violations)
-        2  Warning-only findings (suspicious but not critical)
+        0  Clean, info-only findings, or drift-only (advisory) in bare
+           audit, or successful strip
+        1  Critical findings detected, or --ci with violations
+           (including drift in --ci mode)
+        2  Warning-only findings (suspicious but not critical), or
+           usage error (mutually exclusive flags)
 
     \b
     Examples:
-        apm audit                      # Scan all installed packages
+        apm audit                      # Scan + drift (all checks)
         apm audit my-package           # Scan a specific package
-        apm audit --file .cursorrules  # Scan any file
+        apm audit --file .cursorrules  # Scan any file (no drift)
         apm audit --strip              # Remove dangerous/suspicious chars
-        apm audit --ci                 # Lockfile consistency gate
+        apm audit --no-drift           # Skip drift only (escape hatch)
+        apm audit --ci                 # CI gate (lockfile + drift)
+        apm audit --ci --no-drift      # CI gate without drift (rare)
         apm audit --ci --policy org    # CI gate with org policy checks
         apm audit --ci -f json         # JSON CI report
         apm audit --ci -f sarif        # SARIF for GitHub Code Scanning
@@ -772,6 +890,15 @@ def audit(
         output_path=output_path,
     )
 
+    # --no-drift is a different audit mode from --strip / --file (those
+    # are content-scanning operations unrelated to integration drift).
+    # Click-native UsageError gives exit code 2 with "Usage:" prefix.
+    if no_drift and (strip or file_path):
+        raise click.UsageError(
+            "--no-drift cannot be combined with --strip or --file "
+            "(those modes do not run drift detection)"
+        )
+
     # -- CI mode: lockfile consistency gate -------------------------
     if ci:
         if verbose:
@@ -783,7 +910,7 @@ def audit(
             logger.error("--ci does not support --format markdown. Use json or sarif.")
             sys.exit(1)
 
-        _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast)
+        _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast, no_drift)
         return  # _audit_ci_gate calls sys.exit; return guards against fall-through
 
     # -- Content scan mode ------------------------------------------
@@ -793,4 +920,4 @@ def audit(
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
 
-    _audit_content_scan(cfg, package, file_path, strip, dry_run)
+    _audit_content_scan(cfg, package, file_path, strip, dry_run, no_drift)

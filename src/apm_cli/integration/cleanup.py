@@ -221,7 +221,17 @@ def remove_stale_deployed_files(
                     package=dep_key,
                 )
                 continue
-            if actual_hash != expected_hash:
+
+            # Defensive normalization: ``recorded_hashes`` may carry either
+            # the canonical ``sha256:<hex>`` (regular install pipeline) or
+            # bare ``<hex>`` (legacy local-bundle installs prior to the
+            # 0.12.0 fix).  ``compute_file_hash`` always returns the
+            # prefixed form, so strip the prefix from both sides before
+            # comparing to avoid false "user-edited" classifications.
+            def _strip_sha256(h: str) -> str:
+                return h[len("sha256:") :] if h.startswith("sha256:") else h
+
+            if _strip_sha256(actual_hash) != _strip_sha256(expected_hash):
                 result.skipped_user_edit.append(stale_path)
                 diagnostics.warn(
                     (

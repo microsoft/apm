@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
@@ -70,9 +71,10 @@ class InstructionIntegrator(BaseIntegrator):
 
         Selects the content transform via ``format_id``:
 
-        * ``cursor_rules``  -- convert ``applyTo:`` to ``globs:`` frontmatter
-        * ``claude_rules``  -- convert ``applyTo:`` to ``paths:`` frontmatter
-        * anything else     -- copy verbatim (identity transform)
+        * ``cursor_rules``    -- convert ``applyTo:`` to ``globs:`` frontmatter
+        * ``claude_rules``    -- convert ``applyTo:`` to ``paths:`` frontmatter
+        * ``windsurf_rules``  -- convert ``applyTo:`` to ``trigger: glob`` frontmatter
+        * anything else       -- copy verbatim (identity transform)
         """
         mapping = target.primitives.get("instructions")
         if not mapping:
@@ -92,7 +94,7 @@ class InstructionIntegrator(BaseIntegrator):
         deploy_dir.mkdir(parents=True, exist_ok=True)
 
         fmt = mapping.format_id
-        needs_rename = fmt in ("cursor_rules", "claude_rules")
+        needs_rename = fmt in ("cursor_rules", "claude_rules", "windsurf_rules")
 
         files_integrated = 0
         files_skipped = 0
@@ -109,6 +111,12 @@ class InstructionIntegrator(BaseIntegrator):
                 target_name = source_file.name
 
             target_path = deploy_dir / target_name
+            # target_name is Path.name (no separators), so traversal via
+            # deploy_dir is impossible.  Validated against deploy_dir (not
+            # project_root) so user-scope targets whose root resolves
+            # outside the workspace still work correctly.
+            ensure_path_within(target_path, deploy_dir)
+
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
@@ -125,6 +133,8 @@ class InstructionIntegrator(BaseIntegrator):
                 links_resolved = self.copy_instruction_cursor(source_file, target_path)
             elif fmt == "claude_rules":
                 links_resolved = self.copy_instruction_claude(source_file, target_path)
+            elif fmt == "windsurf_rules":
+                links_resolved = self.copy_instruction_windsurf(source_file, target_path)
             else:
                 links_resolved = self.copy_instruction(source_file, target_path)
 
@@ -156,6 +166,10 @@ class InstructionIntegrator(BaseIntegrator):
         legacy_dir = project_root / effective_root / mapping.subdir
         if mapping.format_id == "cursor_rules":
             legacy_pattern = "*.mdc"
+        elif mapping.format_id == "windsurf_rules":
+            # Do not use a broad legacy glob for Windsurf rules to avoid
+            # deleting user-authored .md files under .windsurf/rules/.
+            legacy_pattern = None
         elif mapping.format_id == "claude_rules":
             # Do not use a broad legacy glob for Claude rules to avoid
             # deleting user-authored .md files under .claude/rules/.
@@ -317,6 +331,62 @@ class InstructionIntegrator(BaseIntegrator):
             project_root,
             managed_files=managed_files,
         )
+
+    # ------------------------------------------------------------------
+    # Windsurf Rules (.md with trigger/globs frontmatter)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _convert_to_windsurf_rules(content: str) -> str:
+        """Convert APM instruction content to Windsurf rules ``.md`` format.
+
+        Parses existing YAML frontmatter via ``yaml.safe_load``, maps
+        ``applyTo`` to Windsurf's ``trigger: glob`` + ``globs`` frontmatter.
+        Instructions without ``applyTo`` become ``trigger: always_on`` rules.
+
+        Ref: https://docs.windsurf.com/windsurf/cascade/memories
+        """
+        import yaml
+
+        body = content
+        apply_to = ""
+
+        # Parse existing frontmatter with yaml.safe_load (consistent with
+        # _write_windsurf_agent_skill and all other frontmatter parsers).
+        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+            apply_to = str(fm.get("applyTo", "")).strip()
+
+        # Build Windsurf rules frontmatter
+        parts = ["---"]
+        if apply_to:
+            # Sanitize: strip newlines to prevent frontmatter injection
+            # via crafted applyTo values (e.g. "**\ntrigger: always_on").
+            safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+            parts.append("trigger: glob")
+            parts.append(f'globs: "{safe_apply_to}"')
+        else:
+            parts.append("trigger: always_on")
+        parts.append("---")
+
+        return "\n".join(parts) + "\n\n" + body.lstrip("\n")
+
+    def copy_instruction_windsurf(self, source: Path, target: Path) -> int:
+        """Copy instruction file converted to Windsurf rules format.
+
+        Converts ``applyTo:`` to ``trigger: glob`` + ``globs:`` frontmatter
+        and resolves links.
+        """
+        content = source.read_text(encoding="utf-8")
+        content = self._convert_to_windsurf_rules(content)
+        content, links_resolved = self.resolve_links(content, source, target)
+        target.write_text(content, encoding="utf-8")
+        return links_resolved
 
     # ------------------------------------------------------------------
     # Claude Code Rules (.md with paths: frontmatter)

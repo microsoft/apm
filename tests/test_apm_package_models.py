@@ -352,7 +352,6 @@ class TestDependencyReference:
         assert dep.is_virtual is True
         assert dep.virtual_path == "prompts/code-review.prompt.md"
         assert dep.is_virtual_file() is True
-        assert dep.is_virtual_collection() is False
         assert dep.get_virtual_package_name() == "test-repo-code-review"
 
     def test_parse_virtual_file_with_reference(self):
@@ -374,24 +373,30 @@ class TestDependencyReference:
             assert dep.is_virtual_file() is True
             assert dep.virtual_path == f"path/to/file{ext}"
 
-    def test_parse_virtual_collection(self):
-        """Test parsing virtual collection package."""
+    def test_parse_collection_yml_url_raises_migration_error(self):
+        """`.collection.yml` URLs are no longer supported (#1094); raise."""
+        with pytest.raises(ValueError, match=r"\.collection\.yml is no longer supported"):
+            DependencyReference.parse("owner/test-repo/collections/project-planning.collection.yml")
+
+    def test_parse_collections_path_resolves_at_fetch_time(self):
+        """A `/collections/<name>` URL is SUBDIRECTORY now (#1094).
+
+        After the `.collection.yml` form was removed, the actual shape of a
+        ``collections/<name>`` path (an APM package or a generic
+        subdirectory) is resolved at fetch time by probing ``apm.yml``.
+        """
         dep = DependencyReference.parse("owner/test-repo/collections/project-planning")
         assert dep.repo_url == "owner/test-repo"
         assert dep.is_virtual is True
         assert dep.virtual_path == "collections/project-planning"
         assert dep.is_virtual_file() is False
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
         assert dep.get_virtual_package_name() == "test-repo-project-planning"
 
-    def test_parse_virtual_collection_with_reference(self):
-        """Test parsing virtual collection with git reference."""
-        dep = DependencyReference.parse("owner/test-repo/collections/testing#main")
-        assert dep.repo_url == "owner/test-repo"
-        assert dep.is_virtual is True
-        assert dep.virtual_path == "collections/testing"
-        assert dep.reference == "main"
-        assert dep.is_virtual_collection() is True
+    def test_parse_collection_yml_with_reference_raises_migration_error(self):
+        """`.collection.yml#ref` is also rejected with the migration error."""
+        with pytest.raises(ValueError, match=r"\.collection\.yml is no longer supported"):
+            DependencyReference.parse("owner/test-repo/collections/testing.collection.yml#main")
 
     def test_parse_invalid_virtual_file_extension(self):
         """Test that invalid file extensions are rejected for virtual files."""
@@ -428,7 +433,6 @@ class TestDependencyReference:
         assert dep.is_virtual is False
         assert dep.virtual_path is None
         assert dep.is_virtual_file() is False
-        assert dep.is_virtual_collection() is False
 
     def test_parse_control_characters_rejected(self):
         """Test that control characters are rejected."""

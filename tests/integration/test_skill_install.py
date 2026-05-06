@@ -84,9 +84,9 @@ class TestSimpleClaudeSkillInstall:
         skill_md = skill_path / "SKILL.md"
         assert skill_md.exists(), "SKILL.md not found in installed package"
 
-        # Verify skill was integrated to .github/skills/
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
-        assert skill_integrated.exists(), "Skill not integrated to .github/skills/"
+        # Verify skill was integrated to .agents/skills/
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
+        assert skill_integrated.exists(), "Skill not integrated to .agents/skills/"
 
     def test_install_skill_updates_apm_yml(self, temp_project, apm_command):
         """Verify the skill is added to project's apm.yml."""
@@ -152,9 +152,9 @@ class TestClaudeSkillWithResources:
         # Verify SKILL.md
         assert (skill_path / "SKILL.md").exists()
 
-        # Verify skill was integrated to .github/skills/
-        skill_integrated = temp_project / ".github" / "skills" / "skill-creator" / "SKILL.md"
-        assert skill_integrated.exists(), "Skill not integrated to .github/skills/"
+        # Verify skill was integrated to .agents/skills/
+        skill_integrated = temp_project / ".agents" / "skills" / "skill-creator" / "SKILL.md"
+        assert skill_integrated.exists(), "Skill not integrated to .agents/skills/"
 
     def test_resources_stay_in_apm_modules(self, temp_project, apm_command):
         """Verify bundled resources stay in apm_modules, not copied to .github/."""
@@ -173,10 +173,10 @@ class TestClaudeSkillWithResources:
         if not skill_path.exists():
             pytest.skip("skill-creator not available")
 
-        # Check .github/skills/ has the skill directory with SKILL.md
-        skills_dir = temp_project / ".github" / "skills" / "skill-creator"
+        # Check .agents/skills/ has the skill directory with SKILL.md
+        skills_dir = temp_project / ".agents" / "skills" / "skill-creator"
         if skills_dir.exists():
-            assert (skills_dir / "SKILL.md").exists(), "SKILL.md not found in .github/skills/"
+            assert (skills_dir / "SKILL.md").exists(), "SKILL.md not found in .agents/skills/"
 
 
 class TestSkillInstallIdempotency:
@@ -207,7 +207,7 @@ class TestSkillInstallIdempotency:
         assert result2.returncode == 0
 
         # Verify still only one skill copy
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
         assert skill_integrated.exists()
 
 
@@ -244,6 +244,6 @@ dependencies:
         )
         assert skill_path.exists()
 
-        # Skill should still be integrated to .github/skills/
-        skill_integrated = project_dir / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
-        assert skill_integrated.exists(), "Skill should be integrated to .github/skills/"
+        # Skill should still be integrated to .agents/skills/
+        skill_integrated = project_dir / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
+        assert skill_integrated.exists(), "Skill should be integrated to .agents/skills/"

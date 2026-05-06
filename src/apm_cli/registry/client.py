@@ -1,10 +1,22 @@
 """Simple MCP Registry client for server discovery."""
 
+import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 import requests
+
+_log = logging.getLogger(__name__)
+
+
+def _safe_headers(response) -> dict[str, str]:
+    """Return response headers as a plain dict, tolerating Mock objects in tests."""
+    try:
+        return dict(response.headers)
+    except (TypeError, AttributeError):
+        return {}
+
 
 _DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
 
@@ -90,6 +102,115 @@ class SimpleRegistryClient:
         self._is_custom_url = registry_url is not None or env_override is not None
         self.session = requests.Session()
         self._timeout = _resolve_timeout()
+        self._http_cache = self._init_http_cache()
+
+    @staticmethod
+    def _init_http_cache():
+        """Resolve the shared HTTP response cache, or ``None`` if disabled.
+
+        Honors ``APM_NO_CACHE`` so users can opt out, and degrades to
+        ``None`` on any setup error so registry calls always fall back to
+        plain network behavior.
+        """
+        if os.environ.get("APM_NO_CACHE", "").strip() in ("1", "true", "yes"):
+            return None
+        try:
+            from apm_cli.cache import HttpCache, get_cache_root
+
+            return HttpCache(get_cache_root())
+        except Exception as exc:  # pragma: no cover - defensive
+            _log.debug("HTTP cache unavailable, falling back to network: %s", exc)
+            return None
+
+    def _cached_get_json(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any] | None, dict[str, str]]:
+        """GET ``url`` honoring the persistent HTTP cache.
+
+        On a fresh cache hit returns the parsed JSON immediately.  On an
+        expired entry, sends ``If-None-Match`` for revalidation; on 304 the
+        cached body is reused and its TTL refreshed.  Returns
+        ``(json_payload, response_headers)``; when there is no payload
+        (204 No Content), ``json_payload`` is ``None``.
+
+        Falls back to a plain ``session.get`` when the cache is disabled
+        or unavailable.
+        """
+        # Cache key includes query params so paginated/search URLs are
+        # cached independently.
+        cache_key = url
+        if params:
+            from urllib.parse import urlencode
+
+            cache_key = f"{url}?{urlencode(sorted(params.items()))}"
+
+        # Auth bypass: when the request would carry an Authorization
+        # header (either on the session or per-request), skip the
+        # cache entirely. Caching authenticated responses risks
+        # cross-identity body leakage when a different caller hits
+        # the same URL with different credentials -- and scoping the
+        # cache by hashed token would just recreate the underlying
+        # auth-store responsibility. Bypass is the simple safe
+        # default; the MCP registry path is anonymous in practice.
+        session_auth = bool(self.session.headers.get("Authorization"))
+        if session_auth or self._http_cache is None:
+            kwargs0: dict[str, Any] = {"timeout": self._timeout}
+            if params:
+                kwargs0["params"] = params
+            response = self.session.get(url, **kwargs0)
+            response.raise_for_status()
+            return response.json(), _safe_headers(response)
+
+        # Fresh cache hit
+        cached = self._http_cache.get(cache_key)
+        if cached is not None:
+            try:
+                import json as _json
+
+                return _json.loads(cached.body.decode("utf-8")), {}
+            except (ValueError, UnicodeDecodeError):
+                pass  # fall through to network
+
+        # Expired or missing: send conditional headers if we have an ETag
+        request_headers = self._http_cache.conditional_headers(cache_key)
+        kwargs: dict[str, Any] = {"timeout": self._timeout}
+        if params:
+            kwargs["params"] = params
+        if request_headers:
+            kwargs["headers"] = request_headers
+        response = self.session.get(url, **kwargs)
+
+        if response.status_code == 304:
+            self._http_cache.refresh_expiry(cache_key, _safe_headers(response))
+            cached = self._http_cache.get(cache_key)
+            if cached is not None:
+                try:
+                    import json as _json
+
+                    return _json.loads(cached.body.decode("utf-8")), _safe_headers(response)
+                except (ValueError, UnicodeDecodeError):
+                    pass  # fall through to a fresh fetch
+            # Stored entry vanished between revalidate and read: refetch
+            kwargs2: dict[str, Any] = {"timeout": self._timeout}
+            if params:
+                kwargs2["params"] = params
+            response = self.session.get(url, **kwargs2)
+
+        response.raise_for_status()
+        try:
+            body = response.content
+            self._http_cache.store(
+                cache_key,
+                body,
+                status_code=response.status_code,
+                headers=_safe_headers(response),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            _log.debug("HTTP cache store failed for %s: %s", cache_key, exc)
+        return response.json(), _safe_headers(response)
 
     def list_servers(
         self, limit: int = 100, cursor: str | None = None
@@ -114,9 +235,8 @@ class SimpleRegistryClient:
         if cursor is not None:
             params["cursor"] = cursor
 
-        response = self.session.get(url, params=params, timeout=self._timeout)
-        response.raise_for_status()
-        data = response.json()
+        data, _hdrs = self._cached_get_json(url, params=params)
+        data = data or {}
 
         # Extract servers - they're nested under "server" key in each item
         raw_servers = data.get("servers", [])
@@ -152,9 +272,8 @@ class SimpleRegistryClient:
         url = f"{self.registry_url}/v0/servers/search"
         params = {"q": search_query}
 
-        response = self.session.get(url, params=params, timeout=self._timeout)
-        response.raise_for_status()
-        data = response.json()
+        data, _hdrs = self._cached_get_json(url, params=params)
+        data = data or {}
 
         # Extract servers - they're nested under "server" key in each item
         raw_servers = data.get("servers", [])
@@ -181,9 +300,8 @@ class SimpleRegistryClient:
             ValueError: If the server is not found.
         """
         url = f"{self.registry_url}/v0/servers/{server_id}"
-        response = self.session.get(url, timeout=self._timeout)
-        response.raise_for_status()
-        data = response.json()
+        data, _hdrs = self._cached_get_json(url)
+        data = data or {}
 
         # Return the complete response including x-github and other metadata
         # but ensure the main server info is accessible at the top level

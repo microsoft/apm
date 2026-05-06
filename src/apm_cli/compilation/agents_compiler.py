@@ -44,7 +44,9 @@ _KNOWN_TARGETS = (  # noqa: RUF005
     "cursor",
     "opencode",
     "codex",
+    "agent-skills",
     "gemini",
+    "windsurf",
     "all",
     "minimal",
 ) + _VSCODE_TARGET_ALIASES
@@ -300,9 +302,14 @@ class AgentsCompiler:
             if should_compile_gemini_md(routing_target):
                 results.append(self._compile_gemini_md(config, primitives))
 
-            # Some targets (e.g. cursor) use the data-driven
+            # Some targets (e.g. cursor, agent-skills) use the data-driven
             # integration layer and don't need compilation.
             if not results:
+                if logger and config.target == "agent-skills":
+                    logger.progress(
+                        "agent-skills -- no compile outputs, skipping",
+                        symbol="info",
+                    )
                 return CompilationResult(
                     success=True,
                     output_path="",

@@ -686,3 +686,36 @@ class TestRound4EmptyRefAndEmptyVpathGates:
         assert ok is True
         ls_remote.assert_called_once()
         ls_tree.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Issue #1094: probe order in SUBDIRECTORY case
+# ---------------------------------------------------------------------------
+
+
+class TestSubdirectoryProbeOrder:
+    """``apm.yml`` is probed first for SUBDIRECTORY paths.
+
+    The legacy ``/collections/`` path heuristic is removed: a path like
+    ``collections/foo`` is now classified SUBDIRECTORY and resolved at fetch
+    time. ``apm.yml`` is the supported way to express a curated dependency
+    aggregator (#1094); the ``.collection.yml`` form was removed.
+    """
+
+    def test_apm_yml_at_collections_path_short_circuits_collection_probe(self) -> None:
+        """`<vpath>/apm.yml` hits first; subdirectory probe stops there."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(vpath="collections/writing", ref="main")
+
+        # Whitelist only `<vpath>/apm.yml`; everything else 404s.
+        def fake_download(_dr, path, _ref):
+            if path == "collections/writing/apm.yml":
+                return b"name: writing\nversion: 1.0.0\n"
+            raise RuntimeError("404")
+
+        with patch.object(downloader, "download_raw_file", side_effect=fake_download) as raw:
+            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
+
+        assert ok is True
+        attempted_paths = [call.args[1] for call in raw.call_args_list]
+        assert "collections/writing/apm.yml" in attempted_paths

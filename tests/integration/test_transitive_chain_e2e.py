@@ -173,3 +173,56 @@ def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_command)
         "leaf-skill.instructions.md",
     ):
         assert not (deployed / fname).exists(), f"Primitive {fname} survived cascade uninstall"
+
+
+def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_command):
+    """Regression for #857: a transitive ../sibling resolves against the
+    DECLARING package's directory, not the consumer's project root.
+
+    Layout (asymmetric — old behaviour would look for /tmp/.../base which
+    is OUTSIDE the consumer root and fail):
+
+        consumer/
+            apm.yml             -> ./packages/specialized
+            packages/
+                specialized/
+                    apm.yml     -> ../base       (resolves to packages/base)
+                base/
+                    apm.yml
+    """
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    pkgs = consumer / "packages"
+    pkgs.mkdir()
+
+    _write_pkg(pkgs / "base", "base-pkg", [], "base-skill")
+    _write_pkg(pkgs / "specialized", "specialized-pkg", ["../base"], "specialized-skill")
+
+    (consumer / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": ["./packages/specialized"]},
+            }
+        )
+    )
+
+    result = subprocess.run(
+        [apm_command, "install"],
+        cwd=consumer,
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT,
+    )
+    assert result.returncode == 0, (
+        f"install failed (#857 regression?):\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+    # Both packages must be materialized — the transitive ../base proves the
+    # anchor is on specialized/, not on consumer/. Install path uses the
+    # source-dir basename (NOT the apm.yml `name` field).
+    assert (consumer / "apm_modules" / "_local" / "specialized").exists()
+    assert (consumer / "apm_modules" / "_local" / "base").exists()
+    # No "outside the project root" rejection should appear in either stream.
+    combined = result.stdout + result.stderr
+    assert "outside the project root" not in combined, combined

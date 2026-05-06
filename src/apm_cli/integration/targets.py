@@ -131,6 +131,46 @@ class TargetProfile:
     ``copilot-instructions.md`` file.
     """
 
+    # -- subsystem-specific metadata (single source of truth) -----------------
+    #
+    # The four fields below centralize per-target knowledge that previously
+    # lived in scattered module-local dicts and ``if/elif`` chains
+    # (see ``bundle/lockfile_enrichment.py``, ``core/conflict_detector.py``,
+    # ``commands/compile/cli.py``, ``install/services.py``).  Adding a new
+    # target now requires only a single ``KNOWN_TARGETS`` entry.
+
+    pack_prefixes: tuple[str, ...] = ()
+    """Path prefixes that identify this target's deployed files when packing.
+
+    When empty, ``bundle.lockfile_enrichment`` derives ``(f"{root_dir}/",)``
+    from :attr:`root_dir`.  Override only when the target deploys to multiple
+    top-level directories (e.g. Codex deploys both ``.codex/`` and
+    ``.agents/``).
+    """
+
+    compile_family: str | None = None
+    """Compiler family this target belongs to for ``apm compile`` routing.
+
+    Recognised values:
+
+    * ``"vscode"`` -- emits ``.github/copilot-instructions.md`` *and* AGENTS.md.
+    * ``"claude"`` -- emits ``CLAUDE.md`` and ``.claude/rules/`` files.
+    * ``"gemini"`` -- emits ``GEMINI.md``.
+    * ``"agents"`` -- emits AGENTS.md only (cursor, opencode, codex, windsurf).
+    * ``None`` -- target has no compile output (agent-skills, copilot-cowork).
+
+    Used by :func:`apm_cli.commands.compile.cli._resolve_compile_target` to
+    derive multi-target routing from the registry instead of hard-coded sets.
+    """
+
+    hooks_config_display: str | None = None
+    """Human-readable path shown in the install log for hooks integration.
+
+    e.g. ``".claude/settings.json"`` for Claude (hooks merge into a settings
+    file rather than landing in their own subdir).  When ``None``, the
+    install log falls back to the generic ``"{root}/{subdir}/"`` formula.
+    """
+
     @property
     def prefix(self) -> str:
         """Return the path prefix for this target (e.g. ``".github/"``).
@@ -138,6 +178,15 @@ class TargetProfile:
         Used by ``validate_deploy_path`` and ``partition_managed_files``.
         """
         return f"{self.root_dir}/"
+
+    @property
+    def effective_pack_prefixes(self) -> tuple[str, ...]:
+        """Return the path prefixes used by pack-time file filtering.
+
+        Falls back to ``(self.prefix,)`` when :attr:`pack_prefixes` is empty,
+        so most targets need not override the field explicitly.
+        """
+        return self.pack_prefixes if self.pack_prefixes else (self.prefix,)
 
     def supports(self, primitive: str) -> bool:
         """Return ``True`` if this target accepts *primitive*."""
@@ -285,7 +334,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
             ),
             "prompts": PrimitiveMapping("prompts", ".prompt.md", "github_prompt"),
             "agents": PrimitiveMapping("agents", ".agent.md", "github_agent"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "github_hooks"),
         },
         auto_create=True,
@@ -294,6 +348,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_dir=".copilot",
         unsupported_user_primitives=("prompts", "instructions"),
         generated_files=("copilot-instructions.md",),
+        compile_family="vscode",
     ),
     # Claude Code -- the user-level config directory is whatever
     # ``CLAUDE_CONFIG_DIR`` points to (default ``~/.claude``).  The env
@@ -315,6 +370,8 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
+        compile_family="claude",
+        hooks_config_display=".claude/settings.json",
     ),
     # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
     # and MCP.  Rules/instructions are managed via Cursor Settings UI only
@@ -326,7 +383,24 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            # TODO(cursor-command-format): track via dedicated issue once
+            # filed.  Cursor command deployment reuses the shared command
+            # transformer (claude_command), which preserves only the
+            # supported common frontmatter subset (description,
+            # allowed-tools, model, argument-hint, input).  Switch to a
+            # dedicated "cursor_command" format when the integrator
+            # implements a Cursor-specific writer that preserves
+            # Cursor-specific prompt metadata (author, mcp, parameters,
+            # ...) verbatim.  Dropped keys are surfaced via
+            # diagnostics.warn() at install time -- see
+            # command_integrator.
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
         },
         auto_create=False,
@@ -334,6 +408,8 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".cursor",
         unsupported_user_primitives=("instructions",),
+        compile_family="agents",
+        hooks_config_display=".cursor/hooks.json",
     ),
     # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
     # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.
@@ -343,13 +419,19 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "agents": PrimitiveMapping("agents", ".md", "opencode_agent"),
             "commands": PrimitiveMapping("commands", ".md", "opencode_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
         },
         auto_create=False,
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".config/opencode",
         unsupported_user_primitives=("hooks",),
+        compile_family="agents",
     ),
     # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
     # Instructions are compile-only (GEMINI.md) -- Gemini CLI does not read
@@ -363,13 +445,20 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         root_dir=".gemini",
         primitives={
             "commands": PrimitiveMapping("commands", ".toml", "gemini_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "gemini_hooks"),
         },
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".gemini",
+        compile_family="gemini",
+        hooks_config_display=".gemini/settings.json",
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
@@ -390,6 +479,60 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported="partial",
+        pack_prefixes=(".codex/", ".agents/"),
+        compile_family="agents",
+        hooks_config_display=".codex/hooks.json",
+    ),
+    # Windsurf/Cascade -- .windsurf/ is the workspace config directory.
+    # Rules are markdown files with trigger/globs frontmatter under .windsurf/rules/.
+    # Agents are deployed as skills under .windsurf/skills/<name>/SKILL.md
+    # (Cascade auto-invokes them when the description matches the task).
+    # Skills use the standard SKILL.md format under .windsurf/skills/.
+    # Workflows (~= commands) are markdown files under .windsurf/workflows/.
+    # Hooks are configured in .windsurf/hooks.json.
+    # At user scope, ~/.codeium/windsurf/ is used.  Global rules use a single
+    # file (~/.codeium/windsurf/memories/global_rules.md) with a different
+    # format, so "instructions" is excluded from user scope.
+    # MCP config: ~/.codeium/windsurf/mcp_config.json (mcpServers JSON format).
+    # Ref: https://docs.windsurf.com/windsurf/cascade/memories
+    # Ref: https://docs.windsurf.com/windsurf/cascade/mcp
+    "windsurf": TargetProfile(
+        name="windsurf",
+        root_dir=".windsurf",
+        primitives={
+            "instructions": PrimitiveMapping("rules", ".md", "windsurf_rules"),
+            "agents": PrimitiveMapping("skills", "/SKILL.md", "windsurf_agent_skill"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "commands": PrimitiveMapping("workflows", ".md", "windsurf_workflow"),
+            "hooks": PrimitiveMapping("", "hooks.json", "windsurf_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported="partial",
+        user_root_dir=".codeium/windsurf",
+        unsupported_user_primitives=("instructions",),
+        compile_family="agents",
+        hooks_config_display=".windsurf/hooks.json",
+    ),
+    # Agent-skills: cross-client shared skills directory (.agents/skills/).
+    # Skills primitive only -- no agents, hooks, or commands.
+    # Not auto-detected (detect_by_dir=False) because .agents/ is shared by
+    # multiple tools (Codex, etc.). Explicit --target agent-skills only.
+    "agent-skills": TargetProfile(
+        name="agent-skills",
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".agents",
+        generated_files=(),
     ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
@@ -413,6 +556,46 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         requires_flag="copilot_cowork",
     ),
 }
+
+
+def apply_legacy_skill_paths(profiles: list[TargetProfile]) -> list[TargetProfile]:
+    """Reset ``deploy_root`` on every ``skills`` primitive to ``None``.
+
+    When ``--legacy-skill-paths`` (or ``APM_LEGACY_SKILL_PATHS=1``) is
+    active, this restores pre-convergence per-client routing so skills
+    land in ``.github/skills/``, ``.cursor/skills/``, etc. instead of
+    the default ``.agents/skills/``.
+
+    Returns a NEW list of (possibly replaced) profiles — the global
+    ``KNOWN_TARGETS`` dict is never mutated.
+    """
+    from dataclasses import replace
+
+    result: list[TargetProfile] = []
+    for profile in profiles:
+        skills_pm = profile.primitives.get("skills")
+        if skills_pm and skills_pm.deploy_root is not None:
+            new_pm = PrimitiveMapping(
+                subdir=skills_pm.subdir,
+                extension=skills_pm.extension,
+                format_id=skills_pm.format_id,
+                deploy_root=None,
+            )
+            new_primitives = {**profile.primitives, "skills": new_pm}
+            profile = replace(profile, primitives=new_primitives)
+        result.append(profile)
+    return result
+
+
+def should_use_legacy_skill_paths() -> bool:
+    """Return ``True`` when the ``APM_LEGACY_SKILL_PATHS`` env var is set.
+
+    Recognised truthy values: ``1``, ``true``, ``yes`` (case-insensitive).
+    """
+    import os
+
+    val = os.environ.get("APM_LEGACY_SKILL_PATHS", "").strip().lower()
+    return val in ("1", "true", "yes")
 
 
 def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821
@@ -519,7 +702,13 @@ def active_targets_user_scope(
         for t in raw:
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
-                return [p for p in KNOWN_TARGETS.values() if p.user_supported and _flag_gated(p)]
+                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+                return [
+                    p
+                    for p in KNOWN_TARGETS.values()
+                    if p.user_supported and _flag_gated(p) and p.name not in EXPLICIT_ONLY_TARGETS
+                ]
             profile = KNOWN_TARGETS.get(canonical)
             if (
                 profile
@@ -587,9 +776,13 @@ def active_targets(
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
                 # Return all targets regardless of flag gating.
+                # Exclude explicit-only targets (agent-skills) -- they must
+                # be requested individually.
                 # The project-scope gate in phases/targets.py and
                 # for_scope() handle user-observable blocking.
-                return list(KNOWN_TARGETS.values())
+                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+                return [p for p in KNOWN_TARGETS.values() if p.name not in EXPLICIT_ONLY_TARGETS]
             profile = KNOWN_TARGETS.get(canonical)
             if profile and _flag_gated(profile) and profile.name not in seen:
                 seen.add(profile.name)
