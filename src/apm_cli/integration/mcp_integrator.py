@@ -909,6 +909,18 @@ class MCPIntegrator:
                     )
                     logger.error(f"  Failed to install {dep}: {install_error}")
                     all_ok = False
+
+            # Emit aggregated post-install diagnostics for runtimes that
+            # support runtime env-var substitution (currently Copilot CLI).
+            # Safe no-op for runtimes whose adapter doesn't aggregate state.
+            try:
+                if runtime == "copilot":
+                    from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+                    CopilotClientAdapter.emit_install_run_summary()
+            except Exception:
+                _log.debug("Failed to emit install-run summary", exc_info=True)
+
             return all_ok
 
         except ImportError as e:

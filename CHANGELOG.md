@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `apm install --target copilot` no longer bakes environment variable values into `~/.copilot/mcp-config.json`; placeholders like `${env:VAR}`, `${VAR}`, and legacy `<VAR>` are translated to Copilot CLI's native runtime substitution syntax (`${VAR}`) so secrets stay in the shell environment instead of on disk. Legacy `<VAR>` syntax is auto-translated with a deprecation warning; migrate to `${VAR}` in `apm.yml`. (#1152)
+
 ### Changed
 
 - **Explicit, auditable target resolution.** `apm install` and `apm compile` now resolve harness targets in a strict priority chain (`--target` flag > `apm.yml` `targets:` > auto-detect from filesystem signals) and print a one-line `[i] Targets: ...  (source: ...)` provenance summary so the chosen path is never silently inferred. Empty repositories with no signal now exit 2 with a teaching message instead of silently defaulting to `copilot`. Adds `apm targets` discovery command and `apm compile --all` flag (deprecates `--target all`). (#1165, closes #1154, closes #1122, closes #1130, closes #518, closes #888, closes #891, closes #650, closes #1056)

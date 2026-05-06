@@ -489,6 +489,23 @@ mcp:
 apm install --trust-transitive-mcp
 ```
 
+### Environment variable placeholders
+
+`env`, `headers`, and `args` values may reference environment variables using either of two equivalent forms:
+
+| Syntax        | Meaning                                                     |
+| ------------- | ----------------------------------------------------------- |
+| `${VAR}`      | Reference to an environment variable named `VAR`            |
+| `${env:VAR}`  | Same as above (VS Code-style prefix, normalized internally) |
+
+How APM materializes a placeholder depends on the target harness:
+
+- **Copilot CLI** (`~/.copilot/mcp-config.json`): the placeholder is preserved as `${VAR}` in the generated config and resolved by Copilot CLI from the host environment at server-start. APM never reads the value, so secrets stay in your shell. Make sure the variable is exported before launching `gh copilot`.
+- **VS Code** (`.vscode/mcp.json`): the placeholder is rewritten to VS Code's `${env:VAR}` form and resolved by VS Code at server-start.
+- **Other harnesses** (Cursor, Windsurf, OpenCode, Claude Desktop, Gemini, Codex): the placeholder is resolved from the current process environment at install time and the literal value is written into the harness config.
+
+The legacy `<VAR>` syntax is still accepted for backward compatibility but emits a deprecation warning; migrate to `${VAR}` in `apm.yml`.
+
 ### Validation
 
 Run `apm install --dry-run` to preview MCP dependency configuration without writing any files. Self-defined deps are validated for required fields and transport values; overlay deps are loaded as-is and unknown fields are ignored.
