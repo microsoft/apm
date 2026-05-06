@@ -490,7 +490,7 @@ class TestCopilotInstallRunSummary(unittest.TestCase):
         with patch.object(
             CopilotClientAdapter,
             "_collect_previously_baked_keys",
-            return_value={"GITHUB_TOKEN", "LINEAR_KEY"},
+            return_value=({"GITHUB_TOKEN", "LINEAR_KEY"}, False),
         ):
             adapter._collect_previously_baked_keys.__call__  # noqa: B018 - sanity
             CopilotClientAdapter._security_upgraded_keys.update({"GITHUB_TOKEN", "LINEAR_KEY"})
@@ -502,6 +502,45 @@ class TestCopilotInstallRunSummary(unittest.TestCase):
         self.assertIn("Security improvement", joined)
         self.assertIn("GITHUB_TOKEN", joined)
         self.assertIn("LINEAR_KEY", joined)
+
+    def test_security_upgrade_detects_baked_http_header_literals(self):
+        """Regression trap: a previously-baked HTTP header literal (which
+        does not expose the env-var name) must still trigger the
+        security-improvement notice for whatever placeholder keys the new
+        write introduces. The pre-fix path produced an empty intersection
+        because the headers branch added a sentinel string instead of a
+        real env-var name.
+        """
+        adapter = self._adapter()
+        # Simulate previous on-disk state: env block had no baked literals
+        # (empty set), but headers block did (True). Combined with new
+        # placeholder keys for this write, the upgrade notice MUST list
+        # the new keys -- they are the vars the user must export.
+        with patch.object(
+            CopilotClientAdapter,
+            "_collect_previously_baked_keys",
+            return_value=(set(), True),
+        ):
+            adapter._last_env_placeholder_keys = {"GH_TOKEN"}
+            previously_baked_keys, previously_baked_headers = (
+                adapter._collect_previously_baked_keys("github/server", "github-mcp")
+            )
+            self.assertEqual(previously_baked_keys, set())
+            self.assertTrue(previously_baked_headers)
+            # Mirror configure_mcp_server's upgrade-detection logic.
+            upgraded = previously_baked_keys & adapter._last_env_placeholder_keys
+            if previously_baked_headers and adapter._last_env_placeholder_keys:
+                upgraded = upgraded | adapter._last_env_placeholder_keys
+            self.assertEqual(upgraded, {"GH_TOKEN"})
+            CopilotClientAdapter._security_upgraded_keys.update(upgraded)
+
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("Security improvement", joined)
+        self.assertIn("GH_TOKEN", joined)
+        # The legacy "(http header value)" sentinel must NOT appear.
+        self.assertNotIn("(http header value)", joined)
 
     def test_unset_env_warning_aggregates_across_servers(self):
         """Two servers contributing different unset env vars produce a

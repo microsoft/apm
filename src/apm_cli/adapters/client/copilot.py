@@ -274,8 +274,11 @@ class CopilotClientAdapter(MCPClientAdapter):
             # remember the affected keys for the post-install notice. We
             # snapshot BEFORE writing the new config.
             previously_baked_keys = set()
+            previously_baked_headers = False
             if self._supports_runtime_env_substitution:
-                previously_baked_keys = self._collect_previously_baked_keys(server_url, server_name)
+                previously_baked_keys, previously_baked_headers = (
+                    self._collect_previously_baked_keys(server_url, server_name)
+                )
 
             # Generate server configuration with environment and runtime variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
@@ -304,8 +307,13 @@ class CopilotClientAdapter(MCPClientAdapter):
                         self._last_legacy_angle_vars
                     )
                 # Only flag a security upgrade when the previously baked keys
-                # actually overlap with what we are now placeholderizing.
+                # actually overlap with what we are now placeholderizing -- OR
+                # when the previous on-disk state had baked HTTP header
+                # literals (which don't expose env-var names directly, so we
+                # surface every newly-placeholderised key for this server).
                 upgraded = previously_baked_keys & self._last_env_placeholder_keys
+                if previously_baked_headers and self._last_env_placeholder_keys:
+                    upgraded = upgraded | self._last_env_placeholder_keys
                 if upgraded:
                     self._security_upgraded_keys.update(upgraded)
 
@@ -318,15 +326,18 @@ class CopilotClientAdapter(MCPClientAdapter):
             return False
 
     def _collect_previously_baked_keys(self, server_url, server_name):
-        """Return the set of env-var keys whose value in the existing on-disk
-        config is a literal (non-placeholder) string. These are the keys that
-        the upcoming write will convert into ``${KEY}`` runtime references,
-        and they form the basis of the security-improvement notice.
+        """Return ``(env_keys, headers_were_baked)`` for the existing on-disk
+        entry: the set of env-block keys whose values are literal
+        (non-placeholder) strings, and a flag indicating whether the headers
+        block contained any literal values. Together these drive the
+        security-improvement notice. Headers don't expose env-var names
+        directly, so the caller unions current-write placeholder keys when
+        ``headers_were_baked`` is True.
         """
         try:
             current = self.get_current_config()
         except Exception:
-            return set()
+            return set(), False
         servers = current.get("mcpServers") or {}
         # Match the same key resolution rule used below.
         if server_name:
@@ -337,24 +348,21 @@ class CopilotClientAdapter(MCPClientAdapter):
             key = server_url
         existing = servers.get(key)
         if not isinstance(existing, dict):
-            return set()
-        baked = set()
+            return set(), False
+        baked_env_keys = set()
         env_block = existing.get("env") or {}
         if isinstance(env_block, dict):
             for k, v in env_block.items():
                 if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
-                    baked.add(k)
-        # Also inspect headers (used for HTTP transport servers).
+                    baked_env_keys.add(k)
+        headers_were_baked = False
         headers_block = existing.get("headers") or {}
         if isinstance(headers_block, dict):
             for v in headers_block.values():
                 if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
-                    # Headers don't expose env-var names directly; we only
-                    # flag the env block for the affected-keys list, but
-                    # presence of literal headers still indicates a prior
-                    # baked-secret state we should surface.
-                    baked.add("(http header value)")
-        return baked
+                    headers_were_baked = True
+                    break
+        return baked_env_keys, headers_were_baked
 
     def _emit_install_summary(self, config_key, server_config):
         """Record env-var references for the post-install aggregated
@@ -418,10 +426,10 @@ class CopilotClientAdapter(MCPClientAdapter):
                 emitted_any = True
 
         if cls._security_upgraded_keys:
-            visible = sorted(k for k in cls._security_upgraded_keys if not k.startswith("("))
-            count = len(visible) if visible else len(cls._security_upgraded_keys)
+            visible = sorted(cls._security_upgraded_keys)
+            count = len(visible)
             noun = "variable" if count == 1 else "variables"
-            affected = ", ".join(visible) if visible else "(values previously stored as literals)"
+            affected = ", ".join(visible)
             _emit_separator_once()
             _rich_warning(
                 f"Security improvement: {count} environment {noun} previously stored as "
