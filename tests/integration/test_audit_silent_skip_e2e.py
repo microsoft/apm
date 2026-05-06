@@ -146,3 +146,54 @@ class TestAuditCiNoGitDirE2E:
         assert result.exit_code == 0
         assert "[!]" in result.stderr
         assert "Could not determine org from git remote" in result.stderr
+
+
+class TestAuditCiNoGitRemoteSarifE2E:
+    """SARIF stdout cleanliness on no_git_remote -- TC-2 from #1164 review.
+
+    Mirrors the JSON cleanliness probe in
+    ``TestAuditCiNoGitRemoteE2E.test_default_warn_emits_stderr_and_exits_zero``
+    but with ``-f sarif``.  The new ``[!]`` warning MUST land on stderr
+    so the SARIF document on stdout stays valid for GitHub Code Scanning
+    upload (``codeql/upload-sarif``).
+    """
+
+    def test_warn_emits_clean_sarif_on_stdout(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _git_init(tmp_path)
+        _setup_clean_project(tmp_path)
+
+        result = runner.invoke(
+            audit,
+            ["--ci", "--no-drift", "-f", "sarif"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+        assert "[!]" in result.stderr
+        assert "Could not determine org from git remote" in result.stderr
+        # SARIF on stdout must be parseable end-to-end.
+        sarif = json.loads(result.stdout)
+        assert sarif.get("$schema", "").endswith("sarif-schema-2.1.0.json") or (
+            sarif.get("version") == "2.1.0"
+        )
+        assert "runs" in sarif
+        assert isinstance(sarif["runs"], list)
+
+    def test_block_emits_clean_stderr_on_sarif_format(self, runner, tmp_path, monkeypatch):
+        """Block path with -f sarif: [x] on stderr, exit 1, no stdout pollution."""
+        monkeypatch.chdir(tmp_path)
+        _git_init(tmp_path)
+        _setup_clean_project(tmp_path, fetch_failure_default="block")
+
+        result = runner.invoke(
+            audit,
+            ["--ci", "--no-drift", "-f", "sarif"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 1
+        assert "[x]" in result.stderr
+        assert "policy.fetch_failure_default=block" in result.stderr
+        # Block path exits before SARIF is rendered, so stdout must be empty.
+        assert result.stdout.strip() == ""

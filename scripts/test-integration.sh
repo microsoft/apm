@@ -596,6 +596,54 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run #1159 audit silent-skip E2E -- offline, no tokens needed
+    # Defends the audit --ci CI gate against silent fall-through when
+    # auto-discovery hits no_git_remote / absent / empty / disabled
+    # outcomes. Real `git init`, real CliRunner. Covers exit codes,
+    # stderr cleanliness for both JSON and SARIF formats, and the
+    # policy.fetch_failure_default=block enforcement contract.
+    log_info "Running #1159 audit silent-skip E2E..."
+    echo "Command: pytest tests/integration/test_audit_silent_skip_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_audit_silent_skip_e2e.py -v -s --tb=short; then
+        log_success "#1159 audit silent-skip E2E passed!"
+    else
+        log_error "#1159 audit silent-skip E2E failed!"
+        exit 1
+    fi
+
+    # Run #1159 install silent-skip parity E2E -- offline, no tokens
+    # Defends the install pipeline parity for #1159: real `git init`
+    # with no remote configured + project policy.fetch_failure_default=block
+    # must raise PolicyViolationError through the policy_gate phase.
+    # Mirrors the audit-side block contract on the install codepath.
+    log_info "Running #1159 install silent-skip parity E2E..."
+    echo "Command: pytest tests/integration/test_install_silent_skip_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_install_silent_skip_e2e.py -v -s --tb=short; then
+        log_success "#1159 install silent-skip parity E2E passed!"
+    else
+        log_error "#1159 install silent-skip parity E2E failed!"
+        exit 1
+    fi
+
+    # Run #1159 SCP/EMU + ADO v3 SSH URL parsing E2E -- offline
+    # Defends the shared SCP_LIKE_RE regex against regressions on its
+    # three consumers: cache.url_normalize, policy.discovery, and
+    # models.dependency.reference. Real `git init` + real `git remote
+    # add origin` for EMU (enterprise-user@), GHE custom hosts, and
+    # ADO v3 SSH (git@ssh.dev.azure.com:v3/<org>/...). Also exercises
+    # APMPackage.from_apm_yml on the same URL forms.
+    log_info "Running #1159 dep URL parsing E2E..."
+    echo "Command: pytest tests/integration/test_dep_url_parsing_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_dep_url_parsing_e2e.py -v -s --tb=short; then
+        log_success "#1159 dep URL parsing E2E passed!"
+    else
+        log_error "#1159 dep URL parsing E2E failed!"
+        exit 1
+    fi
+
     log_success "All integration test suites completed successfully!"
     
 
