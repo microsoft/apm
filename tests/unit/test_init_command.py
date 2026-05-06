@@ -160,8 +160,8 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-                # Simulate user input
-                user_input = "my-test-project\n1.5.0\nTest description\nTest Author\ny\n"
+                # Simulate user input (includes target prompt: done + confirm empty)
+                user_input = "my-test-project\n1.5.0\nTest description\nTest Author\ny\ndone\ny\n"
 
                 result = self.runner.invoke(cli, ["init"], input=user_input)
 
@@ -228,8 +228,8 @@ class TestInitCommand:
                 # Create existing apm.yml
                 Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
 
-                # Say yes to overwrite, then provide interactive setup input
-                user_input = "y\nmy-project\n1.0.0\nA description\nAuthor\ny\n"
+                # Say yes to overwrite, then provide interactive setup input + target prompt
+                user_input = "y\nmy-project\n1.0.0\nA description\nAuthor\ny\ndone\ny\n"
                 result = self.runner.invoke(cli, ["init"], input=user_input)
 
                 assert result.exit_code == 0
@@ -480,7 +480,7 @@ class TestInitProjectNameValidation:
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="bad/name\nmy-project\n1.0.0\n\n\ny\n",
+                input="bad/name\nmy-project\n1.0.0\n\n\ny\ndone\ny\n",
                 catch_exceptions=False,
             )
             assert "Invalid project name" in result.output
@@ -492,8 +492,321 @@ class TestInitProjectNameValidation:
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="..\nmy-project\n1.0.0\n\n\ny\n",
+                input="..\nmy-project\n1.0.0\n\n\ny\ndone\ny\n",
                 catch_exceptions=False,
             )
             assert "Invalid project name" in result.output
             assert (Path(tmp_dir) / "apm.yml").exists()
+
+
+class TestInitTargetPrompt:
+    """Test cases for the target selection prompt in apm init (S1-S7)."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.runner = CliRunner()
+        try:
+            self.original_dir = os.getcwd()
+        except FileNotFoundError:
+            self.original_dir = str(Path(__file__).parent.parent.parent)
+            os.chdir(self.original_dir)
+        # Force TTY=True for interactive-prompt scenarios. The CliRunner's
+        # piped stdin reports isatty=False which would otherwise short-circuit
+        # the new prompt into the non-interactive auto-detect branch.
+        self._isatty_patch = patch("apm_cli.commands.init._stdin_is_tty", return_value=True)
+        self._isatty_patch.start()
+
+    def teardown_method(self):
+        """Clean up after tests."""
+        self._isatty_patch.stop()
+        try:
+            os.chdir(self.original_dir)
+        except (FileNotFoundError, OSError):
+            repo_root = Path(__file__).parent.parent.parent
+            os.chdir(str(repo_root))
+
+    def test_init_target_prompt_no_signals(self):
+        """S1: Empty dir, user toggles targets via numbered input, verify targets: in apm.yml."""
+        with self.runner.isolated_filesystem():
+            # New flow: name, version, desc, author, toggle 1, toggle 2, '' (done), confirm(y)
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="my-project\n1.0.0\n\n\n1\n2\n\ny\n",
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert isinstance(data["targets"], list)
+            assert "copilot" in data["targets"]
+            assert "claude" in data["targets"]
+
+    def test_init_target_prompt_precheck(self):
+        """S2: Create .claude/, verify pre-check state and target in output."""
+        with self.runner.isolated_filesystem():
+            Path(".claude").mkdir()
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="my-project\n1.0.0\n\n\n\ny\n",
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "claude" in data["targets"]
+
+    def test_init_target_prompt_multi_sig(self):
+        """S3: .claude/ + .cursor/ + copilot-instructions, verify all three pre-checked."""
+        with self.runner.isolated_filesystem():
+            Path(".github").mkdir()
+            Path(".github/copilot-instructions.md").touch()
+            Path(".claude").mkdir()
+            Path(".cursor").mkdir()
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="my-project\n1.0.0\n\n\n\ny\n",
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "copilot" in data["targets"]
+            assert "claude" in data["targets"]
+            assert "cursor" in data["targets"]
+
+    def test_init_yes_autodetect(self):
+        """S4: --yes with copilot signal present, verify targets in output."""
+        with self.runner.isolated_filesystem():
+            Path(".github").mkdir()
+            Path(".github/copilot-instructions.md").touch()
+            result = self.runner.invoke(
+                cli,
+                ["init", "--yes"],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "copilot" in data["targets"]
+
+    def test_init_yes_no_signals(self):
+        """S4b: --yes with no signals, verify NO targets key in apm.yml."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(
+                cli,
+                ["init", "--yes"],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" not in data
+            assert "target" not in data
+
+    def test_init_target_flag(self):
+        """S5: --target claude,cursor, verify exact value in apm.yml."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(
+                cli,
+                ["init", "--yes", "--target", "claude,cursor"],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "claude" in data["targets"]
+            assert "cursor" in data["targets"]
+
+    def test_init_target_flag_invalid(self):
+        """S5b: --target invalid, exit code non-zero, error message."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(
+                cli,
+                ["init", "--target", "invalid_target"],
+            )
+            assert result.exit_code != 0
+
+    def test_init_empty_selection(self):
+        """S6: User selects nothing, confirms empty, no targets key."""
+        with self.runner.isolated_filesystem():
+            # Flow: name, version, desc, author, '' (done with nothing toggled),
+            # confirm empty(y), confirm setup(y)
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="my-project\n1.0.0\n\n\n\ny\ny\n",
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" not in data
+            assert "target" not in data
+
+    def test_init_reinit_preserves_targets_plural(self):
+        """S7: Re-init with existing apm.yml `targets:` list, verify pre-check + plural roundtrip."""
+        with self.runner.isolated_filesystem():
+            Path("apm.yml").write_text(
+                "name: test\nversion: 1.0.0\ndescription: test\n"
+                "author: test\ntargets:\n  - claude\n"
+                "dependencies:\n  apm: []\n  mcp: []\n",
+                encoding="utf-8",
+            )
+            # Flow: confirm overwrite(y), name, version, desc, author,
+            # '' (done, accept claude precheck), confirm setup(y)
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="y\nmy-project\n1.0.0\n\n\n\ny\n",
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "claude" in data["targets"]
+
+    def test_init_reinit_legacy_singular_target(self):
+        """Backwards compat: existing legacy `target:` CSV is read on re-init and
+        rewritten as canonical plural `targets:` list."""
+        with self.runner.isolated_filesystem():
+            Path("apm.yml").write_text(
+                "name: test\nversion: 1.0.0\ndescription: test\n"
+                "author: test\ntarget: claude, cursor\n"
+                "dependencies:\n  apm: []\n  mcp: []\n",
+                encoding="utf-8",
+            )
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="y\nmy-project\n1.0.0\n\n\n\ny\n",
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "target" not in data
+            assert "claude" in data["targets"]
+            assert "cursor" in data["targets"]
+
+    def test_init_non_tty_skips_prompt(self):
+        """Non-TTY: --yes auto-detects targets without showing prompt."""
+        with self.runner.isolated_filesystem():
+            Path(".claude").mkdir()
+            # With --yes, no interactive prompt is shown
+            result = self.runner.invoke(
+                cli,
+                ["init", "--yes"],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            assert "Select targets" not in result.output
+            content = Path("apm.yml").read_text(encoding="utf-8")
+            data = yaml.safe_load(content)
+            assert "targets" in data
+            assert "claude" in data["targets"]
+
+    def test_init_non_tty_without_yes_auto_detects(self):
+        """Non-TTY without --yes: skip prompt, auto-detect, emit provenance log.
+
+        Real-world scenario: piped stdin in CI / container without --yes.
+        Must NOT block on prompt; must auto-detect and tell the user it did.
+        """
+        # Override the class-level isatty=True patch with isatty=False for
+        # this test to simulate genuine non-interactive stdin (e.g. piped CI).
+        self._isatty_patch.stop()
+        try:
+            with patch("apm_cli.commands.init._stdin_is_tty", return_value=False):
+                with self.runner.isolated_filesystem():
+                    Path(".claude").mkdir()
+                    # Provide --yes so _interactive_project_setup is skipped too;
+                    # the target prompt's non-TTY guard is the unit under test.
+                    result = self.runner.invoke(
+                        cli,
+                        ["init", "--yes"],
+                        catch_exceptions=False,
+                    )
+                    assert result.exit_code == 0
+                    assert "Select targets" not in result.output
+                    content = Path("apm.yml").read_text(encoding="utf-8")
+                    data = yaml.safe_load(content)
+                    assert "targets" in data
+                    assert "claude" in data["targets"]
+        finally:
+            # Restore the class-level patch for any subsequent test in the same
+            # session (setup_method re-starts it next test, but be defensive).
+            self._isatty_patch.start()
+
+
+class TestToggleInputParser:
+    """Unit tests for the _parse_toggle_input helper."""
+
+    def test_single_number(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("3", 7)
+        assert err is None
+        assert idx == [2]
+
+    def test_csv(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("1,3,5", 7)
+        assert err is None
+        assert idx == [0, 2, 4]
+
+    def test_range(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("1-3", 7)
+        assert err is None
+        assert idx == [0, 1, 2]
+
+    def test_mixed(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("1,3-5,7", 7)
+        assert err is None
+        assert idx == [0, 2, 3, 4, 6]
+
+    def test_all(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("all", 7)
+        assert err is None
+        assert idx == [0, 1, 2, 3, 4, 5, 6]
+
+    def test_whitespace_tolerant(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input(" 1 - 3 , 5 ", 7)
+        assert err is None
+        assert idx == [0, 1, 2, 4]
+
+    def test_out_of_bounds(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        _, err = _parse_toggle_input("9", 7)
+        assert err is not None
+        assert "out of bounds" in err
+
+    def test_invalid_range(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        _, err = _parse_toggle_input("3-1", 7)
+        assert err is not None
+
+    def test_garbage_input(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        _, err = _parse_toggle_input("abc", 7)
+        assert err is not None
