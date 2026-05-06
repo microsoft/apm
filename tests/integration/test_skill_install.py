@@ -210,6 +210,53 @@ class TestSkillInstallIdempotency:
         skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
         assert skill_integrated.exists()
 
+    def test_reinstall_does_not_leak_apm_pin_to_deploy_targets(self, temp_project, apm_command):
+        """Installing a skill twice must not copy .apm-pin into deploy targets.
+
+        Regression test for https://github.com/microsoft/apm/issues/1150.
+        The .apm-pin cache marker belongs exclusively in apm_modules/; the
+        install pipeline must strip it when copying skills to .agents/skills/
+        and other deploy targets. The first install creates the cache (and
+        writes .apm-pin there); the second install is the path where the
+        pre-fix leak occurred (cached source containing .apm-pin re-copied
+        into deploy targets).
+        """
+        skill_ref = "anthropics/skills/skills/brand-guidelines"
+
+        result1 = subprocess.run(
+            [apm_command, "install", skill_ref],
+            cwd=temp_project,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result1.returncode == 0, f"First install failed: {result1.stderr}"
+
+        result2 = subprocess.run(
+            [apm_command, "install", skill_ref],
+            cwd=temp_project,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result2.returncode == 0, f"Second install failed: {result2.stderr}"
+
+        deploy_roots = [
+            temp_project / ".agents",
+            temp_project / ".github",
+            temp_project / ".claude",
+            temp_project / ".apm",
+        ]
+        leaked_pins = []
+        for root in deploy_roots:
+            if root.exists():
+                leaked_pins.extend(root.rglob(".apm-pin"))
+
+        assert leaked_pins == [], (
+            ".apm-pin leaked into deploy targets: "
+            f"{[str(p.relative_to(temp_project)) for p in leaked_pins]}"
+        )
+
 
 class TestSkillInstallWithoutVSCodeTarget:
     """Test skill installation when VSCode is not the target."""

@@ -212,11 +212,6 @@ def ignore_symlinks(directory: str, contents: list[str]) -> list[str]:
     return [c for c in contents if (Path(directory) / c).is_symlink()]
 
 
-# Duplicated from cache_pin.MARKER_FILENAME to avoid a circular import
-# (cache_pin imports from security.gate).
-_APM_PIN_FILENAME = ".apm-pin"
-
-
 def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     """``shutil.copytree`` ignore callback that filters non-content artifacts.
 
@@ -224,4 +219,11 @@ def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     belongs exclusively in ``apm_modules/`` and must not leak into deploy
     targets when skills are copied out.
     """
-    return [c for c in contents if (Path(directory) / c).is_symlink() or c == _APM_PIN_FILENAME]
+    # Local import keeps cache_pin as the single source of truth for the
+    # marker filename. Module-level import is also safe (cache_pin has no
+    # runtime imports from apm_cli.security), but keeping it lazy avoids
+    # any future cycle risk if security.gate is imported during install
+    # bootstrap.
+    from apm_cli.install.cache_pin import MARKER_FILENAME
+
+    return [c for c in contents if (Path(directory) / c).is_symlink() or c == MARKER_FILENAME]
