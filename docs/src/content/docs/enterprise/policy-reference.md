@@ -712,7 +712,7 @@ Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default 
 When discovery cannot reach the policy source, APM behaves as follows:
 
 - **Cached, stale within 7 days** -- use the cached policy and emit a warning naming the cache age and the fetch error. Enforcement still applies.
-- **Cache miss or stale beyond 7 days, fetch fails** -- emit a loud warning every invocation; **do NOT block the install** by default (closes #829: ratified to keep developers unblocked when GitHub is unreachable). Opt in to fail-closed behaviour with `policy.fetch_failure: block` on the org policy (applies when a cached policy is available) or `policy.fetch_failure_default: block` in the project's `apm.yml` (applies when no policy is available at all). Both default to `warn`.
+- **Cache miss or stale beyond 7 days, fetch fails** -- emit a loud warning every invocation; **do NOT block the install** by default, to keep developers unblocked when GitHub is unreachable. Opt in to fail-closed behaviour with `policy.fetch_failure: block` on the org policy (applies when a cached policy is available) or `policy.fetch_failure_default: block` in the project's `apm.yml` (applies when no policy is available at all). Both default to `warn`.
 - **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) -- same posture as fetch failure: warn loudly by default, block when the project pins `policy.fetch_failure_default: block`.
 
 #### 9.5.1. No-policy outcomes (`no_git_remote` / `absent` / `empty`)
@@ -723,12 +723,12 @@ Three additional outcomes describe "discovery succeeded but produced no enforcea
 - `absent` -- the resolved org has no `apm-policy.yml` at the discovered source.
 - `empty` -- the file exists but parses to an empty policy (no rules).
 
-Pre-#1159, these outcomes were silently fail-open on BOTH `apm install` and `apm audit --ci` even when the project pinned `policy.fetch_failure_default: block`. Since [#1159](https://github.com/microsoft/apm/issues/1159) they honour the same knob as fetch failures:
+These outcomes honour the same knob as fetch failures on both `apm install` and `apm audit --ci`:
 
 - **`warn` (default):** `[!]` warning on stderr explaining the cause; install / audit proceeds.
 - **`block`:** `[x]` error on stderr; install raises `PolicyViolationError`, `apm audit --ci` exits 1.
 
-Explicit `--policy <file>` keeps the legacy fall-through for these three outcomes -- an opt-in pointer at a baseline file should not regress.
+Explicit `--policy <file>` falls through these three outcomes -- an opt-in pointer at a baseline file is treated as the authoritative source.
 
 Example -- consumer-side opt-in to fail-closed semantics in `apm.yml`:
 
