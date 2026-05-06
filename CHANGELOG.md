@@ -7,22 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-05-06
+
 ### Security
 
-- `apm install --target copilot` no longer bakes environment variable values into `~/.copilot/mcp-config.json`; placeholders like `${env:VAR}`, `${VAR}`, and legacy `<VAR>` are translated to Copilot CLI's native runtime substitution syntax (`${VAR}`) so secrets stay in the shell environment instead of on disk. Legacy `<VAR>` syntax is auto-translated with a deprecation warning; migrate to `${VAR}` in `apm.yml`. (#1152)
+- `apm install --target copilot` no longer bakes secret values into `~/.copilot/mcp-config.json`: env-var placeholders (`${env:VAR}`, `${VAR}`, legacy `<VAR>`) are translated to Copilot's native `${VAR}` runtime form so secrets never touch disk. Rotate any previously-baked secrets and re-run install. (#1169, closes #1152)
 
 ### Changed
 
-- **Explicit, auditable target resolution.** `apm install` and `apm compile` now resolve harness targets in a strict priority chain (`--target` flag > `apm.yml` `targets:` > auto-detect from filesystem signals) and print a one-line `[i] Targets: ...  (source: ...)` provenance summary so the chosen path is never silently inferred. Empty repositories with no signal now exit 2 with a teaching message instead of silently defaulting to `copilot`. Adds `apm targets` discovery command and `apm compile --all` flag (deprecates `--target all`). (#1165, closes #1154, closes #1122, closes #1130, closes #518, closes #888, closes #891, closes #650, closes #1056)
-- **`apm init` target-selection prompt.** Interactive init now presents a numbered-toggle checklist pre-seeded from filesystem signals (or the existing `target:` on re-init) so users land in Tier 2 (`apm.yml target:`) by default. New `--target` flag for scripted use. (#1165)
-- **`apm install` now honours `policy.fetch_failure_default: block` for `no_git_remote` / `absent` / `empty`** -- install-side parity with the audit fix above; default `warn` keeps fail-open. (#1159)
+- Explicit, auditable target resolution: `apm install` / `apm compile` follow a strict `--target` > `apm.yml target:` > auto-detect chain, print a `[i] Targets: ... (source: ...)` provenance line, and exit 2 on empty repos instead of silently defaulting to `copilot`. Adds `apm targets` discovery command and `apm compile --all` (deprecates `--target all`). (#1165, closes #1154, #1122, #1130, #518, #888, #891, #650, #1056)
+- `apm init` opens an interactive numbered-toggle target checklist pre-seeded from filesystem signals so users land in Tier 2 (`apm.yml target:`) by default; adds `--target` for scripted use. (#1165)
+- `apm install` honours `policy.fetch_failure_default: block` for `no_git_remote` / `absent` / `empty`, matching the audit behaviour. (#1164)
 
 ### Fixed
 
-- **`apm audit --ci` no longer silently skips when no org policy is resolved** -- `no_git_remote` / `absent` / `empty` auto-discovery outcomes now emit a `[!]` warning to stderr by default and honour `policy.fetch_failure_default: block` to fail closed (exit 1); JSON/SARIF on stdout stays clean. (#1159)
-- **SCP-shorthand SSH URLs from non-`git` users now parse correctly** -- `<user>@github.com:owner/repo` (EMU) and `<user>@ssh.dev.azure.com:v3/<org>/<project>/<repo>` (ADO) are accepted by both dependency parsing and policy auto-discovery. (#1159)
-- Fix `apm install` against a branch ref so it re-downloads when upstream has advanced past the lockfile-recorded SHA, and self-heal lockfiles produced by APM <= 0.12.2 on next install. (#1158)
-- Rewrite in-package relative markdown links to their `apm_modules/` location at install time so sibling references survive the `.agents/.github` deploy split. (#1147)
+- `apm audit --ci` no longer silently passes when no org policy is resolved: auto-discovery warns on stderr and honours `policy.fetch_failure_default: block` to fail closed (exit 1); JSON/SARIF on stdout stays clean. (#1164, closes #1159)
+- SCP-shorthand SSH URLs from non-`git` users -- `<user>@github.com:owner/repo` (EMU) and `<user>@ssh.dev.azure.com:v3/<org>/<project>/<repo>` (ADO) -- now parse correctly in dependency parsing and policy auto-discovery. (#1164)
+- `apm install` against a branch ref re-downloads when upstream advances past the lockfile-recorded SHA, and self-heals lockfiles produced by APM <= 0.12.2 on next install. (#1158)
+- In-package relative markdown links are rewritten to their `apm_modules/` location at install time so sibling references survive the `.agents/.github` deploy split. (#1160, closes #1147)
 - `.apm-pin` cache marker no longer leaks into skill deploy targets on subsequent installs. (#1153)
 
 ## [0.12.2] - 2026-05-05
