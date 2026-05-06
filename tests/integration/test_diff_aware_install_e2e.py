@@ -108,8 +108,11 @@ def _collect_deployed_files(project_dir, dep_entry):
 
 
 @pytest.mark.skip(
-    reason="Orphan-removal feature (clean deployed files when package dropped from "
-    "apm.yml) is not yet implemented on main. Tests track expected behaviour."
+    reason="Orphan cleanup runs but the sample package deploys skills as "
+    "directory-keyed lockfile entries (.github/style-checker/), and the "
+    "safety gate at integration/cleanup.py refuses to remove directory "
+    "entries. Tracked separately; non-skill orphan files (instructions, "
+    "prompts, agents) ARE cleaned by the early-return fix in this commit."
 )
 class TestPackageRemovedFromManifest:
     """When a package is removed from apm.yml, apm install should clean up
