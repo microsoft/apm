@@ -128,7 +128,8 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
             # Use auto-detected defaults
             config = _get_default_config(final_project_name)
 
-        # --- Target selection ---
+        # --- Target selection (must run before the confirmation panel so
+        #     the chosen targets render in the "About to create" summary). ---
         resolved_targets = _resolve_init_targets(
             project_root=Path.cwd(),
             target_flag=target_flag,
@@ -138,6 +139,10 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
         )
         if resolved_targets is not None:
             config["targets"] = sorted(resolved_targets)
+
+        # Final confirmation panel (interactive only) -- now includes targets.
+        if not yes:
+            _confirm_setup_summary(config, logger)
 
         # Plugin mode uses 0.1.0 as default version
         if plugin and yes:
@@ -252,18 +257,20 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
 
 
 def _interactive_project_setup(default_name, logger):
-    """Interactive setup for new APM projects with auto-detection."""
+    """Interactive setup for new APM projects with auto-detection.
+
+    Collects only the metadata fields here; target selection and final
+    confirmation are run by the caller via ``_confirm_setup_summary`` so
+    targets can be shown in the same "About to create" panel.
+    """
     from ._helpers import _auto_detect_author, _auto_detect_description, _validate_project_name
 
-    # Get auto-detected defaults
     auto_author = _auto_detect_author()
     auto_description = _auto_detect_description(default_name)
 
     try:
-        # Lazy import rich pieces
         from rich.console import Console  # type: ignore
-        from rich.panel import Panel  # type: ignore
-        from rich.prompt import Confirm, Prompt  # type: ignore
+        from rich.prompt import Prompt  # type: ignore
 
         console = _get_console() or Console()
         console.print("\n[info]Setting up your APM project...[/info]")
@@ -282,18 +289,7 @@ def _interactive_project_setup(default_name, logger):
         description = Prompt.ask("Description", default=auto_description).strip()
         author = Prompt.ask("Author", default=auto_author).strip()
 
-        summary_content = f"""name: {name}
-version: {version}
-description: {description}
-author: {author}"""
-        console.print(Panel(summary_content, title="About to create", border_style="cyan"))
-
-        if not Confirm.ask("\nIs this OK?", default=True):
-            console.print("[info]Aborted.[/info]")
-            sys.exit(0)
-
     except (ImportError, NameError):
-        # Fallback to click prompts
         logger.progress("Setting up your APM project...")
         logger.progress("Press ^C at any time to quit.")
 
@@ -310,22 +306,51 @@ author: {author}"""
         description = click.prompt("Description", default=auto_description).strip()
         author = click.prompt("Author", default=auto_author).strip()
 
-        click.echo(f"\n{INFO}About to create:{RESET}")
-        click.echo(f"  name: {name}")
-        click.echo(f"  version: {version}")
-        click.echo(f"  description: {description}")
-        click.echo(f"  author: {author}")
-
-        if not click.confirm("\nIs this OK?", default=True):
-            logger.progress("Aborted.")
-            sys.exit(0)
-
     return {
         "name": name,
         "version": version,
         "description": description,
         "author": author,
     }
+
+
+def _confirm_setup_summary(config: dict, logger) -> None:
+    """Render the 'About to create' panel (including targets) and confirm.
+
+    Aborts via ``sys.exit(0)`` if the user declines.
+    """
+    targets = config.get("targets")
+    targets_line = ", ".join(targets) if targets else "(none -- auto-detect at compile time)"
+
+    try:
+        from rich.console import Console  # type: ignore
+        from rich.panel import Panel  # type: ignore
+        from rich.prompt import Confirm  # type: ignore
+
+        console = _get_console() or Console()
+        summary_content = (
+            f"name: {config['name']}\n"
+            f"version: {config['version']}\n"
+            f"description: {config['description']}\n"
+            f"author: {config['author']}\n"
+            f"targets: {targets_line}"
+        )
+        console.print(Panel(summary_content, title="About to create", border_style="cyan"))
+
+        if not Confirm.ask("\nIs this OK?", default=True):
+            console.print("[info]Aborted.[/info]")
+            sys.exit(0)
+    except (ImportError, NameError):
+        click.echo(f"\n{INFO}About to create:{RESET}")
+        click.echo(f"  name: {config['name']}")
+        click.echo(f"  version: {config['version']}")
+        click.echo(f"  description: {config['description']}")
+        click.echo(f"  author: {config['author']}")
+        click.echo(f"  targets: {targets_line}")
+
+        if not click.confirm("\nIs this OK?", default=True):
+            logger.progress("Aborted.")
+            sys.exit(0)
 
 
 def _stdin_is_tty() -> bool:
@@ -438,6 +463,44 @@ def _read_existing_targets(project_root: Path) -> list[str]:
         return []
 
 
+def _parse_toggle_input(response: str, max_n: int) -> tuple[list[int], str | None]:
+    """Parse toggle input. Returns (zero-based indices, error message or None).
+
+    Accepts:
+      - single number:        ``3``
+      - csv:                  ``1,3,5``
+      - range:                ``1-3``
+      - mixed:                ``1,3-5,7``
+      - 'all' / 'none':       toggle every entry / clear every entry
+    Whitespace and trailing punctuation are ignored.
+    """
+    response = response.strip().lower().replace(" ", "")
+    if not response:
+        return [], None
+    if response in ("all", "none"):
+        return list(range(max_n)), None
+    indices: list[int] = []
+    for chunk in response.split(","):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            parts = chunk.split("-")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                return [], f"Invalid range '{chunk}'. Use form 'N-M'."
+            lo, hi = int(parts[0]), int(parts[1])
+            if lo < 1 or hi > max_n or lo > hi:
+                return [], f"Range '{chunk}' out of bounds (valid: 1-{max_n})."
+            indices.extend(range(lo - 1, hi))
+        else:
+            if not chunk.isdigit():
+                return [], f"Invalid token '{chunk}'."
+            n = int(chunk)
+            if n < 1 or n > max_n:
+                return [], f"Number {n} out of bounds (valid: 1-{max_n})."
+            indices.append(n - 1)
+    return indices, None
+
+
 def _prompt_target_selection(
     prechecked: set[str],
     signal_hints: dict[str, str],
@@ -446,7 +509,6 @@ def _prompt_target_selection(
 
     Returns list of selected targets or None if user confirms empty selection.
     """
-    # Build ordered list excluding EXPLICIT_ONLY_TARGETS
     targets = [t for t in _PROMPT_TARGETS_ORDERED if t not in EXPLICIT_ONLY_TARGETS]
     selected: list[bool] = [t in prechecked for t in targets]
 
@@ -461,42 +523,40 @@ def _prompt_target_selection(
             lines.append(line)
         return "\n".join(lines)
 
-    # Print header
-    click.echo("\nSelect targets for this project (space to toggle, enter to confirm):")
+    click.echo("\nSelect targets for this project:")
     click.echo(_render_choices())
 
     if not any(signal_hints.values()):
         click.echo("  (no signals detected)")
 
     click.echo(
-        f"\n{INFO}[i] Tip: select the tools your team uses. You can change this later"
-        f"\n    with 'apm targets set <target,...>' or edit apm.yml directly.{RESET}"
+        f"\n{INFO}[i] Type a number to toggle, ranges like '1-3' or '1,3,5' for multiple,"
+        f"\n    'all' / 'none' to flip every entry, or press Enter to confirm."
+        f"\n    You can change this later with 'apm targets set <target,...>'.{RESET}"
     )
 
-    # Input loop
     while True:
-        response = (
-            click.prompt("Toggle (1-7, or 'done' to confirm)", default="done").strip().lower()
+        response = click.prompt(
+            f"Toggle (1-{len(targets)}, ranges, 'all'/'none', or Enter to confirm)",
+            default="",
+            show_default=False,
         )
-
-        if response in ("done", ""):
+        if not response.strip():
+            break
+        if response.strip().lower() == "done":
             break
 
-        try:
-            idx = int(response) - 1
-            if 0 <= idx < len(targets):
-                selected[idx] = not selected[idx]
-                click.echo(_render_choices())
-            else:
-                click.echo(f"  Invalid number. Enter 1-{len(targets)} or 'done'.")
-        except ValueError:
-            click.echo(f"  Invalid input. Enter 1-{len(targets)} or 'done'.")
+        indices, err = _parse_toggle_input(response, len(targets))
+        if err:
+            click.echo(f"  {err}")
+            continue
+        for idx in indices:
+            selected[idx] = not selected[idx]
+        click.echo(_render_choices())
 
-    # Collect selections
     chosen = [targets[i] for i in range(len(targets)) if selected[i]]
 
     if not chosen:
-        # Empty selection warning (S6)
         click.echo(
             f"\n{INFO}[!] No targets selected. APM will auto-detect targets from your"
             "\n    filesystem on every compile (e.g. .github/ -> copilot)."
@@ -504,7 +564,6 @@ def _prompt_target_selection(
         )
         if click.confirm("\nContinue without pinning targets?", default=True):
             return None
-        # User declined -- loop back
         return _prompt_target_selection(prechecked, signal_hints)
 
     return chosen

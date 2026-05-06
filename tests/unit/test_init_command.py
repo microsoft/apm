@@ -528,12 +528,11 @@ class TestInitTargetPrompt:
     def test_init_target_prompt_no_signals(self):
         """S1: Empty dir, user toggles targets via numbered input, verify targets: in apm.yml."""
         with self.runner.isolated_filesystem():
-            # Input: name, version, desc(default), author(default), confirm(y),
-            # toggle 1(copilot), toggle 2(claude), done
+            # New flow: name, version, desc, author, toggle 1, toggle 2, '' (done), confirm(y)
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="my-project\n1.0.0\n\n\ny\n1\n2\ndone\n",
+                input="my-project\n1.0.0\n\n\n1\n2\n\ny\n",
                 catch_exceptions=False,
             )
             assert result.exit_code == 0
@@ -541,7 +540,6 @@ class TestInitTargetPrompt:
             data = yaml.safe_load(content)
             assert "targets" in data
             assert isinstance(data["targets"], list)
-            # Should contain copilot and claude (items 1 and 2 in prompt order)
             assert "copilot" in data["targets"]
             assert "claude" in data["targets"]
 
@@ -549,11 +547,10 @@ class TestInitTargetPrompt:
         """S2: Create .claude/, verify pre-check state and target in output."""
         with self.runner.isolated_filesystem():
             Path(".claude").mkdir()
-            # Input: name, version, desc, author, confirm(y), done (accept precheck)
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="my-project\n1.0.0\n\n\ny\ndone\n",
+                input="my-project\n1.0.0\n\n\n\ny\n",
                 catch_exceptions=False,
             )
             assert result.exit_code == 0
@@ -569,11 +566,10 @@ class TestInitTargetPrompt:
             Path(".github/copilot-instructions.md").touch()
             Path(".claude").mkdir()
             Path(".cursor").mkdir()
-            # Input: name, version, desc, author, confirm(y), done (accept prechecks)
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="my-project\n1.0.0\n\n\ny\ndone\n",
+                input="my-project\n1.0.0\n\n\n\ny\n",
                 catch_exceptions=False,
             )
             assert result.exit_code == 0
@@ -641,12 +637,12 @@ class TestInitTargetPrompt:
     def test_init_empty_selection(self):
         """S6: User selects nothing, confirms empty, no targets key."""
         with self.runner.isolated_filesystem():
-            # Input: name, version, desc, author, confirm(y), done (nothing toggled),
-            # confirm empty(y)
+            # Flow: name, version, desc, author, '' (done with nothing toggled),
+            # confirm empty(y), confirm setup(y)
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="my-project\n1.0.0\n\n\ny\ndone\ny\n",
+                input="my-project\n1.0.0\n\n\n\ny\ny\n",
                 catch_exceptions=False,
             )
             assert result.exit_code == 0
@@ -658,19 +654,18 @@ class TestInitTargetPrompt:
     def test_init_reinit_preserves_targets_plural(self):
         """S7: Re-init with existing apm.yml `targets:` list, verify pre-check + plural roundtrip."""
         with self.runner.isolated_filesystem():
-            # Create initial apm.yml with canonical plural targets list
             Path("apm.yml").write_text(
                 "name: test\nversion: 1.0.0\ndescription: test\n"
                 "author: test\ntargets:\n  - claude\n"
                 "dependencies:\n  apm: []\n  mcp: []\n",
                 encoding="utf-8",
             )
-            # Input: confirm overwrite(y), name, version, desc, author, confirm(y),
-            # done (accept claude precheck)
+            # Flow: confirm overwrite(y), name, version, desc, author,
+            # '' (done, accept claude precheck), confirm setup(y)
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="y\nmy-project\n1.0.0\n\n\ny\ndone\n",
+                input="y\nmy-project\n1.0.0\n\n\n\ny\n",
                 catch_exceptions=False,
             )
             assert result.exit_code == 0
@@ -683,7 +678,6 @@ class TestInitTargetPrompt:
         """Backwards compat: existing legacy `target:` CSV is read on re-init and
         rewritten as canonical plural `targets:` list."""
         with self.runner.isolated_filesystem():
-            # Create initial apm.yml with legacy singular target field (CSV)
             Path("apm.yml").write_text(
                 "name: test\nversion: 1.0.0\ndescription: test\n"
                 "author: test\ntarget: claude, cursor\n"
@@ -693,7 +687,7 @@ class TestInitTargetPrompt:
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="y\nmy-project\n1.0.0\n\n\ny\ndone\n",
+                input="y\nmy-project\n1.0.0\n\n\n\ny\n",
                 catch_exceptions=False,
             )
             assert result.exit_code == 0
@@ -751,3 +745,68 @@ class TestInitTargetPrompt:
             # Restore the class-level patch for any subsequent test in the same
             # session (setup_method re-starts it next test, but be defensive).
             self._isatty_patch.start()
+
+
+class TestToggleInputParser:
+    """Unit tests for the _parse_toggle_input helper."""
+
+    def test_single_number(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("3", 7)
+        assert err is None
+        assert idx == [2]
+
+    def test_csv(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("1,3,5", 7)
+        assert err is None
+        assert idx == [0, 2, 4]
+
+    def test_range(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("1-3", 7)
+        assert err is None
+        assert idx == [0, 1, 2]
+
+    def test_mixed(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("1,3-5,7", 7)
+        assert err is None
+        assert idx == [0, 2, 3, 4, 6]
+
+    def test_all(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input("all", 7)
+        assert err is None
+        assert idx == [0, 1, 2, 3, 4, 5, 6]
+
+    def test_whitespace_tolerant(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        idx, err = _parse_toggle_input(" 1 - 3 , 5 ", 7)
+        assert err is None
+        assert idx == [0, 1, 2, 4]
+
+    def test_out_of_bounds(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        _, err = _parse_toggle_input("9", 7)
+        assert err is not None
+        assert "out of bounds" in err
+
+    def test_invalid_range(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        _, err = _parse_toggle_input("3-1", 7)
+        assert err is not None
+
+    def test_garbage_input(self):
+        from apm_cli.commands.init import _parse_toggle_input
+
+        _, err = _parse_toggle_input("abc", 7)
+        assert err is not None
