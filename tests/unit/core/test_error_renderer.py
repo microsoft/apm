@@ -71,6 +71,26 @@ def test_unknown_target_error_lists_valid():
     assert "claude" in text
 
 
+def test_unknown_target_error_suggests_copilot_not_first_alphabetical():
+    """Suggestion must be a sensible default (#1188), not sorted-first."""
+    valid = ["agent-skills", "claude", "copilot", "cursor"]
+    text = render_unknown_target_error("foo", valid)
+    # 'agent-skills' is alphabetically first but is the wrong default to
+    # surface to a user who typed 'foo'. Prefer 'copilot'.
+    assert "--target copilot" in text
+    assert "    - copilot" in text
+    assert "--target agent-skills" not in text
+
+
+def test_unknown_target_error_sanitizes_garbled_value():
+    """Headline must not show Python list-repr noise (#1188)."""
+    # Simulates the pre-fix garbled token "['copilot'" leaking through.
+    text = render_unknown_target_error("['copilot'", ["claude", "copilot"])
+    headline = text.splitlines()[0]
+    # Bracket and quote noise is stripped from the headline value.
+    assert headline == "[x] Unknown target 'copilot'"
+
+
 def test_conflicting_schema_error_has_three_parts():
     text = render_conflicting_schema_error()
     _assert_three_sections(text, ["cannot use both", "conflicting"])

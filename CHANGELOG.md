@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stabilized `test_install_over_defer_threshold_starts_live_once` on slow CI runners by joining the deferred-start timer thread instead of relying on a 100ms grace window. (#1191)
 - `triage-panel` scheduled sweep now paginates the candidate query oldest-first via the GitHub MCP `list_issues` tool instead of a single 200-issue page, so daily runs actually drain the untriaged backlog rather than processing one issue per cron tick. (#1193)
 - `triage-panel` scheduled sweep switches the candidate query from `list_issues`+prose-driven pagination to `search_issues` with `-label:status/triaged sort:created-asc`, so untriaged candidates are filtered server-side; the previous approach silently noop'd because the MCP gateway DIFC filter dropped non-collaborator issues mid-page and the agent inferred a false `hasNextPage:false`.
+- `apm install` now accepts the YAML list form under `target:` (e.g. `target: [copilot, claude]` or block-list), which previously crashed with `Unknown target '['copilot''` because the install-pipeline parser stringified the list before splitting; the unknown-target error renderer also strips bracket/quote noise from the headline value and suggests `copilot` instead of the alphabetically-first `agent-skills`. (#1196)
 
 ## [0.12.4] - 2026-05-07
 
