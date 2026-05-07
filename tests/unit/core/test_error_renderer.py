@@ -91,6 +91,17 @@ def test_unknown_target_error_sanitizes_garbled_value():
     assert headline == "[x] Unknown target 'copilot'"
 
 
+def test_unknown_target_error_falls_back_when_strip_empties_value():
+    """If sanitization removes everything, fall back so headline stays actionable."""
+    # All-noise input: stripping yields empty string.
+    text = render_unknown_target_error("[]'\"", ["claude", "copilot"])
+    headline = text.splitlines()[0]
+    # Must not render `Unknown target ''`. We accept either the raw
+    # (un-stripped) value or a `<empty>` placeholder.
+    assert headline != "[x] Unknown target ''"
+    assert "Unknown target '" in headline
+
+
 def test_conflicting_schema_error_has_three_parts():
     text = render_conflicting_schema_error()
     _assert_three_sections(text, ["cannot use both", "conflicting"])

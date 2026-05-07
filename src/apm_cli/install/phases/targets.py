@@ -208,10 +208,10 @@ def run(ctx: InstallContext) -> None:
             except _click.UsageError as exc:
                 # ConflictingTargetsError (both target: and targets: in
                 # apm.yml) is a user error -- surface with exit code 2.
-                # The renderer already emits a leading "[x]"; pass
-                # symbol=None so logger.error doesn't double-prefix.
+                # The renderer already emits a leading "[x]"; pass an
+                # empty symbol so logger.error doesn't double-prefix.
                 if ctx.logger:
-                    ctx.logger.error(str(exc), symbol=None)
+                    ctx.logger.error(str(exc), symbol="")
                 raise SystemExit(2) from exc
 
         # Skip v2 entirely when all override targets were non-canonical
@@ -249,10 +249,10 @@ def run(ctx: InstallContext) -> None:
                 # non-canonical targets.  That case is already
                 # guarded by ``_skip_v2`` above, so it never reaches
                 # this except block.  The renderer already emits a
-                # leading "[x]"; pass symbol=None so logger.error
+                # leading "[x]"; pass an empty symbol so logger.error
                 # doesn't double-prefix.
                 if ctx.logger:
-                    ctx.logger.error(str(exc), symbol=None)
+                    ctx.logger.error(str(exc), symbol="")
                 raise SystemExit(2) from exc
 
             # Emit provenance BEFORE any mutation. Route via _rich_info so
