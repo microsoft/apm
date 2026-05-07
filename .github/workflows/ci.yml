@@ -153,11 +153,17 @@ jobs:
         run: apm audit --ci
 
       # Gate B: regeneration drift (producer-side).
+      # NOTE: Once `apm-action` ships a CLI version that includes the
+      # default-on `apm audit` drift detection (issue #1071), this entire
+      # step becomes redundant -- Gate A above already catches the same
+      # divergence via install-replay. Keep this bash check until then as
+      # a defense-in-depth fallback.
+      #
       # The action's `apm install` step re-integrated local .apm/ into
       # .github/ via target auto-detection. If anything in the governed
       # integration directories changed, someone edited the regenerated
       # output without updating the canonical .apm/ source.
-      - name: Check APM integration drift
+      - name: Check APM integration drift (legacy bash fallback, see #1071)
         run: |
           if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
             echo "::error::APM integration files are out of date."

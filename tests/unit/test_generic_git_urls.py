@@ -131,6 +131,20 @@ class TestGitLabSSH:
         assert dep.host == "gitlab.company.internal"
         assert dep.repo_url == "team/rules"
 
+    # --- Regression: #1159 -- SCP shorthand must accept any user, not just `git` ---
+
+    def test_scp_emu_enterprise_user(self):
+        """EMU/GHE SSH URLs use a non-`git` user (e.g. enterprise-user@)."""
+        dep = DependencyReference.parse("enterprise-user@ghe.corp.com:contoso/rules.git")
+        assert dep.host == "ghe.corp.com"
+        assert dep.repo_url == "contoso/rules"
+
+    def test_scp_custom_user_with_ref(self):
+        dep = DependencyReference.parse("alice@gitlab.company.internal:team/rules.git#main")
+        assert dep.host == "gitlab.company.internal"
+        assert dep.repo_url == "team/rules"
+        assert dep.reference == "main"
+
     def test_self_hosted_ssh_protocol(self):
         dep = DependencyReference.parse("ssh://git@gitlab.company.internal/team/rules.git")
         assert dep.host == "gitlab.company.internal"
@@ -454,13 +468,14 @@ class TestFQDNVirtualPaths:
         assert dep.is_virtual is True
         assert dep.is_virtual_file() is True
 
-    def test_bitbucket_virtual_collection(self):
-        dep = DependencyReference.parse("bitbucket.org/team/rules/collections/security")
-        assert dep.host == "bitbucket.org"
-        assert dep.repo_url == "team/rules"
-        assert dep.virtual_path == "collections/security"
-        assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+    def test_bitbucket_collection_yml_url_raises(self):
+        """`.collection.yml` URLs raise migration error on generic hosts too."""
+        import pytest
+
+        with pytest.raises(ValueError, match=r"\.collection\.yml is no longer supported"):
+            DependencyReference.parse(
+                "bitbucket.org/team/rules/collections/security.collection.yml"
+            )
 
     def test_self_hosted_virtual_subdirectory(self):
         """Without virtual indicators, all segments are repo path on generic hosts.

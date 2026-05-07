@@ -148,7 +148,7 @@ supported tool:
 |---|---|---|---|
 | GitHub Copilot | `.github/instructions/`, `.github/prompts/`, agents, hooks, plugins, MCP | `AGENTS.md` (optional) | **Full** |
 | Claude | `.claude/` commands, skills, MCP | `CLAUDE.md` | **Full** |
-| Cursor | `.cursor/rules/`, `.cursor/agents/`, skills, hooks, MCP | `.cursor/rules/` (also via compile) | **Full** |
+| Cursor | `.cursor/rules/`, `.cursor/agents/`, `.cursor/commands/`, skills, hooks, MCP | `.cursor/rules/` (also via compile) | **Full** |
 | OpenCode | `.opencode/agents/`, `.opencode/commands/`, skills, MCP | Via `AGENTS.md` | **Full** |
 | Codex CLI | -- | `AGENTS.md` | Instructions via compile |
 | Gemini | `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` (MCP, hooks) | `GEMINI.md` (instructions) | **Full** |
@@ -249,6 +249,22 @@ change.
 
 **Multi-tool output.** Write your configuration once. APM compiles it for
 every supported AI tool.
+
+## Stability
+
+These surfaces are stable and recommended for production use:
+
+- `apm install`, `apm.lock.yaml`, `apm audit` - dependency resolution, version locking, security scanning.
+- `apm compile`, `apm pack`, `apm install <bundle-path>` - multi-tool output, bundle distribution, and supported local-bundle installation.
+- Authoring layout (`apm.yml`, `.apm/`) and consumption from GitHub, Azure DevOps, GitLab, Bitbucket, and self-hosted Git hosts.
+- Cross-tool deployment to GitHub Copilot, Claude Code, Cursor, OpenCode, Codex, and Gemini.
+
+These surfaces are **experimental** and may change between releases:
+
+- `apm run` and `apm runtime setup` - local execution of agent workflows. Vendor-neutral by design and modeled on what `npx` is to `npm`. Not a current priority for the project; treat as a preview.
+- Microsoft 365 Copilot Cowork target. See [Copilot Cowork](../../integrations/copilot-cowork/).
+
+The dependency-management core does not depend on the experimental runtime surface. If `apm run` is not in your workflow, the stable surface above stands on its own.
 
 ## What's next
 

@@ -588,7 +588,7 @@ All examples below use the literal output APM emits today. Symbol legend: `[+]` 
 $ apm install --verbose
 [i] Resolving dependencies...
 [i] Policy: org:contoso/.github (cached, fetched 12m ago) -- enforcement=block
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 Without `--verbose`, the `Policy:` line is suppressed for `enforcement=warn` and `enforcement=off`. Under `enforcement=block` it is **always** shown (rendered as a `[!]` warning) so users know blocking is active.
@@ -614,7 +614,7 @@ Same denied dep, but the org policy ships `enforcement: warn`:
 ```shell
 $ apm install
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 
 [!] Policy
     acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
@@ -628,7 +628,7 @@ Violations flow through `DiagnosticCollector` and surface in the end-of-install 
 $ apm install --no-policy
 [!] Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 #### `APM_POLICY_DISABLE=1` env var: identical wording
@@ -637,7 +637,7 @@ $ apm install --no-policy
 $ APM_POLICY_DISABLE=1 apm install
 [!] Policy enforcement disabled by APM_POLICY_DISABLE=1 for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 The warning is emitted on every invocation and cannot be silenced.
@@ -683,7 +683,7 @@ When a dep brings in an MCP server denied by `mcp.deny` or rejected by `mcp.tran
 $ apm install
 [i] Resolving dependencies...
 [!] Policy: org:contoso/.github -- enforcement=block
-[+] Installed 4 APM dependencies
+[+] Installed 4 APM dependencies in 0.8s
 [x] Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
 
 [!] Policy
@@ -711,9 +711,24 @@ Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default 
 
 When discovery cannot reach the policy source, APM behaves as follows:
 
-- **Cached, stale within 7 days** — use the cached policy and emit a warning naming the cache age and the fetch error. Enforcement still applies.
-- **Cache miss or stale beyond 7 days, fetch fails** — emit a loud warning every invocation; **do NOT block the install** by default (closes #829: ratified to keep developers unblocked when GitHub is unreachable). Opt in to fail-closed behaviour with `policy.fetch_failure: block` on the org policy (applies when a cached policy is available) or `policy.fetch_failure_default: block` in the project's `apm.yml` (applies when no policy is available at all). Both default to `warn`.
-- **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) — same posture as fetch failure: warn loudly by default, block when the project pins `policy.fetch_failure_default: block`.
+- **Cached, stale within 7 days** -- use the cached policy and emit a warning naming the cache age and the fetch error. Enforcement still applies.
+- **Cache miss or stale beyond 7 days, fetch fails** -- emit a loud warning every invocation; **do NOT block the install** by default, to keep developers unblocked when GitHub is unreachable. Opt in to fail-closed behaviour with `policy.fetch_failure: block` on the org policy (applies when a cached policy is available) or `policy.fetch_failure_default: block` in the project's `apm.yml` (applies when no policy is available at all). Both default to `warn`.
+- **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) -- same posture as fetch failure: warn loudly by default, block when the project pins `policy.fetch_failure_default: block`.
+
+#### 9.5.1. No-policy outcomes (`no_git_remote` / `absent` / `empty`)
+
+Three additional outcomes describe "discovery succeeded but produced no enforceable policy":
+
+- `no_git_remote` -- the working tree has no `origin` remote (shallow CI clone, ephemeral worktree, source pulled via tarball), so APM cannot derive an org to look up.
+- `absent` -- the resolved org has no `apm-policy.yml` at the discovered source.
+- `empty` -- the file exists but parses to an empty policy (no rules).
+
+These outcomes honour the same knob as fetch failures on both `apm install` and `apm audit --ci`:
+
+- **`warn` (default):** `[!]` warning on stderr explaining the cause; install / audit proceeds.
+- **`block`:** `[x]` error on stderr; install raises `PolicyViolationError`, `apm audit --ci` exits 1.
+
+Explicit `--policy <file>` falls through these three outcomes -- an opt-in pointer at a baseline file is treated as the authoritative source.
 
 Example -- consumer-side opt-in to fail-closed semantics in `apm.yml`:
 

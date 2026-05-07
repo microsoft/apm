@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING, List, Optional, Sequence  # noqa: F401, UP035
 
 from ..deps.lockfile import _SELF_KEY
 from .models import CheckResult, CIAuditResult
+
+if TYPE_CHECKING:
+    from ..deps.lockfile import LockFile
+    from ..install.drift import DriftFinding
 
 _logger = logging.getLogger(__name__)
 
@@ -400,6 +404,95 @@ def _check_includes_consent(
         name="includes-consent",
         passed=True,
         message="'includes:' declared -- local content deployment is explicitly consented",
+    )
+
+
+def _check_drift(
+    project_root: Path,
+    lockfile: LockFile,
+    targets: Sequence[str] | None = None,
+    cache_only: bool = True,
+    verbose: bool = False,
+) -> tuple[CheckResult, list[DriftFinding]]:
+    """Replay the install in a scratch dir and diff against the project.
+
+    Returns the standard :class:`CheckResult` PLUS the list of
+    :class:`DriftFinding` instances so callers can render them in the
+    output format of their choice (text/json/sarif) without re-running
+    the replay.
+
+    Cache-only by default: a missing cache entry produces a check
+    failure rather than a network fetch (audit must be deterministic).
+    """
+    from ..deps.lockfile import get_lockfile_path
+    from ..install.drift import (
+        CacheMissError,
+        CheckLogger,
+        ReplayConfig,
+        diff_scratch_against_project,
+        run_replay,
+    )
+    from ..integration.targets import resolve_targets
+
+    logger = CheckLogger(verbose=verbose)
+    config = ReplayConfig(
+        project_root=project_root,
+        lockfile_path=get_lockfile_path(project_root),
+        targets=frozenset(targets) if targets else None,
+        cache_only=cache_only,
+    )
+
+    try:
+        scratch = run_replay(config, logger)
+    except CacheMissError as exc:
+        return (
+            CheckResult(
+                name="drift",
+                passed=False,
+                message=(
+                    f"drift replay aborted: {exc}; run 'apm install' to refresh apm_modules cache"
+                ),
+            ),
+            [],
+        )
+    except NotImplementedError as exc:
+        return (
+            CheckResult(
+                name="drift",
+                passed=False,
+                message=f"drift replay unsupported: {exc}",
+            ),
+            [],
+        )
+
+    logger.diff_start()
+    resolved_targets = resolve_targets(project_root)
+    if targets:
+        resolved_targets = [t for t in resolved_targets if t.name in set(targets)]
+    findings = diff_scratch_against_project(scratch, project_root, lockfile, resolved_targets)
+
+    if not findings:
+        logger.clean()
+        return (
+            CheckResult(
+                name="drift",
+                passed=True,
+                message="no drift detected against lockfile",
+            ),
+            [],
+        )
+
+    logger.findings(len(findings))
+    preview = ", ".join(f.path for f in findings[:3])
+    suffix = "" if len(findings) <= 3 else f" (+{len(findings) - 3} more)"
+    return (
+        CheckResult(
+            name="drift",
+            passed=False,
+            message=f"drift detected: {len(findings)} file(s): {preview}{suffix}",
+            details=[f"{f.kind}: {f.path}" for f in findings],
+        ),
+        findings,
     )
 
 

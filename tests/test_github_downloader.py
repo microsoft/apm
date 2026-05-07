@@ -1720,22 +1720,6 @@ class TestVirtualFilePackageYamlGeneration:
         ]
         return dep_ref
 
-    def _make_collection_dep_ref(self, virtual_path):
-        """Helper: build a minimal DependencyReference for a virtual collection."""
-        from apm_cli.models.apm_package import DependencyReference
-
-        dep_ref = Mock(spec=DependencyReference)
-        dep_ref.is_virtual = True
-        dep_ref.virtual_path = virtual_path
-        dep_ref.reference = "main"
-        dep_ref.repo_url = "github/my-org"
-        dep_ref.get_virtual_package_name.return_value = "my-org-my-collection"
-        dep_ref.to_github_url.return_value = (
-            f"https://github.com/github/my-org/blob/main/{virtual_path}"
-        )
-        dep_ref.is_virtual_collection.return_value = True
-        return dep_ref
-
     def test_yaml_with_colon_in_description(self, tmp_path):
         """apm.yml must be valid when the agent description contains a colon."""
         import yaml
@@ -1808,75 +1792,272 @@ class TestVirtualFilePackageYamlGeneration:
         parsed = yaml.safe_load(content)
         assert parsed["description"] == "A simple agent without special chars"
 
-    def test_collection_yaml_with_colon_in_description(self, tmp_path):
-        """apm.yml for collection packages must be valid when description contains a colon."""
-        import yaml
 
-        # A minimal .collection.yml whose description contains ":"
-        collection_manifest = (
-            b"id: my-collection\n"
-            b"name: My Collection\n"
-            b"description: 'A collection for tasks: feature development, debugging.'\n"
-            b"items:\n"
-            b"  - path: agents/my-agent.agent.md\n"
-            b"    kind: agent\n"
-        )
-        agent_file = b"---\nname: My Agent\n---\n## Body\n"
+class TestRefExistsViaLsRemote:
+    """Tests for the ``_ref_exists_via_ls_remote`` two/three-attempt chain.
 
-        dep_ref = self._make_collection_dep_ref("collections/my-collection")
-        target_path = tmp_path / "pkg"
+    The chain mirrors ``_clone_with_fallback``'s auth path so validation
+    accepts what install would actually clone. These tests pin that
+    behavior so a refactor of the auth chain can't silently regress
+    validation lenience for users with SSO-half-authorized PATs or
+    SSH-only setups.
+    """
+
+    def _make_dep_ref(self, repo: str = "owner/repo") -> DependencyReference:
+        return DependencyReference(repo_url=repo)
+
+    def _patch_auth(self, downloader, *, has_token: bool):
+        """Stub out auth resolution so tests don't hit the real env / git."""
+        token = "test-token" if has_token else None
+        return [
+            patch.object(downloader, "_resolve_dep_token", return_value=token),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=None),
+            patch.object(downloader, "_build_repo_url", return_value="https://example/repo.git"),
+        ]
+
+    def _enter(self, ctxs):
+        return [c.__enter__() for c in ctxs]
+
+    def _exit(self, ctxs):
+        for c in reversed(ctxs):
+            c.__exit__(None, None, None)
+
+    def test_first_attempt_with_token_succeeds_short_circuits(self):
+        """When the authenticated HTTPS attempt resolves the ref, no second attempt fires."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = self._patch_auth(downloader, has_token=True)
+        self._enter(ctxs)
+        try:
+            ls_remote_mock = MagicMock(return_value="abc123\trefs/heads/main\n")
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = ls_remote_mock
+
+                ok = downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
+                )
+
+            assert ok is True
+            assert ls_remote_mock.call_count == 1
+        finally:
+            self._exit(ctxs)
+
+    def test_authenticated_403_falls_back_to_credential_helper(self):
+        """403 on the PAT attempt MUST trigger the plain-HTTPS attempt."""
+        from git.exc import GitCommandError
 
         downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = self._patch_auth(downloader, has_token=True)
+        self._enter(ctxs)
+        try:
+            calls = []
 
-        def _fake_download(dep_ref_arg, path, ref):
-            if "collection" in path:
-                return collection_manifest
-            return agent_file
+            def _ls_remote(*args, **kwargs):
+                calls.append(args)
+                if len(calls) == 1:
+                    raise GitCommandError(
+                        ["git", "ls-remote"],
+                        128,
+                        b"403",
+                        b"Write access not granted",
+                    )
+                return "deadbeef\trefs/heads/main\n"
 
-        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
-            with patch.object(downloader, "download_raw_file", side_effect=_fake_download):
-                downloader.download_collection_package(dep_ref, target_path)
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = _ls_remote
 
-        content = (target_path / "apm.yml").read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)  # must not raise
+                ok = downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
+                )
 
-        assert parsed["description"] == "A collection for tasks: feature development, debugging."
+            assert ok is True
+            assert len(calls) == 2
+        finally:
+            self._exit(ctxs)
 
-    def test_collection_yaml_with_colon_in_tags(self, tmp_path):
-        """apm.yml for collection packages must be valid when tags contain a colon."""
-        import yaml
+    def test_no_token_skips_first_attempt(self):
+        """Without a resolved token, only the credential-helper attempt should run."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = self._patch_auth(downloader, has_token=False)
+        self._enter(ctxs)
+        try:
+            ls_remote_mock = MagicMock(return_value="abc\trefs/heads/main\n")
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = ls_remote_mock
 
-        collection_manifest = (
-            b"id: tagged-collection\n"
-            b"name: Tagged\n"
-            b"description: Normal description\n"
-            b"tags:\n"
-            b"  - 'scope: engineering'\n"
-            b"  - plain-tag\n"
-            b"items:\n"
-            b"  - path: agents/my-agent.agent.md\n"
-            b"    kind: agent\n"
-        )
-        agent_file = b"---\nname: My Agent\n---\n## Body\n"
+                ok = downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
+                )
 
-        dep_ref = self._make_collection_dep_ref("collections/tagged-collection")
-        target_path = tmp_path / "pkg"
+            assert ok is True
+            assert ls_remote_mock.call_count == 1
+        finally:
+            self._exit(ctxs)
+
+    def test_all_attempts_fail_returns_false(self):
+        """If every attempt errors, the helper returns False (validation rejects)."""
+        from git.exc import GitCommandError
 
         downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = self._patch_auth(downloader, has_token=True)
+        self._enter(ctxs)
+        try:
 
-        def _fake_download(dep_ref_arg, path, ref):
-            if "collection" in path:
-                return collection_manifest
-            return agent_file
+            def _always_fail(*args, **kwargs):
+                raise GitCommandError(["git", "ls-remote"], 128, b"403", b"forbidden")
 
-        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
-            with patch.object(downloader, "download_raw_file", side_effect=_fake_download):
-                downloader.download_collection_package(dep_ref, target_path)
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = _always_fail
 
-        content = (target_path / "apm.yml").read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)
+                ok = downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "loo",
+                    log=lambda _msg: None,
+                )
 
-        assert parsed["tags"] == ["scope: engineering", "plain-tag"]
+            assert ok is False
+        finally:
+            self._exit(ctxs)
+
+    def test_empty_output_means_ref_not_found(self):
+        """ls-remote returning no matching refs MUST be treated as a miss, not a hit."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = self._patch_auth(downloader, has_token=False)
+        self._enter(ctxs)
+        try:
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = MagicMock(return_value="   \n  ")
+
+                ok = downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "missing",
+                    log=lambda _msg: None,
+                )
+
+            assert ok is False
+        finally:
+            self._exit(ctxs)
+
+    def test_artifactory_dep_short_circuits_without_calling_git(self):
+        """Artifactory deps have no git surface; helper must not invoke ls-remote."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = DependencyReference(
+            repo_url="owner/repo",
+            host="artifactory.example.com",
+            artifactory_prefix="artifactory/github",
+        )
+
+        with patch("git.cmd.Git") as MockGit:
+            ok = downloader._ref_exists_via_ls_remote(
+                dep_ref,
+                "main",
+                log=lambda _msg: None,
+            )
+
+        assert ok is False
+        MockGit.assert_not_called()
+
+    def test_ssh_attempt_skipped_by_default(self):
+        """Default protocol_pref must NOT add an SSH attempt -- keeps validation quiet."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = self._patch_auth(downloader, has_token=True)
+        self._enter(ctxs)
+        try:
+            ls_remote_mock = MagicMock(return_value="")
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = ls_remote_mock
+
+                downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
+                )
+
+            assert ls_remote_mock.call_count == 2
+        finally:
+            self._exit(ctxs)
+
+    def test_ssh_attempt_added_when_protocol_pref_is_ssh(self):
+        """--ssh / ProtocolPreference.SSH MUST surface an SSH ls-remote attempt."""
+        from apm_cli.deps.transport_selection import ProtocolPreference
+
+        downloader = GitHubPackageDownloader()
+        downloader._protocol_pref = ProtocolPreference.SSH
+        dep_ref = self._make_dep_ref()
+        ctxs = self._patch_auth(downloader, has_token=True)
+        self._enter(ctxs)
+        try:
+            ls_remote_mock = MagicMock(return_value="")
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = ls_remote_mock
+
+                downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
+                )
+
+            assert ls_remote_mock.call_count == 3
+        finally:
+            self._exit(ctxs)
+
+    def test_ls_remote_failure_log_scrubs_token_from_url(self):
+        """Verbose log MUST NOT leak embedded tokens from a failing ls-remote URL.
+
+        If git surfaces the full ``https://ghp_xxx@github.com/owner/repo.git``
+        URL in its error (which it does for basic-auth URLs), the verbose log
+        must route it through ``_sanitize_git_error`` so the token is masked.
+        Pins the token-leakage guard for the new ls-remote fallback chain.
+        """
+        from git.exc import GitCommandError
+
+        downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = [
+            patch.object(downloader, "_resolve_dep_token", return_value="ghp_supersecret"),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=None),
+        ]
+        self._enter(ctxs)
+        try:
+
+            def _always_fail(*args, **kwargs):
+                raise GitCommandError(
+                    [
+                        "git",
+                        "ls-remote",
+                        "https://ghp_supersecret@github.com/owner/repo.git",
+                        "main",
+                    ],
+                    128,
+                    b"fatal: Authentication failed for 'https://ghp_supersecret@github.com/owner/repo.git/'",
+                    b"",
+                )
+
+            captured: list[str] = []
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = _always_fail
+
+                downloader._ref_exists_via_ls_remote(
+                    dep_ref,
+                    "main",
+                    log=captured.append,
+                )
+
+            joined = "\n".join(captured)
+            assert "ghp_supersecret" not in joined, f"Token leaked into verbose log: {joined!r}"
+        finally:
+            self._exit(ctxs)
 
 
 if __name__ == "__main__":

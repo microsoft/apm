@@ -207,6 +207,23 @@ class SecurityGate:
 # ---------------------------------------------------------------------------
 
 
-def ignore_symlinks(directory, contents):
+def ignore_symlinks(directory: str, contents: list[str]) -> list[str]:
     """``shutil.copytree`` ignore callback that filters out symlinks."""
     return [c for c in contents if (Path(directory) / c).is_symlink()]
+
+
+def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
+    """``shutil.copytree`` ignore callback that filters non-content artifacts.
+
+    Excludes symlinks (security) and the ``.apm-pin`` cache marker, which
+    belongs exclusively in ``apm_modules/`` and must not leak into deploy
+    targets when skills are copied out.
+    """
+    # Local import keeps cache_pin as the single source of truth for the
+    # marker filename. Module-level import is also safe (cache_pin has no
+    # runtime imports from apm_cli.security), but keeping it lazy avoids
+    # any future cycle risk if security.gate is imported during install
+    # bootstrap.
+    from apm_cli.install.cache_pin import MARKER_FILENAME
+
+    return [c for c in contents if (Path(directory) / c).is_symlink() or c == MARKER_FILENAME]

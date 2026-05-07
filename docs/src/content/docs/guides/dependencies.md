@@ -143,9 +143,23 @@ dependencies:
       alias: review                      # local alias (controls install directory name)
     - git: ssh://git@bitbucket.example.com:7999/project/repo.git  # Bitbucket Datacenter (custom SSH port)
       ref: v1.0
+    # Azure DevOps with sub-path and ref pin
+    - git: https://dev.azure.com/myorg/myproject/_git/myrepo
+      path: instructions/security
+      ref: v2.0
 ```
 
 Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS, HTTP or SSH clone URL.
+
+:::note[Azure DevOps + sub-path + ref]
+The shorthand form for the same ADO entry is:
+
+```yaml
+- dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
+```
+
+Use the **shorthand** or the **object form** for ADO sub-paths. The full `https://dev.azure.com/<org>/<project>/_git/<repo>/<sub-path>` URL form is not yet accepted by the parser. If you copy the URL straight from your ADO browser tab, switch to one of the two forms above. Spaces in project / repo names must be URL-encoded as `%20`.
+:::
 
 Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
 
@@ -225,6 +239,18 @@ apm install --dry-run
 
 `apm install` also deploys the project's own `.apm/` content (instructions, prompts, agents, skills, hooks, commands) to target directories alongside dependency content. Local content takes priority over dependencies on collision. This works even with zero dependencies -- just `apm.yml` and a `.apm/` directory is enough. See the [CLI reference](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content) for details and exceptions.
 
+:::caution[Migrating from auto-copilot fallback]
+Older APM versions silently deployed to `.github/` (Copilot) when no harness signal was present in the project. Starting with the target-resolution overhaul, that silent fallback is gone: an empty repo with no `targets:` in `apm.yml` and no harness marker (`.claude/`, `.cursor/`, `.github/copilot-instructions.md`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`) now exits 2 with a teaching message.
+
+Pick one of the explicit fixes:
+
+- `apm install --target copilot` -- one-shot deploy to `.github/`.
+- Add `targets: [copilot]` (or any other harness) to `apm.yml` -- persists across runs.
+- Create the harness marker (e.g. `touch .github/copilot-instructions.md`) -- auto-detect picks it up.
+
+Run `apm targets` first to see what APM detects (or doesn't) in the current directory.
+:::
+
 ### 3. Verify Installation
 
 ```bash
@@ -298,6 +324,21 @@ dependencies:
 - Local packages are validated the same as remote packages (must have `apm.yml` or `SKILL.md`)
 - `apm compile` works identically regardless of dependency source
 - Transitive dependencies are resolved recursively (local packages can depend on remote packages)
+- **Anchor rule:** a `local_path` declared **inside another local package** is resolved relative to **that package's own directory**, not the consumer's project root. This matches npm/pip/cargo workspace behaviour and is what makes mono-repos with sibling helper packages portable across consumers. Sibling layouts that resolve **outside** the consuming project root (e.g. `../sibling-pkg` from a local dep at the project edge) are supported -- the consuming developer authored the manifest chain and trusts the layout. The security boundary lives upstream: see the next bullet.
+
+  ```yaml
+  # apm.yml at /repo/apm.yml
+  dependencies:
+    apm:
+      - ./packages/specialized
+
+  # apm.yml at /repo/packages/specialized/apm.yml
+  dependencies:
+    apm:
+      - ../base   # resolves to /repo/packages/base, NOT /repo/base
+  ```
+
+- **Remote packages may not declare local dependencies.** A package fetched from `owner/repo` cannot depend on a `local_path` -- such an entry would reach into the consumer's filesystem in unpredictable ways. Both relative and absolute local paths are rejected at `ERROR` severity. Authors of remote packages must publish their dependencies (or vendor them via subdirectory packages).
 
 **Re-install behavior:** Local deps are always re-copied on `apm install` since there is no commit SHA to cache against. This ensures you always get the latest local changes.
 
@@ -447,6 +488,23 @@ mcp:
 ```bash
 apm install --trust-transitive-mcp
 ```
+
+### Environment variable placeholders
+
+`env`, `headers`, and `args` values may reference environment variables using either of two equivalent forms:
+
+| Syntax        | Meaning                                                     |
+| ------------- | ----------------------------------------------------------- |
+| `${VAR}`      | Reference to an environment variable named `VAR`            |
+| `${env:VAR}`  | Same as above (VS Code-style prefix, normalized internally) |
+
+How APM materializes a placeholder depends on the target harness:
+
+- **Copilot CLI** (`~/.copilot/mcp-config.json`): the placeholder is preserved as `${VAR}` in the generated config and resolved by Copilot CLI from the host environment at server-start. APM never reads the value, so secrets stay in your shell. Make sure the variable is exported before launching `gh copilot`.
+- **VS Code** (`.vscode/mcp.json`): the placeholder is rewritten to VS Code's `${env:VAR}` form and resolved by VS Code at server-start.
+- **Other harnesses** (Cursor, Windsurf, OpenCode, Claude Desktop, Gemini, Codex): the placeholder is resolved from the current process environment at install time and the literal value is written into the harness config.
+
+The legacy `<VAR>` syntax is still accepted for backward compatibility but emits a deprecation warning; migrate to `${VAR}` in `apm.yml`.
 
 ### Validation
 
@@ -642,7 +700,7 @@ APM automatically retries failed HTTP requests with exponential backoff and jitt
 
 #### Parallel Downloads
 
-APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For subdirectory packages in monorepos, APM attempts git sparse-checkout (git 2.25+) to download only the needed directory, falling back to a shallow clone if sparse-checkout is unavailable.
+APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For sibling subdirectory packages from the same monorepo and ref (e.g. two skills under `skills/` in `github/awesome-copilot`), APM clones the repo bare exactly once into a shared cache and materializes each consumer's working tree from that cache via `git clone --local --shared --no-checkout`. This eliminates redundant network fetches and prevents the parallel races that affected earlier sparse-checkout based fetches.
 
 ### File Processing and Content Merging
 

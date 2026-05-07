@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "p-http": {
+      "type": "http",
+      "url": "https://example.invalid/mcp"
+    },
+    "p-sse": {
+      "type": "sse",
+      "url": "https://example.invalid/sse"
+    },
+    "p-stdio": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "some-pkg",
+        "--flag",
+        "arg2"
+      ],
+      "env": {
+        "FOO": "bar",
+        "BAZ": "qux"
+      }
+    },
+    "p-http-auth": {
+      "type": "http",
+      "url": "https://api.example.invalid/mcp",
+      "headers": {
+        "Authorization": "Bearer XYZ"
+      }
+    }
+  }
+}

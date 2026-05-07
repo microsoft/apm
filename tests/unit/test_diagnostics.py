@@ -222,14 +222,20 @@ class TestDiagnosticCollectorRendering:
     @patch(f"{_MOCK_BASE}._rich_echo")
     @patch(f"{_MOCK_BASE}._rich_warning")
     @patch(f"{_MOCK_BASE}._rich_info")
-    def test_render_summary_verbose_shows_file_paths(
+    def test_render_summary_verbose_skipped_no_longer_lists_paths(
         self, mock_info, mock_warning, mock_echo, mock_console
     ):
+        # A4: collision footer is now a global count summary; per-dep
+        # attribution lives in the integrate phase output. Even with
+        # verbose=True, the diagnostics renderer no longer enumerates
+        # individual collided file paths.
         dc = DiagnosticCollector(verbose=True)
         dc.skip("a.md", package="p1")
         dc.render_summary()
         echo_texts = [str(c) for c in mock_echo.call_args_list]
-        assert any("a.md" in t for t in echo_texts)
+        assert not any("a.md" in t for t in echo_texts)
+        warning_texts = [str(c) for c in mock_warning.call_args_list]
+        assert any("1 file skipped" in t for t in warning_texts)
 
     @patch(f"{_MOCK_BASE}._get_console", return_value=None)
     @patch(f"{_MOCK_BASE}._rich_echo")

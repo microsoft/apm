@@ -102,47 +102,34 @@ def run(ctx: InstallContext) -> None:
         _need_download.append((_pd_ref, _pd_path, _pd_dlref))
 
     if _need_download and parallel_downloads > 0:
-        from rich.progress import (
-            BarColumn,
-            Progress,
-            SpinnerColumn,
-            TaskProgressColumn,
-            TextColumn,
-        )
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[cyan]{task.description}[/cyan]"),
-            BarColumn(),
-            TaskProgressColumn(),
-            transient=True,
-        ) as _dl_progress:
-            _max_workers = min(parallel_downloads, len(_need_download))
-            with ThreadPoolExecutor(max_workers=_max_workers) as _executor:
-                _futures = {}
-                for _pd_ref, _pd_path, _pd_dlref in _need_download:
-                    _pd_disp = str(_pd_ref) if _pd_ref.is_virtual else _pd_ref.repo_url
-                    _pd_short = _pd_disp.split("/")[-1] if "/" in _pd_disp else _pd_disp
-                    _pd_tid = _dl_progress.add_task(description=f"Fetching {_pd_short}", total=None)
-                    _pd_fut = _executor.submit(
-                        downloader.download_package,
-                        _pd_dlref,
-                        _pd_path,
-                        progress_task_id=_pd_tid,
-                        progress_obj=_dl_progress,
-                    )
-                    _futures[_pd_fut] = (_pd_ref, _pd_tid, _pd_disp)
-                for _pd_fut in _futures_completed(_futures):
-                    _pd_ref, _pd_tid, _pd_disp = _futures[_pd_fut]
-                    _pd_key = _pd_ref.get_unique_key()
-                    try:
-                        _pd_info = _pd_fut.result()
-                        _pre_download_results[_pd_key] = _pd_info
-                        _dl_progress.update(_pd_tid, visible=False)
-                        _dl_progress.refresh()
-                    except Exception:
-                        _dl_progress.remove_task(_pd_tid)
-                        # Silent: sequential loop below will retry and report errors
+        _max_workers = min(parallel_downloads, len(_need_download))
+        with ThreadPoolExecutor(max_workers=_max_workers) as _executor:
+            _futures = {}
+            for _pd_ref, _pd_path, _pd_dlref in _need_download:
+                _pd_disp = str(_pd_ref) if _pd_ref.is_virtual else _pd_ref.repo_url
+                _pd_short = _pd_disp.split("/")[-1] if "/" in _pd_disp else _pd_disp
+                _pd_key = _pd_ref.get_unique_key()
+                if ctx.tui is not None:
+                    ctx.tui.task_started(_pd_key, f"fetch {_pd_short}")
+                _pd_fut = _executor.submit(
+                    downloader.download_package,
+                    _pd_dlref,
+                    _pd_path,
+                    progress_task_id=None,
+                    progress_obj=None,
+                )
+                _futures[_pd_fut] = (_pd_ref, _pd_disp, _pd_key)
+            for _pd_fut in _futures_completed(_futures):
+                _pd_ref, _pd_disp, _pd_key = _futures[_pd_fut]
+                try:
+                    _pd_info = _pd_fut.result()
+                    _pre_download_results[_pd_key] = _pd_info
+                    if ctx.tui is not None:
+                        ctx.tui.task_completed(_pd_key)
+                except Exception:
+                    if ctx.tui is not None:
+                        ctx.tui.task_failed(_pd_key)
+                    # Silent: sequential loop below will retry and report errors
 
     ctx.pre_download_results = _pre_download_results
     ctx.pre_downloaded_keys = builtins.set(_pre_download_results.keys())

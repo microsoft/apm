@@ -44,3 +44,4 @@ class InstallRequest:
     no_policy: bool = False  # W2-escape-hatch: skip org policy enforcement
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
+    legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS

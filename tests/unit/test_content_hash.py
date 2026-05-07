@@ -72,6 +72,43 @@ class TestComputePackageHash:
 
         assert hash_before == hash_after
 
+    def test_skips_apm_pin_marker(self, tmp_path):
+        """``.apm-pin`` cache-pin marker is excluded from hashing.
+
+        Regression test for the v0.12.2 release-blocking bug: the
+        ``.apm-pin`` marker (introduced in PR #1137 for drift-replay
+        cache verification) is written to the package root AFTER the
+        install-time hash is recorded in the lockfile. Including it in
+        :func:`compute_package_hash` made every subsequent ``apm
+        install`` of the same package observe a hash mismatch against
+        the lockfile, falsely tripping the supply-chain content-hash
+        check in ``FreshDependencySource.acquire`` and
+        ``safe_rmtree``-ing the package directory.
+
+        Exclusion is scoped to the package root: a nested
+        ``subdir/.apm-pin`` (which the install pipeline never writes)
+        MUST still be hashed so a malicious package cannot smuggle
+        bytes past the integrity check by burying them under that
+        name.
+        """
+        (tmp_path / "apm.yml").write_text("name: x\n")
+        hash_before = compute_package_hash(tmp_path)
+
+        (tmp_path / ".apm-pin").write_text('{"schema_version": 1, "resolved_commit": "deadbeef"}')
+        hash_after = compute_package_hash(tmp_path)
+
+        assert hash_before == hash_after
+
+        # A nested .apm-pin (never written by the install pipeline) is
+        # NOT excluded -- defense against using the marker name as a
+        # blind spot in the integrity hash.
+        nested = tmp_path / "subdir"
+        nested.mkdir()
+        (nested / ".apm-pin").write_text("smuggled bytes")
+        hash_with_nested = compute_package_hash(tmp_path)
+
+        assert hash_with_nested != hash_after
+
     def test_empty_directory(self, tmp_path):
         """Empty directory returns a well-known hash."""
         empty = tmp_path / "empty"

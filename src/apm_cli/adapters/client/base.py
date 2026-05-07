@@ -18,6 +18,24 @@ _ENV_VAR_RE = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
 class MCPClientAdapter(ABC):
     """Base adapter for MCP clients."""
 
+    # Identifier matching the corresponding ``KNOWN_TARGETS`` entry name.
+    # Subclasses MUST override this so target-aware code can look up
+    # per-target metadata via ``KNOWN_TARGETS[adapter.target_name]``
+    # instead of sniffing class names.  The ``vscode`` adapter is the
+    # only MCP-only pseudo-target (no entry in ``KNOWN_TARGETS``), so
+    # downstream code that joins on this field must tolerate misses.
+    target_name: str = ""
+
+    # Top-level config key under which this adapter's MCP server entries
+    # live (``"mcpServers"``, ``"mcp_servers"``, ``"servers"``, ...).
+    # Subclasses MUST override this; ``MCPConflictDetector`` reads it to
+    # extract existing server configs without classname dispatch.
+    # The adapter is the canonical owner of its config schema, so this
+    # field lives here rather than on ``TargetProfile`` (which is
+    # primitive-focused) and applies uniformly to MCP-only adapters
+    # (e.g. ``VSCodeClientAdapter``) that have no ``KNOWN_TARGETS`` entry.
+    mcp_servers_key: str = ""
+
     # Whether this adapter's config path is user/global-scoped (e.g.
     # ``~/.copilot/``) rather than workspace-scoped (e.g. ``.vscode/``).
     # Adapters that target a global path should override this to ``True``

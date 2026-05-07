@@ -52,7 +52,7 @@ The lock file serves four goals:
 | Event | Effect on `apm.lock.yaml` |
 |-------|----------------------|
 | `apm install` (first run) | Created. All dependencies resolved, commits pinned, files recorded. |
-| `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. |
+| `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. File only written when semantic content changes (dependencies, MCP servers/configs, `lockfile_version`); no churn from `generated_at` or `apm_version` fields. |
 | `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits. |
 | `apm deps update` | Re-resolved. Refreshes versions for specified or all dependencies. |
 | `apm pack --format apm` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). Plugin format (the default) does not emit `apm.lock.yaml` inside the bundle. |

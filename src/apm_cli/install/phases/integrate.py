@@ -19,6 +19,7 @@ import builtins
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
 
+from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
 from apm_cli.install.template import run_integration_template
@@ -88,6 +89,12 @@ def _resolve_download_strategy(
     # Phase 5 (#171): Also skip when lockfile SHA matches local HEAD
     # -- but not when the manifest ref has changed (user wants different version).
     lockfile_match = False
+    # Track whether lockfile_match was satisfied via content-hash fallback only
+    # (no git HEAD verification possible -- typical for virtual packages, where
+    # install_path is a carved-out subdirectory rather than a git repo).
+    # The self-heal logic below uses this to recover from the v<=0.12.2
+    # branch-ref drift bug for upgrading users.
+    lockfile_match_via_content_hash_only = False
     if install_path.exists() and existing_lockfile:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
         if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
@@ -105,13 +112,15 @@ def _resolve_download_strategy(
                         if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                             lockfile_match = True
                     except Exception:
-                        # Git check failed (e.g. .git removed). Fall back to
-                        # content-hash verification (#763).
+                        # Git check failed (e.g. .git removed, or virtual
+                        # package install_path is not a git repo). Fall back
+                        # to content-hash verification (#763).
                         if locked_dep.content_hash and install_path.is_dir():
                             from apm_cli.utils.content_hash import verify_package_hash
 
                             if verify_package_hash(install_path, locked_dep.content_hash):
                                 lockfile_match = True
+                                lockfile_match_via_content_hash_only = True
             elif not ref_changed:
                 # Normal mode: compare local HEAD with lockfile SHA.
                 try:
@@ -121,13 +130,40 @@ def _resolve_download_strategy(
                     if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                         lockfile_match = True
                 except Exception:
-                    # Git check failed (e.g. .git removed). Fall back to
+                    # Git check failed (e.g. .git removed, or virtual package
+                    # install_path is not a git repo). Fall back to
                     # content-hash verification (#763).
                     if locked_dep.content_hash and install_path.is_dir():
                         from apm_cli.utils.content_hash import verify_package_hash
 
                         if verify_package_hash(install_path, locked_dep.content_hash):
                             lockfile_match = True
+                            lockfile_match_via_content_hash_only = True
+
+    # Self-heal pipeline (PR #1158).
+    #
+    # All install-time heals (branch-ref drift detection, v<=0.12.2
+    # buggy-lockfile recovery, future heals) live in
+    # ``apm_cli.install.heals`` and are dispatched by ``run_heal_chain``.
+    # Each heal is an isolated, individually-testable Chain-of-
+    # Responsibility handler that may turn ``lockfile_match`` False,
+    # set ``ref_changed`` True, and add a bypass key telling
+    # ``FreshDependencySource`` that an upcoming content_hash change is
+    # legitimate recovery, not a supply-chain attack.
+    #
+    # The dispatcher (not individual heals) renders user-facing
+    # diagnostics + log messages, so heals stay pure and testable.
+    lockfile_match, ref_changed = run_heal_chain(
+        ctx,
+        dep_ref,
+        resolved_ref=resolved_ref,
+        existing_lockfile=existing_lockfile,
+        lockfile_match=lockfile_match,
+        lockfile_match_via_content_hash_only=lockfile_match_via_content_hash_only,
+        update_refs=update_refs,
+        ref_changed=ref_changed,
+    )
+
     skip_download = install_path.exists() and (
         (is_cacheable and not update_refs)
         or (already_resolved and not update_refs)
@@ -354,14 +390,6 @@ def run(ctx: InstallContext) -> None:
     ``total_instructions_integrated``, ``total_commands_integrated``,
     ``total_hooks_integrated``, ``total_links_resolved``.
     """
-    from rich.progress import (
-        BarColumn,
-        Progress,
-        SpinnerColumn,
-        TaskProgressColumn,
-        TextColumn,
-    )
-
     # ------------------------------------------------------------------
     # Unpack loop-level aliases and int counters.
     # Mutable containers (lists, dicts, sets) share the reference so
@@ -389,93 +417,94 @@ def run(ctx: InstallContext) -> None:
 
     # ------------------------------------------------------------------
     # Main loop: iterate deps_to_install and dispatch to the appropriate
-    # per-package helper based on package source.
+    # per-package helper based on package source.  Per-dep progress is
+    # routed through ``ctx.tui`` (workstream B, #1116); when the TUI is
+    # disabled every method is a no-op.
     # ------------------------------------------------------------------
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[cyan]{task.description}[/cyan]"),
-        BarColumn(),
-        TaskProgressColumn(),
-        transient=True,  # Progress bar disappears when done
-    ) as progress:
-        for dep_ref in deps_to_install:
-            # Determine installation directory using namespaced structure
-            # e.g., microsoft/apm-sample-package -> apm_modules/microsoft/apm-sample-package/
-            # For virtual packages: owner/repo/prompts/file.prompt.md -> apm_modules/owner/repo-file/
-            # For subdirectory packages: owner/repo/subdir -> apm_modules/owner/repo/subdir/
-            if dep_ref.alias:
-                # If alias is provided, use it directly (assume user handles namespacing)
-                install_path = apm_modules_dir / dep_ref.alias
-            else:
-                # Use the canonical install path from DependencyReference
-                install_path = dep_ref.get_install_path(apm_modules_dir)
+    for dep_ref in deps_to_install:
+        # Determine installation directory using namespaced structure
+        # e.g., microsoft/apm-sample-package -> apm_modules/microsoft/apm-sample-package/
+        # For virtual packages: owner/repo/prompts/file.prompt.md -> apm_modules/owner/repo-file/
+        # For subdirectory packages: owner/repo/subdir -> apm_modules/owner/repo/subdir/
+        if dep_ref.alias:
+            # If alias is provided, use it directly (assume user handles namespacing)
+            install_path = apm_modules_dir / dep_ref.alias
+        else:
+            # Use the canonical install path from DependencyReference
+            install_path = dep_ref.get_install_path(apm_modules_dir)
 
-            # Skip deps that already failed during BFS resolution callback
-            # to avoid a duplicate error entry in diagnostics.
-            dep_key = dep_ref.get_unique_key()
-            if dep_key in ctx.callback_failures:
-                if ctx.logger:
-                    ctx.logger.verbose_detail(
-                        f"  Skipping {dep_key} (already failed during resolution)"
+        # Skip deps that already failed during BFS resolution callback
+        # to avoid a duplicate error entry in diagnostics.
+        dep_key = dep_ref.get_unique_key()
+        if dep_key in ctx.callback_failures:
+            if ctx.logger:
+                ctx.logger.verbose_detail(
+                    f"  Skipping {dep_key} (already failed during resolution)"
+                )
+            continue
+
+        # --- Build the right DependencySource and run the template ---
+        if dep_ref.is_local and dep_ref.local_path:
+            source = make_dependency_source(
+                ctx,
+                dep_ref,
+                install_path,
+                dep_key,
+            )
+        else:
+            resolved_ref, skip_download, dep_locked_chk, ref_changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+            # F2 (#1116): when the resolver callback already
+            # downloaded this package during the parallel resolve
+            # phase, ``skip_download`` will be True but the bytes
+            # arrived in this run. Tell the cached source so it
+            # does not falsely tag the line ``(cached)``.
+            _fetched_now = dep_key in ctx.callback_downloaded
+            source = make_dependency_source(
+                ctx,
+                dep_ref,
+                install_path,
+                dep_key,
+                resolved_ref=resolved_ref,
+                dep_locked_chk=dep_locked_chk,
+                ref_changed=ref_changed,
+                skip_download=skip_download,
+                fetched_this_run=_fetched_now,
+            )
+
+        deltas = run_integration_template(source)
+
+        if deltas is None:
+            # Direct dependency failure: surface a single concise
+            # inline marker so the user sees `[x] <pkg>: integration
+            # failed` immediately (fixes "perceived hang" on HYBRID
+            # validation failures). The full diagnostic detail --
+            # resolved path and `--verbose` hint -- is rendered once
+            # by `render_summary()` to avoid double-output.
+            if dep_key in direct_dep_keys:
+                if ctx.diagnostics:
+                    ctx.diagnostics.error(
+                        f"{dep_key}: integration failed",
+                        package=dep_key,
+                        detail=(f"Resolved at {install_path}. Run with --verbose for details."),
                     )
-                continue
+                elif ctx.logger:
+                    ctx.logger.error(f"{dep_key}: integration failed")
+                ctx.direct_dep_failed = True
+            continue
 
-            # --- Build the right DependencySource and run the template ---
-            if dep_ref.is_local and dep_ref.local_path:
-                source = make_dependency_source(
-                    ctx,
-                    dep_ref,
-                    install_path,
-                    dep_key,
-                )
-            else:
-                resolved_ref, skip_download, dep_locked_chk, ref_changed = (
-                    _resolve_download_strategy(ctx, dep_ref, install_path)
-                )
-                source = make_dependency_source(
-                    ctx,
-                    dep_ref,
-                    install_path,
-                    dep_key,
-                    resolved_ref=resolved_ref,
-                    dep_locked_chk=dep_locked_chk,
-                    ref_changed=ref_changed,
-                    skip_download=skip_download,
-                    progress=progress,
-                )
-
-            deltas = run_integration_template(source)
-
-            if deltas is None:
-                # Direct dependency failure: surface a single concise
-                # inline marker so the user sees `[x] <pkg>: integration
-                # failed` immediately (fixes "perceived hang" on HYBRID
-                # validation failures). The full diagnostic detail --
-                # resolved path and `--verbose` hint -- is rendered once
-                # by `render_summary()` to avoid double-output.
-                if dep_key in direct_dep_keys:
-                    if ctx.diagnostics:
-                        ctx.diagnostics.error(
-                            f"{dep_key}: integration failed",
-                            package=dep_key,
-                            detail=(f"Resolved at {install_path}. Run with --verbose for details."),
-                        )
-                    elif ctx.logger:
-                        ctx.logger.error(f"{dep_key}: integration failed")
-                    ctx.direct_dep_failed = True
-                continue
-
-            # Accumulate counter deltas from this package
-            installed_count += deltas.get("installed", 0)
-            unpinned_count += deltas.get("unpinned", 0)
-            total_prompts_integrated += deltas.get("prompts", 0)
-            total_agents_integrated += deltas.get("agents", 0)
-            total_skills_integrated += deltas.get("skills", 0)
-            total_sub_skills_promoted += deltas.get("sub_skills", 0)
-            total_instructions_integrated += deltas.get("instructions", 0)
-            total_commands_integrated += deltas.get("commands", 0)
-            total_hooks_integrated += deltas.get("hooks", 0)
-            total_links_resolved += deltas.get("links_resolved", 0)
+        # Accumulate counter deltas from this package
+        installed_count += deltas.get("installed", 0)
+        unpinned_count += deltas.get("unpinned", 0)
+        total_prompts_integrated += deltas.get("prompts", 0)
+        total_agents_integrated += deltas.get("agents", 0)
+        total_skills_integrated += deltas.get("skills", 0)
+        total_sub_skills_promoted += deltas.get("sub_skills", 0)
+        total_instructions_integrated += deltas.get("instructions", 0)
+        total_commands_integrated += deltas.get("commands", 0)
+        total_hooks_integrated += deltas.get("hooks", 0)
+        total_links_resolved += deltas.get("links_resolved", 0)
 
     # ------------------------------------------------------------------
     # Integrate root project's own .apm/ primitives (#714).

@@ -1138,3 +1138,259 @@ class TestCodexAgentIntegration:
         source = Path("/fake/test.agent.md")
         filename = integrator.get_target_filename_for_target(source, "pkg", codex)
         assert filename == "test.toml"
+
+
+# ==================================================================
+# Windsurf agent tests (agents -> .windsurf/skills/<name>/SKILL.md)
+# ==================================================================
+
+
+class TestWindsurfAgentSkillConversion:
+    """Test _write_windsurf_agent_skill static method."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_generates_skill_frontmatter(self):
+        """Agent file gets name + description frontmatter in SKILL.md format."""
+        source = self.root / "design-reviewer.agent.md"
+        target = self.root / "design-reviewer" / "SKILL.md"
+        source.write_text(
+            '---\ndescription: "A design review specialist"\n---\n\n# Design Reviewer\n'
+        )
+
+        AgentIntegrator()._write_windsurf_agent_skill(source, target)
+
+        assert target.exists()
+        content = target.read_text()
+        assert "name: design-reviewer" in content
+        assert "description: A design review specialist" in content
+        assert "# Design Reviewer" in content
+        assert "trigger:" not in content
+
+    def test_preserves_name_from_frontmatter(self):
+        """Name from agent frontmatter is preserved."""
+        source = self.root / "architect.agent.md"
+        target = self.root / "architect" / "SKILL.md"
+        source.write_text(
+            "---\ndescription: Context architect\nmodel: GPT-5\n"
+            "tools: ['search/codebase']\nname: Context Architect\n---\n\n# Body"
+        )
+
+        AgentIntegrator()._write_windsurf_agent_skill(source, target)
+
+        content = target.read_text()
+        assert "name: Context Architect" in content
+        assert "description: Context architect" in content
+        assert "model:" not in content
+        assert "tools:" not in content
+        assert "# Body" in content
+
+    def test_no_frontmatter_uses_stem(self):
+        """Agent without frontmatter derives name from filename stem."""
+        source = self.root / "simple.agent.md"
+        target = self.root / "simple" / "SKILL.md"
+        source.write_text("# Simple agent\n\nJust some instructions.")
+
+        AgentIntegrator()._write_windsurf_agent_skill(source, target)
+
+        content = target.read_text()
+        assert "name: simple" in content
+        assert "# Simple agent" in content
+
+    def test_creates_parent_directory(self):
+        """SKILL.md parent directory is created automatically."""
+        source = self.root / "test.agent.md"
+        target = self.root / "skills" / "test" / "SKILL.md"
+        source.write_text("---\ndescription: test\n---\n\n# Test")
+
+        AgentIntegrator()._write_windsurf_agent_skill(source, target)
+
+        assert target.parent.is_dir()
+        assert target.exists()
+
+    def test_body_preserved_verbatim(self):
+        """Markdown body is kept verbatim."""
+        source = self.root / "test.agent.md"
+        target = self.root / "test" / "SKILL.md"
+        body = "\n# Agent\n\n## Expertise\n- Python\n- TypeScript\n\n## Approach\n1. Read first\n2. Then code\n"
+        source.write_text(f"---\ndescription: test\n---\n{body}")
+
+        AgentIntegrator()._write_windsurf_agent_skill(source, target)
+
+        content = target.read_text()
+        assert "## Expertise" in content
+        assert "- Python" in content
+        assert "## Approach" in content
+
+
+class TestWindsurfAgentSkillIntegration:
+    """End-to-end: agents deploy to .windsurf/skills/<name>/SKILL.md via integrate_agents_for_target."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project_root = Path(self.temp_dir)
+        self.integrator = AgentIntegrator()
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _make_package_info(self, pkg_dir):
+        package = APMPackage(name="test-pkg", version="1.0.0", package_path=pkg_dir)
+        resolved_ref = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        return PackageInfo(
+            package=package,
+            install_path=pkg_dir,
+            resolved_reference=resolved_ref,
+            installed_at="2024-01-01T00:00:00",
+        )
+
+    def test_deploys_agent_as_windsurf_skill(self):
+        """Agent deploys to .windsurf/skills/<name>/SKILL.md with name + description."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        agents_dir = pkg / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "design-reviewer.agent.md").write_text(
+            '---\ndescription: "Design review specialist"\n---\n\n# Design Reviewer\n'
+        )
+
+        pkg_info = self._make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_agents_for_target(windsurf, pkg_info, self.project_root)
+
+        assert result.files_integrated == 1
+        deployed = self.project_root / ".windsurf" / "skills" / "design-reviewer" / "SKILL.md"
+        assert deployed.exists()
+        content = deployed.read_text()
+        assert "name: design-reviewer" in content
+        assert "description: Design review specialist" in content
+        assert "# Design Reviewer" in content
+
+    def test_skips_when_no_windsurf_dir(self):
+        """Does not deploy if .windsurf/ doesn't exist (auto_create=False)."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg = self.project_root / "package"
+        agents_dir = pkg / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "test.agent.md").write_text("# Test")
+
+        pkg_info = self._make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_agents_for_target(windsurf, pkg_info, self.project_root)
+
+        assert result.files_integrated == 0
+
+    def test_filename_produces_skill_path(self):
+        """design-reviewer.agent.md -> design-reviewer/SKILL.md"""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        integrator = AgentIntegrator()
+        windsurf = KNOWN_TARGETS["windsurf"]
+        source = Path("/fake/design-reviewer.agent.md")
+        filename = integrator.get_target_filename_for_target(source, "pkg", windsurf)
+        assert filename == "design-reviewer/SKILL.md"
+
+    def test_multiple_agents(self):
+        """Multiple agents deploy to separate .windsurf/skills/<name>/ dirs."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        agents_dir = pkg / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "reviewer.agent.md").write_text("# Reviewer")
+        (agents_dir / "architect.agent.md").write_text("# Architect")
+
+        pkg_info = self._make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_agents_for_target(windsurf, pkg_info, self.project_root)
+
+        assert result.files_integrated == 2
+        skills_dir = self.project_root / ".windsurf" / "skills"
+        assert (skills_dir / "reviewer" / "SKILL.md").exists()
+        assert (skills_dir / "architect" / "SKILL.md").exists()
+
+
+class TestWindsurfAgentSkillDiagnostics:
+    """Diagnostics emitted when agent frontmatter contains unsupported fields."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_warns_on_dropped_tools_and_model(self):
+        """DiagnosticCollector records a warning when tools/model are dropped."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        source = self.root / "smart.agent.md"
+        source.write_text(
+            "---\n"
+            "name: smart-agent\n"
+            "description: An agent with unsupported fields\n"
+            "tools:\n"
+            "  - foo\n"
+            "  - bar\n"
+            "model: gpt-4o\n"
+            "---\n\n"
+            "# Smart Agent Body\n"
+        )
+        target = self.root / "smart-agent" / "SKILL.md"
+
+        diagnostics = DiagnosticCollector()
+        AgentIntegrator()._write_windsurf_agent_skill(source, target, diagnostics=diagnostics)
+
+        # Exactly one warning expected
+        by_cat = diagnostics.by_category()
+        warnings = by_cat.get(CATEGORY_WARNING, [])
+        assert len(warnings) == 1
+        assert "tools" in warnings[0].message
+        assert "model" in warnings[0].message
+
+        # SKILL.md must NOT contain the dropped fields
+        content = target.read_text()
+        # Split into frontmatter vs body to check frontmatter only
+        parts = content.split("---")
+        # parts[0] is empty, parts[1] is frontmatter, parts[2+] is body
+        fm_block = parts[1] if len(parts) >= 3 else ""
+        assert "tools:" not in fm_block
+        assert "model:" not in fm_block
+
+    def test_no_warning_without_tools_or_model(self):
+        """No diagnostic when frontmatter has only name + description."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        source = self.root / "clean.agent.md"
+        source.write_text(
+            "---\nname: clean-agent\ndescription: A clean agent\n---\n\n# Clean Agent\n"
+        )
+        target = self.root / "clean-agent" / "SKILL.md"
+
+        diagnostics = DiagnosticCollector()
+        AgentIntegrator()._write_windsurf_agent_skill(source, target, diagnostics=diagnostics)
+
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert len(warnings) == 0

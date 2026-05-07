@@ -77,4 +77,5 @@ class InstallService:
             no_policy=request.no_policy,
             skill_subset=request.skill_subset,
             skill_subset_from_cli=request.skill_subset_from_cli,
+            legacy_skill_paths=request.legacy_skill_paths,
         )

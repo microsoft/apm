@@ -14,7 +14,8 @@ class TestMCPConflictDetection(unittest.TestCase):
         """Set up test fixtures."""
         # Create a mock adapter
         self.mock_adapter = Mock(spec=MCPClientAdapter)
-        self.mock_adapter.__class__.__name__ = "CopilotClientAdapter"
+        self.mock_adapter.target_name = "copilot"
+        self.mock_adapter.mcp_servers_key = "mcpServers"
         self.mock_adapter.registry_client = Mock()
 
         # Mock existing configuration with UUIDs
@@ -128,7 +129,8 @@ class TestMCPConflictDetection(unittest.TestCase):
 
     def test_get_existing_server_configs_copilot(self):
         """Test extraction of existing server configs for Copilot."""
-        self.mock_adapter.__class__.__name__ = "CopilotClientAdapter"
+        self.mock_adapter.target_name = "copilot"
+        self.mock_adapter.mcp_servers_key = "mcpServers"
 
         configs = self.detector.get_existing_server_configs()
         expected = {
@@ -147,7 +149,8 @@ class TestMCPConflictDetection(unittest.TestCase):
 
     def test_get_existing_server_configs_codex(self):
         """Test extraction of existing server configs for Codex."""
-        self.mock_adapter.__class__.__name__ = "CodexClientAdapter"
+        self.mock_adapter.target_name = "codex"
+        self.mock_adapter.mcp_servers_key = "mcp_servers"
 
         # Mock TOML-style config
         toml_config = {
@@ -206,3 +209,89 @@ class TestMCPConflictDetection(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMCPConflictDetectionByTargetName(unittest.TestCase):
+    """Regression suite covering the per-target dispatch contract.
+
+    Before the targets-registry refactor, ``get_existing_server_configs``
+    sniffed adapter class names and silently returned ``{}`` for cursor,
+    gemini, opencode, and windsurf -- conflict detection was broken for
+    all four.  These tests pin the new contract: dispatch is by
+    ``adapter.mcp_servers_key``, so any adapter declaring a recognised
+    key works uniformly.
+    """
+
+    def _make_detector(self, target_name: str, key: str, config: dict) -> MCPConflictDetector:
+        adapter = Mock(spec=MCPClientAdapter)
+        adapter.target_name = target_name
+        adapter.mcp_servers_key = key
+        adapter.registry_client = Mock()
+        adapter.get_current_config.return_value = config
+        return MCPConflictDetector(adapter)
+
+    def test_windsurf_extracts_mcp_servers(self):
+        detector = self._make_detector(
+            "windsurf",
+            "mcpServers",
+            {"mcpServers": {"my-server": {"command": "node", "args": ["server.js"]}}},
+        )
+        configs = detector.get_existing_server_configs()
+        self.assertIn("my-server", configs)
+
+    def test_cursor_extracts_mcp_servers(self):
+        detector = self._make_detector(
+            "cursor",
+            "mcpServers",
+            {"mcpServers": {"cursor-srv": {"command": "x"}}},
+        )
+        self.assertEqual(detector.get_existing_server_configs(), {"cursor-srv": {"command": "x"}})
+
+    def test_gemini_extracts_mcp_servers(self):
+        detector = self._make_detector(
+            "gemini",
+            "mcpServers",
+            {"mcpServers": {"g": {"command": "x"}}},
+        )
+        self.assertEqual(detector.get_existing_server_configs(), {"g": {"command": "x"}})
+
+    def test_opencode_extracts_mcp_servers(self):
+        detector = self._make_detector(
+            "opencode",
+            "mcpServers",
+            {"mcpServers": {"o": {"command": "x"}}},
+        )
+        self.assertEqual(detector.get_existing_server_configs(), {"o": {"command": "x"}})
+
+    def test_vscode_extracts_servers_key(self):
+        detector = self._make_detector(
+            "vscode",
+            "servers",
+            {"servers": {"v": {"command": "x"}}},
+        )
+        self.assertEqual(detector.get_existing_server_configs(), {"v": {"command": "x"}})
+
+    def test_empty_mcp_servers_key_returns_empty(self):
+        """Adapter with no mcp_servers_key (defensive) yields no configs."""
+        adapter = Mock(spec=MCPClientAdapter)
+        adapter.target_name = "unknown"
+        adapter.mcp_servers_key = ""
+        adapter.registry_client = Mock()
+        adapter.get_current_config.return_value = {"mcpServers": {"x": {"command": "y"}}}
+        detector = MCPConflictDetector(adapter)
+        self.assertEqual(detector.get_existing_server_configs(), {})
+
+    def test_codex_flat_keys_combine_with_nested_table(self):
+        """Codex must merge nested mcp_servers table AND mcp_servers.<name> flat keys."""
+        detector = self._make_detector(
+            "codex",
+            "mcp_servers",
+            {
+                "mcp_servers": {"nested": {"command": "n"}},
+                "mcp_servers.flat": {"command": "f"},
+                'mcp_servers."quoted-name"': {"command": "q"},
+                "mcp_servers.flat.env": {"X": "Y"},  # not a server -- no command/args
+            },
+        )
+        configs = detector.get_existing_server_configs()
+        self.assertEqual(set(configs), {"nested", "flat", "quoted-name"})

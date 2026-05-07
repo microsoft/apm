@@ -871,13 +871,6 @@ class TestProxyRegistryOnlyMode:
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package("owner/repo/prompts/deploy.prompt.md", Path("/tmp/test-pkg"))
 
-    def test_virtual_collection_errors_without_base_url(self):
-        """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual collection packages."""
-        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
-            dl = GitHubPackageDownloader()
-            with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
-                dl.download_package("owner/repo/collections/my-collection", Path("/tmp/test-pkg"))
-
     def test_virtual_subdirectory_errors_without_base_url(self):
         """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual subdirectory packages."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
@@ -898,17 +891,19 @@ class TestProxyRegistryOnlyMode:
             with patch.object(dl, "download_virtual_file_package", return_value=MagicMock()):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
-    def test_explicit_artifactory_fqdn_virtual_collection_passes(self):
-        """Explicit Artifactory FQDN on virtual collection dep is NOT blocked by PROXY_REGISTRY_ONLY."""
+    def test_explicit_artifactory_fqdn_virtual_subdirectory_passes(self):
+        """Explicit Artifactory FQDN on virtual subdirectory dep is NOT blocked by PROXY_REGISTRY_ONLY."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             dep = DependencyReference.parse(
                 "art.example.com/artifactory/github/owner/repo/collections/my-collection"
             )
             assert dep.is_artifactory()
-            assert dep.is_virtual_collection()
+            assert dep.is_virtual_subdirectory()
             # Should not raise - explicit Artifactory FQDN bypasses the guard
-            with patch.object(dl, "download_collection_package", return_value=MagicMock()):
+            with patch.object(
+                dl, "_download_subdirectory_from_artifactory", return_value=MagicMock()
+            ):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
     def test_proxy_registry_only_is_canonical(self):

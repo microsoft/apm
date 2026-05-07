@@ -179,11 +179,12 @@ wheels = [
 
 [[package]]
 name = "apm-cli"
-version = "0.11.0"
+version = "0.12.4"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "colorama" },
+    { name = "filelock" },
     { name = "gitpython" },
     { name = "llm" },
     { name = "llm-github-models" },
@@ -215,6 +216,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "colorama", specifier = ">=0.4.6" },
+    { name = "filelock", specifier = ">=3.12" },
     { name = "gitpython", specifier = ">=3.1.0" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "llm", specifier = ">=0.17.0" },
@@ -518,6 +520,15 @@ wheels = [
 ]
 
 [[package]]
+name = "filelock"
+version = "3.29.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/fe/997687a931ab51049acce6fa1f23e8f01216374ea81374ddee763c493db5/filelock-3.29.0.tar.gz", hash = "sha256:69974355e960702e789734cb4871f884ea6fe50bd8404051a3530bc07809cf90", size = 57571, upload-time = "2026-04-19T15:39:10.068Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/47/dd9a212ef6e343a6857485ffe25bba537304f1913bdbed446a23f7f592e1/filelock-3.29.0-py3-none-any.whl", hash = "sha256:96f5f6344709aa1572bbf631c640e4ebeeb519e08da902c39a001882f30ac258", size = 39812, upload-time = "2026-04-19T15:39:08.752Z" },
+]
+
+[[package]]
 name = "frozenlist"
 version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -625,14 +636,14 @@ wheels = [
 
 [[package]]
 name = "gitpython"
-version = "3.1.47"
+version = "3.1.49"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "gitdb" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c1/bd/50db468e9b1310529a19fce651b3b0e753b5c07954d486cba31bbee9a5d5/gitpython-3.1.47.tar.gz", hash = "sha256:dba27f922bd2b42cb54c87a8ab3cb6beb6bf07f3d564e21ac848913a05a8a3cd", size = 216978, upload-time = "2026-04-22T02:44:44.059Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/63/210aaa302d6a0a78daa67c5c15bbac2cad361722841278b0209b6da20855/gitpython-3.1.49.tar.gz", hash = "sha256:42f9399c9eb33fc581014bedd76049dfbaf6375aa2a5754575966387280315e1", size = 219367, upload-time = "2026-04-29T00:31:20.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/c5/a1bc0996af85757903cf2bf444a7824e68e0035ce63fb41d6f76f9def68b/gitpython-3.1.47-py3-none-any.whl", hash = "sha256:489f590edfd6d20571b2c0e72c6a6ac6915ee8b8cd04572330e3842207a78905", size = 209547, upload-time = "2026-04-22T02:44:41.271Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/6f/b842bfa6f21d6f87c57f9abf7194225e55279d96d869775e19e9f7236fc5/gitpython-3.1.49-py3-none-any.whl", hash = "sha256:024b0422d7f84d15cd794844e029ffebd4c5d42a7eb9b936b458697ef550a02c", size = 212190, upload-time = "2026-04-29T00:31:18.412Z" },
 ]
 
 [[package]]
@@ -1075,11 +1086,11 @@ wheels = [
 
 [[package]]
 name = "pip"
-version = "26.0"
+version = "26.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/44/c2/65686a7783a7c27a329706207147e82f23c41221ee9ae33128fc331670a0/pip-26.0.tar.gz", hash = "sha256:3ce220a0a17915972fbf1ab451baae1521c4539e778b28127efa79b974aff0fa", size = 1812654, upload-time = "2026-01-31T01:40:54.361Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/7e/d2b04004e1068ad4fdfa2f227b839b5d03e602e47cdbbf49de71137c9546/pip-26.1.tar.gz", hash = "sha256:81e13ebcca3ffa8cc85e4deff5c27e1ee26dea0aa7fc2f294a073ac208806ff3", size = 1840316, upload-time = "2026-04-26T21:00:05.406Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/69/00/5ac7aa77688ec4d34148b423d34dc0c9bc4febe0d872a9a1ad9860b2f6f1/pip-26.0-py3-none-any.whl", hash = "sha256:98436feffb9e31bc9339cf369fd55d3331b1580b6a6f1173bacacddcf9c34754", size = 1787564, upload-time = "2026-01-31T01:40:52.252Z" },
+    { url = "https://files.pythonhosted.org/packages/70/7a/be4bd8bcbb24ea475856dd68159d78b03b2bb53dae369f69c9606b8888f5/pip-26.1-py3-none-any.whl", hash = "sha256:4e8486d821d814b77319acb7b9e8bf5a4ee7590a643e7cb21029f209be8573c1", size = 1812804, upload-time = "2026-04-26T21:00:03.194Z" },
 ]
 
 [[package]]

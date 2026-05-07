@@ -1,14 +1,32 @@
 """Tests for marketplace client -- HTTP mock, caching, TTL, auth, auto-detection, proxy."""
 
 import json
+import re
 import time
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
+
+
+def _quoted_hosts(text: str) -> set[str]:
+    """Extract host tokens from `Host '<host>'` patterns in error text.
+
+    Each token is normalised through ``urllib.parse.urlparse`` so callers
+    compare on parsed hostnames (set equality), not raw substrings -- which
+    is what CodeQL's ``py/incomplete-url-substring-sanitization`` rule
+    requires (see ``.github/instructions/tests.instructions.md``).
+    """
+    hosts: set[str] = set()
+    for m in re.finditer(r"Host '([^']+)'", text, re.IGNORECASE):
+        parsed = urlparse(f"https://{m.group(1)}")
+        if parsed.hostname:
+            hosts.add(parsed.hostname)
+    return hosts
 
 
 @pytest.fixture(autouse=True)
@@ -462,3 +480,50 @@ class TestCacheUtf8RoundTrip:
         stale = client_mod._read_stale_cache("stale-mkt")
         assert stale is not None
         assert stale["plugins"][0]["name"] == "\u4e2d\u6587-skill"
+
+
+class TestFetchFileHostKindGuard:
+    """Defense-in-depth: _fetch_file refuses non-GitHub hosts.
+
+    Marketplace registration already gates non-trusted hosts, but if a
+    legacy registry entry or future caller bypasses that gate, we MUST NOT
+    issue a GitHub Contents API request to a non-GitHub host -- doing so
+    would attach Authorization: token <github_pat> headers to a request
+    aimed at an unrelated host, leaking credentials.
+    """
+
+    def test_generic_host_rejected_before_request(self):
+        """A 'generic' kind host (e.g. gitlab.com) raises and never fetches."""
+        from unittest.mock import patch
+
+        source = MarketplaceSource(
+            name="evil",
+            owner="acme",
+            repo="plugins",
+            branch="main",
+            host="gitlab.com",
+        )
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client.requests.get") as mock_get,
+            pytest.raises(MarketplaceFetchError) as excinfo,
+        ):
+            client_mod._fetch_file(source, "marketplace.json")
+
+        # No HTTP request should have been issued (no credential leakage).
+        mock_get.assert_not_called()
+        assert _quoted_hosts(str(excinfo.value)) == {"gitlab.com"}
+        assert "not a supported marketplace source" in str(excinfo.value)
+
+    def test_github_host_passes_guard(self):
+        """github.com sources are untouched by the guard."""
+        from unittest.mock import MagicMock, patch
+
+        source = _make_source()
+        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None):
+            mock_resolver = MagicMock()
+            mock_resolver.try_with_fallback.return_value = {"name": "ok", "plugins": []}
+            mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
+            result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=mock_resolver)
+
+        assert result == {"name": "ok", "plugins": []}

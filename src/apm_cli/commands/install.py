@@ -1,9 +1,11 @@
 """APM install command and dependency installation engine."""
 
 import builtins
+import contextlib
 import dataclasses
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, List, Optional  # noqa: F401, UP035
 
@@ -89,7 +91,6 @@ from ..utils.path_security import safe_rmtree  # noqa: F401
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
-    _rich_blank_line,
     _update_gitignore_for_apm_modules,  # noqa: F401
 )
 
@@ -197,9 +198,11 @@ class InstallContext:
     no_policy: bool
     install_mode: Any  # InstallMode
     packages: tuple  # Original Click packages
+    refresh: bool = False
     only_packages: builtins.list | None = None
     manifest_snapshot: bytes | None = None
     snapshot_manifest_path: Optional["Path"] = None
+    legacy_skill_paths: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -421,9 +424,29 @@ def _resolve_package_references(
         else:
             reason = _local_path_failure_reason(dep_ref)
             if not reason:
-                reason = "not accessible or doesn't exist"
-                if not verbose:
-                    reason += " -- run with --verbose for auth details"
+                # Round-4 panel fix (devx-ux): name the four-step probe
+                # chain explicitly when the validator exhausted it
+                # (virtual subdirectory + explicit ref). Generic "not
+                # accessible" hides the failure mode for the precise
+                # case where the most diagnostics are available.
+                is_subdir_ref_chain = (
+                    dep_ref.is_virtual
+                    and dep_ref.is_virtual_subdirectory()
+                    and bool(dep_ref.reference)
+                )
+                if is_subdir_ref_chain:
+                    reason = (
+                        "all probes failed (marker-file, Contents API, "
+                        "git ls-remote, shallow-fetch) -- verify the path "
+                        "and ref exist and that your credentials have "
+                        "read access"
+                    )
+                    if not verbose:
+                        reason += " (run with --verbose for the full probe log)"
+                else:
+                    reason = "not accessible or doesn't exist"
+                    if not verbose:
+                        reason += " -- run with --verbose for auth details"
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
@@ -773,7 +796,12 @@ def _handle_mcp_install(
     help="Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
 @click.argument("packages", nargs=-1)
-@click.option("--runtime", help="Target specific runtime only (copilot, codex, vscode)")
+@click.option(
+    "--runtime",
+    help=(
+        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude)"
+    ),
+)
 @click.option("--exclude", help="Exclude specific runtime from installation")
 @click.option(
     "--only",
@@ -812,7 +840,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
+    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
 )
 @click.option(
     "--allow-insecure",
@@ -924,6 +952,34 @@ def _handle_mcp_install(
     default=False,
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
+@click.option(
+    "--refresh",
+    is_flag=True,
+    default=False,
+    help="Bypass the persistent cache and re-fetch all dependencies from upstream.",
+)
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Compatibility flag for projects that "
+        "need per-client skill layouts."
+    ),
+)
+@click.option(
+    "--as",
+    "alias",
+    default=None,
+    metavar="ALIAS",
+    help=(
+        "Override the log/display label when installing a local bundle "
+        "(directory or .tar.gz produced by 'apm pack'). Only valid for "
+        "local-bundle installs; passing --as without a local bundle path is rejected."
+    ),
+)
 @click.pass_context
 def install(  # noqa: PLR0913
     ctx,
@@ -954,6 +1010,9 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    refresh,
+    legacy_skill_paths,
+    alias,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
@@ -974,16 +1033,129 @@ def install(  # noqa: PLR0913
         apm install --mcp io.github.github/github-mcp-server   # MCP registry
         apm install --mcp api --url https://example.com/mcp    # MCP remote
         apm install --mcp fetch -- npx -y @mcp/server-fetch    # MCP stdio
+        apm install ./build/my-bundle           # Deploy a local bundle (directory)
+        apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
+        apm install ./bundle --as custom-name   # Local bundle with custom log label
+
+    Environment variables:
+        APM_PROGRESS    Animated install UI: auto (default; TTY only,
+                        off in CI), always (force on -- never set in CI),
+                        never (disable; also implied for non-TTY stdout).
     """
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
     _apm_verbose_prev = os.environ.get("APM_VERBOSE")
+    # F5 (#1116): elapsed wall time covers EVERY exit path. Captured
+    # before logger construction so `finally` can render a timing line
+    # even if logger init itself raised.
+    install_started_at = time.perf_counter()
+    summary_rendered = False
+    logger = None
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+
+        # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
+        # _validate_and_add_packages_to_apm_yml mutates apm.yml. Initialised
+        # to None here -- BEFORE any branch that might raise (e.g. the local
+        # bundle early-exit path below) -- so the `except` handlers at the
+        # bottom of this function can always reference both names without
+        # UnboundLocalError. The bug this prevents: an exception raised in
+        # the local-bundle branch (e.g. a click.Abort from integrity-verify
+        # failure on Windows) would otherwise be masked by an
+        # UnboundLocalError inside the handler that calls
+        # _maybe_rollback_manifest(_snapshot_manifest_path, ...).
+        _manifest_snapshot: bytes | None = None
+        _snapshot_manifest_path: Path | None = None
+
+        # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
+        if not legacy_skill_paths:
+            from ..integration.targets import should_use_legacy_skill_paths
+
+            legacy_skill_paths = should_use_legacy_skill_paths()
+
+        # ----------------------------------------------------------------
+        # Local-bundle early-exit (issue #1098).  When the sole positional
+        # argument is a filesystem path that detect_local_bundle() recognises
+        # as an APM-pack bundle, we skip the dependency-resolution pipeline
+        # entirely and deploy the bundle's files directly.  Local bundles
+        # are imperative deploys -- they do NOT mutate apm.yml.
+        # ----------------------------------------------------------------
+        if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
+            from ..bundle.local_bundle import detect_local_bundle as _detect_lb
+            from ..install.local_bundle_handler import install_local_bundle as _install_lb
+
+            _bundle_info = _detect_lb(_probe)
+            if _bundle_info is not None:
+                _install_lb(
+                    bundle_info=_bundle_info,
+                    bundle_arg=packages[0],
+                    target=target,
+                    global_=global_,
+                    force=force,
+                    dry_run=dry_run,
+                    verbose=verbose,
+                    alias=alias,
+                    logger=logger,
+                    legacy_skill_paths=legacy_skill_paths,
+                    # Rejected-flag context for consolidated UsageError:
+                    rejected_flags={
+                        "--update": update,
+                        "--only": only,
+                        "--runtime": runtime,
+                        "--exclude": exclude,
+                        "--dev": dev,
+                        "--ssh": use_ssh,
+                        "--https": use_https,
+                        "--allow-protocol-fallback": allow_protocol_fallback,
+                        "--mcp": mcp_name,
+                        "--registry": registry_url,
+                        "--skill": bool(skill_names),
+                        "--parallel-downloads": parallel_downloads != 4,
+                        "--allow-insecure": allow_insecure,
+                        "--allow-insecure-host": bool(allow_insecure_hosts),
+                        "--no-policy": no_policy,
+                    },
+                )
+                return
+            # IM7: path exists but isn't a recognised bundle.  For tarball
+            # extensions (.tar.gz / .tgz) the user clearly meant a bundle
+            # artifact, so raise a targeted UsageError instead of falling
+            # through to the registry path (which would try to clone).
+            # For bare directories we still fall through, because
+            # ``apm install ./packages/source-pkg`` is a supported local-path
+            # install that goes through the dependency-resolver pipeline.
+            _suffix = _probe.name.lower()
+            if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
+                # Distinguish legacy --format apm bundles (apm.lock.yaml
+                # present, plugin.json absent) from arbitrary tarballs so
+                # the error message guides the user to the right next step.
+                from ..bundle.local_bundle import _looks_like_legacy_apm_bundle
+
+                if _looks_like_legacy_apm_bundle(_probe):
+                    raise click.UsageError(
+                        f"'{packages[0]}' was packed with '--format apm' (legacy format). "
+                        "'apm install <bundle>' requires the plugin format. "
+                        "Repack with 'apm pack --format plugin --archive', "
+                        "or use 'apm unpack' to deploy the legacy bundle."
+                    )
+                raise click.UsageError(
+                    f"'{packages[0]}' is not a valid APM bundle archive "
+                    "(no plugin.json found at the bundle root). "
+                    "Use 'apm install org/package' for registry installs, "
+                    "or repack the source with 'apm pack'."
+                )
+        # IM8: --as is only meaningful for local-bundle installs.  If we get
+        # here, no local bundle was detected, so reject --as instead of
+        # silently ignoring it.
+        if alias:
+            raise click.UsageError(
+                "--as requires a local bundle path (directory or .tar.gz "
+                "produced by 'apm pack'). It has no effect on registry installs."
+            )
         # HACK(#852): surface --verbose to deeper auth layers via env var until
         # AuthResolver gains a first-class verbose channel. Restored in finally
         # below to keep the mutation scoped to this command invocation.
@@ -992,11 +1164,9 @@ def install(  # noqa: PLR0913
 
         # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
         # _validate_and_add_packages_to_apm_yml mutates apm.yml.
-        # Initialised to None here so exception handlers always have it.
-        _manifest_snapshot: bytes | None = None
-        # manifest_path is set later (scope-dependent); keep a stable ref
-        # so exception handlers can use it without NameError.
-        _snapshot_manifest_path: Path | None = None
+        # NOTE: variables are initialised at the top of the try block
+        # (above the local-bundle early-exit) so exception handlers can
+        # always reference them without UnboundLocalError.
 
         # ----------------------------------------------------------------
         # --mcp branch (W3): when --mcp is set, route to the dedicated
@@ -1198,9 +1368,11 @@ def install(  # noqa: PLR0913
             no_policy=no_policy,
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
+            refresh=refresh,
             only_packages=builtins.list(validated_packages) if packages else None,
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
+            legacy_skill_paths=legacy_skill_paths,
         )
 
         apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
@@ -1214,7 +1386,9 @@ def install(  # noqa: PLR0913
             mcp_count=mcp_count,
             apm_diagnostics=apm_diagnostics,
             force=force,
+            elapsed_seconds=time.perf_counter() - install_started_at,
         )
+        summary_rendered = True
 
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
@@ -1235,11 +1409,20 @@ def install(  # noqa: PLR0913
         raise
     except Exception as e:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        logger.error(f"Error installing dependencies: {e}")
-        if not verbose:
-            logger.progress("Run with --verbose for detailed diagnostics")
+        if logger:
+            logger.error(f"Error installing dependencies: {e}")
+            if not verbose:
+                logger.progress("Run with --verbose for detailed diagnostics")
+        else:
+            _rich_error(f"Error installing dependencies: {e}")
         sys.exit(1)
     finally:
+        # F5 (#1116): render minimal elapsed-time line on exit paths that
+        # did not already render the full install summary. Best-effort:
+        # never let a render failure mask the original exception/exit.
+        if not summary_rendered and logger is not None:
+            with contextlib.suppress(Exception):
+                logger.install_interrupted(elapsed_seconds=time.perf_counter() - install_started_at)
         # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
         if _apm_verbose_prev is None:
             os.environ.pop("APM_VERBOSE", None)
@@ -1358,15 +1541,24 @@ def _install_apm_packages(ctx, outcome):
         old_mcp_servers = builtins.set(_existing_lock.mcp_servers)
         old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
 
-    # Also enter the APM install path when the project root has local .apm/
-    # primitives, even if there are no external APM dependencies (#714).
+    # Enter the APM install path when there are deps, local .apm/ primitives
+    # (#714), OR orphan deps in the lockfile to clean up (manifest emptied).
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.scope import get_deploy_root as _get_deploy_root
+    from apm_cli.deps.lockfile import _SELF_KEY as _LOCK_SELF_KEY
 
     _cli_project_root = _get_deploy_root(ctx.scope)
-
+    _has_orphan_deps_in_lock = bool(
+        _existing_lock
+        and not has_any_apm_deps
+        and any(k != _LOCK_SELF_KEY for k in _existing_lock.dependencies)
+    )
     apm_diagnostics = None
-    if should_install_apm and (has_any_apm_deps or _project_has_root_primitives(_cli_project_root)):
+    if should_install_apm and (
+        has_any_apm_deps
+        or _project_has_root_primitives(_cli_project_root)
+        or _has_orphan_deps_in_lock
+    ):
         if not APM_DEPS_AVAILABLE:
             logger.error("APM dependency system not available")
             logger.progress(f"Import error: {_APM_IMPORT_ERROR}")
@@ -1396,6 +1588,7 @@ def _install_apm_packages(ctx, outcome):
                 protocol_pref=ctx.protocol_pref,
                 allow_protocol_fallback=ctx.allow_protocol_fallback,
                 no_policy=ctx.no_policy,
+                legacy_skill_paths=ctx.legacy_skill_paths,
             )
             apm_count = install_result.installed_count
             prompt_count = install_result.prompts_integrated  # noqa: F841
@@ -1548,37 +1741,25 @@ def _install_apm_packages(ctx, outcome):
     return apm_count, mcp_count, apm_diagnostics
 
 
-def _post_install_summary(*, logger, apm_count, mcp_count, apm_diagnostics, force):
-    """Render diagnostics and final install summary.
+def _post_install_summary(
+    *, logger, apm_count, mcp_count, apm_diagnostics, force, elapsed_seconds=None
+):
+    """Thin shim forwarding to :func:`apm_cli.install.summary.render_post_install_summary`.
 
-    Shows diagnostic details (if any), the install summary line, and
-    exits with code 1 when critical security findings are present
-    (unless *force* is set).
+    Kept as a module-level alias so existing tests that
+    ``@patch("apm_cli.commands.install._post_install_summary")`` continue
+    to work after the extraction (microsoft/apm#1116, F5).
     """
-    # Show diagnostics and final install summary
-    if apm_diagnostics and apm_diagnostics.has_diagnostics:
-        apm_diagnostics.render_summary()
-    else:
-        _rich_blank_line()
+    from apm_cli.install.summary import render_post_install_summary
 
-    error_count = 0
-    if apm_diagnostics:
-        try:
-            error_count = int(apm_diagnostics.error_count)
-        except (TypeError, ValueError):
-            error_count = 0
-    logger.install_summary(
+    render_post_install_summary(
+        logger=logger,
         apm_count=apm_count,
         mcp_count=mcp_count,
-        errors=error_count,
-        stale_cleaned=logger.stale_cleaned_total,
+        apm_diagnostics=apm_diagnostics,
+        force=force,
+        elapsed_seconds=elapsed_seconds,
     )
-
-    # Hard-fail when critical security findings blocked any package.
-    # Consistent with apm unpack which also hard-fails on critical.
-    # Use --force to override.
-    if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
-        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -1607,7 +1788,7 @@ from apm_cli.install.services import (  # noqa: E402
 #
 # The real implementation lives in ``apm_cli.install.pipeline`` (F2).
 # ---------------------------------------------------------------------------
-def _install_apm_dependencies(
+def _install_apm_dependencies(  # noqa: PLR0913
     apm_package: "APMPackage",
     update_refs: bool = False,
     verbose: bool = False,
@@ -1626,6 +1807,7 @@ def _install_apm_dependencies(
     no_policy: bool = False,
     skill_subset: "builtins.tuple | None" = None,
     skill_subset_from_cli: bool = False,
+    legacy_skill_paths: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1660,5 +1842,6 @@ def _install_apm_dependencies(
         no_policy=no_policy,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
+        legacy_skill_paths=legacy_skill_paths,
     )
     return InstallService().run(request)

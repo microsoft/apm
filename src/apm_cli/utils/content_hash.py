@@ -4,8 +4,19 @@ import hashlib
 from pathlib import Path
 from typing import Optional  # noqa: F401
 
+from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
+
 # Directories excluded from hashing (not relevant to package content)
 _EXCLUDED_DIRS = {".git", "__pycache__"}
+
+# Files at the package root excluded from hashing. ``.apm-pin`` is the
+# cache-pin marker (see :mod:`apm_cli.install.cache_pin`) written AFTER
+# hash recording during install; including it would make the on-disk
+# hash diverge from the lockfile-recorded hash on every subsequent
+# install, falsely tripping the supply-chain content-hash mismatch
+# check. Scoped to root paths only so a package cannot slip a
+# ``subdir/.apm-pin`` past the integrity hash.
+_EXCLUDED_ROOT_FILES = {_APM_PIN_MARKER}
 
 # Well-known hash for empty/missing packages
 _EMPTY_HASH = "sha256:" + hashlib.sha256(b"").hexdigest()
@@ -41,6 +52,8 @@ def compute_package_hash(package_path: Path) -> str:
         if any(part in _EXCLUDED_DIRS for part in rel.parts):
             continue
         if item.is_file():
+            if len(rel.parts) == 1 and rel.name in _EXCLUDED_ROOT_FILES:
+                continue
             regular_files.append(rel)
 
     # Sort lexicographically by POSIX path for determinism

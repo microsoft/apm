@@ -1292,7 +1292,7 @@ class TestCodexProjectScopedMCP:
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.factory.ClientFactory.create_client")
     @patch("apm_cli.runtime.manager.RuntimeManager")
-    def test_codex_gating_reports_why_it_was_skipped(
+    def test_codex_gating_silently_skips_when_not_active(
         self,
         mock_manager_cls,
         mock_create_client,
@@ -1303,7 +1303,7 @@ class TestCodexProjectScopedMCP:
         mock_info,
         tmp_path,
     ):
-        """Codex gating should tell the user why project MCP config was skipped."""
+        """Codex gating should silently skip (vendor-neutral, like Cursor/OpenCode/Gemini)."""
         mock_manager = mock_manager_cls.return_value
         mock_manager.is_runtime_available.side_effect = lambda runtime: runtime == "codex"
         mock_create_client.return_value = MagicMock()
@@ -1324,11 +1324,9 @@ class TestCodexProjectScopedMCP:
 
         assert count == 0
         mock_install_runtime.assert_not_called()
-        mock_info.assert_any_call(
-            "Codex not an active project target -- skipping MCP config "
-            "(create .codex/ or set target: codex in apm.yml)",
-            symbol="info",
-        )
+        # Vendor-neutral: no Codex-specific hint emitted (silent skip)
+        for call in mock_info.call_args_list:
+            assert "Codex not an active project target" not in str(call)
 
     def test_remove_stale_codex_uses_project_config(self, tmp_path):
         """Stale cleanup should edit the project .codex/config.toml."""

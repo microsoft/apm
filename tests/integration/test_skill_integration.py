@@ -1,7 +1,7 @@
 """Integration tests for skill installation and integration.
 
 Tests the install flow for skills, verifying SKILL.md is
-integrated to .github/skills/{name}/SKILL.md at install time
+integrated to .agents/skills/{name}/SKILL.md at install time
 and that compile does not modify skill files.
 
 These tests require network access to GitHub.
@@ -32,6 +32,7 @@ def temp_project(tmp_path):
     apm_yml.write_text("""name: skill-compile-project
 version: 1.0.0
 description: Test project for skill compilation
+target: copilot
 dependencies:
   apm: []
   mcp: []
@@ -62,7 +63,7 @@ class TestSkillInstallIntegration:
     """Test SKILL.md integration at install time."""
 
     def test_install_integrates_skill(self, temp_project, apm_command):
-        """Install should integrate SKILL.md to .github/skills/ when VSCode is target."""
+        """Install should integrate SKILL.md to .agents/skills/ when VSCode is target."""
         # Install skill
         result = subprocess.run(
             [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
@@ -74,10 +75,10 @@ class TestSkillInstallIntegration:
 
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
-        # Verify skill was integrated to .github/skills/ at install time
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
+        # Verify skill was integrated to .agents/skills/ at install time
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
         assert skill_integrated.exists(), (
-            "Skill should be integrated to .github/skills/ at install time"
+            "Skill should be integrated to .agents/skills/ at install time"
         )
 
     def test_install_preserves_skill_content(self, temp_project, apm_command):
@@ -102,10 +103,10 @@ class TestSkillInstallIntegration:
             / "brand-guidelines"
             / "SKILL.md"
         )
-        integrated_path = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
+        integrated_path = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
 
         assert skill_path.exists(), "Source SKILL.md not found in apm_modules"
-        assert integrated_path.exists(), "Integrated SKILL.md not found in .github/skills/"
+        assert integrated_path.exists(), "Integrated SKILL.md not found in .agents/skills/"
 
         skill_content = skill_path.read_text()
         integrated_content = integrated_path.read_text()
@@ -114,7 +115,7 @@ class TestSkillInstallIntegration:
         assert skill_content == integrated_content, "Integrated skill content should match original"
 
     def test_install_creates_correct_structure(self, temp_project, apm_command):
-        """Integrated skill should have SKILL.md in .github/skills/{name}/."""
+        """Integrated skill should have SKILL.md in .agents/skills/{name}/."""
         # Install skill
         result = subprocess.run(
             [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
@@ -125,7 +126,7 @@ class TestSkillInstallIntegration:
         )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
-        skill_dir = temp_project / ".github" / "skills" / "brand-guidelines"
+        skill_dir = temp_project / ".agents" / "skills" / "brand-guidelines"
         assert skill_dir.exists(), "Skill directory not created"
 
         # Check SKILL.md exists
@@ -147,7 +148,7 @@ class TestCompileSkipsSkills:
         )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
         assert skill_integrated.exists(), "Skill not integrated after install"
 
         # Record modification time
@@ -167,7 +168,7 @@ class TestMultipleSkillsInstall:
     """Test install with multiple skills."""
 
     def test_multiple_skills_create_multiple_integrations(self, temp_project, apm_command):
-        """Each installed skill should be integrated to .github/skills/."""
+        """Each installed skill should be integrated to .agents/skills/."""
         skills = [
             "anthropics/skills/skills/brand-guidelines",
             # Add more skills if available in the repo
@@ -185,7 +186,7 @@ class TestMultipleSkillsInstall:
                 continue  # Skip unavailable skills
 
         # Check that skills were integrated
-        skills_dir = temp_project / ".github" / "skills"
+        skills_dir = temp_project / ".agents" / "skills"
         if skills_dir.exists():
             skill_dirs = [d for d in skills_dir.iterdir() if d.is_dir()]
             assert len(skill_dirs) >= 1, "At least one skill should be integrated"
@@ -205,7 +206,7 @@ class TestSkillNaming:
         )
 
         # Should be brand-guidelines/ directory
-        skill_dir = temp_project / ".github" / "skills" / "brand-guidelines"
+        skill_dir = temp_project / ".agents" / "skills" / "brand-guidelines"
         assert skill_dir.exists(), "Skill directory should match skill name"
         assert (skill_dir / "SKILL.md").exists(), "SKILL.md should be in skill directory"
 
@@ -219,7 +220,7 @@ class TestSkillNaming:
             timeout=120,
         )
 
-        skill_path = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
+        skill_path = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
 
         if not skill_path.exists():
             pytest.skip("Skill not created")
