@@ -33,14 +33,23 @@ if TYPE_CHECKING:  # pragma: no cover - type-checking only
     from apm_cli.policy.schema import ApmPolicy
 
 
-# Fetch-failure outcomes that honour the project-side
-# ``policy.fetch_failure_default`` knob.  ``absent`` / ``no_git_remote``
-# / ``empty`` are NOT failures -- they mean "no org policy" and are
-# always fail-open.
-_FETCH_FAILURE_OUTCOMES = (
+# Outcomes that honour the project-side ``policy.fetch_failure_default``
+# knob.  Despite the historical name "fetch failure", this set ALSO
+# includes the no-policy outcomes ``no_git_remote`` / ``absent`` /
+# ``empty`` -- pre-#1159 those were excluded and were always fail-open
+# even when the project explicitly opted in to ``block``.  That was an
+# install-path silent-skip (governance bypass) symmetrical to the audit
+# bug fixed in the same PR.  Membership rule: an outcome belongs here
+# iff a project that asserts ``policy.fetch_failure_default: block``
+# expects "no enforceable policy" to fail closed for that outcome on
+# BOTH install and audit paths.
+_OUTCOMES_HONORING_FETCH_FAILURE_DEFAULT = (
     "malformed",
     "cache_miss_fetch_fail",
     "garbage_response",
+    "no_git_remote",
+    "absent",
+    "empty",
 )
 
 
@@ -74,7 +83,7 @@ def route_discovery_outcome(
     fetch_failure_default:
         Project-side ``policy.fetch_failure_default``; one of
         ``"warn"`` (default) or ``"block"``.  Only consulted for
-        outcomes in :data:`_FETCH_FAILURE_OUTCOMES`.
+        outcomes in :data:`_OUTCOMES_HONORING_FETCH_FAILURE_DEFAULT`.
     raise_blocking_errors:
         When ``True`` (default), raise :class:`PolicyViolationError` for
         outcomes that demand fail-closed behaviour (hash mismatch,
@@ -130,11 +139,11 @@ def route_discovery_outcome(
             )
         if (
             raise_blocking_errors
-            and outcome in _FETCH_FAILURE_OUTCOMES
+            and outcome in _OUTCOMES_HONORING_FETCH_FAILURE_DEFAULT
             and fetch_failure_default == "block"
         ):
             raise PolicyViolationError(
-                "Install blocked: org policy could not be fetched / parsed "
+                "Install blocked: no enforceable org policy was resolved "
                 f"(outcome={outcome}) and project apm.yml has "
                 "policy.fetch_failure_default=block "
                 f"(source={source or 'unknown'})",

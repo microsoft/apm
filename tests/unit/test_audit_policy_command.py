@@ -240,6 +240,9 @@ class TestCiWithoutPolicy:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        # Auto-discovery emits a [!] warning to stderr when no git remote is
+        # found; JSON is on stdout. Read stdout explicitly so the warning does
+        # not corrupt JSON parsing.
+        data = json.loads(result.stdout)
         # Only baseline checks (max 8 incl. skill-subset + includes-consent)
         assert data["summary"]["total"] <= 8

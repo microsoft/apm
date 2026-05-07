@@ -104,6 +104,15 @@ class InstallContext:
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
+    # Integrate-internal channel (does NOT cross phase boundaries):
+    # populated by _resolve_download_strategy in phases/integrate.py
+    # (branch-ref `remote_drifted` guard at L195-218 and v<=0.12.2
+    # self-heal block at L234-258), consumed by
+    # FreshDependencySource.acquire() in install/sources.py:~624 to
+    # suppress the supply-chain hard-block when a fresh-download
+    # content_hash legitimately differs from the lockfile-recorded
+    # content_hash (drift / recovery, not a supply-chain attack).
+    expected_hash_change_deps: set[str] = field(default_factory=set)
     installed_count: int = 0  # integrate
     unpinned_count: int = 0  # integrate
     installed_packages: list[Any] = field(default_factory=list)  # integrate

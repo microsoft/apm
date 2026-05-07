@@ -53,6 +53,28 @@ class _AuditConfig:
 # -- Helpers --------------------------------------------------------
 
 
+def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None) -> str:
+    """Render a per-outcome `cause` line for audit --ci policy-discovery messages.
+
+    Used by both the ``warn`` (`[!]`) and ``block`` (`[x]`) branches so the
+    wording is identical; only the prefix and suffix change. Closes #1159
+    by replacing the prior silent-skip with explicit, actionable causes
+    for ``no_git_remote`` / ``absent`` / ``empty`` outcomes (and matching
+    the existing wording for fetch failures).
+    """
+    src = source or "unknown"
+    if outcome == "no_git_remote":
+        return "Could not determine org from git remote"
+    if outcome == "absent":
+        return f"No org policy found at {src}"
+    if outcome == "empty":
+        return f"Org policy at {src} is present but empty"
+    # malformed / cache_miss_fetch_fail / garbage_response (and any
+    # `error` set on the result): preserve the legacy wording so existing
+    # consumers parsing the line keep working.
+    return f"Policy fetch failed: {err_text or outcome}"
+
+
 def _scan_single_file(file_path: Path, logger) -> tuple[dict[str, list[ScanFinding]], int]:
     """Scan a single arbitrary file.
 
@@ -425,6 +447,7 @@ def _audit_ci_gate(
     )
 
     fetch_result = None
+    auto_discovered = False
     if policy_source and (not fail_fast or ci_result.passed):
         fetch_result = discover_policy(
             cfg.project_root,
@@ -434,29 +457,61 @@ def _audit_ci_gate(
     elif not policy_source and not no_policy and (not fail_fast or ci_result.passed):
         # Auto-discovery (mirror install path)
         fetch_result = discover_policy_with_chain(cfg.project_root)
-        # Treat outcomes that mean "no policy to enforce" as a no-op.
-        if fetch_result.outcome in ("absent", "no_git_remote", "empty", "disabled"):
-            fetch_result = None
+        auto_discovered = True
 
     if fetch_result is not None:
-        # Honour project-side fetch_failure_default when the org policy
-        # could not be fetched / parsed (closes #829). Default "warn"
-        # downgrades the previous unconditional sys.exit(1) into a log.
-        if fetch_result.error or (
-            fetch_result.outcome in ("malformed", "cache_miss_fetch_fail", "garbage_response")
+        # Honour project-side fetch_failure_default for outcomes that
+        # mean "no enforcement applied".  Pre-#1159, auto-discovery
+        # silently swallowed `absent` / `no_git_remote` / `empty` /
+        # `disabled` -- a fail-open governance bypass.  Now those
+        # outcomes are surfaced explicitly:
+        #
+        #   * malformed / cache_miss_fetch_fail / garbage_response
+        #     -> existing fetch-failure handling (warn unless block);
+        #     applies to BOTH explicit --policy and auto-discovery.
+        #   * absent / no_git_remote / empty   (auto-discovery only)
+        #     -> were silently dropped pre-#1159; now surfaced as
+        #        explicit warnings, and honour `block` for parity with
+        #        install.  Explicit --policy keeps the legacy fall-
+        #        through so an opt-in pointer at a baseline file does
+        #        not regress.
+        #   * disabled   (auto-discovery only)
+        #     -> emit a forensic `[i]` breadcrumb in --ci mode so
+        #        audit logs explain WHY no policy ran.
+        fetch_failure_outcomes = (
+            "malformed",
+            "cache_miss_fetch_fail",
+            "garbage_response",
+        )
+        no_policy_outcomes = ("absent", "no_git_remote", "empty")
+
+        if auto_discovered and fetch_result.outcome == "disabled":
+            click.echo(
+                "[i] Org-policy auto-discovery disabled by project apm.yml "
+                "(policy.discovery_enabled=false); no enforcement applied",
+                err=True,
+            )
+            fetch_result = None
+        elif (
+            fetch_result.outcome in fetch_failure_outcomes
+            or fetch_result.error
+            or (auto_discovered and fetch_result.outcome in no_policy_outcomes)
         ):
             project_default = read_project_fetch_failure_default(cfg.project_root)
+            source = fetch_result.source
             err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
+            cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
             if project_default == "block":
-                logger.error(
-                    f"Policy fetch failed: {err_text} (policy.fetch_failure_default=block)"
+                click.echo(
+                    f"[x] {cause} (policy.fetch_failure_default=block)",
+                    err=True,
                 )
                 sys.exit(1)
             else:
-                logger.warning(
-                    f"Policy fetch failed: {err_text}; "
-                    "proceeding without policy checks "
-                    "(set policy.fetch_failure_default=block in apm.yml to fail closed)"
+                click.echo(
+                    f"[!] {cause}; enforcement skipped "
+                    "(set policy.fetch_failure_default=block in apm.yml to fail closed)",
+                    err=True,
                 )
                 fetch_result = None
 

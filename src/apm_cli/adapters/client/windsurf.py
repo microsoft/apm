@@ -28,6 +28,12 @@ class WindsurfClientAdapter(CopilotClientAdapter):
     target_name: str = "windsurf"
     mcp_servers_key: str = "mcpServers"
 
+    # Windsurf's mcp_config.json runtime-substitution support has not yet
+    # been individually audited (see #1152). Pin to legacy install-time
+    # resolution so this adapter is unchanged by the Copilot security fix;
+    # revisit in a follow-up.
+    _supports_runtime_env_substitution: bool = False
+
     # ------------------------------------------------------------------ #
     # Config path
     # ------------------------------------------------------------------ #

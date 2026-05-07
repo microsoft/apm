@@ -44,6 +44,12 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     target_name: str = "opencode"
     mcp_servers_key: str = "mcpServers"
 
+    # OpenCode's config runtime-substitution support has not yet been
+    # individually audited (see #1152). Pin to legacy install-time
+    # resolution so this adapter is unchanged by the Copilot security fix;
+    # revisit in a follow-up.
+    _supports_runtime_env_substitution: bool = False
+
     def get_config_path(self):
         """Return the path to ``opencode.json`` in the repository root."""
         return str(self.project_root / "opencode.json")

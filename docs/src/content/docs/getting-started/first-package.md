@@ -206,10 +206,18 @@ team-skills/
 +-- apm.lock.yaml
 ```
 
-`apm install` auto-detects which runtimes you have. The example above shows
-`.github/` because Copilot is the default fallback. If `.claude/`, `.cursor/`,
-`.opencode/`, or `.gemini/` exists in the project, they get populated too. To target
-explicitly, see the [Compilation guide](/apm/guides/compilation/).
+`apm install` resolves which harness directories to populate using a strict
+priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
+filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.github/copilot-instructions.md`,
+`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`). The example layout
+above shows `.github/` because `.github/copilot-instructions.md` exists in the
+project; if you also have `.claude/`, `.cursor/`, `.opencode/`, or `.gemini/`, those
+directories get populated too. With no signal at all, `apm install` exits with
+code 2 and a teaching message instead of silently picking a target -- declare an
+intent explicitly via `--target copilot` (or another harness), or by adding
+`targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects
+in the current directory. To target explicitly, see the
+[Compilation guide](/apm/guides/compilation/).
 
 > **What about `apm compile`?** Compile is a different concern: it
 > generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools

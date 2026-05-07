@@ -840,7 +840,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both.",
+    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
 )
 @click.option(
     "--allow-insecure",
@@ -1541,15 +1541,24 @@ def _install_apm_packages(ctx, outcome):
         old_mcp_servers = builtins.set(_existing_lock.mcp_servers)
         old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
 
-    # Also enter the APM install path when the project root has local .apm/
-    # primitives, even if there are no external APM dependencies (#714).
+    # Enter the APM install path when there are deps, local .apm/ primitives
+    # (#714), OR orphan deps in the lockfile to clean up (manifest emptied).
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.scope import get_deploy_root as _get_deploy_root
+    from apm_cli.deps.lockfile import _SELF_KEY as _LOCK_SELF_KEY
 
     _cli_project_root = _get_deploy_root(ctx.scope)
-
+    _has_orphan_deps_in_lock = bool(
+        _existing_lock
+        and not has_any_apm_deps
+        and any(k != _LOCK_SELF_KEY for k in _existing_lock.dependencies)
+    )
     apm_diagnostics = None
-    if should_install_apm and (has_any_apm_deps or _project_has_root_primitives(_cli_project_root)):
+    if should_install_apm and (
+        has_any_apm_deps
+        or _project_has_root_primitives(_cli_project_root)
+        or _has_orphan_deps_in_lock
+    ):
         if not APM_DEPS_AVAILABLE:
             logger.error("APM dependency system not available")
             logger.progress(f"Import error: {_APM_IMPORT_ERROR}")

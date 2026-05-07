@@ -223,7 +223,7 @@ class TestGoldenScenarioE2E:
 
             print("\n=== Step 3: Transform your project with AI-Native structure ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project --yes",
+                f"{apm_binary} init my-ai-native-project --yes --target copilot",
                 cwd=project_workspace,
                 show_output=True,
             )
@@ -442,7 +442,8 @@ Basic instructions for E2E testing.
 
             print("\n=== Initializing Codex test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-codex --yes", cwd=project_workspace
+                f"{apm_binary} init my-ai-native-project-codex --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -592,7 +593,8 @@ Instructions for Codex E2E testing.
 
             print("\\n=== Initializing LLM test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-llm --yes", cwd=project_workspace
+                f"{apm_binary} init my-ai-native-project-llm --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -748,7 +750,8 @@ Instructions for LLM E2E testing.
 
             print("\n=== Initializing Gemini test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-gemini --yes", cwd=project_workspace
+                f"{apm_binary} init my-ai-native-project-gemini --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -908,7 +911,9 @@ Instructions for Gemini CLI E2E testing.
 
             # Test apm init
             result = run_command(
-                f"{apm_binary} init template-test-project --yes", cwd=workspace, show_output=True
+                f"{apm_binary} init template-test-project --yes --target copilot",
+                cwd=workspace,
+                show_output=True,
             )
             assert result.returncode == 0, f"APM init failed: {result.stderr}"
 

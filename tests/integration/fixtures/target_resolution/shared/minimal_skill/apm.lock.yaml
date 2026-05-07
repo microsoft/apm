@@ -1,0 +1,12 @@
+pack:
+  format: plugin
+  target: claude,copilot
+  bundle_files:
+    .apm/skills/hello/SKILL.md: 06c625df085c01959a4695406d3e1965792e23a68a36959bd8e3cf3a7695159f
+dependencies:
+  - repo_url: local/fixture-skill
+    resolved_commit: fixture
+    deployed_files:
+      - .apm/skills/hello/SKILL.md
+    deployed_file_hashes:
+      .apm/skills/hello/SKILL.md: 06c625df085c01959a4695406d3e1965792e23a68a36959bd8e3cf3a7695159f

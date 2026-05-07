@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
+
+### Fixed
+
+- `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback. The defensive expression broke gh-aw's bare-expression substitution regex, causing consumer-supplied `target:` values to be silently dropped; the `import-schema` default already covers the omitted-input case. (#1185)
+
+## [0.12.4] - 2026-05-07
+
+### Fixed
+
+- `apm install` now removes deployed files when a package is removed from `apm.yml`. Three sequential early-returns previously short-circuited the cleanup phase when the manifest was emptied; the orphan-cleanup logic itself was correct. (#1173)
+- `apm audit --ci` no longer reports false drift on self-package primitives that link to repo-root files (`[..](../../FILE.md)`). The replay's in-package asset rewriter now re-anchors `target_location` onto `package_root` when the candidate sits outside the scratch tree, mirroring real-install output. (#1182)
+
+## [0.12.3] - 2026-05-06
+
+### Security
+
+- `apm install --target copilot` no longer bakes secret values into `~/.copilot/mcp-config.json`: env-var placeholders (`${env:VAR}`, `${VAR}`, legacy `<VAR>`) are translated to Copilot's native `${VAR}` runtime form so secrets never touch disk. Rotate any previously-baked secrets and re-run install. (#1169, closes #1152)
+
+### Changed
+
+- Explicit, auditable target resolution: `apm install` / `apm compile` follow a strict `--target` > `apm.yml target:` > auto-detect chain, print a `[i] Targets: ... (source: ...)` provenance line, and exit 2 on empty repos instead of silently defaulting to `copilot`. Adds `apm targets` discovery command and `apm compile --all` (deprecates `--target all`). (#1165, closes #1154, #1122, #1130, #518, #888, #891, #650, #1056)
+- `apm init` opens an interactive numbered-toggle target checklist pre-seeded from filesystem signals so users land in Tier 2 (`apm.yml target:`) by default; adds `--target` for scripted use. (#1165)
+- `apm install` honours `policy.fetch_failure_default: block` for `no_git_remote` / `absent` / `empty`, matching the audit behaviour. (#1164)
+
+### Fixed
+
+- `apm audit --ci` no longer silently passes when no org policy is resolved: auto-discovery warns on stderr and honours `policy.fetch_failure_default: block` to fail closed (exit 1); JSON/SARIF on stdout stays clean. (#1164, closes #1159)
+- SCP-shorthand SSH URLs from non-`git` users -- `<user>@github.com:owner/repo` (EMU) and `<user>@ssh.dev.azure.com:v3/<org>/<project>/<repo>` (ADO) -- now parse correctly in dependency parsing and policy auto-discovery. (#1164)
+- `apm install` against a branch ref re-downloads when upstream advances past the lockfile-recorded SHA, and self-heals lockfiles produced by APM <= 0.12.2 on next install. (#1158)
+- In-package relative markdown links are rewritten to their `apm_modules/` location at install time so sibling references survive the `.agents/.github` deploy split. (#1160, closes #1147)
+- `.apm-pin` cache marker no longer leaks into skill deploy targets on subsequent installs. (#1153)
+
 ## [0.12.2] - 2026-05-05
 
 ### Added

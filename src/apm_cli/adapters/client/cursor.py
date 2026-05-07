@@ -29,6 +29,12 @@ class CursorClientAdapter(CopilotClientAdapter):
     target_name: str = "cursor"
     mcp_servers_key: str = "mcpServers"
 
+    # Cursor's mcp.json runtime-substitution support has not yet been
+    # individually audited (see #1152). Pin to the legacy install-time
+    # resolution behaviour so this adapter is unchanged by the Copilot
+    # security fix; revisit in a follow-up.
+    _supports_runtime_env_substitution: bool = False
+
     # ------------------------------------------------------------------ #
     # Config path
     # ------------------------------------------------------------------ #

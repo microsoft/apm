@@ -55,7 +55,7 @@ def _make_apm_project(
     *,
     name: str = "drift-fixture",
     version: str = "1.0.0",
-    target: str | None = None,
+    target: str | None = "copilot",
     files: Mapping[str, bytes] | None = None,
 ) -> Path:
     """Create a minimal APM project rooted under ``tmp_path``.

@@ -589,6 +589,8 @@ class TestDownloadCallbackErrorMessages:
                 }
             )
         )
+        # v2 target resolution requires a harness signal (#1154).
+        (tmp_path / ".claude").mkdir(exist_ok=True)
 
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
@@ -647,6 +649,8 @@ class TestCallbackFailureDeduplication:
                 }
             )
         )
+        # v2 target resolution requires a harness signal (#1154).
+        (tmp_path / ".claude").mkdir(exist_ok=True)
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
         with patch("apm_cli.deps.github_downloader.GitHubPackageDownloader") as MockDownloader:
