@@ -750,3 +750,69 @@ class TestCompilationNotBroadened:
         )
         # Unchanged: compile must not generalize.
         assert content == result
+
+
+class TestReplayFrameTranslation:
+    """Regression for #1182: audit-replay must rewrite asset links as if
+    deployed to the project tree, not the scratch tmpdir.
+
+    Without the fix, ``apm audit --ci`` reports false drift on every
+    self-package install whose primitives contain ``../<repo-root-file>``
+    style links, because ``relpath`` is computed from the scratch
+    target_location while the candidate still resolves through the real
+    package_root.
+    """
+
+    def test_replay_frame_rewrites_against_logical_target(self, tmp_path):
+        """When candidate is outside base_dir (replay self-package), the
+        rewrite must re-anchor onto package_root so the link mirrors the
+        install-time output.
+        """
+        # Real project tree (the actual repo).
+        real_root = tmp_path / "real_repo"
+        (real_root / ".apm" / "agents").mkdir(parents=True)
+        (real_root / "MANIFESTO.md").write_text("# Manifesto", encoding="utf-8")
+        (real_root / "apm.yml").write_text("name: self\n", encoding="utf-8")
+        source_file = real_root / ".apm" / "agents" / "x.agent.md"
+        source_file.write_text("placeholder", encoding="utf-8")
+
+        # Scratch tmpdir simulating replay's project_root.
+        scratch_root = tmp_path / "scratch"
+        scratch_target_dir = scratch_root / ".github" / "agents"
+        scratch_target_dir.mkdir(parents=True)
+        target_file = scratch_target_dir / "x.agent.md"
+
+        # Mirror replay wiring: base_dir = scratch, package_root = real repo.
+        resolver = UnifiedLinkResolver(scratch_root)
+        resolver.package_root = real_root
+
+        content = "See [`MANIFESTO.md`](../../MANIFESTO.md) for context."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+
+        # Must match what real install writes to disk: ../../MANIFESTO.md
+        # (relative from .github/agents/ back to repo root). NOT a tmpdir
+        # traversal like ../../../../tmp/.../real_repo/MANIFESTO.md.
+        assert "[`MANIFESTO.md`](../../MANIFESTO.md)" in result
+        assert "tmp" not in result
+        assert "real_repo/MANIFESTO.md" not in result
+
+    def test_normal_install_self_package_unchanged(self, tmp_path):
+        """Sanity: normal install (base_dir == package_root parent) still
+        rewrites correctly and the replay-frame branch does not regress it.
+        """
+        root = tmp_path / "repo"
+        (root / ".apm" / "agents").mkdir(parents=True)
+        (root / "MANIFESTO.md").write_text("# m", encoding="utf-8")
+        (root / "apm.yml").write_text("name: self\n", encoding="utf-8")
+        source_file = root / ".apm" / "agents" / "x.agent.md"
+        source_file.write_text("placeholder", encoding="utf-8")
+        target_dir = root / ".github" / "agents"
+        target_dir.mkdir(parents=True)
+        target_file = target_dir / "x.agent.md"
+
+        resolver = UnifiedLinkResolver(root)
+        resolver.package_root = root
+
+        content = "See [m](../../MANIFESTO.md)."
+        result = resolver.resolve_links_for_installation(content, source_file, target_file)
+        assert "[m](../../MANIFESTO.md)" in result

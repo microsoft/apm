@@ -32,6 +32,7 @@ def temp_project(tmp_path):
     apm_yml.write_text("""name: skill-compile-project
 version: 1.0.0
 description: Test project for skill compilation
+target: copilot
 dependencies:
   apm: []
   mcp: []

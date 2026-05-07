@@ -10,7 +10,7 @@
 # Pre-agent-steps then download all bundles and restore them in one apm-action call.
 #
 # Source of truth: https://github.com/microsoft/apm/blob/main/.github/workflows/shared/apm.md
-# apm-action pin:  microsoft/apm-action@v1.6.0
+# apm-action pin:  microsoft/apm-action@v1.7.2
 # To check whether a vendored copy is current, compare these two lines.
 #
 # Documentation: https://microsoft.github.io/apm/integrations/gh-aw/
@@ -56,6 +56,16 @@
 #              owner: beta-org
 #              packages:
 #                - beta-org/beta-pkg
+#
+# 4. Slim bundle for a single harness (recommended when the workflow
+#    targets one engine -- avoids packing every harness layout):
+#
+#    imports:
+#      - uses: shared/apm.md
+#        with:
+#          target: copilot
+#          packages:
+#            - microsoft/apm-sample-package
 
 import-schema:
   packages:
@@ -132,6 +142,21 @@ import-schema:
           items:
             type: string
           required: true
+
+  # APM compilation target (which agent harness layouts to deploy)
+  target:
+    type: string
+    required: false
+    default: all
+    description: >
+      Target harness(es) for APM compilation. Controls which agent config
+      directories are generated in the bundle. Single token or comma-separated
+      list. Valid tokens: copilot, claude, cursor, codex, opencode, gemini,
+      windsurf, agent-skills, all. Default: all (every supported harness).
+      Set this to match the engine your gh-aw workflow targets for smaller,
+      faster bundles. The shared workflow runs apm-action in isolated mode,
+      so any apm.yml in the consumer repo is intentionally ignored -- this
+      input is the sole target signal.
 
 jobs:
   apm-prep:
@@ -254,7 +279,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Pack APM packages
         id: pack
-        uses: microsoft/apm-action@v1.6.0
+        uses: microsoft/apm-action@v1.7.2
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
@@ -262,7 +287,7 @@ jobs:
           isolated: 'true'
           pack: 'true'
           archive: 'true'
-          target: all
+          target: ${{ github.aw.import-inputs.target || 'all' }}
           working-directory: /tmp/gh-aw/apm-workspace
       - name: Upload APM bundle artifact
         if: success()
@@ -336,7 +361,7 @@ steps:
       [ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }
       printf '%s\n' "${list[@]}" > /tmp/gh-aw/apm-bundle-list.txt
   - name: Restore APM packages (all bundles)
-    uses: microsoft/apm-action@v1.6.0
+    uses: microsoft/apm-action@v1.7.2
     with:
       bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 ---
@@ -349,7 +374,7 @@ in parallel one matrix replica per credential group, packs each group's packages
 with `microsoft/apm-action`, and uploads a per-group bundle artifact. The agent
 job's pre-agent-steps then download all bundles and restore them in a single
 `apm-action` invocation (using the `bundles-file:` input shipped in
-`microsoft/apm-action@v1.6.0`).
+`microsoft/apm-action@v1.7.2`).
 
 ### How it works
 
@@ -363,7 +388,7 @@ job's pre-agent-steps then download all bundles and restore them in a single
 3. **Restore** (agent pre-agent-steps): all `apm-*` artifacts are downloaded,
    validated against the matrix manifest (defends against same-run artifact-name
    collision attacks), and restored in one call via the `bundles-file:` input
-   on `microsoft/apm-action@v1.6.0`.
+   on `microsoft/apm-action@v1.7.2`.
 
 ### Authentication
 

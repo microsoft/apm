@@ -46,13 +46,22 @@ def _make_ctx(
     return ctx
 
 
-def _resolved_dirs(ctx) -> list[Path]:
-    """Collect resolved_deploy_root from every TargetProfile on ctx.targets."""
+def _target_root_dirs(ctx, project_root: Path) -> list[Path]:
+    """Collect on-disk deploy directories for every TargetProfile in ctx.targets.
+
+    Static targets resolve to ``project_root / target.root_dir`` (e.g.
+    ``.claude``). Dynamic targets (cowork) carry an explicit
+    ``resolved_deploy_root`` -- if present, prefer it.
+    """
     out: list[Path] = []
     for t in ctx.targets:
         root = getattr(t, "resolved_deploy_root", None)
         if root is not None:
             out.append(Path(root))
+            continue
+        root_dir = getattr(t, "root_dir", None)
+        if root_dir:
+            out.append(project_root / root_dir)
     return out
 
 
@@ -68,7 +77,7 @@ def test_three_guard_collapse_no_skip(tmp_path):
     run_targets_phase(ctx)
 
     assert ctx.targets, "run_targets_phase produced no targets"
-    dirs = _resolved_dirs(ctx)
+    dirs = _target_root_dirs(ctx, project)
     assert any(d.name == ".claude" for d in dirs), f"No .claude/ deploy dir resolved; got {dirs}"
 
 

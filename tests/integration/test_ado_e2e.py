@@ -65,7 +65,12 @@ class TestADOInstall:
         apm_yml = project_dir / "apm.yml"
         apm_yml.write_text(
             yaml.dump(
-                {"name": "test-project", "version": "1.0.0", "dependencies": {"apm": [], "mcp": []}}
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "target": "copilot",
+                    "dependencies": {"apm": [], "mcp": []},
+                }
             )
         )
 
@@ -102,6 +107,7 @@ class TestADODepsAndPrune:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_TEST_REPO], "mcp": []},
                 }
             )
@@ -130,6 +136,7 @@ class TestADODepsAndPrune:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_TEST_REPO], "mcp": []},
                 }
             )
@@ -162,6 +169,7 @@ class TestADOCompile:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_TEST_REPO], "mcp": []},
                 }
             )
@@ -197,7 +205,12 @@ class TestADOVirtualPackage:
         apm_yml = project_dir / "apm.yml"
         apm_yml.write_text(
             yaml.dump(
-                {"name": "test-project", "version": "1.0.0", "dependencies": {"apm": [], "mcp": []}}
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "target": "copilot",
+                    "dependencies": {"apm": [], "mcp": []},
+                }
             )
         )
 
@@ -225,6 +238,7 @@ class TestADOVirtualPackage:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_VIRTUAL_PACKAGE], "mcp": []},
                 }
             )
@@ -259,6 +273,7 @@ class TestMixedDependencies:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.GITHUB_PACKAGE, self.ADO_PACKAGE], "mcp": []},
                 }
             )
@@ -291,6 +306,7 @@ class TestMixedDependencies:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.GITHUB_PACKAGE, self.ADO_PACKAGE], "mcp": []},
                 }
             )
@@ -323,6 +339,7 @@ class TestMixedDependencies:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.GITHUB_PACKAGE, self.ADO_PACKAGE], "mcp": []},
                 }
             )

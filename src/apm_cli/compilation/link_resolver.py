@@ -499,8 +499,29 @@ class UnifiedLinkResolver:
         except PathTraversalError:
             return None
 
+        # Replay-frame translation (#1182): during audit-replay of a
+        # self-package, ``ctx.base_dir`` is the scratch tmpdir but
+        # ``ctx.package_root`` (and therefore ``candidate``) still points
+        # at the real project tree. Computing ``relpath`` directly would
+        # produce a tmpdir-traversal link (e.g. ``../../../../Users/...``)
+        # that diverges from what real install writes to disk, causing
+        # spurious drift. Detect the cross-frame case (candidate outside
+        # base_dir) and re-anchor the target onto package_root so the
+        # rewrite mirrors the install-time output.
+        relpath_anchor = ctx.target_location
         try:
-            relative_path = os.path.relpath(candidate, ctx.target_location)
+            candidate_in_base = candidate.is_relative_to(ctx.base_dir)
+        except (OSError, ValueError):
+            candidate_in_base = True
+        if not candidate_in_base:
+            try:
+                target_rel = ctx.target_location.relative_to(ctx.base_dir)
+                relpath_anchor = ctx.package_root / target_rel
+            except (OSError, ValueError):
+                relpath_anchor = ctx.target_location
+
+        try:
+            relative_path = os.path.relpath(candidate, relpath_anchor)
         except (OSError, ValueError):
             return None
 

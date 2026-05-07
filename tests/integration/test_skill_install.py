@@ -31,6 +31,7 @@ def temp_project(tmp_path):
     apm_yml.write_text("""name: test-skill-project
 version: 1.0.0
 description: Test project for skill installation
+target: copilot
 dependencies:
   apm: []
   mcp: []
@@ -270,6 +271,7 @@ class TestSkillInstallWithoutVSCodeTarget:
         apm_yml = project_dir / "apm.yml"
         apm_yml.write_text("""name: no-vscode-project
 version: 1.0.0
+target: copilot
 dependencies:
   apm: []
 """)

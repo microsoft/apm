@@ -48,6 +48,7 @@ name: dependency-test-project
 version: 1.0.0
 description: Test project for dependency integration testing
 author: CI Test
+target: copilot
 
 dependencies:
   apm:
@@ -149,6 +150,7 @@ name: multi-dependency-test
 version: 1.0.0
 description: Test project for multi-dependency scenario
 author: CI Test
+target: copilot
 
 dependencies:
   apm:
