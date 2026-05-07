@@ -160,17 +160,29 @@ class TestActiveTargetsGating:
         assert results == []
 
     def test_cowork_absent_from_all_when_flag_off(self, tmp_path: Path, inject_config: Any) -> None:
+        """`--target all` (project scope) must NOT include cowork.
+
+        cowork is in EXPERIMENTAL_TARGETS; per the documented contract in
+        core/target_detection.py it is opt-in only -- explicit
+        ``--target copilot-cowork`` -- and never resolved via ``all``.
+        Including it in the project-scope ``all`` set hits the
+        project-scope gate in phases/targets.py and aborts the install.
+        """
         inject_config({"experimental": {"copilot_cowork": False}})
         results = active_targets(tmp_path, explicit_target="all")
         names = [t.name for t in results]
-        # "all" returns all targets regardless of flag gating
-        # but explicit_target="copilot-cowork" with flag off returns []
-        # The "all" path returns list(KNOWN_TARGETS.values()) which
-        # includes cowork. This is documented: "all" bypasses flag gate.
-        # So cowork IS in the "all" set even when flag is off.
-        # This matches the implementation comment:
-        # "Return all targets regardless of flag gating."
-        assert "copilot-cowork" in names
+        assert "copilot-cowork" not in names
+
+    def test_cowork_absent_from_all_when_flag_on(self, tmp_path: Path, inject_config: Any) -> None:
+        """`--target all` (project scope) excludes cowork even when the
+        experimental flag is enabled. cowork is user-scope only and the
+        project-scope gate would error otherwise; ``all`` honors the
+        documented EXPERIMENTAL_TARGETS exclusion regardless of flag.
+        """
+        inject_config({"experimental": {"copilot_cowork": True}})
+        results = active_targets(tmp_path, explicit_target="all")
+        names = [t.name for t in results]
+        assert "copilot-cowork" not in names
 
     def test_cowork_absent_when_flag_on_resolver_returns_none(
         self, tmp_path: Path, inject_config: Any

@@ -775,14 +775,24 @@ def active_targets(
         for t in raw:
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
-                # Return all targets regardless of flag gating.
                 # Exclude explicit-only targets (agent-skills) -- they must
                 # be requested individually.
-                # The project-scope gate in phases/targets.py and
-                # for_scope() handle user-observable blocking.
-                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+                # Exclude experimental targets (copilot-cowork) -- they must
+                # be opted into explicitly via `--target copilot-cowork`,
+                # matching the documented contract on EXPERIMENTAL_TARGETS in
+                # core/target_detection.py. Including cowork in `all` for
+                # project scope hits the unconditional project-scope gate in
+                # phases/targets.py and aborts the entire install (#1185 b).
+                from apm_cli.core.target_detection import (
+                    EXPERIMENTAL_TARGETS,
+                    EXPLICIT_ONLY_TARGETS,
+                )
 
-                return [p for p in KNOWN_TARGETS.values() if p.name not in EXPLICIT_ONLY_TARGETS]
+                return [
+                    p
+                    for p in KNOWN_TARGETS.values()
+                    if p.name not in EXPLICIT_ONLY_TARGETS and p.name not in EXPERIMENTAL_TARGETS
+                ]
             profile = KNOWN_TARGETS.get(canonical)
             if profile and _flag_gated(profile) and profile.name not in seen:
                 seen.add(profile.name)
