@@ -287,7 +287,7 @@ jobs:
           isolated: 'true'
           pack: 'true'
           archive: 'true'
-          target: ${{ github.aw.import-inputs.target || 'all' }}
+          target: ${{ github.aw.import-inputs.target }}
           working-directory: /tmp/gh-aw/apm-workspace
       - name: Upload APM bundle artifact
         if: success()

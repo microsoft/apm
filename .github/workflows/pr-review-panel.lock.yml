@@ -1018,7 +1018,7 @@ jobs:
           dependencies: ${{ steps.list.outputs.deps }}
           isolated: "true"
           pack: "true"
-          target: ${{ github.aw.import-inputs.target || 'all' }}
+          target: all
           working-directory: /tmp/gh-aw/apm-workspace
       - name: Upload APM bundle artifact
         if: success()
