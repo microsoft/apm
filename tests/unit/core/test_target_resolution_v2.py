@@ -241,7 +241,7 @@ def test_target_singular_with_yaml_list_unknown_token_rejected():
     # No list-repr leakage: the leading "[x]" symbol is fine, but no
     # "['nonsense'" or similar should appear as the value.
     assert "['nonsense'" not in headline
-    assert "[\"nonsense\"" not in headline
+    assert '["nonsense"' not in headline
 
 
 def test_target_singular_with_yaml_list_non_string_coerced():
