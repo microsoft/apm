@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` now removes deployed files when a package is removed from `apm.yml`. Three sequential early-returns previously short-circuited the cleanup phase when the manifest was emptied; the orphan-cleanup logic itself was correct. (#1173)
+- `apm audit --ci` no longer reports false drift on self-package primitives that link to repo-root files (`[..](../../FILE.md)`). The replay's in-package asset rewriter now re-anchors `target_location` onto `package_root` when the candidate sits outside the scratch tree, mirroring real-install output. (#1182)
 
 ## [0.12.3] - 2026-05-06
 
