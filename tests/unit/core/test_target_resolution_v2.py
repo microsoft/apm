@@ -201,6 +201,68 @@ def test_unknown_target_rejected():
 
 
 # ---------------------------------------------------------------------------
+# YAML list under 'target:' singular key (#1188)
+# ---------------------------------------------------------------------------
+
+
+def test_target_singular_with_yaml_list_two_items():
+    """Regression: 'target: [copilot, claude]' YAML flow-list form (#1188)."""
+    out = parse_targets_field({"target": ["copilot", "claude"]})
+    assert sorted(out) == ["claude", "copilot"]
+
+
+def test_target_singular_with_yaml_list_single_item():
+    """Single-item list under 'target:' must equal scalar form."""
+    out = parse_targets_field({"target": ["copilot"]})
+    assert out == ["copilot"]
+
+
+def test_target_singular_with_yaml_list_whitespace_tolerated():
+    """List elements with surrounding whitespace are stripped."""
+    out = parse_targets_field({"target": ["  copilot  ", "claude\t"]})
+    assert sorted(out) == ["claude", "copilot"]
+
+
+def test_target_singular_with_empty_list_falls_through_to_autodetect():
+    """'target: []' under SINGULAR key returns [] (auto-detect upstream),
+    matching 'target:' with no value. Only PLURAL 'targets: []' raises."""
+    out = parse_targets_field({"target": []})
+    assert out == []
+
+
+def test_target_singular_with_yaml_list_unknown_token_rejected():
+    """Garbled tokens from list parsing must surface a clean error."""
+    with pytest.raises(UnknownTargetError) as exc_info:
+        parse_targets_field({"target": ["nonsense"]})
+    msg = str(exc_info.value)
+    headline = msg.splitlines()[0]
+    # Headline must contain the bare token, not a Python list repr.
+    assert "'nonsense'" in headline
+    # No list-repr leakage: the leading "[x]" symbol is fine, but no
+    # "['nonsense'" or similar should appear as the value.
+    assert "['nonsense'" not in headline
+    assert '["nonsense"' not in headline
+
+
+def test_target_singular_with_yaml_list_non_string_coerced():
+    """Non-string list elements coerce via str() and are validated."""
+    with pytest.raises(UnknownTargetError):
+        parse_targets_field({"target": [42]})
+
+
+def test_target_singular_with_all_token_in_list_rejected():
+    """'all' is a CLI flag-only meta-target; must not validate inside YAML."""
+    with pytest.raises(UnknownTargetError):
+        parse_targets_field({"target": ["all", "claude"]})
+
+
+def test_target_singular_with_yaml_list_preserves_duplicates():
+    """Duplicates are preserved (parser does not dedup)."""
+    out = parse_targets_field({"target": ["copilot", "copilot"]})
+    assert out == ["copilot", "copilot"]
+
+
+# ---------------------------------------------------------------------------
 # --target all expansion
 # ---------------------------------------------------------------------------
 
