@@ -272,49 +272,36 @@ fetch the full body again -- the cap is the cap.
 
 Find up to 10 untriaged open issues, **oldest first**, excluding
 bots. The candidate list lives in the GitHub MCP server -- shell `gh`
-is not authenticated, so use the MCP `list_issues` tool. The MCP
-`labels` filter only does positive matches (it cannot exclude
-`status/triaged`), so paginate oldest-first and filter in your
-reasoning step:
+is not authenticated, so use the MCP `search_issues` tool with a
+server-side filter that excludes already-triaged issues:
 
 ```
-list_issues(
-  owner: "microsoft",
-  repo:  "apm",
-  state: "OPEN",
-  orderBy:   "CREATED_AT",
-  direction: "ASC",
-  perPage:   30,
+search_issues(
+  query: "repo:microsoft/apm is:open is:issue -label:status/triaged sort:created-asc",
+  perPage: 30,
 )
 ```
 
-**Pagination is mandatory.** A single page of 30 will commonly be
-mostly already-triaged issues. Keep calling `list_issues` with
-`after: <endCursor>` from the previous response's `pageInfo` until
-**either**:
+**Why `search_issues` and not `list_issues`:** GitHub Search supports
+the `-label:status/triaged` negation, so the response contains ONLY
+the candidates we care about. With `list_issues` we'd have to
+paginate the entire open-issue queue and filter the triaged label
+client-side -- and the MCP gateway's DIFC integrity filter silently
+drops responses from non-collaborator authors mid-page, which makes
+"is the next page worth fetching?" reasoning unreliable. The search
+API sidesteps both problems.
 
-- you have collected at least **10 eligible candidates** after
-  applying the filters below, **or**
-- the API reports `hasNextPage: false` (queue exhausted), **or**
-- you have fetched **5 pages** (150 issues) without finding 10
-  eligibles -- a healthy sweep is allowed to be small.
+The `sort:created-asc` qualifier returns oldest first, so the first
+30 results are the oldest untriaged issues -- exactly the queue we
+want to drain. **One page is enough.** If `total_count` is greater
+than 30 the extras roll to tomorrow's sweep; do not paginate.
 
-Do NOT stop after the first page just because the first page
-contains few eligibles -- the oldest untriaged issues are exactly
-the ones we most want to drain. If you cannot read a single page's
-JSON in one tool response, request a smaller `perPage` (e.g. 15) and
-keep paginating.
-
-In your reasoning step (no shell required), filter each fetched page:
+In your reasoning step (no shell required), filter the response:
 
 - Drop any issue where `author.is_bot` is true or `author.login`
   matches common bot patterns (`*[bot]`, `dependabot*`,
   `github-actions*`, `renovate*`).
 - Drop any issue where `locked` is true.
-- Drop any issue whose `labels` contains `status/triaged`. That label
-  is the explicit "this issue has been through agentic triage" signal.
-  A maintainer can re-trigger triage by removing it (sweep re-picks)
-  or by applying `status/needs-triage` (fast path).
 - Drop any issue with an empty or template-only body.
 - **Spam-shape filter** (drop AND do NOT mark `status/triaged` -- they
   stay in queue for human review):
@@ -329,8 +316,14 @@ In your reasoning step (no shell required), filter each fetched page:
   log (no comment, no labels, no triage); a maintainer who reviews the
   issue can manually apply `status/needs-triage` to force a panel run.
 
-After dropping bots/locked/triaged/template/spam, sort the remainder
-by `createdAt` ascending.
+Note: `status/triaged` exclusion is already done by the search query
+above, so you don't need to re-check that label. A maintainer can
+re-trigger triage by removing the label (sweep re-picks the issue) or
+by applying `status/needs-triage` (which fires the fast path).
+
+After dropping bots/locked/template/spam, the remainder is already
+sorted oldest-first by the `sort:created-asc` qualifier in the search
+query.
 
 - **Per-author quota**: when picking the final batch, take at most
   **2 issues per distinct author** per sweep. If author X has 5
