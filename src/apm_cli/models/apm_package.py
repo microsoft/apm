@@ -204,33 +204,31 @@ class APMPackage:
         dependencies = None
         raw_deps = data.get("dependencies")
         if raw_deps is not None:
-            if isinstance(raw_deps, list):
+            if not isinstance(raw_deps, dict):
                 raise ValueError(
                     f"Invalid 'dependencies' in {apm_yml_path}: expected a mapping "
-                    "with 'apm:' and/or 'mcp:' keys, got a plain list. "
+                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_deps).__name__}. "
                     "Use the structured format:\n"
                     "  dependencies:\n"
                     "    apm:\n"
                     "      - owner/repo"
                 )
-            if isinstance(raw_deps, dict):
-                dependencies = cls._parse_dependency_dict(raw_deps, label="")
+            dependencies = cls._parse_dependency_dict(raw_deps, label="")
 
         # Parse devDependencies (same structure as dependencies)
         dev_dependencies = None
         raw_dev_deps = data.get("devDependencies")
         if raw_dev_deps is not None:
-            if isinstance(raw_dev_deps, list):
+            if not isinstance(raw_dev_deps, dict):
                 raise ValueError(
                     f"Invalid 'devDependencies' in {apm_yml_path}: expected a mapping "
-                    "with 'apm:' and/or 'mcp:' keys, got a plain list. "
+                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_dev_deps).__name__}. "
                     "Use the structured format:\n"
                     "  devDependencies:\n"
                     "    apm:\n"
                     "      - owner/repo"
                 )
-            if isinstance(raw_dev_deps, dict):
-                dev_dependencies = cls._parse_dependency_dict(raw_dev_deps, label="dev ")
+            dev_dependencies = cls._parse_dependency_dict(raw_dev_deps, label="dev ")
 
         # Parse package content type
         pkg_type = None

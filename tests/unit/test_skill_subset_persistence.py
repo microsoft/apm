@@ -268,7 +268,7 @@ class TestApmYmlWriter:
               - owner/repo#main
             """,
         )
-        with pytest.raises(ValueError, match=r"expected a mapping.*got a plain list"):
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
             set_skill_subset_for_entry(manifest, "owner/repo", ["alpha"])
 
     def test_update_existing_dict_entry(self, tmp_path):

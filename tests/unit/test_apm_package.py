@@ -443,13 +443,12 @@ class TestIncludesField:
         assert pkg.has_apm_dependencies() is False
 
 
-class TestFlatListDependencies:
-    """Tests for flat list dependency format rejection.
+class TestInvalidDependencyTypes:
+    """Tests for non-dict dependency format rejection.
 
-    The flat format (``dependencies: [owner/repo#sha, ...]``) is not
-    a supported schema. APM must reject it with a clear error
-    directing the author to the structured format
-    (``dependencies: {apm: [...]}``)
+    Only the structured mapping (``dependencies: {apm: [...]}``) is
+    supported. Any other type -- list, string, int -- must be rejected
+    with a clear error.
     """
 
     def test_flat_list_dependencies_rejected(self, tmp_path):
@@ -466,7 +465,7 @@ class TestFlatListDependencies:
             },
         )
 
-        with pytest.raises(ValueError, match=r"expected a mapping.*got a plain list"):
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
             APMPackage.from_apm_yml(yml)
 
     def test_flat_list_empty_dependencies_rejected(self, tmp_path):
@@ -480,7 +479,7 @@ class TestFlatListDependencies:
             },
         )
 
-        with pytest.raises(ValueError, match=r"expected a mapping.*got a plain list"):
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
             APMPackage.from_apm_yml(yml)
 
     def test_flat_list_dev_dependencies_rejected(self, tmp_path):
@@ -496,10 +495,38 @@ class TestFlatListDependencies:
             },
         )
 
-        with pytest.raises(ValueError, match=r"expected a mapping.*got a plain list"):
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
             APMPackage.from_apm_yml(yml)
 
-    def test_flat_list_error_mentions_structured_format(self, tmp_path):
+    def test_string_dependencies_rejected(self, tmp_path):
+        """String dependencies raise ValueError."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": "owner/repo",
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"expected a mapping.*got str"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_int_dependencies_rejected(self, tmp_path):
+        """Integer dependencies raise ValueError."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": 42,
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"expected a mapping.*got int"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_error_mentions_structured_format(self, tmp_path):
         """Error message includes the correct structured format example."""
         yml = _write_apm_yml(
             tmp_path,

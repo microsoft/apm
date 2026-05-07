@@ -25,12 +25,13 @@ def set_skill_subset_for_entry(
     Returns True if file was modified.
     """
     data = load_yaml(manifest_path) or {}
-    deps_section = data.get("dependencies", {})
-    # Reject flat list format -- the structured form is required.
-    if isinstance(deps_section, list):
+    deps_section = data.get("dependencies")
+    if deps_section is None:
+        deps_section = {}
+    if not isinstance(deps_section, dict):
         raise ValueError(
             f"Invalid 'dependencies' in {manifest_path}: expected a mapping "
-            "with 'apm:' key, got a plain list."
+            f"with 'apm:' key, got {type(deps_section).__name__}."
         )
     apm_deps = deps_section.get("apm", [])
     if not apm_deps:
