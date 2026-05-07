@@ -10,7 +10,7 @@
 # Pre-agent-steps then download all bundles and restore them in one apm-action call.
 #
 # Source of truth: https://github.com/microsoft/apm/blob/main/.github/workflows/shared/apm.md
-# apm-action pin:  microsoft/apm-action@v1.6.0
+# apm-action pin:  microsoft/apm-action@v1.7.1
 # To check whether a vendored copy is current, compare these two lines.
 #
 # Documentation: https://microsoft.github.io/apm/integrations/gh-aw/
@@ -254,7 +254,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Pack APM packages
         id: pack
-        uses: microsoft/apm-action@v1.6.0
+        uses: microsoft/apm-action@v1.7.1
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
@@ -336,7 +336,7 @@ steps:
       [ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }
       printf '%s\n' "${list[@]}" > /tmp/gh-aw/apm-bundle-list.txt
   - name: Restore APM packages (all bundles)
-    uses: microsoft/apm-action@v1.6.0
+    uses: microsoft/apm-action@v1.7.1
     with:
       bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 ---
@@ -349,7 +349,7 @@ in parallel one matrix replica per credential group, packs each group's packages
 with `microsoft/apm-action`, and uploads a per-group bundle artifact. The agent
 job's pre-agent-steps then download all bundles and restore them in a single
 `apm-action` invocation (using the `bundles-file:` input shipped in
-`microsoft/apm-action@v1.6.0`).
+`microsoft/apm-action@v1.7.1`).
 
 ### How it works
 
@@ -363,7 +363,7 @@ job's pre-agent-steps then download all bundles and restore them in a single
 3. **Restore** (agent pre-agent-steps): all `apm-*` artifacts are downloaded,
    validated against the matrix manifest (defends against same-run artifact-name
    collision attacks), and restored in one call via the `bundles-file:` input
-   on `microsoft/apm-action@v1.6.0`.
+   on `microsoft/apm-action@v1.7.1`.
 
 ### Authentication
 
