@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from apm_cli.core.auth import AuthResolver, HostInfo  # noqa: F401
+from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 
 # ---------------------------------------------------------------------------
@@ -272,7 +272,7 @@ class TestClassifyHostVariants:
             ("ACME.GHE.COM", "ghe_cloud", False),
             ("dev.azure.com", "ado", True),
             ("myorg.visualstudio.com", "ado", True),
-            ("gitlab.com", "generic", True),
+            ("gitlab.com", "gitlab", True),
             ("bitbucket.org", "generic", True),
             ("git.internal.corp", "generic", True),
         ],
@@ -300,6 +300,7 @@ class TestClassifyHostVariants:
                 AuthResolver.classify_host("acme.ghe.com").api_base == "https://acme.ghe.com/api/v3"
             )
             assert AuthResolver.classify_host("dev.azure.com").api_base == "https://dev.azure.com"
+            assert AuthResolver.classify_host("gitlab.com").api_base == "https://gitlab.com/api/v4"
 
 
 # ---------------------------------------------------------------------------
@@ -332,3 +333,48 @@ class TestBuildErrorContextIntegration:
             msg = resolver.build_error_context("github.com", "clone", org="contoso")
 
             assert "GITHUB_APM_PAT_CONTOSO" in msg
+
+
+# ---------------------------------------------------------------------------
+# 9. GitLab token chain (no GitHub env leakage)
+# ---------------------------------------------------------------------------
+
+
+class TestGitLabTokenChain:
+    def test_gitlab_gitlab_apm_pat_over_github_token(self):
+        env = {
+            "GITLAB_APM_PAT": "glpat_wins",
+            "GITHUB_TOKEN": "gh_token",
+            "GITHUB_APM_PAT": "pat",
+        }
+        with patch.dict(os.environ, env, clear=True), _NO_GIT_CRED:
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com")
+            assert ctx.token == "glpat_wins"
+            assert ctx.source == "GITLAB_APM_PAT"
+
+    def test_gitlab_gitlab_token_only(self):
+        env = {"GITLAB_TOKEN": "glpat_only"}
+        with patch.dict(os.environ, env, clear=True), _NO_GIT_CRED:
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com")
+            assert ctx.token == "glpat_only"
+            assert ctx.source == "GITLAB_TOKEN"
+
+    def test_gitlab_only_github_env_vars_resolves_none(self):
+        env = {"GITHUB_TOKEN": "x", "GH_TOKEN": "y", "GITHUB_APM_PAT": "z"}
+        with patch.dict(os.environ, env, clear=True), _NO_GIT_CRED:
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.com")
+            assert ctx.token is None
+            assert ctx.source == "none"
+
+
+class TestGenericHostNoGithubEnv:
+    def test_bitbucket_ignores_github_token_without_credential_fill(self):
+        env = {"GITHUB_TOKEN": "ignored", "GH_TOKEN": "ignored2"}
+        with patch.dict(os.environ, env, clear=True), _NO_GIT_CRED:
+            resolver = AuthResolver()
+            ctx = resolver.resolve("bitbucket.org")
+            assert ctx.token is None
+            assert ctx.source == "none"

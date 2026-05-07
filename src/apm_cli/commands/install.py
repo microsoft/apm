@@ -7,11 +7,12 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, List, Optional  # noqa: F401, UP035
+from typing import Any, Optional
 
 import click
 
 from apm_cli.install.errors import AuthenticationError, DirectDependencyError, PolicyViolationError
+from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
@@ -28,16 +29,24 @@ from apm_cli.install.insecure_policy import (
     _get_insecure_dependency_url,
     _guard_transitive_insecure_dependencies,  # noqa: F401
     _InsecureDependencyInfo,  # noqa: F401
-    _normalize_allow_insecure_host,  # noqa: F401
-    _warn_insecure_dependencies,  # noqa: F401
+)
+
+# Re-export MCP add/build helpers under their underscore-prefixed legacy
+# names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
+from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
+from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
+from apm_cli.install.package_resolution import (
+    GIT_PARENT_USER_SCOPE_ERROR,
+    dependency_reference_to_yaml_entry,
+    merge_structured_entry_into_current_deps,
+    persist_dependency_list_if_changed,
+    resolve_parsed_dependency_reference,
+    user_scope_rejection_reason,
 )
 
 # Re-export local-content leaf helpers so that callers inside this module
 # (e.g. _install_apm_dependencies) and any future test patches against
 # "apm_cli.commands.install._copy_local_package" keep working.
-# _integrate_package_primitives and _integrate_local_content live in
-# apm_cli.install.services (P1 -- DI seam).  Re-exports below preserve
-# the existing import contract for tests and external callers.
 from apm_cli.install.phases.local_content import (
     _copy_local_package,  # noqa: F401
     _has_local_apm_content,  # noqa: F401
@@ -48,6 +57,13 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
+
+# Re-export DI-seam helpers from the install services module so that test
+# patches against ``apm_cli.commands.install._integrate_*`` keep working.
+from apm_cli.install.services import (
+    _integrate_local_content,  # noqa: F401
+    _integrate_package_primitives,  # noqa: F401
+)
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
@@ -60,34 +76,32 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401
     _validate_package_exists,
 )
+from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
 from ..constants import (
-    APM_LOCK_FILENAME,  # noqa: F401
-    APM_MODULES_DIR,  # noqa: F401
     APM_YML_FILENAME,
-    CLAUDE_DIR,  # noqa: F401
-    GITHUB_DIR,  # noqa: F401
-    SKILL_MD_FILENAME,  # noqa: F401
     InstallMode,
 )
+from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger, _ValidationOutcome
 from ..core.target_detection import TargetParamType
-from ..drift import (
-    build_download_ref,  # noqa: F401
-    detect_orphans,  # noqa: F401
-    detect_ref_change,  # noqa: F401
-    detect_stale_files,  # noqa: F401
+
+# MCP --mcp helpers (module-level re-exports for test patches); must stay at
+# import time per comments in the original mid-file block.
+from ..install.mcp.command import run_mcp_install as _run_mcp_install
+from ..install.mcp.conflicts import (
+    validate_mcp_conflicts as _validate_mcp_conflicts,
 )
-from ..models.results import InstallResult  # noqa: F401
-from ..utils.console import (  # noqa: F401
-    _rich_echo,
-    _rich_error,
-    _rich_info,
-    _rich_success,
-    _rich_warning,
+from ..install.mcp.registry import (
+    resolve_registry_url as _resolve_registry_url,
 )
-from ..utils.diagnostics import DiagnosticCollector  # noqa: F401
-from ..utils.path_security import safe_rmtree  # noqa: F401
+from ..install.mcp.registry import (
+    validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,
+)
+from ..install.mcp.registry import (
+    validate_registry_url as _validate_registry_url,
+)
+from ..utils.console import _rich_echo, _rich_error, _rich_success  # noqa: F401
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
@@ -126,10 +140,8 @@ def _restore_manifest_from_snapshot(
             fh.write(snapshot)
         os.replace(tmp_name, str(manifest_path))
     except Exception:
-        try:  # noqa: SIM105
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
 
@@ -240,26 +252,35 @@ def _split_argv_at_double_dash(argv):
     return argv[:idx], builtins.tuple(argv[idx + 1 :])
 
 
-# AuthResolver has no optional deps (stdlib + internal utils only), so it must
-# be imported unconditionally here -- NOT inside the APM_DEPS_AVAILABLE guard.
-# If it were gated, a missing optional dep (e.g. GitPython) would cause a
-# NameError in install() before the graceful APM_DEPS_AVAILABLE check fires.
-from ..core.auth import AuthResolver  # noqa: E402
-
 # APM Dependencies (conditional import for graceful degradation)
 APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
 try:
-    from ..deps.apm_resolver import APMDependencyResolver  # noqa: F401
+    from ..deps.apm_resolver import APMDependencyResolver
     from ..deps.github_downloader import GitHubPackageDownloader  # noqa: F401
     from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
     from ..integration import AgentIntegrator, PromptIntegrator  # noqa: F401
     from ..integration.mcp_integrator import MCPIntegrator
     from ..models.apm_package import APMPackage, DependencyReference
 
+    class _ScopedInstallDependencyResolver(APMDependencyResolver):
+        """Install-time resolver; blocks ``git: parent`` expansion at user scope."""
+
+        def __init__(self, *args, install_scope=None, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._install_scope = install_scope
+
+        def expand_parent_repo_decl(self, parent_dep, child_dep):
+            from ..core.scope import InstallScope
+
+            if self._install_scope is InstallScope.USER:
+                raise ValueError(GIT_PARENT_USER_SCOPE_ERROR)
+            return super().expand_parent_repo_decl(parent_dep, child_dep)
+
     APM_DEPS_AVAILABLE = True
 except ImportError as e:
     _APM_IMPORT_ERROR = str(e)
+    _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +314,7 @@ def _check_package_conflicts(current_deps):
 
 def _resolve_package_references(
     packages,
+    current_deps,
     existing_identities,
     *,
     auth_resolver=None,
@@ -310,13 +332,14 @@ def _resolve_package_references(
 
     Returns:
         Tuple of ``(valid_outcomes, invalid_outcomes, validated_packages,
-        marketplace_provenance, apm_yml_entries)``.
+        marketplace_provenance, apm_yml_entries, dependencies_changed)``.
     """
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
     validated_packages = []
+    dependencies_changed = False
 
     if logger:
         logger.validation_start(len(packages))
@@ -329,6 +352,7 @@ def _resolve_package_references(
         # parse path.  Anything that doesn't match is rejected as an
         # invalid format.
         marketplace_provenance = None
+        marketplace_dep_ref = None
         if "/" not in package and not DependencyReference.is_local_path(package):
             try:
                 from ..marketplace.resolver import (
@@ -345,17 +369,21 @@ def _resolve_package_references(
                 try:
                     warning_handler = None
                     if logger:
-                        warning_handler = lambda msg: logger.warning(msg)  # noqa: E731
+
+                        def warning_handler(msg):
+                            return logger.warning(msg)
+
                         logger.verbose_detail(
                             f"    Resolving {plugin_name}@{marketplace_name} via marketplace..."
                         )
-                    canonical_str, resolved_plugin = resolve_marketplace_plugin(  # noqa: RUF059
+                    resolution = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,
                         version_spec=version_spec,
                         auth_resolver=auth_resolver,
                         warning_handler=warning_handler,
                     )
+                    canonical_str, _resolved_plugin = resolution
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
                     marketplace_provenance = {
@@ -363,6 +391,7 @@ def _resolve_package_references(
                         "marketplace_plugin_name": plugin_name,
                     }
                     package = canonical_str
+                    marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
                 except Exception as mkt_err:
                     reason = str(mkt_err)
                     invalid_outcomes.append((package, reason))
@@ -379,9 +408,18 @@ def _resolve_package_references(
 
         # Canonicalize input
         try:
-            dep_ref = DependencyReference.parse(package)
+            dep_ref, direct_gitlab_virtual_resolved = resolve_parsed_dependency_reference(
+                package,
+                marketplace_dep_ref,
+                dependency_reference_cls=DependencyReference,
+                try_resolve_gitlab_direct_shorthand=_try_resolve_gitlab_direct_shorthand,
+                auth_resolver=auth_resolver,
+                verbose=bool(logger and logger.verbose),
+            )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
+            if marketplace_dep_ref is not None or direct_gitlab_virtual_resolved:
+                _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
             reason = str(e)
             invalid_outcomes.append((package, reason))
@@ -404,13 +442,24 @@ def _resolve_package_references(
             dep_ref.allow_insecure = True
             _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
 
+        scope_reject = user_scope_rejection_reason(dep_ref, scope)
+        if scope_reject:
+            invalid_outcomes.append((package, scope_reject))
+            if logger:
+                logger.validation_fail(package, scope_reject)
+            continue
+
         # Check if package is already in dependencies (by identity)
         already_in_deps = identity in existing_identities
 
         # Validate package exists and is accessible
         verbose = bool(logger and logger.verbose)
         if _validate_package_exists(
-            package, verbose=verbose, auth_resolver=auth_resolver, logger=logger
+            package,
+            verbose=verbose,
+            auth_resolver=auth_resolver,
+            logger=logger,
+            dep_ref=dep_ref,
         ):
             valid_outcomes.append((canonical, already_in_deps))
             if logger:
@@ -419,6 +468,17 @@ def _resolve_package_references(
             if not already_in_deps:
                 validated_packages.append(canonical)
                 existing_identities.add(identity)  # prevent duplicates within batch
+            elif canonical in _apm_yml_entries:
+                structured_entry = _apm_yml_entries[canonical]
+                merge_structured_entry_into_current_deps(
+                    current_deps,
+                    structured_entry,
+                    identity,
+                    canonical,
+                    dependency_reference_cls=DependencyReference,
+                    logger=logger,
+                )
+                dependencies_changed = True
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
@@ -457,6 +517,7 @@ def _resolve_package_references(
         validated_packages,
         _marketplace_provenance,
         _apm_yml_entries,
+        dependencies_changed,
     )
 
 
@@ -530,8 +591,6 @@ def _validate_and_add_packages_to_apm_yml(
     Returns:
         Tuple of (validated_packages list, _ValidationOutcome).
     """
-    import subprocess  # noqa: F401
-    import tempfile  # noqa: F401
     from pathlib import Path
 
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
@@ -567,8 +626,10 @@ def _validate_and_add_packages_to_apm_yml(
         validated_packages,
         _marketplace_provenance,
         _apm_yml_entries,
+        dependencies_changed,
     ) = _resolve_package_references(
         packages,
+        current_deps,
         existing_identities,
         auth_resolver=auth_resolver,
         logger=logger,
@@ -593,6 +654,17 @@ def _validate_and_add_packages_to_apm_yml(
             if logger:
                 logger.progress("No new packages to add")
         # If all packages already exist in apm.yml, that's OK - we'll reinstall them
+        persist_dependency_list_if_changed(
+            dependencies_changed=dependencies_changed,
+            data=data,
+            dep_section=dep_section,
+            current_deps=current_deps,
+            apm_yml_path=apm_yml_path,
+            apm_yml_filename=APM_YML_FILENAME,
+            logger=logger,
+            rich_error=_rich_error,
+            sys_exit=sys.exit,
+        )
         return [], outcome
 
     if dry_run:
@@ -624,56 +696,9 @@ def _validate_and_add_packages_to_apm_yml(
 # F7 / F5 install-time MCP warnings live in apm_cli/install/mcp/warnings.py
 # per LOC budget. Re-bind module-level names for back-compat with tests
 # that still patch ``apm_cli.commands.install._warn_*``.
-# MCP --mcp helpers live in apm_cli/install/mcp/*.py per LOC budget.
-# Re-bind module-level ``_xxx`` names so existing test patches against
-# ``apm_cli.commands.install._<helper>`` and direct imports
-# (``from apm_cli.commands.install import _build_mcp_entry``) keep
-# working without modification.
-from ..install.mcp.args import (  # noqa: E402
-    parse_env_pairs as _parse_env_pairs,  # noqa: F401
-)
-from ..install.mcp.args import (  # noqa: E402
-    parse_header_pairs as _parse_header_pairs,  # noqa: F401
-)
-from ..install.mcp.args import (  # noqa: E402
-    parse_kv_pairs as _parse_kv_pairs,  # noqa: F401
-)
-from ..install.mcp.command import run_mcp_install as _run_mcp_install  # noqa: E402
-from ..install.mcp.conflicts import (  # noqa: E402
-    MCP_REQUIRED_FLAGS as _MCP_REQUIRED_FLAGS,  # noqa: F401
-)
-from ..install.mcp.conflicts import (  # noqa: E402
-    validate_mcp_conflicts as _validate_mcp_conflicts,
-)
-from ..install.mcp.entry import build_mcp_entry as _build_mcp_entry  # noqa: E402, F401
-from ..install.mcp.registry import (  # noqa: E402
-    resolve_registry_url as _resolve_registry_url,
-)
-from ..install.mcp.registry import (  # noqa: E402
-    validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,
-)
 
-# --registry helpers live in apm_cli/install/mcp/registry.py per LOC budget.
-from ..install.mcp.registry import (  # noqa: E402
-    validate_registry_url as _validate_registry_url,
-)
-from ..install.mcp.warnings import (  # noqa: E402
-    _METADATA_HOSTS,  # noqa: F401
-    _SHELL_METACHAR_TOKENS,  # noqa: F401
-    _is_internal_or_metadata_host,  # noqa: F401
-)
-from ..install.mcp.warnings import (  # noqa: E402
-    warn_shell_metachars as _warn_shell_metachars,  # noqa: F401
-)
-from ..install.mcp.warnings import (  # noqa: E402
-    warn_ssrf_url as _warn_ssrf_url,  # noqa: F401
-)
-from ..install.mcp.writer import (  # noqa: E402
-    _diff_entry,  # noqa: F401
-)
-from ..install.mcp.writer import (  # noqa: E402
-    add_mcp_to_apm_yml as _add_mcp_to_apm_yml,  # noqa: F401
-)
+# MCP registry / dry-run helpers are imported at module top (see
+# ``..install.mcp.*`` imports above) so test patches keep working.
 
 # ---------------------------------------------------------------------------
 # install() decomposition: extracted flow helpers
@@ -1178,8 +1203,7 @@ def install(  # noqa: PLR0913
         # pre-`--` portion is what the user typed as positional packages.
         if command_argv:
             split_idx = len(packages) - len(command_argv)
-            if split_idx < 0:  # noqa: PLR1730
-                split_idx = 0
+            split_idx = max(split_idx, 0)
             pre_dash_packages = builtins.tuple(packages[:split_idx])
         else:
             pre_dash_packages = builtins.tuple(packages)
@@ -1260,7 +1284,6 @@ def install(  # noqa: PLR0913
             ensure_user_dirs,
             get_apm_dir,
             get_manifest_path,
-            get_modules_dir,  # noqa: F401
             warn_unsupported_user_scope,
         )
 
@@ -1523,8 +1546,6 @@ def _install_apm_packages(ctx, outcome):
 
     # Install APM dependencies first (if requested)
     apm_count = 0
-    prompt_count = 0
-    agent_count = 0
 
     # Migrate legacy apm.lock -> apm.lock.yaml if needed (one-time, transparent)
     migrate_lockfile_if_needed(ctx.apm_dir)
@@ -1591,8 +1612,6 @@ def _install_apm_packages(ctx, outcome):
                 legacy_skill_paths=ctx.legacy_skill_paths,
             )
             apm_count = install_result.installed_count
-            prompt_count = install_result.prompts_integrated  # noqa: F841
-            agent_count = install_result.agents_integrated  # noqa: F841
             apm_diagnostics = install_result.diagnostics
         except InsecureDependencyPolicyError:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
@@ -1774,12 +1793,6 @@ def _post_install_summary(
 # call-sites in this module would look it up.  Tests inside this codebase
 # now patch the canonical apm_cli.install.services._integrate_package_primitives
 # directly to avoid relying on transitive aliasing.
-from apm_cli.install.services import (  # noqa: E402
-    _integrate_local_content,  # noqa: F401
-    _integrate_package_primitives,  # noqa: F401
-    integrate_local_content,  # noqa: F401
-    integrate_package_primitives,  # noqa: F401
-)
 
 
 # ---------------------------------------------------------------------------
@@ -1792,13 +1805,13 @@ def _install_apm_dependencies(  # noqa: PLR0913
     apm_package: "APMPackage",
     update_refs: bool = False,
     verbose: bool = False,
-    only_packages: "builtins.list" = None,  # noqa: RUF013
+    only_packages: "builtins.list | None" = None,
     force: bool = False,
     parallel_downloads: int = 4,
     logger: "InstallLogger" = None,
     scope=None,
     auth_resolver: "AuthResolver" = None,
-    target: str = None,  # noqa: RUF013
+    target: str | None = None,
     allow_insecure: bool = False,
     allow_insecure_hosts=(),
     marketplace_provenance: dict = None,

@@ -1,6 +1,7 @@
 """Tests for marketplace client -- HTTP mock, caching, TTL, auth, auto-detection, proxy."""
 
 import json
+import os
 import re
 import time
 from unittest.mock import MagicMock, patch
@@ -8,6 +9,8 @@ from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.core.auth import AuthResolver
+from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
@@ -429,6 +432,208 @@ class TestPrivateRepoAuth:
             )
 
 
+class TestDirectFetchHostRouting:
+    """GitLab v4 Files API vs GitHub Contents; proxy-first unchanged."""
+
+    _JSON = {"name": "M", "plugins": []}  # noqa: RUF012
+
+    @pytest.fixture(autouse=True)
+    def _no_slow_git_credential(self):
+        """Real ``resolve()`` must not block on git-credential-helper (~60s)."""
+        with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+            yield
+
+    def test_gitlab_uses_v4_files_raw_url(self):
+        source = MarketplaceSource(
+            name="gl",
+            owner="acme",
+            repo="plugins",
+            host="gitlab.com",
+            branch="main",
+        )
+        captured_urls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            captured_urls.append((url, dict(headers or {})))
+            m = MagicMock()
+            m.status_code = 200
+            m.text = json.dumps(self._JSON)
+            return m
+
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+        ):
+            resolver = AuthResolver()
+            result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+
+        assert result == self._JSON
+        assert len(captured_urls) == 1
+        url, headers = captured_urls[0]
+        assert "/api/v4/projects/" in url
+        assert "acme%2Fplugins" in url
+        assert "/repository/files/" in url and "/raw?" in url
+        assert "ref=main" in url
+        assert "/repos/" not in url
+        assert headers.get("User-Agent") == "apm-cli"
+
+    def test_gitlab_private_project_uses_auth_first(self):
+        """Private GitLab projects should use PAT before unauthenticated probing."""
+        source = MarketplaceSource(
+            name="gl",
+            owner="acme",
+            repo="plugins",
+            host="gitlab.com",
+            branch="main",
+        )
+        captured = []
+
+        def fake_get(url, headers=None, timeout=None):
+            hdrs = dict(headers or {})
+            captured.append(hdrs)
+            m = MagicMock()
+            if hdrs.get("PRIVATE-TOKEN"):
+                m.status_code = 200
+                m.text = json.dumps(self._JSON)
+            else:
+                m.status_code = 404
+            return m
+
+        with (
+            patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-test"}, clear=False),
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+        ):
+            resolver = AuthResolver()
+            result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+
+        assert result == self._JSON
+        assert len(captured) == 1
+        assert captured[0].get("PRIVATE-TOKEN") == "glpat-test"
+
+    def test_gitlab_nested_group_project_path_encoded(self):
+        source = MarketplaceSource(
+            name="gl",
+            owner="group/subgroup",
+            repo="repo",
+            host="gitlab.com",
+        )
+        captured_urls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            captured_urls.append(url)
+            m = MagicMock()
+            m.status_code = 200
+            m.text = json.dumps(self._JSON)
+            return m
+
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+        ):
+            resolver = AuthResolver()
+            client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+
+        assert "group%2Fsubgroup%2Frepo" in captured_urls[0]
+
+    def test_github_com_uses_contents_api_regression(self):
+        source = _make_source()
+        captured_urls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            captured_urls.append(url)
+            m = MagicMock()
+            m.status_code = 200
+            m.json.return_value = self._JSON
+            return m
+
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+        ):
+            resolver = AuthResolver()
+            client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+
+        assert len(captured_urls) == 1
+        assert "/repos/acme-org/plugins/contents/marketplace.json" in captured_urls[0]
+        assert "/api/v4/projects/" not in captured_urls[0]
+
+    def test_ghes_uses_v3_contents_api(self):
+        with patch.dict(os.environ, {"GITHUB_HOST": "ghe.example.com"}, clear=False):
+            source = MarketplaceSource(
+                name="x",
+                owner="org",
+                repo="plugins",
+                host="ghe.example.com",
+            )
+            captured_urls = []
+
+            def fake_get(url, headers=None, timeout=None):
+                captured_urls.append(url)
+                m = MagicMock()
+                m.status_code = 200
+                m.json.return_value = self._JSON
+                return m
+
+            with (
+                patch(
+                    "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+                    return_value=None,
+                ),
+                patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+            ):
+                resolver = AuthResolver()
+                client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+
+        assert len(captured_urls) == 1
+        assert "/api/v3/repos/org/plugins/contents/" in captured_urls[0]
+
+    def test_generic_host_not_gitlab_is_rejected_before_request(self):
+        source = MarketplaceSource(
+            name="bb",
+            owner="o",
+            repo="r",
+            host="bitbucket.org",
+        )
+
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client.requests.get") as mock_get,
+            pytest.raises(MarketplaceFetchError) as excinfo,
+        ):
+            resolver = AuthResolver()
+            client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+
+        mock_get.assert_not_called()
+        assert _quoted_hosts(str(excinfo.value)) == {"bitbucket.org"}
+        assert "not a supported marketplace source" in str(excinfo.value)
+
+    def test_proxy_success_does_not_call_requests_get(self):
+        """PROXY_REGISTRY_URL path: no direct GitHub/GitLab HTTP when proxy returns JSON."""
+        source = _make_source()
+        cfg = MagicMock()
+        cfg.host = "art.example.com"
+        cfg.prefix = "artifactory/github"
+        cfg.scheme = "https"
+        cfg.enforce_only = False
+        cfg.get_headers.return_value = {"Authorization": "Bearer x"}
+        raw = json.dumps(self._JSON).encode()
+        mock_get = MagicMock()
+
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
+                return_value=raw,
+            ),
+            patch("apm_cli.marketplace.client.requests.get", mock_get),
+        ):
+            result = client_mod._fetch_file(source, "marketplace.json")
+
+        assert result == self._JSON
+        mock_get.assert_not_called()
+
+
 class TestCacheKey:
     """Cache key includes host for non-github.com sources."""
 
@@ -483,17 +688,17 @@ class TestCacheUtf8RoundTrip:
 
 
 class TestFetchFileHostKindGuard:
-    """Defense-in-depth: _fetch_file refuses non-GitHub hosts.
+    """Defense-in-depth: _fetch_file refuses unsupported hosts.
 
-    Marketplace registration already gates non-trusted hosts, but if a
+    Marketplace registration already gates unsupported hosts, but if a
     legacy registry entry or future caller bypasses that gate, we MUST NOT
-    issue a GitHub Contents API request to a non-GitHub host -- doing so
-    would attach Authorization: token <github_pat> headers to a request
+    issue a GitHub Contents API request to a non-GitHub/GitLab host -- doing
+    so would attach Authorization: token <github_pat> headers to a request
     aimed at an unrelated host, leaking credentials.
     """
 
     def test_generic_host_rejected_before_request(self):
-        """A 'generic' kind host (e.g. gitlab.com) raises and never fetches."""
+        """A 'generic' kind host raises and never fetches."""
         from unittest.mock import patch
 
         source = MarketplaceSource(
@@ -501,7 +706,7 @@ class TestFetchFileHostKindGuard:
             owner="acme",
             repo="plugins",
             branch="main",
-            host="gitlab.com",
+            host="bitbucket.org",
         )
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
@@ -512,7 +717,7 @@ class TestFetchFileHostKindGuard:
 
         # No HTTP request should have been issued (no credential leakage).
         mock_get.assert_not_called()
-        assert _quoted_hosts(str(excinfo.value)) == {"gitlab.com"}
+        assert _quoted_hosts(str(excinfo.value)) == {"bitbucket.org"}
         assert "not a supported marketplace source" in str(excinfo.value)
 
     def test_github_host_passes_guard(self):

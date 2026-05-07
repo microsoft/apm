@@ -6,6 +6,7 @@ import os
 import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional, Protocol, Set, Tuple  # noqa: F401, UP035
 
@@ -223,6 +224,57 @@ class APMDependencyResolver:
 
         return graph
 
+    def _remote_parent_eligible(self, parent_dep: DependencyReference) -> bool:
+        """Return True if *parent_dep* can serve as the Git repo for ``git: parent`` expansion."""
+        if parent_dep.is_azure_devops():
+            return bool(parent_dep.ado_repo and parent_dep.repo_url.count("/") >= 2)
+        return "/" in parent_dep.repo_url
+
+    def expand_parent_repo_decl(
+        self,
+        parent_dep: DependencyReference,
+        child_dep: DependencyReference,
+    ) -> DependencyReference:
+        """Expand ``{ git: parent, path: ... }`` using the declaring package's coordinates.
+
+        The child keeps its ``virtual_path`` (monorepo subdirectory), ``alias``, and
+        optional ``ref`` override; repository identity (host, ``repo_url``, ADO
+        fields, etc.) is inherited from *parent_dep*.
+        """
+        if not child_dep.is_parent_repo_inheritance:
+            raise ValueError(
+                "expand_parent_repo_decl requires child_dep.is_parent_repo_inheritance"
+            )
+        if parent_dep.is_local:
+            raise ValueError("git: parent cannot inherit from a local path dependency")
+        if parent_dep.repo_url.startswith("_local/"):
+            raise ValueError("git: parent cannot inherit from a local path dependency")
+        if not self._remote_parent_eligible(parent_dep):
+            raise ValueError("git: parent requires a remote Git parent package dependency")
+
+        merged_ref = (
+            child_dep.reference if child_dep.reference is not None else parent_dep.reference
+        )
+
+        return replace(
+            child_dep,
+            repo_url=parent_dep.repo_url,
+            host=parent_dep.host,
+            port=parent_dep.port,
+            explicit_scheme=parent_dep.explicit_scheme,
+            ado_organization=parent_dep.ado_organization,
+            ado_project=parent_dep.ado_project,
+            ado_repo=parent_dep.ado_repo,
+            artifactory_prefix=parent_dep.artifactory_prefix,
+            is_insecure=parent_dep.is_insecure,
+            allow_insecure=parent_dep.allow_insecure,
+            reference=merged_ref,
+            is_virtual=True,
+            is_parent_repo_inheritance=False,
+            is_local=False,
+            local_path=None,
+        )
+
     def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
         """
         Build complete tree of all dependencies and sub-dependencies.
@@ -265,12 +317,24 @@ class APMDependencyResolver:
         # Add root dependencies to queue
         root_deps = root_package.get_apm_dependencies()
         for dep_ref in root_deps:
+            if dep_ref.is_parent_repo_inheritance:
+                raise ValueError(
+                    "git: parent cannot be used in the root apm.yml manifest; "
+                    "specify an explicit repository URL. "
+                    "The git: parent form is only valid for transitive dependencies."
+                )
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_unique_key())
 
         # Add root devDependencies to queue (marked is_dev=True)
         root_dev_deps = root_package.get_dev_apm_dependencies()
         for dep_ref in root_dev_deps:
+            if dep_ref.is_parent_repo_inheritance:
+                raise ValueError(
+                    "git: parent cannot be used in the root apm.yml manifest; "
+                    "specify an explicit repository URL. "
+                    "The git: parent form is only valid for transitive dependencies."
+                )
             key = dep_ref.get_unique_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
@@ -400,6 +464,8 @@ class APMDependencyResolver:
                     # ``loaded_package.get_apm_dependencies()`` preserves.
                     sub_dependencies = loaded_package.get_apm_dependencies()
                     for sub_dep in sub_dependencies:
+                        if sub_dep.is_parent_repo_inheritance:
+                            sub_dep = self.expand_parent_repo_decl(node.dependency_ref, sub_dep)
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
                         if sub_dep.get_unique_key() not in queued_keys:

@@ -3,7 +3,6 @@
 import os
 import re
 import urllib.parse
-from typing import Optional  # noqa: F401
 
 
 def default_host() -> str:
@@ -24,9 +23,133 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
     h = hostname.lower()
     if h == "dev.azure.com":
         return True
-    if h.endswith(".visualstudio.com"):  # noqa: SIM103
+    return bool(h.endswith(".visualstudio.com"))
+
+
+def is_gitlab_hostname(hostname: str | None) -> bool:
+    """Return True if *hostname* is GitLab SaaS or a GitLab host from env configuration.
+
+    Matches, in order of what this function checks (not full ``classify_host`` order):
+
+    - ``gitlab.com`` (case-insensitive)
+    - ``GITLAB_HOST`` — single self-managed host (same pattern as ``GITHUB_HOST`` for GHES)
+    - ``APM_GITLAB_HOSTS`` — comma-separated list of self-managed hosts
+
+    **GHES precedence:** If ``GITHUB_HOST`` matches *hostname* under the same
+    rules as ``AuthResolver.classify_host`` (GHES, not ``gitlab.com`` SaaS),
+    this returns ``False`` so GitLab env lists cannot claim an enterprise
+    GitHub host.
+    """
+    if not hostname:
+        return False
+    h = hostname.strip().lower().split("/")[0]
+
+    # GHES precedence: GITHUB_HOST match is enterprise GitHub, not GitLab, even if
+    # the same host appears in GitLab env vars (GHES takes priority over any
+    # GitLab environment hint).
+    ghes_host = os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+    if (
+        ghes_host
+        and ghes_host == h
+        and ghes_host not in {"github.com", "gitlab.com"}
+        and not ghes_host.endswith(".ghe.com")
+        and is_valid_fqdn(ghes_host)
+    ):
+        return False
+
+    if h == "gitlab.com":
         return True
+    gitlab_single = os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+    if gitlab_single and gitlab_single == h:
+        return is_valid_fqdn(h)
+    raw_list = os.environ.get("APM_GITLAB_HOSTS", "")
+    for part in raw_list.split(","):
+        entry = part.strip().lower().split("/")[0]
+        if entry and entry == h and is_valid_fqdn(entry):
+            return True
     return False
+
+
+def has_github_gitlab_host_env_conflict(hostname: str | None) -> bool:
+    """Return True when *hostname* is claimed as GHES via ``GITHUB_HOST`` and also as GitLab.
+
+    Uses the same GHES-env match rules as :func:`is_gitlab_hostname` (GHES precedence
+    block): ``GITHUB_HOST`` must be a valid FQDN, not ``github.com`` / ``gitlab.com``,
+    and not ``*.ghe.com``. If that host is also ``GITLAB_HOST`` or listed in
+    ``APM_GITLAB_HOSTS``, bare FQDN shorthand cannot be disambiguated without user action.
+
+    This does **not** change GitLab vs GHES classification elsewhere.
+    """
+    if not hostname:
+        return False
+    h = hostname.strip().lower().split("/")[0]
+    if not is_valid_fqdn(h):
+        return False
+
+    ghes_host = os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+    github_claims_as_ghes = (
+        ghes_host
+        and ghes_host == h
+        and ghes_host not in {"github.com", "gitlab.com"}
+        and not ghes_host.endswith(".ghe.com")
+        and is_valid_fqdn(ghes_host)
+    )
+    if not github_claims_as_ghes:
+        return False
+
+    gitlab_single = os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+    if gitlab_single and gitlab_single == h and is_valid_fqdn(h):
+        return True
+
+    raw_list = os.environ.get("APM_GITLAB_HOSTS", "")
+    for part in raw_list.split(","):
+        entry = part.strip().lower().split("/")[0]
+        if entry and entry == h and is_valid_fqdn(entry):
+            return True
+
+    return False
+
+
+def format_github_gitlab_host_conflict_error(hostname: str) -> str:
+    """Human-readable error when :func:`has_github_gitlab_host_env_conflict` is True."""
+    return (
+        f"Host '{hostname}' is configured as both GitHub Enterprise via GITHUB_HOST "
+        f"and GitLab via GITLAB_HOST or APM_GITLAB_HOSTS. "
+        f"APM cannot safely infer whether this shorthand is a nested repository path "
+        f"or a repository plus package path.\n\n"
+        "Use object form in apm.yml:\n"
+        f"  - git: https://{hostname}/owner/repo\n"
+        "    path: path/inside/repo\n\n"
+        "Or run APM with GITHUB_HOST unset for this command only:\n"
+        f"  env -u GITHUB_HOST GITLAB_HOST={hostname} apm install <package>"
+    )
+
+
+def maybe_raise_bare_fqdn_github_gitlab_conflict(raw: str) -> None:
+    """Raise ``ValueError`` for ambiguous bare FQDN shorthand when GHES/GitLab envs conflict.
+
+    Explicit ``https://``, ``http://``, ``ssh://``, ``git@``, and protocol-relative URLs
+    are excluded. Only applies when there are at least three path segments after the host
+    (same threshold as GitLab direct shorthand probing).
+    """
+    s = raw.strip()
+    if "#" in s:
+        s = s.rsplit("#", 1)[0].strip()
+    if s.startswith(("git@", "https://", "http://", "ssh://", "//")):
+        return
+    if "/" not in s:
+        return
+    parts = [p for p in s.split("/") if p]
+    # host + at least three segments → ambiguous nested repo vs repo + virtual path
+    if len(parts) < 4:
+        return
+    host_cand = parts[0]
+    if "." not in host_cand:
+        return
+    if not is_supported_git_host(host_cand):
+        return
+    if has_github_gitlab_host_env_conflict(host_cand):
+        raise ValueError(format_github_gitlab_host_conflict_error(host_cand))
 
 
 def is_github_hostname(hostname: str | None) -> bool:
@@ -42,9 +165,7 @@ def is_github_hostname(hostname: str | None) -> bool:
     h = hostname.lower()
     if h == "github.com":
         return True
-    if h.endswith(".ghe.com"):  # noqa: SIM103
-        return True
-    return False
+    return bool(h.endswith(".ghe.com"))
 
 
 def is_supported_git_host(hostname: str | None) -> bool:
@@ -75,10 +196,7 @@ def is_supported_git_host(hostname: str | None) -> bool:
         return True
 
     # Accept any valid FQDN as a generic git host (GitLab, Bitbucket, self-hosted, etc.)
-    if is_valid_fqdn(hostname):  # noqa: SIM103
-        return True
-
-    return False
+    return bool(is_valid_fqdn(hostname))
 
 
 def unsupported_host_error(hostname: str, context: str | None = None) -> str:
@@ -125,9 +243,6 @@ def unsupported_host_error(hostname: str, context: str | None = None) -> str:
     return msg
 
 
-from urllib.parse import quote as url_quote  # noqa: E402
-
-
 def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> str:
     """Build a raw.githubusercontent.com URL for fetching file content.
 
@@ -146,7 +261,7 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     Returns:
         str: ``https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{file_path}``
     """
-    encoded_ref = url_quote(ref, safe="")
+    encoded_ref = urllib.parse.quote(ref, safe="")
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{file_path}"
 
 
@@ -181,6 +296,26 @@ def build_https_clone_url(
         # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
         return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
     return f"https://{netloc}/{repo_ref}"
+
+
+def build_gitlab_https_clone_url(
+    host: str,
+    repo_ref: str,
+    token: str,
+    port: int | None = None,
+) -> str:
+    """Build a GitLab-compatible HTTPS clone URL using oauth2 + PAT (not GitHub x-access-token).
+
+    GitLab accepts personal or OAuth tokens as the password with username ``oauth2``.
+    Values are URL-encoded so tokens may contain reserved characters.
+    ``port`` is embedded in the netloc when set for self-managed GitLab HTTPS.
+
+    Note: callers must avoid logging raw token-bearing URLs; use sanitizers on errors.
+    """
+    user = urllib.parse.quote("oauth2", safe="")
+    password = urllib.parse.quote(token, safe="")
+    netloc = f"{host}:{port}" if port else host
+    return f"https://{user}:{password}@{netloc}/{repo_ref}.git"
 
 
 # Azure DevOps URL builders

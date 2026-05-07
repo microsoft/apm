@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm marketplace add` accepts GitLab-class hosts (`gitlab.com` and self-managed instances configured via `GITLAB_HOST` / `APM_GITLAB_HOSTS`); unsupported generic hosts now show separate recovery hints for GHES (`GITHUB_HOST`) and self-managed GitLab instead of only `GITHUB_HOST`.
 - `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback. The defensive expression broke gh-aw's bare-expression substitution regex, causing consumer-supplied `target:` values to be silently dropped; the `import-schema` default already covers the omitted-input case. (#1185)
 - `apm install --target all` no longer enumerates the experimental `copilot-cowork` target, which was crashing project-scope installs with a "requires --global" error and made `gh aw` workflows that pin `target: all` unusable. (#1191)
 - Stabilized `test_install_over_defer_threshold_starts_live_once` on slow CI runners by joining the deferred-start timer thread instead of relying on a 100ms grace window. (#1191)
@@ -88,6 +89,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Plugin manifest schema-conformance tests.** `tests/unit/test_plugin_exporter_schema.py` validates every shape of `plugin.json` produced by `apm pack` (synthesized, authored, and authored-with-stale-keys) against the vendored official schema. Companion marketplace conformance lives in `tests/unit/marketplace/test_schema_conformance.py`. (#1061)
 - **APM now compiles and integrates to Windsurf/Cascade.** New first-class `--target windsurf` support: instructions deploy as `.windsurf/rules/` with trigger frontmatter, agents deploy as `.windsurf/skills/<name>/SKILL.md`, commands as `.windsurf/workflows/`, hooks merge into `.windsurf/hooks.json`, and MCP servers configure via `~/.codeium/windsurf/mcp_config.json`. Auto-detection, user-scope deployment, and `apm pack` all support the new target. (#1066)
 - Slash commands installed from APM packages now surface argument hints in Claude Code -- `apm install` automatically maps prompt `input:` to Claude's `arguments:` front-matter, rewrites `${input:name}` references to `$name`, and auto-generates `argument-hint`. Argument names are validated against an allowlist to prevent YAML injection from third-party packages, and the mapping is reported at install time. (#1039)
+- **GitLab host support:** `gitlab.com` and self-managed instances (via `GITLAB_HOST` / `APM_GITLAB_HOSTS`) use GitLab REST **v4** for `marketplace.json` and install-time raw file reads; nested GitLab group paths are disambiguated in dependency references with object-form `git:` + `path:` where shorthand is ambiguous. GitHub, GHES, Azure DevOps, and registry-proxy behavior remain unchanged.
+- **`git: parent` monorepo transitive dependency inheritance:** packages in a git monorepo can reference sibling paths via `{ git: parent, path: ... }` without repeating the full `git:` URL; the lockfile stores expanded host, repository, subdirectory path, and resolved ref/commit like other virtual git dependencies (no `parent` sentinel as durable identity).
+
+### Changed
+
+- `apm marketplace browse/search/add/update` route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub and GitLab host API fallbacks.
+
+### Fixed
+
+- **GitLab monorepo marketplaces:** `apm install plugin@marketplace` now resolves plugins whose sources live in a subdirectory of the marketplace repository on GitLab-class hosts (`gitlab.com` and self-managed GitLab when classified as GitLab), matching explicit `git:` + `path:` semantics without requiring that hand-written object form.
 
 ### Changed
 

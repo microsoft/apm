@@ -1,19 +1,21 @@
-"""Fetch, parse, and cache marketplace.json from GitHub repositories.
+"""Fetch, parse, and cache marketplace.json from Git hosting repositories.
 
 Uses ``AuthResolver.try_with_fallback(unauth_first=False)`` for auth-first
 access so private marketplace repos are fetched with credentials when available.
 When ``PROXY_REGISTRY_URL`` is set, fetches are routed through the registry
 proxy (Artifactory Archive Entry Download) before falling back to the
-GitHub Contents API.  When ``PROXY_REGISTRY_ONLY=1``, the GitHub fallback
-is blocked entirely.
+host API: GitHub Contents API for GitHub/GHES, or GitLab REST v4 file raw
+when the host classifies as GitLab (``kind='gitlab'``).  When ``PROXY_REGISTRY_ONLY=1``, the
+direct host API fallback is blocked entirely.
 Cache lives at ``~/.apm/cache/marketplace/`` with a 1-hour TTL.
 """
 
+import contextlib
 import json
 import logging
 import os
 import time
-from typing import Dict, List, Optional  # noqa: F401, UP035
+from urllib.parse import quote
 
 import requests
 
@@ -132,10 +134,8 @@ def _write_cache(name: str, data: dict) -> None:
 def _clear_cache(name: str) -> None:
     """Remove cached data for a marketplace."""
     for path in (_cache_data_path(name), _cache_meta_path(name)):
-        try:  # noqa: SIM105
+        with contextlib.suppress(OSError):
             os.remove(path)
-        except OSError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -185,13 +185,23 @@ def _try_proxy_fetch(
         return None
 
 
-def _github_contents_url(source: MarketplaceSource, file_path: str) -> str:
-    """Build the GitHub Contents API URL for a file."""
-    from ..core.auth import AuthResolver
-
-    host_info = AuthResolver.classify_host(source.host)
-    api_base = host_info.api_base
+def _github_contents_url(source: MarketplaceSource, file_path: str, host_info) -> str:
+    """Build the GitHub Contents API URL for a file (GitHub / GHES / generic)."""
+    api_base = host_info.api_base.rstrip("/")
     return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={source.branch}"
+
+
+def _gitlab_file_raw_url(source: MarketplaceSource, host_info, file_path: str) -> str:
+    """Build the GitLab REST v4 repository file raw URL."""
+    project_path = f"{source.owner}/{source.repo}"
+    encoded_project = quote(project_path, safe="")
+    encoded_file = quote(file_path, safe="")
+    encoded_ref = quote(source.branch, safe="")
+    api_base = host_info.api_base.rstrip("/")
+    return (
+        f"{api_base}/projects/{encoded_project}/repository/files/"
+        f"{encoded_file}/raw?ref={encoded_ref}"
+    )
 
 
 def _fetch_file(
@@ -226,51 +236,56 @@ def _fetch_file(
         )
         return None
 
-    # Defense-in-depth host-kind guard. Marketplace registration already
-    # rejects non-trusted hosts, but if a generic / non-GitHub host slips
-    # through (legacy registry entries, manual registry edits, future
-    # callers) we MUST NOT issue a GitHub Contents API request: doing so
-    # would attach Authorization: token <github_pat> headers to a request
-    # aimed at an unrelated host, leaking GitHub credentials. Fail closed.
-    from ..core.auth import AuthResolver as _AuthResolver
+    # Fallback: host-native file API (GitLab v4 raw vs GitHub Contents)
+    from ..core.auth import AuthResolver
 
-    host_info = _AuthResolver.classify_host(source.host)
-    if host_info.kind not in ("github", "ghe_cloud", "ghes"):
+    host_info = AuthResolver.classify_host(source.host)
+
+    if host_info.kind == "gitlab":
+        url = _gitlab_file_raw_url(source, host_info, file_path)
+
+        def _do_fetch(token, _git_env):
+            headers = {"User-Agent": "apm-cli"}
+            headers.update(AuthResolver.gitlab_rest_headers(token))
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            try:
+                return json.loads(resp.text)
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
+
+    elif host_info.kind in ("github", "ghe_cloud", "ghes"):
+        url = _github_contents_url(source, file_path, host_info)
+
+        def _do_fetch(token, _git_env):
+            headers = {
+                "Accept": "application/vnd.github.v3.raw",
+                "User-Agent": "apm-cli",
+            }
+            if token:
+                headers["Authorization"] = f"token {token}"
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+
+    else:
         raise MarketplaceFetchError(
             source.name,
             f"Host {source.host!r} is not a supported marketplace source. "
-            f"Only GitHub, GitHub Enterprise Cloud (*.ghe.com), and GHES "
-            f"(GITHUB_HOST) are supported. Refusing to fetch to avoid "
-            f"forwarding GitHub credentials to a non-GitHub host.",
+            "Only GitHub, GitHub Enterprise Cloud (*.ghe.com), GHES "
+            "(GITHUB_HOST), and GitLab are supported. Refusing to fetch to "
+            "avoid forwarding GitHub credentials to a non-GitHub host.",
         )
 
-    # Fallback: GitHub Contents API
-    url = _github_contents_url(source, file_path)
-
-    def _do_fetch(token, _git_env):
-        headers = {
-            "Accept": "application/vnd.github.v3.raw",
-            "User-Agent": "apm-cli",
-        }
-        # Only attach GitHub-namespaced credentials when the resolver-derived
-        # host kind is a GitHub variant. The outer guard already enforces
-        # this, but keep the conditional explicit so the credential-attach
-        # site is locally auditable.
-        if token and host_info.kind in ("github", "ghe_cloud", "ghes"):
-            headers["Authorization"] = f"token {token}"
-        resp = requests.get(url, headers=headers, timeout=30)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return resp.json()
-
     if auth_resolver is None:
-        from ..core.auth import AuthResolver
-
         auth_resolver = AuthResolver()
 
     try:
-        return auth_resolver.try_with_fallback(
+        result = auth_resolver.try_with_fallback(
             source.host,
             _do_fetch,
             org=source.owner,
@@ -284,6 +299,22 @@ def _fetch_file(
     except Exception as exc:
         logger.debug("Fetch failed for '%s'", source.name, exc_info=True)
         raise MarketplaceFetchError(source.name, str(exc)) from exc
+
+    # GitLab returns 404 for unauthenticated access to many private projects
+    # (indistinguishable from a missing file). ``_do_fetch`` maps 404 to
+    # ``None`` without raising, so ``unauth_first`` would skip the PAT.
+    if result is None and host_info.kind == "gitlab":
+        try:
+            result = auth_resolver.try_with_fallback(
+                source.host,
+                _do_fetch,
+                org=source.owner,
+                unauth_first=False,
+            )
+        except Exception as exc:
+            raise MarketplaceFetchError(source.name, str(exc)) from exc
+
+    return result
 
 
 def _auto_detect_path(

@@ -4,9 +4,9 @@ Every APM operation that touches a remote host MUST use AuthResolver.
 Resolution is per-(host, org) pair, thread-safe, and cached per-process.
 
 All token-bearing requests use HTTPS — that is the transport security
-boundary.  Global env vars are tried for every host; if the token is
-wrong for the target host, ``try_with_fallback`` retries with git
-credential helpers automatically.
+boundary. Token environment variables are chosen by host class (GitHub-class,
+GitLab, generic, or ADO); when a resolved token fails against the target host,
+``try_with_fallback`` retries with git credential helpers where applicable.
 
 Usage::
 
@@ -33,13 +33,13 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, TypeVar  # noqa: F401
+from typing import TYPE_CHECKING, TypeVar
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.utils.github_host import (
     default_host,
     is_azure_devops_hostname,
-    is_github_hostname,  # noqa: F401
+    is_gitlab_hostname,
     is_valid_fqdn,
 )
 
@@ -59,7 +59,7 @@ class HostInfo:
     """Immutable description of a remote Git host."""
 
     host: str
-    kind: str  # "github" | "ghe_cloud" | "ghes" | "ado" | "generic"
+    kind: str  # "github" | "ghe_cloud" | "ghes" | "ado" | "gitlab" | "generic"
     has_public_repos: bool
     api_base: str
     port: int | None = None  # Non-standard git port (e.g. 7999 for Bitbucket DC)
@@ -179,7 +179,7 @@ class AuthResolver:
         if (
             ghes_host
             and ghes_host == h
-            and ghes_host != "github.com"
+            and ghes_host not in {"github.com", "gitlab.com"}
             and not ghes_host.endswith(".ghe.com")
         ):
             if is_valid_fqdn(ghes_host):
@@ -191,7 +191,21 @@ class AuthResolver:
                     port=port,
                 )
 
-        # Generic FQDN (GitLab, Bitbucket, self-hosted, etc.)
+        # GitLab (SaaS + env-configured self-managed) — after GHES per spec (no silent GHES → GitLab)
+        if is_gitlab_hostname(host):
+            if h == "gitlab.com":
+                api_base = "https://gitlab.com/api/v4"
+            else:
+                api_base = f"https://{host}/api/v4"
+            return HostInfo(
+                host=host,
+                kind="gitlab",
+                has_public_repos=True,
+                api_base=api_base,
+                port=port,
+            )
+
+        # Generic FQDN (Bitbucket, self-hosted non-GitLab, etc.)
         return HostInfo(
             host=host,
             kind="generic",
@@ -232,6 +246,26 @@ class AuthResolver:
         if token.startswith("ghr_"):
             return "github-app"
         return "unknown"
+
+    @staticmethod
+    def gitlab_rest_headers(
+        token: str | None,
+        *,
+        oauth_bearer: bool = False,
+    ) -> dict[str, str]:
+        """Build HTTP headers for GitLab REST API v4 calls.
+
+        Personal access tokens use ``PRIVATE-TOKEN``. OAuth2 access tokens
+        typically use ``Authorization: Bearer <token>``; set *oauth_bearer*
+        to use that style.
+
+        Does not log or print *token*. Callers must not log the returned dict.
+        """
+        if not token:
+            return {}
+        if oauth_bearer:
+            return {"Authorization": f"Bearer {token}"}
+        return {"PRIVATE-TOKEN": token}
 
     # -- core resolution ----------------------------------------------------
 
@@ -484,16 +518,16 @@ class AuthResolver:
                     # a 404, a network error, etc.) so the wording stays
                     # tentative -- see #856 review C6.
                     return (
-                        f"\n    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"  # noqa: F541
-                        f"    but the Azure DevOps request still failed.\n\n"  # noqa: F541
-                        f"    If this is an authentication failure, the PAT may be expired, revoked,\n"  # noqa: F541
-                        f"    or scoped to a different org, and Azure CLI credentials may need to\n"  # noqa: F541
-                        f"    be refreshed.\n\n"  # noqa: F541
-                        f"    To fix:\n"  # noqa: F541
-                        f"      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"  # noqa: F541
-                        f"      2. Re-authenticate Azure CLI if needed:        az login\n"  # noqa: F541
-                        f"      3. Retry:                                       apm install\n\n"  # noqa: F541
-                        f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
+                        "\n    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"
+                        "    but the Azure DevOps request still failed.\n\n"
+                        "    If this is an authentication failure, the PAT may be expired, revoked,\n"
+                        "    or scoped to a different org, and Azure CLI credentials may need to\n"
+                        "    be refreshed.\n\n"
+                        "    To fix:\n"
+                        "      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"
+                        "      2. Re-authenticate Azure CLI if needed:        az login\n"
+                        "      3. Retry:                                       apm install\n\n"
+                        "    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"
                     )
                 # PAT set but rejected, no az -> bare PAT failure
                 return (
@@ -525,13 +559,13 @@ class AuthResolver:
             if tenant is None:
                 # Case 3: az present, not logged in
                 return (
-                    f"\n    Azure DevOps requires authentication. You have two options:\n\n"  # noqa: F541
-                    f"    1. Sign in with Azure CLI (recommended for Entra ID users):\n"  # noqa: F541
-                    f"         az login\n"  # noqa: F541
-                    f"         apm install                   # retry -- no env var needed\n\n"  # noqa: F541
-                    f"    2. Use a Personal Access Token:\n"  # noqa: F541
-                    f"         export ADO_APM_PAT=your_token\n\n"  # noqa: F541
-                    f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
+                    "\n    Azure DevOps requires authentication. You have two options:\n\n"
+                    "    1. Sign in with Azure CLI (recommended for Entra ID users):\n"
+                    "         az login\n"
+                    "         apm install                   # retry -- no env var needed\n\n"
+                    "    2. Use a Personal Access Token:\n"
+                    "         export ADO_APM_PAT=your_token\n\n"
+                    "    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"
                 )
 
             # Case 2: az returned token (tenant known) but ADO rejected it
@@ -544,7 +578,7 @@ class AuthResolver:
                 f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"
             )
 
-        # --- Non-ADO error paths (unchanged) ---
+        # --- Non-ADO error paths ---
         lines: list[str] = [f"Authentication failed for {operation} on {display}."]
 
         if auth_ctx.token:
@@ -557,12 +591,19 @@ class AuthResolver:
                     "enterprise-scoped tokens. Ensure your PAT is authorized "
                     "for this enterprise."
                 )
+            elif host_info.kind == "gitlab":
+                lines.append(
+                    "Ensure your GitLab personal or project access token meets the "
+                    "API read requirements for your instance policy."
+                )
             elif host.lower() == "github.com":
                 lines.append(
                     "If your organization uses SAML SSO or is an EMU org, "
                     "ensure your PAT is authorized at "
                     "https://github.com/settings/tokens"
                 )
+            elif host_info.kind == "generic":
+                lines.append("Verify credentials for this host in your git credential helper.")
             else:
                 lines.append(
                     "If your organization uses SAML SSO, you may need to "
@@ -570,9 +611,21 @@ class AuthResolver:
                 )
         else:
             lines.append("No token available.")
-            lines.append("Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'.")
+            if host_info.kind == "gitlab":
+                lines.append(
+                    "Set GITLAB_APM_PAT or GITLAB_TOKEN, or configure git credential fill "
+                    f"for {display}."
+                )
+            elif host_info.kind == "generic":
+                lines.append(
+                    "APM does not apply GitHub PAT environment variables to generic git "
+                    f"hosts; configure git credential fill for {display} or use a "
+                    "public repository if available."
+                )
+            else:
+                lines.append("Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'.")
 
-        if org and host_info.kind != "ado":
+        if org and host_info.kind not in ("ado", "gitlab", "generic"):
             lines.append(
                 f"If packages span multiple organizations, set per-org tokens: "
                 f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
@@ -595,21 +648,20 @@ class AuthResolver:
     def _resolve_token(self, host_info: HostInfo, org: str | None) -> tuple[str | None, str, str]:
         """Walk the token resolution chain.  Returns (token, source, scheme).
 
-        Resolution order (GitHub-like hosts):
-        1. Per-org env var ``GITHUB_APM_PAT_{ORG}`` (any host)
-        2. Global env vars ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN`` -> ``GH_TOKEN``
-           (any host -- if the token is wrong for the target host,
-           ``try_with_fallback`` retries with git credentials)
-        3. Git credential helper (any host except ADO)
+        Resolution order (GitHub-class: ``github``, ``ghe_cloud``, ``ghes``):
+        1. Per-org ``GITHUB_APM_PAT_{ORG}`` when *org* is set
+        2. ``GITHUB_APM_PAT`` → ``GITHUB_TOKEN`` → ``GH_TOKEN``
+        3. Host-specific git credential helper
 
-        Resolution order (ADO):
-        1. ``ADO_APM_PAT`` env var -> scheme ``"basic"``
-        2. AAD bearer via ``az cli`` -> scheme ``"bearer"``
-        3. None -> source ``"none"``
+        Resolution order (``gitlab``): ``GITLAB_APM_PAT`` → ``GITLAB_TOKEN`` →
+        credential helper. GitHub env vars are not consulted.
 
-        All token-bearing requests use HTTPS, which is the transport
-        security boundary.  Host-gating global env vars is unnecessary
-        and creates DX friction for multi-host setups.
+        Resolution order (``generic``): credential helper only (no GitHub or
+        GitLab platform env vars).
+
+        Resolution order (ADO): ``ADO_APM_PAT`` → AAD bearer → ``none``.
+
+        All token-bearing requests use HTTPS.
         """
         if host_info.kind == "ado":
             # ADO resolution chain: PAT env -> AAD bearer -> none
@@ -633,14 +685,14 @@ class AuthResolver:
         # ADO uses ADO_APM_PAT (single var) + AAD bearer fallback;
         # per-org vars and credential fill are out of scope.
 
-        # 1. Per-org env var (GitHub-like hosts only)
-        if org and host_info.kind not in ("ado",):
+        # 1. Per-org GitHub PAT (GitHub-class hosts only — not GitLab / generic / ADO)
+        if org and host_info.kind in ("github", "ghe_cloud", "ghes"):
             env_name = f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
             token = os.environ.get(env_name)
             if token:
                 return token, env_name, "basic"
 
-        # 2. Global env var chain (any host)
+        # 2. Global env vars by host class
         purpose = self._purpose_for_host(host_info)
         token = self._token_manager.get_token_for_purpose(purpose)
         if token:
@@ -661,6 +713,10 @@ class AuthResolver:
     def _purpose_for_host(host_info: HostInfo) -> str:
         if host_info.kind == "ado":
             return "ado_modules"
+        if host_info.kind == "gitlab":
+            return "gitlab_modules"
+        if host_info.kind == "generic":
+            return "generic_modules"
         return "modules"
 
     def _identify_env_source(self, purpose: str) -> str:
@@ -685,8 +741,7 @@ class AuthResolver:
         """
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
-        # On Windows, GIT_ASKPASS='' can cause issues; use 'echo' instead
-        env["GIT_ASKPASS"] = "" if sys.platform != "win32" else "echo"
+        env["GIT_ASKPASS"] = "echo"
         if scheme == "bearer" and token and host_kind == "ado":
             # B2 #852: skip GIT_TOKEN for bearer scheme -- the JWT is injected via
             # GIT_CONFIG_VALUE_0 only; GIT_TOKEN here would leak it into every

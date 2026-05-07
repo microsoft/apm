@@ -36,6 +36,8 @@ APM supports multiple dependency types:
 
 **Virtual File Packages** download a single file (like a prompt or instruction) and integrate it directly.
 
+**Marketplaces:** Plugins installed as `apm install name@marketplace` resolve from a registered index. On **GitLab-class** hosts, monorepo plugins whose sources live in a subdirectory of the marketplace repository itself are supported without hand-writing object-form `git:` + `path:` entries. See the [Marketplaces guide](./marketplaces/).
+
 ### Claude Skills
 
 Claude Skills are packages with a `SKILL.md` file that describe capabilities for AI agents. APM can install them and transform them for your target platform:
@@ -176,7 +178,16 @@ and otherwise requires `--allow-insecure-host <hostname>` for each additional
 transitive host you want to allow.
 :::
 
-> **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
+> **Nested groups (GitLab, Gitea, etc.):** APM treats path segments after the host as the repository namespace and name. Shorthand works for many GitLab URLs (for example `gitlab.com/group/subgroup/repo`). When the namespace is **deeply nested** or a segment could be read either as part of the repo path or as a **virtual path**, prefer the **object form** with an explicit `git:` URL and `path:` so install and API resolution stay unambiguous:
+>
+> ```yaml
+> dependencies:
+>   apm:
+>     - git: https://gitlab.com/group/subgroup/repo.git
+>       path: registry/pkg
+> ```
+>
+> Virtual paths on simple two-segment repos still work in shorthand (`gitlab.com/owner/repo/file.prompt.md`). For **nested-group repos plus a virtual path in the same string**, the shorthand is ambiguous — use `git:` + `path:`:
 >
 > ```yaml
 > # DON'T — ambiguous: APM can't tell where the repo path ends

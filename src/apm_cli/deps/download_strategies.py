@@ -12,16 +12,18 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional  # noqa: F401, UP035
+from urllib.parse import quote
 
 import requests
 
+from ..core.auth import AuthResolver
 from ..models.apm_package import DependencyReference
 from ..utils.github_host import (
     build_ado_api_url,
     build_ado_https_clone_url,
     build_ado_ssh_url,
     build_artifactory_archive_url,
+    build_gitlab_https_clone_url,
     build_https_clone_url,
     build_raw_content_url,
     build_ssh_url,
@@ -210,15 +212,16 @@ class DownloadDelegate:
         is_ado = (dep_ref and dep_ref.is_azure_devops()) or is_azure_devops_hostname(host)
         is_insecure = bool(getattr(dep_ref, "is_insecure", False)) if dep_ref is not None else False
 
-        # Use provided token or fall back to instance default.  Pass an empty
-        # string ("") explicitly to suppress the per-instance token (used by
-        # the TransportSelector for "plain HTTPS" / "SSH" attempts that must
-        # NOT embed credentials in the URL).
+        # Use provided token or fall back to host-appropriate defaults.  Pass
+        # an empty string ("") explicitly to suppress embedded credentials
+        # for "plain HTTPS" / "SSH" attempts.
         if token == "":
             github_token = ""
+            gitlab_token = ""
             ado_token = ""
         else:
             github_token = token if token is not None else self._host.github_token
+            gitlab_token = token
             ado_token = token if (token is not None and is_ado) else self._host.ado_token
 
         _debug(
@@ -261,6 +264,7 @@ class DownloadDelegate:
         else:
             # Determine if this host should receive a GitHub token
             is_github = is_github_hostname(host)
+            is_gitlab = self._host.auth_resolver.classify_host(host).kind == "gitlab"
             # Thread the user-declared custom port (e.g. 7999 for Bitbucket DC)
             # through the URL builders so neither SSH nor HTTPS attempts
             # silently drop it.
@@ -270,6 +274,12 @@ class DownloadDelegate:
             elif is_insecure:
                 netloc = f"{host}:{port}" if port else host
                 return f"http://{netloc}/{repo_ref}.git"
+            elif is_gitlab:
+                if gitlab_token is None and dep_ref is not None:
+                    gitlab_token = self._host.auth_resolver.resolve_for_dep(dep_ref).token
+                if gitlab_token:
+                    return build_gitlab_https_clone_url(host, repo_ref, gitlab_token, port=port)
+                return build_https_clone_url(host, repo_ref, token=None, port=port)
             elif is_github and github_token:
                 # Only send GitHub tokens to GitHub hosts
                 return build_https_clone_url(host, repo_ref, token=github_token, port=port)
@@ -530,9 +540,9 @@ class DownloadDelegate:
             if e.response.status_code == 404:
                 # Try fallback branches
                 if ref not in ["main", "master"]:
-                    raise RuntimeError(  # noqa: B904
+                    raise RuntimeError(
                         f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
-                    )
+                    ) from e
 
                 fallback_ref = "master" if ref == "main" else "main"
                 fallback_url = build_ado_api_url(
@@ -548,11 +558,11 @@ class DownloadDelegate:
                     response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     return response.content
-                except requests.exceptions.HTTPError:
-                    raise RuntimeError(  # noqa: B904
+                except requests.exceptions.HTTPError as fallback_err:
+                    raise RuntimeError(
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
-                    )
+                    ) from fallback_err
             elif e.response.status_code in (401, 403):
                 error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. "
                 if not self._host.ado_token:
@@ -565,11 +575,95 @@ class DownloadDelegate:
                     )
                 else:
                     error_msg += "Please check your Azure DevOps PAT permissions."
-                raise RuntimeError(error_msg)  # noqa: B904
+                raise RuntimeError(error_msg) from e
             else:
-                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")  # noqa: B904
+                raise RuntimeError(
+                    f"Failed to download {file_path}: HTTP {e.response.status_code}"
+                ) from e
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error downloading {file_path}: {e}")  # noqa: B904
+            raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
+
+    # ------------------------------------------------------------------
+    # GitLab file download
+    # ------------------------------------------------------------------
+
+    def download_gitlab_file(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+    ) -> bytes:
+        """Download a file via GitLab REST v4 ``repository/files/.../raw``."""
+        host = dep_ref.host or default_host()
+        host_info = self._host.auth_resolver.classify_host(host)
+        project_path = dep_ref.repo_url
+        if not project_path:
+            raise RuntimeError("Missing repository path for GitLab file download")
+
+        org = project_path.split("/")[0]
+        file_ctx = self._host.auth_resolver.resolve(host, org, port=dep_ref.port)
+        token = file_ctx.token
+        headers = AuthResolver.gitlab_rest_headers(token)
+
+        api_base = host_info.api_base.rstrip("/")
+        enc_proj = quote(project_path, safe="")
+        enc_file = quote(file_path, safe="")
+
+        def _raw_url(r: str) -> str:
+            return (
+                f"{api_base}/projects/{enc_proj}/repository/files/{enc_file}/raw"
+                f"?ref={quote(r, safe='')}"
+            )
+
+        api_url = _raw_url(ref)
+
+        try:
+            response = self._host._resilient_get(api_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            if verbose_callback:
+                verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+            return response.content
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                if ref not in ("main", "master"):
+                    raise RuntimeError(
+                        f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
+                    ) from e
+                fallback_ref = "master" if ref == "main" else "main"
+                fallback_url = _raw_url(fallback_ref)
+                try:
+                    response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
+                    response.raise_for_status()
+                    if verbose_callback:
+                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                    return response.content
+                except requests.exceptions.HTTPError as fallback_err:
+                    raise RuntimeError(
+                        f"File not found: {file_path} in {dep_ref.repo_url} "
+                        f"(tried refs: {ref}, {fallback_ref})"
+                    ) from fallback_err
+            if e.response is not None and e.response.status_code in (401, 403):
+                error_msg = (
+                    f"Authentication failed for GitLab {dep_ref.repo_url} "
+                    f"(file: {file_path}, ref: {ref}). "
+                )
+                if not token:
+                    error_msg += self._host.auth_resolver.build_error_context(
+                        host, "download", org=org, port=dep_ref.port
+                    )
+                else:
+                    error_msg += (
+                        "Please verify your token can read this project (required API scope)."
+                    )
+                raise RuntimeError(error_msg) from e
+            if e.response is not None:
+                raise RuntimeError(
+                    f"Failed to download {file_path}: HTTP {e.response.status_code}"
+                ) from e
+            raise
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 
     # ------------------------------------------------------------------
     # GitHub file download
@@ -661,9 +755,9 @@ class DownloadDelegate:
             if e.response.status_code == 404:
                 # Try fallback branches if the specified ref fails
                 if ref not in ["main", "master"]:
-                    raise RuntimeError(  # noqa: B904
+                    raise RuntimeError(
                         f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
-                    )
+                    ) from e
 
                 # Try the other default branch
                 fallback_ref = "master" if ref == "main" else "main"
@@ -691,11 +785,11 @@ class DownloadDelegate:
                     if verbose_callback:
                         verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
                     return response.content
-                except requests.exceptions.HTTPError:
-                    raise RuntimeError(  # noqa: B904
+                except requests.exceptions.HTTPError as fallback_err:
+                    raise RuntimeError(
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
-                    )
+                    ) from fallback_err
             elif e.response.status_code in (401, 403):
                 # Distinguish rate limiting from auth failure.
                 is_rate_limit = False
@@ -726,7 +820,7 @@ class DownloadDelegate:
                             "Wait a few minutes or check your token's "
                             "rate-limit quota."
                         )
-                    raise RuntimeError(error_msg)  # noqa: B904
+                    raise RuntimeError(error_msg) from e
 
                 # Token may lack SSO/SAML authorization for this org.
                 # Retry without auth -- the repo might be public.
@@ -766,8 +860,10 @@ class DownloadDelegate:
                     )
                 else:
                     error_msg += "Please check your GitHub token permissions."
-                raise RuntimeError(error_msg)  # noqa: B904
+                raise RuntimeError(error_msg) from e
             else:
-                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")  # noqa: B904
+                raise RuntimeError(
+                    f"Failed to download {file_path}: HTTP {e.response.status_code}"
+                ) from e
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error downloading {file_path}: {e}")  # noqa: B904
+            raise RuntimeError(f"Network error downloading {file_path}: {e}") from e

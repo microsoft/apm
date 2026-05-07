@@ -11,7 +11,9 @@ Token Architecture:
 - GITHUB_TOKEN: User-scoped PAT for GitHub Models API access
 
 Platform Token Selection:
-- GitHub: GITHUB_APM_PAT -> GITHUB_TOKEN -> GH_TOKEN -> git credential helpers
+- GitHub-class: GITHUB_APM_PAT -> GITHUB_TOKEN -> GH_TOKEN -> git credential helpers
+- GitLab-class: GITLAB_APM_PAT -> GITLAB_TOKEN -> git credential helpers
+- Generic FQDN hosts: git credential helpers only (no GitHub/GitLab platform env vars)
 - Azure DevOps: ADO_APM_PAT
 
 Runtime Requirements:
@@ -52,7 +54,12 @@ class GitHubTokenManager:
             "GITHUB_TOKEN",
             "GITHUB_APM_PAT",
         ],  # GitHub Models prefers user-scoped PAT, falls back to APM PAT
-        "modules": ["GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN"],  # APM module access (GitHub)
+        "modules": ["GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN"],  # GitHub-class module access
+        "gitlab_modules": [
+            "GITLAB_APM_PAT",
+            "GITLAB_TOKEN",
+        ],  # GitLab SaaS / self-managed API + git HTTPS
+        "generic_modules": [],  # Non-GitHub / non-GitLab FQDN: env PATs deferred to credential fill only
         "ado_modules": ["ADO_APM_PAT"],  # APM module access (Azure DevOps)
         "artifactory_modules": ["ARTIFACTORY_APM_TOKEN"],  # APM module access (JFrog Artifactory)
     }

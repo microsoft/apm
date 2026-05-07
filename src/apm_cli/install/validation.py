@@ -133,11 +133,15 @@ def _local_path_no_markers_hint(local_dir, logger=None):
             _rich_echo(f"      ... and {len(found) - 5} more", color="dim")
 
 
-def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=None):
-    """Validate that a package exists and is accessible on GitHub, Azure DevOps, or locally."""
+def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=None, dep_ref=None):
+    """Validate that a package exists and is accessible on GitHub, Azure DevOps, or locally.
+
+    When *dep_ref* is provided (for example, marketplace GitLab monorepo
+    resolution), use it instead of reparsing *package* so explicit ``git`` +
+    ``path`` semantics are preserved.
+    """
     import os
     import subprocess
-    import tempfile  # noqa: F401
 
     from apm_cli.core.auth import AuthResolver
 
@@ -154,7 +158,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.models.apm_package import DependencyReference
 
-        dep_ref = DependencyReference.parse(package)
+        if dep_ref is None:
+            dep_ref = DependencyReference.parse(package)
 
         # For local packages, validate directory exists and has valid package content
         if dep_ref.is_local and dep_ref.local_path:
@@ -175,8 +180,19 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             _local_path_no_markers_hint(local, logger=logger)
             return False
 
-        # For virtual packages, use the downloader's validation method
-        if dep_ref.is_virtual:
+        from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
+
+        virtual_subdir_repo_probe = (
+            dep_ref.is_virtual
+            and dep_ref.is_virtual_subdirectory()
+            and not is_github_hostname(dep_ref.host or default_host())
+            and not dep_ref.is_azure_devops()
+        )
+
+        # For virtual packages, use the downloader's validation method unless
+        # the virtual path is a subdirectory on a non-GitHub host. Those should
+        # validate the clone root with git, preserving SSH/credential-helper flows.
+        if dep_ref.is_virtual and not virtual_subdir_repo_probe:
             ctx = auth_resolver.resolve_for_dep(dep_ref)
             host = dep_ref.host or default_host()
             org = (
@@ -238,15 +254,21 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         # For Azure DevOps or GitHub Enterprise (non-github.com hosts),
         # use the downloader which handles authentication properly
-        if dep_ref.is_azure_devops() or (dep_ref.host and dep_ref.host != "github.com"):
-            from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
-
+        if (
+            virtual_subdir_repo_probe
+            or dep_ref.is_azure_devops()
+            or (dep_ref.host and dep_ref.host != "github.com")
+        ):
             # Determine host type before building the URL so we know whether to
             # embed a token.  Generic (non-GitHub, non-ADO) hosts are excluded
             # from APM-managed auth; they rely on git credential helpers via the
-            # relaxed validate_env below.
-            is_generic = not is_github_hostname(dep_ref.host) and not is_azure_devops_hostname(
-                dep_ref.host
+            # relaxed validate_env below. GitLab hosts are managed when classified
+            # as GitLab because they need oauth2 HTTPS token formatting.
+            is_gitlab = auth_resolver.classify_host(dep_ref.host).kind == "gitlab"
+            is_generic = (
+                not is_github_hostname(dep_ref.host)
+                and not is_azure_devops_hostname(dep_ref.host)
+                and not is_gitlab
             )
 
             # For GHES / ADO: resolve per-dependency auth up front so the URL

@@ -3,22 +3,17 @@
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import click
 
 # Import existing APM components
-from ...constants import APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME  # noqa: F401
+from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
 from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package  # noqa: F401
 from .._helpers import _expand_with_ancestors, _standalone_installed_packages
 from ._utils import (
-    _count_package_files,  # noqa: F401
     _count_primitives,
-    _count_workflows,  # noqa: F401
-    _get_detailed_context_counts,  # noqa: F401
-    _get_detailed_package_info,  # noqa: F401
     _get_package_display_info,
     _is_nested_under_package,
 )
@@ -35,6 +30,24 @@ def _format_primitive_counts(primitives):
         if count > 0:
             parts.append(f"{count} {ptype}")
     return ", ".join(parts)
+
+
+def _deps_list_source_label(
+    host: str | None,
+    *,
+    is_local: bool = False,
+    lockfile_source: str | None = None,
+) -> str:
+    """Map host / local flags to the ``apm deps list`` Source column."""
+    from ...utils.github_host import is_azure_devops_hostname, is_gitlab_hostname
+
+    if is_local or lockfile_source == "local":
+        return "local"
+    if host and is_azure_devops_hostname(host):
+        return "azure-devops"
+    if host and is_gitlab_hostname(host):
+        return "gitlab"
+    return "github"
 
 
 def _dep_display_name(dep) -> str:
@@ -54,10 +67,7 @@ def _add_tree_children(parent_branch, parent_repo_url, children_map, has_rich, d
     kids = children_map.get(parent_repo_url, [])
     for child_dep in kids:
         child_name = _dep_display_name(child_dep)
-        if has_rich:  # noqa: SIM108
-            child_branch = parent_branch.add(f"[dim]{child_name}[/dim]")
-        else:
-            child_branch = child_name
+        child_branch = parent_branch.add(f"[dim]{child_name}[/dim]") if has_rich else child_name
         if depth < 5:  # Prevent infinite recursion
             _add_tree_children(child_branch, child_dep.repo_url, children_map, has_rich, depth + 1)
 
@@ -87,7 +97,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Load project dependencies to check for orphaned packages
     # GitHub: owner/repo or owner/virtual-pkg-name (2 levels)
     # Azure DevOps: org/project/repo or org/project/virtual-pkg-name (3 levels)
-    declared_sources = {}  # dep_path -> 'github' | 'azure-devops'
+    declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
         if apm_yml_path.exists():
@@ -95,7 +105,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             for dep in project_package.get_apm_dependencies():
                 # Build the expected installed package name
                 repo_parts = dep.repo_url.split("/")
-                source = "azure-devops" if dep.is_azure_devops() else "github"
+                source = _deps_list_source_label(dep.host, is_local=dep.is_local)
                 is_ado = dep.is_azure_devops() and len(repo_parts) >= 3
                 is_gh = len(repo_parts) >= 2
 
@@ -139,7 +149,10 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 # Lockfile keys match declared_sources format (owner/repo)
                 dep_key = dep.get_unique_key()
                 if dep_key and dep_key not in declared_sources:
-                    declared_sources[dep_key] = "github"
+                    declared_sources[dep_key] = _deps_list_source_label(
+                        dep.host,
+                        lockfile_source=dep.source,
+                    )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
     except Exception:
@@ -612,23 +625,22 @@ def tree(global_):
                             child_is_last = j == len(kids) - 1
                             child_prefix = "+-- " if child_is_last else "|-- "
                             click.echo(f"{sub_prefix}{child_prefix}{_dep_display_name(child)}")
-        else:  # noqa: PLR5501
-            # Fallback: scan apm_modules directory (no lockfile)
-            if has_rich:
-                root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
-                if not tree_data["has_modules"]:
-                    root_tree.add("[dim]No dependencies installed[/dim]")
-                else:
-                    for pkg in tree_data["scanned_packages"]:
-                        branch = root_tree.add(f"[green]{pkg['display_name']}[/green]")
-                        prim_summary = _format_primitive_counts(pkg["primitives"])
-                        if prim_summary:
-                            branch.add(f"[dim]{prim_summary}[/dim]")
-                console.print(root_tree)
+        # Fallback: scan apm_modules directory (no lockfile)
+        elif has_rich:
+            root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
+            if not tree_data["has_modules"]:
+                root_tree.add("[dim]No dependencies installed[/dim]")
             else:
-                click.echo(f"{project_name} (local)")
-                if not tree_data["has_modules"]:
-                    click.echo("+-- No dependencies installed")
+                for pkg in tree_data["scanned_packages"]:
+                    branch = root_tree.add(f"[green]{pkg['display_name']}[/green]")
+                    prim_summary = _format_primitive_counts(pkg["primitives"])
+                    if prim_summary:
+                        branch.add(f"[dim]{prim_summary}[/dim]")
+            console.print(root_tree)
+        else:
+            click.echo(f"{project_name} (local)")
+            if not tree_data["has_modules"]:
+                click.echo("+-- No dependencies installed")
 
     except Exception as e:
         logger.error(f"Error showing dependency tree: {e}")
@@ -828,10 +840,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
 
     auth_resolver = AuthResolver()
 
-    if packages:  # noqa: SIM108
-        noun = f"{len(packages)} package(s)"
-    else:
-        noun = f"all {len(all_deps)} dependencies"
+    noun = f"{len(packages)} package(s)" if packages else f"all {len(all_deps)} dependencies"
     # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
     if not legacy_skill_paths:
         from ...integration.targets import should_use_legacy_skill_paths
