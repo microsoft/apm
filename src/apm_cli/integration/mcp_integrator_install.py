@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
 
 
-def run_mcp_install(  # noqa: PLR0915
+def run_mcp_install(  # noqa: C901, PLR0912, PLR0915
     mcp_deps: list,
     runtime: str | None = None,
     exclude: str | None = None,

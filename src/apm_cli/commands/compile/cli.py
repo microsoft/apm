@@ -388,7 +388,7 @@ def _resolve_effective_target(
     help="Compile for all canonical targets. Equivalent to --target all.",
 )
 @click.pass_context
-def compile(
+def compile(  # noqa: C901, PLR0912, PLR0915
     ctx,
     output,
     target,

@@ -677,13 +677,11 @@ class MarketplacePublisher:
         return None
 
     def _write_target_apm_yml(self, apm_yml_path: Path, data: dict[str, Any]) -> None:
-        new_text = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
+        from apm_cli.utils.yaml_io import dump_yaml
+
         tmp_yml = apm_yml_path.with_suffix(".yml.tmp")
         try:
-            with open(tmp_yml, "w", encoding="utf-8") as fh:
-                fh.write(new_text)
-                fh.flush()
-                os.fsync(fh.fileno())
+            dump_yaml(data, tmp_yml, sort_keys=False)
             os.replace(str(tmp_yml), str(apm_yml_path))
         except BaseException:
             try:  # noqa: SIM105
