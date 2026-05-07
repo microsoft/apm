@@ -270,17 +270,42 @@ fetch the full body again -- the cap is the cap.
 
 ### SCHEDULED_SWEEP
 
-Find up to 10 untriaged open issues, oldest first, excluding bots:
+Find up to 10 untriaged open issues, **oldest first**, excluding
+bots. The candidate list lives in the GitHub MCP server -- shell `gh`
+is not authenticated, so use the MCP `list_issues` tool. The MCP
+`labels` filter only does positive matches (it cannot exclude
+`status/triaged`), so paginate oldest-first and filter in your
+reasoning step:
 
-```bash
-gh issue list \
-  --repo "${{ github.repository }}" \
-  --state open \
-  --limit 200 \
-  --json number,title,author,labels,locked,createdAt,body,id
+```
+list_issues(
+  owner: "microsoft",
+  repo:  "apm",
+  state: "OPEN",
+  orderBy:   "CREATED_AT",
+  direction: "ASC",
+  perPage:   30,
+)
 ```
 
-In your reasoning step (no shell required), filter the result:
+**Pagination is mandatory.** A single page of 30 will commonly be
+mostly already-triaged issues. Keep calling `list_issues` with
+`after: <endCursor>` from the previous response's `pageInfo` until
+**either**:
+
+- you have collected at least **10 eligible candidates** after
+  applying the filters below, **or**
+- the API reports `hasNextPage: false` (queue exhausted), **or**
+- you have fetched **5 pages** (150 issues) without finding 10
+  eligibles -- a healthy sweep is allowed to be small.
+
+Do NOT stop after the first page just because the first page
+contains few eligibles -- the oldest untriaged issues are exactly
+the ones we most want to drain. If you cannot read a single page's
+JSON in one tool response, request a smaller `perPage` (e.g. 15) and
+keep paginating.
+
+In your reasoning step (no shell required), filter each fetched page:
 
 - Drop any issue where `author.is_bot` is true or `author.login`
   matches common bot patterns (`*[bot]`, `dependabot*`,
