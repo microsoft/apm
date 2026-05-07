@@ -26,6 +26,10 @@ def set_skill_subset_for_entry(
     """
     data = load_yaml(manifest_path) or {}
     deps_section = data.get("dependencies", {})
+    # Normalise flat list format to structured dict so .get("apm")
+    # does not raise AttributeError on a list object.
+    if isinstance(deps_section, list):
+        deps_section = {"apm": deps_section}
     apm_deps = deps_section.get("apm", [])
     if not apm_deps:
         return False

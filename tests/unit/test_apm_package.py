@@ -441,3 +441,154 @@ class TestIncludesField:
         )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.has_apm_dependencies() is False
+
+
+class TestFlatListDependencies:
+    """Tests for flat list dependency format normalisation.
+
+    The flat format (``dependencies: [owner/repo#sha, ...]``) is
+    deprecated but must be normalised to the structured form
+    (``dependencies: {apm: [...]}``), otherwise transitive resolution
+    silently drops them.
+    """
+
+    def test_flat_list_dependencies_parsed_as_apm(self, tmp_path):
+        """Flat list dependencies are normalised to apm deps."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": [
+                    "owner/repo1#abc123",
+                    "owner/repo2#def456",
+                ],
+            },
+        )
+
+        with pytest.warns(DeprecationWarning, match="Flat dependency list"):
+            pkg = APMPackage.from_apm_yml(yml)
+
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 2
+        assert all(isinstance(d, DependencyReference) for d in deps)
+        urls = {d.repo_url for d in deps}
+        assert "owner/repo1" in urls
+        assert "owner/repo2" in urls
+
+    def test_flat_list_dependencies_have_references(self, tmp_path):
+        """Flat list entries with #ref preserve the reference."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": ["owner/repo#main"],
+            },
+        )
+
+        with pytest.warns(DeprecationWarning):
+            pkg = APMPackage.from_apm_yml(yml)
+
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 1
+        assert deps[0].repo_url == "owner/repo"
+        assert deps[0].reference == "main"
+
+    def test_flat_list_empty_dependencies(self, tmp_path):
+        """Empty flat list produces no deps and no crash."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": [],
+            },
+        )
+
+        with pytest.warns(DeprecationWarning):
+            pkg = APMPackage.from_apm_yml(yml)
+
+        assert pkg.get_apm_dependencies() == []
+        assert pkg.has_apm_dependencies() is False
+
+    def test_flat_list_dev_dependencies_parsed_as_apm(self, tmp_path):
+        """Flat list devDependencies are normalised to dev apm deps."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": [
+                    "owner/dev-tool#v1",
+                ],
+            },
+        )
+
+        with pytest.warns(DeprecationWarning, match="Flat devDependencies list"):
+            pkg = APMPackage.from_apm_yml(yml)
+
+        dev_deps = pkg.get_dev_apm_dependencies()
+        assert len(dev_deps) == 1
+        assert dev_deps[0].repo_url == "owner/dev-tool"
+
+    def test_flat_list_subpath_dependencies(self, tmp_path):
+        """Flat list with sub-path packages (owner/repo/sub/path) works."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": [
+                    "org/monorepo/sub/path#abc123",
+                ],
+            },
+        )
+
+        with pytest.warns(DeprecationWarning):
+            pkg = APMPackage.from_apm_yml(yml)
+
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 1
+        assert deps[0].repo_url == "org/monorepo"
+
+    def test_structured_format_still_works(self, tmp_path):
+        """Regression guard: structured format must not break."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": {
+                    "apm": ["owner/repo1"],
+                    "mcp": [],
+                },
+            },
+        )
+
+        # Must not emit a DeprecationWarning
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            pkg = APMPackage.from_apm_yml(yml)
+
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 1
+        assert deps[0].repo_url == "owner/repo1"
+
+    def test_flat_list_mcp_not_in_deps(self, tmp_path):
+        """Flat list does not produce MCP deps -- only APM."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": ["owner/repo1"],
+            },
+        )
+
+        with pytest.warns(DeprecationWarning):
+            pkg = APMPackage.from_apm_yml(yml)
+
+        assert pkg.get_mcp_dependencies() == []
