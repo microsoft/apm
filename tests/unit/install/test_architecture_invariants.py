@@ -161,12 +161,16 @@ def test_install_py_under_legacy_budget():
     and ``InstallContext`` so users can opt back into per-client skill
     paths during the .agents/ convergence migration window. The pending
     --mcp extraction will recover this budget.
+
+    v0.12.4 (orphan-cleanup gate) raised 1840 -> 1855 to add the
+    ``_has_orphan_deps_in_lock`` short-circuit so emptying apm.yml
+    actually removes deployed files (regression dating back to #1116).
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1840, (
-        f"commands/install.py grew to {n} LOC (budget 1840). "
+    assert n <= 1855, (
+        f"commands/install.py grew to {n} LOC (budget 1855). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

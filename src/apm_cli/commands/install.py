@@ -1541,15 +1541,24 @@ def _install_apm_packages(ctx, outcome):
         old_mcp_servers = builtins.set(_existing_lock.mcp_servers)
         old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
 
-    # Also enter the APM install path when the project root has local .apm/
-    # primitives, even if there are no external APM dependencies (#714).
+    # Enter the APM install path when there are deps, local .apm/ primitives
+    # (#714), OR orphan deps in the lockfile to clean up (manifest emptied).
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.scope import get_deploy_root as _get_deploy_root
+    from apm_cli.deps.lockfile import _SELF_KEY as _LOCK_SELF_KEY
 
     _cli_project_root = _get_deploy_root(ctx.scope)
-
+    _has_orphan_deps_in_lock = bool(
+        _existing_lock
+        and not has_any_apm_deps
+        and any(k != _LOCK_SELF_KEY for k in _existing_lock.dependencies)
+    )
     apm_diagnostics = None
-    if should_install_apm and (has_any_apm_deps or _project_has_root_primitives(_cli_project_root)):
+    if should_install_apm and (
+        has_any_apm_deps
+        or _project_has_root_primitives(_cli_project_root)
+        or _has_orphan_deps_in_lock
+    ):
         if not APM_DEPS_AVAILABLE:
             logger.error("APM dependency system not available")
             logger.progress(f"Import error: {_APM_IMPORT_ERROR}")

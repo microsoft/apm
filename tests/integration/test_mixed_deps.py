@@ -31,6 +31,7 @@ def temp_project(tmp_path):
     apm_yml.write_text("""name: mixed-deps-project
 version: 1.0.0
 description: Test project with mixed dependencies
+target: copilot
 dependencies:
   apm: []
   mcp: []
