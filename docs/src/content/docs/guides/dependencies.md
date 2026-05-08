@@ -15,7 +15,7 @@ APM dependencies are git repositories containing `.apm/` directories with contex
 - **Build on tested context** instead of starting from scratch
 - **Maintain consistency** across multiple repositories and teams
 
-APM supports any git-accessible host — GitHub, GitLab, Bitbucket, self-hosted instances, and more.
+APM supports any git-accessible host — GitHub, GitLab, Bitbucket, Gitea, Gogs, self-hosted instances, and more. For self-hosted Gitea/Gogs, virtual subdirectory and raw-file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL with a Contents API v1/v3 fallback. GitLab nested-group repos require the object form (see below).
 
 ## Dependency Types
 
