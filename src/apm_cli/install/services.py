@@ -515,6 +515,19 @@ def integrate_local_bundle(
     deployed_hashes: dict[str, str] = {}
     skipped = 0
 
+    # py-arch-2: Filter bundle-metadata files (plugin.json, .mcp.json) out of
+    # pack_files BEFORE the per-target loop.  These are never deployable in
+    # any target, so iterating per-target inflated the skip counter
+    # (e.g. one plugin.json on a 2-target install bumped skipped by 2).
+    # The case-insensitive match here mirrors the fallback walk above and
+    # the previously-inline guards in the deploy loop.
+    _filtered_pack_files: dict[str, str] = {}
+    for _rel, _hash in pack_files.items():
+        if _rel.lower() in {"plugin.json", ".mcp.json"}:
+            continue
+        _filtered_pack_files[_rel] = _hash
+    pack_files = _filtered_pack_files
+
     slug = alias or bundle_info.package_id
     if logger:
         logger.verbose_detail(
@@ -549,20 +562,6 @@ def integrate_local_bundle(
                 _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
 
         for rel, expected_hash in sorted(pack_files.items()):
-            # Issue #1207 D2.a: skip ``plugin.json`` (case-insensitive) --
-            # this is bundle-internal metadata describing where primitives
-            # live in the tarball, not deployable consumer content.
-            if rel.lower() == "plugin.json":
-                skipped += 1
-                continue
-            # Issue #1207 D2: ``.mcp.json`` is wired via ``MCPIntegrator``
-            # in ``local_bundle_handler`` after this loop, not deployed as
-            # a flat file under the target's root_dir.  Match
-            # case-insensitively so case-folding filesystems (HFS+, NTFS)
-            # do not let a bundle ship ``.MCP.json`` past the skip.
-            if rel.lower() == ".mcp.json":
-                skipped += 1
-                continue
             # CR1: bundle_files keys come from untrusted lockfile YAML
             # inside the bundle.  Reject traversal sequences before
             # constructing any filesystem path, then assert the resolved
@@ -590,12 +589,33 @@ def integrate_local_bundle(
             if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
                 # Slug must be safe for filesystem path construction --
                 # ``package_id`` originates from untrusted ``plugin.json``.
+                # Enforce a strict character whitelist documented in
+                # docs/src/content/docs/enterprise/security.md so
+                # forward slashes, null bytes, spaces, and other
+                # filesystem-significant characters are rejected before
+                # any path construction or resolution.
+                _slug_str = str(slug)
+                _slug_ok = (
+                    bool(_slug_str)
+                    and all(c.isalnum() or c in "._-" for c in _slug_str)
+                    and not _slug_str.startswith(".")
+                    and not _slug_str.endswith(".")
+                    and ".." not in _slug_str
+                )
+                if not _slug_ok:
+                    if logger is not None:
+                        logger.warning(
+                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: "
+                            "slug must match [A-Za-z0-9._-]+ with no leading/trailing dot, no '..'"
+                        )
+                    skipped += 1
+                    continue
                 try:
-                    validate_path_segments(str(slug), context="bundle slug")
+                    validate_path_segments(_slug_str, context="bundle slug")
                 except PathTraversalError as exc:
                     if logger is not None:
                         logger.warning(
-                            f"Skipped instruction staging for unsafe slug {slug!r}: {exc}"
+                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: {exc}"
                         )
                     skipped += 1
                     continue

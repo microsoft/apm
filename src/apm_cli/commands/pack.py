@@ -65,7 +65,7 @@ Exit codes:
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both.",
+    help="[Deprecated] Target platform filter. Bundles are now target-agnostic; the consumer's project decides where files land at install time. Value is recorded in pack.target as informational metadata only and is ignored by 'apm install'. The flag will be removed in a future release.",
 )
 @click.option(
     "--archive",
@@ -150,6 +150,11 @@ def pack_cmd(
         except Exception:
             effective_target = None
     else:
+        logger.warning(
+            "--target is deprecated and will be removed in a future release. "
+            "Bundles are target-agnostic; the value is recorded as informational "
+            "pack.target metadata only and is ignored by 'apm install'."
+        )
         effective_target = target
     options = BuildOptions(
         project_root=project_root,
@@ -360,7 +365,9 @@ def _warn_empty(logger, target, result):
             logger.warning(f"No files to pack for target '{target}'")
         else:
             logger.warning(f"No files to pack for target '{target}'")
-            logger.verbose_detail(f"    Hint: use '--target all' to include all platforms")  # noqa: F541
+            logger.verbose_detail(
+                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
+            )
     else:
         logger.warning("No deployed files found -- empty bundle created")
 

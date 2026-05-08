@@ -323,6 +323,50 @@ class TestInstructionStaging:
         for f in result["deployed_files"]:
             assert ".." not in f
 
+    @pytest.mark.parametrize(
+        "bad_slug,reason",
+        [
+            ("foo/bar", "forward slash creates nested dirs"),
+            ("a\x00b", "null byte must be rejected before path resolution"),
+            (".hidden", "leading dot is forbidden"),
+            ("trailing.", "trailing dot is forbidden"),
+            ("a@b", "@ is outside the [A-Za-z0-9._-] whitelist"),
+            ("a b", "whitespace is outside the whitelist"),
+        ],
+    )
+    def test_adversarial_slug_skips_staging(
+        self, tmp_path: Path, bad_slug: str, reason: str
+    ) -> None:
+        """Slugs that fail the documented [A-Za-z0-9._-] whitelist must
+        be skipped cleanly, not crash the install with a bare ValueError
+        from path resolution (sec-2) or smuggle a forward slash past the
+        slug guard (sec-1).
+        """
+        bundle = _build_bundle(
+            tmp_path,
+            files={"instructions/x.md": "# x\n"},
+        )
+        project = tmp_path / "project"
+        project.mkdir()
+        bi = _bundle_info(bundle)
+        bi.package_id = bad_slug
+
+        result = integrate_local_bundle(
+            bi,
+            project,
+            targets=[KNOWN_TARGETS["opencode"]],
+            force=False,
+            dry_run=False,
+            diagnostics=None,
+            logger=None,
+            scope=None,
+            alias=None,
+        )
+        assert result["skipped"] >= 1, f"slug {bad_slug!r}: {reason}"
+        # Nothing under apm_modules/ for a rejected slug.
+        for f in result["deployed_files"]:
+            assert "apm_modules/" not in f.replace("\\", "/")
+
 
 # ---------------------------------------------------------------------------
 # D3: no false "Install interrupted"

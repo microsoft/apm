@@ -242,7 +242,7 @@ generated_at: "2026-03-09T14:00:00Z"
 | Field | Type | Description |
 |-------|------|-------------|
 | `pack.format` | string | Bundle format: `"apm"` or `"plugin"`. |
-| `pack.target` | string (deprecated, optional) | Historical target hint. Bundles are now target-agnostic; the consumer's project decides where files land at install time. New bundles omit this field; old bundles that carry it remain installable -- the value is not enforced. |
+| `pack.target` | string (deprecated, optional) | Historical target hint. Bundles are now target-agnostic; the consumer's project decides where files land at install time. The field is still recorded in every bundle for diagnostic purposes (typically `"all"` for target-agnostic packs, or the project's detected target) and is not authoritative at install time. |
 | `pack.packed_at` | string (ISO 8601) | UTC timestamp of when the bundle was created. |
 | `pack.bundle_files` | map[string -> string] | Per-file SHA-256 manifest of the bundle's deployable contents (relative path -> hex digest). Drives the install-side deploy loop. |
 

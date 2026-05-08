@@ -82,9 +82,9 @@ A bundle ships in Anthropic plugin layout (`agents/`, `skills/`, `commands/`, `i
 
 Concretely: the same `team-skills.tgz` installed into a Copilot project lands under `.github/`; installed into a Claude project, lands under `.claude/`; installed into an OpenCode project, lands under `.opencode/` with instructions staged for `apm compile`.
 
-`--target` on `apm pack` is **deprecated**. Old bundles that carry `pack.target` are still installable -- the field is ignored on the install side; consumer-side resolution always wins.
+`--target` on `apm pack` is **deprecated**. The field is informational and never overrides consumer-side target resolution; an advisory warning may still print at install time if the bundle's recorded `pack.target` differs from the resolved install target.
 
-Compile-only targets (OpenCode, Codex, Gemini) receive instructions under `apm_modules/<slug>/.apm/instructions/` so `apm compile` merges them into `AGENTS.md` / `GEMINI.md` on the next compile.
+Compile-only targets (OpenCode, Codex, Gemini) receive instructions under `apm_modules/<slug>/.apm/instructions/` so [`apm compile`](../../guides/compilation/) merges them into `AGENTS.md` / `GEMINI.md` on the next compile.
 
 ```
 $ apm install team-skills.tgz
@@ -439,4 +439,4 @@ During unpack, verification found files listed in the bundle's lockfile that are
 If `apm pack` produces zero files, check:
 
 1. Your dependencies have `deployed_files` entries in `apm.lock.yaml`. This can happen if `apm install` completed but no integration files were deployed (e.g., the package has no prompts or agents for the active target).
-2. The bundle is built from the `deployed_files` in `apm.lock.yaml` directly. Cross-target remapping for `skills/` and `agents/` runs automatically. If `apm.lock.yaml` shows zero deployed files, run `apm install` first; if files exist there but the bundle is empty, file an issue.
+2. The bundle is built from the `deployed_files` in `apm.lock.yaml` directly. Cross-target remapping for the convention dirs (`skills/`, `agents/`, `commands/`, `instructions/`, `hooks/`) runs automatically. If `apm.lock.yaml` shows zero deployed files, run `apm install` first; if files exist there but the bundle is empty, file an issue.
