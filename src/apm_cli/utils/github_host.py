@@ -260,6 +260,48 @@ def build_ado_bearer_git_env(bearer_token: str) -> dict:
     return build_authorization_header_git_env("Bearer", bearer_token)
 
 
+# Single source of truth for the ADO auth-failure signal set.
+#
+# Historically these signal strings were open-coded across 3+ call sites
+# (pipeline._preflight_auth_check, github_downloader.list_remote_refs,
+# github_downloader._execute_transport_plan, auth._try_ado_bearer_fallback)
+# and drifted: the auth.py and github_downloader.py variants were missing
+# "403" and "could not read username", causing #1212 (preflight failed to
+# trigger bearer fallback on stale-PAT 403 / interactive-prompt-blocked
+# scenarios). Consolidating here prevents that recurring drift.
+#
+# All five signals are union-required for ADO PAT->bearer eligibility:
+#   "401"                       canonical HTTP auth failure
+#   "403"                       PAT scope/permission rejection (ADO returns 403)
+#   "authentication failed"     git's stderr text on credential rejection
+#   "unauthorized"              libcurl synonym, capitalization varies by version
+#   "could not read username"   GIT_TERMINAL_PROMPT=0 + invalid creds
+_ADO_AUTH_FAILURE_SIGNALS = (
+    "401",
+    "403",
+    "authentication failed",
+    "unauthorized",
+    "could not read username",
+)
+
+
+def is_ado_auth_failure_signal(text: str | None) -> bool:
+    """Return True if ``text`` matches an ADO auth-failure signal.
+
+    Accepts raw stderr from ``subprocess.run`` or ``str(GitCommandError)``.
+    Matches case-insensitively; libcurl error capitalization has changed
+    across versions (curl 7.x vs 8.x), so callers must not rely on case.
+
+    Callers MUST gate bearer-fallback eligibility on additional context
+    (host is ADO, scheme is "basic", a token was actually presented) --
+    this predicate only answers the "looks like an auth failure" question.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(signal in lowered for signal in _ADO_AUTH_FAILURE_SIGNALS)
+
+
 def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.azure.com") -> str:
     """Build Azure DevOps SSH clone URL for cloud or server.
 

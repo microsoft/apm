@@ -126,6 +126,11 @@ class AuthResolver:
         # F5 #852: pre-init the per-host dedup set so callers do not need
         # the prior hasattr() guard.
         self._verbose_auth_logged_hosts: set = set()
+        # #1212 follow-up: with preflight + list_remote_refs + clone all
+        # routing through execute_with_bearer_fallback, a single ADO host
+        # in an install plan can trigger emit_stale_pat_diagnostic up to
+        # 3x per dependency. Dedup per host so the user sees ONE warning.
+        self._stale_pat_warned_hosts: set = set()
 
     def set_logger(self, logger: object) -> None:
         """Wire a CommandLogger (or InstallLogger) into the resolver after
@@ -362,12 +367,9 @@ class AuthResolver:
             """Retry ADO operation with AAD bearer when PAT fails with 401."""
             if not ado_bearer_fallback_available:
                 raise exc
-            exc_msg = str(exc)
-            if (
-                "401" not in exc_msg
-                and "Unauthorized" not in exc_msg
-                and "Authentication failed" not in exc_msg
-            ):
+            from apm_cli.utils.github_host import is_ado_auth_failure_signal
+
+            if not is_ado_auth_failure_signal(str(exc)):
                 raise exc
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
 
@@ -447,8 +449,16 @@ class AuthResolver:
         *,
         port: int | None = None,
         dep_url: str | None = None,
+        bearer_also_failed: bool = False,
     ) -> str:
-        """Build an actionable error message for auth failures."""
+        """Build an actionable error message for auth failures.
+
+        ``bearer_also_failed=True`` prepends a single line to the Case 2
+        block (az signed in, bearer rejected) clarifying that ADO_APM_PAT
+        was tried first and rejected before the bearer attempt -- so the
+        user understands why both halves of the protocol failed without
+        having to read the full diagnostic context.
+        """
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
         display = host_info.display_name
@@ -483,17 +493,23 @@ class AuthResolver:
                     # failed. We may not have observed an explicit 401 (could be
                     # a 404, a network error, etc.) so the wording stays
                     # tentative -- see #856 review C6.
+                    prefix = (
+                        "    ADO_APM_PAT was rejected; az cli bearer was also rejected.\n\n"
+                        if bearer_also_failed
+                        else ""
+                    )
                     return (
-                        f"\n    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"  # noqa: F541
-                        f"    but the Azure DevOps request still failed.\n\n"  # noqa: F541
-                        f"    If this is an authentication failure, the PAT may be expired, revoked,\n"  # noqa: F541
-                        f"    or scoped to a different org, and Azure CLI credentials may need to\n"  # noqa: F541
-                        f"    be refreshed.\n\n"  # noqa: F541
-                        f"    To fix:\n"  # noqa: F541
-                        f"      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"  # noqa: F541
-                        f"      2. Re-authenticate Azure CLI if needed:        az login\n"  # noqa: F541
-                        f"      3. Retry:                                       apm install\n\n"  # noqa: F541
-                        f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
+                        f"\n{prefix}"
+                        f"    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"
+                        f"    but the Azure DevOps request still failed.\n\n"
+                        f"    If this is an authentication failure, the PAT may be expired, revoked,\n"
+                        f"    or scoped to a different org, and Azure CLI credentials may need to\n"
+                        f"    be refreshed.\n\n"
+                        f"    To fix:\n"
+                        f"      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"
+                        f"      2. Re-authenticate Azure CLI if needed:        az login\n"
+                        f"      3. Retry:                                       apm install\n\n"
+                        f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"
                     )
                 # PAT set but rejected, no az -> bare PAT failure
                 return (
@@ -535,8 +551,14 @@ class AuthResolver:
                 )
 
             # Case 2: az returned token (tenant known) but ADO rejected it
+            prefix = (
+                "    ADO_APM_PAT was rejected; az cli bearer was also rejected.\n\n"
+                if bearer_also_failed
+                else ""
+            )
             return (
-                f"\n    Your az cli session (tenant: {tenant}) returned a bearer token,\n"
+                f"\n{prefix}"
+                f"    Your az cli session (tenant: {tenant}) returned a bearer token,\n"
                 f"    but Azure DevOps rejected it (HTTP 401).\n\n"
                 f"    Check that you are signed into the correct tenant:\n"
                 f"      az account show\n"
@@ -706,10 +728,17 @@ class AuthResolver:
         install summary. Without a logger (e.g. unit tests) we fall back to
         the inline ``_rich_warning`` emission for backwards compatibility.
 
+        #1212 follow-up: dedup per host_display so the user sees ONE warning
+        per ADO host even when preflight, list_remote_refs, and the clone
+        path each trigger the bearer-fallback path against the same host.
+
         Naming: previously ``_emit_stale_pat_diagnostic`` (private). Public
         now (#856 follow-up C9) so external modules (validation.py,
         github_downloader.py) do not reach into the underscore API.
         """
+        if host_display in self._stale_pat_warned_hosts:
+            return
+        self._stale_pat_warned_hosts.add(host_display)
         msg = f"ADO_APM_PAT was rejected for {host_display} (HTTP 401); fell back to az cli bearer."
         detail = "Consider unsetting the stale variable."
         diagnostics = self._diagnostics_or_none()

@@ -158,6 +158,9 @@ class GitCache:
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
         git_exe = get_git_executable()
+        # auth-delegated: cache-layer ref resolution runs after lockfile
+        # already pinned the commit; no PAT->bearer fallback applies here
+        # (env is sanitized, no embedded creds).
         cmd = [git_exe, "ls-remote", url]
         if ref:
             cmd.append(ref)

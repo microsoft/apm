@@ -55,6 +55,16 @@ def _build_downloader():
         }
         mock_auth._token_manager.get_token_for_purpose.return_value = None
         mock_auth.build_error_context.return_value = "Check your auth setup."
+
+        # Wire execute_with_bearer_fallback to delegate to primary_op so
+        # tests can drive the auth-eligible (ADO + basic + token) path
+        # without configuring a fake bearer provider. The real helper
+        # short-circuits to primary when is_auth_failure(primary) is False
+        # (success case) or when the bearer provider is unavailable.
+        def _exec_bearer_fallback(dep_ref, primary_op, bearer_op, is_auth_failure):
+            return primary_op()
+
+        mock_auth.execute_with_bearer_fallback.side_effect = _exec_bearer_fallback
         downloader = GitHubPackageDownloader(auth_resolver=mock_auth)
     return downloader
 

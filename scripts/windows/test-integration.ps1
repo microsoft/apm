@@ -221,6 +221,16 @@ function Invoke-IntegrationTests {
         Write-Info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
     }
 
+    # #1212 anti-regression: ADO --update preflight bearer-fallback (hermetic).
+    # Uses PATH-injected fake `git`/`az`; runs unconditionally on every host.
+    Write-Info "Running #1212 ADO preflight bearer-fallback E2E..."
+    pytest tests/integration/test_ado_preflight_bearer_fallback_e2e.py -v --tb=short
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorText "#1212 ADO preflight bearer-fallback tests failed!"
+        exit 1
+    }
+    Write-Success "#1212 ADO preflight bearer-fallback tests passed!"
+
     Write-Success "All integration test suites completed successfully!"
 }
 #endregion
