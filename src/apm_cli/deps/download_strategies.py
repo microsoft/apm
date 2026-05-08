@@ -639,10 +639,7 @@ class DownloadDelegate:
         # --- Generic host: raw URL first, then API version negotiation ---
         # For non-GitHub non-GHE hosts (Gitea, Gogs, self-hosted git), try the
         # raw URL path first, then negotiate API versions v1 -> v3.
-        is_github_host = is_github_hostname(host) or (
-            os.environ.get("GITHUB_HOST", "").strip().lower() == (host or "").lower()
-            and bool(os.environ.get("GITHUB_HOST", "").strip())
-        )
+        is_github_host = is_github_hostname(host) or self._is_configured_ghes(host)
         if not is_github_host:
             raw_url = f"https://{host}/{owner}/{repo}/raw/{ref}/{file_path}"
             raw_headers = self._build_generic_host_auth_headers(host, file_ctx, accept=None)
@@ -657,13 +654,15 @@ class DownloadDelegate:
             except (requests.RequestException, OSError) as raw_err:
                 if verbose_callback:
                     verbose_callback(
-                        f"Raw URL on {host} failed: {type(raw_err).__name__}; "
-                        f"falling back to Contents API."
+                        f"Raw URL on {host} failed for {file_path}@{ref}: "
+                        f"{type(raw_err).__name__}; falling back to Contents API."
                     )
 
         # --- Contents API path (authenticated, enterprise, or raw fallback) ---
         # Build API URL candidates - format differs by host type
-        api_url_candidates = self._build_contents_api_urls(host, owner, repo, file_path, ref)
+        api_url_candidates = self._build_contents_api_urls(
+            host, owner, repo, file_path, ref, is_github_host=is_github_host
+        )
         api_url = api_url_candidates[0]
 
         # Set up authentication headers
@@ -834,8 +833,11 @@ class DownloadDelegate:
                     # Generic host: don't claim SSO/SAML or "GitHub token".
                     error_msg += (
                         f"Host {host} rejected the request. "
-                        "Verify the repository exists and that any token "
-                        "configured via 'git credential' has access."
+                        "Verify the repository exists and that the token has "
+                        "access. Tokens are sourced from your git credential "
+                        "helper, a per-org GITHUB_APM_PAT_<ORG> env var, or "
+                        f"GITHUB_HOST={host} when this host is your GitHub "
+                        "Enterprise Server."
                     )
                 raise RuntimeError(error_msg)  # noqa: B904
             else:
@@ -848,20 +850,46 @@ class DownloadDelegate:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _is_configured_ghes(host: str) -> bool:
+        """Return True when *host* matches the user's declared GHES via GITHUB_HOST.
+
+        ``GITHUB_HOST=<custom-domain>`` is the documented opt-in for treating
+        a non-``*.ghe.com`` FQDN as GitHub-family. Centralised so the routing
+        check, header builder, and Contents-API URL builder cannot drift.
+        """
+        configured = os.environ.get("GITHUB_HOST", "").strip().lower()
+        if not configured:
+            return False
+        return (host or "").lower() == configured
+
+    @staticmethod
     def _build_contents_api_urls(
-        host: str, owner: str, repo: str, file_path: str, ref: str
+        host: str,
+        owner: str,
+        repo: str,
+        file_path: str,
+        ref: str,
+        *,
+        is_github_host: bool | None = None,
     ) -> list[str]:
         """Return the ordered list of Contents-API URL candidates for *host*.
 
         - github.com -> single api.github.com candidate
-        - *.ghe.com (GHE Cloud / GHE Data Residency) -> single api.<host> candidate
+        - *.ghe.com (GHE Cloud / GHE Data Residency) or GITHUB_HOST-declared
+          GHES -> single api.<host> candidate (skips Gitea v1 round-trip)
         - generic host -> Gitea-native /api/v1/ then Gogs-compat /api/v3/
 
         GitLab uses /api/v4/projects/:id/repository/files/... which has a
         different shape; it is intentionally NOT included. GitLab support
         is limited to git-clone operations.
+
+        ``is_github_host`` lets the caller pass its already-computed
+        classification (which honours ``GITHUB_HOST``); when omitted we
+        fall back to ``is_github_hostname`` plus the GHES env-var check.
         """
-        if is_github_hostname(host):
+        if is_github_host is None:
+            is_github_host = is_github_hostname(host) or DownloadDelegate._is_configured_ghes(host)
+        if is_github_host:
             if host.lower() == "github.com":
                 return [
                     f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
@@ -903,11 +931,9 @@ class DownloadDelegate:
         if auth_ctx is None or not getattr(auth_ctx, "token", None):
             return headers
         source = getattr(auth_ctx, "source", None) or ""
-        configured_host = os.environ.get("GITHUB_HOST", "").strip().lower()
-        host_lower = (host or "").lower()
         host_scoped = source == "git-credential-fill"
         org_scoped = source.startswith("GITHUB_APM_PAT_")
-        configured_ghes = bool(configured_host) and host_lower == configured_host
+        configured_ghes = DownloadDelegate._is_configured_ghes(host)
         if host_scoped or org_scoped or configured_ghes:
             headers["Authorization"] = f"token {auth_ctx.token}"
         return headers
