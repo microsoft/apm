@@ -1004,9 +1004,10 @@ class DownloadDelegate:
         # Non-GitHub host: name what was tried so users can diagnose
         # GitLab / unsupported-host cases without re-reading source.
         tried = ", ".join(["raw"] + [u.split("/api/")[1].split("/")[0] for u in api_url_candidates])
+        canonical_url = f"https://{host}/{repo_url}/raw/{ref}/{file_path}"
         return (
-            f"File not found on generic host {host}: {file_path} in "
-            f"{repo_url} {ref_part}. Tried URL families: {tried}. "
+            f"File not found on generic host {host}: {canonical_url} {ref_part}. "
+            f"Tried URL families: {tried}. "
             "If this is GitLab, virtual subdirectory packages are not "
             "supported (use the dict-form full repo URL instead)."
         )

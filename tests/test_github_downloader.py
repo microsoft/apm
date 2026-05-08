@@ -2438,8 +2438,13 @@ class TestGiteaGogsApiVersionNegotiation:
                 self.downloader.download_raw_file(dep_ref, "missing.md", "main")
 
         msg = str(excinfo.value)
-        assert "git.example.com" in msg
-        assert "missing.md" in msg
+        # Use urlparse on the canonical URL embedded in the error message
+        # (per tests.instructions.md: never substring-match URLs).
+        url_tokens = [tok.strip("(),.;'\"") for tok in msg.split() if "://" in tok]
+        hosts = {urlparse(t).hostname for t in url_tokens}
+        assert hosts == {"git.example.com"}, f"Host not surfaced in error: {msg!r}"
+        paths = [urlparse(t).path for t in url_tokens]
+        assert any("missing.md" in p for p in paths)
         assert "GitLab" in msg, "Error should hint at GitLab unsupported case"
 
     def test_github_com_uses_api_github_com_not_api_v4(self):
