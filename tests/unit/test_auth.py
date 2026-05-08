@@ -229,15 +229,18 @@ class TestResolve:
         """Dependency-aware resolution still uses the standard host-based fallback chain."""
         dep_ref = DependencyReference.parse("Devolutions/RDM/.claude/skills/add-culture-rdm")
         with patch.dict(os.environ, {}, clear=True):
-            with patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_gh_cli",
-                return_value=None,
-            ) as mock_gh, patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_git",
-                return_value="cred-token",
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_gh_cli",
+                    return_value=None,
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_git",
+                    return_value="cred-token",
+                ) as mock_cred,
+            ):
                 resolver = AuthResolver()
                 ctx = resolver.resolve_for_dep(dep_ref)
                 assert ctx.token == "cred-token"

@@ -326,9 +326,10 @@ class TestGetTokenWithCredentialFallback:
         """Returns env var token and never calls credential fill."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "env-token"}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli") as mock_gh, patch.object(
-                GitHubTokenManager, "resolve_credential_from_git"
-            ) as mock_cred:
+            with (
+                patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli") as mock_gh,
+                patch.object(GitHubTokenManager, "resolve_credential_from_git") as mock_cred,
+            ):
                 token = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert token == "env-token"
                 mock_gh.assert_not_called()
@@ -338,9 +339,12 @@ class TestGetTokenWithCredentialFallback:
         """Uses gh CLI before git credential helpers when no env token exists."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_gh_cli", return_value="gh-token"
-            ) as mock_gh, patch.object(GitHubTokenManager, "resolve_credential_from_git") as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value="gh-token"
+                ) as mock_gh,
+                patch.object(GitHubTokenManager, "resolve_credential_from_git") as mock_cred,
+            ):
                 token = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert token == "gh-token"
                 mock_gh.assert_called_once_with("github.com")
@@ -350,11 +354,14 @@ class TestGetTokenWithCredentialFallback:
         """Falls back to resolve_credential_from_git when no env token."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
-            ) as mock_gh, patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
+                ) as mock_cred,
+            ):
                 token = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert token == "cred-token"
                 mock_gh.assert_called_once_with("github.com")
@@ -364,11 +371,14 @@ class TestGetTokenWithCredentialFallback:
         """Second call uses cache, subprocess not invoked again."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
-            ) as mock_gh, patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="cached-tok"
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value="cached-tok"
+                ) as mock_cred,
+            ):
                 first = manager.get_token_with_credential_fallback("modules", "github.com")
                 second = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert first == second == "cached-tok"
@@ -379,11 +389,14 @@ class TestGetTokenWithCredentialFallback:
         """None results are cached to avoid retrying failed lookups."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
-            ) as mock_gh, patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value=None
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value=None
+                ) as mock_cred,
+            ):
                 first = manager.get_token_with_credential_fallback("modules", "github.com")
                 second = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert first is None
@@ -395,13 +408,16 @@ class TestGetTokenWithCredentialFallback:
         """Different hosts get independent cache entries."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
-            ) as mock_gh, patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_git",
-                side_effect=lambda h, port=None: f"tok-{h}",
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_git",
+                    side_effect=lambda h, port=None: f"tok-{h}",
+                ) as mock_cred,
+            ):
                 tok1 = manager.get_token_with_credential_fallback("modules", "github.com")
                 tok2 = manager.get_token_with_credential_fallback("modules", "gitlab.com")
                 assert tok1 == "tok-github.com"
@@ -413,9 +429,12 @@ class TestGetTokenWithCredentialFallback:
         """Generic hosts should not invoke gh CLI fallback."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli") as mock_gh, patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
-            ) as mock_cred:
+            with (
+                patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli") as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
+                ) as mock_cred,
+            ):
                 token = manager.get_token_with_credential_fallback("modules", "gitlab.com")
                 assert token == "cred-token"
                 mock_gh.assert_not_called()

@@ -362,7 +362,9 @@ class AuthResolver:
             # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
             if host_info.kind == "ado":
                 raise exc
-            _log(f"Token from {auth_ctx.source} failed, trying fallback credentials for {host_info.display_name}")
+            _log(
+                f"Token from {auth_ctx.source} failed, trying fallback credentials for {host_info.display_name}"
+            )
             if host_info.kind in ("github", "ghe_cloud", "ghes"):
                 gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
                 if gh_token:
