@@ -556,18 +556,20 @@ class AgentsCompiler:
         # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
         claude_rules_dir = self.base_dir / ".claude" / "rules"
         skip_instructions = False
-        if claude_rules_dir.is_dir() and any(claude_rules_dir.glob("*.md")):
+        if claude_rules_dir.is_dir():
             from ..utils.path_security import PathTraversalError, ensure_path_within
 
             try:
                 ensure_path_within(claude_rules_dir, self.base_dir)
-                skip_instructions = True
             except PathTraversalError:
                 self._log(
                     "progress",
                     ".claude/rules/ is a symlink outside the project root -- ignoring",
                     symbol="warning",
                 )
+            else:
+                if any(claude_rules_dir.glob("*.md")):
+                    skip_instructions = True
 
         if skip_instructions:
             self._log(

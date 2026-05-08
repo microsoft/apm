@@ -826,7 +826,10 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         claude_dir = Path(self.tmp_resolved) / ".claude"
         claude_dir.mkdir(parents=True, exist_ok=True)
         rules_link = claude_dir / "rules"
-        rules_link.symlink_to(external_dir)
+        try:
+            rules_link.symlink_to(external_dir)
+        except OSError:
+            self.skipTest("symlinks not supported on this platform")
 
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=False)
