@@ -633,6 +633,91 @@ class TestBuildErrorContextADO:
                     assert "unset ADO_APM_PAT" in msg
                     assert "az login" in msg
 
+    def test_ado_pat_set_az_available_case4_bearer_also_failed_prefix(self):
+        """Case 4 + bearer_also_failed=True: dual-rejection prefix appears."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context(
+                        "dev.azure.com",
+                        "clone",
+                        bearer_also_failed=True,
+                    )
+                    assert "ADO_APM_PAT was rejected" in msg
+                    assert "az cli bearer was also rejected" in msg
+                    assert "unset ADO_APM_PAT" in msg
+
+    def test_ado_pat_set_az_available_case4_bearer_not_failed_no_prefix(self):
+        """Case 4 default (bearer_also_failed=False): no dual-rejection prefix."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone")
+                    assert "ADO_APM_PAT was rejected" not in msg
+                    assert "az cli bearer was also rejected" not in msg
+
+    def test_ado_no_pat_case2_ignores_bearer_also_failed_kwarg(self):
+        """Case 2 (no PAT, bearer rejected) must NOT render PAT-rejected prefix
+        even if bearer_also_failed=True is passed -- the prefix wording is
+        contradictory when no PAT was tried. Defends against contradictory
+        diagnostics if future callers misuse the kwarg."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    mock_provider.get_current_tenant_id.return_value = "tenant-abc"
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context(
+                        "dev.azure.com",
+                        "clone",
+                        bearer_also_failed=True,
+                    )
+                    assert "ADO_APM_PAT was rejected" not in msg
+                    assert "tenant" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestStalePATDiagnosticDedup -- per-host dedup of warning emission
+# ---------------------------------------------------------------------------
+
+
+class TestStalePATDiagnosticDedup:
+    def test_same_host_emits_once(self):
+        """Two calls with same host -> warn called exactly once.
+
+        The dedup uses _stale_pat_warned_hosts on the AuthResolver instance.
+        Without dedup, users hit N warnings per dependency under the same
+        host cluster; this regression-trap defends the per-host promise.
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                # Each emit_stale_pat_diagnostic that fires calls _rich_warning
+                # twice (msg + detail). One emission -> 2 calls; dedup'd second
+                # call -> still 2 total.
+                assert mock_warn.call_count == 2
+
+    def test_different_hosts_each_emit_once(self):
+        """Different hosts dedup independently."""
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                resolver.emit_stale_pat_diagnostic("contoso.visualstudio.com")
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                # Two distinct hosts emit; each emission calls _rich_warning
+                # twice (msg + detail). Third call (dup) -> no extra calls.
+                assert mock_warn.call_count == 4
+
 
 # ---------------------------------------------------------------------------
 # TestHostInfoPort -- port field + display_name property

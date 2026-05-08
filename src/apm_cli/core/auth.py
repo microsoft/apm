@@ -527,7 +527,11 @@ class AuthResolver:
                 return (
                     f"\n    Azure DevOps requires authentication. You have two options:\n\n"
                     f"    1. Install Azure CLI and sign in (recommended for Entra ID users):\n"
-                    f"         https://aka.ms/installazurecliwindows  (or 'brew install azure-cli')\n"
+                    f"         brew install azure-cli            # macOS\n"
+                    f"         winget install Microsoft.AzureCLI # Windows\n"
+                    f"         apt-get install azure-cli         # Debian/Ubuntu\n"
+                    f"         dnf install azure-cli             # Fedora/RHEL\n"
+                    f"         (full guide: https://aka.ms/InstallAzureCli)\n"
                     f"         az login\n"
                     f"         apm install                   # retry -- no env var needed\n\n"
                     f"    2. Use a Personal Access Token:\n"
@@ -550,15 +554,14 @@ class AuthResolver:
                     f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
                 )
 
-            # Case 2: az returned token (tenant known) but ADO rejected it
-            prefix = (
-                "    ADO_APM_PAT was rejected; az cli bearer was also rejected.\n\n"
-                if bearer_also_failed
-                else ""
-            )
+            # Case 2: az returned token (tenant known) but ADO rejected it.
+            # Note: bearer_also_failed=True is structurally unreachable here --
+            # callers only set it when source == "ADO_APM_PAT" (i.e. pat_set
+            # is True), and Case 2 lives in the `not pat_set` branch. We do
+            # not render a "PAT was also rejected" prefix in this case
+            # because no PAT was tried.
             return (
-                f"\n{prefix}"
-                f"    Your az cli session (tenant: {tenant}) returned a bearer token,\n"
+                f"\n    Your az cli session (tenant: {tenant}) returned a bearer token,\n"
                 f"    but Azure DevOps rejected it (HTTP 401).\n\n"
                 f"    Check that you are signed into the correct tenant:\n"
                 f"      az account show\n"

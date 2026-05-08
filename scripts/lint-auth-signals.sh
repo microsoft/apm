@@ -25,11 +25,14 @@ violations=0
 
 # --- Rule A -----------------------------------------------------------------
 # Allowed: src/apm_cli/core/auth.py, src/apm_cli/core/azure_cli.py, tests/**.
-# All other src/ files importing get_bearer_provider must go through the
-# canonical helper instead.
-echo "[*] Rule A: get_bearer_provider import boundary"
+# All other src/ files referencing get_bearer_provider must go through the
+# canonical helper instead. We scan for ANY reference to the symbol (not
+# just imports), so multi-line `from ... import (...)` blocks and
+# module-attribute access (e.g. `azure_cli.get_bearer_provider`) are
+# caught equally.
+echo "[*] Rule A: get_bearer_provider boundary (any reference)"
 rule_a_hits=$(
-    grep -rEn "(from .*azure_cli import|import).*get_bearer_provider" \
+    grep -rEn '\bget_bearer_provider\b' \
         src/apm_cli/ --include='*.py' \
         | grep -vE '(src/apm_cli/core/auth\.py|src/apm_cli/core/azure_cli\.py)' \
         || true
@@ -37,7 +40,14 @@ rule_a_hits=$(
 
 # Exempt sites (tracked here, not via inline annotations, so the boundary is
 # auditable in one place).
-rule_a_exempt="src/apm_cli/install/validation.py"
+#   - install/validation.py: legacy direct provider use; refactor tracked
+#     as a follow-up to #1212.
+#   - deps/github_downloader.py: _execute_transport_plan clone path still
+#     open-codes the PAT->bearer protocol. Refactor onto
+#     execute_with_bearer_fallback is non-trivial because the loop wraps a
+#     stateful clone_action that mutates target_path; refactor tracked as
+#     a follow-up to #1212.
+rule_a_exempt="src/apm_cli/install/validation.py src/apm_cli/deps/github_downloader.py"
 
 while IFS= read -r hit; do
     [ -z "$hit" ] && continue

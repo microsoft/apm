@@ -988,8 +988,13 @@ class GitHubPackageDownloader:
                 _bearer_op,
                 _is_auth_failure,
             )
+            # If the bearer fallback also failed (returned the err outcome),
+            # mark bearer_also_failed so build_error_context renders the
+            # dual-rejection prefix consistently with the install preflight.
+            ado_bearer_also_failed = _is_auth_failure(outcome)
         else:
             outcome = _primary_op()
+            ado_bearer_also_failed = False
 
         if outcome[0] == "ok":
             refs = self._parse_ls_remote_output(outcome[1])
@@ -1027,6 +1032,7 @@ class GitHubPackageDownloader:
                 org=org,
                 port=dep_ref.port if dep_ref else None,
                 dep_url=dep_ref.repo_url if dep_ref else None,
+                bearer_also_failed=ado_bearer_also_failed,
             )
 
         sanitized = self._sanitize_git_error(str(e))
