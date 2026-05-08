@@ -828,7 +828,7 @@ class TestSCPPortDetection:
             DependencyReference.parse("git@host.example.com:7999")
 
     def test_scp_port_trailing_slash_no_path_raises(self):
-        """git@host:7999/ — trailing slash but empty remaining path."""
+        """git@host:7999/ -- trailing slash but empty remaining path."""
         with pytest.raises(ValueError, match="no repository path follows"):
             DependencyReference.parse("git@host.example.com:7999/")
 
@@ -902,3 +902,64 @@ class TestSCPPortDetection:
         assert dep.host == "bitbucket.example.com"
         assert dep.port == 7999
         assert dep.repo_url == "project/repo"
+
+
+class TestGiteaVirtualPackageDetection:
+    """Gitea-specific virtual package detection -- supplements TestFQDNVirtualPaths
+    and TestNestedGroupSupport with Gitea host fixtures and regression guards
+    for the len(path_segments) > 2 over-trigger."""
+
+    # --- Must NOT be virtual (nested-group repo, no virtual indicators) ---
+
+    def test_three_segment_gitea_path_is_not_virtual(self):
+        """group/subgroup/repo on Gitea is a nested-group repo, not virtual."""
+        dep = DependencyReference.parse("gitea.myorg.com/group/subgroup/repo")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "group/subgroup/repo"
+        assert dep.is_virtual is False
+
+    def test_two_segment_gitea_path_is_not_virtual(self):
+        """Simple owner/repo on a Gitea host is never virtual."""
+        dep = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.is_virtual is False
+
+    def test_four_segment_generic_path_without_indicators_is_not_virtual(self):
+        """Deep nested groups without file extensions or /collections/ are not virtual."""
+        dep = DependencyReference.parse("git.company.internal/team/skills/brand-guidelines")
+        assert dep.is_virtual is False
+        assert dep.repo_url == "team/skills/brand-guidelines"
+
+    # --- Must be virtual (explicit virtual indicators) ---
+
+    def test_gitea_virtual_file_extension(self):
+        """Path with virtual file extension on Gitea is detected as virtual."""
+        dep = DependencyReference.parse("gitea.myorg.com/owner/repo/file.prompt.md")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "file.prompt.md"
+        assert dep.is_virtual is True
+        assert dep.is_virtual_file() is True
+
+    def test_gitea_collections_path_is_virtual(self):
+        """Path with /collections/ on Gitea is detected as a virtual subdirectory package."""
+        dep = DependencyReference.parse("gitea.myorg.com/owner/repo/collections/security")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "collections/security"
+        assert dep.is_virtual is True
+        assert dep.is_virtual_subdirectory() is True
+
+    def test_dict_format_virtual_on_gitea(self):
+        """Dict format with path= on Gitea host yields a virtual package."""
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "gitea.myorg.com/owner/repo",
+                "path": "prompts/review.prompt.md",
+            }
+        )
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "prompts/review.prompt.md"
+        assert dep.is_virtual is True
