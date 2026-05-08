@@ -624,3 +624,35 @@ class TestSkipInstructions:
         content = result.content_map[temp_project / "CLAUDE.md"]
         assert "# Project Standards" in content
         assert "Use type hints and follow PEP 8." in content
+
+    def test_skip_instructions_oserror_fallback_identifies_root(
+        self, temp_project, sample_primitives
+    ):
+        """When Path.resolve() raises OSError, fallback still identifies root placement."""
+        from unittest.mock import patch
+
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {temp_project: list(sample_primitives.instructions)}
+
+        # Create a dependency so root CLAUDE.md is emitted even with skip
+        dep_dir = temp_project / "apm_modules" / "owner" / "package"
+        dep_dir.mkdir(parents=True)
+        (dep_dir / "CLAUDE.md").write_text("# dep")
+
+        config = {"skip_instructions": True}
+
+        original_resolve = Path.resolve
+
+        def raising_resolve(self_path, *args, **kwargs):
+            if "CLAUDE.md" in str(self_path):
+                raise OSError("simulated resolve failure")
+            return original_resolve(self_path, *args, **kwargs)
+
+        with patch.object(Path, "resolve", raising_resolve):
+            result = formatter.format_distributed(sample_primitives, placement_map, config)
+
+        assert result.success
+        assert len(result.content_map) == 1
+        content = result.content_map[temp_project / "CLAUDE.md"]
+        assert "# Dependencies" in content
+        assert "# Project Standards" not in content

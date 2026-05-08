@@ -813,5 +813,34 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         assert "CLAUDE.md not generated" in joined
 
 
+    def test_skip_instructions_ignores_symlink_outside_project(self):
+        """A .claude/rules/ symlinked outside the project does not trigger skip."""
+        import shutil
+
+        # Create a rules directory outside the project
+        external_dir = Path(self.tmp_resolved).parent / "external_rules"
+        external_dir.mkdir(parents=True, exist_ok=True)
+        (external_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nHacked.\n")
+
+        # Symlink .claude/rules/ to the external directory
+        claude_dir = Path(self.tmp_resolved) / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        rules_link = claude_dir / "rules"
+        rules_link.symlink_to(external_dir)
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+        result = compiler.compile(config)
+        assert result.success
+
+        # Instructions should NOT be skipped (symlink escapes project root)
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        assert claude_md.exists()
+        assert "# Project Standards" in claude_md.read_text()
+
+        # Cleanup external dir
+        shutil.rmtree(external_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

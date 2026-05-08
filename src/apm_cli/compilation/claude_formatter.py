@@ -115,7 +115,7 @@ class ClaudeFormatter:
                     try:
                         is_root = placement.claude_path.parent.resolve() == self.base_dir
                     except OSError:
-                        is_root = placement.claude_path.parent == self.base_dir
+                        is_root = placement.claude_path.parent.absolute() == self.base_dir
                     if not is_root:
                         continue
                     has_constitution = bool(read_constitution(self.base_dir))
