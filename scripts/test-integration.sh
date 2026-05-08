@@ -377,6 +377,19 @@ run_e2e_tests() {
         log_error "MCP env-var headers tests failed!"
         exit 1
     fi
+
+    # #1212 anti-regression: ADO --update preflight must fall back from a
+    # stale ADO_APM_PAT to an az-cli AAD bearer when az is logged in. Uses
+    # PATH-injected fake `git` and `az` binaries so the test is hermetic.
+    log_info "Running #1212 ADO preflight bearer-fallback E2E..."
+    echo "Command: pytest tests/integration/test_ado_preflight_bearer_fallback_e2e.py -v --tb=short"
+
+    if pytest tests/integration/test_ado_preflight_bearer_fallback_e2e.py -v --tb=short; then
+        log_success "#1212 ADO preflight bearer-fallback tests passed!"
+    else
+        log_error "#1212 ADO preflight bearer-fallback tests failed!"
+        exit 1
+    fi
     
     # Run APM Dependencies integration tests (NEW - Task 8A)
     log_info "Running APM Dependencies integration tests with real repositories..."

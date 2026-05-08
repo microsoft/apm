@@ -221,6 +221,14 @@ function Invoke-IntegrationTests {
         Write-Info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
     }
 
+    # #1212 anti-regression: ADO --update preflight bearer-fallback.
+    # The Python E2E (test_ado_preflight_bearer_fallback_e2e.py) is POSIX-only
+    # (relies on a fake `git` shim invoked via shebang); on Windows it
+    # `skipif`s. A native Windows variant is tracked as follow-up; until it
+    # exists, the unit suite (`tests/unit/install/test_pipeline_auth_preflight.py`)
+    # already covers the preflight bearer-fallback contract on every platform.
+    Write-Info "Skipping #1212 ADO preflight E2E on Windows (POSIX-only fake shim); unit suite covers the contract."
+
     Write-Success "All integration test suites completed successfully!"
 }
 #endregion

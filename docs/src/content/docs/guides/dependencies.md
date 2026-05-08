@@ -15,7 +15,7 @@ APM dependencies are git repositories containing `.apm/` directories with contex
 - **Build on tested context** instead of starting from scratch
 - **Maintain consistency** across multiple repositories and teams
 
-APM supports any git-accessible host — GitHub, GitLab, Bitbucket, self-hosted instances, and more.
+APM supports any git-accessible host — GitHub, GitLab, Bitbucket, Gitea, Gogs, self-hosted instances, and more. See [GitHub Authentication Setup](#github-authentication-setup) below for how tokens flow to non-GitHub hosts via the git credential helper.
 
 ## Dependency Types
 
@@ -37,6 +37,8 @@ APM supports multiple dependency types:
 **Virtual File Packages** download a single file (like a prompt or instruction) and integrate it directly.
 
 **Marketplaces:** Plugins installed as `apm install name@marketplace` resolve from a registered index. On **GitLab-class** hosts, monorepo plugins whose sources live in a subdirectory of the marketplace repository itself are supported without hand-writing object-form `git:` + `path:` entries. See the [Marketplaces guide](./marketplaces/).
+
+For self-hosted **Gitea** and **Gogs**, virtual subdirectory and file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab is not yet supported for virtual packages -- use git-clone-based dependencies for GitLab repos.
 
 ### Claude Skills
 

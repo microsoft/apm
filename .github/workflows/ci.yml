@@ -71,6 +71,9 @@ jobs:
           exit 1
         fi
 
+    - name: Lint - auth-protocol boundary (#1212 anti-regression)
+      run: bash scripts/lint-auth-signals.sh
+
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   # Combines unit tests + binary build into a single job to eliminate runner re-provisioning overhead.
   build-and-test:
