@@ -196,17 +196,21 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         )
 
         if ado_eligible:
-            result = auth_resolver.execute_with_bearer_fallback(
+            fallback_result = auth_resolver.execute_with_bearer_fallback(
                 dep,
                 _primary_op,
                 _bearer_op,
                 _is_auth_failure,
             )
-            # Surface bearer-also-failed signal to the diagnostic builder
-            # by checking whether execute_with_bearer_fallback returned the
-            # primary outcome (auth-failure signature still present).
+            result = fallback_result.outcome
+            # bearer_also_failed is True only when the bearer leg actually
+            # ran AND its outcome still matched the auth-failure signature.
+            # Early returns from execute_with_bearer_fallback (az
+            # unavailable, JWT acquisition failed) leave bearer_attempted
+            # False so the diagnostic does not falsely claim an attempt.
             bearer_also_failed = (
-                result is not None
+                fallback_result.bearer_attempted
+                and result is not None
                 and result.returncode != 0
                 and is_ado_auth_failure_signal(result.stderr or "")
             )

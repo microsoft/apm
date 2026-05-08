@@ -268,13 +268,15 @@ def _make_ado_resolver_with_bearer(
 
     def _exec(dep_ref, primary_op, bearer_op, is_auth_failure):
         # Real helper: run primary, then bearer if is_auth_failure(primary).
+        from apm_cli.core.auth import BearerFallbackOutcome
+
         po = primary_op()
         if is_auth_failure(po):
             bo = bearer_op("dummy.jwt.token")
             if bo is not None and not is_auth_failure(bo):
-                return bo
-            return bo if bo is not None else po
-        return po
+                return BearerFallbackOutcome(bo, True)
+            return BearerFallbackOutcome(bo if bo is not None else po, True)
+        return BearerFallbackOutcome(po, False)
 
     resolver.execute_with_bearer_fallback.side_effect = _exec
     return resolver, primary_result, bearer_result

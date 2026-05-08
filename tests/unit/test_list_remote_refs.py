@@ -62,7 +62,9 @@ def _build_downloader():
         # short-circuits to primary when is_auth_failure(primary) is False
         # (success case) or when the bearer provider is unavailable.
         def _exec_bearer_fallback(dep_ref, primary_op, bearer_op, is_auth_failure):
-            return primary_op()
+            from apm_cli.core.auth import BearerFallbackOutcome
+
+            return BearerFallbackOutcome(primary_op(), False)
 
         mock_auth.execute_with_bearer_fallback.side_effect = _exec_bearer_fallback
         downloader = GitHubPackageDownloader(auth_resolver=mock_auth)

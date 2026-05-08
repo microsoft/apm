@@ -979,12 +979,12 @@ class GitHubPackageDownloader:
         ado_eligible = is_ado and dep_auth_scheme == "basic" and dep_token is not None
 
         if ado_eligible:
-            outcome = self.auth_resolver.execute_with_bearer_fallback(
+            fb = self.auth_resolver.execute_with_bearer_fallback(
                 dep_ref, _primary_op, _bearer_op, _is_auth_failure
             )
-            # bearer_also_failed: bearer fallback returned an auth-failure
-            # outcome (matches install preflight UX for dual-rejection).
-            ado_bearer_also_failed = _is_auth_failure(outcome)
+            outcome = fb.outcome
+            # bearer_also_failed only when the bearer leg actually ran AND failed auth.
+            ado_bearer_also_failed = fb.bearer_attempted and _is_auth_failure(outcome)
         else:
             outcome = _primary_op()
             ado_bearer_also_failed = False

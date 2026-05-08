@@ -33,7 +33,7 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, TypeVar  # noqa: F401
+from typing import TYPE_CHECKING, NamedTuple, Optional, TypeVar  # noqa: F401
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.utils.github_host import (
@@ -100,6 +100,20 @@ class AuthContext:
 # ---------------------------------------------------------------------------
 # AuthResolver
 # ---------------------------------------------------------------------------
+
+
+class BearerFallbackOutcome(NamedTuple):
+    """Result of :meth:`AuthResolver.execute_with_bearer_fallback`.
+
+    ``bearer_attempted`` is True iff ``bearer_op`` was actually invoked.
+    Callers use it to distinguish "PAT rejected, bearer also rejected"
+    (both halves failed) from "PAT rejected, bearer never tried" (early
+    return: non-ADO, az unavailable, JWT acquisition failed) so the user
+    diagnostic does not falsely claim an attempt that never happened.
+    """
+
+    outcome: object
+    bearer_attempted: bool
 
 
 class AuthResolver:
@@ -453,11 +467,13 @@ class AuthResolver:
     ) -> str:
         """Build an actionable error message for auth failures.
 
-        ``bearer_also_failed=True`` prepends a single line to the Case 2
-        block (az signed in, bearer rejected) clarifying that ADO_APM_PAT
-        was tried first and rejected before the bearer attempt -- so the
-        user understands why both halves of the protocol failed without
-        having to read the full diagnostic context.
+        ``bearer_also_failed=True`` prepends a single line to the Case 4
+        block (PAT set, az available, both attempts failed) clarifying
+        that ADO_APM_PAT was tried first and rejected before the bearer
+        attempt -- so the user understands why both halves of the
+        protocol failed without having to read the full diagnostic
+        context. Callers MUST only set this when the bearer attempt
+        actually ran (see :class:`BearerFallbackOutcome.bearer_attempted`).
         """
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
@@ -742,7 +758,7 @@ class AuthResolver:
         if host_display in self._stale_pat_warned_hosts:
             return
         self._stale_pat_warned_hosts.add(host_display)
-        msg = f"ADO_APM_PAT was rejected for {host_display} (HTTP 401); fell back to az cli bearer."
+        msg = f"ADO_APM_PAT was rejected for {host_display}; fell back to az cli bearer."
         detail = "Consider unsetting the stale variable."
         diagnostics = self._diagnostics_or_none()
         if diagnostics is not None:
@@ -806,7 +822,7 @@ class AuthResolver:
         primary_op,
         bearer_op,
         is_auth_failure,
-    ):
+    ) -> BearerFallbackOutcome:
         """Run ``primary_op``; on a confirmed auth failure for ADO, retry
         via AAD bearer using ``bearer_op(bearer_token)``.
 
@@ -829,36 +845,39 @@ class AuthResolver:
                 failed", etc.). Caller knows the outcome shape; resolver does not.
 
         Returns:
-            The outcome of ``bearer_op`` on successful fallback, otherwise
-            the outcome of ``primary_op``. Never raises (exceptions from
-            ``bearer_op`` are swallowed and the primary outcome is returned
-            so the caller's existing error rendering still runs).
+            :class:`BearerFallbackOutcome` carrying the final ``outcome``
+            plus a ``bearer_attempted`` flag. The flag is True iff
+            ``bearer_op`` was actually invoked (ADO + auth-failure signature
+            + az provider available + JWT acquired) and lets callers
+            distinguish "PAT rejected, bearer also rejected" from "PAT
+            rejected, bearer never tried" for accurate diagnostics. Never
+            raises (exceptions from ``bearer_op`` are swallowed).
         """
         primary = primary_op()
         if dep_ref is None or not getattr(dep_ref, "is_azure_devops", lambda: False)():
-            return primary
+            return BearerFallbackOutcome(primary, False)
         if not is_auth_failure(primary):
-            return primary
+            return BearerFallbackOutcome(primary, False)
         try:
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
         except ImportError:
-            return primary
+            return BearerFallbackOutcome(primary, False)
         provider = get_bearer_provider()
         if not provider.is_available():
-            return primary
+            return BearerFallbackOutcome(primary, False)
         try:
             bearer = provider.get_bearer_token()
         except AzureCliBearerError:
-            return primary
+            return BearerFallbackOutcome(primary, False)
         try:
             fallback = bearer_op(bearer)
         except Exception:
-            return primary
+            return BearerFallbackOutcome(primary, True)
         if fallback is None or is_auth_failure(fallback):
-            return primary
+            return BearerFallbackOutcome(primary, True)
         host_display = getattr(dep_ref, "host", None) or "dev.azure.com"
         self.emit_stale_pat_diagnostic(host_display)
-        return fallback
+        return BearerFallbackOutcome(fallback, True)
 
 
 # ---------------------------------------------------------------------------
