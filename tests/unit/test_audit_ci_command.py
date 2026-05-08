@@ -136,7 +136,7 @@ class TestCIOutputFormats:
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
             result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert "passed" in data
         assert "checks" in data
         assert "summary" in data
@@ -147,7 +147,7 @@ class TestCIOutputFormats:
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
             result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "sarif"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data["version"] == "2.1.0"
         assert "runs" in data
 

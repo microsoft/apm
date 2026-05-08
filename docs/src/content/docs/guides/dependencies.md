@@ -239,6 +239,18 @@ apm install --dry-run
 
 `apm install` also deploys the project's own `.apm/` content (instructions, prompts, agents, skills, hooks, commands) to target directories alongside dependency content. Local content takes priority over dependencies on collision. This works even with zero dependencies -- just `apm.yml` and a `.apm/` directory is enough. See the [CLI reference](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content) for details and exceptions.
 
+:::caution[Migrating from auto-copilot fallback]
+Older APM versions silently deployed to `.github/` (Copilot) when no harness signal was present in the project. Starting with the target-resolution overhaul, that silent fallback is gone: an empty repo with no `targets:` in `apm.yml` and no harness marker (`.claude/`, `.cursor/`, `.github/copilot-instructions.md`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`) now exits 2 with a teaching message.
+
+Pick one of the explicit fixes:
+
+- `apm install --target copilot` -- one-shot deploy to `.github/`.
+- Add `targets: [copilot]` (or any other harness) to `apm.yml` -- persists across runs.
+- Create the harness marker (e.g. `touch .github/copilot-instructions.md`) -- auto-detect picks it up.
+
+Run `apm targets` first to see what APM detects (or doesn't) in the current directory.
+:::
+
 ### 3. Verify Installation
 
 ```bash
@@ -476,6 +488,23 @@ mcp:
 ```bash
 apm install --trust-transitive-mcp
 ```
+
+### Environment variable placeholders
+
+`env`, `headers`, and `args` values may reference environment variables using either of two equivalent forms:
+
+| Syntax        | Meaning                                                     |
+| ------------- | ----------------------------------------------------------- |
+| `${VAR}`      | Reference to an environment variable named `VAR`            |
+| `${env:VAR}`  | Same as above (VS Code-style prefix, normalized internally) |
+
+How APM materializes a placeholder depends on the target harness:
+
+- **Copilot CLI** (`~/.copilot/mcp-config.json`): the placeholder is preserved as `${VAR}` in the generated config and resolved by Copilot CLI from the host environment at server-start. APM never reads the value, so secrets stay in your shell. Make sure the variable is exported before launching `gh copilot`.
+- **VS Code** (`.vscode/mcp.json`): the placeholder is rewritten to VS Code's `${env:VAR}` form and resolved by VS Code at server-start.
+- **Other harnesses** (Cursor, Windsurf, OpenCode, Claude Desktop, Gemini, Codex): the placeholder is resolved from the current process environment at install time and the literal value is written into the harness config.
+
+The legacy `<VAR>` syntax is still accepted for backward compatibility but emits a deprecation warning; migrate to `${VAR}` in `apm.yml`.
 
 ### Validation
 

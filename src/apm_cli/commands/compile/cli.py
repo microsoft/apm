@@ -314,6 +314,13 @@ def _resolve_compile_target(target):
         "need per-client skill layouts."
     ),
 )
+@click.option(
+    "--all",
+    "compile_all",
+    is_flag=True,
+    default=False,
+    help="Compile for all canonical targets. Equivalent to --target all.",
+)
 @click.pass_context
 def compile(
     ctx,
@@ -330,6 +337,7 @@ def compile(
     local_only,
     clean,
     legacy_skill_paths,
+    compile_all,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -350,6 +358,22 @@ def compile(
     * --clean: Remove orphaned AGENTS.md files that are no longer generated
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
+
+    # --all flag: equivalent to --target all, with deprecation path
+    if compile_all:
+        if target is not None:
+            logger.error("Cannot use --all together with --target")
+            sys.exit(2)
+        target = "all"
+    elif (isinstance(target, str) and target == "all") or (
+        isinstance(target, list) and "all" in target
+    ):
+        # Surface deprecation through the same UX channel as other
+        # warnings so users actually see it (convergence item 9).
+        # warnings.warn(DeprecationWarning) is invisible by default in
+        # CLI output and would only ever fire for downstream library
+        # consumers running with -W default, which we have none of.
+        logger.warning("'--target all' is deprecated; use '--all' instead.")
 
     try:
         # Check if this is an APM project first
@@ -456,6 +480,27 @@ def compile(
         if apm_yml_path.exists():
             apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
             config_target = apm_pkg.target
+            # Parity with `apm install`: also honor canonical plural
+            # `targets:` key (#1154).  APMPackage only reads singular
+            # `target:`; parse_targets_field handles both keys, raises
+            # ConflictingTargetsError when both appear, and validates
+            # tokens against CANONICAL_TARGETS.  When only `targets:` is
+            # present, apm_pkg.target is None and we promote the plural
+            # list here so compile sees the same schema install sees.
+            if config_target is None:
+                try:
+                    from ...core.apm_yml import parse_targets_field
+                    from ...utils.yaml_io import load_yaml
+
+                    _raw = load_yaml(apm_yml_path)
+                    if isinstance(_raw, dict):
+                        _yaml_targets = parse_targets_field(_raw)
+                        if _yaml_targets:
+                            config_target = (
+                                _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
+                            )
+                except Exception:
+                    pass
 
         # Resolve list targets to compiler-understood value
         compile_target = _resolve_compile_target(target)
@@ -484,6 +529,55 @@ def compile(
             # Keep the detected target intact so the compiler can preserve
             # minimal-mode semantics (AGENTS.md only, no .github side outputs).
             effective_target = detected_target
+
+        # Emit canonical provenance line BEFORE compilation -- mirrors
+        # `apm install` so users see the same `[i] Targets: ...
+        # (source: ...)` line on both surfaces.  Use the user-facing
+        # source values (target / config_target) NOT the compiler-family
+        # expansion in effective_target -- install shows the schema names
+        # the user wrote (e.g. "copilot"), so compile must too, otherwise
+        # parity drifts (compile would print "agents, vscode" for the
+        # same input).
+        from ...core.target_detection import ResolvedTargets, format_provenance
+        from ...utils.console import _rich_info
+
+        def _coerce_provenance_targets(value):
+            if value is None:
+                return []
+            if isinstance(value, str):
+                return [t.strip() for t in value.split(",") if t.strip()]
+            if isinstance(value, list):
+                return [str(t) for t in value]
+            if isinstance(value, frozenset):
+                return sorted(value)
+            return []
+
+        if detection_reason == "explicit --target flag":
+            _provenance_targets = _coerce_provenance_targets(target)
+            _provenance_source = "--target flag"
+        elif detection_reason == "apm.yml target":
+            _provenance_targets = _coerce_provenance_targets(config_target)
+            _provenance_source = "apm.yml"
+        else:
+            if isinstance(effective_target, frozenset):
+                _provenance_targets = sorted(effective_target)
+            elif isinstance(effective_target, str):
+                _provenance_targets = [effective_target]
+            else:
+                _provenance_targets = []
+            _provenance_source = f"auto-detect ({detection_reason})"
+
+        if _provenance_targets:
+            _rich_info(
+                format_provenance(
+                    ResolvedTargets(
+                        targets=sorted(set(_provenance_targets)),
+                        source=_provenance_source,
+                        auto_create=True,
+                    )
+                ),
+                symbol="info",
+            )
 
         # Build config with distributed compilation flags (Task 7)
         config = CompilationConfig.from_apm_yml(

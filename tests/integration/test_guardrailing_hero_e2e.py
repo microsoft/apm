@@ -127,7 +127,9 @@ class TestGuardrailingHeroScenario:
             # Step 1: apm init my-project
             print("\n=== Step 1: apm init my-project ===")
             result = run_command(
-                f"{apm_binary} init my-project --yes", cwd=workspace, show_output=True
+                f"{apm_binary} init my-project --yes --target copilot",
+                cwd=workspace,
+                show_output=True,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 

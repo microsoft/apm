@@ -42,6 +42,12 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     target_name: str = "claude"
     mcp_servers_key: str = "mcpServers"
 
+    # Claude Desktop / Code's mcp config does NOT support runtime env-var
+    # substitution -- the value in ``env`` must be a literal string. This
+    # adapter MUST keep the legacy install-time resolution behaviour.
+    # See #1152 supply-chain analysis.
+    _supports_runtime_env_substitution: bool = False
+
     @staticmethod
     def _normalize_mcp_entry_for_claude_code(entry: dict) -> dict:
         """Normalize a server entry to Claude Code's on-disk shape.

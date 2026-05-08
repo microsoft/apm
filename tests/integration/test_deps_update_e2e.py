@@ -92,6 +92,7 @@ def _write_apm_yml(target_dir, packages):
     config = {
         "name": "deps-update-test",
         "version": "1.0.0",
+        "target": "copilot",
         "dependencies": {"apm": packages, "mcp": []},
     }
     (target_dir / "apm.yml").write_text(
@@ -244,6 +245,7 @@ def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
                 {
                     "name": "global-deps-update-test",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {
                         "apm": [{"git": SAMPLE_GIT_URL, "ref": ref}],
                         "mcp": [],

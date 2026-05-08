@@ -98,6 +98,7 @@ permissions:
 imports:
   - uses: shared/apm.md
     with:
+      target: copilot
       packages:
         - microsoft/apm#main
 
@@ -269,26 +270,38 @@ fetch the full body again -- the cap is the cap.
 
 ### SCHEDULED_SWEEP
 
-Find up to 10 untriaged open issues, oldest first, excluding bots:
+Find up to 10 untriaged open issues, **oldest first**, excluding
+bots. The candidate list lives in the GitHub MCP server -- shell `gh`
+is not authenticated, so use the MCP `search_issues` tool with a
+server-side filter that excludes already-triaged issues:
 
-```bash
-gh issue list \
-  --repo "${{ github.repository }}" \
-  --state open \
-  --limit 200 \
-  --json number,title,author,labels,locked,createdAt,body,id
+```
+search_issues(
+  query: "repo:microsoft/apm is:open is:issue -label:status/triaged sort:created-asc",
+  perPage: 30,
+)
 ```
 
-In your reasoning step (no shell required), filter the result:
+**Why `search_issues` and not `list_issues`:** GitHub Search supports
+the `-label:status/triaged` negation, so the response contains ONLY
+the candidates we care about. With `list_issues` we'd have to
+paginate the entire open-issue queue and filter the triaged label
+client-side -- and the MCP gateway's DIFC integrity filter silently
+drops responses from non-collaborator authors mid-page, which makes
+"is the next page worth fetching?" reasoning unreliable. The search
+API sidesteps both problems.
+
+The `sort:created-asc` qualifier returns oldest first, so the first
+30 results are the oldest untriaged issues -- exactly the queue we
+want to drain. **One page is enough.** If `total_count` is greater
+than 30 the extras roll to tomorrow's sweep; do not paginate.
+
+In your reasoning step (no shell required), filter the response:
 
 - Drop any issue where `author.is_bot` is true or `author.login`
   matches common bot patterns (`*[bot]`, `dependabot*`,
   `github-actions*`, `renovate*`).
 - Drop any issue where `locked` is true.
-- Drop any issue whose `labels` contains `status/triaged`. That label
-  is the explicit "this issue has been through agentic triage" signal.
-  A maintainer can re-trigger triage by removing it (sweep re-picks)
-  or by applying `status/needs-triage` (fast path).
 - Drop any issue with an empty or template-only body.
 - **Spam-shape filter** (drop AND do NOT mark `status/triaged` -- they
   stay in queue for human review):
@@ -303,8 +316,14 @@ In your reasoning step (no shell required), filter the result:
   log (no comment, no labels, no triage); a maintainer who reviews the
   issue can manually apply `status/needs-triage` to force a panel run.
 
-After dropping bots/locked/triaged/template/spam, sort the remainder
-by `createdAt` ascending.
+Note: `status/triaged` exclusion is already done by the search query
+above, so you don't need to re-check that label. A maintainer can
+re-trigger triage by removing the label (sweep re-picks the issue) or
+by applying `status/needs-triage` (which fires the fast path).
+
+After dropping bots/locked/template/spam, the remainder is already
+sorted oldest-first by the `sort:created-asc` qualifier in the search
+query.
 
 - **Per-author quota**: when picking the final batch, take at most
   **2 issues per distinct author** per sweep. If author X has 5

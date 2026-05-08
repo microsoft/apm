@@ -202,7 +202,8 @@ class TestMCPRegistryE2E:
 
             print("Creating project with MCP dependencies...")
             result = run_command(
-                f"{apm_binary} init registry-test-project --yes", cwd=project_workspace
+                f"{apm_binary} init registry-test-project --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -331,7 +332,7 @@ class TestMCPRegistryE2E:
             project_dir = Path(project_workspace) / "empty-string-test"
 
             result = run_command(
-                f"{apm_binary} init empty-string-test --yes", cwd=project_workspace
+                f"{apm_binary} init empty-string-test --yes --target copilot", cwd=project_workspace
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -446,7 +447,7 @@ class TestMCPRegistryE2E:
             project_dir = Path(project_workspace) / "empty-string-test"
 
             result = run_command(
-                f"{apm_binary} init empty-string-test --yes", cwd=project_workspace
+                f"{apm_binary} init empty-string-test --yes --target copilot", cwd=project_workspace
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -514,7 +515,9 @@ class TestMCPRegistryE2E:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as project_workspace:
             project_dir = Path(project_workspace) / "consistency-test"
 
-            result = run_command(f"{apm_binary} init consistency-test --yes", cwd=project_workspace)
+            result = run_command(
+                f"{apm_binary} init consistency-test --yes --target copilot", cwd=project_workspace
+            )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
             # Create apm.yml with Codex script
@@ -579,7 +582,9 @@ class TestMCPRegistryE2E:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as project_workspace:
             project_dir = Path(project_workspace) / "duplication-test"
 
-            result = run_command(f"{apm_binary} init duplication-test --yes", cwd=project_workspace)
+            result = run_command(
+                f"{apm_binary} init duplication-test --yes --target copilot", cwd=project_workspace
+            )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
             # Create apm.yml
