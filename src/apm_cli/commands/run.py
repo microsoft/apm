@@ -17,7 +17,7 @@ from ._helpers import (
 )
 
 
-@click.command(help="Run a script with parameters")
+@click.command(help="Run a script with parameters (experimental)")
 @click.argument("script_name", required=False)
 @click.option("--param", "-p", multiple=True, help="Parameter in format name=value")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
