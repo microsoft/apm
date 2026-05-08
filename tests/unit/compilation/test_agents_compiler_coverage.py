@@ -817,32 +817,33 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         """A .claude/rules/ symlinked outside the project does not trigger skip."""
         import shutil
 
-        # Create a rules directory outside the project
-        external_dir = Path(self.tmp_resolved).parent / "external_rules"
-        external_dir.mkdir(parents=True, exist_ok=True)
-        (external_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nHacked.\n")
-
-        # Symlink .claude/rules/ to the external directory
-        claude_dir = Path(self.tmp_resolved) / ".claude"
-        claude_dir.mkdir(parents=True, exist_ok=True)
-        rules_link = claude_dir / "rules"
+        # Create a rules directory in a separate unique temp directory
+        external_dir = Path(tempfile.mkdtemp())
         try:
-            rules_link.symlink_to(external_dir)
-        except OSError:
-            self.skipTest("symlinks not supported on this platform")
+            (external_dir / "style.md").write_text(
+                "---\npaths:\n  - '**/*.py'\n---\nHacked.\n"
+            )
 
-        compiler = AgentsCompiler(self.tmp_resolved)
-        config = CompilationConfig(target="claude", dry_run=False)
-        result = compiler.compile(config)
-        assert result.success
+            # Symlink .claude/rules/ to the external directory
+            claude_dir = Path(self.tmp_resolved) / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            rules_link = claude_dir / "rules"
+            try:
+                rules_link.symlink_to(external_dir)
+            except OSError:
+                self.skipTest("symlinks not supported on this platform")
 
-        # Instructions should NOT be skipped (symlink escapes project root)
-        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        assert claude_md.exists()
-        assert "# Project Standards" in claude_md.read_text()
+            compiler = AgentsCompiler(self.tmp_resolved)
+            config = CompilationConfig(target="claude", dry_run=False)
+            result = compiler.compile(config)
+            assert result.success
 
-        # Cleanup external dir
-        shutil.rmtree(external_dir, ignore_errors=True)
+            # Instructions should NOT be skipped (symlink escapes project root)
+            claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+            assert claude_md.exists()
+            assert "# Project Standards" in claude_md.read_text()
+        finally:
+            shutil.rmtree(external_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

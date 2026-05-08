@@ -630,6 +630,8 @@ class TestSkipInstructions:
     ):
         """When Path.resolve() raises OSError, the .absolute() fallback correctly
         identifies root vs non-root placements."""
+        from unittest.mock import patch
+
         formatter = ClaudeFormatter(str(temp_project))
 
         # Create a dependency so root CLAUDE.md is emitted even with skip
@@ -640,33 +642,50 @@ class TestSkipInstructions:
         placement_map = {temp_project: list(sample_primitives.instructions)}
         config = {"skip_instructions": True}
 
-        # Exercise the .absolute() fallback branch directly by replicating the
-        # placement loop logic with the fallback comparison.
-        def format_with_oserror_fallback(primitives, pm, cfg):
-            # Call the real method but patch the is_root check to use fallback
-            formatter._skip_instructions = cfg.get("skip_instructions", False)
-            placements = formatter._generate_placements(
-                pm, primitives, source_attribution=cfg.get("source_attribution", True)
-            )
-            content_map = {}
-            for placement in placements:
-                if formatter._skip_instructions:
-                    # Exercise the fallback branch directly
-                    is_root = placement.claude_path.parent.absolute() == formatter.base_dir
-                    if not is_root:
-                        continue
-                    from apm_cli.compilation.constitution import read_constitution
+        # Build a placement with a mock parent that raises on resolve()
+        # but returns the correct base_dir on absolute().
+        class RaisingParent:
+            """Mimics a Path parent that fails resolve() but works with absolute()."""
 
-                    has_constitution = bool(read_constitution(formatter.base_dir))
-                    if not placement.dependencies and not has_constitution:
-                        continue
-                content = formatter._generate_claude_content(placement, primitives)
-                content_map[placement.claude_path] = content
-            return content_map
+            def resolve(self):
+                raise OSError("simulated resolve failure")
 
-        content_map = format_with_oserror_fallback(sample_primitives, placement_map, config)
+            def absolute(self):
+                return formatter.base_dir
 
-        assert len(content_map) == 1
-        content = content_map[temp_project / "CLAUDE.md"]
+            def __eq__(self, other):
+                return other == formatter.base_dir
+
+            def __hash__(self):
+                return hash(formatter.base_dir)
+
+        class MockClaudePath:
+            """A path-like object whose .parent raises on resolve()."""
+
+            def __init__(self, real_path):
+                self._real_path = real_path
+                self.parent = RaisingParent()
+
+            def __hash__(self):
+                return hash(self._real_path)
+
+            def __eq__(self, other):
+                return self._real_path == other
+
+        # Patch _generate_placements to inject our mock path
+        real_placements_fn = formatter._generate_placements
+
+        def patched_generate(*args, **kwargs):
+            placements = real_placements_fn(*args, **kwargs)
+            for p in placements:
+                p.claude_path = MockClaudePath(p.claude_path)
+            return placements
+
+        with patch.object(formatter, "_generate_placements", patched_generate):
+            result = formatter.format_distributed(sample_primitives, placement_map, config)
+
+        assert result.success
+        assert len(result.content_map) == 1
+        content = next(iter(result.content_map.values()))
         assert "# Dependencies" in content
         assert "# Project Standards" not in content
