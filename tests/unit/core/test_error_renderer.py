@@ -124,13 +124,17 @@ def test_unknown_target_error_hides_agent_skills_meta_target():
 
 def test_unknown_target_error_falls_back_when_only_meta_target_visible():
     """If the caller filters to only agent-skills, the renderer must
-    not crash and must emit a sane default suggestion (claude)."""
+    not crash and must emit a sane default suggestion (claude) -- and
+    the 'Valid targets:' line must not render as a bare colon."""
     text = render_unknown_target_error("foo", ["agent-skills"])
     # No agent-skills in suggestions...
     assert "--target agent-skills" not in text
     assert "    - agent-skills" not in text
     # ...and the safety-net default 'claude' surfaces instead.
     assert "--target claude" in text
+    # The 'Valid targets:' line must have non-empty content (#1215 review).
+    assert "Valid targets: \n" not in text
+    assert "Valid targets: claude" in text
 
 
 def test_conflicting_schema_error_has_three_parts():

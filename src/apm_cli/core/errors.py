@@ -126,18 +126,23 @@ def render_unknown_target_error(value: str, valid: list[str]) -> str:
     # continue to work; we just don't advertise it here.
     visible = [t for t in valid if t != "agent-skills"]
     visible_sorted = sorted(visible)
-    valid_csv = ", ".join(visible_sorted)
+    suggestion = (
+        "copilot"
+        if "copilot" in visible_sorted
+        else (visible_sorted[0] if visible_sorted else "claude")
+    )
+    # When the caller passes only the hidden meta-target (or an empty
+    # list), fall back to the safety-net suggestion so the "Valid
+    # targets:" line never renders as a bare colon. In practice all
+    # production call sites pass the full canonical set, so this is a
+    # defense-in-depth path for tests and future callers.
+    valid_csv = ", ".join(visible_sorted) if visible_sorted else suggestion
     # Strip bracket/quote noise that can leak in from misparsed tokens
     # (e.g. "['copilot'"). Defense-in-depth: callers should pass clean
     # values, but this keeps the headline readable if they don't. Fall
     # back to the raw value (or "<empty>") if stripping consumes
     # everything, so the headline remains actionable.
     display_value = value.strip("[]'\" ") or value or "<empty>"
-    suggestion = (
-        "copilot"
-        if "copilot" in visible_sorted
-        else (visible_sorted[0] if visible_sorted else "claude")
-    )
     return (
         f"[x] Unknown target '{display_value}'\n"
         "\n"
