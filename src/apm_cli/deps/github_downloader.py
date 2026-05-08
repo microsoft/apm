@@ -955,11 +955,8 @@ class GitHubPackageDownloader:
                 return ("err", exc)
 
         def _bearer_op(bearer):
-            # SECURITY: use AuthResolver._build_git_env(scheme="bearer") to
-            # avoid leaking the rejected PAT (still in self.git_env as
-            # GIT_TOKEN) into the bearer attempt's child-process env. The
-            # JWT travels exclusively via the http.extraHeader injected by
-            # build_ado_bearer_git_env (already invoked by _build_git_env).
+            # SECURITY: _build_git_env(scheme="bearer") yields a clean env
+            # (no leaked PAT). JWT travels via http.extraHeader.
             bearer_env = self.auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
             bearer_url = self._build_repo_url(
                 repo_url_base,
@@ -983,14 +980,10 @@ class GitHubPackageDownloader:
 
         if ado_eligible:
             outcome = self.auth_resolver.execute_with_bearer_fallback(
-                dep_ref,
-                _primary_op,
-                _bearer_op,
-                _is_auth_failure,
+                dep_ref, _primary_op, _bearer_op, _is_auth_failure
             )
-            # If the bearer fallback also failed (returned the err outcome),
-            # mark bearer_also_failed so build_error_context renders the
-            # dual-rejection prefix consistently with the install preflight.
+            # bearer_also_failed: bearer fallback returned an auth-failure
+            # outcome (matches install preflight UX for dual-rejection).
             ado_bearer_also_failed = _is_auth_failure(outcome)
         else:
             outcome = _primary_op()
