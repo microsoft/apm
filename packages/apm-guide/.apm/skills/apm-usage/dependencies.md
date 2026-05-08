@@ -167,11 +167,13 @@ dependencies:
       headers:
         X-Custom: "value"
         # Env-var placeholders in headers/env values:
-        #   ${VAR} or ${env:VAR}  -> resolved from host env at install time
-        #                            by Copilot (VS Code resolves at runtime;
-        #                            Codex passes ${...} through unchanged)
+        #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
+        #                            from host env at server-start (no plaintext on disk).
+        #                            VS Code: rewritten to ${env:VAR} and resolved at runtime.
+        #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
+        #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
-        #   <VAR>                 -> legacy Copilot syntax (still supported)
+        #   <VAR>                 -> deprecated; auto-translated, emits a warning
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 

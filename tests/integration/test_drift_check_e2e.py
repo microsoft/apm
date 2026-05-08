@@ -40,7 +40,9 @@ _INSTRUCTION_BYTES = b'---\napplyTo: "**"\n---\n# Rules\n\nE2E fixture content.\
 def _make_project(tmp_path: Path, name: str = "drift-e2e") -> Path:
     project = tmp_path / name
     project.mkdir()
-    (project / "apm.yml").write_bytes(yaml.safe_dump({"name": name, "version": "1.0.0"}).encode())
+    (project / "apm.yml").write_bytes(
+        yaml.safe_dump({"name": name, "version": "1.0.0", "target": "copilot"}).encode()
+    )
     inst_dir = project / ".apm" / "instructions"
     inst_dir.mkdir(parents=True)
     (inst_dir / "rules.instructions.md").write_bytes(_INSTRUCTION_BYTES)

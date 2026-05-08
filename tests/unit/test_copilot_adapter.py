@@ -149,15 +149,19 @@ class TestCopilotRemoteTransportValidation(unittest.TestCase):
         self.assertEqual(config["url"], "https://good.example.com/sse")
 
 
-class TestCopilotEnvVarResolutionInHeaders(unittest.TestCase):
-    """Issue #944: ``${VAR}`` and ``${env:VAR}`` in headers are install-time resolved.
-
-    Copilot CLI's mcp-config.json has no runtime env interpolation, so APM bakes
-    the actual value in. The legacy ``<VAR>`` syntax already worked; these tests
-    cover the new ``${VAR}`` and ``${env:VAR}`` syntaxes added for #944. Together
-    with the existing ``<VAR>`` path, the three syntaxes share the same
-    env_overrides -> os.environ -> prompt resolution flow.
+class TestCopilotEnvVarTranslationInHeaders(unittest.TestCase):
+    """Issue #1152: Copilot CLI adapter translates env-var placeholders to
+    its native runtime substitution syntax (``${VAR}``) instead of resolving
+    them to plaintext at install time. Per Copilot CLI documentation,
+    ``${VAR}``, ``$VAR`` and ``${VAR:-default}`` are evaluated at server
+    start, so install-time resolution unnecessarily bakes secrets to disk.
     """
+
+    def setUp(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def tearDown(self):
+        CopilotClientAdapter.reset_install_run_state()
 
     def _adapter(self):
         with (
@@ -166,64 +170,77 @@ class TestCopilotEnvVarResolutionInHeaders(unittest.TestCase):
         ):
             return CopilotClientAdapter()
 
-    def test_resolves_bare_dollar_brace_var(self):
-        adapter = self._adapter()
-        with patch.dict(os.environ, {"MY_TOKEN": "secret-xyz"}, clear=False):
-            result = adapter._resolve_env_variable(
-                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
-            )
-        self.assertEqual(result, "Bearer secret-xyz")
-
-    def test_resolves_env_prefixed_var(self):
-        """``${env:VAR}`` (VS Code-flavored) also resolves to the host env value."""
+    def test_translate_env_prefix_to_bare(self):
+        """``${env:VAR}`` becomes ``${VAR}``; the ``env:`` prefix is stripped."""
         adapter = self._adapter()
         with patch.dict(os.environ, {"MY_TOKEN": "secret-xyz"}, clear=False):
             result = adapter._resolve_env_variable(
                 "Authorization", "Bearer ${env:MY_TOKEN}", env_overrides=None
             )
-        self.assertEqual(result, "Bearer secret-xyz")
+        self.assertEqual(result, "Bearer ${MY_TOKEN}")
+        self.assertNotIn("secret-xyz", result)
 
-    def test_legacy_angle_bracket_still_works(self):
-        """Regression: ``<VAR>`` legacy syntax must keep functioning."""
+    def test_translate_bare_brace_is_idempotent(self):
+        """``${VAR}`` is already Copilot-native; pass through unchanged."""
         adapter = self._adapter()
         with patch.dict(os.environ, {"MY_TOKEN": "secret-xyz"}, clear=False):
             result = adapter._resolve_env_variable(
-                "Authorization", "Bearer <MY_TOKEN>", env_overrides=None
+                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
             )
-        self.assertEqual(result, "Bearer secret-xyz")
+        self.assertEqual(result, "Bearer ${MY_TOKEN}")
+        self.assertNotIn("secret-xyz", result)
 
-    def test_env_overrides_take_precedence(self):
-        """``env_overrides`` wins over ``os.environ``, identical to legacy behavior."""
+    def test_translation_ignores_os_environ(self):
+        """Canonical regression trap: translation MUST be pure-textual.
+        Even if the env var is set in the process, the result must be the
+        ``${VAR}`` reference -- never the literal value.
+        """
         adapter = self._adapter()
-        with patch.dict(os.environ, {"MY_TOKEN": "from-env"}, clear=False):
+        with patch.dict(os.environ, {"MY_TOKEN": "PLAINTEXT_DO_NOT_BAKE"}, clear=False):
             result = adapter._resolve_env_variable(
-                "Authorization",
-                "Bearer ${MY_TOKEN}",
-                env_overrides={"MY_TOKEN": "from-overrides"},
+                "Authorization", "Bearer ${env:MY_TOKEN}", env_overrides=None
             )
-        self.assertEqual(result, "Bearer from-overrides")
+        self.assertNotIn("PLAINTEXT_DO_NOT_BAKE", result)
+        self.assertEqual(result, "Bearer ${MY_TOKEN}")
 
-    def test_unresolvable_passes_through(self):
-        """Unset vars survive verbatim in non-interactive (env_overrides supplied) mode."""
+    def test_translation_ignores_env_overrides(self):
+        """``env_overrides`` is irrelevant in translation mode -- the value
+        is never resolved here, the variable name is preserved as-is.
+        """
         adapter = self._adapter()
-        # Make sure target var is not in env
-        with patch.dict(os.environ, {}, clear=True):
-            result = adapter._resolve_env_variable(
-                "Authorization",
-                "Bearer ${MISSING_VAR}",
-                env_overrides={"OTHER": "x"},  # presence forces non-interactive path
-            )
-        self.assertEqual(result, "Bearer ${MISSING_VAR}")
+        result = adapter._resolve_env_variable(
+            "Authorization",
+            "Bearer ${MY_TOKEN}",
+            env_overrides={"MY_TOKEN": "from-overrides"},
+        )
+        self.assertEqual(result, "Bearer ${MY_TOKEN}")
+        self.assertNotIn("from-overrides", result)
+
+    def test_default_syntax_passes_through(self):
+        """``${VAR:-default}`` is Copilot-native default syntax; passthrough."""
+        adapter = self._adapter()
+        result = adapter._resolve_env_variable(
+            "Authorization", "Bearer ${MY_TOKEN:-anon}", env_overrides=None
+        )
+        self.assertEqual(result, "Bearer ${MY_TOKEN:-anon}")
+
+    def test_legacy_angle_translates_with_warning(self):
+        """``<VAR>`` legacy APM syntax translates to ``${VAR}`` and is
+        recorded for the post-install deprecation warning."""
+        adapter = self._adapter()
+        adapter._last_legacy_angle_vars = set()
+        result = adapter._resolve_env_variable(
+            "Authorization", "Bearer <MY_TOKEN>", env_overrides=None
+        )
+        self.assertEqual(result, "Bearer ${MY_TOKEN}")
+        self.assertIn("MY_TOKEN", adapter._last_legacy_angle_vars)
 
     def test_input_syntax_is_not_resolved(self):
-        """``${input:...}`` must NOT be resolved here -- it's runtime-prompted by VS Code."""
+        """``${input:...}`` is VS Code-only; passthrough untouched."""
         adapter = self._adapter()
-        with patch.dict(os.environ, {"input": "should-not-match"}, clear=False):
-            result = adapter._resolve_env_variable(
-                "Authorization",
-                "Bearer ${input:my-token}",
-                env_overrides={"OTHER": "x"},
-            )
+        result = adapter._resolve_env_variable(
+            "Authorization", "Bearer ${input:my-token}", env_overrides=None
+        )
         self.assertEqual(result, "Bearer ${input:my-token}")
 
     def test_github_actions_template_is_not_touched(self):
@@ -232,35 +249,15 @@ class TestCopilotEnvVarResolutionInHeaders(unittest.TestCase):
         result = adapter._resolve_env_variable(
             "Authorization",
             "Bearer ${{ secrets.GITHUB_TOKEN }}",
-            env_overrides={"OTHER": "x"},
+            env_overrides=None,
         )
         self.assertEqual(result, "Bearer ${{ secrets.GITHUB_TOKEN }}")
 
-    def test_resolved_value_is_not_recursively_expanded(self):
-        """Regression guard: a resolved value containing placeholder-like text
-        must NOT be re-scanned for further substitution.
-
-        Mirrors the original ``<VAR>``-only semantics where each placeholder is
-        resolved exactly once. Important for tokens/values that legitimately
-        contain ``${...}`` literal text (e.g. regex patterns, templated strings).
-        """
+    def test_mixed_syntaxes_translated_consistently(self):
+        """A header may mix legacy ``<VAR>`` and new ``${VAR}``/``${env:VAR}``;
+        all translate to ``${VAR}``, none resolve to literal values."""
         adapter = self._adapter()
-        with patch.dict(
-            os.environ,
-            {"OUTER": "literal-${INNER}", "INNER": "should-not-appear"},
-            clear=False,
-        ):
-            # Test all three placeholder syntaxes for symmetry.
-            for syntax in ("<OUTER>", "${OUTER}", "${env:OUTER}"):
-                with self.subTest(syntax=syntax):
-                    result = adapter._resolve_env_variable(
-                        "Authorization", syntax, env_overrides={"OTHER": "x"}
-                    )
-                    self.assertEqual(result, "literal-${INNER}")
-
-    def test_mixed_syntaxes_in_one_value(self):
-        """A header may mix legacy and new placeholders; all should resolve."""
-        adapter = self._adapter()
+        adapter._last_legacy_angle_vars = set()
         with patch.dict(
             os.environ,
             {"OLD": "old-val", "NEW": "new-val", "ENV_PREFIXED": "env-val"},
@@ -271,7 +268,325 @@ class TestCopilotEnvVarResolutionInHeaders(unittest.TestCase):
                 "old=<OLD> new=${NEW} env=${env:ENV_PREFIXED}",
                 env_overrides=None,
             )
-        self.assertEqual(result, "old=old-val new=new-val env=env-val")
+        self.assertEqual(result, "old=${OLD} new=${NEW} env=${ENV_PREFIXED}")
+        for plaintext in ("old-val", "new-val", "env-val"):
+            self.assertNotIn(plaintext, result)
+
+
+class TestCopilotEnvTranslationStdioEnv(unittest.TestCase):
+    """Translation behaviour in stdio ``env`` block values."""
+
+    def _adapter(self):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CopilotClientAdapter()
+
+    def test_env_block_value_translates_to_runtime_placeholder(self):
+        """An env-var declared in registry stdio env_vars with a placeholder
+        default emits ``${KEY}`` so Copilot CLI resolves it at server start.
+        """
+        adapter = self._adapter()
+        env_vars = [
+            {"name": "MY_TOKEN", "value": "${env:MY_TOKEN}"},
+        ]
+        with patch.dict(os.environ, {"MY_TOKEN": "PLAINTEXT_DO_NOT_BAKE"}, clear=False):
+            resolved = adapter._resolve_environment_variables(env_vars, env_overrides=None)
+        self.assertEqual(resolved.get("MY_TOKEN"), "${MY_TOKEN}")
+        self.assertNotIn("PLAINTEXT_DO_NOT_BAKE", str(resolved))
+        self.assertIn("MY_TOKEN", adapter._last_env_placeholder_keys)
+
+    def test_github_toolsets_literal_default_preserved(self):
+        """Non-secret literal defaults (e.g. ``GITHUB_TOOLSETS=context``)
+        must remain literal so tools work without the user exporting them."""
+        adapter = self._adapter()
+        env_vars = [
+            {"name": "GITHUB_TOOLSETS", "value": "context"},
+        ]
+        resolved = adapter._resolve_environment_variables(env_vars, env_overrides=None)
+        self.assertEqual(resolved.get("GITHUB_TOOLSETS"), "context")
+
+
+class TestCopilotEnvTranslationStdioArgs(unittest.TestCase):
+    """Translation behaviour for placeholders in stdio command ``args``."""
+
+    def _adapter(self):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CopilotClientAdapter()
+
+    def test_args_env_placeholder_translates(self):
+        """``--host=${env:H}`` becomes ``--host=${H}`` in the rendered args."""
+        adapter = self._adapter()
+        with patch.dict(os.environ, {"H": "PLAINTEXT_DO_NOT_BAKE"}, clear=False):
+            result = adapter._resolve_variable_placeholders(
+                "--host=${env:H}", resolved_env={}, runtime_vars=None
+            )
+        self.assertEqual(result, "--host=${H}")
+        self.assertNotIn("PLAINTEXT_DO_NOT_BAKE", result)
+
+    def test_args_runtime_template_var_still_resolved(self):
+        """``{ado_org}`` template vars are APM-specific; resolved at install
+        time even in translate mode (Copilot can't see them)."""
+        adapter = self._adapter()
+        result = adapter._resolve_variable_placeholders(
+            "--org={ado_org}", resolved_env={}, runtime_vars={"ado_org": "myorg"}
+        )
+        self.assertEqual(result, "--org=myorg")
+
+
+class TestSiblingAdaptersUnchanged(unittest.TestCase):
+    """Regression trap: sibling adapters that inherit from
+    ``CopilotClientAdapter`` MUST keep the legacy install-time resolution
+    behaviour. Their ``_supports_runtime_env_substitution`` is pinned to
+    ``False`` until each is individually audited (#1152 follow-ups)."""
+
+    def _adapter(self, cls):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return cls()
+
+    def test_cursor_still_resolves_to_literal(self):
+        from apm_cli.adapters.client.cursor import CursorClientAdapter
+
+        adapter = self._adapter(CursorClientAdapter)
+        self.assertFalse(adapter._supports_runtime_env_substitution)
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer literal-value")
+
+    def test_claude_still_resolves_to_literal(self):
+        """Claude Desktop config does NOT support runtime substitution --
+        this adapter MUST keep resolving."""
+        from apm_cli.adapters.client.claude import ClaudeClientAdapter
+
+        adapter = self._adapter(ClaudeClientAdapter)
+        self.assertFalse(adapter._supports_runtime_env_substitution)
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${env:MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer literal-value")
+
+    def test_windsurf_still_resolves_to_literal(self):
+        from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
+
+        adapter = self._adapter(WindsurfClientAdapter)
+        self.assertFalse(adapter._supports_runtime_env_substitution)
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer literal-value")
+
+    def test_opencode_still_resolves_to_literal(self):
+        from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+
+        adapter = self._adapter(OpenCodeClientAdapter)
+        self.assertFalse(adapter._supports_runtime_env_substitution)
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer literal-value")
+
+    def test_gemini_still_resolves_to_literal(self):
+        from apm_cli.adapters.client.gemini import GeminiClientAdapter
+
+        adapter = self._adapter(GeminiClientAdapter)
+        self.assertFalse(adapter._supports_runtime_env_substitution)
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-value"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer literal-value")
+
+
+class TestCopilotEnvVarTranslationInStdioEnvBlock(unittest.TestCase):
+    """Issue #1152 supply-chain regression trap: self-defined stdio deps
+    pass ``env`` as a plain dict ({NAME: value}), not a list of
+    {name, description, required} dicts. The translate-mode pipeline
+    must handle this shape without silently dropping the block to ``{}``.
+    """
+
+    def setUp(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def tearDown(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def test_dict_shaped_env_block_translates_all_placeholder_syntaxes(self):
+        adapter = CopilotClientAdapter()
+        result = adapter._resolve_environment_variables(
+            {
+                "PRIMARY_TOKEN": "${MY_STDIO_TOKEN}",
+                "PREFIXED_TOKEN": "${env:MY_STDIO_TOKEN}",
+                "LEGACY_TOKEN": "<MY_LEGACY_VAR>",
+            },
+            env_overrides=None,
+        )
+        self.assertEqual(result["PRIMARY_TOKEN"], "${MY_STDIO_TOKEN}")
+        self.assertEqual(result["PREFIXED_TOKEN"], "${MY_STDIO_TOKEN}")
+        self.assertEqual(result["LEGACY_TOKEN"], "${MY_LEGACY_VAR}")
+
+    def test_dict_shaped_env_block_with_literal_replaced_by_runtime_placeholder(self):
+        adapter = CopilotClientAdapter()
+        with patch.dict(os.environ, {"MY_TOKEN": "ignored-os-env"}, clear=False):
+            result = adapter._resolve_environment_variables(
+                {"MY_TOKEN": "literal-value-from-apm-yml"}, env_overrides=None
+            )
+        self.assertEqual(result["MY_TOKEN"], "${MY_TOKEN}")
+        for v in result.values():
+            self.assertNotIn("literal-value-from-apm-yml", v)
+            self.assertNotIn("ignored-os-env", v)
+
+    def test_dict_shaped_env_block_does_not_silently_drop(self):
+        """Regression trap for the bug where dict-input was iterated as a
+        list-of-dicts, every key failed isinstance(dict), and the result
+        was an empty {} -- breaking every self-defined stdio MCP server.
+        """
+        adapter = CopilotClientAdapter()
+        result = adapter._resolve_environment_variables(
+            {"FOO": "${env:FOO}", "BAR": "${BAR}"}, env_overrides=None
+        )
+        self.assertEqual(set(result.keys()), {"FOO", "BAR"})
+
+
+class TestCopilotInstallRunSummary(unittest.TestCase):
+    """Issue #1152: aggregated post-install diagnostics.
+
+    ``emit_install_run_summary`` consolidates security-upgrade,
+    unset-env-var, and legacy-syntax diagnostics into a single
+    end-of-run block so the user sees one actionable summary even when
+    many servers were configured.
+    """
+
+    def setUp(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def tearDown(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def _adapter(self):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CopilotClientAdapter()
+
+    def test_security_upgrade_warning_when_baked_keys_detected(self):
+        """A server config that previously had literal env values triggers
+        a single security-improvement warning naming the affected keys.
+        """
+        adapter = self._adapter()
+        # Simulate a previously-baked config on disk.
+        with patch.object(
+            CopilotClientAdapter,
+            "_collect_previously_baked_keys",
+            return_value=({"GITHUB_TOKEN", "LINEAR_KEY"}, False),
+        ):
+            adapter._collect_previously_baked_keys.__call__  # noqa: B018 - sanity
+            CopilotClientAdapter._security_upgraded_keys.update({"GITHUB_TOKEN", "LINEAR_KEY"})
+
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("Security improvement", joined)
+        self.assertIn("GITHUB_TOKEN", joined)
+        self.assertIn("LINEAR_KEY", joined)
+
+    def test_security_upgrade_detects_baked_http_header_literals(self):
+        """Regression trap: a previously-baked HTTP header literal (which
+        does not expose the env-var name) must still trigger the
+        security-improvement notice for whatever placeholder keys the new
+        write introduces. The pre-fix path produced an empty intersection
+        because the headers branch added a sentinel string instead of a
+        real env-var name.
+        """
+        adapter = self._adapter()
+        # Simulate previous on-disk state: env block had no baked literals
+        # (empty set), but headers block did (True). Combined with new
+        # placeholder keys for this write, the upgrade notice MUST list
+        # the new keys -- they are the vars the user must export.
+        with patch.object(
+            CopilotClientAdapter,
+            "_collect_previously_baked_keys",
+            return_value=(set(), True),
+        ):
+            adapter._last_env_placeholder_keys = {"GH_TOKEN"}
+            previously_baked_keys, previously_baked_headers = (
+                adapter._collect_previously_baked_keys("github/server", "github-mcp")
+            )
+            self.assertEqual(previously_baked_keys, set())
+            self.assertTrue(previously_baked_headers)
+            # Mirror configure_mcp_server's upgrade-detection logic.
+            upgraded = previously_baked_keys & adapter._last_env_placeholder_keys
+            if previously_baked_headers and adapter._last_env_placeholder_keys:
+                upgraded = upgraded | adapter._last_env_placeholder_keys
+            self.assertEqual(upgraded, {"GH_TOKEN"})
+            CopilotClientAdapter._security_upgraded_keys.update(upgraded)
+
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("Security improvement", joined)
+        self.assertIn("GH_TOKEN", joined)
+        # The legacy "(http header value)" sentinel must NOT appear.
+        self.assertNotIn("(http header value)", joined)
+
+    def test_unset_env_warning_aggregates_across_servers(self):
+        """Two servers contributing different unset env vars produce a
+        single aggregated warning with a copy-pasteable export hint.
+        """
+        CopilotClientAdapter._unset_env_keys_by_server["github-mcp"] = ["GH_TOKEN"]
+        CopilotClientAdapter._unset_env_keys_by_server["linear"] = ["LINEAR_KEY"]
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+        joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
+        self.assertIn("GH_TOKEN", joined)
+        self.assertIn("LINEAR_KEY", joined)
+        self.assertIn("export GH_TOKEN=... LINEAR_KEY=...", joined)
+
+    def test_summary_emitted_only_once(self):
+        """Calling ``emit_install_run_summary`` twice in the same process
+        emits the diagnostics exactly once (idempotent guard)."""
+        CopilotClientAdapter._unset_env_keys_by_server["s"] = ["X"]
+        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            CopilotClientAdapter.emit_install_run_summary()
+            CopilotClientAdapter.emit_install_run_summary()
+        self.assertEqual(mock_warn.call_count, 1)
+
+    def test_unset_env_emit_summary_records_keys(self):
+        """``_emit_install_summary`` populates the unset-env bucket for
+        keys not present in ``os.environ``; set keys are not recorded.
+        """
+        adapter = self._adapter()
+        adapter._last_env_placeholder_keys = {"DEFINITELY_NOT_SET_VAR_XYZ"}
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DEFINITELY_NOT_SET_VAR_XYZ", None)
+            adapter._emit_install_summary("svc", {"type": "local"})
+        self.assertIn("svc", CopilotClientAdapter._unset_env_keys_by_server)
+        self.assertIn(
+            "DEFINITELY_NOT_SET_VAR_XYZ",
+            CopilotClientAdapter._unset_env_keys_by_server["svc"],
+        )
+
+    def test_set_env_var_not_recorded_as_unset(self):
+        """When the env var IS exported, the unset bucket is not
+        populated for that server."""
+        adapter = self._adapter()
+        adapter._last_env_placeholder_keys = {"PRESENT_VAR"}
+        with patch.dict(os.environ, {"PRESENT_VAR": "value"}, clear=False):
+            adapter._emit_install_summary("svc", {"type": "local"})
+        self.assertNotIn("svc", CopilotClientAdapter._unset_env_keys_by_server)
 
 
 class TestCopilotSelectRemoteWithUrl(unittest.TestCase):

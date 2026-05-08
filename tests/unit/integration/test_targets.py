@@ -76,10 +76,17 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["claude"]
 
     def test_explicit_all_returns_every_known_target(self):
-        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+        from apm_cli.core.target_detection import (
+            EXPERIMENTAL_TARGETS,
+            EXPLICIT_ONLY_TARGETS,
+        )
 
         targets = active_targets(self.root, explicit_target="all")
-        assert len(targets) == len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS)
+        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
+        assert len(targets) == expected
+        names = [t.name for t in targets]
+        assert "copilot-cowork" not in names
+        assert "agent-skills" not in names
 
     def test_explicit_vscode_alias(self):
         targets = active_targets(self.root, explicit_target="vscode")
@@ -193,17 +200,25 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["copilot"]
 
     def test_explicit_list_with_all_returns_every_known_target(self):
-        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+        from apm_cli.core.target_detection import (
+            EXPERIMENTAL_TARGETS,
+            EXPLICIT_ONLY_TARGETS,
+        )
 
         targets = active_targets(self.root, explicit_target=["all"])
-        assert len(targets) == len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS)
+        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
+        assert len(targets) == expected
 
     def test_explicit_list_all_mixed_returns_every_known_target(self):
         """'all' anywhere in the list wins."""
-        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+        from apm_cli.core.target_detection import (
+            EXPERIMENTAL_TARGETS,
+            EXPLICIT_ONLY_TARGETS,
+        )
 
         targets = active_targets(self.root, explicit_target=["claude", "all"])
-        assert len(targets) == len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS)
+        expected = len(KNOWN_TARGETS) - len(EXPLICIT_ONLY_TARGETS) - len(EXPERIMENTAL_TARGETS)
+        assert len(targets) == expected
 
     def test_explicit_list_all_unknown_returns_empty(self):
         """When the parser is bypassed and all tokens are unknown, the

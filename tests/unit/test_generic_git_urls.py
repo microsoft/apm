@@ -131,6 +131,20 @@ class TestGitLabSSH:
         assert dep.host == "gitlab.company.internal"
         assert dep.repo_url == "team/rules"
 
+    # --- Regression: #1159 -- SCP shorthand must accept any user, not just `git` ---
+
+    def test_scp_emu_enterprise_user(self):
+        """EMU/GHE SSH URLs use a non-`git` user (e.g. enterprise-user@)."""
+        dep = DependencyReference.parse("enterprise-user@ghe.corp.com:contoso/rules.git")
+        assert dep.host == "ghe.corp.com"
+        assert dep.repo_url == "contoso/rules"
+
+    def test_scp_custom_user_with_ref(self):
+        dep = DependencyReference.parse("alice@gitlab.company.internal:team/rules.git#main")
+        assert dep.host == "gitlab.company.internal"
+        assert dep.repo_url == "team/rules"
+        assert dep.reference == "main"
+
     def test_self_hosted_ssh_protocol(self):
         dep = DependencyReference.parse("ssh://git@gitlab.company.internal/team/rules.git")
         assert dep.host == "gitlab.company.internal"

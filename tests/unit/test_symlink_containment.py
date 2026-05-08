@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import tempfile
+import typing
 import unittest
 from pathlib import Path
 
@@ -240,8 +241,8 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         self.assertNotIn("evil.txt", copied)
         self.assertNotIn("agents/evil-nested.txt", copied)
 
-    def test_skill_integrator_native_skill_copytree_uses_ignore_symlinks(self):
-        """integrate_native_skills passes ignore_symlinks to shutil.copytree.
+    def test_skill_integrator_native_skill_copytree_uses_ignore_non_content(self):
+        """integrate_native_skills passes ignore_non_content to shutil.copytree.
 
         Source-level guard: if a future refactor drops the callback,
         this test fails before any malicious package can exploit it.
@@ -252,23 +253,71 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
 
         source = inspect.getsource(skill_integrator)
         # All three copytree calls in skill_integrator.py must reference
-        # ignore_symlinks (directly or via a composing helper).
+        # ignore_non_content (directly or via a composing helper).
         copytree_count = source.count("shutil.copytree(")
-        ignore_symlinks_refs = source.count("ignore_symlinks")
+        ignore_non_content_refs = source.count("ignore_non_content")
         self.assertGreaterEqual(
             copytree_count,
             3,
             f"Expected >=3 copytree calls in skill_integrator, found {copytree_count}",
         )
-        # Each copytree must be matched by at least one ignore_symlinks
-        # reference (the helper at line 818 composes one ignore_symlinks
-        # import + one usage inside a closure -- still >=copytree_count).
+        # Each copytree must be matched by at least one ignore_non_content
+        # reference (the helper composes one import + one usage inside a
+        # closure -- still >=copytree_count).
         self.assertGreaterEqual(
-            ignore_symlinks_refs,
+            ignore_non_content_refs,
             copytree_count,
-            f"Expected >={copytree_count} ignore_symlinks references "
-            f"(one per copytree); found {ignore_symlinks_refs}",
+            f"Expected >={copytree_count} ignore_non_content references "
+            f"(one per copytree); found {ignore_non_content_refs}",
         )
+
+
+class TestIgnoreNonContentSourceGuard(unittest.TestCase):
+    """Source-level guard: every copytree site that fans content out of
+    apm_modules/ to deploy targets must use ``ignore_non_content`` so
+    ``.apm-pin`` and symlinks cannot leak into the deploy tree.
+
+    Companion to ``test_skill_integrator_native_skill_copytree_uses_ignore_non_content``
+    which covers ``skill_integrator.py``; this class covers the remaining
+    three modules (plugin_parser, packer, unpacker).
+    """
+
+    # (import_path, module_attr, min_ignore_non_content_references)
+    # plugin_parser has 7 copytree calls in total: 2 agents + 3 skills +
+    # 2 hooks. After PR #1153 follow-up #2, ALL 7 use ignore_non_content;
+    # the import + 7 call sites yields >= 8 references.
+    _MODULES: typing.ClassVar[list[tuple[str, str, int]]] = [
+        ("apm_cli.deps", "plugin_parser", 7),
+        ("apm_cli.bundle", "packer", 2),
+        ("apm_cli.bundle", "unpacker", 2),
+    ]
+
+    def test_copytree_sites_use_ignore_non_content(self):
+        """Every copytree call that copies into a deploy target must pass
+        ``ignore_non_content`` (or a composing helper that wraps it).
+
+        Source-level guard: if a future refactor drops the callback at any
+        site, this test fails before a stale or malicious ``.apm-pin`` can
+        leak into the deploy target.
+        """
+        import importlib
+        import inspect
+
+        for pkg, mod_name, min_refs in self._MODULES:
+            with self.subTest(module=f"{pkg}.{mod_name}"):
+                mod = importlib.import_module(f"{pkg}.{mod_name}")
+                source = inspect.getsource(mod)
+
+                copytree_count = source.count("shutil.copytree(")
+                ignore_refs = source.count("ignore_non_content")
+
+                self.assertGreaterEqual(
+                    ignore_refs,
+                    min_refs,
+                    f"{pkg}.{mod_name}: expected >={min_refs} ignore_non_content "
+                    f"references (for {copytree_count} copytree calls); "
+                    f"found {ignore_refs}",
+                )
 
 
 if __name__ == "__main__":

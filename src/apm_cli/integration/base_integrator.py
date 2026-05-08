@@ -354,6 +354,15 @@ class BaseIntegrator:
                 scan_root = scan_root / ".apm"
             primitives = discover_primitives(scan_root)
             self.link_resolver.register_contexts(primitives)
+            # Generalized in-package asset link rewriting (#1147) needs the
+            # authoritative source-package root. Use install_path directly:
+            # for installed deps it is apm_modules/<owner>/<repo>/ (or any
+            # ADO/virtual subdir variant), for local packages it is the
+            # package's apm_modules/_local/<name>/ copy. Skip when scan_root
+            # was narrowed to .apm/ (user-scope) so we do not let asset
+            # links escape the .apm/ boundary on $HOME packages.
+            if scan_root == package_info.install_path and Path(scan_root).is_dir():
+                self.link_resolver.package_root = Path(scan_root)
         except Exception:
             self.link_resolver = None
 

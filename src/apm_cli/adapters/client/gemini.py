@@ -47,6 +47,12 @@ class GeminiClientAdapter(CopilotClientAdapter):
     target_name: str = "gemini"
     mcp_servers_key: str = "mcpServers"
 
+    # Gemini CLI's settings.json runtime-substitution support has not yet
+    # been individually audited (see #1152). Pin to legacy install-time
+    # resolution so this adapter is unchanged by the Copilot security fix;
+    # revisit in a follow-up.
+    _supports_runtime_env_substitution: bool = False
+
     def get_config_path(self):
         """Return the path to ``.gemini/settings.json`` in the repository root."""
         return str(Path(os.getcwd()) / ".gemini" / "settings.json")

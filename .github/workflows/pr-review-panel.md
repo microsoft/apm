@@ -87,6 +87,7 @@ permissions:
 imports:
   - uses: shared/apm.md
     with:
+      target: copilot
       packages:
         - microsoft/apm#main
 

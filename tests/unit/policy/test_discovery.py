@@ -94,6 +94,32 @@ class TestParseRemoteUrl(unittest.TestCase):
         result = _parse_remote_url("https://github.com/")
         self.assertIsNone(result)
 
+    # --- Regression: #1159 SCP non-`git` user (EMU / GHE) ---
+
+    def test_scp_emu_enterprise_user(self):
+        """SCP-like SSH with non-`git` user (EMU/GHE) must parse, not return None."""
+        result = _parse_remote_url("enterprise-user@ghe.corp.com:contoso/my-project.git")
+        self.assertEqual(result, ("contoso", "ghe.corp.com"))
+
+    def test_scp_custom_user(self):
+        """SCP-like SSH with arbitrary username parses correctly."""
+        result = _parse_remote_url("alice@github.example.com:org/repo.git")
+        self.assertEqual(result, ("org", "github.example.com"))
+
+    def test_scp_user_with_dot_dash(self):
+        """SCP usernames may include `.` `-` `_` `+` -- still parse."""
+        result = _parse_remote_url("first.last-1@github.com:contoso/repo.git")
+        self.assertEqual(result, ("contoso", "github.com"))
+
+    def test_ado_ssh_v3_prefix(self):
+        """Azure DevOps SSH URLs carry a `v3/` segment that is NOT the org."""
+        result = _parse_remote_url("git@ssh.dev.azure.com:v3/myorg/myproject/myrepo")
+        self.assertEqual(result, ("myorg", "ssh.dev.azure.com"))
+
+    def test_ado_ssh_v3_prefix_with_git_suffix(self):
+        result = _parse_remote_url("git@ssh.dev.azure.com:v3/myorg/myproject/myrepo.git")
+        self.assertEqual(result, ("myorg", "ssh.dev.azure.com"))
+
 
 class TestExtractOrgFromGitRemote(unittest.TestCase):
     """Test _extract_org_from_git_remote with mocked subprocess."""
