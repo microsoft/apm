@@ -241,7 +241,22 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     if _early_lockfile:
         _old_local_deployed = builtins.list(_early_lockfile.local_deployed_files)
 
-    if not all_apm_deps and not _root_has_local_primitives and not _old_local_deployed:
+    # Detect orphan APM dependencies in the previous lockfile so we don't
+    # short-circuit cleanup when the user removed every dep from apm.yml.
+    # Without this check, deleting all deps would leave their deployed files
+    # behind because the cleanup phase never runs.
+    from apm_cli.deps.lockfile import _SELF_KEY
+
+    _has_orphan_deps = bool(
+        _early_lockfile and any(k != _SELF_KEY for k in _early_lockfile.dependencies)
+    )
+
+    if (
+        not all_apm_deps
+        and not _root_has_local_primitives
+        and not _old_local_deployed
+        and not _has_orphan_deps
+    ):
         return InstallResult()
 
     # ------------------------------------------------------------------
@@ -299,7 +314,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     finally:
         ctx.tui.__exit__()
 
-    if not ctx.deps_to_install and not ctx.root_has_local_primitives:
+    if not ctx.deps_to_install and not ctx.root_has_local_primitives and not _has_orphan_deps:
         if logger:
             logger.nothing_to_install()
         return InstallResult()

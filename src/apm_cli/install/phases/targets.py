@@ -49,7 +49,6 @@ def run(ctx: InstallContext) -> None:
 
     On return ``ctx.targets`` and ``ctx.integrators`` are populated.
     """
-    from dataclasses import replace as _replace
 
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import (
@@ -209,8 +208,10 @@ def run(ctx: InstallContext) -> None:
             except _click.UsageError as exc:
                 # ConflictingTargetsError (both target: and targets: in
                 # apm.yml) is a user error -- surface with exit code 2.
+                # The renderer already emits a leading "[x]"; pass an
+                # empty symbol so logger.error doesn't double-prefix.
                 if ctx.logger:
-                    ctx.logger.error(str(exc))
+                    ctx.logger.error(str(exc), symbol="")
                 raise SystemExit(2) from exc
 
         # Skip v2 entirely when all override targets were non-canonical
@@ -247,9 +248,11 @@ def run(ctx: InstallContext) -> None:
                 # is a false positive because v2 does not handle
                 # non-canonical targets.  That case is already
                 # guarded by ``_skip_v2`` above, so it never reaches
-                # this except block.
+                # this except block.  The renderer already emits a
+                # leading "[x]"; pass an empty symbol so logger.error
+                # doesn't double-prefix.
                 if ctx.logger:
-                    ctx.logger.error(str(exc))
+                    ctx.logger.error(str(exc), symbol="")
                 raise SystemExit(2) from exc
 
             # Emit provenance BEFORE any mutation. Route via _rich_info so
@@ -282,7 +285,13 @@ def run(ctx: InstallContext) -> None:
                         raise SystemExit(1) from None
                     if ctx.logger:
                         ctx.logger.verbose_detail(f"Created {_profile.root_dir}/ ({_tname} target)")
-                _profile = _replace(_profile, resolved_deploy_root=_target_dir)
+                # NOTE: do NOT set resolved_deploy_root on static targets.
+                # That field is reserved for dynamic-root targets (cowork)
+                # and is treated as the final deploy destination by
+                # skill_integrator and base_integrator. Static targets must
+                # follow the standard primitive-mapping path so that
+                # ``deploy_root`` (e.g. .agents) and ``subdir`` (e.g. skills)
+                # are honored.
                 _v2_targets.append(_profile)
 
             # Replace legacy targets with v2 targets for project-scope.
@@ -379,7 +388,6 @@ def run_targets_phase(ctx) -> None:
     This is the three-guard collapse: every resolved target always materializes
     its deploy directory (auto_create=True unconditionally post-resolution).
     """
-    from dataclasses import replace
     from pathlib import Path
 
     from apm_cli.core.target_detection import resolve_targets
@@ -420,8 +428,12 @@ def run_targets_phase(ctx) -> None:
         if not target_dir.exists():
             target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Set resolved_deploy_root so downstream code knows the exact path
-        profile = replace(profile, resolved_deploy_root=target_dir)
+        # NOTE: do NOT set resolved_deploy_root on static targets.
+        # That field is reserved for dynamic-root targets (cowork) and is
+        # treated as the final deploy destination by downstream integrators.
+        # Static targets must follow the standard primitive-mapping path so
+        # that ``deploy_root`` (e.g. .agents) and ``subdir`` (e.g. skills)
+        # are honored.
         profiles.append(profile)
 
     ctx.targets = profiles

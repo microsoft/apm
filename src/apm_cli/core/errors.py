@@ -116,22 +116,32 @@ def render_ambiguous_error(project_root: Path | None, detected: list[str]) -> st
 
 def render_unknown_target_error(value: str, valid: list[str]) -> str:
     """Render the 3-section error for unknown target token."""
-    valid_csv = ", ".join(sorted(valid))
+    valid_sorted = sorted(valid)
+    valid_csv = ", ".join(valid_sorted)
+    # Strip bracket/quote noise that can leak in from misparsed tokens
+    # (e.g. "['copilot'"). Defense-in-depth: callers should pass clean
+    # values, but this keeps the headline readable if they don't. Fall
+    # back to the raw value (or "<empty>") if stripping consumes
+    # everything, so the headline remains actionable.
+    display_value = value.strip("[]'\" ") or value or "<empty>"
+    suggestion = (
+        "copilot" if "copilot" in valid_sorted else (valid_sorted[0] if valid_sorted else "claude")
+    )
     return (
-        f"[x] Unknown target '{value}'\n"
+        f"[x] Unknown target '{display_value}'\n"
         "\n"
         f"Valid targets: {valid_csv}\n"
         "\n"
         "Fix with one of:\n"
         "\n"
         "  apm targets                            # see all supported harnesses\n"
-        f"  apm install <pkg> --target {valid[0] if valid else 'claude'}\n"
+        f"  apm install <pkg> --target {suggestion}\n"
         "  apm install <pkg> --dry-run\n"
         "\n"
         "Or declare in apm.yml:\n"
         "\n"
         "  targets:\n"
-        f"    - {valid[0] if valid else 'claude'}"
+        f"    - {suggestion}"
     )
 
 

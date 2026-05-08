@@ -132,12 +132,16 @@ class TestDeferredStart:
             with patch.object(InstallTui, "_defer_start", autospec=True) as mock_defer:
                 with tui:
                     # Sleep slightly longer than the defer window so the
-                    # timer fires before __exit__ cancels it.
+                    # timer fires before __exit__ cancels it, then join the
+                    # Timer thread to deterministically wait for the
+                    # callback to complete. Without the join this test is
+                    # flaky on busy CI runners where threading.Timer
+                    # scheduling can slip past a fixed grace window.
                     time.sleep(_DEFER_SHOW_S + 0.10)
-                # Either the timer fired (preferred) or it was cancelled.
-                # We assert at most one call -- never multiple.
-                assert mock_defer.call_count <= 1
-                # In the typical case the timer fires; assert it did.
+                    if tui._timer is not None:
+                        tui._timer.join(timeout=2.0)
+                # The timer must have fired exactly once (deterministic
+                # via the join above).
                 assert mock_defer.call_count == 1
 
 

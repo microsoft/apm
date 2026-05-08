@@ -56,6 +56,7 @@ def project_with_apm(tmp_path: Path) -> Path:
         """\
 name: parity-test
 version: 0.1.0
+target: copilot
 dependencies:
   apm:
     - microsoft/apm-sample-package

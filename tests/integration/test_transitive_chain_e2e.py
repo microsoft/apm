@@ -56,6 +56,7 @@ def chain_workspace(tmp_path):
             {
                 "name": "consumer-project",
                 "version": "1.0.0",
+                "target": "copilot",
                 "dependencies": {"apm": []},
             }
         )
@@ -203,6 +204,7 @@ def test_asymmetric_layout_anchors_on_declaring_pkg(tmp_path, apm_command):
             {
                 "name": "consumer",
                 "version": "1.0.0",
+                "target": "copilot",
                 "dependencies": {"apm": ["./packages/specialized"]},
             }
         )
