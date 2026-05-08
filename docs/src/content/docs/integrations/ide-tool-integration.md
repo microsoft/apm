@@ -66,7 +66,7 @@ VS Code implements core primitives for GitHub Copilot that APM integrates with:
 - **Agents**: AI personas and workflows with `.agent.md` files in `.github/agents/` (legacy: `.chatmode.md` in `.github/chatmodes/`)
 - **Instructions Files**: Modular instructions with `copilot-instructions.md` and `.instructions.md` files
 - **Prompt Files**: Reusable task templates with `.prompt.md` files in `.github/prompts/`
-- **Skills**: Structured capabilities with `SKILL.md` in `.github/skills/`
+- **Skills**: Structured capabilities with `SKILL.md` deployed to `.agents/skills/` (the converged cross-client default; per-client `.github/skills/` available via `--legacy-skill-paths` or `APM_LEGACY_SKILL_PATHS=1`)
 
 > **Note**: APM supports both the new `.agent.md` format and legacy `.chatmode.md` format. VS Code provides Quick Fix actions to migrate from `.chatmode.md` to `.agent.md`.
 
@@ -197,7 +197,7 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 |---|---|---|
 | Agents (`.agent.md`) | `.opencode/agents/*.md` | Markdown with YAML frontmatter |
 | Prompts (`.prompt.md`) | `.opencode/commands/*.md` | Converted to command format |
-| Skills (`SKILL.md`) | `.opencode/skills/{name}/SKILL.md` | Identical (agentskills.io standard) |
+| Skills (`SKILL.md`) | `.agents/skills/{name}/SKILL.md` | Identical (agentskills.io standard; converged from `.opencode/skills/`) |
 | MCP servers | `opencode.json` | `mcp` key with `command` array, `environment` |
 | Instructions | Via `AGENTS.md` | Read natively by OpenCode |
 
@@ -211,7 +211,8 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 |----------|---------|
 | `.cursor/rules/*.mdc` | Instructions converted to Cursor rules format |
 | `.cursor/agents/*.md` | Sub-agents from installed packages |
-| `.cursor/skills/{name}/SKILL.md` | Skills from installed packages |
+| `.cursor/commands/*.md` | Slash commands from installed packages (from `.prompt.md` files). Files are deployed when `.cursor/` exists. Frontmatter is normalized to the common Claude-compatible subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. **Lifecycle note:** Cursor 1.6+ only. Cursor is de-emphasizing commands in favor of rules and skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes to this surface. |
+| `.agents/skills/{name}/SKILL.md` | Skills from installed packages (converged from `.cursor/skills/`) |
 | `.cursor/hooks.json` (hooks key) | Hooks from installed packages (merged into config) |
 | `.cursor/hooks/{pkg}/` | Referenced hook scripts |
 | `.cursor/mcp.json` | MCP server configurations |
@@ -227,14 +228,14 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 
 **Setup**: Create a `.codex/` directory in your project root, then run `apm install`. APM detects the directory and deploys automatically.
 
-> **Note**: Skills deploy to `.agents/skills/` (the cross-tool agent skills standard directory), not `.codex/skills/`. Agents are transformed from `.agent.md` Markdown to `.toml` format.
+> **Note**: Skills deploy to `.agents/skills/` (the cross-tool agent skills standard directory), not `.codex/skills/`. Agents are transformed from `.agent.md` Markdown to `.toml` format. Use `--target agent-skills` to deploy skills to `.agents/skills/` without also setting up `.codex/` (see [Cross-client deployment](../../guides/skills/#cross-client-deployment-agent-skills)).
 
 #### Gemini CLI (`.gemini/`)
 
 | APM Primitive | Gemini Destination | Format |
 |---|---|---|
 | Commands (`.prompt.md`) | `.gemini/commands/*.toml` | Converted from Markdown to TOML |
-| Skills (`SKILL.md`) | `.gemini/skills/{name}/` | Verbatim copy |
+| Skills (`SKILL.md`) | `.agents/skills/{name}/` | Verbatim copy (converged from `.gemini/skills/`) |
 | Hooks (`.json`) | `.gemini/settings.json` | Merged into `hooks` key |
 | MCP servers | `.gemini/settings.json` | Merged into `mcpServers` key |
 | Instructions | Via `GEMINI.md` | Compile-only (`apm compile --target gemini`) |
@@ -308,25 +309,25 @@ Review $feature_name with priority $priority.
 
 ### Automatic Skills Integration
 
-APM automatically integrates skills from installed packages into `.github/skills/`:
+By default, APM deploys skills from installed packages to `.agents/skills/` (the converged cross-client directory shared by Copilot, Cursor, OpenCode, Codex, and Gemini). Claude is the exception and continues to receive its own copy under `.claude/skills/`. Pass `--legacy-skill-paths` (or set `APM_LEGACY_SKILL_PATHS=1`) to restore per-client routing.
 
 ```bash
 # Install a package with skills
 apm install ComposioHQ/awesome-claude-skills/mcp-builder
 
-# Result:
-# .github/skills/mcp-builder/SKILL.md -- Skill available for agents
-# .github/skills/mcp-builder/...      -- Full skill folder copied
+# Result (default routing):
+# .agents/skills/mcp-builder/SKILL.md -- Skill available for agents
+# .agents/skills/mcp-builder/...      -- Full skill folder copied
 ```
 
 **Skill Folder Naming**: Uses the source folder name directly (e.g., `mcp-builder`, `design-guidelines`), not flattened paths.
 
 **How skill integration works:**
 1. `apm install` checks if the package contains a `SKILL.md` file
-2. If `SKILL.md` exists: copies the entire skill folder to `.github/skills/{folder-name}/` (primary location)
-3. If a `.claude/` directory exists: also copies to `.claude/skills/{folder-name}/` for Claude compatibility
-4. Sub-skills inside `.apm/skills/` are promoted to top-level `.github/skills/` entries
-5. `apm uninstall` removes the skill folder from both locations
+2. If `SKILL.md` exists: copies the entire skill folder to the resolved skills root (`.agents/skills/{folder-name}/` by default, per-client paths under `--legacy-skill-paths`)
+3. If a `.claude/` directory exists: also copies to `.claude/skills/{folder-name}/` (Claude is excluded from the convergence)
+4. Sub-skills inside `.apm/skills/` are promoted to top-level entries under the same skills root
+5. `apm uninstall` removes the skill folder from every location recorded in `apm.lock.yaml`; foreign / hand-authored skills outside the lockfile are never touched
 
 ### Automatic Hook Integration
 
@@ -420,7 +421,7 @@ apm install github/awesome-copilot/skills/review-and-refactor
 
 ### Claude Desktop Integration
 
-Skills installed to `.github/skills/` are the primary location; when a `.claude/` directory exists, APM also copies skills to `.claude/skills/` for compatibility. Each skill folder contains a `SKILL.md` that defines the skill's capabilities and any supporting files.
+Skills installed by APM deploy to `.agents/skills/` by default (the converged cross-client directory); Claude additionally receives its own copy under `.claude/skills/`. Each skill folder contains a `SKILL.md` that defines the skill's capabilities and any supporting files. Pass `--legacy-skill-paths` (or set `APM_LEGACY_SKILL_PATHS=1`) to restore per-client routing.
 
 Claude Desktop can use `CLAUDE.md` as its project instructions file. Optionally run `apm compile --target claude` to generate `CLAUDE.md` with `@import` syntax for organized instruction loading.
 
@@ -432,6 +433,47 @@ APM maintains synchronization between packages and Claude primitives:
 - **Uninstall**: Removes only that package's rules, agents, commands, and skill directories (as tracked in `apm.lock.yaml`). User-authored files are preserved.
 - **Update**: Refreshes rules, agents, commands, and skills when package version changes
 - **Virtual Packages**: Individual files and skills (e.g., `github/awesome-copilot/skills/review-and-refactor`) are tracked via `apm.lock.yaml` and removed correctly on uninstall
+
+## Windsurf Integration
+
+APM integrates with Windsurf/Cascade by deploying primitives into the workspace `.windsurf/` directory.
+
+> **Auto-Detection**: Windsurf integration is enabled only when a `.windsurf/` folder ALREADY exists in your project. Unlike VS Code or Claude, `apm install` will NOT create the folder for you. To opt in, either run `mkdir .windsurf` first, pass an explicit target (`apm install --target windsurf`), or set `target: windsurf` in `apm.yml`.
+
+### Native Windsurf Primitives
+
+When you run `apm install` (with `.windsurf/` present or `--target windsurf`), APM deploys package primitives to Windsurf's native locations:
+
+| APM Primitive | Windsurf Destination | Format |
+|---|---|---|
+| Instructions (`.instructions.md`) | `.windsurf/rules/*.md` | Windsurf rules markdown with `trigger`/`globs` frontmatter |
+| Agents (`.agent.md`) | `.windsurf/skills/<name>/SKILL.md` | Converted to a Windsurf Skill (lossy, see below) |
+| Skills (`SKILL.md`) | `.windsurf/skills/<name>/SKILL.md` | Standard `SKILL.md` format |
+| Commands (`.prompt.md`) | `.windsurf/workflows/*.md` | Windsurf workflow markdown |
+| Hooks | `.windsurf/hooks.json` | Hook definitions merged into a single file |
+
+Reference: [Windsurf memories and rules](https://docs.windsurf.com/windsurf/cascade/memories).
+
+### Lossy Agent to Skill Conversion
+
+Windsurf has no native equivalent of an `.agent.md` persona, so APM converts each agent into a Windsurf Skill (`SKILL.md`). The conversion is deliberately lossy:
+
+- **Preserved**: `name`, `description`, and the full markdown body (verbatim).
+- **Dropped**: `tools` and `model` frontmatter keys -- Windsurf Skills do not support them.
+
+APM prints a warning when a dropped field is detected, so the loss is never silent. If your agent depends on a specific tool list or model pin, prefer a target that supports those keys natively (Copilot, Claude).
+
+### MCP Configuration
+
+Windsurf reads MCP server definitions from a USER-SCOPE file at `~/.codeium/windsurf/mcp_config.json`. The schema is the standard `mcpServers` JSON used by GitHub Copilot CLI. The workspace `.windsurf/` directory does NOT contain MCP config -- there is nothing to commit per project.
+
+Reference: [Windsurf MCP integration](https://docs.windsurf.com/windsurf/cascade/mcp).
+
+### User-Scope Installation Limitations
+
+Windsurf has partial user-scope support. `apm install -g --target windsurf` deploys agents, skills, commands, and hooks under `~/.codeium/windsurf/`, but **instructions (rules) are skipped** at user scope -- Windsurf does not expose a user-level rules directory in the same shape as the workspace one. Keep instruction packages workspace-local.
+
+See [Global Installation](../../guides/dependencies/#global-user-scope-installation) for cross-target user-scope coverage.
 
 ## Other IDE Support
 
@@ -458,7 +500,7 @@ APM natively integrates with Cursor when a `.cursor/` directory exists in your p
 |---|---|---|
 | Instructions (`.instructions.md`) | `.cursor/rules/*.mdc` | Converted: `applyTo:` → `globs:` frontmatter |
 | Agents (`.agent.md`) | `.cursor/agents/*.md` | Markdown with YAML frontmatter |
-| Skills (`SKILL.md`) | `.cursor/skills/{name}/SKILL.md` | Identical (agentskills.io standard) |
+| Skills (`SKILL.md`) | `.agents/skills/{name}/SKILL.md` | Identical (agentskills.io standard; converged from `.cursor/skills/`) |
 | Hooks (`.json`) | `.cursor/hooks.json` + `.cursor/hooks/{pkg}/` | Merged JSON config |
 | MCP servers | `.cursor/mcp.json` | Standard `mcpServers` JSON |
 
@@ -523,11 +565,16 @@ APM configures MCP servers in the native config format for each supported client
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | JSON `mcpServers` object |
 | Codex CLI (project) | `.codex/config.toml` | TOML `mcp_servers` section |
 | Codex CLI (`--global`) | `~/.codex/config.toml` | TOML `mcp_servers` section |
-| Claude | `.claude/settings.json` | JSON `mcpServers` object |
+| Claude Code (project) | `.mcp.json` | JSON `mcpServers` object (opt-in: requires `.claude/`) |
+| Claude Code (`-g`/`--global`) | `~/.claude.json` | JSON `mcpServers` object (atomic write; `0o600` on first create) |
 | Cursor | `.cursor/mcp.json` | JSON `mcpServers` object |
 | Gemini CLI | `.gemini/settings.json` | JSON `mcpServers` object |
 
-**Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration.
+**Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration. Supported runtime names: `copilot`, `codex`, `vscode`, `cursor`, `opencode`, `gemini`, `claude`.
+
+**Claude Code detection**: APM considers Claude Code available when either the `claude` CLI command is on PATH **or** a `.claude/` directory exists in the resolved project root. Project-scope writes are gated on `.claude/` being present (mirroring Cursor / OpenCode), so `apm install` will not create `.mcp.json` until you opt in by creating the directory.
+
+**Claude Code scopes**: Claude Code itself supports three scopes -- LOCAL (the default for `claude mcp add`, per-project private under `~/.claude.json -> projects.<path>.mcpServers`), PROJECT (`.mcp.json`, VCS-shared), and USER (`~/.claude.json` top-level `mcpServers`, cross-project). APM intentionally targets PROJECT and USER (mapping to `apm install` and `apm install -g/--global`) and does not implement LOCAL: APM packages are designed for reproducible team installs, which aligns with PROJECT (shared via VCS) and USER (private but cross-project), not LOCAL (private to one user, one project).
 
 **Codex CLI**: Project installs write MCP configuration to `.codex/config.toml` only when Codex is an active project target. `--global` installs write to `~/.codex/config.toml`.
 
@@ -644,7 +691,6 @@ dependencies:
 The following IDE integrations are planned for future releases:
 
 - **JetBrains IDE support**: Native integration with IntelliJ, PyCharm, WebStorm, and other JetBrains IDEs
-- **Windsurf support**: Integration with the Windsurf AI coding environment
 - **Cursor deeper integration**: Enhanced Cursor support including rule versioning and conflict resolution
 
 ## Related Resources

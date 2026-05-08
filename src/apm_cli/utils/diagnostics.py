@@ -12,7 +12,7 @@ from dataclasses import dataclass, field  # noqa: F401
 from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from apm_cli.utils.console import (
-    _get_console,
+    _get_console,  # noqa: F401  -- re-exported for back-compat (tests patch this name)
     _rich_echo,
     _rich_info,
     _rich_warning,
@@ -26,12 +26,19 @@ CATEGORY_ERROR = "error"
 CATEGORY_SECURITY = "security"
 CATEGORY_POLICY = "policy"
 CATEGORY_AUTH = "auth"
+CATEGORY_DRIFT = "drift"
 CATEGORY_INFO = "info"
+
+# Drift severities: kinds of divergence from the lockfile-defined state.
+DRIFT_MODIFIED = "modified"  # tracked file content changed
+DRIFT_UNINTEGRATED = "unintegrated"  # tracked file missing from project
+DRIFT_ORPHANED = "orphaned"  # tracked in lockfile but not produced by replay
 
 _CATEGORY_ORDER = [
     CATEGORY_SECURITY,
     CATEGORY_POLICY,
     CATEGORY_AUTH,
+    CATEGORY_DRIFT,
     CATEGORY_COLLISION,
     CATEGORY_OVERWRITE,
     CATEGORY_WARNING,
@@ -177,6 +184,37 @@ class DiagnosticCollector:
                 )
             )
 
+    def drift(
+        self,
+        path: str,
+        kind: str,
+        package: str = "",
+        detail: str = "",
+    ) -> None:
+        """Record a drift finding from ``apm audit`` replay.
+
+        Parameters
+        ----------
+        path : str
+            Project-relative path of the divergent file.
+        kind : str
+            One of ``DRIFT_MODIFIED``, ``DRIFT_UNINTEGRATED``, ``DRIFT_ORPHANED``.
+        package : str
+            Package name owning the file (best-effort; may be empty for orphans).
+        detail : str
+            Optional inline diff or extra context (rendered only in verbose).
+        """
+        with self._lock:
+            self._diagnostics.append(
+                Diagnostic(
+                    message=path,
+                    category=CATEGORY_DRIFT,
+                    package=package,
+                    detail=detail,
+                    severity=kind,
+                )
+            )
+
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
@@ -204,6 +242,11 @@ class DiagnosticCollector:
     def policy_count(self) -> int:
         """Return number of policy diagnostics."""
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_POLICY)
+
+    @property
+    def drift_count(self) -> int:
+        """Return number of drift findings."""
+        return sum(1 for d in self._diagnostics if d.category == CATEGORY_DRIFT)
 
     @property
     def has_critical_security(self) -> bool:
@@ -237,24 +280,16 @@ class DiagnosticCollector:
 
         In normal mode, shows counts and actionable hints.
         In verbose mode, also lists individual file paths / messages.
+
+        The legacy "-- Diagnostics --" section header has been removed: each
+        category renderer already labels itself, and the header added visual
+        weight without information. The closing blank-line separator is
+        retained so subsequent install output starts cleanly.
         """
         if not self._diagnostics:
             return
 
         groups = self.by_category()
-
-        console = _get_console()
-        # Separator line
-        if console:
-            try:
-                console.print()
-                console.print("-- Diagnostics --", style="bold cyan")
-            except Exception:
-                _rich_echo("")
-                _rich_echo("-- Diagnostics --", color="cyan", bold=True)
-        else:
-            _rich_echo("")
-            _rich_echo("-- Diagnostics --", color="cyan", bold=True)
 
         for cat in _CATEGORY_ORDER:
             items = groups.get(cat)
@@ -267,6 +302,8 @@ class DiagnosticCollector:
                 self._render_policy_group(items)
             elif cat == CATEGORY_AUTH:
                 self._render_auth_group(items)
+            elif cat == CATEGORY_DRIFT:
+                self._render_drift_group(items)
             elif cat == CATEGORY_COLLISION:
                 self._render_collision_group(items)
             elif cat == CATEGORY_OVERWRITE:
@@ -277,14 +314,6 @@ class DiagnosticCollector:
                 self._render_error_group(items)
             elif cat == CATEGORY_INFO:
                 self._render_info_group(items)
-
-        if console:
-            try:
-                console.print()
-            except Exception:
-                _rich_echo("")
-        else:
-            _rich_echo("")
 
     # -- Per-category renderers ------------------------------------
 
@@ -372,16 +401,11 @@ class DiagnosticCollector:
         noun = "file" if count == 1 else "files"
         _rich_warning(f"  [!] {count} {noun} skipped -- local files exist, not managed by APM")
         _rich_info("    Use 'apm install --force' to overwrite")
-        if not self.verbose:
-            _rich_info("    Run with --verbose to see individual files")
-        else:
-            # Group by package for readability
-            by_pkg = _group_by_package(items)
-            for pkg, diags in by_pkg.items():
-                if pkg:
-                    _rich_echo(f"    [{pkg}]", color="dim")
-                for d in diags:
-                    _rich_echo(f"      +- {d.message}", color="dim")
+        # Per-dep attribution is now emitted inline by the integrate phase
+        # (see services.integrate_package_primitives -- the
+        # "(files unchanged)" annotation under each [+] header). The
+        # collision footer stays as a global count summary; do NOT enumerate
+        # individual file paths even under --verbose.
 
     def _render_overwrite_group(self, items: list[Diagnostic]) -> None:
         count = len(items)
@@ -421,6 +445,34 @@ class DiagnosticCollector:
             _rich_info(f"  [i] {d.message}")
             if d.detail and self.verbose:
                 _rich_echo(f"    +- {d.detail}", color="dim")
+
+    def _render_drift_group(self, items: list[Diagnostic]) -> None:
+        """Render drift findings: modified / unintegrated / orphaned files.
+
+        Stable section header so machine consumers can grep for it.
+        Counts shown by kind, then per-file lines with severity-coded markers.
+        """
+        modified = [d for d in items if d.severity == "modified"]
+        unintegrated = [d for d in items if d.severity == "unintegrated"]
+        orphaned = [d for d in items if d.severity == "orphaned"]
+
+        total = len(items)
+        _rich_warning(f"  [!] Drift detected: {total} file(s) diverge from lockfile")
+
+        for label, group, marker in (
+            ("modified", modified, "M"),
+            ("unintegrated", unintegrated, "U"),
+            ("orphaned", orphaned, "O"),
+        ):
+            if not group:
+                continue
+            _rich_echo(f"    {len(group)} {label}:", color="yellow")
+            for d in group:
+                pkg_prefix = f"[{d.package}] " if d.package else ""
+                _rich_echo(f"      {marker}  {pkg_prefix}{d.message}", color="yellow")
+                if d.detail and self.verbose:
+                    for line in d.detail.splitlines():
+                        _rich_echo(f"         {line}", color="dim")
 
 
 def _group_by_package(items: list[Diagnostic]) -> dict[str, list[Diagnostic]]:

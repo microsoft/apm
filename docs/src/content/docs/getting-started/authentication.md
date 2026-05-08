@@ -21,6 +21,8 @@ Results are cached per-process — the same `(host, org)` pair is resolved once.
 
 All token-bearing requests use HTTPS. Tokens are never sent over unencrypted connections.
 
+`apm install <package>` validation walks the same chain as the actual install: an authenticated attempt with the resolved token first, then a credential-helper fallback (plain HTTPS where the system credential helper provides the token). This means `apm install` from the CLI never rejects a package the lockfile-driven install would accept -- useful when an env-var PAT has narrower SSO/EMU access than the token your `gh auth setup-git` / OS keychain has cached.
+
 ## Token lookup
 
 | Priority | Variable | Scope | Notes |
@@ -147,6 +149,9 @@ ADO is always auth-required. Uses 3-segment paths (`org/project/repo`). No `ADO_
 ```bash
 apm install dev.azure.com/myorg/myproject/myrepo#main
 apm install mycompany.visualstudio.com/org/project/repo  # legacy URL
+
+# Sub-path inside an ADO repo, pinned to a tag (use the _git form for sub-paths):
+apm install dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
 ```
 
 If your ADO project or repository name contains spaces, URL-encode them as `%20`:

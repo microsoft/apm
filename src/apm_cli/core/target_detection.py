@@ -21,18 +21,61 @@ Detection priority (highest to lowest):
 are accepted as aliases and map to the same internal value.
 """
 
+import warnings
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union  # noqa: F401, UP035
 
 import click
 
+
+class AgentsTargetDeprecationWarning(DeprecationWarning):
+    """Raised when the legacy ``--target agents`` alias is used.
+
+    Scoped subclass so that :mod:`apm_cli.cli` can suppress *only* this
+    deprecation (keeping all other ``DeprecationWarning`` s visible).
+    """
+
+
+# Module-level flag: set by :func:`parse_target_field` when the raw input
+# contains the ``"agents"`` token, BEFORE alias resolution collapses it.
+# Consumed by downstream phases (e.g. ``phases/targets.py``) that need to
+# emit a formatted logger warning.  Single-threaded CLI; reset at the top
+# of each :func:`parse_target_field` call.
+_agents_alias_detected: bool = False
+
+
+def agents_alias_was_detected() -> bool:
+    """Return *True* if the most recent ``parse_target_field()`` saw ``'agents'``."""
+    return _agents_alias_detected
+
+
 # Valid target values (internal canonical form)
-TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
+TargetType = Literal[
+    "vscode",
+    "claude",
+    "cursor",
+    "opencode",
+    "codex",
+    "gemini",
+    "windsurf",
+    "agent-skills",
+    "all",
+    "minimal",
+]
 
 # Compiler families used inside a multi-target frozenset. Narrower than
 # TargetType because the families are produced by _resolve_compile_target()
 # (in the compile CLI) from CLI-validated target names.
-CompileFamily = Literal["agents", "claude", "gemini"]
+#
+# Family semantics:
+#   "agents"  -> AGENTS.md is generated (any of copilot/vscode/agents/cursor/
+#                opencode/codex was requested)
+#   "vscode"  -> .github/copilot-instructions.md is generated (only when
+#                copilot/vscode/agents was specifically requested -- NOT for
+#                cursor/opencode/codex which use their own native config files)
+#   "claude"  -> CLAUDE.md is generated
+#   "gemini"  -> GEMINI.md is generated
+CompileFamily = Literal["agents", "vscode", "claude", "gemini"]
 
 # Compile target: either a single TargetType string or a frozenset of compiler
 # families ({"agents", "claude", "gemini"}) for multi-target lists.
@@ -53,6 +96,8 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "windsurf",
+    "agent-skills",
     "all",
     "minimal",
 ]
@@ -89,6 +134,10 @@ def detect_target(  # noqa: PLR0911
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
             return "gemini", "explicit --target flag"
+        elif explicit_target == "windsurf":
+            return "windsurf", "explicit --target flag"
+        elif explicit_target == "agent-skills":
+            return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -106,6 +155,10 @@ def detect_target(  # noqa: PLR0911
             return "codex", "apm.yml target"
         elif config_target == "gemini":
             return "gemini", "apm.yml target"
+        elif config_target == "windsurf":
+            return "windsurf", "apm.yml target"
+        elif config_target == "agent-skills":
+            return "agent-skills", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -116,6 +169,7 @@ def detect_target(  # noqa: PLR0911
     opencode_exists = (project_root / ".opencode").is_dir()
     codex_exists = (project_root / ".codex").is_dir()
     gemini_exists = (project_root / ".gemini").is_dir()
+    windsurf_exists = (project_root / ".windsurf").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -129,6 +183,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".codex/")
     if gemini_exists:
         detected.append(".gemini/")
+    if windsurf_exists:
+        detected.append(".windsurf/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -144,6 +200,8 @@ def detect_target(  # noqa: PLR0911
         return "codex", "detected .codex/ folder"
     elif gemini_exists:
         return "gemini", "detected .gemini/ folder"
+    elif windsurf_exists:
+        return "windsurf", "detected .windsurf/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -163,7 +221,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "agents" in target or "gemini" in target
-    return target in ("vscode", "opencode", "codex", "gemini", "all", "minimal")
+    return target in ("vscode", "opencode", "codex", "gemini", "windsurf", "all", "minimal")
 
 
 def should_compile_claude_md(target: CompileTargetType) -> bool:
@@ -196,15 +254,27 @@ def should_compile_gemini_md(target: CompileTargetType) -> bool:
     return target in ("gemini", "all")
 
 
-def should_compile_copilot_instructions_md(target: TargetType) -> bool:
+def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
     """Check if .github/copilot-instructions.md should be compiled.
 
+    Only the Copilot-native targets (copilot/vscode/agents alias) and "all"
+    trigger generation.  cursor, opencode, and codex use their own native
+    configuration files and must NOT receive copilot-instructions.md, even
+    when combined in a multi-target list.
+
     Args:
-        target: The detected or configured target
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
 
     Returns:
         bool: True if Copilot root instructions should be generated
     """
+    if isinstance(target, frozenset):
+        # "vscode" family is added to the frozenset by _resolve_compile_target()
+        # ONLY when copilot/vscode/agents was in the original list. Checking
+        # "agents" would over-fire because cursor/opencode/codex also map to
+        # the "agents" family for AGENTS.md generation.
+        return "vscode" in target
     return target in ("vscode", "all")
 
 
@@ -228,7 +298,9 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
+        "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
+        "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -240,13 +312,20 @@ def get_target_description(target: UserTargetType) -> str:
 
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
-ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex", "gemini"})
+ALL_CANONICAL_TARGETS = frozenset(
+    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf"}
+)
 
 #: Targets that the parser must accept but that are gated at runtime by
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
 EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork"})
+
+#: Stable targets excluded from "all" expansion (cross-client deploy
+#: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
+#: not represent a single client tool.
+EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
@@ -303,7 +382,11 @@ def normalize_target_list(
 #: All values accepted by the ``--target`` CLI option.
 #: Derived from canonical targets, alias keys, and the ``"all"`` keyword.
 VALID_TARGET_VALUES: frozenset[str] = (
-    ALL_CANONICAL_TARGETS | EXPERIMENTAL_TARGETS | frozenset(TARGET_ALIASES) | frozenset({"all"})
+    ALL_CANONICAL_TARGETS
+    | EXPERIMENTAL_TARGETS
+    | EXPLICIT_ONLY_TARGETS
+    | frozenset(TARGET_ALIASES)
+    | frozenset({"all"})
 )
 
 
@@ -359,6 +442,9 @@ def parse_target_field(
     if value is None:
         return None
 
+    global _agents_alias_detected
+    _agents_alias_detected = False
+
     # ---- collect raw tokens ----
     if isinstance(value, str):
         # Empty / whitespace-only / comma-only strings are user error -- a
@@ -399,22 +485,39 @@ def parse_target_field(
                 )
             )
 
-    # ---- "all" is exclusive ----
+    # ---- deprecation warning for legacy "agents" alias (once per call) ----
+    if "agents" in raw_parts:
+        _agents_alias_detected = True
+        warnings.warn(
+            "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
+            "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
+            "(.agents/skills/). Removal in v1.0.",
+            AgentsTargetDeprecationWarning,
+            stacklevel=2,
+        )
+
+    # ---- "all" handling ----
     if "all" in raw_parts:
-        if len(raw_parts) > 1:
+        non_all_tokens = {t for t in raw_parts if t != "all"}
+        if non_all_tokens - EXPLICIT_ONLY_TARGETS:
             raise ValueError(
                 _target_error(
                     "'all' cannot be combined with other targets",
                     source_path,
                 )
             )
-        return "all"
+        if not non_all_tokens:
+            return "all"
+        # "all" + explicit-only tokens (e.g. "all,agent-skills"):
+        # expand "all" to canonical targets and append the explicit-only ones.
+        expanded = sorted(ALL_CANONICAL_TARGETS) + sorted(non_all_tokens)
+        return expanded
 
     # Single-token input is returned as-is (no alias resolution).  This
     # preserves the long-standing CLI contract where ``--target copilot``
     # yields ``"copilot"`` rather than the canonical ``"vscode"``; every
     # downstream consumer (active_targets, agents_compiler,
-    # _CROSS_TARGET_MAPS, _TARGET_PREFIXES) already accepts both alias
+    # _CROSS_TARGET_MAPS, _get_target_prefixes) already accepts both alias
     # spellings, so resolving here would be a visible behaviour change
     # with zero functional benefit and would break the CLI test suite
     # (~10 ``test_single_*`` cases).  This is the one asymmetry #820's
@@ -470,7 +573,205 @@ class TargetParamType(click.ParamType):
         try:
             return parse_target_field(value)
         except ValueError as e:
+            # Use the v2 three-section error renderer for unknown targets
+            # so that CLI, apm.yml, and auto-detect all share the same
+            # error format (#1154).
+            from apm_cli.core.apm_yml import CANONICAL_TARGETS
+            from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
+
+            err_msg = str(e)
+            if "is not a valid target" in err_msg:
+                target_name = value if isinstance(value, str) else ",".join(value or [])
+                rendered = render_unknown_target_error(target_name, sorted(CANONICAL_TARGETS))
+                raise UnknownTargetError(rendered) from None
             # Click idiom: route validation errors through self.fail so the
             # user sees a clean "Invalid value for '--target': ..." message
             # rather than a Python traceback.
-            self.fail(str(e), param, ctx)
+            self.fail(err_msg, param, ctx)
+
+
+# ---------------------------------------------------------------------------
+# v2 Resolution algorithm (#1154)
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass  # noqa: E402
+
+
+@dataclass(frozen=True)
+class Signal:
+    """A filesystem marker that indicates a harness is present."""
+
+    target: str  # canonical target name: 'claude', 'copilot', etc.
+    source: str  # human-readable: 'CLAUDE.md', '.github/copilot-instructions.md'
+
+
+@dataclass(frozen=True)
+class ResolvedTargets:
+    """Result of target resolution -- the single source of truth."""
+
+    targets: list[str]  # sorted canonical target names
+    source: str  # '--target flag' | 'apm.yml' | 'auto-detect from <csv>'
+    auto_create: bool  # always True after resolution (three-guard collapse)
+
+
+# Detection signal whitelist.
+# (target, check_type, path)
+# check_type: 'dir' = is_dir(), 'file' = is_file()
+SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
+    ("claude", "dir", ".claude"),
+    ("claude", "file", "CLAUDE.md"),
+    ("cursor", "dir", ".cursor"),
+    ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
+    ("copilot", "file", ".github/copilot-instructions.md"),
+    ("codex", "dir", ".codex"),
+    ("gemini", "dir", ".gemini"),
+    ("gemini", "file", "GEMINI.md"),
+    ("opencode", "dir", ".opencode"),
+    ("windsurf", "dir", ".windsurf"),
+]
+
+# Ordered list of targets for display (excludes agent-skills meta-target).
+CANONICAL_TARGETS_ORDERED: list[str] = [
+    "claude",
+    "copilot",
+    "cursor",
+    "codex",
+    "gemini",
+    "opencode",
+    "windsurf",
+]
+
+# Canonical deploy directories for each target.
+CANONICAL_DEPLOY_DIRS: dict[str, str] = {
+    "claude": ".claude/",
+    "copilot": ".github/",
+    "cursor": ".cursor/",
+    "codex": ".codex/",
+    "gemini": ".gemini/",
+    "opencode": ".opencode/",
+    "windsurf": ".windsurf/",
+}
+
+# The primary (lowest-friction) signal for each target, used in
+# "needs <path>" display for inactive targets.
+CANONICAL_SIGNAL: dict[str, str] = {
+    "claude": "CLAUDE.md",
+    "copilot": ".github/copilot-instructions.md",
+    "cursor": ".cursor/",
+    "codex": ".codex/",
+    "gemini": "GEMINI.md",
+    "opencode": ".opencode/",
+    "windsurf": ".windsurf/",
+}
+
+
+def detect_signals(project_root: Path) -> list[Signal]:
+    """Scan project_root for harness markers per SIGNAL_WHITELIST."""
+    found: list[Signal] = []
+    for target, check_type, rel_path in SIGNAL_WHITELIST:
+        full = project_root / rel_path
+        if check_type == "dir" and full.is_dir():
+            found.append(Signal(target=target, source=rel_path + "/"))
+        elif check_type == "file" and full.is_file():
+            found.append(Signal(target=target, source=rel_path))
+    return found
+
+
+def _validate_canonical_v2(tokens: list[str]) -> None:
+    """Validate every token is a known canonical target."""
+    from apm_cli.core.apm_yml import CANONICAL_TARGETS
+    from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
+
+    for token in tokens:
+        if token not in CANONICAL_TARGETS:
+            raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
+
+
+def resolve_targets(
+    project_root: Path,
+    *,
+    flag: str | list[str] | None = None,
+    yaml_targets: list[str] | None = None,
+) -> ResolvedTargets:
+    """Resolve effective targets. Raises on error.
+
+    Priority: flag > yaml_targets > auto-detect signals.
+    """
+    from apm_cli.core.errors import (
+        AmbiguousHarnessError,
+        NoHarnessError,
+        render_ambiguous_error,
+        render_no_harness_error,
+    )
+
+    # Priority 1: --target flag
+    if flag is not None:
+        tokens = [flag] if isinstance(flag, str) else list(flag)
+        _validate_canonical_v2(tokens)
+        return ResolvedTargets(
+            targets=sorted(tokens),
+            source="--target flag",
+            auto_create=True,
+        )
+
+    # Priority 2: apm.yml targets (already validated by parse_targets_field)
+    if yaml_targets is not None and len(yaml_targets) > 0:
+        return ResolvedTargets(
+            targets=sorted(yaml_targets),
+            source="apm.yml",
+            auto_create=True,
+        )
+
+    # Priority 3: auto-detect from signals
+    signals = detect_signals(project_root)
+
+    # Dedupe by target (e.g. .claude/ + CLAUDE.md both -> 'claude')
+    target_set = sorted({s.target for s in signals})
+    signal_sources = sorted({s.source for s in signals})
+
+    if len(target_set) == 0:
+        raise NoHarnessError(render_no_harness_error(project_root))
+
+    if len(target_set) >= 2:
+        raise AmbiguousHarnessError(render_ambiguous_error(project_root, target_set))
+
+    # Exactly 1 target detected
+    return ResolvedTargets(
+        targets=target_set,
+        source=f"auto-detect from {', '.join(signal_sources)}",
+        auto_create=True,
+    )
+
+
+def expand_all_targets(
+    project_root: Path,
+    *,
+    yaml_targets: list[str] | None = None,
+) -> list[str]:
+    """Expand 'all' to (signals union yaml_targets). Raises NoHarnessError if empty."""
+    from apm_cli.core.errors import NoHarnessError, render_no_harness_error
+
+    signals = detect_signals(project_root)
+    signal_set = {s.target for s in signals}
+
+    yaml_set = set(yaml_targets) if yaml_targets else set()
+
+    combined = sorted(signal_set | yaml_set)
+
+    if not combined:
+        raise NoHarnessError(render_no_harness_error(project_root))
+
+    return combined
+
+
+def format_provenance(resolved: ResolvedTargets) -> str:
+    """Format provenance line for CLI output.
+
+    Returns the message portion (without the [i] prefix, since
+    _rich_info adds it).
+
+    # Double-space between target list and metadata is intentional and
+    # canonical. Test assertions match this exact spacing. Do not collapse.
+    """
+    targets_csv = ", ".join(resolved.targets)
+    return f"Targets: {targets_csv}  (source: {resolved.source})"

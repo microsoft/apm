@@ -251,13 +251,13 @@ These tools support the full set of APM primitives. Running `apm install` deploy
 - **GitHub Copilot** (AGENTS.md + .github/) - instructions, prompts, chat modes, context, hooks, MCP
 - **Claude Code** (CLAUDE.md + .claude/) - commands, skills, MCP configuration
 
-APM auto-detects targets based on project structure -- deploying to every recognized directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`) that exists, falling back to `.github/` when none do. Set `target` in `apm.yml` to restrict to specific targets (single string or list).
+APM auto-detects targets based on project structure -- deploying to every recognized directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.windsurf/`) that exists, falling back to `.github/` when none do. Set `target` in `apm.yml` to restrict to specific targets (single string or list).
 
 ### Compiled instructions
 
 For tools that read a single instructions file, `apm compile` merges your primitives into a portable document the tool can consume. This gives you instruction-level support rather than full primitive integration.
 
-- **Cursor** - native integration to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`, `.cursor/hooks.json`, `.cursor/mcp.json`
+- **Cursor** - native integration to `.cursor/rules/`, `.cursor/agents/`, `.cursor/commands/`, `.cursor/skills/`, `.cursor/hooks.json`, `.cursor/mcp.json`
 - **OpenCode** - native integration to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`, `opencode.json` (MCP)
 - **Gemini** - native integration to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` (MCP, hooks); instructions compiled to `GEMINI.md`
 - **Codex CLI** - compiled to `AGENTS.md`

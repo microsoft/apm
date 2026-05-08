@@ -121,7 +121,7 @@ download → scan source → block or deploy → report
 
 Content scanning extends beyond install:
 
-- **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources.
+- **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
 - **`apm pack`** scans files before bundling. This catches hidden characters before a package is published, preventing authors from accidentally distributing tainted content.
 - **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used.
 
@@ -226,6 +226,27 @@ APM separates production and development dependencies:
 - **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output (both plugin format -- the default -- and `--format apm`).
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
+
+## Slash command deployment
+
+Several IDE-style targets read files in their `commands/` directory as
+**slash commands** -- typing `/foo` in the IDE invokes the file's
+content as an LLM prompt with full tool access. Across all supported
+targets (Claude Code, Cursor, OpenCode, Gemini CLI), invocation
+requires the user to type the command name; commands are not
+auto-invoked at IDE startup or on disk-write.
+
+`apm install` deploys package `.prompt.md` files to each target's
+commands directory by default when that directory exists, so packaged
+slash commands are available to the user immediately and consistently
+across targets.
+
+| Target | Commands directory | Notes |
+|--------|--------------------|-------|
+| **Claude Code** | `.claude/commands/*.md` | Deployed when `.claude/` exists. |
+| **Cursor** | `.cursor/commands/*.md` | Deployed when `.cursor/` exists. Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes. The shared command transformer keeps the Claude-compatible frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. |
+| **OpenCode** | `.opencode/commands/*.md` | Deployed when `.opencode/` exists. |
+| **Gemini CLI** | `.gemini/commands/*.toml` | Deployed when `.gemini/` exists. |
 
 ## MCP server trust model
 

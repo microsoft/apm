@@ -691,3 +691,8 @@ class TestLocalMixedWithRemote:
             data = yaml.safe_load(f)
         apm_deps = data.get("dependencies", {}).get("apm", [])
         assert "../packages/local-skills" in apm_deps
+
+
+# NOTE: Issue #1147 (in-package relative link rewriting) has its own
+# dedicated E2E test module at tests/integration/test_link_rewrite_e2e.py
+# wired into scripts/test-integration.sh.

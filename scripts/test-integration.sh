@@ -377,6 +377,19 @@ run_e2e_tests() {
         log_error "MCP env-var headers tests failed!"
         exit 1
     fi
+
+    # #1212 anti-regression: ADO --update preflight must fall back from a
+    # stale ADO_APM_PAT to an az-cli AAD bearer when az is logged in. Uses
+    # PATH-injected fake `git` and `az` binaries so the test is hermetic.
+    log_info "Running #1212 ADO preflight bearer-fallback E2E..."
+    echo "Command: pytest tests/integration/test_ado_preflight_bearer_fallback_e2e.py -v --tb=short"
+
+    if pytest tests/integration/test_ado_preflight_bearer_fallback_e2e.py -v --tb=short; then
+        log_success "#1212 ADO preflight bearer-fallback tests passed!"
+    else
+        log_error "#1212 ADO preflight bearer-fallback tests failed!"
+        exit 1
+    fi
     
     # Run APM Dependencies integration tests (NEW - Task 8A)
     log_info "Running APM Dependencies integration tests with real repositories..."
@@ -388,7 +401,62 @@ run_e2e_tests() {
         log_error "APM Dependencies integration tests failed!"
         exit 1
     fi
-    
+
+    # Subdirectory dedup race E2E (#1126): two sibling subdirs of the
+    # same upstream repo+ref must install in parallel without the
+    # "Subdirectory ... not found" race the v1 cache produced.
+    log_info "Running #1126 parallel subdir dedup E2E..."
+    echo "Command: pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration"
+
+    if pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration; then
+        log_success "#1126 subdir dedup E2E passed!"
+    else
+        log_error "#1126 subdir dedup E2E failed!"
+        exit 1
+    fi
+
+    # Branch-ref drift + lockfile self-heal regression E2E (#1158).
+    # Defends the heal pipeline (BranchRefDriftHeal,
+    # BuggyLockfileRecoveryHeal) and the supply-chain interlock against
+    # the 3-way drift bug. Uses the public danielmeppiel/apm-update-repro
+    # fixture with mutable refs.
+    log_info "Running #1158 branch-ref drift + heal pipeline E2E..."
+    echo "Command: pytest tests/integration/test_diff_aware_install_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_diff_aware_install_e2e.py -v -s --tb=short; then
+        log_success "#1158 branch-ref drift + heal pipeline E2E passed!"
+    else
+        log_error "#1158 branch-ref drift + heal pipeline E2E failed!"
+        exit 1
+    fi
+
+    # Target resolution overhaul E2E (#1154 + 10 sister issues).
+    # Offline tests: exercises detection whitelist, resolution priority,
+    # provenance line, error renderer, dry-run, apm targets command.
+    # NO GitHub token required (uses local bundles).
+    log_info "Running #1154 target resolution E2E..."
+    echo "Command: pytest tests/integration/test_target_resolution_e2e.py -v -s --tb=short -m integration"
+
+    if pytest tests/integration/test_target_resolution_e2e.py -v -s --tb=short -m integration; then
+        log_success "#1154 target resolution E2E passed!"
+    else
+        log_error "#1154 target resolution E2E failed!"
+        exit 1
+    fi
+
+    # apm deps update CLI E2E -- defends the explicit update workflow
+    # (lockfile bump across all packages, selective package update,
+    # global-scope update, unknown-package error).
+    log_info "Running apm deps update CLI E2E..."
+    echo "Command: pytest tests/integration/test_deps_update_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_deps_update_e2e.py -v -s --tb=short; then
+        log_success "apm deps update CLI E2E passed!"
+    else
+        log_error "apm deps update CLI E2E failed!"
+        exit 1
+    fi
+
     # Run Transport Selection integration tests (issue #778)
     # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
     # when no usable SSH key is available for git@github.com.
@@ -413,6 +481,42 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run Claude Code MCP schema-fidelity tests -- offline, golden fixtures
+    # captured from the upstream `claude` CLI (see fixtures/README.md)
+    log_info "Running Claude Code MCP schema-fidelity tests..."
+    echo "Command: pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short; then
+        log_success "Claude Code MCP schema-fidelity tests passed!"
+    else
+        log_error "Claude Code MCP schema-fidelity tests failed!"
+        exit 1
+    fi
+
+    # Run local-bundle install E2E tests -- offline, no tokens needed
+    log_info "Running local-bundle install E2E tests..."
+    echo "Command: pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short; then
+        log_success "Local-bundle install E2E tests passed!"
+    else
+        log_error "Local-bundle install E2E tests failed!"
+        exit 1
+    fi
+
+    # Run cache lockfile-parity test (requires GITHUB_APM_PAT or GITHUB_TOKEN).
+    # Asserts byte-identical apm.lock.yaml across cold / warm / no-cache
+    # regimes -- the worst silent regression the cache layer could introduce.
+    log_info "Running cache lockfile-parity E2E test..."
+    echo "Command: pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short; then
+        log_success "Cache lockfile-parity E2E test passed!"
+    else
+        log_error "Cache lockfile-parity E2E test failed!"
+        exit 1
+    fi
+
     # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
     if [[ -n "${ADO_APM_PAT:-}" ]]; then
         log_info "Running Azure DevOps E2E tests..."
@@ -427,7 +531,158 @@ run_e2e_tests() {
     else
         log_info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
     fi
-    
+
+    # Run agent-skills target E2E tests -- offline, no tokens needed
+    log_info "Running agent-skills target E2E tests..."
+    echo "Command: pytest tests/integration/test_agent_skills_target.py -v -s --tb=short"
+
+    if pytest tests/integration/test_agent_skills_target.py -v -s --tb=short; then
+        log_success "Agent-skills target E2E tests passed!"
+    else
+        log_error "Agent-skills target E2E tests failed!"
+        exit 1
+    fi
+
+    # Run skill install E2E tests -- requires GITHUB_APM_PAT (pytestmark skips otherwise).
+    # Guards skill install idempotency and .apm-pin no-leak invariant on reinstall.
+    log_info "Running skill install E2E tests..."
+    echo "Command: pytest tests/integration/test_skill_install.py -v -s --tb=short"
+
+    if pytest tests/integration/test_skill_install.py -v -s --tb=short; then
+        log_success "Skill install E2E tests passed!"
+    else
+        log_error "Skill install E2E tests failed!"
+        exit 1
+    fi
+
+    # Run unified pack format E2E tests -- offline, no tokens needed
+    # Guards the 0.12.0 default flip from --format apm to --format plugin.
+    log_info "Running unified pack format E2E tests..."
+    echo "Command: pytest tests/integration/test_pack_unified.py -v -s --tb=short"
+
+    if pytest tests/integration/test_pack_unified.py -v -s --tb=short; then
+        log_success "Unified pack format E2E tests passed!"
+    else
+        log_error "Unified pack format E2E tests failed!"
+        exit 1
+    fi
+
+    # Run Copilot compile target E2E tests -- offline, no tokens needed
+    # Guards .github/copilot-instructions.md generation + idempotent cleanup.
+    log_info "Running Copilot compile target E2E tests..."
+    echo "Command: pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short"
+
+    if pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short; then
+        log_success "Copilot compile target E2E tests passed!"
+    else
+        log_error "Copilot compile target E2E tests failed!"
+        exit 1
+    fi
+
+    # Run transitive local-path chain E2E tests -- offline, no tokens needed
+    # Guards local_path anchoring across multi-level local dependency chains.
+    log_info "Running transitive local-path chain E2E tests..."
+    echo "Command: pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short; then
+        log_success "Transitive local-path chain E2E tests passed!"
+    else
+        log_error "Transitive local-path chain E2E tests failed!"
+        exit 1
+    fi
+
+    # Run drift-detection integration tests -- offline, no tokens needed
+    # Guards `apm audit` drift replay (Phase D) across all 9 drift cases,
+    # multi-target, --no-drift opt-out, and false-positive guards
+    # (CRLF, BOM, Build ID line). Pinning these tests prevents silent
+    # regression of the drift contract.
+    log_info "Running drift detection integration tests..."
+    echo "Command: pytest tests/integration/test_drift_check.py -v -s --tb=short"
+
+    if pytest tests/integration/test_drift_check.py -v -s --tb=short; then
+        log_success "Drift detection integration tests passed!"
+    else
+        log_error "Drift detection integration tests failed!"
+        exit 1
+    fi
+
+    # Run drift-detection E2E tests -- offline, no tokens needed
+    # Verifies the no-write contract, air-gap proof, performance smoke,
+    # and JSON/SARIF output shapes for the `apm audit` drift surface.
+    log_info "Running drift detection E2E tests..."
+    echo "Command: pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short; then
+        log_success "Drift detection E2E tests passed!"
+    else
+        log_error "Drift detection E2E tests failed!"
+        exit 1
+    fi
+
+    # Run #1147 in-package link rewrite E2E -- offline, no tokens needed
+    # Defends the install-time link rewriter against the .agents/.github
+    # split regression: instructions/prompts/skills with relative links
+    # to in-package siblings must resolve on disk after `apm install`.
+    # Covers happy path, mixed link types, path-traversal escape
+    # (security), in-bundle skill links, and multi-target installs.
+    log_info "Running #1147 in-package link rewrite E2E..."
+    echo "Command: pytest tests/integration/test_link_rewrite_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_link_rewrite_e2e.py -v -s --tb=short; then
+        log_success "#1147 in-package link rewrite E2E passed!"
+    else
+        log_error "#1147 in-package link rewrite E2E failed!"
+        exit 1
+    fi
+
+    # Run #1159 audit silent-skip E2E -- offline, no tokens needed
+    # Defends the audit --ci CI gate against silent fall-through when
+    # auto-discovery hits no_git_remote / absent / empty / disabled
+    # outcomes. Real `git init`, real CliRunner. Covers exit codes,
+    # stderr cleanliness for both JSON and SARIF formats, and the
+    # policy.fetch_failure_default=block enforcement contract.
+    log_info "Running #1159 audit silent-skip E2E..."
+    echo "Command: pytest tests/integration/test_audit_silent_skip_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_audit_silent_skip_e2e.py -v -s --tb=short; then
+        log_success "#1159 audit silent-skip E2E passed!"
+    else
+        log_error "#1159 audit silent-skip E2E failed!"
+        exit 1
+    fi
+
+    # Run #1159 install silent-skip parity E2E -- offline, no tokens
+    # Defends the install pipeline parity for #1159: real `git init`
+    # with no remote configured + project policy.fetch_failure_default=block
+    # must raise PolicyViolationError through the policy_gate phase.
+    # Mirrors the audit-side block contract on the install codepath.
+    log_info "Running #1159 install silent-skip parity E2E..."
+    echo "Command: pytest tests/integration/test_install_silent_skip_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_install_silent_skip_e2e.py -v -s --tb=short; then
+        log_success "#1159 install silent-skip parity E2E passed!"
+    else
+        log_error "#1159 install silent-skip parity E2E failed!"
+        exit 1
+    fi
+
+    # Run #1159 SCP/EMU + ADO v3 SSH URL parsing E2E -- offline
+    # Defends the shared SCP_LIKE_RE regex against regressions on its
+    # three consumers: cache.url_normalize, policy.discovery, and
+    # models.dependency.reference. Real `git init` + real `git remote
+    # add origin` for EMU (enterprise-user@), GHE custom hosts, and
+    # ADO v3 SSH (git@ssh.dev.azure.com:v3/<org>/...). Also exercises
+    # APMPackage.from_apm_yml on the same URL forms.
+    log_info "Running #1159 dep URL parsing E2E..."
+    echo "Command: pytest tests/integration/test_dep_url_parsing_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_dep_url_parsing_e2e.py -v -s --tb=short; then
+        log_success "#1159 dep URL parsing E2E passed!"
+    else
+        log_error "#1159 dep URL parsing E2E failed!"
+        exit 1
+    fi
+
     log_success "All integration test suites completed successfully!"
     
 

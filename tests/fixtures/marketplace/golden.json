@@ -14,15 +14,16 @@
   "plugins": [
     {
       "name": "code-reviewer",
+      "description": "Automated code review assistant",
       "tags": [
         "review",
         "quality"
       ],
       "source": {
-        "type": "github",
-        "repository": "acme/code-reviewer",
+        "source": "github",
+        "repo": "acme/code-reviewer",
         "ref": "v2.1.0",
-        "commit": "abcd234567890abcdef1234567890abcdef12345"
+        "sha": "abcd234567890abcdef1234567890abcdef12345"
       }
     },
     {
@@ -31,11 +32,11 @@
         "testing"
       ],
       "source": {
-        "type": "github",
-        "repository": "acme/test-generator",
+        "source": "git-subdir",
+        "url": "acme/test-generator",
         "path": "src/plugin",
         "ref": "v1.0.3",
-        "commit": "def4567890abcdef1234567890abcdef12345678"
+        "sha": "def4567890abcdef1234567890abcdef12345678"
       }
     }
   ]

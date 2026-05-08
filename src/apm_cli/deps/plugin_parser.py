@@ -174,11 +174,6 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     return apm_yml_path
 
 
-def _ignore_symlinks(directory, contents):
-    """Ignore function for shutil.copytree that skips symlinks."""
-    return [name for name in contents if (Path(directory) / name).is_symlink()]
-
-
 def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     """Extract MCP server definitions from a plugin manifest.
 
@@ -405,6 +400,8 @@ def _map_plugin_artifacts(
     if manifest is None:
         manifest = {}
 
+    from apm_cli.security.gate import ignore_non_content
+
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
     #
@@ -460,9 +457,9 @@ def _map_plugin_artifacts(
         agent_dirs = [s for s in agent_sources if s.is_dir()]
         agent_files = [s for s in agent_sources if s.is_file()]
         if agent_dirs:
-            shutil.copytree(agent_dirs[0], target_agents, ignore=_ignore_symlinks)
+            shutil.copytree(agent_dirs[0], target_agents, ignore=ignore_non_content)
             for extra in agent_dirs[1:]:
-                shutil.copytree(extra, target_agents, dirs_exist_ok=True, ignore=_ignore_symlinks)
+                shutil.copytree(extra, target_agents, dirs_exist_ok=True, ignore=ignore_non_content)
         if agent_files:
             target_agents.mkdir(parents=True, exist_ok=True)
             for f in agent_files:
@@ -476,6 +473,7 @@ def _map_plugin_artifacts(
             shutil.rmtree(target_skills)
         skill_dirs = [s for s in skill_sources if s.is_dir()]
         skill_files = [s for s in skill_sources if s.is_file()]
+
         is_custom_list = isinstance(manifest.get("skills"), list)
         if is_custom_list and skill_dirs:
             target_skills.mkdir(parents=True, exist_ok=True)
@@ -483,13 +481,13 @@ def _map_plugin_artifacts(
                 shutil.copytree(
                     d,
                     target_skills / d.name,
-                    ignore=_ignore_symlinks,
+                    ignore=ignore_non_content,
                     dirs_exist_ok=True,
                 )
         elif skill_dirs:
-            shutil.copytree(skill_dirs[0], target_skills, ignore=_ignore_symlinks)
+            shutil.copytree(skill_dirs[0], target_skills, ignore=ignore_non_content)
             for extra in skill_dirs[1:]:
-                shutil.copytree(extra, target_skills, dirs_exist_ok=True, ignore=_ignore_symlinks)
+                shutil.copytree(extra, target_skills, dirs_exist_ok=True, ignore=ignore_non_content)
         if skill_files:
             target_skills.mkdir(parents=True, exist_ok=True)
             for f in skill_files:
@@ -548,9 +546,9 @@ def _map_plugin_artifacts(
             target_hooks = apm_dir / "hooks"
             if target_hooks.exists():
                 shutil.rmtree(target_hooks)
-            shutil.copytree(hook_sources[0], target_hooks, ignore=_ignore_symlinks)
+            shutil.copytree(hook_sources[0], target_hooks, ignore=ignore_non_content)
             for extra in hook_sources[1:]:
-                shutil.copytree(extra, target_hooks, dirs_exist_ok=True, ignore=_ignore_symlinks)
+                shutil.copytree(extra, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
 
     # Pass-through files required for MCP/LSP plugins to function
     for passthrough in (".mcp.json", ".lsp.json", "settings.json"):

@@ -132,6 +132,32 @@ This is informational -- the files still extract. The warning helps users unders
 
 Pick `--format apm` when a downstream consumer expects the enriched lockfile and the install-shape directory tree -- in particular `microsoft/apm-action@v1` with `bundle:` (its restore mode reads the bundle's `apm.lock.yaml`). The action exposes `--format apm` end-to-end so existing pack/restore workflows continue unchanged. Otherwise leave the default in place.
 
+## Without APM: what you give up
+
+A plugin bundle works two ways: with APM, or without it. Both are supported. Pick the one that matches the consumer.
+
+| Concern | With APM (`apm install`) | Without APM (host's native plugin loader) |
+|---|---|---|
+| Dependency declaration | `apm.yml` | None - copy the bundle directly |
+| Version locking | `apm.lock.yaml` pins exact commits | None - whatever bytes you copied |
+| Transitive dependencies | Resolved automatically | Not resolved - bundle whatever the author shipped |
+| Governance hooks | `apm install` runs policy + security scans | Trust the source |
+| Security scanning | Built-in: install / compile / unpack block critical findings; `apm audit` for reports | None at install time |
+| Cross-runtime deploy | One install, all detected runtimes | One bundle per host, manually placed |
+| Reproducibility | Same `apm.lock.yaml` -> identical bytes everywhere | Copy-and-pray |
+
+The parallel: `apm install <skill>` is to `npx skills add <skill>` what `npm install` is to `npx`. Both work. The first is reproducible and governed; the second is convenient.
+
+### Where the bundle goes without APM
+
+`apm pack` writes a directory shaped like a standard plugin. The consumer side depends on the host:
+
+- **Claude Code** loads plugins from `~/.claude/plugins/<name>/` (or via a Claude marketplace entry and `/plugin install`). Convention dirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`) are picked up automatically.
+- **Other Claude-plugin-compatible hosts** follow their own install steps. The bundle conforms to the [official Claude Code plugin manifest schema](https://json.schemastore.org/claude-code-plugin.json); consult your host's plugin documentation for the install path.
+- **Archive output (`apm pack --archive`)** must be extracted first (`tar xzf <name>-<version>.tar.gz`), then copied into the host's plugin directory.
+
+If your consumer runs APM, none of this applies - declare the package in `apm.yml`, run `apm install`, and APM handles discovery, deployment, locking, and scanning.
+
 ## Bundle structure (plugin format, default)
 
 `apm pack` writes to `./build/<name>-<version>/` by default. Convention directories (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`) are auto-discovered by Claude Code, so the synthesized `plugin.json` does NOT emit `agents`/`skills`/`commands`/`instructions` keys for them. Per the [official schema](https://json.schemastore.org/claude-code-plugin.json), those array entries are reserved for `./*.md` paths to *additional* files outside the convention directories.

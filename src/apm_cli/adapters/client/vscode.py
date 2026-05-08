@@ -29,6 +29,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
     in the VSCode documentation.
     """
 
+    target_name: str = "vscode"
+    mcp_servers_key: str = "servers"
+
     def __init__(
         self,
         registry_url=None,

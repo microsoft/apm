@@ -274,8 +274,8 @@ This is the certitude section. Read it twice if you are deciding whether `apm au
 
 | Surface | What it bypasses LOCALLY | What it CANNOT bypass | Reviewable in |
 |---|---|---|---|
-| `apm install --no-policy` | All 17 policy checks at install (incl. transitive MCP, hash pin) | The 7 baseline checks in `apm audit --ci` | git diff of `apm.lock.yaml` in PR |
-| `APM_POLICY_DISABLE=1` env | Same as `--no-policy` plus the 17 audit policy checks | The 7 baseline checks in `apm audit --ci` | PR diff; CI env vars in Actions logs |
+| `apm install --no-policy` | All 17 policy checks at install (incl. transitive MCP, hash pin) | The 7 baseline checks plus integration drift detection in `apm audit --ci` | git diff of `apm.lock.yaml` in PR |
+| `APM_POLICY_DISABLE=1` env | Same as `--no-policy` plus the 17 audit policy checks | The 7 baseline checks plus integration drift detection in `apm audit --ci` | PR diff; CI env vars in Actions logs |
 | Manual edit to `apm.lock.yaml` | Nothing; install regenerates the file each run | Audit baseline `ref-consistency` and `deployed-files-present` | git diff |
 | Manual edit to deployed file post-install | Local file content until next audit | Audit baseline `content-integrity` (re-hashes deployed files); hidden-Unicode scan in `apm audit` content mode | git diff of the deployed file in PR |
 | Direct `git clone` of an APM package, bypassing install | Everything; nothing detects out-of-band file drops | Audit baseline `no-orphaned-packages` and audit-only `unmanaged-files` | git diff |
@@ -287,7 +287,7 @@ This is the certitude section. Read it twice if you are deciding whether `apm au
 Notes on specific rows:
 
 - **`apm install --no-policy`** also bypasses the `apm install --mcp` preflight, the transitive-MCP preflight, and any project-side `policy.hash` pin.
-- **`APM_POLICY_DISABLE=1`** short-circuits discovery to `outcome="disabled"` everywhere -- including `apm audit --ci`, where the 17 policy checks are skipped (the 7 baseline checks still run).
+- **`APM_POLICY_DISABLE=1`** short-circuits discovery to `outcome="disabled"` everywhere -- including `apm audit --ci`, where the 17 policy checks are skipped (the 7 baseline checks and integration drift detection still run).
 - **Manual lockfile edits**: `content_hash` mismatch on registry-proxy deps is caught at the next install when downloads resume.
 - **Direct `git clone`**: `unmanaged-files` only flags governed dirs and only when configured to `warn` / `deny`.
 - **Fork-to-personal-org**: discovery resolves via `git remote get-url origin`; branch protection on the upstream repo is the trust boundary.
@@ -334,7 +334,7 @@ This section covers offline **policy** enforcement (the `apm-policy.yml` cache).
 | Online | Discovers + enforces | Discovers + enforces | Loads from path, enforces | Discovers + enforces |
 | Cache fresh (< 1h) | Cache hit, enforces | Cache hit, enforces | n/a (file path skips cache) | Cache hit, enforces |
 | Cache stale (1h - 7d) | Refresh attempted; on fail, `cached_stale` outcome -- proceed with cached unless `policy.fetch_failure: block` | Same | n/a | Same |
-| Offline, cache > 7d | `cache_miss_fetch_fail` -- fail-OPEN by default; fail-closed only if `policy.fetch_failure_default: block` in `apm.yml` | Same | Loads from path, full enforce | Same as install |
+| Offline, cache > 7d | `cache_miss_fetch_fail` -- fail-OPEN by default; fail-closed only if `policy.fetch_failure_default: block` in `apm.yml` | Same | Loads from path, full enforce | Same as install -- also covers `no_git_remote` / `absent` / `empty` outcomes when `policy.fetch_failure_default: block` |
 
 Workarounds when the network is unreliable:
 
@@ -352,6 +352,7 @@ Workarounds when the network is unreliable:
 | Network failure (`cache_miss_fetch_fail`) | Fail-OPEN, log warning, install proceeds with no policy | `policy.fetch_failure_default: block` in `apm.yml` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Cached stale (1h - 7d, refresh failed) | Warn and proceed with cached policy | `policy.fetch_failure: block` set in the cached policy itself | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed YAML (`malformed`) (org policy file) | Fail-OPEN by default | `policy.fetch_failure_default: block` | `policy/parser.py` |
+| **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN, log warning** | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](../policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
 | Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Garbage response | Fail-OPEN by default | `policy.fetch_failure_default: block` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed project manifest (`manifest_parse`) | **Always fail-CLOSED** | n/a (cannot be relaxed) | `policy/policy_checks.py`, `policy/ci_checks.py` |

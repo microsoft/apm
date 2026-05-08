@@ -1,5 +1,7 @@
 """Tests for target detection module."""
 
+import contextlib
+
 import click
 import pytest
 
@@ -261,6 +263,28 @@ class TestShouldCompileCopilotInstructionsMd:
     def test_claude_target(self):
         assert should_compile_copilot_instructions_md("claude") is False
 
+    def test_frozenset_with_vscode_returns_true(self):
+        """Multi-target lists containing 'vscode' family member must emit."""
+        assert (
+            should_compile_copilot_instructions_md(frozenset({"vscode", "agents", "claude"}))
+            is True
+        )
+
+    def test_frozenset_with_agents_only_returns_false(self):
+        """Multi-target lists that map cursor/opencode/codex to 'agents'
+        family for AGENTS.md routing must NOT trigger copilot-instructions.md.
+
+        This is the round-3 regression: previously the predicate checked
+        '"agents" in target' which over-fired on cursor/opencode/codex combos.
+        """
+        assert should_compile_copilot_instructions_md(frozenset({"agents", "claude"})) is False
+        assert should_compile_copilot_instructions_md(frozenset({"agents"})) is False
+
+    def test_frozenset_without_vscode_returns_false(self):
+        """Multi-target lists without 'vscode' family must not emit."""
+        assert should_compile_copilot_instructions_md(frozenset({"claude", "gemini"})) is False
+        assert should_compile_copilot_instructions_md(frozenset({"claude"})) is False
+
 
 class TestGetTargetDescription:
     """Tests for get_target_description function."""
@@ -396,6 +420,77 @@ class TestDetectTargetOpencode:
         assert should_compile_claude_md("opencode") is False
 
 
+class TestDetectTargetWindsurf:
+    """Tests for auto-detection and explicit windsurf target."""
+
+    def test_explicit_target_windsurf(self, tmp_path):
+        """Explicit --target windsurf always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="windsurf",
+        )
+        assert target == "windsurf"
+        assert reason == "explicit --target flag"
+
+    def test_config_target_windsurf(self, tmp_path):
+        """Config target windsurf is used when no explicit target."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="windsurf",
+        )
+        assert target == "windsurf"
+        assert reason == "apm.yml target"
+
+    def test_auto_detect_windsurf_only(self, tmp_path):
+        """Auto-detect windsurf when only .windsurf/ exists."""
+        (tmp_path / ".windsurf").mkdir()
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "windsurf"
+        assert ".windsurf/" in reason
+
+    def test_auto_detect_windsurf_plus_github(self, tmp_path):
+        """Auto-detect all when .windsurf/ and .github/ exist."""
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".windsurf").mkdir()
+        target, _ = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "all"
+
+    def test_windsurf_compile_agents_md(self):
+        """Windsurf target should compile AGENTS.md (reads it natively)."""
+        assert should_compile_agents_md("windsurf") is True
+
+    def test_windsurf_no_compile_claude_md(self):
+        """Windsurf target should NOT compile CLAUDE.md."""
+        assert should_compile_claude_md("windsurf") is False
+
+    def test_windsurf_no_compile_gemini_md(self):
+        """Windsurf target should NOT compile GEMINI.md."""
+        assert should_compile_gemini_md("windsurf") is False
+
+    def test_windsurf_description(self):
+        """Description for windsurf target."""
+        desc = get_target_description("windsurf")
+        assert "AGENTS.md" in desc
+        assert ".windsurf/" in desc
+
+    def test_windsurf_in_all_canonical_targets(self):
+        """Windsurf must appear in ALL_CANONICAL_TARGETS."""
+        assert "windsurf" in ALL_CANONICAL_TARGETS
+
+    def test_windsurf_in_valid_target_values(self):
+        """Windsurf must be accepted by the --target parser."""
+        assert "windsurf" in VALID_TARGET_VALUES
+
+
 # ---------------------------------------------------------------------------
 # TargetParamType tests
 # ---------------------------------------------------------------------------
@@ -415,9 +510,10 @@ class TestTargetParamType:
             assert name in VALID_TARGET_VALUES
 
     def test_valid_target_values_includes_aliases(self):
-        """VALID_TARGET_VALUES contains user-facing aliases."""
+        """VALID_TARGET_VALUES contains user-facing aliases and explicit-only targets."""
         for name in ("copilot", "agents"):
             assert name in VALID_TARGET_VALUES
+        assert "agent-skills" in VALID_TARGET_VALUES
 
     def test_valid_target_values_includes_all(self):
         """VALID_TARGET_VALUES contains 'all'."""
@@ -444,7 +540,8 @@ class TestTargetParamType:
     def test_list_input_collapses_aliases_to_string(self):
         """Multi-element list whose entries all alias to one canonical
         target collapses to that single canonical name (``"vscode"``)."""
-        assert self.tp.convert(["copilot", "agents"], None, None) == "vscode"
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            assert self.tp.convert(["copilot", "agents"], None, None) == "vscode"
 
     # -- Single target (backward compat: returns string) ------------------
 
@@ -467,7 +564,8 @@ class TestTargetParamType:
         assert self.tp.convert("codex", None, None) == "codex"
 
     def test_single_agents(self):
-        assert self.tp.convert("agents", None, None) == "agents"
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            assert self.tp.convert("agents", None, None) == "agents"
 
     def test_single_all(self):
         """'all' returns string 'all' for backward compat."""
@@ -521,12 +619,14 @@ class TestTargetParamType:
 
     def test_copilot_agents_deduplicates(self):
         """copilot,agents → 'vscode' (both alias to same canonical)."""
-        result = self.tp.convert("copilot,agents", None, None)
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            result = self.tp.convert("copilot,agents", None, None)
         assert result == "vscode"
 
     def test_copilot_agents_vscode_deduplicates(self):
         """copilot,agents,vscode → 'vscode' (all alias to same)."""
-        result = self.tp.convert("copilot,agents,vscode", None, None)
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            result = self.tp.convert("copilot,agents,vscode", None, None)
         assert result == "vscode"
 
     def test_copilot_claude_deduplicates_alias(self):
@@ -556,12 +656,12 @@ class TestTargetParamType:
 
     def test_invalid_single_target(self):
         """Invalid target name produces clean error."""
-        with pytest.raises(click.exceptions.BadParameter, match="'invalid' is not a valid target"):
+        with pytest.raises(click.UsageError, match="Unknown target"):
             self.tp.convert("invalid", None, None)
 
     def test_invalid_in_multi(self):
         """Invalid target in comma list produces clean error."""
-        with pytest.raises(click.exceptions.BadParameter, match="'nope' is not a valid target"):
+        with pytest.raises(click.UsageError, match="Unknown target"):
             self.tp.convert("claude,nope", None, None)
 
     def test_all_combined_with_other_rejected(self):
@@ -583,6 +683,154 @@ class TestTargetParamType:
         """Only commas (no actual values) is rejected."""
         with pytest.raises(click.exceptions.BadParameter, match="must not be empty"):
             self.tp.convert(",,,", None, None)
+
+    # -- agent-skills target + deprecation warning behaviour (#737) -------
+
+    def test_explicit_only_targets_subset_of_known_targets(self):
+        """EXPLICIT_ONLY_TARGETS is a subset of KNOWN_TARGETS keys."""
+        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        assert frozenset(KNOWN_TARGETS) >= EXPLICIT_ONLY_TARGETS
+
+    def test_agents_deprecation_fires_once_not_per_token(self):
+        """parse_target_field('agents,agents') emits exactly one AgentsTargetDeprecationWarning."""
+        import warnings
+
+        from apm_cli.core.target_detection import (
+            AgentsTargetDeprecationWarning,
+            parse_target_field,
+        )
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            parse_target_field("agents,agents")
+            deprecation_warnings = [
+                x for x in w if issubclass(x.category, AgentsTargetDeprecationWarning)
+            ]
+            assert len(deprecation_warnings) == 1
+
+    def test_agents_deprecation_fires_for_apm_yml_target(self):
+        """apm.yml target: agents path emits AgentsTargetDeprecationWarning."""
+        import warnings
+
+        from apm_cli.core.target_detection import (
+            AgentsTargetDeprecationWarning,
+            parse_target_field,
+        )
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            parse_target_field("agents")
+            deprecation_warnings = [
+                x for x in w if issubclass(x.category, AgentsTargetDeprecationWarning)
+            ]
+            assert len(deprecation_warnings) == 1
+
+    def test_agent_skills_does_not_emit_deprecation(self):
+        """--target agent-skills does not emit DeprecationWarning."""
+        import warnings
+
+        from apm_cli.core.target_detection import parse_target_field
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            parse_target_field("agent-skills")
+            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+            assert len(deprecation_warnings) == 0
+
+    # -- F5: agents_alias_was_detected() tracks raw tokens across shapes ----
+
+    @pytest.mark.parametrize(
+        "raw_input",
+        [
+            "agents",
+            "copilot,agents",
+            "agents,claude",
+            "all,agents",
+        ],
+        ids=["solo-agents", "copilot-comma-agents", "agents-comma-claude", "all-comma-agents"],
+    )
+    def test_agents_alias_detected_across_invocation_shapes(self, raw_input: str):
+        """agents_alias_was_detected() returns True for all shapes containing 'agents'.
+
+        Note: ``all,agents`` is rejected by parse_target_field (agents is a
+        canonical alias, not an explicit-only target), but the flag is set
+        *before* the ``all`` validation fires.
+        """
+        import warnings
+
+        from apm_cli.core.target_detection import (
+            agents_alias_was_detected,
+            parse_target_field,
+        )
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            with contextlib.suppress(ValueError):
+                parse_target_field(raw_input)
+                # "all,agents" raises; flag should still be set
+
+        assert agents_alias_was_detected(), (
+            f"agents_alias_was_detected() should be True for input {raw_input!r}"
+        )
+
+    def test_agents_alias_not_detected_for_copilot(self):
+        """agents_alias_was_detected() returns False when 'agents' is absent."""
+        import warnings
+
+        from apm_cli.core.target_detection import (
+            agents_alias_was_detected,
+            parse_target_field,
+        )
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            parse_target_field("copilot")
+
+        assert not agents_alias_was_detected()
+
+    # -- B1: detect_target() returns agent-skills for explicit --target ----
+
+    def test_explicit_target_agent_skills(self):
+        """detect_target(explicit_target='agent-skills') returns 'agent-skills'."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".github").mkdir()
+            target, reason = detect_target(root, explicit_target="agent-skills")
+            assert target == "agent-skills"
+            assert reason == "explicit --target flag"
+
+    def test_config_target_agent_skills(self):
+        """detect_target(config_target='agent-skills') returns 'agent-skills'."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target, reason = detect_target(root, config_target="agent-skills")
+            assert target == "agent-skills"
+            assert reason == "apm.yml target"
+
+    # -- B2: 'all,agent-skills' is allowed; 'all,claude' still rejected ----
+
+    def test_all_combined_with_agent_skills_allowed(self):
+        """'all,agent-skills' expands to every canonical target + agent-skills."""
+        from apm_cli.core.target_detection import parse_target_field
+
+        result = parse_target_field("all,agent-skills")
+        assert isinstance(result, list)
+        for t in ALL_CANONICAL_TARGETS:
+            assert t in result, f"expected '{t}' in expansion, got {result}"
+        assert "agent-skills" in result
+
+    def test_all_combined_with_codex_still_rejected(self):
+        """'all,codex' is still rejected (non-explicit-only combo)."""
+        with pytest.raises(click.exceptions.BadParameter, match="cannot be combined"):
+            self.tp.convert("all,codex", None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -679,9 +927,9 @@ class TestCoworkParserLayer:
     # -- Case 8: invalid target still rejected (sanity check) ------------
 
     def test_invalid_target_still_rejected(self):
-        """'nonsense' must still raise BadParameter after adding copilot-cowork."""
+        """'nonsense' must still raise UsageError after adding copilot-cowork."""
         with pytest.raises(
-            click.exceptions.BadParameter,
-            match="'nonsense' is not a valid target",
+            click.UsageError,
+            match="Unknown target",
         ):
             self.tp.convert("nonsense", None, None)

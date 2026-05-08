@@ -2,7 +2,12 @@
 
 from .agents_compiler import AgentsCompiler, CompilationConfig, CompilationResult, compile_agents_md
 from .link_resolver import resolve_markdown_links, validate_link_targets
-from .template_builder import TemplateData, build_conditional_sections, find_chatmode_by_name
+from .template_builder import (
+    TemplateData,
+    build_conditional_sections,
+    find_chatmode_by_name,
+    render_instructions_block,
+)
 
 __all__ = [  # noqa: RUF022
     # Main compilation interface
@@ -12,6 +17,7 @@ __all__ = [  # noqa: RUF022
     "CompilationResult",
     # Template building
     "build_conditional_sections",
+    "render_instructions_block",
     "TemplateData",
     "find_chatmode_by_name",
     # Link resolution

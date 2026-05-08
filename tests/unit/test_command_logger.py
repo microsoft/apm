@@ -327,9 +327,11 @@ class TestInstallLogger:
         logger.install_summary(apm_count=3, mcp_count=0, stale_cleaned=5)
         msg = mock_success.call_args[0][0]
         assert "5 stale files cleaned" in msg
-        # Period belongs at the end of the sentence, after the parenthetical.
-        assert msg.endswith("cleaned).")
+        # Period belongs at the end of the sentence.
+        assert msg.endswith(".")
         assert ". (" not in msg
+        # Cleanup parenthetical must appear before any timing/terminator.
+        assert msg.index("(5 stale files cleaned)") < len(msg) - 2
 
     @patch("apm_cli.core.command_logger._rich_success")
     def test_install_summary_no_stale_no_suffix(self, mock_success):

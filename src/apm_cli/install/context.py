@@ -104,6 +104,15 @@ class InstallContext:
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
+    # Integrate-internal channel (does NOT cross phase boundaries):
+    # populated by _resolve_download_strategy in phases/integrate.py
+    # (branch-ref `remote_drifted` guard at L195-218 and v<=0.12.2
+    # self-heal block at L234-258), consumed by
+    # FreshDependencySource.acquire() in install/sources.py:~624 to
+    # suppress the supply-chain hard-block when a fresh-download
+    # content_hash legitimately differs from the lockfile-recorded
+    # content_hash (drift / recovery, not a supply-chain attack).
+    expected_hash_change_deps: set[str] = field(default_factory=set)
     installed_count: int = 0  # integrate
     unpinned_count: int = 0  # integrate
     installed_packages: list[Any] = field(default_factory=list)  # integrate
@@ -139,3 +148,19 @@ class InstallContext:
     # Cowork integration state
     # ------------------------------------------------------------------
     cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)
+
+    # ------------------------------------------------------------------
+    # TUI controller (PR #1116, workstream B): one Live region for the
+    # whole pipeline.  Phases call ``ctx.tui.start_phase(...)`` /
+    # ``ctx.tui.task_started(...)`` / ``ctx.tui.task_completed(...)``;
+    # when the controller is disabled (CI, dumb terminal,
+    # ``APM_PROGRESS=never``) every method is a no-op.  Pipeline owns
+    # the context-manager lifecycle (``with ctx.tui:``) so individual
+    # phases never need to enter / exit it.
+    # ------------------------------------------------------------------
+    tui: Any = None  # InstallTui
+
+    # ------------------------------------------------------------------
+    # Legacy skill paths opt-out (convergence §3)
+    # ------------------------------------------------------------------
+    legacy_skill_paths: bool = False  # --legacy-skill-paths flag or APM_LEGACY_SKILL_PATHS env

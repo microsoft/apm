@@ -14,7 +14,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401
 import frontmatter
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.security.gate import WARN_POLICY, SecurityGate
+from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
@@ -29,6 +34,37 @@ logger = logging.getLogger(__name__)
 # Claude command bodies as $name placeholders. Rejects YAML-significant
 # characters (newline, colon, quote, etc.) to prevent frontmatter injection.
 _INPUT_NAME_RE = re.compile(r"^[A-Za-z][\w-]{0,63}$")
+
+
+# Frontmatter keys preserved (or consumed) by the shared claude_command
+# transformer.  Any key in source frontmatter not in this set is dropped
+# during transformation and surfaced as a diagnostic warning so package
+# authors can act on it.  See command_integrator.integrate_command().
+_PRESERVED_COMMAND_KEYS = frozenset(
+    {
+        "description",
+        "allowed-tools",
+        "allowedTools",
+        "model",
+        "argument-hint",
+        "argumentHint",
+        "input",
+    }
+)
+
+# User-facing display names for preserved keys.  Excludes camelCase
+# aliases (allowedTools, argumentHint) -- those are accepted on input
+# for compat but the canonical kebab-case form is what we surface to
+# package authors in diagnostic messages.
+_PRESERVED_COMMAND_KEYS_DISPLAY = frozenset(
+    {
+        "description",
+        "allowed-tools",
+        "model",
+        "argument-hint",
+        "input",
+    }
+)
 
 
 def _is_valid_input_name(name: str) -> bool:
@@ -108,6 +144,42 @@ class CommandIntegrator(BaseIntegrator):
     during package installation, following the same pattern as PromptIntegrator.
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Track which (target_name) values have already received the
+        # one-shot Claude-frontmatter-passthrough notice so the message
+        # fires once per (install run, target), not once per package or
+        # once per file.  Reset implicitly when a new integrator is
+        # constructed (one per install run).
+        self._passthrough_notified: set[str] = set()
+
+    def _should_emit_passthrough_notice(
+        self,
+        target_name: str,
+        format_id: str,
+        *,
+        had_dropped_keys: bool,
+    ) -> bool:
+        """Return True the first time *target_name* sees a passthrough deploy
+        in which at least one file actually had dropped keys.
+
+        Only fires for cursor-style targets that reuse the shared
+        ``claude_command`` transformer (and would benefit from the
+        cross-tool-compatibility explanation).  Returns False for
+        targets that have their own dedicated writer (e.g. Gemini),
+        and -- per review feedback -- returns False on the happy path
+        where no frontmatter keys were dropped (the notice would be
+        pure noise then).
+        """
+        if not had_dropped_keys:
+            return False
+        if format_id != "claude_command" or target_name == "claude":
+            return False
+        if target_name in self._passthrough_notified:
+            return False
+        self._passthrough_notified.add(target_name)
+        return True
+
     def find_prompt_files(self, package_path: Path) -> list[Path]:
         """Find all .prompt.md files in a package."""
         return self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"])
@@ -115,14 +187,17 @@ class CommandIntegrator(BaseIntegrator):
     def _transform_prompt_to_command(
         self,
         source: Path,
-    ) -> tuple[str, frontmatter.Post, list[str]]:
+    ) -> tuple[str, frontmatter.Post, list[str], list[str]]:
         """Transform a .prompt.md file into Claude command format.
 
         Args:
             source: Path to the .prompt.md file
 
         Returns:
-            Tuple of (command_name, post, warnings).
+            Tuple of (command_name, post, warnings, dropped_keys).
+            ``dropped_keys`` lists source frontmatter keys that the shared
+            command transformer does not preserve (e.g. ``author``,
+            ``mcp``, ``parameters`` for Cursor-specific frontmatter).
         """
         warnings: list[str] = []
 
@@ -181,7 +256,12 @@ class CommandIntegrator(BaseIntegrator):
         new_post = frontmatter.Post(content)
         new_post.metadata = claude_metadata
 
-        return (command_name, new_post, warnings)
+        # Compute keys present in source frontmatter but not preserved by
+        # the shared command transformer.  Surfaced by integrate_command()
+        # via diagnostics so users see the lossy transform at install time.
+        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS)
+
+        return (command_name, new_post, warnings, dropped_keys)
 
     def integrate_command(
         self,
@@ -191,21 +271,48 @@ class CommandIntegrator(BaseIntegrator):
         original_path: Path,
         *,
         diagnostics: DiagnosticCollector | None = None,
-    ) -> int:
-        """Integrate a prompt file as a Claude command (verbatim copy with format conversion).
+        target_name: str = "claude",
+    ) -> tuple[int, bool, bool]:
+        """Integrate a prompt file as a slash command (verbatim copy with format conversion).
+
+        Deploys to ``.claude/commands/`` (Claude Code), ``.cursor/commands/``
+        (Cursor), or any other target whose ``commands`` primitive uses the
+        shared ``claude_command`` format_id.  ``target_name`` is woven into
+        diagnostic messages so users can tell which IDE the command was
+        installed for.
+
+        TODO(cursor-command-format): track via dedicated follow-up issue
+        once filed.  Cursor currently reuses the ``claude_command``
+        transformer which preserves only a common subset of frontmatter
+        (description, allowed-tools, model, argument-hint, input).  When a
+        dedicated ``cursor_command`` transformer lands, the target
+        dispatch in ``integrate_commands_for_target`` should branch to
+        it.  Dropped keys are surfaced via diagnostics.warn() per file
+        in the meantime.
 
         Args:
             source: Source .prompt.md file path
-            target: Target command file path in .claude/commands/
+            target: Target command file path (e.g. .claude/commands/foo.md
+                    or .cursor/commands/foo.md)
             package_info: PackageInfo object with package metadata
             original_path: Original path to the prompt file
             diagnostics: Optional DiagnosticCollector for surfacing warnings.
+            target_name: Name of the deployment target (e.g. ``"claude"``,
+                ``"cursor"``, ``"opencode"``) so diagnostic messages stay
+                target-agnostic instead of always saying "Claude".
 
         Returns:
-            int: Number of links resolved
+            tuple[int, bool, bool]: (links_resolved, written, had_dropped_keys).
+            ``written`` is False when a critical post-transform security
+            finding causes the write to be skipped (defense-in-depth on
+            top of the pre-install BLOCK gate).  ``had_dropped_keys`` is
+            True when the source frontmatter carried at least one key
+            outside the cross-tool subset preserved by the shared
+            ``claude_command`` transformer; the dispatcher uses this to
+            decide whether to surface the one-shot passthrough notice.
         """
         # Transform to command format
-        command_name, post, warnings = self._transform_prompt_to_command(source)  # noqa: RUF059
+        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(source)
 
         # Resolve context links in content
         post.content, links_resolved = self.resolve_links(post.content, source, target)
@@ -216,13 +323,31 @@ class CommandIntegrator(BaseIntegrator):
             "",
         )
 
+        # Surface dropped (lossy-transform) frontmatter keys.  The shared
+        # claude_command transformer preserves only a common subset of
+        # frontmatter; any other source key is silently discarded by the
+        # transformer.  Warn so users see the lossy transform at install
+        # time -- core "install adds, never silently mutates" contract.
+        if dropped_keys and diagnostics is not None:
+            preserved_list = ", ".join(sorted(_PRESERVED_COMMAND_KEYS_DISPLAY))
+            diagnostics.warn(
+                message=(
+                    f"{target_name.capitalize()} command {command_name}: "
+                    f"frontmatter keys not supported for {target_name} commands "
+                    f"and were dropped: {', '.join(dropped_keys)}. "
+                    f"Supported keys: {preserved_list}."
+                ),
+                package=pkg_name,
+            )
+
         # Surface install-time info when input -> arguments mapping happened so
         # users aren't surprised by content that differs from the source package.
         mapped_args = post.metadata.get("arguments") if post.metadata else None
         if mapped_args and diagnostics is not None:
             diagnostics.info(
                 message=(
-                    f"Mapped input -> Claude arguments in {target.name}: [{', '.join(mapped_args)}]"
+                    f"Mapped input -> command arguments in {target.name}: "
+                    f"[{', '.join(mapped_args)}]"
                 ),
                 package=pkg_name,
                 detail=(
@@ -231,7 +356,11 @@ class CommandIntegrator(BaseIntegrator):
                 ),
             )
 
-        # Defense-in-depth: scan compiled command before writing.
+        # Defense-in-depth: scan compiled command before writing.  Uses
+        # BLOCK_POLICY so a critical finding introduced by the
+        # transform itself (e.g. via link resolution) prevents the file
+        # from being written -- matches the secure-by-default contract
+        # of the pre-install BLOCK gate that scans source files.
         # Fail-closed on missing/broken security gate (re-raise ImportError);
         # other I/O-style errors are surfaced as a warning so installs stay observable.
         compiled = frontmatter.dumps(post)
@@ -240,7 +369,7 @@ class CommandIntegrator(BaseIntegrator):
             scan_verdict = SecurityGate.scan_text(
                 compiled,
                 str(target),
-                policy=WARN_POLICY,
+                policy=BLOCK_POLICY,
             )
         except ImportError:
             # Missing/tampered gate must not silently become a no-op.
@@ -298,6 +427,12 @@ class CommandIntegrator(BaseIntegrator):
             else:
                 logger.warning(warning)
 
+        # Defense-in-depth skip: a critical post-transform finding must
+        # not be deployed.  Surfaced as severity=critical above so the
+        # user sees why nothing landed on disk.
+        if scan_verdict is not None and scan_verdict.has_critical:
+            return (links_resolved, False, bool(dropped_keys))
+
         # Ensure target directory exists
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -305,7 +440,7 @@ class CommandIntegrator(BaseIntegrator):
         with open(target, "w", encoding="utf-8") as f:
             f.write(compiled)
 
-        return links_resolved
+        return (links_resolved, True, bool(dropped_keys))
 
     # ------------------------------------------------------------------
     # Target-driven API (data-driven dispatch)
@@ -331,15 +466,40 @@ class CommandIntegrator(BaseIntegrator):
         if not mapping:
             return IntegrationResult(0, 0, 0, [], 0)
 
+        # Hoist the per-package name lookup once -- used by every
+        # diagnostic emitted below instead of being recomputed at each
+        # call site (was duplicated 4x in this method).
+        pkg_name = getattr(
+            getattr(package_info, "package", None),
+            "name",
+            "",
+        )
+
         effective_root = mapping.deploy_root or target.root_dir
         target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
+            # Surface a discoverability note so users (and CI logs) see
+            # why the target was skipped.
+            if diagnostics is not None:
+                diagnostics.info(
+                    message=(
+                        f"Skipped {target.root_dir}/{mapping.subdir}/ -- "
+                        f"create a {target.root_dir}/ directory to enable "
+                        f"{target.name} command deployment."
+                    ),
+                    package=pkg_name,
+                )
             return IntegrationResult(0, 0, 0, [], 0)
 
         prompt_files = self.find_prompt_files(package_info.install_path)
         if not prompt_files:
             return IntegrationResult(0, 0, 0, [], 0)
 
+        # NOTE: the one-shot passthrough notice that used to fire here
+        # is now emitted *after* the loop, gated on whether at least one
+        # file in the batch actually had dropped frontmatter keys.  This
+        # avoids polluting the happy path on Cursor installs of packages
+        # whose prompts only use the cross-tool subset.
         self.init_link_resolver(package_info, project_root)
 
         commands_dir = target_root / mapping.subdir
@@ -347,6 +507,7 @@ class CommandIntegrator(BaseIntegrator):
         files_skipped = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
+        any_dropped_keys = False
 
         for prompt_file in prompt_files:
             filename = prompt_file.name
@@ -355,7 +516,37 @@ class CommandIntegrator(BaseIntegrator):
             else:
                 base_name = prompt_file.stem
 
+            # Containment: reject base names containing path traversal
+            # sequences before joining into commands_dir.  A malicious
+            # package shipping ``../../evil.prompt.md`` would otherwise
+            # escape the target commands directory.
+            try:
+                validate_path_segments(base_name, context="command filename")
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected command filename: {exc}",
+                        package=pkg_name,
+                    )
+                files_skipped += 1
+                continue
+
             target_path = commands_dir / f"{base_name}{mapping.extension}"
+
+            # Defense-in-depth: assert the resolved target stays inside
+            # the commands directory even if validate_path_segments was
+            # bypassed by a future regression.
+            try:
+                ensure_path_within(target_path, commands_dir)
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected command target path: {exc}",
+                        package=pkg_name,
+                    )
+                files_skipped += 1
+                continue
+
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
@@ -371,17 +562,56 @@ class CommandIntegrator(BaseIntegrator):
             if mapping.format_id == "gemini_command":
                 self._write_gemini_command(prompt_file, target_path)
                 links_resolved = 0
+                written = True
+                had_dropped = False
             else:
-                links_resolved = self.integrate_command(
+                # Cursor reuses the shared claude_command transformer;
+                # pass target.name so diagnostic messages stay
+                # target-agnostic (no Claude branding for Cursor
+                # installs).  See the cursor-command-format TODO on
+                # KNOWN_TARGETS["cursor"]["commands"] in targets.py.
+                links_resolved, written, had_dropped = self.integrate_command(
                     prompt_file,
                     target_path,
                     package_info,
                     prompt_file,
                     diagnostics=diagnostics,
+                    target_name=target.name,
                 )
+            if not written:
+                # Critical post-transform finding -- defense-in-depth
+                # skip already surfaced via diagnostics.security().
+                files_skipped += 1
+                continue
+            if had_dropped:
+                any_dropped_keys = True
             files_integrated += 1
             total_links_resolved += links_resolved
             target_paths.append(target_path)
+
+        # One-shot install-time notice for cursor-style targets that
+        # actually dropped at least one frontmatter key in this batch.
+        # Suppressed on the happy path (no dropped keys) to avoid
+        # noise on Cursor installs of packages whose prompts only use
+        # the cross-tool subset.  Per-file dropped-keys warnings already
+        # fire from integrate_command() for keys that *are* discarded;
+        # this one-shot info adds the cross-tool-compatibility context
+        # so users who inspect ``.cursor/commands/*.md`` and see
+        # Claude-style frontmatter understand it is intentional.
+        if diagnostics is not None and self._should_emit_passthrough_notice(
+            target.name,
+            mapping.format_id,
+            had_dropped_keys=any_dropped_keys,
+        ):
+            diagnostics.info(
+                message=(
+                    f"{target.name.capitalize()} command files keep "
+                    f"Claude-compatible frontmatter (description, "
+                    f"allowed-tools, model, argument-hint, input) "
+                    f"intentionally for cross-tool compatibility."
+                ),
+                package=pkg_name,
+            )
 
         return IntegrationResult(
             files_integrated=files_integrated,

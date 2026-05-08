@@ -10,7 +10,8 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm install [PKGS...]` | Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)) | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skill(s) from SKILL_BUNDLE (repeatable; persisted in apm.yml; `'*'` resets to all), `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
+| `apm install [PKGS...]` | Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)) | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated, e.g. `--target claude,cursor`; highest-priority entry in the resolution chain `--target` > apm.yml `targets:` > auto-detect; `--target all` deprecated, see `apm compile --all`; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skill(s) from SKILL_BUNDLE (repeatable; persisted in apm.yml; `'*'` resets to all), `--legacy-skill-paths` restore per-client skill dirs, `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
+| `apm targets` | Show resolved deployment targets for the current project (Click group; reads filesystem signals; works with or without `apm.yml`) | `--all` also include the `agent-skills` meta-target (only meaningful with `--json`), `--json` machine-readable output. No provenance line is printed (the table is the provenance). |
 | `apm uninstall PKGS...` | Remove packages | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
@@ -21,11 +22,35 @@
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N` |
 
+### Install validation chain (virtual subdirectory packages)
+
+`apm install` validates subdirectory packages (`owner/repo/path#ref`) before writing to `apm.yml` using the same credential chain as the actual install. See [Authentication > Install validation chain](../authentication/) for the full probe sequence and troubleshooting.
+
+### Target resolution chain
+
+`apm install` resolves harness targets in strict priority order:
+
+1. `--target` flag (highest; CSV form: `--target claude,cursor`).
+2. `apm.yml` `targets:` list (or singular `target:` sugar).
+3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf).
+
+`apm install` prints a one-line provenance summary before any mutation:
+
+```
+[i] Targets: claude, copilot  (source: auto-detect from CLAUDE.md, .github/copilot-instructions.md)
+```
+
+Suppress with `--quiet`. Add `--verbose` to also print a `[>] Scanned: ...` line listing every signal probed.
+
+If no `--target`, no `targets:` in `apm.yml`, and no harness signal is present, `apm install` exits 2 with a teaching message instead of silently defaulting to copilot. Run `apm targets` to inspect what APM detects in the current directory; use it for discovery, scripting (`--json`), and debugging unexpected detection.
+
+`apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
+
 ## Compilation
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm compile` | Compile agent context | `-o` output, `-t` target (comma-separated), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution` |
+| `apm compile` | Compile agent context | `-o` output, `-t` target (comma-separated; resolution chain `--target` > apm.yml `targets:` > auto-detect), `--all` compile for every canonical target (preferred over deprecated `--target all`), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution` |
 
 ## Scripts
 
@@ -39,20 +64,24 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm audit [PKG]` | Scan for security issues | `--file PATH`, `--strip`, `--dry-run`, `-v`, `-f [text\|json\|sarif\|md]`, `-o PATH`, `--ci`, `--policy SOURCE`, `--no-cache`, `--no-fail-fast` |
+| `apm audit [PKG]` | Scan for security issues + detect integration drift | `--file PATH`, `--strip`, `--dry-run`, `-v`, `-f [text\|json\|sarif\|md]`, `-o PATH`, `--ci`, `--policy SOURCE`, `--no-cache`, `--no-fail-fast`, `--no-drift` |
+
+`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. Catches three failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. Use `--no-drift` to opt out (e.g. fast inner loops); the flag is mutually exclusive with `--strip`/`--file`. In `--ci` mode drift findings produce exit code 1 alongside the seven baseline lockfile checks. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`).
 
 ## Distribution
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm pack` | Build distributable artifacts (bundle and/or marketplace.json -- driven by `apm.yml`). Default output is a Claude Code plugin directory. | `-o PATH`, `-t TARGET`, `--archive`, `--dry-run`, `--format [plugin\|apm]` (default `plugin`), `--force`, `--offline`, `--include-prerelease`, `--marketplace-output PATH` |
-| `apm unpack BUNDLE` | Extract a bundle | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
+| `apm pack` | Build distributable artifacts (bundle and/or marketplace.json -- driven by `apm.yml`). Default output is a Claude Code plugin directory. Bundles embed `apm.lock.yaml` with `pack.target` and `pack.bundle_files` (path -> sha256) so `apm install` can verify integrity at deploy time. | `-o PATH`, `-t TARGET`, `--archive`, `--dry-run`, `--format [plugin\|apm]` (default `plugin`), `--force`, `--offline`, `--include-prerelease`, `--marketplace-output PATH` |
+| `apm unpack BUNDLE` | **[Deprecated]** Extract a bundle. Use `apm install <bundle-path>` instead -- it deploys directly with integrity verification and target resolution. | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
+
+`apm install <BUNDLE-PATH>` -- when the positional argument resolves to a directory containing `plugin.json` at its root, or to a `.tar.gz`/`.tgz` archive whose extracted root contains `plugin.json`, install switches to local-bundle mode: the bundle is integrity-verified against its embedded `apm.lock.yaml` (`pack.bundle_files`) and deployed into the resolved targets. Other existing paths (e.g. a source-package directory without `plugin.json`) still flow through the normal local-path dependency-resolver pipeline. Files are recorded under `local_deployed_files` in the project lockfile -- `apm.yml` is **never** mutated. Honours `--target`, `--global`, `--force`, `--dry-run`, `--verbose`, plus `--as ALIAS` (log/display label only). Resolver/MCP/registry/policy flags (`--update`, `--mcp`, `--parallel-downloads`, `--allow-insecure-host`, `--skill`, ...) are rejected with a single consolidated error -- local-bundle install is an imperative deploy and bypasses those subsystems.
 
 ## Marketplace (consumer)
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace add OWNER/REPO` | Register a marketplace | `-n NAME`, `-b BRANCH`, `--host HOST` |
+| `apm marketplace add OWNER/REPO` | Register a marketplace (also accepts `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, or full HTTPS URL) | `-n NAME`, `-b BRANCH`, `--host HOST` |
 | `apm marketplace list` | List registered marketplaces | -- |
 | `apm marketplace browse NAME` | Browse marketplace plugins | -- |
 | `apm marketplace update [NAME]` | Update marketplace index | -- |
@@ -95,9 +124,9 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm runtime setup {copilot\|codex\|llm\|gemini}` | Install a runtime | `--version`, `--vanilla` |
+| `apm runtime setup {copilot\|codex\|llm\|gemini\|windsurf}` | Install a runtime | `--version`, `--vanilla` |
 | `apm runtime list` | Show installed runtimes | -- |
-| `apm runtime remove {copilot\|codex\|llm\|gemini}` | Remove a runtime | `-y`, `--yes` |
+| `apm runtime remove {copilot\|codex\|llm\|gemini\|windsurf}` | Remove a runtime | `-y`, `--yes` |
 | `apm runtime status` | Show active runtime | -- |
 
 ## Experimental features
@@ -111,6 +140,16 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 | `apm experimental reset [NAME]` | Reset one flag or all flags to defaults; also cleans malformed overrides during bulk reset | `-y` skip confirm, `-v` verbose |
 
 Use `apm experimental enable copilot-cowork` to turn on Microsoft 365 Copilot Cowork skill deployment. Once enabled, deploy skills with `apm install --target copilot-cowork --global`.
+
+### Cross-client skills (`agent-skills`)
+
+Use `--target agent-skills` to deploy skills to `.agents/skills/` -- the cross-tool standard directory. This is useful when multiple clients (Codex, future tools) read from `.agents/skills/`. Unlike `--target all`, `agent-skills` must be requested explicitly: `apm install --target agent-skills` or `apm install --target all,agent-skills` for both. `apm compile --target agent-skills` is a no-op (skills-only target).
+
+> **Note:** `--target agents` is **deprecated** -- it maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` or `--target agent-skills` instead.
+
+### Skill routing convergence
+
+By default, Copilot, Cursor, OpenCode, Codex, and Gemini all deploy skills to `.agents/skills/` (the agentskills.io standard). Claude is the only exception and retains its native per-client routing (`.claude/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
 
 Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
 

@@ -175,35 +175,80 @@ def _resolve_compile_target(target):
     collapsing to ``"all"`` (which would incorrectly generate files
     for every family).
 
+    Family resolution reads ``TargetProfile.compile_family`` from
+    ``KNOWN_TARGETS`` so adding a new compile-eligible target only
+    requires populating that field.  The CLI alias ``"vscode"`` is
+    treated as ``"copilot"`` for this purpose.
+
     Args:
         target: A single target string, a list of target strings, or ``None``.
 
     Returns:
         A single string, a ``frozenset`` of compiler families, or ``None``.
     """
+    from ...integration.targets import KNOWN_TARGETS
+
     if target is None:
         return None  # will trigger detect_target() auto-detection
     if isinstance(target, list):
         target_set = set(target)
-        agents_family = {"copilot", "vscode", "agents", "cursor", "opencode", "codex"}
-        has_agents_family = bool(target_set & agents_family)
-        has_claude = "claude" in target_set
-        has_gemini = "gemini" in target_set
-        families = set()
-        if has_agents_family:
-            families.add("agents")
-        if has_claude:
-            families.add("claude")
-        if has_gemini:
-            families.add("gemini")
+        # Strip targets with no compile output (compile_family is None);
+        # they would silently fall through the family resolution otherwise.
+        # ``vscode`` is a CLI alias for ``copilot`` and shares its profile.
+        skip = {name for name, profile in KNOWN_TARGETS.items() if profile.compile_family is None}
+        target_set -= skip
+        if not target_set:
+            # Solo agent-skills (or another no-compile target) in a list --
+            # pass through as a string so the compiler's no-op path fires.
+            for sentinel in target:
+                if sentinel in skip:
+                    return sentinel
+            return None
+
+        # The "vscode" family handles copilot AND emits AGENTS.md as a
+        # bonus; the "agents" family emits AGENTS.md only.  When both
+        # appear in a multi-target compile we still need both family
+        # tokens so the agents compiler routes correctly.
+        def _family_of(name: str) -> str | None:
+            if name == "vscode":
+                return "vscode"
+            profile = KNOWN_TARGETS.get(name)
+            return profile.compile_family if profile else None
+
+        families: set[str] = set()
+        for name in target_set:
+            family = _family_of(name)
+            if family is None:
+                continue
+            families.add(family)
+            if family == "vscode":
+                # copilot also emits AGENTS.md; mirror legacy behavior.
+                families.add("agents")
+
         if len(families) >= 2:
+            # Single-target copilot collapses {"vscode","agents"} to bare
+            # "vscode" for routing parity with single-string -t copilot.
+            if families == {"vscode", "agents"}:
+                return "vscode"
             return frozenset(families)
-        elif has_claude:
+        if "claude" in families:
             return "claude"
-        elif has_gemini:
+        if "gemini" in families:
             return "gemini"
-        else:
-            return "vscode"  # agents-family only
+        if "vscode" in families:
+            return "vscode"
+        # Bare agents-family target: preserve the original target name so
+        # single-element list routing matches single-string semantics
+        # (-t cursor and -t [cursor] both end up as "cursor").  Iterate
+        # KNOWN_TARGETS in insertion order so priority ties (e.g.
+        # ["opencode","codex"]) resolve deterministically to the
+        # earliest-registered target.  Adding a new agents-family
+        # target (e.g. zed, cline) costs zero edits here -- it inherits
+        # whatever priority position it occupies in the registry.
+        for name, profile in KNOWN_TARGETS.items():
+            if profile.compile_family == "agents" and name in target_set:
+                return name
+        return "vscode"  # defensive fallback (unreachable)
     return target  # single string pass-through
 
 
@@ -219,7 +264,7 @@ def _resolve_compile_target(target):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both.",
 )
 @click.option(
     "--dry-run",
@@ -258,6 +303,24 @@ def _resolve_compile_target(target):
     is_flag=True,
     help="Remove orphaned AGENTS.md files that are no longer generated",
 )
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Compatibility flag for projects that "
+        "need per-client skill layouts."
+    ),
+)
+@click.option(
+    "--all",
+    "compile_all",
+    is_flag=True,
+    default=False,
+    help="Compile for all canonical targets. Equivalent to --target all.",
+)
 @click.pass_context
 def compile(
     ctx,
@@ -273,6 +336,8 @@ def compile(
     verbose,
     local_only,
     clean,
+    legacy_skill_paths,
+    compile_all,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -293,6 +358,22 @@ def compile(
     * --clean: Remove orphaned AGENTS.md files that are no longer generated
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
+
+    # --all flag: equivalent to --target all, with deprecation path
+    if compile_all:
+        if target is not None:
+            logger.error("Cannot use --all together with --target")
+            sys.exit(2)
+        target = "all"
+    elif (isinstance(target, str) and target == "all") or (
+        isinstance(target, list) and "all" in target
+    ):
+        # Surface deprecation through the same UX channel as other
+        # warnings so users actually see it (convergence item 9).
+        # warnings.warn(DeprecationWarning) is invisible by default in
+        # CLI output and would only ever fire for downstream library
+        # consumers running with -W default, which we have none of.
+        logger.warning("'--target all' is deprecated; use '--all' instead.")
 
     try:
         # Check if this is an APM project first
@@ -399,6 +480,27 @@ def compile(
         if apm_yml_path.exists():
             apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
             config_target = apm_pkg.target
+            # Parity with `apm install`: also honor canonical plural
+            # `targets:` key (#1154).  APMPackage only reads singular
+            # `target:`; parse_targets_field handles both keys, raises
+            # ConflictingTargetsError when both appear, and validates
+            # tokens against CANONICAL_TARGETS.  When only `targets:` is
+            # present, apm_pkg.target is None and we promote the plural
+            # list here so compile sees the same schema install sees.
+            if config_target is None:
+                try:
+                    from ...core.apm_yml import parse_targets_field
+                    from ...utils.yaml_io import load_yaml
+
+                    _raw = load_yaml(apm_yml_path)
+                    if isinstance(_raw, dict):
+                        _yaml_targets = parse_targets_field(_raw)
+                        if _yaml_targets:
+                            config_target = (
+                                _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
+                            )
+                except Exception:
+                    pass
 
         # Resolve list targets to compiler-understood value
         compile_target = _resolve_compile_target(target)
@@ -427,6 +529,55 @@ def compile(
             # Keep the detected target intact so the compiler can preserve
             # minimal-mode semantics (AGENTS.md only, no .github side outputs).
             effective_target = detected_target
+
+        # Emit canonical provenance line BEFORE compilation -- mirrors
+        # `apm install` so users see the same `[i] Targets: ...
+        # (source: ...)` line on both surfaces.  Use the user-facing
+        # source values (target / config_target) NOT the compiler-family
+        # expansion in effective_target -- install shows the schema names
+        # the user wrote (e.g. "copilot"), so compile must too, otherwise
+        # parity drifts (compile would print "agents, vscode" for the
+        # same input).
+        from ...core.target_detection import ResolvedTargets, format_provenance
+        from ...utils.console import _rich_info
+
+        def _coerce_provenance_targets(value):
+            if value is None:
+                return []
+            if isinstance(value, str):
+                return [t.strip() for t in value.split(",") if t.strip()]
+            if isinstance(value, list):
+                return [str(t) for t in value]
+            if isinstance(value, frozenset):
+                return sorted(value)
+            return []
+
+        if detection_reason == "explicit --target flag":
+            _provenance_targets = _coerce_provenance_targets(target)
+            _provenance_source = "--target flag"
+        elif detection_reason == "apm.yml target":
+            _provenance_targets = _coerce_provenance_targets(config_target)
+            _provenance_source = "apm.yml"
+        else:
+            if isinstance(effective_target, frozenset):
+                _provenance_targets = sorted(effective_target)
+            elif isinstance(effective_target, str):
+                _provenance_targets = [effective_target]
+            else:
+                _provenance_targets = []
+            _provenance_source = f"auto-detect ({detection_reason})"
+
+        if _provenance_targets:
+            _rich_info(
+                format_provenance(
+                    ResolvedTargets(
+                        targets=sorted(set(_provenance_targets)),
+                        source=_provenance_source,
+                        auto_create=True,
+                    )
+                ),
+                symbol="info",
+            )
 
         # Build config with distributed compilation flags (Task 7)
         config = CompilationConfig.from_apm_yml(

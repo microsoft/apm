@@ -13,7 +13,12 @@ from ..core.command_logger import CommandLogger
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..models.apm_package import APMPackage
 from ..utils.path_security import PathTraversalError, safe_rmtree  # noqa: F401
-from ._helpers import _build_expected_install_paths, _scan_installed_packages
+from ._helpers import (
+    _build_expected_install_paths,
+    _expand_with_ancestors,
+    _scan_installed_packages,
+    _standalone_installed_packages,
+)
 
 
 @click.command(help="Remove APM packages not listed in apm.yml")
@@ -57,19 +62,32 @@ def prune(ctx, dry_run):
             sys.exit(1)
 
         installed_packages = _scan_installed_packages(apm_modules_dir)
-        orphaned_packages = [p for p in installed_packages if p not in expected_installed]
+        # Mirror _check_orphaned_packages: filter installed paths to
+        # real standalone packages (lockfile-membership + apm.yml
+        # fallback) so ancestor expansion does NOT silently mask a
+        # genuinely orphaned ``owner/repo`` package when a sibling
+        # subdirectory dep shares the same install root.
+        # ``apm prune`` is a destructive command -- it MUST behave
+        # identically to its advisory display path.
+        standalone_installed = _standalone_installed_packages(
+            installed_packages, apm_modules_dir, lockfile=lockfile
+        )
+        expected_with_ancestors = _expand_with_ancestors(expected_installed, standalone_installed)
+        orphaned_packages = sorted(
+            p for p in installed_packages if p not in expected_with_ancestors
+        )
 
         if not orphaned_packages:
             logger.success("No orphaned packages found. apm_modules/ is clean.", symbol="check")
             return
 
         # Show what will be removed
-        logger.progress(f"Found {len(orphaned_packages)} orphaned package(s):")
+        logger.warning(f"Found {len(orphaned_packages)} orphaned package(s):")
         for pkg_name in orphaned_packages:
             if dry_run:
-                logger.progress(f"  - {pkg_name} (would be removed)")
+                logger.warning(f"  - {pkg_name} (would be removed)")
             else:
-                logger.progress(f"  - {pkg_name}")
+                logger.warning(f"  - {pkg_name}")
 
         if dry_run:
             logger.success("Dry run complete - no changes made")

@@ -52,8 +52,13 @@ __all__ = [  # noqa: RUF022
     "clear_apm_yml_cache",
 ]
 
-# Module-level parse cache: resolved path -> APMPackage (#171)
-_apm_yml_cache: dict[Path, "APMPackage"] = {}
+# Module-level parse cache: (resolved apm.yml path, resolved source dir) ->
+# APMPackage. The source-dir half of the key is part of cache identity (#940)
+# because two logical loads of the same apm.yml file can declare different
+# anchors for relative ``local_path`` deps depending on which parent package
+# declared them. Sharing one APMPackage instance across both would let the
+# resolver mutate ``source_path`` and poison the cache for the other consumer.
+_apm_yml_cache: dict[tuple[Path, Path | None], "APMPackage"] = {}
 
 
 def clear_apm_yml_cache() -> None:
@@ -78,6 +83,14 @@ class APMPackage:
     dev_dependencies: dict[str, list[DependencyReference | str | dict]] | None = None
     scripts: dict[str, str] | None = None
     package_path: Path | None = None  # Local path to package
+    # Absolute on-disk directory used to anchor relative ``local_path``
+    # dependencies declared in this package's apm.yml (#857). For LOCAL deps
+    # this is the *original* user source directory, not the apm_modules copy
+    # -- so a transitive ``../sibling`` declared inside the original means
+    # what a developer reading the file expects. For REMOTE deps it is the
+    # clone location under apm_modules. For the root project it is the
+    # project root.
+    source_path: Path | None = None
     target: str | list[str] | None = (
         None  # Target agent(s): single string or list (applies to compile and install)
     )
@@ -131,16 +144,31 @@ class APMPackage:
         return parsed
 
     @classmethod
-    def from_apm_yml(cls, apm_yml_path: Path) -> "APMPackage":
+    def from_apm_yml(
+        cls,
+        apm_yml_path: Path,
+        source_path: Path | None = None,
+    ) -> "APMPackage":
         """Load APM package from apm.yml file.
 
-        Results are cached by resolved path for the lifetime of the process.
+        Results are cached by ``(resolved apm.yml path, resolved source_path)``
+        for the lifetime of the process. ``source_path`` is part of the cache
+        identity so two logical loads of the same file with different anchors
+        for relative ``local_path`` deps each get their own immutable
+        APMPackage instance (#940 -- prevents cache poisoning).
 
         Args:
-            apm_yml_path: Path to the apm.yml file
+            apm_yml_path: Path to the apm.yml file.
+            source_path: Optional absolute directory used to anchor relative
+                ``local_path`` dependencies declared in this apm.yml. The
+                resolver passes the *original* user source directory for
+                local deps (not the apm_modules copy) so transitive
+                ``../sibling`` references resolve as a developer reading the
+                file expects. Callers that don't care about this anchoring
+                may omit the argument and get the legacy behavior.
 
         Returns:
-            APMPackage: Loaded package instance
+            APMPackage: Loaded package instance with ``source_path`` set.
 
         Raises:
             ValueError: If the file is invalid or missing required fields
@@ -150,7 +178,9 @@ class APMPackage:
             raise FileNotFoundError(f"apm.yml not found: {apm_yml_path}")
 
         resolved = apm_yml_path.resolve()
-        cached = _apm_yml_cache.get(resolved)
+        resolved_source = source_path.resolve() if source_path is not None else None
+        cache_key = (resolved, resolved_source)
+        cached = _apm_yml_cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -227,11 +257,12 @@ class APMPackage:
             dev_dependencies=dev_dependencies,
             scripts=data.get("scripts"),
             package_path=apm_yml_path.parent,
+            source_path=resolved_source,
             target=target_value,
             type=pkg_type,
             includes=includes,
         )
-        _apm_yml_cache[resolved] = result
+        _apm_yml_cache[cache_key] = result
         return result
 
     def get_apm_dependencies(self) -> list[DependencyReference]:
