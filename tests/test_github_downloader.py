@@ -2062,15 +2062,14 @@ class TestRefExistsViaLsRemote:
 # Generic host (Gitea / GitLab) download tests
 # ---------------------------------------------------------------------------
 
+
 def _make_resp(status_code: int, content: bytes = b"") -> Mock:
     """Build a minimal mock requests.Response."""
     resp = Mock()
     resp.status_code = status_code
     resp.content = content
     if status_code >= 400:
-        resp.raise_for_status = Mock(
-            side_effect=requests_lib.exceptions.HTTPError(response=resp)
-        )
+        resp.raise_for_status = Mock(side_effect=requests_lib.exceptions.HTTPError(response=resp))
     else:
         resp.raise_for_status = Mock()
     return resp
@@ -2121,8 +2120,9 @@ class TestGiteaRawUrlDownload:
         expected = b"file via API"
 
         with patch.object(
-            self.downloader, "_resilient_get",
-            side_effect=[_make_resp(404), _make_resp(200, expected)]
+            self.downloader,
+            "_resilient_get",
+            side_effect=[_make_resp(404), _make_resp(200, expected)],
         ) as mock_get:
             result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
 
@@ -2151,9 +2151,9 @@ class TestGiteaGogsApiVersionNegotiation:
         expected = b"gitea v3 file content"
 
         side_effects = [
-            _make_resp(404),           # raw URL
-            _make_resp(404),           # v1
-            _make_resp(200, expected), # v3
+            _make_resp(404),  # raw URL
+            _make_resp(404),  # v1
+            _make_resp(200, expected),  # v3
         ]
         with patch.object(self.downloader, "_resilient_get", side_effect=side_effects) as mock_get:
             result = self.downloader.download_raw_file(dep_ref, "skill.md", "main")
@@ -2170,8 +2170,9 @@ class TestGiteaGogsApiVersionNegotiation:
         expected = b"gitea content"
 
         with patch.object(
-            self.downloader, "_resilient_get",
-            side_effect=[_make_resp(404), _make_resp(200, expected)]
+            self.downloader,
+            "_resilient_get",
+            side_effect=[_make_resp(404), _make_resp(200, expected)],
         ) as mock_get:
             result = self.downloader.download_raw_file(dep_ref, "file.md", "main")
 

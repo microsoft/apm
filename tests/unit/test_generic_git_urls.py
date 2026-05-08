@@ -953,10 +953,12 @@ class TestGiteaVirtualPackageDetection:
 
     def test_dict_format_virtual_on_gitea(self):
         """Dict format with path= on Gitea host yields a virtual package."""
-        dep = DependencyReference.parse_from_dict({
-            "git": "gitea.myorg.com/owner/repo",
-            "path": "prompts/review.prompt.md",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "gitea.myorg.com/owner/repo",
+                "path": "prompts/review.prompt.md",
+            }
+        )
         assert dep.host == "gitea.myorg.com"
         assert dep.repo_url == "owner/repo"
         assert dep.virtual_path == "prompts/review.prompt.md"

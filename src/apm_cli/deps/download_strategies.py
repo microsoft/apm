@@ -734,7 +734,9 @@ class DownloadDelegate:
 
                 for fallback_url in fallback_url_candidates:
                     try:
-                        response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
+                        response = self._host._resilient_get(
+                            fallback_url, headers=headers, timeout=30
+                        )
                         response.raise_for_status()
                         if verbose_callback:
                             verbose_callback(
