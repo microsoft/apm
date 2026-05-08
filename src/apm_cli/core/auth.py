@@ -732,6 +732,12 @@ class AuthResolver:
             # B2 #852: skip GIT_TOKEN for bearer scheme -- the JWT is injected via
             # GIT_CONFIG_VALUE_0 only; GIT_TOKEN here would leak it into every
             # child-process env (visible in /proc/<pid>/environ, ps eww).
+            #
+            # #1214 follow-up: a stale GIT_TOKEN already in the parent env
+            # (set by a prior shell, CI step, or another tool) would survive
+            # the os.environ.copy() above and defeat the isolation guarantee.
+            # Drop it explicitly so the bearer env is clean by construction.
+            env.pop("GIT_TOKEN", None)
             from apm_cli.utils.github_host import build_ado_bearer_git_env
 
             env.update(build_ado_bearer_git_env(token))
@@ -754,10 +760,16 @@ class AuthResolver:
         Naming: previously ``_emit_stale_pat_diagnostic`` (private). Public
         now (#856 follow-up C9) so external modules (validation.py,
         github_downloader.py) do not reach into the underscore API.
+
+        #1214 follow-up: guard the check-then-add under self._lock so two
+        threads (parallel install) racing on the same ADO host cannot both
+        pass the membership check before either calls add(); without the
+        lock the dedup set defeats its own purpose.
         """
-        if host_display in self._stale_pat_warned_hosts:
-            return
-        self._stale_pat_warned_hosts.add(host_display)
+        with self._lock:
+            if host_display in self._stale_pat_warned_hosts:
+                return
+            self._stale_pat_warned_hosts.add(host_display)
         msg = f"ADO_APM_PAT was rejected for {host_display}; fell back to az cli bearer."
         detail = "Consider unsetting the stale variable."
         diagnostics = self._diagnostics_or_none()

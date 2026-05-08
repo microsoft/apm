@@ -718,6 +718,63 @@ class TestStalePATDiagnosticDedup:
                 # twice (msg + detail). Third call (dup) -> no extra calls.
                 assert mock_warn.call_count == 4
 
+    def test_concurrent_same_host_emits_once(self):
+        """Parallel install: N threads racing on the same ADO host -> ONE warning.
+
+        #1214 follow-up: without locking the check-then-add of
+        ``_stale_pat_warned_hosts``, two threads can both pass the
+        ``host in set`` check before either calls ``add()``, defeating the
+        per-host dedup the set is there to provide. The lock serialises
+        check+add so only the first racer emits.
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+                with ThreadPoolExecutor(max_workers=16) as pool:
+                    futures = [
+                        pool.submit(resolver.emit_stale_pat_diagnostic, "dev.azure.com")
+                        for _ in range(64)
+                    ]
+                    for fut in futures:
+                        fut.result()
+                # Single emission -> _rich_warning called twice (msg + detail).
+                assert mock_warn.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# TestBuildGitEnvBearerIsolation -- _build_git_env(scheme="bearer") drops GIT_TOKEN
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGitEnvBearerIsolation:
+    def test_bearer_env_drops_pre_existing_git_token(self):
+        """A stale GIT_TOKEN in the parent env must NOT survive into the bearer env.
+
+        #1214 follow-up: ``_build_git_env`` starts from ``os.environ.copy()``;
+        if a prior shell, CI step, or sibling tool already set GIT_TOKEN, the
+        copy preserves it and silently defeats the bearer-isolation guarantee
+        (the JWT is meant to flow ONLY via GIT_CONFIG_VALUE_0). Pop it
+        explicitly so the bearer env is clean by construction.
+        """
+        with patch.dict(os.environ, {"GIT_TOKEN": "stale-pat-from-prior-shell"}, clear=False):
+            env = AuthResolver._build_git_env(
+                "fresh-jwt-from-az-cli", scheme="bearer", host_kind="ado"
+            )
+        assert "GIT_TOKEN" not in env, (
+            "Stale GIT_TOKEN leaked into bearer env -- isolation guarantee broken"
+        )
+        # Sanity: bearer JWT IS present via GIT_CONFIG_* (the only legit channel).
+        assert env.get("GIT_CONFIG_COUNT") is not None
+        # Find the value slot that carries the JWT.
+        value_slots = [v for k, v in env.items() if k.startswith("GIT_CONFIG_VALUE_")]
+        assert any("fresh-jwt-from-az-cli" in v for v in value_slots)
+
+    def test_basic_scheme_still_sets_git_token(self):
+        """Non-bearer path keeps the legacy GIT_TOKEN behaviour."""
+        with patch.dict(os.environ, {}, clear=True):
+            env = AuthResolver._build_git_env("a-pat", scheme="basic", host_kind="github")
+        assert env.get("GIT_TOKEN") == "a-pat"
+
 
 # ---------------------------------------------------------------------------
 # TestHostInfoPort -- port field + display_name property
