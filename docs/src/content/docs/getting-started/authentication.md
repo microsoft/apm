@@ -76,14 +76,22 @@ To opt in, enable path-aware matching once:
 git config --global credential.useHttpPath true
 ```
 
-GCM matches credential URLs by **prefix**, so a single config entry per org typically covers every repo under that org:
+GCM (v2.1+) matches credential URLs by **prefix**, so a single config entry per org typically covers every repo under that org:
 
 ```bash
 git config --global credential.https://github.com/acme.username your-acme-account
 git config --global credential.https://github.com/personal-org.username your-personal-account
 ```
 
-With the entries above, fetches against `acme/widgets`, `acme/payments`, and any other `acme/*` repo all resolve to `your-acme-account` without per-repo configuration.
+With the entries above, fetches against `acme/widgets`, `acme/payments`, and any other `acme/*` repo all resolve to `your-acme-account` without per-repo configuration. Other credential helpers (and older GCM versions) may require an exact path match -- consult your helper's documentation if a per-org entry is not picked up.
+
+### Seeing an account picker mid-install?
+
+If `apm install` triggers a GCM account-picker dialog while resolving a private repo:
+
+1. Confirm `credential.useHttpPath` is set globally: `git config --global --get credential.useHttpPath` should print `true`.
+2. Confirm a per-URL entry exists for the org: `git config --global --get-urlmatch credential https://github.com/<org>` should list the username.
+3. Re-run with `--verbose`; APM logs `trying git credential fill for <host> (path=<owner>/<repo>)` so you can confirm the path APM is sending matches your config entry.
 
 ## Fine-grained PAT setup
 

@@ -50,7 +50,7 @@ def _format_credential_host(host: str, port: int | None) -> str:
 
 
 def _sanitize_credential_path(path: str) -> str:
-    """Strip leading ``/``, reject full URLs, and reject control characters.
+    """Strip leading ``/``, reject control chars, allowlist URL schemes.
 
     The git credential protocol is line-oriented: a stray newline in the
     ``path`` value would let an attacker inject arbitrary attribute lines
@@ -66,9 +66,19 @@ def _sanitize_credential_path(path: str) -> str:
     passes a full URL the naive ``lstrip('/')`` would yield
     ``https:/host/owner/repo`` which GCM silently ignores. Detect this
     via ``urlparse`` and use the URL's path component instead.
+
+    Schemes are allowlisted to ``https``/``http``/``ssh`` (and the
+    schemeless owner/repo case). ``urlparse`` is greedy about consuming
+    embedded characters in non-hierarchical schemes (notably ``data:``
+    and ``file:``), which would let those URI families bypass the
+    char-scan -- the ``parsed.path`` after such schemes can still embed
+    bytes the scan would otherwise reject. Reject anything off-allowlist.
     """
     parsed = urlparse(path)
-    cleaned = parsed.path.lstrip("/") if parsed.scheme else path.lstrip("/")
+    scheme = parsed.scheme.lower()
+    if scheme and scheme not in ("https", "http", "ssh"):
+        return ""
+    cleaned = parsed.path.lstrip("/") if scheme else path.lstrip("/")
     if not cleaned:
         return ""
     for ch in cleaned:

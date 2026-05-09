@@ -5,9 +5,65 @@ import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
-from src.apm_cli.core.token_manager import GitHubTokenManager
+from src.apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
+
+
+class TestSanitizeCredentialPath:
+    """Direct coverage of the security-critical credential-path sanitizer.
+
+    The four code paths (control-char reject, scheme allowlist, full-URL
+    extraction, valid passthrough) are exercised with parametrized cases
+    so a future refactor that drops a branch fails immediately rather than
+    silently widening the injection surface.
+    """
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            # Valid passthrough -- canonical owner/repo
+            ("acme/widgets", "acme/widgets"),
+            # Leading slash stripped
+            ("/acme/widgets", "acme/widgets"),
+            # Dots / hyphens / underscores allowed (GitHub's owner/repo charset)
+            ("acme-org/my.widget_v2", "acme-org/my.widget_v2"),
+            # Empty / whitespace-only -> empty
+            ("", ""),
+            ("/", ""),
+            # Newline (LF) injection -> empty (defense-in-depth)
+            ("acme/widgets\nusername=x", ""),
+            # Carriage return (CR) injection -> empty
+            ("acme/widgets\rusername=x", ""),
+            # NUL byte -> empty
+            ("acme/widgets\x00username=x", ""),
+            # Tab -> empty
+            ("acme/wid\tgets", ""),
+            # Other whitespace -> empty
+            ("acme/wid gets", ""),
+            # DEL (0x7f) -> empty
+            ("acme/widgets\x7f", ""),
+            # https:// URL -> path component extracted
+            ("https://github.com/acme/widgets", "acme/widgets"),
+            # http:// URL (allowlisted) -> path component extracted
+            ("http://example.com/acme/widgets", "acme/widgets"),
+            # ssh URL (allowlisted) -> path component extracted
+            ("ssh://git@github.com/acme/widgets", "acme/widgets"),
+            # data: URI -> rejected (not on allowlist; bypasses char-scan otherwise)
+            ("data:text/plain,acme/widgets%0Ausername=x", ""),
+            # file: URI -> rejected (not on allowlist)
+            ("file:///etc/passwd", ""),
+            # javascript: -> rejected
+            ("javascript:alert(1)", ""),
+        ],
+    )
+    def test_sanitize(self, raw, expected):
+        assert _sanitize_credential_path(raw) == expected
+
+    def test_scheme_allowlist_is_case_insensitive(self):
+        """Schemes are normalized to lowercase before allowlist check."""
+        assert _sanitize_credential_path("HTTPS://github.com/acme/widgets") == "acme/widgets"
+        assert _sanitize_credential_path("DATA:text/plain,x") == ""
 
 
 class TestModulesTokenPrecedence:

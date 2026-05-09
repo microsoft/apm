@@ -23,6 +23,7 @@ _local_path_no_markers_hint
     Scan a local directory for nested installable packages and hint the user.
 """
 
+import re
 from pathlib import Path
 
 import requests
@@ -559,6 +560,15 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         host = default_host()
         org = package.split("/")[0] if "/" in package else None
         repo_path = package  # owner/repo format
+        # Defensive owner/repo guard: when DependencyReference.parse raises,
+        # we fall back to embedding `repo_path` directly into an API URL and
+        # forwarding it as `path=` to git credential fill. Reject anything
+        # that isn't a strict <owner>/<repo> slug so path-confusion sequences
+        # (`../`, embedded slashes, control bytes) cannot reach either sink.
+        # Allows GitHub's documented owner/repo characters: alphanumeric,
+        # dot, underscore, hyphen.
+        if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo_path):
+            return False
 
         def _check_repo_fallback(token, git_env):
             host_info = auth_resolver.classify_host(host)
