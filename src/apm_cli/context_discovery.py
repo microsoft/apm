@@ -52,6 +52,7 @@ _MIGRATION_MAP: dict[tuple[str, str], tuple[str, str | None]] = {
     ("copilot", "command"): (".apm/prompts", ".prompt.md"),
     ("copilot", "hook"): (".apm/hooks", None),
     ("copilot", "hook-script"): (".apm/hooks/scripts", None),
+    ("copilot", "instruction"): (".apm/instructions", ".instructions.md"),
     ("agents", "root-instructions"): (".apm/instructions", ".instructions.md"),
     ("agents", "style"): (".apm/styles", ".style.md"),
 }
