@@ -55,6 +55,16 @@ _MIGRATION_MAP: dict[tuple[str, str], tuple[str, str | None]] = {
     ("copilot", "instruction"): (".apm/instructions", ".instructions.md"),
     ("agents", "root-instructions"): (".apm/instructions", ".instructions.md"),
     ("agents", "style"): (".apm/styles", ".style.md"),
+    # APM-native files misplaced outside .apm/ or .github/ (e.g. .claude/agents/*.agent.md)
+    ("apm", "agent"): (".apm/agents", None),
+    ("apm", "instruction"): (".apm/instructions", None),
+    ("apm", "chatmode"): (".apm/chatmodes", None),
+    ("apm", "context"): (".apm/context", None),
+    ("apm", "prompt"): (".apm/prompts", None),
+    ("apm", "hook"): (".apm/hooks", None),
+    ("apm", "hook-script"): (".apm/hooks/scripts", None),
+    ("apm", "style"): (".apm/styles", None),
+    ("apm", "command"): (".apm/prompts", None),
 }
 
 # Known compound APM extensions -- stripped before applying target extension.
@@ -95,18 +105,29 @@ def compute_migration_plan(
     findings: tuple[ContextDiscoveryFinding, ...],
     project_root: Path,
 ) -> list[MigrationAction]:
-    """Return the file copies needed to migrate convertible findings into .apm/.
+    """Return the file copies needed to migrate findings into .apm/.
 
-    Only project-scoped convertible findings with a known migration mapping are
-    included.  Already-migrated files (dest already exists) are excluded so
-    that running ``--write`` twice is safe.
+    Includes project-scoped convertible findings with a known migration mapping,
+    plus APM-native files that live outside the standard ``.apm/`` and
+    ``.github/`` locations (e.g. ``.claude/agents/*.agent.md``).
+    Already-migrated files (dest already exists) are excluded so that running
+    ``--write`` twice is safe.
     """
     actions: list[MigrationAction] = []
     seen_dests: set[Path] = set()
+    apm_dir = project_root / ".apm"
+    github_dir = project_root / ".github"
 
     for finding in findings:
-        if finding.scope != "project" or finding.importability != IMPORT_CONVERTIBLE:
+        if finding.scope != "project":
             continue
+        if finding.importability == IMPORT_APM_NATIVE:
+            # Only migrate APM-native files that are misplaced outside standard locations.
+            if finding.path.is_relative_to(apm_dir) or finding.path.is_relative_to(github_dir):
+                continue
+        elif finding.importability != IMPORT_CONVERTIBLE:
+            continue
+
         mapping = _MIGRATION_MAP.get((finding.tool, finding.kind))
         if mapping is None:
             continue

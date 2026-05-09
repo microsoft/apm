@@ -591,3 +591,42 @@ def test_full_claude_to_codex_migration(tmp_path):
     assert (tmp_path / ".apm" / "prompts" / "review.prompt.md").exists()
     assert (tmp_path / ".apm" / "agents" / "backend.agent.md").exists()
     assert (tmp_path / ".apm" / "instructions" / "CLAUDE.instructions.md").exists()
+
+
+def test_migration_plan_includes_misplaced_apm_native(tmp_path):
+    """APM-native files outside .apm/ or .github/ (e.g. .claude/agents/*.agent.md) are migrated."""
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "agentic-workflows.agent.md").write_text(
+        "---\ndescription: Workflows\n---", encoding="utf-8"
+    )
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
+    assert ".apm/agents/agentic-workflows.agent.md" in plan
+
+
+def test_migration_plan_skips_apm_native_in_github(tmp_path):
+    """.github/agents/*.agent.md (already compiler-visible) is NOT migrated."""
+    (tmp_path / ".github" / "agents").mkdir(parents=True)
+    (tmp_path / ".github" / "agents" / "my-agent.agent.md").write_text(
+        "---\ndescription: x\n---", encoding="utf-8"
+    )
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    agent_dests = [str(a.dest.relative_to(tmp_path)) for a in result.migration_plan]
+    assert not any("my-agent" in d for d in agent_dests)
+
+
+def test_migration_plan_skips_apm_native_in_apm_dir(tmp_path):
+    """.apm/agents/*.agent.md (canonical location) is NOT migrated."""
+    (tmp_path / ".apm" / "agents").mkdir(parents=True)
+    (tmp_path / ".apm" / "agents" / "my-agent.agent.md").write_text(
+        "---\ndescription: x\n---", encoding="utf-8"
+    )
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    agent_dests = [str(a.dest.relative_to(tmp_path)) for a in result.migration_plan]
+    assert not any("my-agent" in d for d in agent_dests)
