@@ -1912,20 +1912,14 @@ class GitHubPackageDownloader:
 
         # For plugins without an explicit version, stamp with the short commit SHA.
         package = validation_result.package
-        if (
-            validation_result.package_type == PackageType.MARKETPLACE_PLUGIN
-            and package.version == "0.0.0"
-            and resolved_commit != "unknown"
-        ):
-            short_sha = resolved_commit[:7]
-            package.version = short_sha
-            apm_yml_path = target_path / "apm.yml"
-            if apm_yml_path.exists():
-                from ..utils.yaml_io import dump_yaml, load_yaml
+        from .package_validator import stamp_plugin_version
 
-                _data = load_yaml(apm_yml_path) or {}
-                _data["version"] = short_sha
-                dump_yaml(_data, apm_yml_path)
+        stamp_plugin_version(
+            package,
+            validation_result.package_type,
+            resolved_commit,
+            target_path,
+        )
 
         # Update progress - complete
         if progress_obj and progress_task_id is not None:
@@ -2352,21 +2346,14 @@ class GitHubPackageDownloader:
 
         # For plugins without an explicit version, use the short commit SHA so the
         # lock file and conflict detection have a meaningful, stable version string.
-        if (
-            validation_result.package_type == PackageType.MARKETPLACE_PLUGIN
-            and package.version == "0.0.0"
-            and resolved_ref.resolved_commit
-        ):
-            short_sha = resolved_ref.resolved_commit[:7]
-            package.version = short_sha
-            # Keep the synthesized apm.yml in sync
-            apm_yml_path = target_path / "apm.yml"
-            if apm_yml_path.exists():
-                from ..utils.yaml_io import dump_yaml, load_yaml
+        from .package_validator import stamp_plugin_version
 
-                _data = load_yaml(apm_yml_path) or {}
-                _data["version"] = short_sha
-                dump_yaml(_data, apm_yml_path)
+        stamp_plugin_version(
+            package,
+            validation_result.package_type,
+            resolved_ref.resolved_commit,
+            target_path,
+        )
 
         # Create and return PackageInfo
         return PackageInfo(

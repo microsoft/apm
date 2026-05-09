@@ -250,3 +250,44 @@ class PackageValidator:
             summary += f" ({primitive_count} primitives)"
 
         return summary
+
+
+def stamp_plugin_version(
+    package,
+    package_type,
+    resolved_commit: str | None,
+    target_path: "Path",
+) -> None:
+    """Stamp the package version with the short commit SHA when missing.
+
+    Plugins published as marketplace bundles (no ``apm.yml`` of their own)
+    receive a synthesized ``apm.yml`` with ``version: 0.0.0`` during
+    validation. To give the lockfile and conflict detection a meaningful,
+    stable version string we replace ``0.0.0`` with the first 7 characters
+    of the resolved commit SHA -- both on the in-memory ``package`` object
+    and in the on-disk ``apm.yml`` so subsequent reloads agree.
+
+    Idempotent: only acts when ``package_type`` is MARKETPLACE_PLUGIN,
+    ``package.version == "0.0.0"``, and a usable commit SHA is provided.
+    """
+    from ..models.validation import PackageType
+
+    if package is None:
+        return
+    if package_type != PackageType.MARKETPLACE_PLUGIN:
+        return
+    if getattr(package, "version", None) != "0.0.0":
+        return
+    if not resolved_commit or resolved_commit == "unknown":
+        return
+
+    short_sha = resolved_commit[:7]
+    package.version = short_sha
+    apm_yml_path = target_path / "apm.yml"
+    if not apm_yml_path.exists():
+        return
+    from ..utils.yaml_io import dump_yaml, load_yaml
+
+    data = load_yaml(apm_yml_path) or {}
+    data["version"] = short_sha
+    dump_yaml(data, apm_yml_path)
