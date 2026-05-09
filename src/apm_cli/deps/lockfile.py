@@ -237,6 +237,8 @@ class LockFile:
     mcp_configs: dict[str, dict] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
+    discovered_context_files: list[str] = field(default_factory=list)
+    discovered_context_file_hashes: dict[str, str] = field(default_factory=dict)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file."""
@@ -283,6 +285,12 @@ class LockFile:
                 data["local_deployed_file_hashes"] = dict(
                     sorted(self.local_deployed_file_hashes.items())
                 )
+            if self.discovered_context_files:
+                data["discovered_context_files"] = sorted(self.discovered_context_files)
+            if self.discovered_context_file_hashes:
+                data["discovered_context_file_hashes"] = dict(
+                    sorted(self.discovered_context_file_hashes.items())
+                )
             from ..utils.yaml_io import yaml_to_str
 
             return yaml_to_str(data)
@@ -309,6 +317,8 @@ class LockFile:
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
+        lock.discovered_context_files = list(data.get("discovered_context_files", []))
+        lock.discovered_context_file_hashes = dict(data.get("discovered_context_file_hashes") or {})
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
