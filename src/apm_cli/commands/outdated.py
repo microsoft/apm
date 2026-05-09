@@ -262,7 +262,7 @@ def _check_one_dep(dep, downloader, verbose):
             )
 
 
-@click.command(name="outdated", help="Check for outdated locked dependencies")
+@click.command(name="outdated", help="Show outdated locked dependencies")
 @click.option(
     "--global",
     "-g",
