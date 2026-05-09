@@ -768,3 +768,315 @@ class TestInstallLegacyApmFormatBundle:
         )
         # Should NOT contain the legacy-tarball error message
         assert "--format apm" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# E2E: Issue #1207 -- target-agnostic bundle install matrix
+# ---------------------------------------------------------------------------
+
+
+class TestInstallLocalBundleIssue1207:
+    """End-to-end matrix for issue #1207.
+
+    The same target-agnostic bundle (``pack.target == "all"``) must
+    install correctly into projects configured for any target.  No
+    "Install interrupted" line on success; ``plugin.json`` is never
+    deployed; instructions land where the target's compile flow
+    expects them.
+    """
+
+    @pytest.mark.parametrize(
+        "consumer_target,expected_paths",
+        [
+            (
+                "copilot",
+                [
+                    ".agents/skills/coding/SKILL.md",
+                    ".github/agents/reviewer.md",
+                    ".github/instructions/style.md",
+                ],
+            ),
+            (
+                "claude",
+                [
+                    ".claude/skills/coding/SKILL.md",
+                    ".claude/agents/reviewer.md",
+                    ".claude/instructions/style.md",
+                ],
+            ),
+            (
+                "cursor",
+                [
+                    ".agents/skills/coding/SKILL.md",
+                    ".cursor/agents/reviewer.md",
+                    ".cursor/instructions/style.md",
+                ],
+            ),
+            (
+                "opencode",
+                [
+                    ".agents/skills/coding/SKILL.md",
+                    ".opencode/agents/reviewer.md",
+                    "apm_modules/test-plugin/.apm/instructions/style.md",
+                ],
+            ),
+            (
+                "codex",
+                [
+                    ".agents/skills/coding/SKILL.md",
+                    ".codex/agents/reviewer.md",
+                    "apm_modules/test-plugin/.apm/instructions/style.md",
+                ],
+            ),
+            (
+                "gemini",
+                [
+                    ".agents/skills/coding/SKILL.md",
+                    "apm_modules/test-plugin/.apm/instructions/style.md",
+                ],
+            ),
+        ],
+    )
+    def test_target_agnostic_bundle_installs_per_consumer_target(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        consumer_target: str,
+        expected_paths: list[str],
+    ) -> None:
+        """Bundle packed with ``pack.target == "all"`` deploys correctly
+        into the consumer's resolved target without any pack-side
+        target binding leaking into the deploy path.
+
+        We exercise both detection mechanisms in a single matrix: the
+        consumer's IDE is "configured" by pre-creating its ``root_dir``
+        (matches what real users see -- they don't pass ``--target`` on
+        every install).
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        bundle = _make_plugin_bundle(tmp_path / "src", pack_target="all")
+        project = _make_project(tmp_path / "dst")
+        # Pre-create the target's root_dir so resolve_targets picks it up
+        # via directory detection (mirrors a project with the IDE set up).
+        (project / KNOWN_TARGETS[consumer_target].root_dir).mkdir(parents=True, exist_ok=True)
+
+        result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+
+        assert result.exit_code == 0, f"target={consumer_target} stdout={result.output!r}"
+        # D3: no false "Install interrupted" on success.
+        assert "Install interrupted" not in result.output
+
+        for rel in expected_paths:
+            assert (project / rel).is_file(), (
+                f"missing {rel} for target={consumer_target} in {result.output!r}"
+            )
+
+        # D2.a: plugin.json never deployed under the consumer's project
+        # tree, regardless of casing.  PR #1217 review: walk the entire
+        # project tree -- not just ``apm_modules/`` -- so a regression
+        # that leaks ``plugin.json`` under ``.github/``, ``.claude/``,
+        # ``.cursor/``, or any other target root is caught.
+        for child in project.rglob("*"):
+            if child.is_file() and child.name.lower() == "plugin.json":
+                rel_to_project = child.relative_to(project)
+                pytest.fail(f"plugin.json leaked into {rel_to_project}")
+
+        # D2.b: compile-only targets must surface the compile hint so
+        # users know to run ``apm compile`` to merge staged instructions.
+        if consumer_target in {"opencode", "codex", "gemini"}:
+            # CLI logger may line-wrap; collapse whitespace before
+            # substring checks so the assertion survives terminal width
+            # changes without coupling to render details.
+            collapsed = " ".join(result.output.split())
+            assert "apm compile" in collapsed, (
+                f"compile hint missing for target={consumer_target}: {result.output!r}"
+            )
+            assert consumer_target in collapsed, (
+                f"compile hint should name target={consumer_target}: {result.output!r}"
+            )
+
+    def test_multi_target_consumer_deploys_to_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A consumer project with both ``.github/`` and ``.opencode/``
+        present receives the bundle in both layouts: native instructions
+        for copilot, staged for opencode.
+        """
+        bundle = _make_plugin_bundle(tmp_path / "src", pack_target="all")
+        project = _make_project(tmp_path / "dst")
+        # Both targets configured.
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text("# proj\n", encoding="utf-8")
+        (project / ".opencode").mkdir()
+
+        result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+
+        assert result.exit_code == 0, f"stdout={result.output!r}"
+        # copilot side: instructions deploy verbatim to .github/instructions.
+        assert (project / ".github" / "instructions" / "style.md").is_file()
+        # opencode side: instructions staged for apm compile.
+        assert (
+            project / "apm_modules" / "test-plugin" / ".apm" / "instructions" / "style.md"
+        ).is_file()
+        # Skills shared dir from both target profiles.
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+
+
+# ---------------------------------------------------------------------------
+# E2E: bundle .mcp.json wiring through MCPIntegrator
+# ---------------------------------------------------------------------------
+
+
+class TestBundleMcpWiringE2E:
+    """End-to-end: a packed bundle carrying ``.mcp.json`` wires its
+    servers through ``MCPIntegrator.install`` once after the deploy
+    loop, with the resolved targets passed via ``explicit_target``.
+
+    Per-target write paths (Claude project ``.mcp.json``,
+    ``.vscode/mcp.json``, ``.cursor/mcp.json``, etc.) are covered by
+    ``MCPIntegrator``'s own suite -- here we assert at the
+    integrator boundary so the test is independent of installed
+    runtime binaries (``claude``, ``cursor``, ...) on the CI host.
+    """
+
+    @staticmethod
+    def _make_mcp_bundle(tmp_path: Path) -> Path:
+        """Plugin bundle with skill + .mcp.json + matching bundle_files."""
+        mcp_payload = json.dumps(
+            {
+                "mcpServers": {
+                    "filesystem": {
+                        "type": "stdio",
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                    },
+                    "github": {
+                        "type": "http",
+                        "url": "https://api.githubcopilot.com/mcp/",
+                    },
+                }
+            },
+            indent=2,
+        )
+        files = {
+            "skills/coding/SKILL.md": "# Coding Skill\nbody.",
+            ".mcp.json": mcp_payload,
+        }
+        return _make_plugin_bundle(tmp_path / "src", files=files, pack_target="all")
+
+    def test_bundle_mcp_servers_reach_integrator_with_resolved_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bundle ``.mcp.json`` is parsed and ``MCPIntegrator.install``
+        is called once with the bundle's servers and the resolved
+        targets as a CSV string in ``explicit_target``."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        bundle = self._make_mcp_bundle(tmp_path)
+        project = _make_project(tmp_path / "dst")
+        # Mark the project as configured for both copilot and claude.
+        (project / KNOWN_TARGETS["copilot"].root_dir).mkdir(parents=True, exist_ok=True)
+        (project / KNOWN_TARGETS["claude"].root_dir).mkdir(parents=True, exist_ok=True)
+
+        captured: dict = {}
+
+        def _capture(mcp_deps, **kwargs):
+            captured["deps"] = list(mcp_deps)
+            captured["kwargs"] = dict(kwargs)
+            return len(mcp_deps)
+
+        with patch(
+            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+            side_effect=_capture,
+        ):
+            result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        # The skill still deploys verbatim.
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+        # The bundle .mcp.json must NOT be deployed as a flat file
+        # under any target root (it is metadata, routed through the
+        # integrator instead).
+        for child in project.rglob(".mcp.json"):
+            # Tolerate the integrator legitimately writing one to the
+            # project root; the regression we forbid is the bundle
+            # file copied verbatim into a target tree.
+            rel = child.relative_to(project)
+            parts = rel.parts
+            assert "skills" not in parts and "apm_modules" not in parts, (
+                f".mcp.json leaked into target tree at {rel}"
+            )
+
+        # Integrator was invoked.
+        assert "deps" in captured, "MCPIntegrator.install was not called"
+        names = sorted(d.name for d in captured["deps"])
+        assert names == ["filesystem", "github"]
+
+        # Resolved targets reach the integrator as a CSV in
+        # ``explicit_target``.  Both copilot and claude must appear.
+        target_csv = captured["kwargs"].get("explicit_target") or ""
+        target_set = {t.strip() for t in target_csv.split(",") if t.strip()}
+        assert "copilot" in target_set
+        assert "claude" in target_set
+
+        # ``project_root`` is the consumer project, not the bundle.
+        assert Path(captured["kwargs"]["project_root"]).resolve() == project.resolve()
+
+    def test_bundle_without_mcp_does_not_call_integrator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the bundle has no ``.mcp.json``, the integrator is not
+        invoked -- protects against spurious "No MCP dependencies
+        found" warnings on every install."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        bundle = _make_plugin_bundle(tmp_path / "src", pack_target="all")
+        project = _make_project(tmp_path / "dst")
+        (project / KNOWN_TARGETS["copilot"].root_dir).mkdir(parents=True, exist_ok=True)
+
+        with patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install") as mock_install:
+            result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        mock_install.assert_not_called()
+
+    def test_bundle_mcp_integrator_failure_does_not_break_install(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the integrator raises, the install still succeeds with
+        a warning -- file deploys must not be undone by an MCP wiring
+        hiccup."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        bundle = self._make_mcp_bundle(tmp_path)
+        project = _make_project(tmp_path / "dst")
+        (project / KNOWN_TARGETS["copilot"].root_dir).mkdir(parents=True, exist_ok=True)
+
+        with patch(
+            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+            side_effect=RuntimeError("integrator blew up"),
+        ):
+            result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+        # Warning should mention MCP wiring.
+        assert "MCP" in result.output or "mcp" in result.output
+
+    def test_bundle_mcp_dry_run_does_not_call_integrator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--dry-run`` must not fire the integrator: zero side
+        effects on the consumer's MCP config."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        bundle = self._make_mcp_bundle(tmp_path)
+        project = _make_project(tmp_path / "dst")
+        (project / KNOWN_TARGETS["copilot"].root_dir).mkdir(parents=True, exist_ok=True)
+
+        with patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install") as mock_install:
+            result = _invoke_install(project, str(bundle), "--dry-run", monkeypatch=monkeypatch)
+
+        assert result.exit_code == 0, result.output
+        mock_install.assert_not_called()

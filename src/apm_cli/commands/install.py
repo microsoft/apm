@@ -1120,6 +1120,11 @@ def install(  # noqa: PLR0913
                         "--no-policy": no_policy,
                     },
                 )
+                # Local bundle install renders its own summary; mark
+                # ``summary_rendered = True`` so the finally-block (line ~1423)
+                # does not emit a misleading "install interrupted" line on the
+                # success path.  See issue #1207 D3.
+                summary_rendered = True
                 return
             # IM7: path exists but isn't a recognised bundle.  For tarball
             # extensions (.tar.gz / .tgz) the user clearly meant a bundle

@@ -502,13 +502,31 @@ def integrate_local_bundle(
             if not fp.is_file() or fp.is_symlink():
                 continue
             rel = fp.relative_to(bundle_dir).as_posix()
-            if rel in ("apm.lock.yaml", "plugin.json"):
+            # Issue #1207 D2.a: case-insensitive ``plugin.json`` and
+            # ``.mcp.json`` skip -- bundle metadata must never deploy to
+            # consumer projects.  Match the deploy-loop semantics so
+            # case-folding filesystems do not let a renamed file slip
+            # into pack_files unnecessarily.
+            if rel == "apm.lock.yaml" or rel.lower() == "plugin.json" or rel.lower() == ".mcp.json":
                 continue
             pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
     skipped = 0
+
+    # py-arch-2: Filter bundle-metadata files (plugin.json, .mcp.json) out of
+    # pack_files BEFORE the per-target loop.  These are never deployable in
+    # any target, so iterating per-target inflated the skip counter
+    # (e.g. one plugin.json on a 2-target install bumped skipped by 2).
+    # The case-insensitive match here mirrors the fallback walk above and
+    # the previously-inline guards in the deploy loop.
+    _filtered_pack_files: dict[str, str] = {}
+    for _rel, _hash in pack_files.items():
+        if _rel.lower() in {"plugin.json", ".mcp.json"}:
+            continue
+        _filtered_pack_files[_rel] = _hash
+    pack_files = _filtered_pack_files
 
     slug = alias or bundle_info.package_id
     if logger:
@@ -560,15 +578,79 @@ def integrate_local_bundle(
                 skipped += 1
                 continue
 
-            # Route the file to the correct deploy root.  If the first
-            # path segment matches a primitive with an explicit
-            # ``deploy_root`` (e.g. ``skills/`` → ``.agents/``), use
-            # the converged directory.  Otherwise fall back to the
-            # target's default root.
+            # Issue #1207 D2.b: for compile-only targets (opencode, codex,
+            # gemini -- no ``instructions`` primitive in their profile),
+            # bundle ``instructions/*.md`` files must be staged under
+            # ``apm_modules/<slug>/.apm/instructions/`` so ``apm compile``
+            # can merge them into the target's AGENTS.md / GEMINI.md /
+            # equivalent.  Deploying them verbatim to ``<root>/instructions/``
+            # is a no-op for these clients.
             _first_seg = rel.split("/", 1)[0] if "/" in rel else ""
-            deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
-
-            dest = deploy_root / rel
+            if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
+                # Slug must be safe for filesystem path construction --
+                # ``package_id`` originates from untrusted ``plugin.json``.
+                # Enforce a strict character whitelist documented in
+                # docs/src/content/docs/enterprise/security.md so
+                # forward slashes, null bytes, spaces, and other
+                # filesystem-significant characters are rejected before
+                # any path construction or resolution.
+                _slug_str = str(slug)
+                # CR1.5 (#1217 review): use ASCII-only validation, not
+                # ``str.isalnum`` (which accepts Unicode letters/digits
+                # like accented or non-Latin chars and would slip past
+                # the documented [A-Za-z0-9._-] whitelist).
+                _ALLOWED = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+                _slug_ok = (
+                    bool(_slug_str)
+                    and all(c in _ALLOWED for c in _slug_str)
+                    and not _slug_str.startswith(".")
+                    and not _slug_str.endswith(".")
+                    and ".." not in _slug_str
+                )
+                if not _slug_ok:
+                    if logger is not None:
+                        logger.warning(
+                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: "
+                            "slug must match [A-Za-z0-9._-]+ with no leading/trailing dot, no '..'"
+                        )
+                    skipped += 1
+                    continue
+                try:
+                    validate_path_segments(_slug_str, context="bundle slug")
+                except PathTraversalError as exc:
+                    if logger is not None:
+                        logger.warning(
+                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: {exc}"
+                        )
+                    skipped += 1
+                    continue
+                stage_root = project_root / "apm_modules" / slug / ".apm" / "instructions"
+                try:
+                    ensure_path_within(stage_root, project_root / "apm_modules")
+                except PathTraversalError as exc:
+                    if logger is not None:
+                        logger.warning(f"Skipped unsafe stage root for {slug!r}: {exc}")
+                    skipped += 1
+                    continue
+                # PR #1217 review: preserve nested subdirs under
+                # ``instructions/`` so two files with the same basename
+                # (e.g. ``instructions/a/x.md`` and
+                # ``instructions/b/x.md``) do not collide at the staged
+                # location.  ``rel`` already starts with
+                # ``instructions/`` so we strip that prefix before
+                # joining under the stage root (which itself ends in
+                # ``.apm/instructions``).
+                _rel_under_instructions = rel.split("/", 1)[1] if "/" in rel else Path(rel).name
+                dest = stage_root / _rel_under_instructions
+                deploy_root = stage_root
+            else:
+                # Route the file to the correct deploy root.  If the first
+                # path segment matches a primitive with an explicit
+                # ``deploy_root`` (e.g. ``skills/`` -> ``.agents/``), use
+                # the converged directory.  Otherwise fall back to the
+                # target's default root.
+                deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
+                dest = deploy_root / rel
             try:
                 ensure_path_within(dest, deploy_root)
             except PathTraversalError as exc:

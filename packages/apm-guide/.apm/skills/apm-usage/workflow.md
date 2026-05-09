@@ -13,7 +13,7 @@ cd existing-repo && apm init                   # existing repo
 # 3. Install packages
 apm install microsoft/apm-sample-package#v1.0.0
 
-# 4. Compile (needed for Codex, Gemini, single-file targets)
+# 4. Compile (needed for Codex, OpenCode, Gemini, single-file targets)
 apm compile
 
 # 5. Commit and share
@@ -110,3 +110,7 @@ The lockfile ensures every team member gets the exact same dependency versions.
 `apm install` also deploys the project's own `.apm/` content (instructions, prompts, agents, skills, hooks, commands) to target directories alongside dependency content. Local content wins on collision. This works even with zero dependencies.
 Subsequent `apm install` reads locked commit SHAs for reproducible installs.
 Use `apm install --update` to refresh to latest refs.
+
+## Local bundle install
+
+`apm install <bundle>` accepts a directory or `.tar.gz` produced by `apm pack` and deploys its contents into the consumer's resolved target. Bundles are target-agnostic; the project decides where files land (same precedence as registry installs: `--target` > `apm.yml` > directory detection). For compile-only targets (OpenCode, Codex, Gemini) instructions stage under `apm_modules/<slug>/.apm/instructions/` and the install prints a hint to run `apm compile` to merge them into the target's single-file format (`AGENTS.md`, `GEMINI.md`).

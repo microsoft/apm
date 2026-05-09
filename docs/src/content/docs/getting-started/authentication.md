@@ -186,6 +186,16 @@ apm install dev.azure.com/myorg/myproject/myrepo
 [!]     Consider unsetting the stale variable.
 ```
 
+This fallback applies to all ADO operations including `apm install --update`. If you have a stale `ADO_APM_PAT` but an active `az login` session, `apm install --update` will succeed transparently via the bearer retry.
+
+If both `ADO_APM_PAT` and the `az` bearer fail, APM emits:
+
+```
+[x] AAD bearer fallback also failed for dev.azure.com.
+```
+
+This confirms both paths were attempted and neither succeeded, so the fix is either to refresh your PAT or run `az login`.
+
 **Verbose output** (`--verbose`) shows which source was used per host:
 
 ```
