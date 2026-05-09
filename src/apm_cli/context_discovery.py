@@ -684,11 +684,11 @@ def build_proposed_manifest(
     dependencies.setdefault("mcp", [])
     manifest["dependencies"] = dependencies
 
-    # Collect root-level dirs that hold APM-native project-scope files but are
-    # outside the standard .apm/ and .github/ locations (which are always
-    # scanned by the compiler).  These need an explicit 'includes' entry so
-    # that both users and tooling know where the primitives live.
-    _standard_prefixes = (".apm/", ".github/")
+    # Collect root-level dirs that hold APM-native project-scope files.
+    # .apm/ is the canonical location and always scanned -- keep it implicit.
+    # .github/ and tool dirs (e.g. .claude/) are listed explicitly so users
+    # can see at a glance where their agent primitives live.
+    _implicit_prefixes = (".apm/",)
     extra_dirs: list[str] = sorted(
         {
             f.display_path.split("/")[0]
@@ -696,11 +696,18 @@ def build_proposed_manifest(
             if f.scope == "project"
             and f.importability == IMPORT_APM_NATIVE
             and "/" in f.display_path
-            and not any(f.display_path.startswith(p) for p in _standard_prefixes)
+            and not any(f.display_path.startswith(p) for p in _implicit_prefixes)
         }
     )
     existing_includes = manifest.get("includes")
-    if extra_dirs and existing_includes in (None, "auto"):
+    if isinstance(existing_includes, list):
+        # Merge new dirs into the existing list, preserving order and deduping.
+        merged = list(existing_includes)
+        for d in extra_dirs:
+            if d not in merged:
+                merged.append(d)
+        manifest["includes"] = merged
+    elif extra_dirs:
         manifest["includes"] = extra_dirs
     else:
         manifest.setdefault("includes", "auto")
