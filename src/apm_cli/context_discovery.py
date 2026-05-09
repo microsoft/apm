@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,120 @@ IMPORT_IGNORED = "ignored"
 
 _TOKEN_RE = re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{10,}\b")
 _URL_USERINFO_RE = re.compile(r"\b(https?://)[^/\s@]+@([^/\s]+)")
+
+# ---------------------------------------------------------------------------
+# Migration plan: convertible findings -> .apm/ primitives
+# ---------------------------------------------------------------------------
+
+# (tool, kind) -> (target subdir relative to project root, target extension or None=keep original)
+_MIGRATION_MAP: dict[tuple[str, str], tuple[str, str | None]] = {
+    ("claude", "command"): (".apm/prompts", ".prompt.md"),
+    ("claude", "agent"): (".apm/agents", ".agent.md"),
+    ("claude", "root-instructions"): (".apm/instructions", ".instructions.md"),
+    ("claude", "hook-script"): (".apm/hooks/scripts", None),
+    ("codex", "agent"): (".apm/agents", ".agent.md"),
+    ("codex", "command"): (".apm/prompts", ".prompt.md"),
+    ("cursor", "rule"): (".apm/instructions", ".instructions.md"),
+    ("cursor", "agent"): (".apm/agents", ".agent.md"),
+    ("opencode", "command"): (".apm/prompts", ".prompt.md"),
+    ("opencode", "agent"): (".apm/agents", ".agent.md"),
+    ("gemini", "command"): (".apm/prompts", ".prompt.md"),
+    ("gemini", "root-instructions"): (".apm/instructions", ".instructions.md"),
+    ("windsurf", "rule"): (".apm/instructions", ".instructions.md"),
+    ("windsurf", "workflow"): (".apm/prompts", ".prompt.md"),
+    ("copilot", "command"): (".apm/prompts", ".prompt.md"),
+    ("copilot", "hook"): (".apm/hooks", None),
+    ("copilot", "hook-script"): (".apm/hooks/scripts", None),
+    ("agents", "root-instructions"): (".apm/instructions", ".instructions.md"),
+    ("agents", "style"): (".apm/styles", ".style.md"),
+}
+
+# Known compound APM extensions -- stripped before applying target extension.
+_APM_EXTENSIONS = (
+    ".prompt.md",
+    ".agent.md",
+    ".instructions.md",
+    ".chatmode.md",
+    ".style.md",
+    ".context.md",
+    ".memory.md",
+)
+
+
+@dataclass(frozen=True)
+class MigrationAction:
+    """One file to copy from its current location into .apm/."""
+
+    source: Path
+    dest: Path
+    tool: str
+    kind: str
+
+
+def _migration_dest_name(source_name: str, target_ext: str | None) -> str:
+    """Return the destination filename for a migration action."""
+    if target_ext is None:
+        return source_name
+    if source_name.endswith(target_ext):
+        return source_name
+    for known in _APM_EXTENSIONS:
+        if source_name.endswith(known):
+            return source_name[: -len(known)] + target_ext
+    return Path(source_name).stem + target_ext
+
+
+def compute_migration_plan(
+    findings: tuple[ContextDiscoveryFinding, ...],
+    project_root: Path,
+) -> list[MigrationAction]:
+    """Return the file copies needed to migrate convertible findings into .apm/.
+
+    Only project-scoped convertible findings with a known migration mapping are
+    included.  Already-migrated files (dest already exists) are excluded so
+    that running ``--write`` twice is safe.
+    """
+    actions: list[MigrationAction] = []
+    seen_dests: set[Path] = set()
+
+    for finding in findings:
+        if finding.scope != "project" or finding.importability != IMPORT_CONVERTIBLE:
+            continue
+        mapping = _MIGRATION_MAP.get((finding.tool, finding.kind))
+        if mapping is None:
+            continue
+
+        target_subdir, target_ext = mapping
+        dest_name = _migration_dest_name(finding.path.name, target_ext)
+        dest = project_root / target_subdir / dest_name
+
+        if dest in seen_dests:
+            dest = project_root / target_subdir / f"{finding.tool}-{dest_name}"
+        seen_dests.add(dest)
+
+        if dest.exists():
+            continue  # already migrated -- skip silently
+
+        actions.append(
+            MigrationAction(source=finding.path, dest=dest, tool=finding.tool, kind=finding.kind)
+        )
+
+    return actions
+
+
+def execute_migration(actions: list[MigrationAction]) -> list[MigrationAction]:
+    """Copy files according to *actions*, creating .apm/ subdirs as needed.
+
+    Returns the actions that were applied.  Skips any whose destination already
+    exists (safe to call multiple times).
+    """
+    applied: list[MigrationAction] = []
+    for action in actions:
+        if action.dest.exists():
+            continue
+        action.dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(action.source, action.dest)
+        applied.append(action)
+    return applied
 
 
 @dataclass(frozen=True)
@@ -73,6 +188,7 @@ class ContextDiscoveryResult:
     existing_apm_yml: bool
     findings: tuple[ContextDiscoveryFinding, ...]
     proposed_manifest: dict[str, Any]
+    migration_plan: tuple[MigrationAction, ...]
 
     def summary(self) -> dict[str, Any]:
         by_scope = Counter(f.scope for f in self.findings)
@@ -94,6 +210,15 @@ class ContextDiscoveryResult:
             "summary": self.summary(),
             "files": [finding.to_dict() for finding in self.findings],
             "proposed_apm_yml": self.proposed_manifest,
+            "migration_plan": [
+                {
+                    "source": redact_text(str(portable_relpath(a.source, self.project_root))),
+                    "dest": redact_text(str(portable_relpath(a.dest, self.project_root))),
+                    "tool": a.tool,
+                    "kind": a.kind,
+                }
+                for a in self.migration_plan
+            ],
         }
 
 
@@ -501,13 +626,17 @@ def discover_agent_context(
         findings=tuple(findings),
     )
 
+    sorted_findings = tuple(sorted(findings, key=_finding_sort_key))
+    migration_plan = tuple(compute_migration_plan(sorted_findings, project_root))
+
     return ContextDiscoveryResult(
         project_root=project_root,
         detected_target=target,
         target_reason=target_reason,
         existing_apm_yml=existing_manifest is not None,
-        findings=tuple(sorted(findings, key=_finding_sort_key)),
+        findings=sorted_findings,
         proposed_manifest=proposed_manifest,
+        migration_plan=migration_plan,
     )
 
 
@@ -615,15 +744,48 @@ def _format_text_result(result: ContextDiscoveryResult, *, write: bool = False) 
             "",
             "Proposed apm.yml:",
             yaml_to_str(result.proposed_manifest).rstrip(),
-            "",
-            (
-                "Writing proposed apm.yml."
-                if write
-                else "Preview only. Re-run with --write to create or update apm.yml."
-            ),
         ]
     )
+
+    # Migration plan section
+    if result.migration_plan:
+        lines.append("")
+        if write:
+            lines.append(f"Migrating {len(result.migration_plan)} convertible file(s) to .apm/:")
+        else:
+            lines.append(
+                f"Migration plan ({len(result.migration_plan)} convertible file(s) -> .apm/):"
+            )
+        lines.extend(_format_migration_table(result.migration_plan, result.project_root))
+        if not write:
+            lines.append("  Re-run with --write to migrate files and create apm.yml.")
+    else:
+        lines.append("")
+        lines.append(
+            "Writing proposed apm.yml."
+            if write
+            else "Preview only. Re-run with --write to create or update apm.yml."
+        )
+
     return "\n".join(lines) + "\n"
+
+
+def _format_migration_table(actions: tuple[MigrationAction, ...], project_root: Path) -> list[str]:
+    rows = [
+        (
+            str(portable_relpath(a.source, project_root)),
+            "->",
+            str(portable_relpath(a.dest, project_root)),
+        )
+        for a in actions
+    ]
+    if not rows:
+        return []
+    src_w = max(len(r[0]) for r in rows)
+    lines = []
+    for src, arrow, dst in rows:
+        lines.append(f"  {src.ljust(src_w)}  {arrow}  {dst}")
+    return lines
 
 
 def _format_findings_table(findings: tuple[ContextDiscoveryFinding, ...]) -> list[str]:

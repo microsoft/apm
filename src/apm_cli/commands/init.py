@@ -631,6 +631,7 @@ def _run_discovery_init(final_project_name, yes, write_discovery, output_format,
     from ..context_discovery import (
         discover_agent_context,
         echo_discovery_result,
+        execute_migration,
         write_proposed_manifest,
     )
 
@@ -656,5 +657,11 @@ def _run_discovery_init(final_project_name, yes, write_discovery, output_format,
             logger.progress("--yes specified, overwriting apm.yml...")
 
     write_proposed_manifest(result, Path(APM_YML_FILENAME))
+
+    if result.migration_plan:
+        applied = execute_migration(list(result.migration_plan))
+        if applied and output_format == "text":
+            logger.success(f"Migrated {len(applied)} file(s) to .apm/")
+
     if output_format == "text":
         logger.success("APM project initialized successfully!")

@@ -11,6 +11,7 @@ from apm_cli.context_discovery import (
     IMPORT_REFERENCE_ONLY,
     build_proposed_manifest,
     discover_agent_context,
+    execute_migration,
     format_discovery_result,
     redact_text,
 )
@@ -485,3 +486,108 @@ def test_harness_mixed_kinds_in_single_project(tmp_path):
     assert "copilot" in tools
     assert "codex" in tools
     assert "agents" in tools
+
+
+# ---------------------------------------------------------------------------
+# Migration plan tests
+# ---------------------------------------------------------------------------
+
+
+def test_migration_plan_claude_to_apm(tmp_path):
+    """Claude command/agent/root-instructions map to .apm/ equivalents."""
+    (tmp_path / ".claude" / "commands").mkdir(parents=True)
+    (tmp_path / ".claude" / "commands" / "review.md").write_text("review", encoding="utf-8")
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "backend.md").write_text("agent", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("instructions", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
+    assert ".apm/prompts/review.prompt.md" in plan
+    assert ".apm/agents/backend.agent.md" in plan
+    assert ".apm/instructions/CLAUDE.instructions.md" in plan
+
+
+def test_migration_plan_skips_reference_only(tmp_path):
+    """Settings and reference-only files are not included in the migration plan."""
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    assert result.migration_plan == ()
+
+
+def test_migration_plan_skips_user_scope(tmp_path):
+    """User-scope findings are not migrated (they belong to the user, not the project)."""
+    home = tmp_path / "home"
+    (home / ".claude" / "commands").mkdir(parents=True)
+    (home / ".claude" / "commands" / "fix.md").write_text("fix", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=home, system_dirs=())
+
+    assert result.migration_plan == ()
+
+
+def test_execute_migration_creates_files(tmp_path):
+    """execute_migration copies source files to their .apm/ destinations."""
+    (tmp_path / ".claude" / "commands").mkdir(parents=True)
+    (tmp_path / ".claude" / "commands" / "review.md").write_text("review", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    applied = execute_migration(list(result.migration_plan))
+
+    assert len(applied) == 1
+    dest = tmp_path / ".apm" / "prompts" / "review.prompt.md"
+    assert dest.exists()
+    assert dest.read_text(encoding="utf-8") == "review"
+
+
+def test_execute_migration_idempotent(tmp_path):
+    """Running execute_migration twice does not overwrite or error."""
+    (tmp_path / ".claude" / "commands").mkdir(parents=True)
+    (tmp_path / ".claude" / "commands" / "review.md").write_text("original", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    execute_migration(list(result.migration_plan))
+    dest = tmp_path / ".apm" / "prompts" / "review.prompt.md"
+    dest.write_text("modified", encoding="utf-8")
+
+    applied = execute_migration(list(result.migration_plan))
+    assert applied == []  # nothing applied -- dest already exists
+    assert dest.read_text(encoding="utf-8") == "modified"  # not overwritten
+
+
+def test_migration_preview_shown_in_text_output(tmp_path):
+    """Text output includes the migration plan section when convertible files exist."""
+    (tmp_path / ".claude" / "commands").mkdir(parents=True)
+    (tmp_path / ".claude" / "commands" / "review.md").write_text("review", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    text = format_discovery_result(result, "text")
+    assert "Migration plan" in text
+    assert ".apm/prompts/review.prompt.md" in text
+    assert "--write" in text
+
+
+def test_full_claude_to_codex_migration(tmp_path):
+    """End-to-end: discover -> migration plan -> execute -> .apm/ populated."""
+    (tmp_path / ".claude" / "commands").mkdir(parents=True)
+    (tmp_path / ".claude" / "commands" / "review.md").write_text("review cmd", encoding="utf-8")
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "backend.md").write_text("backend", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("# Instructions", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    assert len(result.migration_plan) == 3
+    applied = execute_migration(list(result.migration_plan))
+    assert len(applied) == 3
+
+    assert (tmp_path / ".apm" / "prompts" / "review.prompt.md").exists()
+    assert (tmp_path / ".apm" / "agents" / "backend.agent.md").exists()
+    assert (tmp_path / ".apm" / "instructions" / "CLAUDE.instructions.md").exists()
