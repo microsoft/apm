@@ -98,9 +98,17 @@ def _normalize_apply_to(value: object) -> str:
     """Normalize an applyTo frontmatter value to a string.
 
     YAML allows ``applyTo`` to be written as a list (e.g. ``applyTo: ['*']``).
-    Join list items with ``,`` so the compiler always receives a plain string.
+    Single-item lists are unwrapped; multi-item lists are joined with ``,``
+    (downstream glob matching treats comma-separated patterns as OR).
     """
     if isinstance(value, list):
+        if len(value) == 1:
+            return str(value[0])
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "applyTo is a multi-item list %r; joining with comma", value
+        )
         return ",".join(str(item) for item in value)
     return str(value) if value is not None else ""
 

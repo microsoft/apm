@@ -626,7 +626,13 @@ def _prompt_target_selection(
     return chosen
 
 
-def _run_discovery_init(final_project_name, yes, write_discovery, output_format, logger):
+def _run_discovery_init(
+    final_project_name: str,
+    yes: bool,
+    write_discovery: bool,
+    output_format: str,
+    logger: CommandLogger,
+) -> None:
     """Run preview-first brownfield context discovery."""
     from ..context_discovery import (
         discover_agent_context,

@@ -222,10 +222,14 @@ def test_empty_project_yields_no_findings(tmp_path):
 
 def test_url_credential_redaction():
     """redact_text strips userinfo from https://user:pass@host/... style paths."""
+    from urllib.parse import urlparse
+
     dirty = "clone url: https://user:secret@github.example.com/org/repo.git"
     clean = redact_text(dirty)
     assert "secret" not in clean
-    assert "github.example.com" in clean
+    urls = [tok for tok in clean.split() if "://" in tok]
+    assert len(urls) == 1
+    assert urlparse(urls[0]).hostname == "github.example.com"
 
 
 def test_yaml_format_output(tmp_path):
