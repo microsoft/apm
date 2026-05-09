@@ -12,6 +12,7 @@ import os
 import sys
 import types
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -140,7 +141,7 @@ class TestGitHubFamilyCloneUrls:
         backend = GitHubBackend(host_info=_info("github.com", "github"))
         url = backend.build_clone_https_url(_dep_ref(), token="")
         assert "@" not in url
-        assert "github.com" in url
+        assert urlparse(url).hostname == "github.com"
 
     def test_https_bearer_scheme_does_not_embed_token(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
@@ -285,7 +286,7 @@ class TestGenericGitBackend:
         url = backend.build_clone_https_url(_dep_ref(host="gitea.example.com"), token="some_token")
         assert "some_token" not in url
         assert "@" not in url
-        assert "gitea.example.com" in url
+        assert urlparse(url).hostname == "gitea.example.com"
 
     def test_ssh_url(self):
         backend = GenericGitBackend(host_info=_info("gitea.example.com", "generic"))
