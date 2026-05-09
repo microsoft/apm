@@ -245,8 +245,8 @@ class APMDependencyResolver:
                 if self._project_root is not None
                 else root_apm_yml.parent.resolve(),
             )
-        except (ValueError, FileNotFoundError) as e:  # noqa: F841
-            # Return empty tree with error
+        except (ValueError, FileNotFoundError) as e:
+            _logger.warning("Failed to parse root apm.yml: %s", e)
             empty_package = APMPackage(name="error", version="0.0.0")
             tree = DependencyTree(root_package=empty_package)
             return tree
@@ -379,16 +379,18 @@ class APMDependencyResolver:
             # --- Phase C (main thread): integrate results, enqueue sub-deps ---
             for (node, dep_ref, _parent_node, is_dev), loaded_package, exc in results:
                 if exc is not None:
-                    # Could not load dependency package -- expected for remote deps
-                    # whose apm.yml lives at the resolved repo. Surface via stdlib
-                    # debug logger so --verbose users can diagnose silent skips
-                    # (#940 SR2). The node already has a placeholder package, so
-                    # subsequent integration phases keep working.
-                    _logger.debug(
-                        "Could not load transitive apm.yml for %s: %s",
-                        dep_ref.get_display_name(),
-                        exc,
-                    )
+                    if isinstance(exc, ValueError):
+                        _logger.warning(
+                            "Invalid transitive apm.yml for %s: %s",
+                            dep_ref.get_display_name(),
+                            exc,
+                        )
+                    else:
+                        _logger.debug(
+                            "Could not load transitive apm.yml for %s: %s",
+                            dep_ref.get_display_name(),
+                            exc,
+                        )
                     continue
                 if loaded_package:
                     # Update the node with the actual loaded package
@@ -735,10 +737,10 @@ class APMDependencyResolver:
             if not package.source:
                 package.source = dep_ref.repo_url
             return package
-        except (ValueError, FileNotFoundError) as e:  # noqa: F841
-            # Package has invalid apm.yml - log warning but continue
-            # In production, we might want to surface this to the user
+        except FileNotFoundError:
             return None
+        except ValueError:
+            raise
 
     @staticmethod
     def _is_remote_parent(parent_pkg: APMPackage | None) -> bool:
