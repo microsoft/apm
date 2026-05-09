@@ -628,18 +628,12 @@ def _prompt_target_selection(
 
 def _run_discovery_init(final_project_name, yes, write_discovery, output_format, logger):
     """Run preview-first brownfield context discovery."""
-    import contextlib
-
     from ..context_discovery import (
-        IMPORT_APM_NATIVE,
-        IMPORT_CONVERTIBLE,
         discover_agent_context,
         echo_discovery_result,
         execute_migration,
         write_proposed_manifest,
     )
-    from ..deps.lockfile import LockFile
-    from ..utils.content_hash import compute_file_hash
 
     if write_discovery and not yes:
         config = _interactive_project_setup(final_project_name, logger)
@@ -668,27 +662,6 @@ def _run_discovery_init(final_project_name, yes, write_discovery, output_format,
         applied = execute_migration(list(result.migration_plan))
         if applied and output_format == "text":
             logger.success(f"Migrated {len(applied)} file(s) to .apm/")
-
-    # Register all discovered project-scope context files in the lockfile.
-    project_root = Path.cwd()
-    lock_path = project_root / "apm.lock.yaml"
-    lock = LockFile.load_or_create(lock_path)
-    context_files: list[str] = []
-    context_hashes: dict[str, str] = {}
-    for finding in result.findings:
-        if finding.scope != "project":
-            continue
-        if finding.importability not in (IMPORT_APM_NATIVE, IMPORT_CONVERTIBLE):
-            continue
-        rel = finding.display_path
-        context_files.append(rel)
-        with contextlib.suppress(OSError):
-            context_hashes[rel] = compute_file_hash(finding.path)
-    lock.discovered_context_files = sorted(context_files)
-    lock.discovered_context_file_hashes = dict(sorted(context_hashes.items()))
-    lock.write(lock_path)
-    if output_format == "text" and context_files:
-        logger.progress(f"Registered {len(context_files)} context file(s) in apm.lock.yaml")
 
     if output_format == "text":
         logger.success("APM project initialized successfully!")
