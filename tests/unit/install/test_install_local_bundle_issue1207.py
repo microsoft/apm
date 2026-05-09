@@ -402,3 +402,268 @@ class TestSummaryRenderedFlag:
         result = CliRunner().invoke(cli, ["install", str(archive)], catch_exceptions=False)
         assert result.exit_code == 0, result.output
         assert "Install interrupted" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# D2.c: bundle .mcp.json wired through MCPIntegrator (per-target dispatch)
+# ---------------------------------------------------------------------------
+
+
+class TestBundleMcpWiring:
+    """``.mcp.json`` (Anthropic plugin format) is parsed and routed
+    through ``MCPIntegrator.install`` so each resolved target's native
+    MCP config gets the servers in its own format/location.  The file
+    itself is never deployed verbatim.
+    """
+
+    def test_parse_bundle_mcp_servers_anthropic_format(self, tmp_path: Path) -> None:
+        from apm_cli.install.local_bundle_handler import _parse_bundle_mcp_servers
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        (bundle / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "weather": {
+                            "type": "stdio",
+                            "command": "npx",
+                            "args": ["-y", "@example/weather-mcp"],
+                            "env": {"API_KEY": "${WEATHER_KEY}"},
+                        },
+                        "search": {
+                            "type": "http",
+                            "url": "https://search.example.com/mcp",
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        deps = _parse_bundle_mcp_servers(bundle)
+        names = {d.name for d in deps}
+        assert names == {"weather", "search"}
+        # ``type`` aliases ``transport`` (handled by MCPDependency.from_dict).
+        weather = next(d for d in deps if d.name == "weather")
+        assert weather.transport == "stdio"
+        assert weather.command == "npx"
+        # Self-defined (not pulled from registry).
+        assert weather.registry is False
+
+    def test_parse_bundle_mcp_servers_case_insensitive(self, tmp_path: Path) -> None:
+        from apm_cli.install.local_bundle_handler import _parse_bundle_mcp_servers
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        (bundle / ".MCP.json").write_text(
+            json.dumps({"mcpServers": {"x": {"type": "stdio", "command": "echo"}}}),
+            encoding="utf-8",
+        )
+        deps = _parse_bundle_mcp_servers(bundle)
+        assert {d.name for d in deps} == {"x"}
+
+    def test_parse_bundle_mcp_servers_missing_or_malformed_returns_empty(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.install.local_bundle_handler import _parse_bundle_mcp_servers
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        # Missing file.
+        assert _parse_bundle_mcp_servers(bundle) == []
+        # Malformed JSON.
+        (bundle / ".mcp.json").write_text("{not json", encoding="utf-8")
+        assert _parse_bundle_mcp_servers(bundle) == []
+        # Valid JSON, no mcpServers key.
+        (bundle / ".mcp.json").write_text(json.dumps({"unrelated": 1}), encoding="utf-8")
+        assert _parse_bundle_mcp_servers(bundle) == []
+        # Bad per-server entry is skipped, others survive.  ``noxform`` is
+        # not a valid transport so strict validation raises and the entry
+        # is dropped; ``good`` parses cleanly.
+        (bundle / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "good": {"type": "stdio", "command": "ok"},
+                        "bad": {"type": "noxform", "command": "x"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        deps = _parse_bundle_mcp_servers(bundle)
+        assert {d.name for d in deps} == {"good"}
+
+    def test_wire_bundle_mcp_servers_invokes_integrator_with_csv_targets(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """``_wire_bundle_mcp_servers`` calls ``MCPIntegrator.install`` once
+        with a CSV of all resolved target names so per-target dispatch is
+        delegated to the integrator's existing fan-out.
+        """
+        from apm_cli.install import local_bundle_handler
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        (bundle / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"a": {"type": "stdio", "command": "x"}}}),
+            encoding="utf-8",
+        )
+
+        captured: dict = {}
+
+        def fake_install(deps, **kwargs):
+            captured["deps"] = deps
+            captured["kwargs"] = kwargs
+            return len(deps)
+
+        monkeypatch.setattr(
+            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+            staticmethod(fake_install),
+        )
+
+        targets = [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["opencode"]]
+        logger = types.SimpleNamespace(
+            success=lambda *a, **k: None,
+            info=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+        )
+        count = local_bundle_handler._wire_bundle_mcp_servers(
+            bundle_dir=bundle,
+            targets=targets,
+            project_root=tmp_path / "project",
+            user_scope=False,
+            verbose=False,
+            logger=logger,
+        )
+        assert count == 1
+        assert captured["kwargs"]["explicit_target"] == "copilot,opencode"
+        assert captured["kwargs"]["apm_config"]["target"] == "copilot,opencode"
+        assert captured["kwargs"]["user_scope"] is False
+        assert {d.name for d in captured["deps"]} == {"a"}
+
+    def test_wire_bundle_mcp_servers_handles_missing_mcp_json(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from apm_cli.install import local_bundle_handler
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()  # No .mcp.json present.
+
+        called = {"n": 0}
+
+        def fake_install(deps, **kwargs):
+            called["n"] += 1
+            return 0
+
+        monkeypatch.setattr(
+            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+            staticmethod(fake_install),
+        )
+
+        logger = types.SimpleNamespace(
+            success=lambda *a, **k: None,
+            info=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+        )
+        count = local_bundle_handler._wire_bundle_mcp_servers(
+            bundle_dir=bundle,
+            targets=[KNOWN_TARGETS["copilot"]],
+            project_root=tmp_path / "project",
+            user_scope=False,
+            verbose=False,
+            logger=logger,
+        )
+        assert count == 0
+        # Integrator is not invoked when the bundle has no servers to wire.
+        assert called["n"] == 0
+
+    def test_wire_bundle_mcp_servers_isolates_integrator_failure(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A failing ``MCPIntegrator.install`` must not propagate -- the
+        rest of the install completes and the user is told to wire the
+        servers manually via ``apm.yml``.
+        """
+        from apm_cli.install import local_bundle_handler
+
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        (bundle / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"a": {"type": "stdio", "command": "x"}}}),
+            encoding="utf-8",
+        )
+
+        def boom(deps, **kwargs):
+            raise RuntimeError("simulated wiring failure")
+
+        monkeypatch.setattr(
+            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+            staticmethod(boom),
+        )
+
+        warnings: list[str] = []
+        logger = types.SimpleNamespace(
+            success=lambda *a, **k: None,
+            info=lambda *a, **k: None,
+            warning=lambda msg, *a, **k: warnings.append(msg),
+        )
+
+        count = local_bundle_handler._wire_bundle_mcp_servers(
+            bundle_dir=bundle,
+            targets=[KNOWN_TARGETS["copilot"]],
+            project_root=tmp_path / "project",
+            user_scope=False,
+            verbose=False,
+            logger=logger,
+        )
+        assert count == 0
+        assert any("simulated wiring failure" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# PR #1217 review: nested instruction paths must not collide at staging
+# ---------------------------------------------------------------------------
+
+
+class TestNestedInstructionStaging:
+    def test_same_basename_in_different_subdirs_does_not_collide(self, tmp_path: Path) -> None:
+        """Two ``instructions/<sub>/x.md`` entries with the same leaf
+        name must stage to distinct paths under
+        ``apm_modules/<slug>/.apm/instructions/``, not collapse to one
+        ``x.md`` (regression trap for ``Path(rel).name`` collapsing).
+        """
+        bundle = _build_bundle(
+            tmp_path,
+            files={
+                "instructions/a/x.md": "# A\n",
+                "instructions/b/x.md": "# B\n",
+                "instructions/top.md": "# top\n",
+            },
+        )
+        project = tmp_path / "project"
+        project.mkdir()
+        bi = _bundle_info(bundle)
+
+        result = integrate_local_bundle(
+            bi,
+            project,
+            targets=[KNOWN_TARGETS["opencode"]],
+            force=False,
+            dry_run=False,
+            diagnostics=None,
+            logger=None,
+            scope=None,
+            alias=None,
+        )
+
+        deployed = {f.replace("\\", "/") for f in result["deployed_files"]}
+        # Both nested entries land at distinct staged paths.
+        assert "apm_modules/ai/.apm/instructions/a/x.md" in deployed
+        assert "apm_modules/ai/.apm/instructions/b/x.md" in deployed
+        # And the flat one preserves its leaf.
+        assert "apm_modules/ai/.apm/instructions/top.md" in deployed
+        # Real files exist on disk.
+        assert (project / "apm_modules/ai/.apm/instructions/a/x.md").read_text() == "# A\n"
+        assert (project / "apm_modules/ai/.apm/instructions/b/x.md").read_text() == "# B\n"

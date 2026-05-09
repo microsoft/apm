@@ -595,9 +595,14 @@ def integrate_local_bundle(
                 # filesystem-significant characters are rejected before
                 # any path construction or resolution.
                 _slug_str = str(slug)
+                # CR1.5 (#1217 review): use ASCII-only validation, not
+                # ``str.isalnum`` (which accepts Unicode letters/digits
+                # like accented or non-Latin chars and would slip past
+                # the documented [A-Za-z0-9._-] whitelist).
+                _ALLOWED = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
                 _slug_ok = (
                     bool(_slug_str)
-                    and all(c.isalnum() or c in "._-" for c in _slug_str)
+                    and all(c in _ALLOWED for c in _slug_str)
                     and not _slug_str.startswith(".")
                     and not _slug_str.endswith(".")
                     and ".." not in _slug_str
@@ -627,11 +632,16 @@ def integrate_local_bundle(
                         logger.warning(f"Skipped unsafe stage root for {slug!r}: {exc}")
                     skipped += 1
                     continue
-                # Stage with bundle-relative basename only -- nested
-                # subdirs under ``instructions/`` collapse to the staged
-                # flat directory (mirrors how plugin_exporter writes
-                # ``instructions/<name>``).
-                dest = stage_root / Path(rel).name
+                # PR #1217 review: preserve nested subdirs under
+                # ``instructions/`` so two files with the same basename
+                # (e.g. ``instructions/a/x.md`` and
+                # ``instructions/b/x.md``) do not collide at the staged
+                # location.  ``rel`` already starts with
+                # ``instructions/`` so we strip that prefix before
+                # joining under the stage root (which itself ends in
+                # ``.apm/instructions``).
+                _rel_under_instructions = rel.split("/", 1)[1] if "/" in rel else Path(rel).name
+                dest = stage_root / _rel_under_instructions
                 deploy_root = stage_root
             else:
                 # Route the file to the correct deploy root.  If the first

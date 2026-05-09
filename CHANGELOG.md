@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage-panel` scheduled sweep now paginates the candidate query oldest-first via the GitHub MCP `list_issues` tool instead of a single 200-issue page, so daily runs actually drain the untriaged backlog rather than processing one issue per cron tick. (#1193)
 - `triage-panel` scheduled sweep switches the candidate query from `list_issues`+prose-driven pagination to `search_issues` with `-label:status/triaged sort:created-asc`, so untriaged candidates are filtered server-side; the previous approach silently noop'd because the MCP gateway DIFC filter dropped non-collaborator issues mid-page and the agent inferred a false `hasNextPage:false`.
 - `apm install` now accepts the YAML list form under `target:` (e.g. `target: [copilot, claude]`); previously crashed with a garbled `Unknown target` error. (#1197)
-- `apm pack` no longer hardcodes `pack.target: copilot` into bundles; bundles are now target-agnostic and `apm install <bundle>` resolves the consumer target from project context, routes primitives per the resolved target's layout, stages instructions under `apm_modules/<slug>/.apm/instructions/` for compile-only targets (opencode, codex, gemini), skips `plugin.json` regardless of casing, and no longer prints a misleading "Install interrupted" line on success. (#1217)
+- `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
 
 ## [0.12.4] - 2026-05-07
 

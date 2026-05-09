@@ -678,7 +678,7 @@ apm pack [OPTIONS]
 
 **Options:**
 - `-o, --output PATH` - Bundle output directory (default: `./build`). Does not affect `marketplace.json` path.
-- `-t, --target` - **Deprecated.** Emits a warning and is ignored. Bundles are target-agnostic; the consumer's project decides where files land at install time. Old bundles that carry `pack.target` remain installable.
+- `-t, --target` - **Deprecated.** Emits a warning; the value is recorded in `pack.target` as diagnostic metadata and is ignored by `apm install` target resolution. Bundles are target-agnostic; the consumer's project decides where files land at install time. Old bundles that carry `pack.target` remain installable.
 - `--archive` - Produce a `.tar.gz` archive instead of a directory. Bundle only.
 - `--format [plugin|apm]` - Bundle format (default: `plugin`). `plugin` emits a Claude Code plugin directory with a schema-conformant `plugin.json` ([official schema](https://json.schemastore.org/claude-code-plugin.json)). `apm` produces the legacy APM bundle layout (consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling). No-op for marketplace output.
 - `--force` - On collision (plugin format), last writer wins instead of first. Bundle only.
@@ -717,7 +717,7 @@ apm pack --marketplace-output ./build/marketplace.json
 **Bundle behaviour:**
 - Reads `apm.lock.yaml` to enumerate all `deployed_files` from installed dependencies
 - Scans files for hidden Unicode characters before bundling -- warns if findings are detected (non-blocking; consumers are protected by `apm install`/`apm unpack` which block on critical)
-- **Plugin format (default):** Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`); generates or updates a schema-conformant `plugin.json` (convention-dir keys are stripped because Claude Code auto-discovers them); merges hooks into a single `hooks.json`. `devDependencies` are excluded. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format).
+- **Plugin format (default):** Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`); generates or updates a schema-conformant `plugin.json` (convention-dir keys are stripped because Claude Code auto-discovers them); merges hooks into a single `hooks.json`. `devDependencies` are excluded. Embeds an enriched `apm.lock.yaml` (per-file SHA-256 `bundle_files` manifest) so `apm install <bundle>` can verify integrity at install time. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format).
 - **APM format (`--format apm`):** Copies files preserving the install-time directory structure; writes an enriched `apm.lock.yaml` inside the bundle with a `pack:` metadata section (the project's own `apm.lock.yaml` is never modified). Consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling.
 - **Target-agnostic transport:** The bundle carries no target binding. `apm install <bundle>` on the consumer side resolves the target from the consumer's project (`--target` > `apm.yml` > directory detection) and routes primitives accordingly. Compile-only targets (opencode, codex, gemini) receive instructions staged under `apm_modules/<slug>/.apm/instructions/` for the next `apm compile`.
 

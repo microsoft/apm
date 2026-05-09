@@ -220,9 +220,10 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
             logger.verbose_detail(f"    {f}")
         if fmt == "plugin":
             logger.progress(
-                "Plugin bundle ready -- contains plugin.json and "
-                "plugin-native directories (agents/, skills/, commands/, ...). "
-                "No APM-specific files included."
+                "Plugin bundle ready -- contains plugin.json plus "
+                "plugin-native directories (agents/, skills/, commands/, ...) "
+                "and an embedded apm.lock.yaml for install-time integrity "
+                "verification."
             )
         # Issue #1207: target-agnostic bundles install into any consumer
         # project.  Print a copy-pasteable share line so packing creates

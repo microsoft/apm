@@ -57,7 +57,7 @@ apm pack --dry-run
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--format` | `plugin` | Bundle format. `plugin` emits a Claude Code plugin directory with `plugin.json`. `apm` emits the legacy APM bundle layout. |
-| `-t, --target` | (deprecated) | Deprecated -- emits a warning and is ignored. Bundles are target-agnostic; the consumer's project decides where files land at install time. |
+| `-t, --target` | (deprecated) | Deprecated. Emits a warning; the value is recorded in `pack.target` as diagnostic metadata only and is ignored by `apm install` target resolution. Bundles are target-agnostic; the consumer's project decides where files land at install time. |
 | `--archive` | off | Produce `.tar.gz` instead of directory |
 | `-o, --output` | `./build` | Output directory |
 | `--dry-run` | off | List files without writing |
@@ -101,7 +101,7 @@ $ apm install team-skills.tgz
 |---|---|---|
 | Output layout | Claude Code plugin directory with `plugin.json` at the root and convention dirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`) | Mirrors `apm install` deploy paths (`.github/`, `.claude/`, `.cursor/`, `.opencode/`) plus an enriched `apm.lock.yaml` |
 | `plugin.json` | Synthesized (or updated from existing) and validates against the [official Claude Code plugin manifest schema](https://json.schemastore.org/claude-code-plugin.json) | Not emitted |
-| `apm.lock.yaml` inside output | Not emitted (no APM-specific files) | Enriched copy with a `pack:` metadata section |
+| `apm.lock.yaml` inside output | Enriched copy with a `pack:` metadata section (when the project has a lockfile) | Enriched copy with a `pack:` metadata section |
 | Drop-in for | Any Claude Code plugin consumer (Copilot CLI, Claude Code, Cursor, ...) | `microsoft/apm-action`'s restore mode and bundle-aware tooling |
 | `devDependencies` | Excluded | Included (full install layout) |
 
@@ -254,9 +254,9 @@ build/my-project-1.0.0/
 
 The bundle is self-describing: its `apm.lock.yaml` lists every file it contains and the dependency graph that produced them.
 
-## Lockfile enrichment (APM format only)
+## Lockfile enrichment
 
-When `--format apm` is used, the bundle includes a copy of `apm.lock.yaml` enriched with a `pack:` section. The project's own `apm.lock.yaml` is never modified.
+Both formats embed an enriched `apm.lock.yaml` in the bundle when the project has a lockfile. The project's own `apm.lock.yaml` is never modified; the embedded copy carries an additional `pack:` section so consumers verify integrity at install time without re-running the upstream pack.
 
 ```yaml
 pack:
@@ -281,9 +281,13 @@ dependencies:
       - .github/agents/architect.md
 ```
 
-The `pack:` section records the bundle `format`, the per-file `bundle_files` SHA-256 manifest, and a `packed_at` UTC timestamp. Plugin-format output has no `apm.lock.yaml` -- consumers verify by re-running the upstream pack instead.
+The `pack:` section records the bundle `format`, the per-file `bundle_files` SHA-256 manifest, and a `packed_at` UTC timestamp.
 
 ## `apm unpack`
+
+:::note
+For APM consumers, prefer `apm install <bundle>` over `apm unpack`. `apm install` deploys both formats target-agnostically, persists provenance to the project lockfile (`local_deployed_files`), and works with directory or `.tar.gz` inputs. `apm unpack` is retained for the legacy APM-format restore-without-APM workflow consumed by `microsoft/apm-action@v1`.
+:::
 
 Extracts an APM bundle (produced with `--format apm`) into a project directory. Accepts both `.tar.gz` archives and unpacked bundle directories. Plugin-format output is consumed directly by Claude Code and other plugin hosts and does not need `apm unpack`.
 

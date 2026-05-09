@@ -872,16 +872,15 @@ class TestInstallLocalBundleIssue1207:
                 f"missing {rel} for target={consumer_target} in {result.output!r}"
             )
 
-        # D2.a: plugin.json never deployed under the consumer's target
-        # root, regardless of casing.
+        # D2.a: plugin.json never deployed under the consumer's project
+        # tree, regardless of casing.  PR #1217 review: walk the entire
+        # project tree -- not just ``apm_modules/`` -- so a regression
+        # that leaks ``plugin.json`` under ``.github/``, ``.claude/``,
+        # ``.cursor/``, or any other target root is caught.
         for child in project.rglob("*"):
             if child.is_file() and child.name.lower() == "plugin.json":
-                # Bundle-source directory may live under tmp_path/src; we
-                # only forbid it under the project tree.
                 rel_to_project = child.relative_to(project)
-                assert "apm_modules" not in str(rel_to_project), (
-                    f"plugin.json leaked into {rel_to_project}"
-                )
+                pytest.fail(f"plugin.json leaked into {rel_to_project}")
 
         # D2.b: compile-only targets must surface the compile hint so
         # users know to run ``apm compile`` to merge staged instructions.
