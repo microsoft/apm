@@ -344,5 +344,226 @@ class TestInstallCommandMCPScope(unittest.TestCase):
                     self.assertIsInstance(result, int)
 
 
+# ---------------------------------------------------------------------------
+# 5. update_lockfile receives the scope-resolved path (#794)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateLockfileScope(unittest.TestCase):
+    """Regression tests for issue #794.
+
+    Verifies that ``MCPIntegrator.update_lockfile`` is called with the
+    scope-resolved lockfile path so that ``apm install --global`` writes MCP
+    audit entries to ``~/.apm/apm.lock.yaml`` and NOT to the project-local
+    ``apm.lock.yaml``.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_ctx(self, scope, tmp_apm_dir):
+        """Build a minimal InstallContext-like object for _install_apm_packages."""
+        ctx = MagicMock()
+        ctx.scope = scope
+        ctx.apm_dir = tmp_apm_dir
+        ctx.project_root = tmp_apm_dir
+        ctx.manifest_path = tmp_apm_dir / "apm.yml"
+        ctx.manifest_display = "apm.yml"
+        ctx.runtime = None
+        ctx.exclude = None
+        ctx.verbose = False
+        ctx.force = False
+        ctx.dry_run = False
+        ctx.update = False
+        ctx.dev = False
+        ctx.target = None
+        ctx.parallel_downloads = 4
+        ctx.allow_insecure = False
+        ctx.allow_insecure_hosts = ()
+        ctx.protocol_pref = None
+        ctx.allow_protocol_fallback = None
+        ctx.trust_transitive_mcp = False
+        ctx.no_policy = True
+        ctx.install_mode = MagicMock()
+        # InstallMode.MCP / APM comparisons
+        from apm_cli.commands.install import InstallMode
+
+        ctx.install_mode = InstallMode.ALL
+        ctx.packages = ()
+        ctx.refresh = False
+        ctx.only_packages = None
+        ctx.manifest_snapshot = None
+        ctx.snapshot_manifest_path = None
+        ctx.legacy_skill_paths = False
+        ctx.logger = MagicMock()
+        ctx.auth_resolver = MagicMock()
+        return ctx
+
+    # ------------------------------------------------------------------
+    # Test: USER scope -> ~/.apm/apm.lock.yaml
+    # ------------------------------------------------------------------
+
+    @patch("apm_cli.commands.install.MCPIntegrator.remove_stale")
+    @patch("apm_cli.commands.install.MCPIntegrator.install", return_value=1)
+    @patch("apm_cli.commands.install.MCPIntegrator.update_lockfile")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_user_scope_update_lockfile_uses_user_path(
+        self, mock_apm_deps, mock_update_lf, mock_mcp_install, mock_remove_stale
+    ):
+        """At USER scope, update_lockfile must use ~/.apm/apm.lock.yaml."""
+        import tempfile
+        from pathlib import Path
+
+        from apm_cli.commands.install import _install_apm_packages
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        with tempfile.TemporaryDirectory() as user_apm_dir_str:
+            user_apm_dir = Path(user_apm_dir_str)
+            expected_lock = get_lockfile_path(user_apm_dir)
+
+            # Create a minimal lockfile so update_lockfile finds an existing one
+            LockFile().save(expected_lock)
+
+            ctx = self._make_ctx(InstallScope.USER, user_apm_dir)
+            ctx.manifest_path = user_apm_dir / "apm.yml"
+            ctx.manifest_path.write_text("name: test\nmcp:\n  - test/server\n", encoding="utf-8")
+
+            # Stub APMPackage parse so we don't need a real apm.yml pipeline
+            mock_pkg = MagicMock()
+            mock_pkg.get_apm_dependencies.return_value = []
+            mock_pkg.get_dev_apm_dependencies.return_value = []
+            mock_mcp_dep = MagicMock()
+            mock_mcp_dep.name = "test/server"
+            mock_pkg.get_mcp_dependencies.return_value = [mock_mcp_dep]
+            mock_pkg.target = None
+            mock_pkg.scripts = {}
+
+            with patch("apm_cli.commands.install.APMPackage") as mock_apm_pkg_cls:
+                mock_apm_pkg_cls.from_apm_yml.return_value = mock_pkg
+                with patch("apm_cli.commands.install.migrate_lockfile_if_needed"):
+                    with patch(
+                        "apm_cli.commands.install.MCPIntegrator.collect_transitive", return_value=[]
+                    ):
+                        with patch(
+                            "apm_cli.commands.install.MCPIntegrator.get_server_names",
+                            return_value={"test/server"},
+                        ):
+                            with patch(
+                                "apm_cli.commands.install.MCPIntegrator.get_server_configs",
+                                return_value={},
+                            ):
+                                with patch(
+                                    "apm_cli.commands.install.MCPIntegrator.deduplicate",
+                                    side_effect=lambda x: x,
+                                ):
+                                    _install_apm_packages(ctx, None)
+
+            # Check the lock_path argument (2nd positional arg) passed to update_lockfile
+            self.assertTrue(
+                mock_update_lf.called,
+                "update_lockfile should have been called",
+            )
+            call_args = mock_update_lf.call_args
+            # Positional arg[1] is the lock_path
+            actual_lock_path = (
+                call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("lock_path")
+            )
+            self.assertEqual(
+                actual_lock_path,
+                expected_lock,
+                f"Expected lock path {expected_lock}, got {actual_lock_path}. "
+                "update_lockfile must receive the scope-resolved lockfile path.",
+            )
+
+    @patch("apm_cli.commands.install.MCPIntegrator.remove_stale")
+    @patch("apm_cli.commands.install.MCPIntegrator.install", return_value=1)
+    @patch("apm_cli.commands.install.MCPIntegrator.update_lockfile")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_project_scope_update_lockfile_uses_project_path(
+        self, mock_apm_deps, mock_update_lf, mock_mcp_install, mock_remove_stale
+    ):
+        """At PROJECT scope, update_lockfile must use the project-local lockfile."""
+        import tempfile
+        from pathlib import Path
+
+        from apm_cli.commands.install import _install_apm_packages
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        with tempfile.TemporaryDirectory() as project_dir_str:
+            project_dir = Path(project_dir_str)
+            expected_lock = get_lockfile_path(project_dir)
+
+            LockFile().save(expected_lock)
+
+            ctx = self._make_ctx(InstallScope.PROJECT, project_dir)
+            ctx.manifest_path = project_dir / "apm.yml"
+            ctx.manifest_path.write_text("name: test\nmcp:\n  - test/server\n", encoding="utf-8")
+
+            mock_pkg = MagicMock()
+            mock_pkg.get_apm_dependencies.return_value = []
+            mock_pkg.get_dev_apm_dependencies.return_value = []
+            mock_mcp_dep = MagicMock()
+            mock_mcp_dep.name = "test/server"
+            mock_pkg.get_mcp_dependencies.return_value = [mock_mcp_dep]
+            mock_pkg.target = None
+            mock_pkg.scripts = {}
+
+            with patch("apm_cli.commands.install.APMPackage") as mock_apm_pkg_cls:
+                mock_apm_pkg_cls.from_apm_yml.return_value = mock_pkg
+                with patch("apm_cli.commands.install.migrate_lockfile_if_needed"):
+                    with patch(
+                        "apm_cli.commands.install.MCPIntegrator.collect_transitive", return_value=[]
+                    ):
+                        with patch(
+                            "apm_cli.commands.install.MCPIntegrator.get_server_names",
+                            return_value={"test/server"},
+                        ):
+                            with patch(
+                                "apm_cli.commands.install.MCPIntegrator.get_server_configs",
+                                return_value={},
+                            ):
+                                with patch(
+                                    "apm_cli.commands.install.MCPIntegrator.deduplicate",
+                                    side_effect=lambda x: x,
+                                ):
+                                    _install_apm_packages(ctx, None)
+
+            self.assertTrue(mock_update_lf.called)
+            call_args = mock_update_lf.call_args
+            actual_lock_path = (
+                call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("lock_path")
+            )
+            self.assertEqual(
+                actual_lock_path,
+                expected_lock,
+                f"Expected lock path {expected_lock}, got {actual_lock_path}.",
+            )
+
+    def test_update_lockfile_no_default_cwd_fallback_when_path_supplied(self):
+        """update_lockfile itself must NOT call Path.cwd() when lock_path is given."""
+        import tempfile
+        from pathlib import Path
+
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        with tempfile.TemporaryDirectory() as d:
+            lock_path = get_lockfile_path(Path(d))
+            LockFile().save(lock_path)
+
+            with patch("apm_cli.integration.mcp_integrator.Path") as mock_path_cls:
+                # If Path.cwd() is called, the test fails; we want it NOT called.
+                MCPIntegrator.update_lockfile({"server-a"}, lock_path)
+                cwd_calls = [c for c in mock_path_cls.mock_calls if "cwd" in str(c)]
+                self.assertEqual(
+                    cwd_calls,
+                    [],
+                    "update_lockfile should not call Path.cwd() when lock_path is supplied",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
