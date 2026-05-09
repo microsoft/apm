@@ -677,7 +677,7 @@ def test_migration_plan_includes_agents_shared_skill(tmp_path):
 
 
 def test_migration_plan_claude_plain_md_skill(tmp_path):
-    """Claude skills as plain .md files migrate as files with .skill.md extension."""
+    """Claude skills as plain .md files are wrapped into skill directories."""
     skills_dir = tmp_path / ".claude" / "skills"
     skills_dir.mkdir(parents=True)
     (skills_dir / "render-validate.md").write_text("# Render", encoding="utf-8")
@@ -686,9 +686,11 @@ def test_migration_plan_claude_plain_md_skill(tmp_path):
     result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
 
     plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
-    assert ".apm/skills/render-validate.skill.md" in plan
-    assert ".apm/skills/data-transform.skill.md" in plan
-    assert not plan[".apm/skills/render-validate.skill.md"].is_dir
+    assert ".apm/skills/render-validate" in plan
+    assert ".apm/skills/data-transform" in plan
+    action = plan[".apm/skills/render-validate"]
+    assert not action.is_dir
+    assert action.wrap_as_skill
 
 
 def test_migration_plan_mixed_skill_formats(tmp_path):
@@ -706,9 +708,25 @@ def test_migration_plan_mixed_skill_formats(tmp_path):
     result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
 
     plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
-    # Plain skill -> file with .skill.md extension
-    assert ".apm/skills/standalone.skill.md" in plan
-    assert not plan[".apm/skills/standalone.skill.md"].is_dir
+    # Plain skill -> wrapped into directory
+    assert ".apm/skills/standalone" in plan
+    assert plan[".apm/skills/standalone"].wrap_as_skill
     # SKILL.md-anchored -> directory copy
     assert ".apm/skills/my-tool" in plan
     assert plan[".apm/skills/my-tool"].is_dir
+
+
+def test_execute_migration_wraps_plain_skill_as_directory(tmp_path):
+    """execute_migration creates <dest>/SKILL.md for wrap_as_skill actions."""
+    skills_dir = tmp_path / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "my-helper.md").write_text("# Helper content", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+    applied = execute_migration(list(result.migration_plan))
+
+    assert len(applied) >= 1
+    dest = tmp_path / ".apm" / "skills" / "my-helper"
+    assert dest.is_dir()
+    assert (dest / "SKILL.md").exists()
+    assert (dest / "SKILL.md").read_text(encoding="utf-8") == "# Helper content"

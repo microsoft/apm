@@ -62,7 +62,7 @@ _MIGRATION_MAP: dict[tuple[str, str], tuple[str, str | None]] = {
     ("agents", "style"): (".apm/styles", ".style.md"),
     # Skills: the SKILL.md file anchors the discovery, but the entire parent
     # directory is the deployable unit.  Extension None = copy dir as-is.
-    ("claude", "skill"): (".apm/skills", ".skill.md"),
+    ("claude", "skill"): (".apm/skills", None),
     ("agent-skills", "skill"): (".apm/skills", None),
     ("cursor", "skill"): (".apm/skills", None),
     ("opencode", "skill"): (".apm/skills", None),
@@ -101,6 +101,7 @@ class MigrationAction:
     tool: str
     kind: str
     is_dir: bool = False
+    wrap_as_skill: bool = False
 
 
 def _migration_dest_name(source_name: str, target_ext: str | None) -> str:
@@ -149,7 +150,9 @@ def compute_migration_plan(
         target_subdir, target_ext = mapping
 
         # Skills: SKILL.md-anchored findings migrate the whole parent directory;
-        # plain .md skill files (e.g. Claude .claude/skills/*.md) migrate as files.
+        # plain .md skill files (e.g. Claude .claude/skills/*.md) are wrapped
+        # into a proper skill directory with SKILL.md so the install pipeline
+        # can discover and deploy them.
         if finding.kind == "skill" and finding.path.name == "SKILL.md":
             skill_dir = finding.path.parent
             skill_name = skill_dir.name
@@ -160,6 +163,26 @@ def compute_migration_plan(
             actions.append(
                 MigrationAction(
                     source=skill_dir, dest=dest, tool=finding.tool, kind=finding.kind, is_dir=True
+                )
+            )
+            continue
+
+        if finding.kind == "skill":
+            # Plain .md skill: wrap into <stem>/SKILL.md directory structure
+            # so the install pipeline can find and deploy it.
+            skill_name = finding.path.stem
+            dest = project_root / target_subdir / skill_name
+            if dest in seen_dests or dest.exists():
+                continue
+            seen_dests.add(dest)
+            actions.append(
+                MigrationAction(
+                    source=finding.path,
+                    dest=dest,
+                    tool=finding.tool,
+                    kind=finding.kind,
+                    is_dir=False,
+                    wrap_as_skill=True,
                 )
             )
             continue
@@ -194,6 +217,11 @@ def execute_migration(actions: list[MigrationAction]) -> list[MigrationAction]:
         action.dest.parent.mkdir(parents=True, exist_ok=True)
         if action.is_dir:
             shutil.copytree(action.source, action.dest)
+        elif action.wrap_as_skill:
+            # Plain .md skill: create <dest>/SKILL.md from the source file
+            # so the install pipeline recognises it as a deployable skill.
+            action.dest.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(action.source, action.dest / "SKILL.md")
         else:
             shutil.copy2(action.source, action.dest)
         applied.append(action)
