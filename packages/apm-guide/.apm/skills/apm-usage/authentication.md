@@ -10,8 +10,11 @@ APM checks these sources in order, using the first valid token found:
 | 2 | `GITHUB_APM_PAT` | Global | Falls back to git credential if rejected |
 | 3 | `GITHUB_TOKEN` | Global | Shared with GitHub Actions |
 | 4 | `GH_TOKEN` | Global | Set by `gh auth login` |
-| 5 | `git credential fill` | Per-host | System credential manager |
+| 5 | `gh auth token --hostname <host>` | GitHub-like hosts | Active `gh auth login` account |
+| 6 | `git credential fill` | Per-host | System credential manager |
 | -- | None | -- | Unauthenticated (public GitHub repos only) |
+
+APM checks the active `gh` CLI account before invoking OS credential helpers. This reduces ambiguous multi-account prompts on hosts like github.com. If the `gh` CLI is not installed or no account is active, APM skips this step silently and continues to `git credential fill`.
 
 ## Per-org setup
 
@@ -143,7 +146,7 @@ apm install --verbose owner/repo/path#v1.2.0
 # Diagnose the auth chain -- shows which token source is used
 apm install --verbose your-org/package
 
-# Increase git credential timeout (default 30s, max 180s)
+# Increase git credential timeout (default 60s, max 180s)
 export APM_GIT_CREDENTIAL_TIMEOUT=120
 ```
 

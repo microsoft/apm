@@ -344,7 +344,8 @@ class AuthResolver:
 
         When the resolved token comes from a global env var and fails
         (e.g. a github.com PAT tried on ``*.ghe.com``), the method
-        retries with ``git credential fill`` before giving up.
+        retries with ``gh auth token`` and then ``git credential fill``
+        before giving up.
         """
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
@@ -355,21 +356,41 @@ class AuthResolver:
                 verbose_callback(msg)
 
         def _try_credential_fallback(exc: Exception) -> T:
-            """Retry with git-credential-fill when an env-var token fails."""
-            if auth_ctx.source in ("git-credential-fill", "none"):
+            """Retry the operation when the originally-resolved token fails.
+
+            Walks the secondary chain in order: gh CLI (GitHub-like hosts;
+            internal guard short-circuits unsupported hosts), then
+            ``git credential fill``. Sources already obtained from a
+            secondary chain (``gh-auth-token``, ``git-credential-fill``,
+            ``none``) skip retry to avoid double-invocation.
+            """
+            if auth_ctx.source in ("gh-auth-token", "git-credential-fill", "none"):
                 raise exc
             # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
             if host_info.kind == "ado":
                 raise exc
             _log(
-                f"Token from {auth_ctx.source} failed, trying git credential fill "
-                f"for {host_info.display_name}"
+                f"Token from {auth_ctx.source} failed for {host_info.display_name}; "
+                "trying secondary credential sources"
             )
+            _log(f"trying gh auth token for {host_info.display_name}")
+            gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+            if gh_token:
+                _log(f"gh auth token resolved a credential for {host_info.display_name}")
+                return operation(
+                    gh_token,
+                    self._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
+                )
+            _log(f"trying git credential fill for {host_info.display_name}")
             cred = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port
             )
             if cred:
-                return operation(cred, self._build_git_env(cred))
+                _log(f"git credential fill resolved a credential for {host_info.display_name}")
+                return operation(
+                    cred,
+                    self._build_git_env(cred, scheme="basic", host_kind=host_info.kind),
+                )
             raise exc
 
         # ADO bearer fallback machinery (PAT was tried first; bearer is the safety net)
@@ -641,7 +662,8 @@ class AuthResolver:
         2. Global env vars ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN`` -> ``GH_TOKEN``
            (any host -- if the token is wrong for the target host,
            ``try_with_fallback`` retries with git credentials)
-        3. Git credential helper (any host except ADO)
+          3. gh CLI active account (GitHub-like hosts only)
+          4. Git credential helper (any host except ADO)
 
         Resolution order (ADO):
         1. ``ADO_APM_PAT`` env var -> scheme ``"basic"``
@@ -688,7 +710,13 @@ class AuthResolver:
             source = self._identify_env_source(purpose)
             return token, source, "basic"
 
-        # 3. Git credential helper (not for ADO)
+        # 3. gh CLI active account (eligibility gated inside the call;
+        #    unsupported hosts return None instantly without a subprocess)
+        gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+        if gh_token:
+            return gh_token, "gh-auth-token", "basic"
+
+        # 4. Git credential helper (not for ADO)
         if host_info.kind not in ("ado",):
             credential = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port
