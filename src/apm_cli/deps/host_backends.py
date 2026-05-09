@@ -292,6 +292,10 @@ class ADOBackend:
         # ADO's HTTPS host comes from the dependency itself; ``host_info``
         # is for classification only.
         host = getattr(dep_ref, "host", None) or self.host_info.host
+        if not getattr(dep_ref, "ado_organization", None):
+            raise ValueError(
+                "ADO dependency is missing ado_organization; cannot construct clone URL"
+            )
         # Bearer scheme: token goes into env vars, NOT into the URL.
         if auth_scheme == "bearer":
             return build_ado_https_clone_url(
@@ -312,6 +316,10 @@ class ADOBackend:
         )
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
+        if not getattr(dep_ref, "ado_organization", None):
+            raise ValueError(
+                "ADO dependency is missing ado_organization; cannot construct clone URL"
+            )
         return build_ado_ssh_url(dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo)
 
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:

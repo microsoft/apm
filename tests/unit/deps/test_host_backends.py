@@ -265,6 +265,30 @@ class TestADOBackend:
         with pytest.raises(ValueError, match="Azure DevOps does not support plain HTTP"):
             backend.build_clone_http_url(self._ado_dep())
 
+    def test_https_missing_org_raises_value_error(self):
+        backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
+        bad_dep = _dep_ref(
+            host="dev.azure.com",
+            repo_url="myorg/myproj/myrepo",
+            ado_organization=None,
+            ado_project="myproj",
+            ado_repo="myrepo",
+        )
+        with pytest.raises(ValueError, match=r"missing ado_organization"):
+            backend.build_clone_https_url(bad_dep, token="x")
+
+    def test_ssh_missing_org_raises_value_error(self):
+        backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
+        bad_dep = _dep_ref(
+            host="dev.azure.com",
+            repo_url="myorg/myproj/myrepo",
+            ado_organization=None,
+            ado_project="myproj",
+            ado_repo="myrepo",
+        )
+        with pytest.raises(ValueError, match=r"missing ado_organization"):
+            backend.build_clone_ssh_url(bad_dep)
+
     def test_commits_api_returns_none(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
         assert backend.build_commits_api_url(self._ado_dep(), "main") is None
@@ -357,6 +381,10 @@ class TestBackendDispatch:
         with patch.dict(os.environ, {"GITHUB_HOST": "git.acme.com"}):
             backend = backend_for(_dep_ref(host="git.acme.com"), self.resolver)
             assert isinstance(backend, GHESBackend)
+            # Regression guard: GHES api_base must be `https://{host}/api/v3`,
+            # never `https://api.{host}/...` (the latter was a real bug fixed
+            # earlier in the same PR; see fallback path in backend_for).
+            assert backend.host_info.api_base == "https://git.acme.com/api/v3"
 
     def test_dispatch_uses_default_when_no_host(self):
         backend = backend_for(_dep_ref(host=None), self.resolver)
