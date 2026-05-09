@@ -201,6 +201,41 @@ transitive host you want to allow.
 >   path: file.prompt.md
 > ```
 
+#### Monorepo sibling references with `git: parent`
+
+When an APM package lives **inside a monorepo** and depends on a sibling package in the same repository at the same ref, declare the dependency with the literal sentinel `git: parent` and a `path:` to the sibling. APM expands `parent` at resolve time to the consumer's clone coordinates -- you do not have to repeat the host, repo, or ref.
+
+```yaml
+# In agents/pkg-a/apm.yml inside org/monorepo
+dependencies:
+  apm:
+    - git: parent
+      path: skills/shared
+```
+
+When `org/monorepo` is installed at ref `main`, APM resolves the sibling to the same `host`, `repo_url`, and `ref`, with `virtual_path: skills/shared`. The lockfile records the **expanded** coordinates -- there is no `parent` sentinel persisted as durable identity:
+
+```yaml
+# apm.lock.yaml (excerpt)
+host: github.com
+repo_url: org/monorepo
+virtual_path: skills/shared
+resolved_ref: main
+resolved_commit: <sha>
+is_virtual: true
+```
+
+The expansion result is byte-for-byte identical to writing the explicit form below, so swapping between the two never invalidates the lockfile or causes a re-download:
+
+```yaml
+# Equivalent explicit form (verbose, but works outside the monorepo too)
+- git: https://github.com/org/monorepo.git
+  path: skills/shared
+  ref: main
+```
+
+Use `git: parent` only when both the consumer and the sibling live in the same git monorepo. A `parent` reference at the **top level** of an `apm.yml` (not transitively pulled in by a parent install) has no monorepo to inherit from and is rejected at resolve time. The `path` is required, must not be empty, and is normalised to a single relative path -- absolute paths and `..` traversal are refused.
+
 ### How Dependencies Are Stored (Canonical Format)
 
 APM normalizes every dependency entry on write — no matter how you specify a package, the stored form in `apm.yml` is always a clean, canonical string. This works like Docker's default registry convention:

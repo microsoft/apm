@@ -1,5 +1,6 @@
 """Tests for the install flow with mocked marketplace resolution."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 from apm_cli.marketplace.models import MarketplacePlugin, MarketplaceSource
@@ -265,3 +266,119 @@ class TestInstallMarketplaceGitLabMonorepoWiring:
         assert passed is not None
         assert passed.repo_url == "acme/marketplace"
         assert passed.virtual_path == "plugins/foo"
+
+
+class TestInstallGitLabMarketplaceFullPipelineFromHttp:
+    """End-to-end: HTTP-mocked GitLab v4 fetch -> resolver -> install -> apm.yml.
+
+    Companion tests above mock ``resolve_marketplace_plugin`` directly to focus
+    on the ``_validate_and_add_packages_to_apm_yml`` seam. This pins the **full
+    pipeline** with a mocked GitLab v4 ``marketplace.json`` fetch so a regression
+    in any layer between ``_fetch_file`` and ``apm.yml`` normalisation surfaces
+    here, not silently in production.
+    """
+
+    def _setup_apm_yml(self, tmp_path, monkeypatch):
+        import yaml
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}})
+        )
+        monkeypatch.chdir(tmp_path)
+        return apm_yml
+
+    @patch("apm_cli.marketplace.shadow_detector.detect_shadows", return_value=[])
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    @patch("apm_cli.commands.install._rich_success")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    @patch("apm_cli.marketplace.client.requests.get")
+    @patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None)
+    def test_gitlab_marketplace_in_repo_plugin_resolves_to_git_path(
+        self,
+        _mock_proxy_cfg,
+        mock_http_get,
+        mock_get_source,
+        _mock_rich,
+        _mock_validate,
+        _mock_shadows,
+        tmp_path,
+        monkeypatch,
+    ):
+        """``apm install plugin@gitlab-mkt`` for an in-marketplace plugin yields
+        ``{ git: <gitlab url>, path: <subdir> }`` in apm.yml after resolution."""
+        import yaml
+
+        from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+        from apm_cli.models.apm_package import APMPackage
+
+        apm_yml = self._setup_apm_yml(tmp_path, monkeypatch)
+
+        # Redirect APM CONFIG_DIR so cache reads/writes are sandboxed and
+        # cannot serve a previously-cached marketplace.json from disk.
+        cache_root = tmp_path / "apm_home"
+        cache_root.mkdir()
+        monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(cache_root))
+
+        source = MarketplaceSource(
+            name="apm-reg",
+            owner="epm-ease",
+            repo="ai-apm-registry",
+            host="gitlab.com",
+            branch="main",
+        )
+        mock_get_source.return_value = source
+
+        marketplace_json = {
+            "name": "apm-reg",
+            "plugins": [
+                {
+                    "name": "optimize-prompt",
+                    "source": "registry/optimize-prompt",
+                }
+            ],
+        }
+
+        captured_urls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            captured_urls.append(url)
+            m = MagicMock()
+            m.status_code = 200
+            m.text = json.dumps(marketplace_json)
+            m.json.return_value = marketplace_json
+            return m
+
+        mock_http_get.side_effect = fake_get
+
+        validated, outcome = _validate_and_add_packages_to_apm_yml(["optimize-prompt@apm-reg"])
+
+        # HTTP fetch hit the GitLab v4 raw endpoint (proves the GitLab branch
+        # of ``_fetch_file`` was exercised end-to-end, not the GitHub Contents
+        # API). We do not assert ``/repos/`` is absent because shadow-detection
+        # may probe other registered marketplaces on GitHub hosts -- that is a
+        # separate code path not under test here.
+        assert any("/api/v4/projects/" in u and "/repository/files/" in u for u in captured_urls)
+        assert any(
+            "acme%2Fplugins" in u or "epm-ease%2Fai-apm-registry" in u for u in captured_urls
+        )
+
+        assert len(validated) == 1
+        canonical = validated[0]
+        assert canonical == ("gitlab.com/epm-ease/ai-apm-registry/registry/optimize-prompt")
+
+        data = yaml.safe_load(apm_yml.read_text())
+        dep_entry = data["dependencies"]["apm"][0]
+        assert dep_entry == {
+            "git": "https://gitlab.com/epm-ease/ai-apm-registry",
+            "path": "registry/optimize-prompt",
+        }
+
+        parsed = APMPackage.from_apm_yml(apm_yml)
+        stored = parsed.get_apm_dependencies()[0]
+        assert stored.host == "gitlab.com"
+        assert stored.repo_url == "epm-ease/ai-apm-registry"
+        assert stored.virtual_path == "registry/optimize-prompt"
+        assert stored.is_virtual is True
+
+        assert outcome.marketplace_provenance is not None

@@ -633,6 +633,67 @@ class TestDirectFetchHostRouting:
         assert result == self._JSON
         mock_get.assert_not_called()
 
+    def test_proxy_only_blocks_gitlab_v4_fallback(self):
+        """PROXY_REGISTRY_ONLY=1 + proxy miss MUST NOT fall through to the GitLab v4 raw API.
+
+        Policy-enforcement promise: when the org pins all marketplace fetches to
+        the registry proxy, a proxy miss returns ``None`` (treated as 404 by the
+        caller); APM must not silently leak the request -- and any auth headers
+        -- to the GitLab host as a fallback. Mirrors the equivalent guarantee
+        for the GitHub Contents API.
+        """
+        source = MarketplaceSource(
+            name="gl",
+            owner="acme",
+            repo="plugins",
+            host="gitlab.com",
+            branch="main",
+        )
+        cfg = MagicMock()
+        cfg.host = "art.example.com"
+        cfg.prefix = "artifactory/gitlab"
+        cfg.scheme = "https"
+        cfg.enforce_only = True
+        cfg.get_headers.return_value = {"Authorization": "Bearer x"}
+        mock_get = MagicMock()
+
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
+                return_value=None,
+            ),
+            patch("apm_cli.marketplace.client.requests.get", mock_get),
+        ):
+            result = client_mod._fetch_file(source, "marketplace.json")
+
+        assert result is None
+        mock_get.assert_not_called()
+
+    def test_proxy_only_blocks_github_contents_fallback(self):
+        """Companion guarantee: PROXY_REGISTRY_ONLY=1 also blocks GitHub Contents fallback."""
+        source = _make_source()
+        cfg = MagicMock()
+        cfg.host = "art.example.com"
+        cfg.prefix = "artifactory/github"
+        cfg.scheme = "https"
+        cfg.enforce_only = True
+        cfg.get_headers.return_value = {"Authorization": "Bearer x"}
+        mock_get = MagicMock()
+
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
+                return_value=None,
+            ),
+            patch("apm_cli.marketplace.client.requests.get", mock_get),
+        ):
+            result = client_mod._fetch_file(source, "marketplace.json")
+
+        assert result is None
+        mock_get.assert_not_called()
+
 
 class TestCacheKey:
     """Cache key includes host for non-github.com sources."""

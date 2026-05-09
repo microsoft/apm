@@ -125,3 +125,105 @@ class TestLockfileExpandedGitParent:
         )
         assert a.to_dict() == b.to_dict()
         assert a.get_unique_key() == b.get_unique_key()
+
+
+class TestParentExpansionToLockfilePipeline:
+    """End-to-end glue: ``{ git: parent, path: ... }`` -> resolver -> lockfile.
+
+    The individual halves are unit-tested separately (``test_git_parent_resolver``
+    covers expansion; the ``TestLockfileExpandedGitParent`` block above covers
+    persistence shape). This pins the **seam** between them so a refactor that
+    drifts either side cannot silently break portability of monorepo siblings.
+
+    The contract: feeding a real ``DependencyReference.parse_from_dict({"git":
+    "parent", "path": ...})`` through ``APMDependencyResolver.expand_parent_repo_decl``
+    and into ``LockedDependency.from_dependency_ref`` MUST yield the same
+    persisted bytes (and same unique key) as if the user had hand-written the
+    explicit ``git`` + ``path`` form -- with no ``parent`` sentinel anywhere.
+    """
+
+    def _parent(self, git_url: str, ref: str = "main"):
+        from apm_cli.models.apm_package import DependencyReference as DR
+
+        return DR.parse_from_dict({"git": git_url, "path": "agents/pkg-a", "ref": ref})
+
+    def _child_parent_decl(self):
+        from apm_cli.models.apm_package import DependencyReference as DR
+
+        return DR.parse_from_dict({"git": "parent", "path": "skills/shared"})
+
+    def _explicit(self, git_url: str, ref: str = "main"):
+        from apm_cli.models.apm_package import DependencyReference as DR
+
+        return DR.parse_from_dict({"git": git_url, "path": "skills/shared", "ref": ref})
+
+    def _round_trip(self, dep_ref, *, sha: str = "f" * 40):
+        lf = LockFile()
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref=dep_ref,
+            resolved_commit=sha,
+            depth=2,
+            resolved_by="org/parent-pkg",
+        )
+        lf.add_dependency(locked)
+        parsed = LockFile.from_yaml(lf.to_yaml())
+        reloaded = next(iter(parsed.dependencies.values()))
+        return locked, reloaded
+
+    def test_pipeline_github_default_host(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        parent = self._parent("https://github.com/org/monorepo.git")
+        child = self._child_parent_decl()
+        expanded = APMDependencyResolver().expand_parent_repo_decl(parent, child)
+
+        # Sanity: the expansion drops the parent sentinel before lockfile sees it.
+        assert expanded.is_parent_repo_inheritance is False
+        assert expanded.repo_url == "org/monorepo"
+        assert expanded.host == "github.com"
+
+        explicit = self._explicit("https://github.com/org/monorepo.git")
+        locked_p, _ = self._round_trip(expanded)
+        locked_e, _ = self._round_trip(explicit)
+        assert locked_p.to_dict() == locked_e.to_dict()
+        assert locked_p.get_unique_key() == locked_e.get_unique_key()
+
+        d = locked_p.to_dict()
+        # No parent sentinel persisted anywhere as durable identity.
+        assert d.get("repo_url") != "parent" and d.get("repo_url") != "_parent"
+        assert d.get("source") != "parent" and d.get("source") != "_parent"
+        assert d.get("virtual_path") == "skills/shared"
+        assert d.get("is_virtual") is True
+
+    def test_pipeline_gitlab_class_host(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        parent = self._parent("https://git.example.com/org/monorepo.git")
+        child = self._child_parent_decl()
+        expanded = APMDependencyResolver().expand_parent_repo_decl(parent, child)
+
+        explicit = self._explicit("https://git.example.com/org/monorepo.git")
+        locked_p, reloaded_p = self._round_trip(expanded, sha="a" * 40)
+        locked_e, _ = self._round_trip(explicit, sha="a" * 40)
+        assert locked_p.to_dict() == locked_e.to_dict()
+        assert locked_p.get_unique_key() == locked_e.get_unique_key()
+
+        # Survives YAML round-trip with expanded coordinates intact.
+        assert reloaded_p.host == "git.example.com"
+        assert reloaded_p.repo_url == "org/monorepo"
+        assert reloaded_p.virtual_path == "skills/shared"
+        assert reloaded_p.is_virtual is True
+
+    def test_pipeline_ref_override_on_child(self):
+        """Child ``ref:`` override survives expansion and reaches the lockfile."""
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+        from apm_cli.models.apm_package import DependencyReference as DR
+
+        parent = self._parent("https://github.com/org/monorepo.git", ref="main")
+        child = DR.parse_from_dict({"git": "parent", "path": "skills/shared", "ref": "v1.2.3"})
+        expanded = APMDependencyResolver().expand_parent_repo_decl(parent, child)
+        assert expanded.reference == "v1.2.3"
+
+        locked, reloaded = self._round_trip(expanded, sha="b" * 40)
+        assert locked.resolved_ref == "v1.2.3"
+        assert reloaded.resolved_ref == "v1.2.3"
