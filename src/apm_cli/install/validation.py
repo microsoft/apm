@@ -524,6 +524,9 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 _check_repo,
                 org=org,
                 port=port,
+                # dep_ref.repo_url is owner/repo (never a full URL per the
+                # DependencyReference invariant); forwarded as path= so GCM
+                # multi-account users get per-URL credential matching.
                 path=dep_ref.repo_url,
                 unauth_first=True,
                 verbose_callback=verbose_log,

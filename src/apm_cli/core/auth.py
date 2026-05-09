@@ -389,7 +389,8 @@ class AuthResolver:
                     gh_token,
                     self._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
                 )
-            _log(f"trying git credential fill for {host_info.display_name}")
+            path_suffix = f" (path={path})" if path else ""
+            _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
             cred = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port, path=path
             )

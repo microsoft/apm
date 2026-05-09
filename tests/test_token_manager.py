@@ -194,6 +194,19 @@ class TestResolveCredentialFromGit:
             stdin = mock_run.call_args.kwargs["input"]
             assert "path=" not in stdin
 
+    def test_path_with_full_url_is_extracted_via_urlparse(self):
+        """If a future caller mistakenly passes a full URL, only the URL path
+        component is forwarded -- never the scheme/host. Guards against the
+        naive lstrip('/') yielding 'https:/host/owner/repo'."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="https://github.com/acme/widgets"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=acme/widgets" in stdin
+            assert "https" not in stdin.split("path=", 1)[1].splitlines()[0]
+
     def test_git_terminal_prompt_disabled(self):
         """GIT_TERMINAL_PROMPT=0 is set in the subprocess env."""
         mock_result = MagicMock(returncode=0, stdout="password=tok\n")

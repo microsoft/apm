@@ -68,22 +68,22 @@ Per-org tokens take priority over global tokens. Use this when different orgs re
 
 ## Multi-account Git Credential Manager
 
-If you use [Git Credential Manager (GCM)](https://github.com/git-ecosystem/git-credential-manager) with more than one GitHub account on the same host, set:
+APM forwards the repository path to `git credential fill`, so [Git Credential Manager (GCM)](https://github.com/git-ecosystem/git-credential-manager) can automatically pick the right GitHub account per organization -- no account-picker prompt. Existing single-account setups are unaffected: if `credential.useHttpPath` is not enabled, git credential helpers ignore the `path` attribute and match per host only.
+
+To opt in, enable path-aware matching once:
 
 ```bash
 git config --global credential.useHttpPath true
 ```
 
-With this enabled you can pin a specific account per URL:
+GCM matches credential URLs by **prefix**, so a single config entry per org typically covers every repo under that org:
 
 ```bash
 git config --global credential.https://github.com/acme.username your-acme-account
 git config --global credential.https://github.com/personal-org.username your-personal-account
 ```
 
-APM forwards `path=<org/repo>` to `git credential fill` so GCM can match these per-URL entries and return the right account without prompting an account picker. If `credential.useHttpPath` is not enabled, git credential helpers ignore the `path` attribute and match per host only.
-
-If you have configured `gh auth login`, APM consults the `gh` CLI active account before falling back to credential helpers, which avoids the credential-fill path entirely.
+With the entries above, fetches against `acme/widgets`, `acme/payments`, and any other `acme/*` repo all resolve to `your-acme-account` without per-repo configuration.
 
 ## Fine-grained PAT setup
 

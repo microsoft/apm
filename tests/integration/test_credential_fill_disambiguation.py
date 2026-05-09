@@ -159,3 +159,132 @@ def test_gh_cli_success_short_circuits_credential_fill_in_validation(isolated_en
 
     assert result is True
     mock_cred_fill.assert_not_called()
+
+
+def test_credential_fill_receives_path_on_parse_failure_fallback(
+    isolated_env, stub_gh_cli_unavailable
+):
+    """E2E (validation.py:590): when DependencyReference.parse raises, the fallback
+    branch (`_check_repo_fallback`) must still forward `path=owner/repo` to git
+    credential fill. This is a secure-by-default surface -- the parse-failure
+    code path threads the same per-URL disambiguation as the happy path.
+    """
+    from apm_cli.install.validation import _validate_package_exists
+
+    captured_stdin: list[str] = []
+    api_calls: list[str] = []
+
+    def fake_requests_get(url, *args, **kwargs):
+        api_calls.append(url)
+        headers = kwargs.get("headers", {}) or {}
+        auth = headers.get("Authorization", "")
+        resp = MagicMock()
+        resp.headers = {}
+        if "good-token" in auth:
+            resp.ok = True
+            resp.status_code = 200
+        elif "bad-token" in auth:
+            resp.ok = False
+            resp.status_code = 401
+            resp.reason = "Unauthorized"
+        else:
+            resp.ok = False
+            resp.status_code = 404
+            resp.reason = "Not Found"
+        return resp
+
+    # Force the primary parse path to raise so execution falls through to
+    # `_check_repo_fallback` (validation.py:585+). Anything non-AuthenticationError
+    # routes there.
+    with (
+        patch(
+            "apm_cli.models.apm_package.DependencyReference.parse",
+            side_effect=ValueError("simulated parse failure"),
+        ),
+        patch(
+            "subprocess.run", side_effect=_make_credential_fill_stub(captured_stdin)
+        ) as mock_subproc,
+        patch("apm_cli.install.validation.requests.get", side_effect=fake_requests_get),
+    ):
+        result = _validate_package_exists("acme/widgets", verbose=False)
+
+    assert result is True, "fallback validation must succeed once the good token is fetched"
+
+    # The recovered (good) token must have been used in a GitHub API call.
+    parsed_calls = [urlparse(url) for url in api_calls]
+    assert any(p.path == "/repos/acme/widgets" for p in parsed_calls), (
+        f"GitHub API was not called with the right repo: {api_calls!r}"
+    )
+
+    # Contract: even on the fallback branch, `path=` is sent to credential fill.
+    assert captured_stdin, "git credential fill was never invoked on the fallback branch"
+    last_stdin = captured_stdin[-1]
+    assert "path=acme/widgets" in last_stdin, (
+        "fallback (parse-failure) branch must forward path= to credential fill; "
+        f"got: {last_stdin!r}"
+    )
+
+    cmd_calls = [
+        call.args[0] if call.args else call.kwargs.get("args")
+        for call in mock_subproc.call_args_list
+    ]
+    assert any(
+        cmd and "credential" in " ".join(cmd) and "fill" in " ".join(cmd)
+        for cmd in cmd_calls
+        if isinstance(cmd, (list, tuple))
+    ), f"git credential fill not in subprocess calls: {cmd_calls!r}"
+
+
+def test_marketplace_fetch_threads_path_to_credential_fill(isolated_env, stub_gh_cli_unavailable):
+    """E2E (marketplace/client.py:273): marketplace package fetches must thread
+    `path=<owner>/<repo>` through to git credential fill so multi-account GCM
+    users get the right account when downloading from upstream marketplaces.
+
+    Verifies the marketplace -> AuthResolver.try_with_fallback -> token_manager
+    chain end-to-end; complements the unit-level assertion in
+    `tests/unit/marketplace/test_marketplace_client.py`.
+    """
+    from apm_cli.core.auth import AuthResolver
+
+    captured_stdin: list[str] = []
+    captured_paths: list[str | None] = []
+
+    real_resolve = GitHubTokenManager.resolve_credential_from_git
+
+    def recording_resolve(host, port=None, path=None):
+        captured_paths.append(path)
+        return real_resolve(host, port=port, path=path)
+
+    def operation(token, git_env):
+        # Reject any token that isn't the recovered credential-fill one --
+        # forces try_with_fallback to walk the full chain (env -> gh cli ->
+        # git credential fill) the same way the marketplace client does.
+        if token != "good-token":
+            raise RuntimeError(f"simulated 401 with non-recovered token: {token!r}")
+        return f"ok:{token}"
+
+    with (
+        patch.object(
+            GitHubTokenManager,
+            "resolve_credential_from_git",
+            side_effect=recording_resolve,
+        ),
+        patch("subprocess.run", side_effect=_make_credential_fill_stub(captured_stdin)),
+    ):
+        auth_resolver = AuthResolver()
+        result = auth_resolver.try_with_fallback(
+            "github.com",
+            operation,
+            org="acme-org",
+            path="acme-org/plugins",
+            unauth_first=False,
+        )
+
+    assert result == "ok:good-token"
+    assert captured_paths and captured_paths[-1] == "acme-org/plugins", (
+        f"marketplace path= not forwarded to resolve_credential_from_git: {captured_paths!r}"
+    )
+    assert captured_stdin, "git credential fill stdin was never captured"
+    assert "path=acme-org/plugins" in captured_stdin[-1], (
+        f"credential fill stdin missing path= for marketplace fetch: {captured_stdin[-1]!r}"
+    )

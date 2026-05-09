@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 from typing import Dict, Optional, Tuple  # noqa: F401, UP035
+from urllib.parse import urlparse
 
 from apm_cli.utils.github_host import (
     default_host,
@@ -49,7 +50,7 @@ def _format_credential_host(host: str, port: int | None) -> str:
 
 
 def _sanitize_credential_path(path: str) -> str:
-    """Strip leading ``/`` and reject control characters from a credential path.
+    """Strip leading ``/``, reject full URLs, and reject control characters.
 
     The git credential protocol is line-oriented: a stray newline in the
     ``path`` value would let an attacker inject arbitrary attribute lines
@@ -59,13 +60,17 @@ def _sanitize_credential_path(path: str) -> str:
     contains control characters or whitespace, returning an empty string
     so the caller skips the ``path=`` line entirely. This preserves the
     pre-disambiguation request rather than ever sending a malformed one.
+
+    We also guard against accidental full-URL inputs (``https://...``).
+    Today every caller passes ``owner/repo``, but if a future caller ever
+    passes a full URL the naive ``lstrip('/')`` would yield
+    ``https:/host/owner/repo`` which GCM silently ignores. Detect this
+    via ``urlparse`` and use the URL's path component instead.
     """
-    cleaned = path.lstrip("/")
+    parsed = urlparse(path)
+    cleaned = parsed.path.lstrip("/") if parsed.scheme else path.lstrip("/")
     if not cleaned:
         return ""
-    # Reject any control char (incl. \n, \r, \t) or whitespace -- valid
-    # repository paths never contain these. Any character with codepoint
-    # below 0x20 or equal to 0x7f, or any whitespace, disqualifies.
     for ch in cleaned:
         if ord(ch) < 0x20 or ord(ch) == 0x7F or ch.isspace():
             return ""
