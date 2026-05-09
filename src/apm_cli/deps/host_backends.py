@@ -7,10 +7,11 @@ host kind is represented by a small immutable backend object that exposes
 URL builders, API URLs, and capability flags. A dispatch function picks the
 right backend by consulting :meth:`AuthResolver.classify_host`.
 
-Pattern: Strategy via Protocol + dispatch dict. No class hierarchy, no
-runtime registry, no inheritance — backends are leaf classes that share
-nothing other than the Protocol shape. Adding a new vendor is one new file
-+ one new entry in ``_BACKEND_BY_KIND``, never a new branch in an
+Pattern: Strategy via Protocol + dispatch dict. The three GitHub-family
+backends (GitHub, GHE Cloud, GHES) share URL builders through a small
+``_GitHubFamilyBase`` to avoid copy/paste; ADO and Generic stand alone.
+There is no runtime registry. Adding a new vendor is one new class plus
+one new entry in ``_BACKEND_BY_KIND``, never a new branch in an
 ``if/elif`` ladder.
 
 Design constraints (see plan in WIP/host-backends-refactor):
@@ -20,7 +21,7 @@ Design constraints (see plan in WIP/host-backends-refactor):
   arguments so the same backend instance can serve every dependency on a
   given host.
 - ``build_clone_*`` returns a clone URL suitable for ``git clone``. Bearer
-  tokens are NOT embedded in the URL — they are injected via git env vars
+  tokens are NOT embedded in the URL -- they are injected via git env vars
   by ``download_strategies``; the backend signals this via
   ``auth_scheme="bearer"``.
 - ``build_commits_api_url`` returns ``None`` for hosts where no cheap
@@ -100,7 +101,7 @@ class HostBackend(Protocol):
 
         ``token`` may be ``None`` (anonymous), a non-empty string (basic auth
         embedded in URL), or the empty string ``""`` (explicitly suppress
-        per-instance default — used by transport plans for plain HTTPS).
+        per-instance default -- used by transport plans for plain HTTPS).
 
         ``auth_scheme="bearer"`` indicates the token will be injected via
         git env vars; the URL must NOT embed credentials in this case.
@@ -114,9 +115,9 @@ class HostBackend(Protocol):
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         """Build a plain HTTP (insecure) clone URL.
 
-        Only used when ``dep_ref.is_insecure`` is true — APM never
-        downgrades automatically. ADO and ``*.ghe.com`` reject HTTP and
-        will raise.
+        Only used when ``dep_ref.is_insecure`` is true; APM never
+        downgrades automatically. ADO raises ValueError because Azure
+        DevOps does not accept HTTP at all.
         """
         ...
 
@@ -153,7 +154,7 @@ class HostBackend(Protocol):
 class _GitHubFamilyBase:
     """Shared composition base for github.com / GHE Cloud / GHES backends.
 
-    Not a Protocol implementer on its own — concrete subclasses set
+    Not a Protocol implementer on its own -- concrete subclasses set
     ``kind`` and (optionally) override ``build_commits_api_url`` to use
     the right API base.
 
@@ -213,7 +214,7 @@ class _GitHubFamilyBase:
             owner, repo = dep_ref.repo_url.split("/", 1)
         except ValueError:
             return None
-        # Treat already-resolved 40-char SHAs as a no-op — caller should
+        # Treat already-resolved 40-char SHAs as a no-op -- caller should
         # short-circuit the network round-trip.
         if re.match(r"^[a-f0-9]{40}$", (ref or "").lower()):
             return None
@@ -241,7 +242,7 @@ class GitHubBackend(_GitHubFamilyBase):
 
 @dataclass(frozen=True)
 class GHECloudBackend(_GitHubFamilyBase):
-    """Backend for ``*.ghe.com`` (GitHub Enterprise Cloud — Data Residency)."""
+    """Backend for ``*.ghe.com`` (GitHub Enterprise Cloud -- Data Residency)."""
 
     @property
     def kind(self) -> str:
@@ -264,7 +265,7 @@ class ADOBackend:
     ADO has its own URL builders that take ``ado_organization``,
     ``ado_project``, ``ado_repo`` triplets instead of a flat
     ``owner/repo``. Bearer-scheme tokens are injected via git env vars,
-    not embedded in the URL — the orchestrator handles that.
+    not embedded in the URL -- the orchestrator handles that.
     """
 
     host_info: HostInfo
@@ -400,7 +401,7 @@ class GenericGitBackend:
         ref: str,
     ) -> list[str]:
         # Gitea/Gogs Contents API: /api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={ref}
-        # Some legacy deployments only expose v3 (mirroring GitHub) — try both.
+        # Some legacy deployments only expose v3 (mirroring GitHub) -- try both.
         host = self.host_info.host
         return [
             f"https://{host}/api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={ref}",
@@ -431,7 +432,7 @@ def backend_for(
     """Pick the right :class:`HostBackend` for *dep_ref*.
 
     ``auth_resolver.classify_host`` is the single source of truth for
-    host kind classification — this function is a thin dispatch layer
+    host kind classification -- this function is a thin dispatch layer
     that wraps the resulting :class:`HostInfo` in a backend object.
 
     Args:
@@ -439,7 +440,7 @@ def backend_for(
             instance-default resolution (uses ``fallback_host`` or
             :func:`default_host`).
         auth_resolver: The :class:`AuthResolver` instance. Used solely
-            for the static :meth:`classify_host` method — no auth
+            for the static :meth:`classify_host` method -- no auth
             resolution side effects.
         fallback_host: Host to use when ``dep_ref`` is ``None`` or has
             no host. Defaults to :func:`default_host`.
@@ -490,7 +491,7 @@ def backend_for(
             elif host_lower.endswith(".ghe.com"):
                 cls = GHECloudBackend
                 kind = "ghe_cloud"
-                api_base = f"https://api.{host}"
+                api_base = f"https://{host}/api/v3"
             else:
                 cls = GHESBackend
                 kind = "ghes"

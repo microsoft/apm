@@ -1,8 +1,10 @@
 """APM package structure validation."""
 
+from __future__ import annotations
+
 import os  # noqa: F401
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
 
 from ..models.apm_package import (
     APMPackage,
@@ -11,6 +13,9 @@ from ..models.apm_package import (
 from ..models.apm_package import (
     validate_apm_package as base_validate_apm_package,
 )
+
+if TYPE_CHECKING:
+    from ..models.validation import PackageType
 
 
 class PackageValidator:
@@ -253,10 +258,10 @@ class PackageValidator:
 
 
 def stamp_plugin_version(
-    package,
-    package_type,
+    package: APMPackage | None,
+    package_type: PackageType | None,
     resolved_commit: str | None,
-    target_path: "Path",
+    target_path: Path,
 ) -> None:
     """Stamp the package version with the short commit SHA when missing.
 

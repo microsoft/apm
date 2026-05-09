@@ -2,8 +2,8 @@
 
 Tests anchor the HostBackend Protocol contract for each concrete vendor
 (GitHub, GHE Cloud, GHES, ADO, Generic). Each backend is tested in
-isolation — no orchestrator, no HTTP mocks, no AuthResolver token
-resolution — to keep the seam clean.
+isolation -- no orchestrator, no HTTP mocks, no AuthResolver token
+resolution -- to keep the seam clean.
 """
 
 from __future__ import annotations
@@ -140,15 +140,17 @@ class TestGitHubFamilyCloneUrls:
     def test_https_empty_token_suppresses_credential(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
         url = backend.build_clone_https_url(_dep_ref(), token="")
-        assert "@" not in url
-        assert urlparse(url).hostname == "github.com"
+        parsed = urlparse(url)
+        assert parsed.username is None and parsed.password is None
+        assert parsed.hostname == "github.com"
 
     def test_https_bearer_scheme_does_not_embed_token(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
         # Bearer is ADO-only; GitHub family should fall through to plain URL.
         url = backend.build_clone_https_url(_dep_ref(), token="ghp_abc", auth_scheme="bearer")
+        parsed = urlparse(url)
         assert "ghp_abc" not in url
-        assert "@" not in url
+        assert parsed.username is None and parsed.password is None
 
     def test_ssh_url(self):
         backend = GitHubBackend(host_info=_info("github.com", "github"))
@@ -269,7 +271,7 @@ class TestADOBackend:
 
     def test_contents_api_returns_empty_list(self):
         backend = ADOBackend(host_info=_info("dev.azure.com", "ado"))
-        # ADO has no Contents API — empty list signals "use ADO REST Items API".
+        # ADO has no Contents API -- empty list signals "use ADO REST Items API".
         assert backend.build_contents_api_urls("o", "r", "f", "main") == []
 
 
@@ -284,9 +286,10 @@ class TestGenericGitBackend:
         # Even when a token is passed, generic hosts defer to credential
         # helpers -- we never embed the token in the URL.
         url = backend.build_clone_https_url(_dep_ref(host="gitea.example.com"), token="some_token")
+        parsed = urlparse(url)
         assert "some_token" not in url
-        assert "@" not in url
-        assert urlparse(url).hostname == "gitea.example.com"
+        assert parsed.username is None and parsed.password is None
+        assert parsed.hostname == "gitea.example.com"
 
     def test_ssh_url(self):
         backend = GenericGitBackend(host_info=_info("gitea.example.com", "generic"))

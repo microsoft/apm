@@ -868,7 +868,7 @@ class DownloadDelegate:
     ) -> list[str]:
         """Return the ordered list of Contents-API URL candidates for *host*.
 
-        Thin wrapper around the per-host backends — the actual URL shape
+        Thin wrapper around the per-host backends -- the actual URL shape
         lives on the backend. Kept as a static method on
         :class:`DownloadDelegate` for back-compat with existing callers
         and tests that monkey-patch it.
@@ -903,7 +903,7 @@ class DownloadDelegate:
                     host=host,
                     kind="ghe_cloud",
                     has_public_repos=False,
-                    api_base=f"https://api.{host}",
+                    api_base=f"https://{host}/api/v3",
                 )
             )
         else:
