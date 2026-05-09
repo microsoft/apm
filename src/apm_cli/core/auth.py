@@ -356,26 +356,37 @@ class AuthResolver:
                 verbose_callback(msg)
 
         def _try_credential_fallback(exc: Exception) -> T:
-            """Retry with git-credential-fill when an env-var token fails."""
-            if auth_ctx.source in ("git-credential-fill", "none"):
+            """Retry the operation when the originally-resolved token fails.
+
+            Walks the secondary chain in order: gh CLI (GitHub-like hosts;
+            internal guard short-circuits unsupported hosts), then
+            ``git credential fill``. Sources already obtained from a
+            secondary chain (``gh-auth-token``, ``git-credential-fill``,
+            ``none``) skip retry to avoid double-invocation.
+            """
+            if auth_ctx.source in ("gh-auth-token", "git-credential-fill", "none"):
                 raise exc
             # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
             if host_info.kind == "ado":
                 raise exc
             _log(
-                f"Token from {auth_ctx.source} failed, trying fallback credentials for {host_info.display_name}"
+                f"Token from {auth_ctx.source} failed for {host_info.display_name}; "
+                "trying secondary credential sources"
             )
-            if host_info.kind in ("github", "ghe_cloud", "ghes"):
-                gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
-                if gh_token:
-                    return operation(
-                        gh_token,
-                        self._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
-                    )
+            _log(f"trying gh auth token for {host_info.display_name}")
+            gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+            if gh_token:
+                _log(f"gh auth token resolved a credential for {host_info.display_name}")
+                return operation(
+                    gh_token,
+                    self._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
+                )
+            _log(f"trying git credential fill for {host_info.display_name}")
             cred = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port
             )
             if cred:
+                _log(f"git credential fill resolved a credential for {host_info.display_name}")
                 return operation(
                     cred,
                     self._build_git_env(cred, scheme="basic", host_kind=host_info.kind),
@@ -699,11 +710,11 @@ class AuthResolver:
             source = self._identify_env_source(purpose)
             return token, source, "basic"
 
-        # 3. gh CLI active account (GitHub-like hosts only)
-        if host_info.kind in ("github", "ghe_cloud", "ghes"):
-            gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
-            if gh_token:
-                return gh_token, "gh-auth-token", "basic"
+        # 3. gh CLI active account (eligibility gated inside the call;
+        #    unsupported hosts return None instantly without a subprocess)
+        gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+        if gh_token:
+            return gh_token, "gh-auth-token", "basic"
 
         # 4. Git credential helper (not for ADO)
         if host_info.kind not in ("ado",):

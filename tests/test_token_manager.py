@@ -230,7 +230,18 @@ class TestResolveCredentialFromGhCli:
             token = GitHubTokenManager.resolve_credential_from_gh_cli("github.com")
             assert token == "gho_cli_token"
             assert mock_run.call_args.args[0] == ["gh", "auth", "token", "--hostname", "github.com"]
-            assert mock_run.call_args.kwargs["env"]["GH_PROMPT_DISABLED"] == "1"
+            kwargs = mock_run.call_args.kwargs
+            assert kwargs["env"]["GH_PROMPT_DISABLED"] == "1"
+            assert kwargs["env"]["GH_NO_UPDATE_NOTIFIER"] == "1"
+            assert kwargs["stdin"] is subprocess.DEVNULL
+
+    def test_ineligible_host_skips_subprocess(self):
+        """ADO/empty/unrelated hosts must short-circuit without spawning gh."""
+        with patch("subprocess.run") as mock_run:
+            assert GitHubTokenManager.resolve_credential_from_gh_cli(None) is None
+            assert GitHubTokenManager.resolve_credential_from_gh_cli("") is None
+            assert GitHubTokenManager.resolve_credential_from_gh_cli("dev.azure.com") is None
+            mock_run.assert_not_called()
 
     def test_nonzero_exit_returns_none(self):
         mock_result = MagicMock(returncode=1, stdout="", stderr="not logged in")
@@ -245,6 +256,36 @@ class TestResolveCredentialFromGhCli:
     def test_timeout_returns_none(self):
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=5)):
             assert GitHubTokenManager.resolve_credential_from_gh_cli("github.com") is None
+
+
+class TestSupportsGhCliHost:
+    """Eligibility guard for the gh CLI fallback."""
+
+    def test_none_and_empty_unsupported(self):
+        assert GitHubTokenManager._supports_gh_cli_host(None) is False
+        assert GitHubTokenManager._supports_gh_cli_host("") is False
+
+    def test_ado_unsupported(self):
+        assert GitHubTokenManager._supports_gh_cli_host("dev.azure.com") is False
+
+    def test_github_com_supported(self):
+        assert GitHubTokenManager._supports_gh_cli_host("github.com") is True
+
+    def test_ghe_cloud_supported(self):
+        assert GitHubTokenManager._supports_gh_cli_host("acme.ghe.com") is True
+
+    def test_ghes_supported_when_matches_default_host(self):
+        with patch.dict(os.environ, {"GITHUB_HOST": "github.acme.com"}, clear=False):
+            assert GitHubTokenManager._supports_gh_cli_host("github.acme.com") is True
+
+    def test_ghes_unsupported_when_mismatches_default_host(self):
+        with patch.dict(os.environ, {"GITHUB_HOST": "github.acme.com"}, clear=False):
+            assert GitHubTokenManager._supports_gh_cli_host("github.other.com") is False
+
+    def test_ghes_unsupported_when_no_default_host(self):
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_HOST"}
+        with patch.dict(os.environ, env, clear=True):
+            assert GitHubTokenManager._supports_gh_cli_host("github.acme.com") is False
 
 
 class TestCredentialTimeout:

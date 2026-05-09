@@ -225,6 +225,49 @@ class TestResolve:
             assert ctx.token == "cred-token"
             assert ctx.source == "git-credential-fill"
 
+    def test_gh_cli_source_label(self):
+        """When gh CLI supplies the token, ctx.source == 'gh-auth-token'."""
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_cli_token",
+            ),
+        ):
+            resolver = AuthResolver()
+            ctx = resolver.resolve("github.com")
+            assert ctx.token == "gho_cli_token"
+            assert ctx.source == "gh-auth-token"
+
+    def test_try_with_fallback_uses_gh_cli(self):
+        """try_with_fallback retries via gh CLI before git credential fill."""
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "stale-token"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_fresh",
+            ),
+            patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ) as mock_cred,
+        ):
+            resolver = AuthResolver()
+            attempts = []
+
+            def op(token, env):
+                attempts.append(token)
+                if token == "gho_fresh":
+                    return token
+                raise RuntimeError("401 Unauthorized")
+
+            result = resolver.try_with_fallback("github.com", op)
+            assert result == "gho_fresh"
+            assert attempts == ["stale-token", None, "gho_fresh"]
+            # git credential fill must not be reached when gh CLI succeeds.
+            mock_cred.assert_not_called()
+
     def test_resolve_for_dep_uses_standard_credential_fallback(self):
         """Dependency-aware resolution still uses the standard host-based fallback chain."""
         dep_ref = DependencyReference.parse("Devolutions/RDM/.claude/skills/add-culture-rdm")
