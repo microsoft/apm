@@ -65,7 +65,7 @@ Exit codes:
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both.",
+    help="[Deprecated] Target platform filter. Bundles are now target-agnostic; the consumer's project decides where files land at install time. Value is recorded in pack.target as informational metadata only and is ignored by 'apm install'. The flag will be removed in a future release.",
 )
 @click.option(
     "--archive",
@@ -135,11 +135,32 @@ def pack_cmd(
     """Pack APM artifacts: bundle and/or marketplace.json."""
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
     project_root = Path(".").resolve()
+    # Issue #1207 D1: when --target is not given, detect the project's
+    # actual target so the embedded ``pack.target`` reflects what was
+    # tested rather than a hardcoded "copilot".  ``pack.target`` is now
+    # informational metadata only -- consumer-side install resolves the
+    # deploy target from the consumer project's context, not from the
+    # bundle.
+    if target is None:
+        from ..core.target_detection import detect_target
+
+        try:
+            detected, _reason = detect_target(project_root)
+            effective_target = detected if detected else None
+        except Exception:
+            effective_target = None
+    else:
+        logger.warning(
+            "--target is deprecated and will be removed in a future release. "
+            "Bundles are target-agnostic; the value is recorded as informational "
+            "pack.target metadata only and is ignored by 'apm install'."
+        )
+        effective_target = target
     options = BuildOptions(
         project_root=project_root,
         apm_yml_path=project_root / "apm.yml",
         bundle_format=fmt,
-        bundle_target=target,
+        bundle_target=effective_target,
         bundle_archive=archive,
         bundle_output=Path(output),
         bundle_force=force,
@@ -199,10 +220,16 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
             logger.verbose_detail(f"    {f}")
         if fmt == "plugin":
             logger.progress(
-                "Plugin bundle ready -- contains plugin.json and "
-                "plugin-native directories (agents/, skills/, commands/, ...). "
-                "No APM-specific files included."
+                "Plugin bundle ready -- contains plugin.json plus "
+                "plugin-native directories (agents/, skills/, commands/, ...) "
+                "and an embedded apm.lock.yaml for install-time integrity "
+                "verification."
             )
+        # Issue #1207: target-agnostic bundles install into any consumer
+        # project.  Print a copy-pasteable share line so packing creates
+        # the social hand-off naturally.
+        if pack_result.bundle_path:
+            logger.info(f"Share with: apm install {pack_result.bundle_path}")
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
@@ -339,7 +366,9 @@ def _warn_empty(logger, target, result):
             logger.warning(f"No files to pack for target '{target}'")
         else:
             logger.warning(f"No files to pack for target '{target}'")
-            logger.verbose_detail(f"    Hint: use '--target all' to include all platforms")  # noqa: F541
+            logger.verbose_detail(
+                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
+            )
     else:
         logger.warning("No deployed files found -- empty bundle created")
 

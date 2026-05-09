@@ -55,7 +55,7 @@ The lock file serves four goals:
 | `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. File only written when semantic content changes (dependencies, MCP servers/configs, `lockfile_version`); no churn from `generated_at` or `apm_version` fields. |
 | `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits. |
 | `apm deps update` | Re-resolved. Refreshes versions for specified or all dependencies. |
-| `apm pack --format apm` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). Plugin format (the default) does not emit `apm.lock.yaml` inside the bundle. |
+| `apm pack` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). Both `--format plugin` (default) and `--format apm` embed the enriched copy when a project lockfile exists. |
 | `apm uninstall` | Updated. Removed dependency entries and their `deployed_files` references. |
 
 The lock file SHOULD be committed to version control. It MUST NOT be
@@ -219,17 +219,19 @@ produce consistent diffs in version control.
 
 ## 6. Pack Enrichment
 
-When `apm pack --format apm` creates a bundle, it prepends a `pack:` section to
-the lock file copy included in the bundle. This section is informational and is
-not written back to the project's `apm.lock.yaml`. Plugin format (the default
-`apm pack`) does not embed `apm.lock.yaml` and therefore emits no `pack:`
-section.
+When `apm pack` creates a bundle, it prepends a `pack:` section to the
+lock file copy included in the bundle. Both `--format plugin` (default)
+and `--format apm` embed the enriched copy when the project has a
+lockfile; bundles built without a project lockfile (rare) skip the
+embedded copy and emit no `pack:` section. The `pack:` section is
+informational and is not written back to the project's `apm.lock.yaml`.
 
 ```yaml
 pack:
   format: apm
-  target: vscode
   packed_at: "2026-03-09T14:30:00Z"
+  bundle_files:
+    .github/agents/architect.md: a1b2c3...
 
 lockfile_version: "1"
 generated_at: "2026-03-09T14:00:00Z"
@@ -241,8 +243,9 @@ generated_at: "2026-03-09T14:00:00Z"
 | Field | Type | Description |
 |-------|------|-------------|
 | `pack.format` | string | Bundle format: `"apm"` or `"plugin"`. |
-| `pack.target` | string | Target environment: `"vscode"`, `"claude"`, or `"all"`. |
+| `pack.target` | string (deprecated, optional) | Historical target hint. Bundles are now target-agnostic; the consumer's project decides where files land at install time. The field is still recorded in every bundle for diagnostic purposes (typically `"all"` for target-agnostic packs, or the project's detected target) and is not authoritative at install time. |
 | `pack.packed_at` | string (ISO 8601) | UTC timestamp of when the bundle was created. |
+| `pack.bundle_files` | map[string -> string] | Per-file SHA-256 manifest of the bundle's deployable contents (relative path -> hex digest). Drives the install-side deploy loop. |
 
 The original lock file is not mutated. The enriched copy exists only inside the
 packed archive.

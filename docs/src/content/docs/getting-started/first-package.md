@@ -272,6 +272,7 @@ Output (plugin format is the default):
 ```
 build/team-skills-1.0.0/
 +-- plugin.json        # synthesized, schema-conformant per https://json.schemastore.org/claude-code-plugin.json
++-- apm.lock.yaml      # enriched copy with bundle_files manifest (used by `apm install <bundle>` for integrity)
 +-- agents/
 |   +-- team-reviewer.agent.md
 +-- skills/
