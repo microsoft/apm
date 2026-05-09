@@ -788,6 +788,19 @@ class CopilotClientAdapter(MCPClientAdapter):
             self._last_env_placeholder_keys = set(placeholder_keys)
             return resolved
 
+        if isinstance(env_vars, dict):
+            resolved = {}
+            for name, value in env_vars.items():
+                if not name:
+                    continue
+                if isinstance(value, str):
+                    resolved[name] = self._resolve_env_variable(
+                        name, value, env_overrides=env_overrides
+                    )
+                elif value is not None:
+                    resolved[name] = value
+            return resolved
+
         import os
         import sys
 
