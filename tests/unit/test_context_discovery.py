@@ -674,3 +674,41 @@ def test_migration_plan_includes_agents_shared_skill(tmp_path):
 
     plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
     assert ".apm/skills/shared-skill" in plan
+
+
+def test_migration_plan_claude_plain_md_skill(tmp_path):
+    """Claude skills as plain .md files migrate as files with .skill.md extension."""
+    skills_dir = tmp_path / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "render-validate.md").write_text("# Render", encoding="utf-8")
+    (skills_dir / "data-transform.md").write_text("# Data", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
+    assert ".apm/skills/render-validate.skill.md" in plan
+    assert ".apm/skills/data-transform.skill.md" in plan
+    assert not plan[".apm/skills/render-validate.skill.md"].is_dir
+
+
+def test_migration_plan_mixed_skill_formats(tmp_path):
+    """SKILL.md-anchored dirs and plain .md files coexist in migration plan."""
+    skills_dir = tmp_path / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    # Plain .md skill
+    (skills_dir / "standalone.md").write_text("# Standalone", encoding="utf-8")
+    # SKILL.md-anchored dir
+    sub = skills_dir / "my-tool"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text("# My Tool", encoding="utf-8")
+    (sub / "utils.py").write_text("pass", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
+    # Plain skill -> file with .skill.md extension
+    assert ".apm/skills/standalone.skill.md" in plan
+    assert not plan[".apm/skills/standalone.skill.md"].is_dir
+    # SKILL.md-anchored -> directory copy
+    assert ".apm/skills/my-tool" in plan
+    assert plan[".apm/skills/my-tool"].is_dir

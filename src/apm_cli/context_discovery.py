@@ -62,7 +62,7 @@ _MIGRATION_MAP: dict[tuple[str, str], tuple[str, str | None]] = {
     ("agents", "style"): (".apm/styles", ".style.md"),
     # Skills: the SKILL.md file anchors the discovery, but the entire parent
     # directory is the deployable unit.  Extension None = copy dir as-is.
-    ("claude", "skill"): (".apm/skills", None),
+    ("claude", "skill"): (".apm/skills", ".skill.md"),
     ("agent-skills", "skill"): (".apm/skills", None),
     ("cursor", "skill"): (".apm/skills", None),
     ("opencode", "skill"): (".apm/skills", None),
@@ -148,9 +148,9 @@ def compute_migration_plan(
 
         target_subdir, target_ext = mapping
 
-        # Skills are directory-based: SKILL.md anchors the discovery but the
-        # entire parent directory is the deployable unit.
-        if finding.kind == "skill":
+        # Skills: SKILL.md-anchored findings migrate the whole parent directory;
+        # plain .md skill files (e.g. Claude .claude/skills/*.md) migrate as files.
+        if finding.kind == "skill" and finding.path.name == "SKILL.md":
             skill_dir = finding.path.parent
             skill_name = skill_dir.name
             dest = project_root / target_subdir / skill_name
@@ -414,7 +414,7 @@ TOOL_CONTEXT_RULES: tuple[ContextDiscoveryRule, ...] = (
     ContextDiscoveryRule(
         "claude",
         "skill",
-        (".claude/skills/**/SKILL.md",),
+        (".claude/skills/**/*.md",),
         IMPORT_CONVERTIBLE,
         "Claude skill file",
     ),
