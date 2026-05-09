@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
 
 ### Fixed
@@ -19,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage-panel` scheduled sweep now paginates the candidate query oldest-first via the GitHub MCP `list_issues` tool instead of a single 200-issue page, so daily runs actually drain the untriaged backlog rather than processing one issue per cron tick. (#1193)
 - `triage-panel` scheduled sweep switches the candidate query from `list_issues`+prose-driven pagination to `search_issues` with `-label:status/triaged sort:created-asc`, so untriaged candidates are filtered server-side; the previous approach silently noop'd because the MCP gateway DIFC filter dropped non-collaborator issues mid-page and the agent inferred a false `hasNextPage:false`.
 - `apm install` now accepts the YAML list form under `target:` (e.g. `target: [copilot, claude]`); previously crashed with a garbled `Unknown target` error. (#1197)
+- `apm install --update` now falls back from a stale `ADO_APM_PAT` to an `az login` AAD bearer in the preflight auth probe, matching the behavior of `apm install` and every other ADO call site. Previously the preflight raised `AuthenticationError` on 401/403 even when `az login` would have succeeded. The bearer env also pops any pre-existing `GIT_TOKEN` so the JWT flows only via `GIT_CONFIG_VALUE_0`, and the per-host stale-PAT warning dedup is lock-guarded so parallel installs against the same ADO host emit one warning instead of one-per-thread. (#1212)
+- `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
 - `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
 
 ## [0.12.4] - 2026-05-07

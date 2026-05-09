@@ -1431,14 +1431,22 @@ class TestDownloaderCredentialFallback:
                 assert actual_headers.get("Authorization") == "token enterprise-token"
 
     def test_non_default_host_uses_global_token(self):
-        """Global env vars (GITHUB_APM_PAT) are now tried for all hosts, not just the default."""
+        """Global env vars (GITHUB_APM_PAT) must NOT leak to an arbitrary non-GitHub host.
+
+        SECURITY: forwarding a GitHub PAT to ``ghes.company.com`` (or any
+        other FQDN) without explicit user opt-in exfiltrates the token.
+        The user must opt in via ``GITHUB_HOST=<host>`` (declares the
+        host as their GitHub Enterprise Server) or via a per-org env var
+        ``GITHUB_APM_PAT_<ORG>`` -- bare ``GITHUB_APM_PAT`` against a
+        custom-domain host gets no Authorization header.
+        """
         with (
             patch.dict(os.environ, {"GITHUB_APM_PAT": "default-host-pat"}, clear=True),
             patch(
                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-            ) as mock_cred,
+                return_value=None,
+            ),
         ):
-            mock_cred.return_value = "enterprise-cred"
             downloader = GitHubPackageDownloader()
             assert downloader.github_token == "default-host-pat"
 
@@ -1451,6 +1459,50 @@ class TestDownloaderCredentialFallback:
             mock_response_200.status_code = 200
             mock_response_200.content = b"enterprise content"
             mock_response_200.raise_for_status = Mock()
+            mock_response_200.headers = {}
+
+            with patch.object(
+                downloader, "_resilient_get", return_value=mock_response_200
+            ) as mock_get:
+                # The raw-URL path runs first; mock returns 200 immediately.
+                result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
+                assert result == b"enterprise content"
+
+                for call in mock_get.call_args_list:
+                    req_headers = call[1].get("headers", {}) or {}
+                    assert "Authorization" not in req_headers, (
+                        f"PAT leaked to {call[0][0]} without GITHUB_HOST opt-in: {req_headers!r}"
+                    )
+
+    def test_global_token_forwarded_when_github_host_is_configured(self):
+        """When ``GITHUB_HOST=<host>`` is set, the global PAT IS forwarded.
+
+        This is the explicit user opt-in: declaring a custom domain as
+        their GitHub Enterprise Server. The complement to
+        ``test_non_default_host_uses_global_token``.
+        """
+        with (
+            patch.dict(
+                os.environ,
+                {"GITHUB_APM_PAT": "ghes-pat", "GITHUB_HOST": "ghes.company.com"},
+                clear=True,
+            ),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+        ):
+            downloader = GitHubPackageDownloader()
+            dep_ref = DependencyReference(
+                repo_url="owner/repo",
+                host="ghes.company.com",
+            )
+
+            mock_response_200 = Mock()
+            mock_response_200.status_code = 200
+            mock_response_200.content = b"enterprise content"
+            mock_response_200.raise_for_status = Mock()
+            mock_response_200.headers = {}
 
             with patch.object(
                 downloader, "_resilient_get", return_value=mock_response_200
@@ -1458,12 +1510,8 @@ class TestDownloaderCredentialFallback:
                 result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
                 assert result == b"enterprise content"
 
-                actual_headers = mock_get.call_args[1].get("headers") or mock_get.call_args[0][1]
-                # Global PAT is now used for non-default hosts too
-                assert actual_headers.get("Authorization") == "token default-host-pat"
-
-            # Credential fill is not reached because the global env var is found first
-            mock_cred.assert_not_called()
+                first_call_headers = mock_get.call_args_list[0][1].get("headers", {})
+                assert first_call_headers.get("Authorization") == "token ghes-pat"
 
     def test_error_message_mentions_gh_auth_login(self):
         """Error message should mention 'gh auth login' when no token is available."""
@@ -1794,9 +1842,7 @@ class TestVirtualFilePackageYamlGeneration:
 
 
 class TestRefExistsViaLsRemote:
-    """Tests for the ``_ref_exists_via_ls_remote`` two/three-attempt chain.
-
-    The chain mirrors ``_clone_with_fallback``'s auth path so validation
+    """Tests for ``_clone_with_fallback``'s auth path so validation
     accepts what install would actually clone. These tests pin that
     behavior so a refactor of the auth chain can't silently regress
     validation lenience for users with SSO-half-authorized PATs or
@@ -2058,6 +2104,386 @@ class TestRefExistsViaLsRemote:
             assert "ghp_supersecret" not in joined, f"Token leaked into verbose log: {joined!r}"
         finally:
             self._exit(ctxs)
+
+
+# ---------------------------------------------------------------------------
+# Generic host (Gitea / GitLab) download tests
+# ---------------------------------------------------------------------------
+
+
+def _make_resp(
+    status_code: int,
+    content: bytes = b"",
+    *,
+    content_type: str = "",
+    headers: dict | None = None,
+) -> Mock:
+    """Build a minimal mock requests.Response.
+
+    Set content_type='application/json' (or include 'json' in headers
+    Content-Type) when simulating a Gitea/Gogs JSON envelope.
+    """
+    resp = Mock()
+    resp.status_code = status_code
+    resp.content = content
+    hdrs = dict(headers or {})
+    if content_type and "Content-Type" not in hdrs:
+        hdrs["Content-Type"] = content_type
+    resp.headers = hdrs
+    if status_code >= 400:
+        resp.raise_for_status = Mock(side_effect=requests_lib.exceptions.HTTPError(response=resp))
+    else:
+        resp.raise_for_status = Mock()
+    return resp
+
+
+def _gitea_json_envelope(file_bytes: bytes) -> bytes:
+    """Encode *file_bytes* as a Gitea/Gogs Contents-API JSON envelope."""
+    import base64 as _b64
+    import json as _json
+
+    return _json.dumps(
+        {
+            "name": "skill.md",
+            "encoding": "base64",
+            "content": _b64.b64encode(file_bytes).decode("ascii"),
+        }
+    ).encode("utf-8")
+
+
+class TestGiteaRawUrlDownload:
+    """Gitea raw URL path: /{owner}/{repo}/raw/{ref}/{file}."""
+
+    def setup_method(self):
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            self.downloader = GitHubPackageDownloader()
+
+    def test_raw_url_succeeds_on_first_attempt(self):
+        """Raw URL returns 200 -- content returned without calling the API."""
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"# README content"
+        raw_ok = _make_resp(200, expected)
+
+        with patch.object(self.downloader, "_resilient_get", return_value=raw_ok) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        assert result == expected
+        first_url = mock_get.call_args_list[0][0][0]
+        assert first_url == "https://gitea.myorg.com/owner/repo/raw/main/README.md"
+        assert mock_get.call_count == 1
+
+    def test_no_token_sent_to_non_github_host_via_env_var(self):
+        """SECURITY: GITHUB_APM_PAT MUST NOT leak to a non-GitHub host.
+
+        Regression trap for the PAT exfiltration vector. The clone path at
+        ``get_clone_url`` (download_strategies.py:262-279) only embeds a
+        token when ``is_github_hostname(host)``; the file-download path
+        must mirror that guard.
+        """
+        dep_ref = DependencyReference.parse("gitea.evil.example.com/owner/repo")
+        raw_ok = _make_resp(200, b"data")
+
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_APM_PAT": "ghp_supersecret",
+                "GITHUB_TOKEN": "ghp_other",
+            },
+            clear=True,
+        ):
+            with _CRED_FILL_PATCH:
+                downloader = GitHubPackageDownloader()
+            with patch.object(downloader, "_resilient_get", return_value=raw_ok) as mock_get:
+                downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        # Inspect EVERY HTTP call made for this download.
+        for call in mock_get.call_args_list:
+            req_headers = call[1].get("headers", {}) or {}
+            assert "Authorization" not in req_headers, (
+                f"PAT leaked to {call[0][0]}: headers={req_headers!r}"
+            )
+
+    def test_token_still_sent_when_host_is_github(self):
+        """github.com receives the Authorization header (regression trap)."""
+        dep_ref = DependencyReference.parse("owner/repo")  # default host
+        api_ok = _make_resp(200, b"data")
+
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_real_gh"}, clear=True):
+            with _CRED_FILL_PATCH:
+                downloader = GitHubPackageDownloader()
+            with patch.object(downloader, "_try_raw_download", return_value=None):
+                with patch.object(downloader, "_resilient_get", return_value=api_ok) as mock_get:
+                    downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        api_headers = mock_get.call_args_list[0][1].get("headers", {})
+        assert api_headers.get("Authorization") == "token ghp_real_gh"
+
+    def test_token_still_sent_when_host_is_ghe(self):
+        """*.ghe.com (GHE Cloud / Data Residency) receives the token too."""
+        dep_ref = DependencyReference.parse("acme.ghe.com/owner/repo")
+        api_ok = _make_resp(200, b"data")
+
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_ghe"}, clear=True):
+            with _CRED_FILL_PATCH:
+                downloader = GitHubPackageDownloader()
+            with patch.object(downloader, "_resilient_get", return_value=api_ok) as mock_get:
+                downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        api_headers = mock_get.call_args_list[0][1].get("headers", {})
+        assert api_headers.get("Authorization") == "token ghp_ghe"
+
+    def test_git_credential_helper_token_sent_to_generic_host(self):
+        """Host-scoped credentials (git credential helper) ARE sent to generic hosts.
+
+        The credential helper is host-scoped by construction, so forwarding
+        is safe and necessary for private Gitea/Gogs repos. This is the
+        symmetric case to the security guard test above.
+        """
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        raw_ok = _make_resp(200, b"data")
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value="gitea-host-scoped-token",
+            ):
+                downloader = GitHubPackageDownloader()
+                with patch.object(downloader, "_resilient_get", return_value=raw_ok) as mock_get:
+                    downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        raw_headers = mock_get.call_args_list[0][1].get("headers", {})
+        assert raw_headers.get("Authorization") == "token gitea-host-scoped-token"
+
+    def test_falls_back_to_api_v1_when_raw_returns_non_200(self):
+        """When the raw URL returns 404, the API v1 path is tried next."""
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"file via API"
+
+        with patch.object(
+            self.downloader,
+            "_resilient_get",
+            side_effect=[_make_resp(404), _make_resp(200, expected)],
+        ) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        assert result == expected
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        assert urls[0] == "https://gitea.myorg.com/owner/repo/raw/main/README.md"
+        assert urlparse(urls[1]).path.startswith("/api/v1/")
+
+    def test_raw_url_request_exception_falls_through_to_api(self):
+        """RequestException on the raw URL path must not abort -- API path runs.
+
+        Regression trap for the ``except (RequestException, OSError)``
+        swallow at the raw-URL try block. Previously this only had unit
+        coverage that pinned the swallow itself; this test exercises the
+        downstream "fallthrough must reach the API path" promise.
+        """
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"recovered via api"
+        api_ok = _make_resp(200, expected)
+
+        side_effects = [
+            requests_lib.exceptions.ConnectionError("boom"),
+            api_ok,
+        ]
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        assert result == expected
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        assert urls[0].endswith("/owner/repo/raw/main/README.md")
+        assert urlparse(urls[1]).path.startswith("/api/v1/")
+
+
+class TestGiteaGogsApiVersionNegotiation:
+    """API version negotiation: raw URL -> v1 -> v3 for Gitea/Gogs generic hosts.
+
+    The implementation intentionally stops at v3.  GitLab uses a completely
+    different API shape (/api/v4/projects/:id/repository/files/...) that is
+    not compatible with the GitHub Contents-style endpoint negotiated here;
+    GitLab support is limited to git-clone operations only.
+    """
+
+    def setup_method(self):
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            self.downloader = GitHubPackageDownloader()
+
+    def test_v1_falls_back_to_v3_for_generic_hosts(self):
+        """When Gitea raw URL and v1 both return 404, v3 is tried and succeeds."""
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"gitea v3 file content"
+        envelope_resp = _make_resp(
+            200,
+            _gitea_json_envelope(expected),
+            content_type="application/json",
+        )
+
+        side_effects = [
+            _make_resp(404),  # raw URL
+            _make_resp(404),  # v1
+            envelope_resp,  # v3
+        ]
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "skill.md", "main")
+
+        assert result == expected
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        assert urlparse(urls[1]).path.startswith("/api/v1/")
+        assert urlparse(urls[2]).path.startswith("/api/v3/")
+        assert len(mock_get.call_args_list) == 3
+
+    def test_gitea_v1_succeeds_without_trying_v3(self):
+        """When v1 returns 200, v3 must never be called."""
+        dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
+        expected = b"gitea content"
+        envelope_resp = _make_resp(
+            200,
+            _gitea_json_envelope(expected),
+            content_type="application/json",
+        )
+
+        with patch.object(
+            self.downloader,
+            "_resilient_get",
+            side_effect=[_make_resp(404), envelope_resp],
+        ) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "file.md", "main")
+
+        assert result == expected
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        assert not any(urlparse(u).path.startswith("/api/v3/") for u in urls)
+
+    def test_gitea_api_decodes_json_envelope_into_file_bytes(self):
+        """API path returns Gitea ``{content,encoding}`` envelope -> decoded bytes."""
+        dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
+        expected = b"# Hello from Gitea base64\n"
+        envelope_resp = _make_resp(
+            200,
+            _gitea_json_envelope(expected),
+            content_type="application/json; charset=utf-8",
+        )
+
+        with patch.object(
+            self.downloader,
+            "_resilient_get",
+            side_effect=[_make_resp(404), envelope_resp],
+        ):
+            result = self.downloader.download_raw_file(dep_ref, "skill.md", "main")
+
+        assert result == expected, "Gitea JSON envelope must be base64-decoded"
+
+    def test_gitea_api_passthrough_when_server_returns_raw_bytes(self):
+        """Some Gitea proxies serve raw bytes; passthrough must still work."""
+        dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
+        expected = b"raw markdown bytes"
+        # No JSON content-type; body is not a JSON envelope.
+        raw_resp = _make_resp(200, expected, content_type="text/plain")
+
+        with patch.object(
+            self.downloader,
+            "_resilient_get",
+            side_effect=[_make_resp(404), raw_resp],
+        ):
+            result = self.downloader.download_raw_file(dep_ref, "skill.md", "main")
+
+        assert result == expected
+
+    def test_fallback_candidate_loop_reraises_non_404(self):
+        """500 on a candidate URL must surface as RuntimeError, not silent skip.
+
+        Pins the symmetry-fix between the primary loop (already re-raised
+        non-404) and the fallback-ref loop (previously swallowed all
+        HTTPErrors via bare ``pass``).
+        """
+        dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
+
+        # raw=404, v1=404 (forces ref-fallback), v1@master=500
+        side_effects = [
+            _make_resp(404),  # raw main
+            _make_resp(404),  # v1 main
+            _make_resp(404),  # v3 main
+            _make_resp(500),  # v1 master -- must re-raise
+        ]
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects):
+            with pytest.raises(RuntimeError, match=r"HTTP 500"):
+                self.downloader.download_raw_file(dep_ref, "missing.md", "main")
+
+    def test_primary_candidate_loop_reraises_non_404(self):
+        """500 on the v3 fallback in the primary loop also re-raises."""
+        dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
+
+        side_effects = [
+            _make_resp(404),  # raw
+            _make_resp(404),  # v1
+            _make_resp(500),  # v3 -- must re-raise
+        ]
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects):
+            with pytest.raises(RuntimeError, match=r"HTTP 500"):
+                self.downloader.download_raw_file(dep_ref, "missing.md", "main")
+
+    def test_all_api_versions_404_raises_descriptive_error(self):
+        """When every API version returns 404 for both refs, a clear error is raised.
+
+        The error must name the host, the file path, and which API
+        families were attempted -- so users staring at a GitLab or
+        unsupported-host failure see an actionable signal.
+        """
+        dep_ref = DependencyReference.parse("git.example.com/owner/repo")
+        # raw(main) + v1(main) + v3(main) = 3 calls, then v1(master) + v3(master) = 2 calls
+        side_effects = [_make_resp(404)] * 5
+
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects):
+            with pytest.raises(RuntimeError) as excinfo:
+                self.downloader.download_raw_file(dep_ref, "missing.md", "main")
+
+        msg = str(excinfo.value)
+        # Use urlparse on the canonical URL embedded in the error message
+        # (per tests.instructions.md: never substring-match URLs).
+        url_tokens = [tok.strip("(),.;'\"") for tok in msg.split() if "://" in tok]
+        hosts = {urlparse(t).hostname for t in url_tokens}
+        assert hosts == {"git.example.com"}, f"Host not surfaced in error: {msg!r}"
+        paths = [urlparse(t).path for t in url_tokens]
+        assert any("missing.md" in p for p in paths)
+        assert "GitLab" in msg, "Error should hint at GitLab unsupported case"
+
+    def test_github_com_uses_api_github_com_not_api_v4(self):
+        """github.com must still use api.github.com, never /api/v4/."""
+        dep_ref = DependencyReference.parse("owner/repo")
+        expected = b"github content"
+        api_ok = _make_resp(200, expected)
+
+        with patch.object(self.downloader, "_try_raw_download", return_value=None):
+            with patch.object(self.downloader, "_resilient_get", return_value=api_ok) as mock_get:
+                result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        assert result == expected
+        url_called = mock_get.call_args_list[0][0][0]
+        assert url_called.startswith("https://api.github.com/")
+        assert not urlparse(url_called).path.startswith("/api/v4/")
+
+    def test_verbose_callback_logs_each_attempt(self):
+        """--verbose surfaces raw -> v1 -> v3 chain so users can diagnose failures."""
+        dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
+        expected = b"ok"
+        envelope_resp = _make_resp(
+            200, _gitea_json_envelope(expected), content_type="application/json"
+        )
+        side_effects = [
+            _make_resp(404),  # raw URL
+            _make_resp(404),  # v1
+            envelope_resp,  # v3
+        ]
+        captured: list[str] = []
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects):
+            self.downloader.download_raw_file(
+                dep_ref, "skill.md", "main", verbose_callback=captured.append
+            )
+
+        joined = "\n".join(captured)
+        assert "Trying raw URL" in joined
+        assert "Trying Contents API" in joined or "trying next candidate" in joined
+        assert "/api/v3/" in joined
 
 
 if __name__ == "__main__":

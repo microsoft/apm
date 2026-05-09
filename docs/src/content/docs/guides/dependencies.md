@@ -15,7 +15,7 @@ APM dependencies are git repositories containing `.apm/` directories with contex
 - **Build on tested context** instead of starting from scratch
 - **Maintain consistency** across multiple repositories and teams
 
-APM supports any git-accessible host — GitHub, GitLab, Bitbucket, self-hosted instances, and more.
+APM supports any git-accessible host — GitHub, GitLab, Bitbucket, Gitea, Gogs, self-hosted instances, and more. See [GitHub Authentication Setup](#github-authentication-setup) below for how tokens flow to non-GitHub hosts via the git credential helper.
 
 ## Dependency Types
 
@@ -35,6 +35,8 @@ APM supports multiple dependency types:
 **Virtual Subdirectory Packages** are skill folders from monorepos - they download an entire folder and may contain a SKILL.md plus resources.
 
 **Virtual File Packages** download a single file (like a prompt or instruction) and integrate it directly.
+
+For self-hosted **Gitea** and **Gogs**, virtual subdirectory and file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab is not yet supported for virtual packages -- use git-clone-based dependencies for GitLab repos.
 
 ### Claude Skills
 

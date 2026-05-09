@@ -139,7 +139,7 @@ SOFTWARE.
 
 ## Component. requests
 
-- Version requirement: `>=2.28.0`
+- Version requirement: `>=2.31.0`
 - Upstream: https://github.com/psf/requests
 - SPDX: `Apache-2.0`
 - Notes: Apache-2.0 requires forwarding the upstream NOTICE file verbatim.

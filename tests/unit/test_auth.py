@@ -633,6 +633,148 @@ class TestBuildErrorContextADO:
                     assert "unset ADO_APM_PAT" in msg
                     assert "az login" in msg
 
+    def test_ado_pat_set_az_available_case4_bearer_also_failed_prefix(self):
+        """Case 4 + bearer_also_failed=True: dual-rejection prefix appears."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context(
+                        "dev.azure.com",
+                        "clone",
+                        bearer_also_failed=True,
+                    )
+                    assert "ADO_APM_PAT was rejected" in msg
+                    assert "az cli bearer was also rejected" in msg
+                    assert "unset ADO_APM_PAT" in msg
+
+    def test_ado_pat_set_az_available_case4_bearer_not_failed_no_prefix(self):
+        """Case 4 default (bearer_also_failed=False): no dual-rejection prefix."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone")
+                    assert "ADO_APM_PAT was rejected" not in msg
+                    assert "az cli bearer was also rejected" not in msg
+
+    def test_ado_no_pat_case2_ignores_bearer_also_failed_kwarg(self):
+        """Case 2 (no PAT, bearer rejected) must NOT render PAT-rejected prefix
+        even if bearer_also_failed=True is passed -- the prefix wording is
+        contradictory when no PAT was tried. Defends against contradictory
+        diagnostics if future callers misuse the kwarg."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    mock_provider.get_current_tenant_id.return_value = "tenant-abc"
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context(
+                        "dev.azure.com",
+                        "clone",
+                        bearer_also_failed=True,
+                    )
+                    assert "ADO_APM_PAT was rejected" not in msg
+                    assert "tenant" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestStalePATDiagnosticDedup -- per-host dedup of warning emission
+# ---------------------------------------------------------------------------
+
+
+class TestStalePATDiagnosticDedup:
+    def test_same_host_emits_once(self):
+        """Two calls with same host -> warn called exactly once.
+
+        The dedup uses _stale_pat_warned_hosts on the AuthResolver instance.
+        Without dedup, users hit N warnings per dependency under the same
+        host cluster; this regression-trap defends the per-host promise.
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                # Each emit_stale_pat_diagnostic that fires calls _rich_warning
+                # twice (msg + detail). One emission -> 2 calls; dedup'd second
+                # call -> still 2 total.
+                assert mock_warn.call_count == 2
+
+    def test_different_hosts_each_emit_once(self):
+        """Different hosts dedup independently."""
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                resolver.emit_stale_pat_diagnostic("contoso.visualstudio.com")
+                resolver.emit_stale_pat_diagnostic("dev.azure.com")
+                # Two distinct hosts emit; each emission calls _rich_warning
+                # twice (msg + detail). Third call (dup) -> no extra calls.
+                assert mock_warn.call_count == 4
+
+    def test_concurrent_same_host_emits_once(self):
+        """Parallel install: N threads racing on the same ADO host -> ONE warning.
+
+        #1214 follow-up: without locking the check-then-add of
+        ``_stale_pat_warned_hosts``, two threads can both pass the
+        ``host in set`` check before either calls ``add()``, defeating the
+        per-host dedup the set is there to provide. The lock serialises
+        check+add so only the first racer emits.
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch("apm_cli.utils.console._rich_warning") as mock_warn:
+                with ThreadPoolExecutor(max_workers=16) as pool:
+                    futures = [
+                        pool.submit(resolver.emit_stale_pat_diagnostic, "dev.azure.com")
+                        for _ in range(64)
+                    ]
+                    for fut in futures:
+                        fut.result()
+                # Single emission -> _rich_warning called twice (msg + detail).
+                assert mock_warn.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# TestBuildGitEnvBearerIsolation -- _build_git_env(scheme="bearer") drops GIT_TOKEN
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGitEnvBearerIsolation:
+    def test_bearer_env_drops_pre_existing_git_token(self):
+        """A stale GIT_TOKEN in the parent env must NOT survive into the bearer env.
+
+        #1214 follow-up: ``_build_git_env`` starts from ``os.environ.copy()``;
+        if a prior shell, CI step, or sibling tool already set GIT_TOKEN, the
+        copy preserves it and silently defeats the bearer-isolation guarantee
+        (the JWT is meant to flow ONLY via GIT_CONFIG_VALUE_0). Pop it
+        explicitly so the bearer env is clean by construction.
+        """
+        with patch.dict(os.environ, {"GIT_TOKEN": "stale-pat-from-prior-shell"}, clear=False):
+            env = AuthResolver._build_git_env(
+                "fresh-jwt-from-az-cli", scheme="bearer", host_kind="ado"
+            )
+        assert "GIT_TOKEN" not in env, (
+            "Stale GIT_TOKEN leaked into bearer env -- isolation guarantee broken"
+        )
+        # Sanity: bearer JWT IS present via GIT_CONFIG_* (the only legit channel).
+        assert env.get("GIT_CONFIG_COUNT") is not None
+        # Find the value slot that carries the JWT.
+        value_slots = [v for k, v in env.items() if k.startswith("GIT_CONFIG_VALUE_")]
+        assert any("fresh-jwt-from-az-cli" in v for v in value_slots)
+
+    def test_basic_scheme_still_sets_git_token(self):
+        """Non-bearer path keeps the legacy GIT_TOKEN behaviour."""
+        with patch.dict(os.environ, {}, clear=True):
+            env = AuthResolver._build_git_env("a-pat", scheme="basic", host_kind="github")
+        assert env.get("GIT_TOKEN") == "a-pat"
+
 
 # ---------------------------------------------------------------------------
 # TestHostInfoPort -- port field + display_name property
