@@ -198,12 +198,13 @@ class _GitHubFamilyBase:
         netloc = f"{host}:{port}" if port else host
         return f"http://{netloc}/{dep_ref.repo_url}.git"
 
-    @staticmethod
-    def _url_host(dep_ref: DependencyReference) -> str:
-        # Prefer the host carried on the dependency reference itself --
-        # ``host_info`` is for kind classification + api_base, and may
-        # have been derived through a mocked classify_host in tests.
-        return getattr(dep_ref, "host", None) or ""
+    def _url_host(self, dep_ref: DependencyReference) -> str:
+        # Prefer the host carried on the dependency reference itself, but
+        # fall back to ``host_info.host`` when the dep_ref has none. The
+        # backend was already classified for this host, so the fallback
+        # is safe and makes URL construction robust against partially
+        # constructed DependencyReference objects.
+        return getattr(dep_ref, "host", None) or self.host_info.host or ""
 
     def build_commits_api_url(self, dep_ref: DependencyReference, ref: str) -> str | None:
         # GitHub-family commits API: GET {api_base}/repos/{owner}/{repo}/commits/{ref}

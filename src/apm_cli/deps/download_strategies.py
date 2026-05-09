@@ -873,25 +873,50 @@ class DownloadDelegate:
         :class:`DownloadDelegate` for back-compat with existing callers
         and tests that monkey-patch it.
         """
-        from .host_backends import GenericGitBackend, GitHubBackend
+        from .host_backends import GenericGitBackend, GHECloudBackend, GHESBackend, GitHubBackend
 
         if is_github_host is None:
             is_github_host = is_github_hostname(host) or DownloadDelegate._is_configured_ghes(host)
-        host_info = HostInfo(
-            host=host,
-            kind="github" if is_github_host else "generic",
-            has_public_repos=is_github_host,
-            api_base=(
-                "https://api.github.com"
-                if (is_github_host and host.lower() == "github.com")
-                else (f"https://api.{host}" if is_github_host else f"https://{host}")
-            ),
-        )
-        backend = (
-            GitHubBackend(host_info=host_info)
-            if is_github_host
-            else GenericGitBackend(host_info=host_info)
-        )
+
+        host_lower = (host or "").lower()
+        if not is_github_host:
+            backend = GenericGitBackend(
+                host_info=HostInfo(
+                    host=host,
+                    kind="generic",
+                    has_public_repos=False,
+                    api_base=f"https://{host}",
+                )
+            )
+        elif host_lower == "github.com":
+            backend = GitHubBackend(
+                host_info=HostInfo(
+                    host=host,
+                    kind="github",
+                    has_public_repos=True,
+                    api_base="https://api.github.com",
+                )
+            )
+        elif host_lower.endswith(".ghe.com"):
+            backend = GHECloudBackend(
+                host_info=HostInfo(
+                    host=host,
+                    kind="ghe_cloud",
+                    has_public_repos=False,
+                    api_base=f"https://api.{host}",
+                )
+            )
+        else:
+            # Configured GHES (GITHUB_HOST=<custom-host>): api_base is
+            # ``https://{host}/api/v3``, not ``https://api.{host}``.
+            backend = GHESBackend(
+                host_info=HostInfo(
+                    host=host,
+                    kind="ghes",
+                    has_public_repos=False,
+                    api_base=f"https://{host}/api/v3",
+                )
+            )
         return backend.build_contents_api_urls(owner, repo, file_path, ref)
 
     @staticmethod
