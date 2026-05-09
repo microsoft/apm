@@ -331,7 +331,8 @@ def integrate_package_primitives(
     _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1
-        _skill_label = "Skill"
+        _native_skill_paths = _skill_target_paths
+        _skill_label = "Integrated skill"
         if _pkg_namespace:
             _deployed_name = skill_result.skill_path.parent.name
             _prefix = f"{_pkg_namespace}-"
@@ -340,13 +341,23 @@ def integrate_package_primitives(
                 if _deployed_name.startswith(_prefix)
                 else _deployed_name
             )
-            _skill_label = f"Skill {_pkg_namespace}/{_skill_name}"
-        if _skill_expansion:
+            _skill_label = f"Integrated skill {_pkg_namespace}/{_skill_name}"
+            _native_skill_paths = [
+                f"{tp.relative_to(project_root).as_posix()}/"
+                for tp in skill_result.target_paths
+                if tp.name == _deployed_name
+            ]
+            if not _native_skill_paths:
+                _native_skill_paths = [
+                    f"{skill_result.skill_path.parent.relative_to(project_root).as_posix()}/"
+                ]
+        _native_suffix, _native_expansion = _format_target_collapse(_native_skill_paths, _verbose)
+        if _native_expansion:
             _log_integration(f"  |-- {_skill_label} integrated:")
-            for line in _skill_expansion:
+            for line in _native_expansion:
                 _log_integration(line)
         else:
-            _log_integration(f"  |-- {_skill_label} integrated -> {_skill_suffix}")
+            _log_integration(f"  |-- {_skill_label} -> {_native_suffix}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
         if _skill_expansion:
