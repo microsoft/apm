@@ -799,7 +799,7 @@ def _handle_mcp_install(
 @click.option(
     "--runtime",
     help=(
-        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude)"
+        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf)"
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")
@@ -840,7 +840,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
+    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
 )
 @click.option(
     "--allow-insecure",
@@ -1120,6 +1120,11 @@ def install(  # noqa: PLR0913
                         "--no-policy": no_policy,
                     },
                 )
+                # Local bundle install renders its own summary; mark
+                # ``summary_rendered = True`` so the finally-block (line ~1423)
+                # does not emit a misleading "install interrupted" line on the
+                # success path.  See issue #1207 D3.
+                summary_rendered = True
                 return
             # IM7: path exists but isn't a recognised bundle.  For tarball
             # extensions (.tar.gz / .tgz) the user clearly meant a bundle

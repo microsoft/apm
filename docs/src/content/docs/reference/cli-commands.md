@@ -96,9 +96,9 @@ apm install [PACKAGES...] [OPTIONS]
 - `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude,windsurf)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target, -t [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Highest-priority entry in the resolution chain (`--target` > `apm.yml` `targets:` > auto-detect). Accepts comma-separated values for multiple targets (e.g., `--target claude,cursor`). `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with `agent-skills` for both. With no flag, no `targets:` in `apm.yml`, and no harness signal in the project (e.g. `.claude/`, `.cursor/`, `.github/copilot-instructions.md`), `apm install` exits 2 with a teaching message instead of silently defaulting to `copilot`. Run `apm targets` to see what APM detects in the current directory.
+- `--target, -t [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Highest-priority entry in the resolution chain (`--target` > `apm.yml` `target:`/`targets:` > auto-detect). Accepts comma-separated values for multiple targets (e.g., `--target claude,cursor`). `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills and copilot-cowork); combine with `agent-skills` for both. With no flag, no `target:` or `targets:` in `apm.yml`, and no harness signal in the project (e.g. `.claude/`, `.cursor/`, `.github/copilot-instructions.md`), `apm install` exits 2 with a teaching message instead of silently defaulting to `copilot`. Run `apm targets` to see what APM detects in the current directory.
   - `windsurf` - Windsurf/Cascade (`.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`)
-  - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag)
+  - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag). Not included in `all`; must be specified explicitly with `--target copilot-cowork --global`.
   - `vscode`, `agents` - Deprecated aliases for `copilot` (`.github/`). Still accepted by the parser; prefer `copilot` for GitHub Copilot deployment, or `agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
@@ -255,9 +255,16 @@ apm install /home/user/repos/my-ai-package
 # Deploy a local APM bundle (directory or .tar.gz produced by `apm pack`).
 # Bundles are an imperative, air-gapped deploy: no apm.yml mutation,
 # no network, no policy / MCP / dependency-resolver involvement.
+# The consumer's project decides where files land (target resolution
+# follows the same precedence as registry installs: --target > apm.yml >
+# directory detection); bundles themselves are target-agnostic.  For
+# compile-only targets (opencode, codex, gemini), instructions are
+# staged under `apm_modules/<slug>/.apm/instructions/` and the install
+# emits a hint to run `apm compile` to merge them.
 apm install ./build/my-bundle
 apm install ./my-bundle.tar.gz
 apm install ./my-bundle --as custom-name   # override the log/display label
+apm install ./my-bundle --target opencode  # override consumer-side target
 
 # Install to user scope (available across all projects)
 apm install -g microsoft/apm-sample-package
@@ -679,7 +686,7 @@ apm pack [OPTIONS]
 
 **Options:**
 - `-o, --output PATH` - Bundle output directory (default: `./build`). Does not affect `marketplace.json` path.
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|windsurf|all]` - Filter bundle files by target. Accepts comma-separated values (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if omitted. `vscode` is an alias for `copilot`. No-op for marketplace output.
+- `-t, --target` - **Deprecated.** Emits a warning; the value is recorded in `pack.target` as diagnostic metadata and is ignored by `apm install` target resolution. Bundles are target-agnostic; the consumer's project decides where files land at install time. Old bundles that carry `pack.target` remain installable.
 - `--archive` - Produce a `.tar.gz` archive instead of a directory. Bundle only.
 - `--format [plugin|apm]` - Bundle format (default: `plugin`). `plugin` emits a Claude Code plugin directory with a schema-conformant `plugin.json` ([official schema](https://json.schemastore.org/claude-code-plugin.json)). `apm` produces the legacy APM bundle layout (consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling). No-op for marketplace output.
 - `--force` - On collision (plugin format), last writer wins instead of first. Bundle only.
@@ -700,7 +707,7 @@ Flags whose scope does not match the detected outputs are silent no-ops, not err
 ```bash
 # Bundle only (apm.yml has dependencies:, no marketplace:)
 apm pack                              # plugin format (default)
-apm pack --target claude --archive
+apm pack --archive                    # tarball
 apm pack --format apm -o ./dist       # legacy APM bundle layout
 
 # Marketplace only (apm.yml has marketplace:, no dependencies:)
@@ -718,8 +725,9 @@ apm pack --marketplace-output ./build/marketplace.json
 **Bundle behaviour:**
 - Reads `apm.lock.yaml` to enumerate all `deployed_files` from installed dependencies
 - Scans files for hidden Unicode characters before bundling -- warns if findings are detected (non-blocking; consumers are protected by `apm install`/`apm unpack` which block on critical)
-- **Plugin format (default):** Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`); generates or updates a schema-conformant `plugin.json` (convention-dir keys are stripped because Claude Code auto-discovers them); merges hooks into a single `hooks.json`. `devDependencies` are excluded. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format).
+- **Plugin format (default):** Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`); generates or updates a schema-conformant `plugin.json` (convention-dir keys are stripped because Claude Code auto-discovers them); merges hooks into a single `hooks.json`. `devDependencies` are excluded. Embeds an enriched `apm.lock.yaml` (per-file SHA-256 `bundle_files` manifest) so `apm install <bundle>` can verify integrity at install time. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format).
 - **APM format (`--format apm`):** Copies files preserving the install-time directory structure; writes an enriched `apm.lock.yaml` inside the bundle with a `pack:` metadata section (the project's own `apm.lock.yaml` is never modified). Consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling.
+- **Target-agnostic transport:** The bundle carries no target binding. `apm install <bundle>` on the consumer side resolves the target from the consumer's project (`--target` > `apm.yml` > directory detection) and routes primitives accordingly. Compile-only targets (opencode, codex, gemini) receive instructions staged under `apm_modules/<slug>/.apm/instructions/` for the next `apm compile`.
 
 **Marketplace behaviour:**
 - Reads the `marketplace:` block from `apm.yml` (falls back to legacy `marketplace.yml` with a deprecation warning when no block is present; both files present is a hard error)
@@ -728,23 +736,13 @@ apm pack --marketplace-output ./build/marketplace.json
 - Creates `.claude-plugin/` if absent; never scaffolds other files there
 - See the [Authoring a marketplace guide](../../guides/marketplace-authoring/) for the full schema and workflow
 
-**Bundle target filtering:**
-
-| Target | Includes paths starting with |
-|--------|------------------------------|
-| `vscode` | `.github/` |
-| `claude` | `.claude/` |
-| `cursor` | `.cursor/` |
-| `opencode` | `.opencode/` |
-| `gemini` | `.gemini/` |
-| `all` | all of the above |
-
 **Enriched lockfile example:**
 ```yaml
 pack:
   format: apm
-  target: vscode
   packed_at: '2026-03-09T12:00:00+00:00'
+  bundle_files:
+    .github/agents/architect.md: a1b2c3...
 lockfile_version: '1'
 generated_at: ...
 dependencies:

@@ -4,6 +4,7 @@ Rules:
   - 'targets: [a, b]'  -> ['a', 'b']   (canonical, plural)
   - 'target: a'        -> ['a']         (singular sugar)
   - 'target: "a,b"'    -> ['a', 'b']   (CSV sugar)
+  - 'target: [a, b]'   -> ['a', 'b']   (list sugar under singular key, #1188)
   - both present       -> raise ConflictingTargetsError
   - neither present    -> []            (empty = auto-detect upstream)
 
@@ -85,6 +86,15 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
         raw = yaml_data["target"]
         if raw is None:
             return []
+        if isinstance(raw, list):
+            # YAML list sugar: 'target: [claude, copilot]' or block list.
+            # Empty list under singular key falls through to auto-detect
+            # (consistent with 'target:' with no value).
+            tokens = [str(t).strip() for t in raw if str(t).strip()]
+            if not tokens:
+                return []
+            _validate_canonical(tokens)
+            return tokens
         raw_str = str(raw).strip()
         if not raw_str:
             return []

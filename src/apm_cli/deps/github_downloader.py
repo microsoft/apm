@@ -40,6 +40,7 @@ from ..utils.github_host import (
     build_raw_content_url,  # noqa: F401
     build_ssh_url,  # noqa: F401
     default_host,
+    is_ado_auth_failure_signal,
     is_azure_devops_hostname,  # noqa: F401
     is_github_hostname,
     sanitize_token_url_in_message,
@@ -772,11 +773,7 @@ class GitHubPackageDownloader:
                     and attempt.use_token
                     and dep_auth_scheme == "basic"
                     and has_token
-                    and (
-                        "401" in err_msg
-                        or "Authentication failed" in err_msg
-                        or "Unauthorized" in err_msg
-                    )
+                    and is_ado_auth_failure_signal(err_msg)
                 ):
                     try:
                         from apm_cli.core.azure_cli import (
@@ -944,92 +941,96 @@ class GitHubPackageDownloader:
             auth_scheme=dep_auth_scheme,
         )
 
-        try:
-            g = git.cmd.Git()
-            output = g.ls_remote("--tags", "--heads", remote_url, env=ls_env)
-            refs = self._parse_ls_remote_output(output)
-            return self._sort_remote_refs(refs)
-        except GitCommandError as e:
-            # ADO bearer fallback: if PAT was rejected (401/Authentication failed)
-            # AND the host is ADO AND we resolved as PAT AND az is available,
-            # silently retry with bearer and emit a deferred [!] warning.
-            err_str = str(e)
-            ado_pat_401 = (
-                is_ado
-                and dep_auth_scheme == "basic"
-                and dep_token is not None
-                and (
-                    "401" in err_str
-                    or "Authentication failed" in err_str
-                    or "Unauthorized" in err_str
-                )
+        # Run primary attempt; on ADO auth failure, fall back via the
+        # canonical AuthResolver helper. We use a tuple "outcome" shape so
+        # primary_op can pass the GitCommandError through to is_auth_failure
+        # without the resolver needing to re-catch.
+        g = git.cmd.Git()
+
+        def _primary_op():
+            try:
+                output = g.ls_remote("--tags", "--heads", remote_url, env=ls_env)
+                return ("ok", output)
+            except GitCommandError as exc:
+                return ("err", exc)
+
+        def _bearer_op(bearer):
+            # SECURITY: _build_git_env(scheme="bearer") yields a clean env
+            # (no leaked PAT). JWT travels via http.extraHeader.
+            bearer_env = self.auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
+            bearer_url = self._build_repo_url(
+                repo_url_base,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token=None,
+                auth_scheme="bearer",
             )
-            if ado_pat_401:
-                try:
-                    from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
-                    from apm_cli.utils.github_host import build_ado_bearer_git_env
+            try:
+                output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
+                return ("ok", output)
+            except GitCommandError as exc:
+                return ("err", exc)
 
-                    provider = get_bearer_provider()
-                    if provider.is_available():
-                        try:
-                            bearer = provider.get_bearer_token()
-                            bearer_env = {**self.git_env, **build_ado_bearer_git_env(bearer)}
-                            # Re-build URL WITHOUT token (bearer flows via header)
-                            bearer_url = self._build_repo_url(
-                                repo_url_base,
-                                use_ssh=False,
-                                dep_ref=dep_ref,
-                                token=None,
-                                auth_scheme="bearer",
-                            )
-                            output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
-                            refs = self._parse_ls_remote_output(output)
-                            # Emit stale-PAT diagnostic via the resolver
-                            self.auth_resolver.emit_stale_pat_diagnostic(
-                                dep_ref.host or default_host()
-                            )
-                            return self._sort_remote_refs(refs)
-                        except (AzureCliBearerError, GitCommandError):
-                            pass  # Fall through to original error handling
-                except ImportError:
-                    pass
+        def _is_auth_failure(outcome):
+            if outcome is None or outcome[0] != "err":
+                return False
+            return is_ado_auth_failure_signal(str(outcome[1]))
 
-            dep_host = dep_ref.host
-            if dep_host:  # noqa: SIM108
-                is_github = is_github_hostname(dep_host)
-            else:
-                is_github = True
-            is_generic = not is_ado and not is_github
+        ado_eligible = is_ado and dep_auth_scheme == "basic" and dep_token is not None
 
-            error_msg = f"Failed to list remote refs for {repo_url_base}. "
-            if is_generic:
-                if dep_host:
-                    host_info = self.auth_resolver.classify_host(
-                        dep_host,
-                        port=dep_ref.port,
-                    )
-                    host_name = host_info.display_name
-                else:
-                    host_name = "the target host"
-                error_msg += (
-                    f"For private repositories on {host_name}, configure SSH keys "
-                    f"or a git credential helper. "
-                    f"APM delegates authentication to git for non-GitHub/ADO hosts."
+        if ado_eligible:
+            fb = self.auth_resolver.execute_with_bearer_fallback(
+                dep_ref, _primary_op, _bearer_op, _is_auth_failure
+            )
+            outcome = fb.outcome
+            # bearer_also_failed only when the bearer leg actually ran AND failed auth.
+            ado_bearer_also_failed = fb.bearer_attempted and _is_auth_failure(outcome)
+        else:
+            outcome = _primary_op()
+            ado_bearer_also_failed = False
+
+        if outcome[0] == "ok":
+            refs = self._parse_ls_remote_output(outcome[1])
+            return self._sort_remote_refs(refs)
+
+        e = outcome[1]
+        dep_host = dep_ref.host
+        if dep_host:  # noqa: SIM108
+            is_github = is_github_hostname(dep_host)
+        else:
+            is_github = True
+        is_generic = not is_ado and not is_github
+
+        error_msg = f"Failed to list remote refs for {repo_url_base}. "
+        if is_generic:
+            if dep_host:
+                host_info = self.auth_resolver.classify_host(
+                    dep_host,
+                    port=dep_ref.port,
                 )
+                host_name = host_info.display_name
             else:
-                host = dep_host or default_host()
-                org = repo_url_base.split("/")[0] if repo_url_base else None
-                error_msg += self.auth_resolver.build_error_context(
-                    host,
-                    "list refs",
-                    org=org,
-                    port=dep_ref.port if dep_ref else None,
-                    dep_url=dep_ref.repo_url if dep_ref else None,
-                )
+                host_name = "the target host"
+            error_msg += (
+                f"For private repositories on {host_name}, configure SSH keys "
+                f"or a git credential helper. "
+                f"APM delegates authentication to git for non-GitHub/ADO hosts."
+            )
+        else:
+            host = dep_host or default_host()
+            org = repo_url_base.split("/")[0] if repo_url_base else None
+            error_msg += self.auth_resolver.build_error_context(
+                host,
+                "list refs",
+                org=org,
+                port=dep_ref.port if dep_ref else None,
+                dep_url=dep_ref.repo_url if dep_ref else None,
+                bearer_also_failed=ado_bearer_also_failed,
+            )
 
-            sanitized = self._sanitize_git_error(str(e))
-            error_msg += f" Last error: {sanitized}"
-            raise RuntimeError(error_msg) from e
+        sanitized = self._sanitize_git_error(str(e))
+        error_msg += f" Last error: {sanitized}"
+        raise RuntimeError(error_msg) from e
 
     def resolve_git_reference(
         self, repo_ref: Union[str, "DependencyReference"]

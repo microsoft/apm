@@ -71,6 +71,72 @@ def test_unknown_target_error_lists_valid():
     assert "claude" in text
 
 
+def test_unknown_target_error_suggests_copilot_not_first_alphabetical():
+    """Suggestion must be a sensible default (#1188), not sorted-first."""
+    valid = ["agent-skills", "claude", "copilot", "cursor"]
+    text = render_unknown_target_error("foo", valid)
+    # 'agent-skills' is alphabetically first but is the wrong default to
+    # surface to a user who typed 'foo'. Prefer 'copilot'.
+    assert "--target copilot" in text
+    assert "    - copilot" in text
+    assert "--target agent-skills" not in text
+
+
+def test_unknown_target_error_sanitizes_garbled_value():
+    """Headline must not show Python list-repr noise (#1188)."""
+    # Simulates the pre-fix garbled token "['copilot'" leaking through.
+    text = render_unknown_target_error("['copilot'", ["claude", "copilot"])
+    headline = text.splitlines()[0]
+    # Bracket and quote noise is stripped from the headline value.
+    assert headline == "[x] Unknown target 'copilot'"
+
+
+def test_unknown_target_error_falls_back_when_strip_empties_value():
+    """If sanitization removes everything, fall back so headline stays actionable."""
+    # All-noise input: stripping yields empty string.
+    text = render_unknown_target_error("[]'\"", ["claude", "copilot"])
+    headline = text.splitlines()[0]
+    # Must not render `Unknown target ''`. We accept either the raw
+    # (un-stripped) value or a `<empty>` placeholder.
+    assert headline != "[x] Unknown target ''"
+    assert "Unknown target '" in headline
+
+
+def test_unknown_target_error_hides_agent_skills_meta_target():
+    """agent-skills is a meta-target; do not advertise it as a recovery
+    path here when ``apm targets`` won't list it (#1208).
+
+    The canonical set still ACCEPTS ``agent-skills`` via --target or
+    apm.yml; this test only pins that the unknown-target error message
+    does not steer users to it. Discoverability lives in
+    ``apm targets --json --all``.
+    """
+    valid = ["agent-skills", "claude", "copilot", "cursor"]
+    text = render_unknown_target_error("foo", valid)
+    # 'agent-skills' must not appear in the rendered "Valid targets:" CSV
+    # nor in any of the three suggested commands or the apm.yml snippet.
+    assert "agent-skills" not in text, (
+        f"agent-skills meta-target leaked into unknown-target suggestions:\n{text}"
+    )
+    # Sanity: the surviving harness targets are still listed.
+    assert "claude" in text and "copilot" in text and "cursor" in text
+
+
+def test_unknown_target_error_falls_back_when_only_meta_target_visible():
+    """If the caller filters to only agent-skills, the renderer must
+    not crash and must emit a sane default suggestion (claude) -- and
+    the 'Valid targets:' line must not render as a bare colon."""
+    text = render_unknown_target_error("foo", ["agent-skills"])
+    # No agent-skills in suggestions...
+    assert "--target agent-skills" not in text
+    assert "    - agent-skills" not in text
+    # ...and the safety-net default 'claude' surfaces instead.
+    assert "--target claude" in text
+    # The 'Valid targets:' line must have non-empty content (#1215 review).
+    assert "Valid targets: \n" not in text
+    assert "Valid targets: claude" in text
+
+
 def test_conflicting_schema_error_has_three_parts():
     text = render_conflicting_schema_error()
     _assert_three_sections(text, ["cannot use both", "conflicting"])

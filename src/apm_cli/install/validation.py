@@ -28,7 +28,7 @@ from pathlib import Path
 import requests
 
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
-from ..utils.github_host import default_host
+from ..utils.github_host import default_host, is_ado_auth_failure_signal
 from .errors import AuthenticationError
 
 # ---------------------------------------------------------------------------
@@ -391,15 +391,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 and result.returncode != 0
                 and dep_ref.is_azure_devops()
                 and _url_token is not None  # we had a PAT
-                and (
-                    "401" in (result.stderr or "")
-                    or "Authentication failed" in (result.stderr or "")
-                    or "Unauthorized" in (result.stderr or "")
-                )
+                and is_ado_auth_failure_signal(result.stderr or "")
             ):
                 try:
                     from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
-                    from apm_cli.utils.github_host import build_ado_bearer_git_env
 
                     provider = get_bearer_provider()
                     if provider.is_available():
@@ -412,7 +407,17 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                                 token=None,
                                 auth_scheme="bearer",
                             )
-                            bearer_env = {**validate_env, **build_ado_bearer_git_env(bearer)}
+                            # SECURITY: build a CLEAN env via _build_git_env(scheme="bearer")
+                            # rather than {**validate_env, **build_ado_bearer_git_env(bearer)}.
+                            # validate_env still carries the PAT-context GIT_CONFIG_*
+                            # entries from _ctx_git_env; merging the bearer env on top
+                            # would keep the rejected PAT visible in the child-process
+                            # env (visible in /proc/<pid>/environ on Linux). _build_git_env
+                            # explicitly skips GIT_TOKEN for scheme="bearer" and emits
+                            # only the bearer-specific GIT_CONFIG_* injection.
+                            bearer_env = auth_resolver._build_git_env(
+                                bearer, scheme="bearer", host_kind="ado"
+                            )
                             cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
                             bearer_result = subprocess.run(
                                 cmd,
@@ -449,15 +454,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # exception with actionable diagnostics; non-auth failures keep
             # the legacy False return so the caller can word its own message.
             if result.returncode != 0 and not is_generic:
-                _stderr = (result.stderr or "").lower()
-                _auth_signals = (
-                    "401" in _stderr
-                    or "403" in _stderr
-                    or "authentication failed" in _stderr
-                    or "unauthorized" in _stderr
-                    or "could not read username" in _stderr
-                )
-                if _auth_signals:
+                if is_ado_auth_failure_signal(result.stderr or ""):
                     _host = dep_ref.host or "dev.azure.com"
                     _org = (
                         dep_ref.repo_url.split("/")[0]
