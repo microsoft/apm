@@ -1,6 +1,5 @@
 """GitHub package downloader for APM dependencies."""
 
-import contextlib
 import os
 import random  # noqa: F401
 import re
@@ -14,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union  # noqa: F401, UP035
 
+import git  # noqa: F401  # re-exported for tests that patch github_downloader.git
 import requests
 from git import RemoteProgress, Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError  # noqa: F401
@@ -29,7 +29,7 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
-from ..utils.console import _rich_warning
+from ..utils.console import _rich_warning  # noqa: F401  # re-exported for tests
 from ..utils.github_host import (
     build_ado_api_url,  # noqa: F401
     build_ado_https_clone_url,  # noqa: F401
@@ -39,7 +39,6 @@ from ..utils.github_host import (
     build_raw_content_url,  # noqa: F401
     build_ssh_url,  # noqa: F401
     default_host,
-    is_ado_auth_failure_signal,
     is_azure_devops_hostname,  # noqa: F401
     is_github_hostname,
     sanitize_token_url_in_message,
@@ -47,7 +46,6 @@ from ..utils.github_host import (
 from ..utils.yaml_io import yaml_to_str
 from .bare_cache import (
     bare_clone_with_fallback,
-    build_clone_failure_message,
     clone_with_fallback,
     materialize_from_bare,
 )
@@ -61,8 +59,6 @@ from .transport_selection import (
     GitConfigInsteadOfResolver,  # noqa: F401
     InsteadOfResolver,  # noqa: F401
     ProtocolPreference,
-    TransportAttempt,
-    TransportPlan,
     TransportSelector,
     is_fallback_allowed,
     protocol_pref_from_env,
@@ -217,10 +213,12 @@ class GitHubPackageDownloader:
         # (download_package / download_subdirectory) backed by the
         # DownloadDelegate's HTTP archive downloader.
         from .artifactory_orchestrator import ArtifactoryOrchestrator
+        from .clone_engine import CloneEngine
         from .git_reference_resolver import GitReferenceResolver
 
         self._artifactory = ArtifactoryOrchestrator(archive_downloader=self._strategies)
         self._refs = GitReferenceResolver(host=self)
+        self._clone_engine = CloneEngine(host=self)
 
         # WS2a (#1116): per-run shared clone cache for subdirectory dep
         # deduplication.  Set by the install pipeline before resolution
@@ -235,63 +233,23 @@ class GitHubPackageDownloader:
     def _git_env_dict(self) -> dict[str, str]:
         """Return a sanitized git env dict for cache-layer subprocess calls.
 
-        Combines the auth-aware ``self.git_env`` (which already strips
-        prompts and forces empty system config) with the ambient-state
-        sanitization performed by ``git_subprocess_env``. Required for
-        every ``GitCache.get_checkout`` call so that private repos
-        receive credentials AND the subprocess never inherits a stray
-        ``GIT_DIR`` / ``GIT_CEILING_DIRECTORIES`` that would bias the
-        cache fetch / integrity verification.
+        Delegates to :class:`GitAuthEnvBuilder.subprocess_env_dict`.
         """
-        from ..utils.git_env import git_subprocess_env
+        from .git_auth_env import GitAuthEnvBuilder
 
-        env: dict[str, str] = git_subprocess_env()
-        # self.git_env carries auth tokens + safety flags; let it win
-        # over ambient os.environ where keys overlap.
-        for key, value in self.git_env.items():
-            if isinstance(value, str):
-                env[key] = value
-        return env
+        return GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
 
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
 
-        Returns:
-            Dict containing environment variables for Git operations
+        Builds the auth-bearing env via :class:`GitAuthEnvBuilder`, then
+        records token-state attributes on the downloader (these are read
+        by many other methods on the class).
         """
-        env = self.token_manager.setup_environment()
+        from .git_auth_env import GitAuthEnvBuilder
 
-        # Configure Git security settings
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_ASKPASS"] = "echo"  # Prevent interactive credential prompts
-        env["GIT_CONFIG_NOSYSTEM"] = "1"
-
-        # Ensure SSH connections fail fast instead of hanging indefinitely when
-        # a firewall silently drops packets (common on corporate/VPN networks).
-        # If the user already set GIT_SSH_COMMAND we merge our option in;
-        # otherwise we create a minimal command with ConnectTimeout.
-        _ssh_timeout = "-o ConnectTimeout=30"
-        existing_ssh_cmd = os.environ.get("GIT_SSH_COMMAND", "").strip()
-        if existing_ssh_cmd:
-            if "connecttimeout" not in existing_ssh_cmd.lower():
-                env["GIT_SSH_COMMAND"] = f"{existing_ssh_cmd} {_ssh_timeout}"
-            else:
-                env["GIT_SSH_COMMAND"] = existing_ssh_cmd
-        else:
-            env["GIT_SSH_COMMAND"] = f"ssh {_ssh_timeout}"
-        if sys.platform == "win32":
-            # 'NUL' fails on some Windows git versions; use an empty temp file.
-            import tempfile
-
-            from ..config import get_apm_temp_dir
-
-            temp_base = get_apm_temp_dir() or tempfile.gettempdir()
-            empty_cfg = os.path.join(temp_base, ".apm_empty_gitconfig")
-            with open(empty_cfg, "w") as f:  # noqa: F841
-                pass
-            env["GIT_CONFIG_GLOBAL"] = empty_cfg
-        else:
-            env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        builder = GitAuthEnvBuilder(self.token_manager)
+        env = builder.setup_environment()
 
         # IMPORTANT: Do not resolve credentials via helpers at construction time.
         # AuthResolver.resolve(...) can trigger OS credential helper UI. If we do
@@ -313,7 +271,9 @@ class GitHubPackageDownloader:
         self.has_artifactory_token = self.artifactory_token is not None
 
         _debug(
-            f"Token setup: has_github_token={self.has_github_token}, has_ado_token={self.has_ado_token}, has_artifactory_token={self.has_artifactory_token}"
+            f"Token setup: has_github_token={self.has_github_token}, "
+            f"has_ado_token={self.has_ado_token}, "
+            f"has_artifactory_token={self.has_artifactory_token}"
             f"{', source=credential_helper' if self._github_token_from_credential_fill else ''}"
         )
 
@@ -469,47 +429,15 @@ class GitHubPackageDownloader:
     ) -> dict[str, str]:
         """Return a non-interactive git env for unauthenticated git operations.
 
-        Credential-helper policy (intentional two-stage design):
-
-        1. Start by clearing ``GIT_ASKPASS`` unconditionally. The default
-           APM env sets ``GIT_ASKPASS=echo`` for all authenticated ops; for
-           unauthenticated fallback attempts (HTTPS/SSH without a token), we
-           want the user's system credential helpers (e.g. macOS Keychain,
-           Windows credential manager, SSH agent) to resolve naturally.
-        2. Then re-set the full credential-helper *suppression* fence ONLY
-           when ``suppress_credential_helpers=True`` (HTTP transport). This
-           blocks all four credential channels: ``GIT_ASKPASS``,
-           ``GIT_TERMINAL_PROMPT``, ``GIT_CONFIG_NOSYSTEM``, and
-           ``credential.helper=`` (via ``GIT_CONFIG_COUNT/KEY/VALUE``).
-
-        Do NOT invert or flatten this pop-then-conditionally-restore pattern
-        without re-auditing every caller: removing step 1 would leak
-        credentials through user helpers on HTTPS/SSH fallbacks; removing
-        step 2 would leak them over plaintext HTTP.
+        Delegates to :class:`GitAuthEnvBuilder.noninteractive_env`.
         """
-        env = dict(self.git_env)
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        env.pop("GIT_ASKPASS", None)
+        from .git_auth_env import GitAuthEnvBuilder
 
-        if preserve_config_isolation or suppress_credential_helpers:
-            env["GIT_CONFIG_NOSYSTEM"] = "1"
-            if "GIT_CONFIG_GLOBAL" in self.git_env:
-                env["GIT_CONFIG_GLOBAL"] = self.git_env["GIT_CONFIG_GLOBAL"]
-        else:
-            env.pop("GIT_CONFIG_GLOBAL", None)
-            env.pop("GIT_CONFIG_NOSYSTEM", None)
-
-        if suppress_credential_helpers:
-            env["GIT_ASKPASS"] = "echo"
-            env["GIT_CONFIG_COUNT"] = "1"
-            env["GIT_CONFIG_KEY_0"] = "credential.helper"
-            env["GIT_CONFIG_VALUE_0"] = ""
-        else:
-            env.pop("GIT_CONFIG_COUNT", None)
-            env.pop("GIT_CONFIG_KEY_0", None)
-            env.pop("GIT_CONFIG_VALUE_0", None)
-
-        return env
+        return GitAuthEnvBuilder.noninteractive_env(
+            self.git_env,
+            preserve_config_isolation=preserve_config_isolation,
+            suppress_credential_helpers=suppress_credential_helpers,
+        )
 
     def _resilient_get(
         self, url: str, headers: dict[str, str], timeout: int = 30, max_retries: int = 3
@@ -600,237 +528,32 @@ class GitHubPackageDownloader:
     ) -> None:
         """Execute a clone action against a TransportPlan with full fallback.
 
-        Owns:
-          - TransportPlan resolution + per-dep transport warnings.
-          - Per-attempt URL + env construction.
-          - ADO bearer in-attempt retry on 401/Unauthorized.
-          - Cross-protocol fallback warning on protocol switch.
-          - Aggregate error construction on exhaustion.
-
-        The provided ``clone_action`` performs the actual clone for one
-        attempt. Working-tree clones pass an action that wraps
-        ``Repo.clone_from``; bare clones pass an action that wraps
-        ``subprocess.run([git, "clone", "--bare", ...])``. The template
-        catches both ``GitCommandError`` (GitPython) and
-        ``subprocess.CalledProcessError`` (subprocess) so either action
-        composes correctly with ADO bearer retry and protocol fallback.
-
-        Raises:
-            RuntimeError: If all planned attempts fail.
+        Delegates to :class:`CloneEngine`. Stub kept on the downloader so
+        existing test patches that target this method on the class still
+        work.
         """
-        last_error: Exception | None = None
-        is_ado = dep_ref and dep_ref.is_azure_devops()
-
-        dep_host = dep_ref.host if dep_ref else None
-        if dep_host:  # noqa: SIM108
-            is_github = is_github_hostname(dep_host)
-        else:
-            is_github = True
-        is_generic = not is_ado and not is_github
-
-        dep_token = self._resolve_dep_token(dep_ref)
-        has_token = dep_token is not None
-
-        # Resolve full auth context for bearer-aware URL building and env selection.
-        dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
-
-        _debug(
-            f"_clone_with_fallback: repo={repo_url_base}, is_ado={is_ado}, "
-            f"is_generic={is_generic}, has_token={has_token}, "
-            f"auth_scheme={dep_auth_scheme}, "
-            f"protocol_pref={self._protocol_pref.value}, allow_fallback={self._allow_fallback}"
-        )
-
-        # Choose the clone env PER ATTEMPT (not per dependency): only the
-        # token-bearing attempt should run with the locked-down env that
-        # silences credential helpers. SSH and plain-HTTPS attempts in a
-        # mixed allow_fallback plan need the relaxed env so user-configured
-        # credential helpers (gh auth, Keychain, ssh-agent passphrase
-        # prompts) keep working.
-        def _env_for(attempt: TransportAttempt) -> dict[str, str]:
-            if attempt.use_token:
-                # For ADO bearer auth, use the AuthContext git_env which contains
-                # GIT_CONFIG_COUNT/KEY/VALUE for Authorization header injection.
-                if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                    return dep_auth_ctx.git_env
-                return self.git_env
-            if attempt.scheme == "http":
-                return self._build_noninteractive_git_env(
-                    preserve_config_isolation=True,
-                    suppress_credential_helpers=True,
-                )
-            return self._build_noninteractive_git_env()
-
-        plan: TransportPlan = self._transport_selector.select(
+        return self._get_clone_engine().execute(
+            repo_url_base,
+            target_path,
             dep_ref=dep_ref,
-            cli_pref=self._protocol_pref,
-            allow_fallback=self._allow_fallback,
-            has_token=has_token,
-        )
-        _debug(
-            "transport plan: "
-            f"strict={plan.strict}, attempts={[(a.scheme, a.use_token, a.label) for a in plan.attempts]}"
+            clone_action=clone_action,
+            verbose_callback=verbose_callback,
         )
 
-        # Cross-protocol fallback reuses the dependency's port for every
-        # attempt. On servers that serve SSH and HTTPS on different ports
-        # (e.g. Bitbucket Datacenter: SSH 7999, HTTPS 7990), the off-protocol
-        # URL will be wrong. Warn once per dep, before the first attempt, so
-        # the user can pin the URL scheme (and leave fallback disabled) or
-        # fail fast by dropping --allow-protocol-fallback. See #786.
-        # A single install may call this method multiple times for the same
-        # dep (ref resolution + actual clone), so dedup on (host, repo, port).
-        dep_port = getattr(dep_ref, "port", None) if dep_ref else None
-        if (
-            not plan.strict
-            and dep_port is not None
-            and any(a.scheme == "ssh" for a in plan.attempts)
-            and any(a.scheme == "https" for a in plan.attempts)
-        ):
-            warn_key = (
-                dep_host.lower() if dep_host else dep_host,
-                repo_url_base,
-                dep_port,
-            )
-            if warn_key not in self._fallback_port_warned:
-                self._fallback_port_warned.add(warn_key)
-                initial_scheme = plan.attempts[0].scheme.upper()
-                fallback_scheme = next(
-                    a.scheme.upper() for a in plan.attempts if a.scheme != plan.attempts[0].scheme
-                )
-                host_display = dep_host or "host"
-                _rich_warning(
-                    f"Custom port {dep_port} on {host_display}/{repo_url_base}: "
-                    f"if {initial_scheme} fails, APM will retry over "
-                    f"{fallback_scheme} on the same port.\n"
-                    f"    Pin the URL scheme, or drop "
-                    f"--allow-protocol-fallback to fail fast.\n"
-                    f"    See: {_PROTOCOL_FALLBACK_DOCS_URL}",
-                    symbol="warning",
-                )
+    def _get_clone_engine(self):
+        """Return the CloneEngine, lazily constructing it if needed.
 
-        prev_label: str | None = None
-        prev_scheme: str | None = None
-        for attempt in plan.attempts:
-            # Defensive: skip token-bearing attempts when no token available.
-            if attempt.use_token and not has_token:
-                continue
+        Lazy construction matters for tests that build a downloader via
+        ``GitHubPackageDownloader.__new__(...)`` and skip ``__init__``;
+        they only set the attributes the engine actually reads.
+        """
+        engine = getattr(self, "_clone_engine", None)
+        if engine is None:
+            from .clone_engine import CloneEngine
 
-            use_ssh = attempt.scheme == "ssh"
-            try:
-                url = self._build_repo_url(
-                    repo_url_base,
-                    use_ssh=use_ssh,
-                    dep_ref=dep_ref,
-                    token=dep_token if attempt.use_token else "",
-                    auth_scheme=dep_auth_scheme if attempt.use_token else "basic",
-                )
-            except Exception as e:
-                last_error = e
-                continue
-
-            # Surface a [!] warning when the plan permits fallback and we
-            # are actually switching git protocols (ssh <-> https) mid-clone
-            # rather than just retrying with different auth on the same protocol.
-            if not plan.strict and prev_label and prev_scheme and prev_scheme != attempt.scheme:
-                _rich_warning(
-                    f"Protocol fallback: {prev_label} clone of {repo_url_base} failed; retrying with {attempt.label}.",
-                    symbol="warning",
-                )
-
-            try:
-                _debug(f"Attempting clone with {attempt.label} (URL sanitized)")
-                clone_action(url, _env_for(attempt), target_path)
-                if verbose_callback:
-                    display = self._sanitize_git_error(url) if attempt.use_token else url
-                    verbose_callback(f"Cloned from: {display}")
-                return
-            except (GitCommandError, subprocess.CalledProcessError) as e:
-                # ADO bearer fallback for clone (mirrors validation/list_remote_refs):
-                # PAT was rejected -> silently retry with az-cli bearer.
-                # Append e.stderr to err_msg because str(CalledProcessError)
-                # does NOT include stderr by default; without this, the bare
-                # clone path would never trigger bearer retry on PAT 401.
-                err_msg = str(e)
-                stderr_attr = getattr(e, "stderr", None)
-                if stderr_attr:
-                    if isinstance(stderr_attr, bytes):
-                        with contextlib.suppress(Exception):
-                            err_msg += " " + stderr_attr.decode("utf-8", errors="replace")
-                    else:
-                        err_msg += " " + str(stderr_attr)
-                if (
-                    is_ado
-                    and attempt.use_token
-                    and dep_auth_scheme == "basic"
-                    and has_token
-                    and is_ado_auth_failure_signal(err_msg)
-                ):
-                    try:
-                        from apm_cli.core.azure_cli import (
-                            AzureCliBearerError,
-                            get_bearer_provider,
-                        )
-                        from apm_cli.utils.github_host import build_ado_bearer_git_env
-
-                        provider = get_bearer_provider()
-                        if provider.is_available():
-                            try:
-                                bearer = provider.get_bearer_token()
-                                bearer_url = self._build_repo_url(
-                                    repo_url_base,
-                                    use_ssh=False,
-                                    dep_ref=dep_ref,
-                                    token=None,
-                                    auth_scheme="bearer",
-                                )
-                                bearer_env = {**self.git_env, **build_ado_bearer_git_env(bearer)}
-                                # Bearer retry composes with bare-action's tier
-                                # ladder: clone_action will rmtree any partial
-                                # state (tier-1 init+fetch) before re-attempting
-                                # against the bearer URL. See 6.15.
-                                clone_action(bearer_url, bearer_env, target_path)
-                                self.auth_resolver.emit_stale_pat_diagnostic(
-                                    dep_host or "dev.azure.com"
-                                )
-                                if verbose_callback:
-                                    verbose_callback(
-                                        "Cloned from: (sanitized) via AAD bearer fallback"
-                                    )
-                                return
-                            except (
-                                AzureCliBearerError,
-                                GitCommandError,
-                                subprocess.CalledProcessError,
-                            ):
-                                pass
-                    except ImportError:
-                        pass
-                last_error = e
-                prev_label = attempt.label
-                prev_scheme = attempt.scheme
-                if plan.strict:
-                    break
-
-        # All planned attempts failed (or strict-mode single failure)
-        error_msg = build_clone_failure_message(
-            repo_url_base=repo_url_base,
-            plan=plan,
-            dep_ref=dep_ref,
-            dep_host=dep_host,
-            is_ado=bool(is_ado),
-            is_generic=is_generic,
-            has_ado_token=self.has_ado_token,
-            has_token=has_token,
-            auth_resolver=self.auth_resolver,
-            configured_github_host=os.environ.get("GITHUB_HOST", ""),
-            default_host_fn=default_host,
-            last_error=last_error,
-            sanitize_git_error=self._sanitize_git_error,
-        )
-
-        raise RuntimeError(error_msg)
+            engine = CloneEngine(host=self)
+            self._clone_engine = engine
+        return engine
 
     # ------------------------------------------------------------------
     # Bare-clone helpers (#1126: subdir-agnostic shared cache)
@@ -1206,7 +929,6 @@ class GitHubPackageDownloader:
 
         Returns True on success. Falls back silently on failure.
         """
-        import subprocess
 
         try:
             temp_clone_path.mkdir(parents=True, exist_ok=True)

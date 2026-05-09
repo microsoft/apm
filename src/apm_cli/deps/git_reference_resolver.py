@@ -29,7 +29,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-import git
 from git.exc import GitCommandError
 
 from ..models.apm_package import (
@@ -141,7 +140,11 @@ class GitReferenceResolver:
             auth_scheme=dep_auth_scheme,
         )
 
-        g = git.cmd.Git()
+        # Route through the github_downloader module so that test patches
+        # of ``apm_cli.deps.github_downloader.git.cmd.Git`` intercept here.
+        from . import github_downloader as _gd
+
+        g = _gd.git.cmd.Git()
 
         def _primary_op():
             try:
