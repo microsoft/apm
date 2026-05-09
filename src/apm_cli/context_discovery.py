@@ -684,17 +684,17 @@ def build_proposed_manifest(
     dependencies.setdefault("mcp", [])
     manifest["dependencies"] = dependencies
 
-    # Collect root-level dirs that hold APM-native project-scope files.
-    # .apm/ is the canonical location and always scanned -- keep it implicit.
-    # .github/ and tool dirs (e.g. .claude/) are listed explicitly so users
-    # can see at a glance where their agent primitives live.
+    # Collect root-level dirs that hold APM-native or convertible project-scope
+    # files. .apm/ is the canonical location and always scanned -- keep it
+    # implicit. Every other dir (e.g. .github/, .claude/, .codex/) is listed
+    # explicitly so users can see at a glance where their agent context lives.
     _implicit_prefixes = (".apm/",)
     extra_dirs: list[str] = sorted(
         {
             f.display_path.split("/")[0]
             for f in findings
             if f.scope == "project"
-            and f.importability == IMPORT_APM_NATIVE
+            and f.importability in (IMPORT_APM_NATIVE, IMPORT_CONVERTIBLE)
             and "/" in f.display_path
             and not any(f.display_path.startswith(p) for p in _implicit_prefixes)
         }
