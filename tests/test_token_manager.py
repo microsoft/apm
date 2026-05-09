@@ -163,6 +163,37 @@ class TestResolveCredentialFromGit:
             GitHubTokenManager.resolve_credential_from_git("github.com", path=None)
             assert mock_run.call_args.kwargs["input"] == "protocol=https\nhost=github.com\n\n"
 
+    def test_path_with_newline_is_rejected(self):
+        """Newline in path is dropped to prevent credential-protocol injection."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="acme/widgets\nusername=attacker"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "\nusername=attacker" not in stdin
+            assert "path=" not in stdin, f"malformed path must be dropped entirely: {stdin!r}"
+            assert stdin == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_carriage_return_is_rejected(self):
+        """CR in path is dropped; helpers split on CRLF as well as LF."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="acme/widgets\rprotocol=ftp"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=" not in stdin
+            assert stdin == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_whitespace_is_rejected(self):
+        """Whitespace in path is dropped (real repo paths never contain it)."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="acme/wid gets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=" not in stdin
+
     def test_git_terminal_prompt_disabled(self):
         """GIT_TERMINAL_PROMPT=0 is set in the subprocess env."""
         mock_result = MagicMock(returncode=0, stdout="password=tok\n")

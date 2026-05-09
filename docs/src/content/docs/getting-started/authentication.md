@@ -34,7 +34,7 @@ All token-bearing requests use HTTPS. Tokens are never sent over unencrypted con
 | 3 | `GITHUB_TOKEN` | Any host | Shared with GitHub Actions |
 | 4 | `GH_TOKEN` | Any host | Set by `gh auth login` |
 | 5 | `gh auth token --hostname <host>` | GitHub-like hosts | Active `gh auth login` account |
-| 6 | `git credential fill` | Per-host | System credential manager, `gh auth`, OS keychain. APM forwards `path=<org/repo>` so [Git Credential Manager](#multi-account-git-credential-manager) with `credential.useHttpPath = true` can pick the per-URL account |
+| 6 | `git credential fill` | Per-host | System credential manager, `gh auth`, OS keychain |
 
 For Azure DevOps, APM resolves credentials in this order: `ADO_APM_PAT` env var, then a Microsoft Entra ID (AAD) bearer token from the Azure CLI (`az`). See [Azure DevOps](#azure-devops) below.
 
@@ -81,7 +81,7 @@ git config --global credential.https://github.com/acme.username your-acme-accoun
 git config --global credential.https://github.com/personal-org.username your-personal-account
 ```
 
-APM forwards `path=<org/repo>` to `git credential fill` so GCM can match these per-URL entries and return the right account without prompting an account picker. Without `useHttpPath = true`, git ignores the path field and behaviour is unchanged.
+APM forwards `path=<org/repo>` to `git credential fill` so GCM can match these per-URL entries and return the right account without prompting an account picker. If `credential.useHttpPath` is not enabled, git credential helpers ignore the `path` attribute and match per host only.
 
 If you have configured `gh auth login`, APM consults the `gh` CLI active account before falling back to credential helpers, which avoids the credential-fill path entirely.
 

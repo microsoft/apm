@@ -48,6 +48,30 @@ def _format_credential_host(host: str, port: int | None) -> str:
     return f"{host}:{port}" if port is not None else host
 
 
+def _sanitize_credential_path(path: str) -> str:
+    """Strip leading ``/`` and reject control characters from a credential path.
+
+    The git credential protocol is line-oriented: a stray newline in the
+    ``path`` value would let an attacker inject arbitrary attribute lines
+    (``\\nusername=...`` etc.) into the credential request. Even though
+    ``path`` originates from a parsed dependency reference (already
+    constrained to URL components), we defensively reject any value that
+    contains control characters or whitespace, returning an empty string
+    so the caller skips the ``path=`` line entirely. This preserves the
+    pre-disambiguation request rather than ever sending a malformed one.
+    """
+    cleaned = path.lstrip("/")
+    if not cleaned:
+        return ""
+    # Reject any control char (incl. \n, \r, \t) or whitespace -- valid
+    # repository paths never contain these. Any character with codepoint
+    # below 0x20 or equal to 0x7f, or any whitespace, disqualifies.
+    for ch in cleaned:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F or ch.isspace():
+            return ""
+    return cleaned
+
+
 class GitHubTokenManager:
     """Manages GitHub token environment setup for different AI runtimes."""
 
@@ -170,7 +194,9 @@ class GitHubTokenManager:
         host_field = _format_credential_host(host, port)
         stdin_lines = ["protocol=https", f"host={host_field}"]
         if path:
-            stdin_lines.append(f"path={path.lstrip('/')}")
+            sanitized = _sanitize_credential_path(path)
+            if sanitized:
+                stdin_lines.append(f"path={sanitized}")
         stdin = "\n".join(stdin_lines) + "\n\n"
         try:
             result = subprocess.run(

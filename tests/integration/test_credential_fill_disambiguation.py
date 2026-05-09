@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -90,9 +91,10 @@ def test_credential_fill_receives_path_for_per_url_disambiguation(
     assert result is True, "validation must succeed once the good token is fetched"
 
     # The recovered (good) token must have been used in a GitHub API call.
-    assert any(url.endswith("/repos/acme/widgets") for url in api_calls), (
-        f"GitHub API was not called with the right repo: {api_calls!r}"
-    )
+    parsed_calls = [urlparse(url) for url in api_calls]
+    assert any(
+        p.hostname == "api.github.com" and p.path == "/repos/acme/widgets" for p in parsed_calls
+    ), f"GitHub API was not called with the right repo: {api_calls!r}"
 
     # `git credential fill` was invoked at least once, and the stdin includes path=acme/widgets.
     assert captured_stdin, "git credential fill was never invoked"
