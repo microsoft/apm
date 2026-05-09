@@ -69,7 +69,7 @@ class TestDiscoverSanityE2E:
                 assert "claude" in result.output
                 assert "codex" in result.output
                 assert "cursor" in result.output
-                assert "Preview only" in result.output
+                assert "Preview only" in result.output or "Re-run with --write" in result.output
                 assert not (project / "apm.yml").exists()
             finally:
                 os.chdir(self.original_dir)

@@ -66,6 +66,10 @@ apm init --discover
 
 # Generate apm.yml from the discovery proposal
 apm init --discover --write
+
+# Migrate a Claude project to Codex (end-to-end)
+apm init --discover --write --yes   # discovers .claude/ files, migrates to .apm/
+apm install --target codex          # deploys .apm/ content to .codex/
 ```
 
 **Behavior:**
@@ -74,6 +78,8 @@ apm init --discover --write
 - **Auto-detection**: Automatically detects author from `git config user.name` and description from project context
 - **Brownfield friendly**: Works cleanly in existing projects without file pollution
 - **Discovery mode** (`--discover`): Scans known project, user, and safe system-level agent context locations for APM-native, convertible, and reference-only files, then prints a proposed `apm.yml`. It is read-only unless `--write` is provided
+- **Migration** (`--discover --write`): In addition to writing `apm.yml`, convertible files (e.g. `.claude/commands/*.md`) and misplaced APM-native files (e.g. `.claude/agents/*.agent.md`) are copied into their canonical `.apm/` locations so that `apm install --target <tool>` can deploy them. Files already in `.apm/` or `.github/` are left in place. The migration is idempotent -- running `--write` twice does not overwrite existing files
+- **Includes tracking**: All directories containing discovered context files (`.github/`, `.claude/`, `.codex/`, etc.) are merged into `apm.yml` `includes`. `.apm/` is always scanned implicitly and not listed
 - **Harness discovery**: The discovery scan covers the full agent harness -- hooks (pre/post tool-use event handlers), commands (executable prompt files / slash commands), and styles (output style guides) -- in addition to instructions, agents, and skills. Discovered harness items are reported by tool, scope, kind, and importability:
   - `hook`: `hooks/*.json`, `.apm/hooks/*.json` (APM-native); `.github/hooks/*.json` (Copilot)
   - `hook-script`: shell/Python scripts under `hooks/scripts/`, `.github/hooks/scripts/`, `.claude/hooks/scripts/`

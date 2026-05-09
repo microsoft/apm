@@ -12,8 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
 - If you use the `gh` CLI, APM is now zero-config for private GitHub packages on github.com, `*.ghe.com`, and GHES: APM uses your active `gh auth login` token (`gh auth token --hostname <host>`) before falling back to `git credential fill`. Silently skipped when `gh` is not installed or not logged in for the host. (#630)
+- **`apm init --discover` migration plan: convertible and misplaced files are copied to `.apm/` on `--write`.** Discovery now computes a migration plan for files that can be re-homed into canonical `.apm/` locations (e.g. `.claude/commands/review.md` -> `.apm/prompts/review.prompt.md`, `.claude/agents/backend.agent.md` -> `.apm/agents/backend.agent.md`). The plan is shown in preview mode; `--write` executes it idempotently. This closes the loop for cross-tool migration: `apm init --discover --write && apm install --target codex` now works end-to-end. (#1122)
+- **`apm init --discover` harness discovery: hooks, commands, and styles.** The discovery scan now covers the full agent harness -- APM-native hooks (`hooks/*.json`), hook scripts (`hooks/scripts/`), commands (`.apm/prompts/`, `.github/prompts/`, `.codex/commands/`, `.claude/commands/`), and style guides (`STYLE.md`, `.apm/styles/`). (#1122)
 
 ### Fixed
+
 
 - `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback. The defensive expression broke gh-aw's bare-expression substitution regex, causing consumer-supplied `target:` values to be silently dropped; the `import-schema` default already covers the omitted-input case. (#1185)
 - `apm install --target all` no longer enumerates the experimental `copilot-cowork` target, which was crashing project-scope installs with a "requires --global" error and made `gh aw` workflows that pin `target: all` unusable. (#1191)
@@ -27,7 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.4] - 2026-05-07
 
-### Fixed
 
 - `apm install` now removes deployed files when a package is removed from `apm.yml`. Three sequential early-returns previously short-circuited the cleanup phase when the manifest was emptied; the orphan-cleanup logic itself was correct. (#1173)
 - `apm audit --ci` no longer reports false drift on self-package primitives that link to repo-root files (`[..](../../FILE.md)`). The replay's in-package asset rewriter now re-anchors `target_location` onto `package_root` when the candidate sits outside the scratch tree, mirroring real-install output. (#1182)
@@ -44,7 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm init` opens an interactive numbered-toggle target checklist pre-seeded from filesystem signals so users land in Tier 2 (`apm.yml target:`) by default; adds `--target` for scripted use. (#1165)
 - `apm install` honours `policy.fetch_failure_default: block` for `no_git_remote` / `absent` / `empty`, matching the audit behaviour. (#1164)
 
-### Fixed
 
 - `apm audit --ci` no longer silently passes when no org policy is resolved: auto-discovery warns on stderr and honours `policy.fetch_failure_default: block` to fail closed (exit 1); JSON/SARIF on stdout stays clean. (#1164, closes #1159)
 - SCP-shorthand SSH URLs from non-`git` users -- `<user>@github.com:owner/repo` (EMU) and `<user>@ssh.dev.azure.com:v3/<org>/<project>/<repo>` (ADO) -- now parse correctly in dependency parsing and policy auto-discovery. (#1164)
@@ -58,7 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`apm audit` now catches forgotten installs and hand-edits by default.** No more shipping stale `.github/instructions/` because someone forgot to re-run `apm install`, no more silent hand-edits to regenerated content. Opt out with `--no-drift`. See the [Drift Detection guide](https://danielmeppiel.github.io/awd-cli/guides/drift-detection/). (#1137, closes #1071, supersedes scope of #898)
 
-### Fixed
 
 - **Parallel subdir install race.** `apm install` no longer intermittently fails with `RuntimeError: Subdirectory '<path>' not found in repository` when multiple dependencies (including ADO sub-path deps) resolve to different subdirectories of the same `repo@ref`. The shared clone cache now stores subdir-agnostic bare clones and each consumer materializes its own working tree (mirrors the WS3 `GitCache` pattern). (#1135, fixes #1126, fixes #1140)
 - **Re-installing the same package no longer rmtree's it.** `compute_package_hash` now excludes the `.apm-pin` cache marker (introduced by #1137) so the supply-chain content-hash check sees a stable hash across installs instead of falsely tripping and deleting `apm_modules/<owner>/<pkg>/`. (#1142, regression from #1137)
@@ -75,10 +75,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cursor slash command support (Cursor 1.6+).** `apm install` deploys package `.prompt.md` files to `.cursor/commands/*.md` when a `.cursor/` directory is present, completing cross-tool slash-command parity with Claude Code, OpenCode, and Gemini CLI. (#1046)
 - **`apm install` performance + UX overhaul:** WS3 persistent two-tier cache for git + HTTP (with rev-parse HEAD verification on cache hits), parallel level-batched BFS dependency resolution, parallel MCP registry batch lookups with ETag-revalidated HTTP cache, in-install repo clone dedup for subdirectory deps, reflink-aware file copies with write-dedup for cache checkouts, live progress UI for parallel resolution and download, per-phase timing in `--verbose`, elapsed time on every exit path, and ASCII-only progress bar. (#1116)
 
-### Fixed
 
 - **gh-aw lock workflows: bump `microsoft/apm-action` v1.5.0 -> v1.6.0** so packed bundles use the legacy `--format apm` layout that `apm unpack` accepts after the v0.12.0 default flip to plugin format. (#1121)
 - **Windows CI: explicit UTF-8 encoding** in the `_make_package` test helper to unblock Windows runners. (#1124)
+
+- **`apm init --discover` now merges discovered dirs into existing `includes`.** Previously, when `apm.yml` already had an `includes` list, newly discovered directories were silently dropped. All project-scope dirs with agent context (`.github/`, `.claude/`, `.codex/`, etc.) are now merged in. `.apm/` stays implicit (always scanned). (#1122)
+- **`apm init --discover` migrates misplaced APM-native files outside `.apm/` and `.github/`.** Files with APM-native extensions (e.g. `.agent.md`) stored under tool dirs like `.claude/agents/` were classified correctly but skipped by the migration plan. They are now included when outside `.apm/` and `.github/`. (#1122)
+- **`apm init --discover` missing `copilot/instruction` migration mapping.** `.github/copilot-instructions.md` was discovered as convertible but never migrated due to a missing entry in the migration map. (#1122)
+- **`apm list` crash on `applyTo` field.** Fixed `TypeError` when listing installed context files whose `applyTo` field was a list instead of a string. (#1122)
+- **`apm compile` pre-flight check now scans `.github/`.** Projects with content only in `.github/` (no `.apm/` directory) no longer fail with "No APM content found". (#1122)
 
 ## [0.12.0] - 2026-05-03
 

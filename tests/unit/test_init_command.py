@@ -392,7 +392,7 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 assert "Agent context discovery preview" in result.output
                 assert ".claude/commands/review.md" in result.output
-                assert "Preview only" in result.output
+                assert "Preview only" in result.output or "Re-run with --write" in result.output
                 assert not Path("apm.yml").exists()
             finally:
                 os.chdir(self.original_dir)
