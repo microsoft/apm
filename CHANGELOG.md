@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Package namespaces.** Declare `namespace: acme` in `apm.yml` to install skills under direct runtime-visible directories like `skills/acme-<name>/` -- ship multiple packages from the same org without name collisions while staying compatible with harnesses that expect direct child skill folders. The namespace flows from manifest into `apm.lock.yaml`, the install tree, and per-skill confirmation messages so the routing is visible end-to-end. (#1028)
 - Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
+- If you use the `gh` CLI, APM is now zero-config for private GitHub packages on github.com, `*.ghe.com`, and GHES: APM uses your active `gh auth login` token (`gh auth token --hostname <host>`) before falling back to `git credential fill`. Silently skipped when `gh` is not installed or not logged in for the host. (#630)
 
 ### Changed
 

@@ -12,9 +12,12 @@ APM resolves tokens per `(host, org)` pair. For each dependency, it walks a reso
 
 1. **Per-org env var** — `GITHUB_APM_PAT_{ORG}` (GitHub-like hosts — not ADO)
 2. **Global env vars** — `GITHUB_APM_PAT` → `GITHUB_TOKEN` → `GH_TOKEN` (any host)
-3. **Git credential helper** — `git credential fill` (any host except ADO)
+3. **GitHub CLI active account** — `gh auth token --hostname <host>` (GitHub-like hosts; silently skipped if `gh` is not installed or not logged in)
+4. **Git credential helper** — `git credential fill` (any host except ADO)
 
-If the global token doesn't work for the target host, APM automatically retries with git credential helpers. If nothing matches, APM attempts unauthenticated access (works for public repos on github.com).
+Steps 1 and 2 cover the four token-priority rows in the table below (priorities 1-4). The numbering above collapses the three global env vars (`GITHUB_APM_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`) into a single resolution step.
+
+If the global token doesn't work for the target host, APM next tries the active `gh` CLI account before falling back to git credential helpers. If nothing matches, APM attempts unauthenticated access (works for public repos on github.com).
 
 Results are cached per-process — the same `(host, org)` pair is resolved once.
 
@@ -30,7 +33,8 @@ All token-bearing requests use HTTPS. Tokens are never sent over unencrypted con
 | 2 | `GITHUB_APM_PAT` | Any host | Falls back to git credential helpers if rejected |
 | 3 | `GITHUB_TOKEN` | Any host | Shared with GitHub Actions |
 | 4 | `GH_TOKEN` | Any host | Set by `gh auth login` |
-| 5 | `git credential fill` | Per-host | System credential manager, `gh auth`, OS keychain |
+| 5 | `gh auth token --hostname <host>` | GitHub-like hosts | Active `gh auth login` account |
+| 6 | `git credential fill` | Per-host | System credential manager, `gh auth`, OS keychain |
 
 For Azure DevOps, APM resolves credentials in this order: `ADO_APM_PAT` env var, then a Microsoft Entra ID (AAD) bearer token from the Azure CLI (`az`). See [Azure DevOps](#azure-devops) below.
 
@@ -186,6 +190,16 @@ apm install dev.azure.com/myorg/myproject/myrepo
 [!]     Consider unsetting the stale variable.
 ```
 
+This fallback applies to all ADO operations including `apm install --update`. If you have a stale `ADO_APM_PAT` but an active `az login` session, `apm install --update` will succeed transparently via the bearer retry.
+
+If both `ADO_APM_PAT` and the `az` bearer fail, APM emits:
+
+```
+[x] AAD bearer fallback also failed for dev.azure.com.
+```
+
+This confirms both paths were attempted and neither succeeded, so the fix is either to refresh your PAT or run `az login`.
+
 **Verbose output** (`--verbose`) shows which source was used per host:
 
 ```
@@ -203,10 +217,10 @@ When authentication fails, APM prints a targeted diagnostic instead of a generic
 
 | Package source | Host | Auth behavior | Fallback |
 |---|---|---|---|
-| `org/repo` (bare) | `default_host()` | Global env vars → credential fill | Unauth for public repos |
-| `github.com/org/repo` | github.com | Global env vars → credential fill | Unauth for public repos |
-| `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars → credential fill | Auth-only (no public repos) |
-| GHES via `GITHUB_HOST` | ghes.company.com | Global env vars → credential fill | Unauth for public repos |
+| `org/repo` (bare) | `default_host()` | Global env vars → `gh auth token` → credential fill | Unauth for public repos |
+| `github.com/org/repo` | github.com | Global env vars → `gh auth token` → credential fill | Unauth for public repos |
+| `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars → `gh auth token` → credential fill | Auth-only (no public repos) |
+| GHES via `GITHUB_HOST` | ghes.company.com | Global env vars → `gh auth token` → credential fill | Unauth for public repos |
 | `dev.azure.com/org/proj/repo` | ADO | `ADO_APM_PAT` -> AAD bearer via `az` | Auth-only |
 | Artifactory registry proxy | custom FQDN | `PROXY_REGISTRY_TOKEN` | Error if `PROXY_REGISTRY_ONLY=1` |
 
@@ -302,21 +316,24 @@ flowchart TD
     B -->|GITHUB_APM_PAT_ORG| C[Use per-org token]
     B -->|Not set| D{Global env var?}
     D -->|GITHUB_APM_PAT / GITHUB_TOKEN / GH_TOKEN| E[Use global token]
-    D -->|Not set| F{Git credential fill?}
-    F -->|Found| G[Use credential]
-    F -->|Not found| H[No token]
+    D -->|Not set| F{gh auth token?<br/>GitHub-like hosts only}
+    F -->|Found| G[Use gh token]
+    F -->|Not found| H{Git credential fill?}
+    H -->|Found| J[Use credential]
+    H -->|Not found| K[No token]
 
     E --> I{try_with_fallback}
     C --> I
     G --> I
-    H --> I
+    J --> I
+    K --> I
 
-    I -->|Token works| J[Success]
-    I -->|Token fails| K{Credential-fill fallback}
-    K -->|Found credential| J
-    K -->|No credential| L{Host has public repos?}
-    L -->|Yes| M[Try unauthenticated]
-    L -->|No| N[Auth error with actionable message]
+    I -->|Token works| L[Success]
+    I -->|Token fails| M{Fallback credentials}
+    M -->|gh or git credential found| L
+    M -->|No credential| N{Host has public repos?}
+    N -->|Yes| O[Try unauthenticated]
+    N -->|No| P[Auth error with actionable message]
 ```
 
 ### Git credential helper not found
