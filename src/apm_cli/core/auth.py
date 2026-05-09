@@ -33,7 +33,7 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, TypeVar  # noqa: F401
+from typing import TYPE_CHECKING, NamedTuple, Optional, TypeVar  # noqa: F401
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.utils.github_host import (
@@ -102,6 +102,20 @@ class AuthContext:
 # ---------------------------------------------------------------------------
 
 
+class BearerFallbackOutcome(NamedTuple):
+    """Result of :meth:`AuthResolver.execute_with_bearer_fallback`.
+
+    ``bearer_attempted`` is True iff ``bearer_op`` was actually invoked.
+    Callers use it to distinguish "PAT rejected, bearer also rejected"
+    (both halves failed) from "PAT rejected, bearer never tried" (early
+    return: non-ADO, az unavailable, JWT acquisition failed) so the user
+    diagnostic does not falsely claim an attempt that never happened.
+    """
+
+    outcome: object
+    bearer_attempted: bool
+
+
 class AuthResolver:
     """Single source of truth for auth resolution.
 
@@ -126,6 +140,11 @@ class AuthResolver:
         # F5 #852: pre-init the per-host dedup set so callers do not need
         # the prior hasattr() guard.
         self._verbose_auth_logged_hosts: set = set()
+        # #1212 follow-up: with preflight + list_remote_refs + clone all
+        # routing through execute_with_bearer_fallback, a single ADO host
+        # in an install plan can trigger emit_stale_pat_diagnostic up to
+        # 3x per dependency. Dedup per host so the user sees ONE warning.
+        self._stale_pat_warned_hosts: set = set()
 
     def set_logger(self, logger: object) -> None:
         """Wire a CommandLogger (or InstallLogger) into the resolver after
@@ -362,12 +381,9 @@ class AuthResolver:
             """Retry ADO operation with AAD bearer when PAT fails with 401."""
             if not ado_bearer_fallback_available:
                 raise exc
-            exc_msg = str(exc)
-            if (
-                "401" not in exc_msg
-                and "Unauthorized" not in exc_msg
-                and "Authentication failed" not in exc_msg
-            ):
+            from apm_cli.utils.github_host import is_ado_auth_failure_signal
+
+            if not is_ado_auth_failure_signal(str(exc)):
                 raise exc
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
 
@@ -447,8 +463,18 @@ class AuthResolver:
         *,
         port: int | None = None,
         dep_url: str | None = None,
+        bearer_also_failed: bool = False,
     ) -> str:
-        """Build an actionable error message for auth failures."""
+        """Build an actionable error message for auth failures.
+
+        ``bearer_also_failed=True`` prepends a single line to the Case 4
+        block (PAT set, az available, both attempts failed) clarifying
+        that ADO_APM_PAT was tried first and rejected before the bearer
+        attempt -- so the user understands why both halves of the
+        protocol failed without having to read the full diagnostic
+        context. Callers MUST only set this when the bearer attempt
+        actually ran (see :class:`BearerFallbackOutcome.bearer_attempted`).
+        """
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
         display = host_info.display_name
@@ -483,17 +509,23 @@ class AuthResolver:
                     # failed. We may not have observed an explicit 401 (could be
                     # a 404, a network error, etc.) so the wording stays
                     # tentative -- see #856 review C6.
+                    prefix = (
+                        "    ADO_APM_PAT was rejected; az cli bearer was also rejected.\n\n"
+                        if bearer_also_failed
+                        else ""
+                    )
                     return (
-                        f"\n    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"  # noqa: F541
-                        f"    but the Azure DevOps request still failed.\n\n"  # noqa: F541
-                        f"    If this is an authentication failure, the PAT may be expired, revoked,\n"  # noqa: F541
-                        f"    or scoped to a different org, and Azure CLI credentials may need to\n"  # noqa: F541
-                        f"    be refreshed.\n\n"  # noqa: F541
-                        f"    To fix:\n"  # noqa: F541
-                        f"      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"  # noqa: F541
-                        f"      2. Re-authenticate Azure CLI if needed:        az login\n"  # noqa: F541
-                        f"      3. Retry:                                       apm install\n\n"  # noqa: F541
-                        f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
+                        f"\n{prefix}"
+                        f"    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"
+                        f"    but the Azure DevOps request still failed.\n\n"
+                        f"    If this is an authentication failure, the PAT may be expired, revoked,\n"
+                        f"    or scoped to a different org, and Azure CLI credentials may need to\n"
+                        f"    be refreshed.\n\n"
+                        f"    To fix:\n"
+                        f"      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"
+                        f"      2. Re-authenticate Azure CLI if needed:        az login\n"
+                        f"      3. Retry:                                       apm install\n\n"
+                        f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"
                     )
                 # PAT set but rejected, no az -> bare PAT failure
                 return (
@@ -511,7 +543,11 @@ class AuthResolver:
                 return (
                     f"\n    Azure DevOps requires authentication. You have two options:\n\n"
                     f"    1. Install Azure CLI and sign in (recommended for Entra ID users):\n"
-                    f"         https://aka.ms/installazurecliwindows  (or 'brew install azure-cli')\n"
+                    f"         brew install azure-cli            # macOS\n"
+                    f"         winget install Microsoft.AzureCLI # Windows\n"
+                    f"         apt-get install azure-cli         # Debian/Ubuntu\n"
+                    f"         dnf install azure-cli             # Fedora/RHEL\n"
+                    f"         (full guide: https://aka.ms/InstallAzureCli)\n"
                     f"         az login\n"
                     f"         apm install                   # retry -- no env var needed\n\n"
                     f"    2. Use a Personal Access Token:\n"
@@ -534,7 +570,12 @@ class AuthResolver:
                     f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
                 )
 
-            # Case 2: az returned token (tenant known) but ADO rejected it
+            # Case 2: az returned token (tenant known) but ADO rejected it.
+            # Note: bearer_also_failed=True is structurally unreachable here --
+            # callers only set it when source == "ADO_APM_PAT" (i.e. pat_set
+            # is True), and Case 2 lives in the `not pat_set` branch. We do
+            # not render a "PAT was also rejected" prefix in this case
+            # because no PAT was tried.
             return (
                 f"\n    Your az cli session (tenant: {tenant}) returned a bearer token,\n"
                 f"    but Azure DevOps rejected it (HTTP 401).\n\n"
@@ -691,6 +732,12 @@ class AuthResolver:
             # B2 #852: skip GIT_TOKEN for bearer scheme -- the JWT is injected via
             # GIT_CONFIG_VALUE_0 only; GIT_TOKEN here would leak it into every
             # child-process env (visible in /proc/<pid>/environ, ps eww).
+            #
+            # #1214 follow-up: a stale GIT_TOKEN already in the parent env
+            # (set by a prior shell, CI step, or another tool) would survive
+            # the os.environ.copy() above and defeat the isolation guarantee.
+            # Drop it explicitly so the bearer env is clean by construction.
+            env.pop("GIT_TOKEN", None)
             from apm_cli.utils.github_host import build_ado_bearer_git_env
 
             env.update(build_ado_bearer_git_env(token))
@@ -706,11 +753,24 @@ class AuthResolver:
         install summary. Without a logger (e.g. unit tests) we fall back to
         the inline ``_rich_warning`` emission for backwards compatibility.
 
+        #1212 follow-up: dedup per host_display so the user sees ONE warning
+        per ADO host even when preflight, list_remote_refs, and the clone
+        path each trigger the bearer-fallback path against the same host.
+
         Naming: previously ``_emit_stale_pat_diagnostic`` (private). Public
         now (#856 follow-up C9) so external modules (validation.py,
         github_downloader.py) do not reach into the underscore API.
+
+        #1214 follow-up: guard the check-then-add under self._lock so two
+        threads (parallel install) racing on the same ADO host cannot both
+        pass the membership check before either calls add(); without the
+        lock the dedup set defeats its own purpose.
         """
-        msg = f"ADO_APM_PAT was rejected for {host_display} (HTTP 401); fell back to az cli bearer."
+        with self._lock:
+            if host_display in self._stale_pat_warned_hosts:
+                return
+            self._stale_pat_warned_hosts.add(host_display)
+        msg = f"ADO_APM_PAT was rejected for {host_display}; fell back to az cli bearer."
         detail = "Consider unsetting the stale variable."
         diagnostics = self._diagnostics_or_none()
         if diagnostics is not None:
@@ -774,7 +834,7 @@ class AuthResolver:
         primary_op,
         bearer_op,
         is_auth_failure,
-    ):
+    ) -> BearerFallbackOutcome:
         """Run ``primary_op``; on a confirmed auth failure for ADO, retry
         via AAD bearer using ``bearer_op(bearer_token)``.
 
@@ -797,36 +857,39 @@ class AuthResolver:
                 failed", etc.). Caller knows the outcome shape; resolver does not.
 
         Returns:
-            The outcome of ``bearer_op`` on successful fallback, otherwise
-            the outcome of ``primary_op``. Never raises (exceptions from
-            ``bearer_op`` are swallowed and the primary outcome is returned
-            so the caller's existing error rendering still runs).
+            :class:`BearerFallbackOutcome` carrying the final ``outcome``
+            plus a ``bearer_attempted`` flag. The flag is True iff
+            ``bearer_op`` was actually invoked (ADO + auth-failure signature
+            + az provider available + JWT acquired) and lets callers
+            distinguish "PAT rejected, bearer also rejected" from "PAT
+            rejected, bearer never tried" for accurate diagnostics. Never
+            raises (exceptions from ``bearer_op`` are swallowed).
         """
         primary = primary_op()
         if dep_ref is None or not getattr(dep_ref, "is_azure_devops", lambda: False)():
-            return primary
+            return BearerFallbackOutcome(primary, False)
         if not is_auth_failure(primary):
-            return primary
+            return BearerFallbackOutcome(primary, False)
         try:
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
         except ImportError:
-            return primary
+            return BearerFallbackOutcome(primary, False)
         provider = get_bearer_provider()
         if not provider.is_available():
-            return primary
+            return BearerFallbackOutcome(primary, False)
         try:
             bearer = provider.get_bearer_token()
         except AzureCliBearerError:
-            return primary
+            return BearerFallbackOutcome(primary, False)
         try:
             fallback = bearer_op(bearer)
         except Exception:
-            return primary
+            return BearerFallbackOutcome(primary, True)
         if fallback is None or is_auth_failure(fallback):
-            return primary
+            return BearerFallbackOutcome(primary, True)
         host_display = getattr(dep_ref, "host", None) or "dev.azure.com"
         self.emit_stale_pat_diagnostic(host_display)
-        return fallback
+        return BearerFallbackOutcome(fallback, True)
 
 
 # ---------------------------------------------------------------------------

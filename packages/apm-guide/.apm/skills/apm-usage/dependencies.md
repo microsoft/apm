@@ -129,6 +129,8 @@ Virtual packages reference a subset of a repository.
 
 Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.
 
+**Gitea and Gogs (self-hosted or vendor-hosted):** virtual packages resolve via the host's `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab nested-group repos (`group/subgroup/repo`) require the object form (`git: <full-url>`, `path: <virtual>`) -- shorthand is ambiguous on >2-segment paths.
+
 > **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any `.collection.yml` to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
 ## Canonical storage rules

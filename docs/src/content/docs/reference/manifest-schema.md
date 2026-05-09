@@ -122,8 +122,13 @@ Controls which output targets are generated during compilation and installation.
 # Single target
 target: copilot
 
-# Multiple targets
+# Multiple targets -- flow-list form
 target: [claude, copilot]
+
+# Multiple targets -- block-list form (equivalent)
+target:
+  - claude
+  - copilot
 ```
 
 When a list is specified, only those targets are compiled, installed, and packed -- no output is generated for unlisted targets. `all` cannot be combined with other values.
