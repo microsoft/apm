@@ -8,23 +8,7 @@ APM treats plugins and packages as the same artifact. Every APM package is plugi
 
 ## Plugin authoring
 
-The only authoring decision is whether you also keep an `apm.yml`:
-
-- **With `apm.yml` (recommended).** You get dependency management, lockfile pinning, [security scanning](../../enterprise/security/), [`devDependencies`](../../reference/manifest-schema/#5-devdependencies), and multi-runtime deploy during development. `apm pack` still emits a plugin-compatible bundle for non-APM consumers. This is what `apm init --plugin` produces.
-- **From an existing `plugin.json`.** APM consumes it natively - `apm install owner/repo` works against any plugin repo without migration. Metadata is synthesized from `plugin.json`. Add an `apm.yml` later if you want APM tooling during development.
-
-For why `apm.yml` adds value on top of `plugin.json`, see [Anatomy -- Why not just ship a `plugin.json`?](../../introduction/anatomy-of-an-apm-package/#why-not-just-ship-a-pluginjson).
-
-### Authoring workflow
-
-```bash
-apm init my-plugin --plugin    # apm.yml + plugin.json
-apm install --dev owner/helpers # dev-only dependency (excluded from pack)
-apm install owner/core-rules   # production dependency
-apm pack                       # plugin-compatible bundle by default
-```
-
-The packed directory contains no APM-specific files. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and [Without APM: what you give up](../../guides/pack-distribute/#without-apm-what-you-give-up) for the consumer-side trade-off.
+For the authoring flow (`apm init --plugin`, dev/prod dependency split, `apm pack` output mapping, hybrid mode with `apm.yml` + `plugin.json`), see [Pack & Distribute](../../guides/pack-distribute/) and the [first package walkthrough](../../getting-started/first-package/#6-ship-as-a-plugin-optional). For why APM still adds value when you already have a `plugin.json`, see [Anatomy -- Why not just ship a `plugin.json`?](../../introduction/anatomy-of-an-apm-package/#why-not-just-ship-a-pluginjson).
 
 ## Overview
 
@@ -353,7 +337,7 @@ This:
 
 ## Exporting APM packages as plugins
 
-Use the [authoring workflow](#authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and structure.
+Use the [authoring workflow](#plugin-authoring) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and structure.
 
 ## Finding Plugins
 

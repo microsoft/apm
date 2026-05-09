@@ -636,10 +636,17 @@ def export_plugin_bundle(
             if rel == "apm.lock.yaml":
                 continue
             bundle_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+        # Issue #1207 D1: do NOT silently substitute ``"copilot"`` when
+        # ``target`` is missing.  Bundles are target-agnostic at install
+        # time; ``pack.target`` is recorded as informational metadata only.
+        # Falling back to ``"all"`` preserves the lockfile-filter shape
+        # (which uses target prefixes to narrow each dep's deployed_files
+        # list to the union of supported targets) without locking the
+        # bundle to a single client.
         enriched_yaml = enrich_lockfile_for_pack(
             lockfile,
             "plugin",
-            target or "copilot",
+            target or "all",
             bundle_files=bundle_files,
         )
         (bundle_dir / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")

@@ -365,6 +365,7 @@ def check_target_mismatch(
     Returns ``None`` when:
 
     - ``bundle_targets`` is empty (pre-constraint bundle, no metadata), OR
+    - ``bundle_targets`` contains ``"all"`` (target-agnostic bundle), OR
     - ``install_targets`` is a superset of ``bundle_targets``.
 
     Otherwise returns a human-readable warning naming the missing targets.
@@ -372,6 +373,11 @@ def check_target_mismatch(
     if not bundle_targets:
         return None
     bundle_set = {t.strip() for t in bundle_targets if t and t.strip()}
+    # Issue #1207: ``"all"`` (or empty after stripping) means target-agnostic.
+    # Such bundles cover any install target, so no mismatch warning is
+    # appropriate.
+    if "all" in bundle_set:
+        return None
     install_set = {t.strip() for t in install_targets if t and t.strip()}
     missing = sorted(bundle_set - install_set)
     if not missing:
