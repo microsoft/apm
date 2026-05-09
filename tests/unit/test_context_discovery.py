@@ -630,3 +630,47 @@ def test_migration_plan_skips_apm_native_in_apm_dir(tmp_path):
 
     agent_dests = [str(a.dest.relative_to(tmp_path)) for a in result.migration_plan]
     assert not any("my-agent" in d for d in agent_dests)
+
+
+def test_migration_plan_includes_claude_skill(tmp_path):
+    """Skills under .claude/skills/ are migrated as directories to .apm/skills/."""
+    skill_dir = tmp_path / ".claude" / "skills" / "my-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# My Skill", encoding="utf-8")
+    (skill_dir / "helper.py").write_text("print('hi')", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
+    assert ".apm/skills/my-skill" in plan
+    assert plan[".apm/skills/my-skill"].is_dir
+
+
+def test_execute_migration_copies_skill_directory(tmp_path):
+    """execute_migration copies the entire skill directory (not just SKILL.md)."""
+    skill_dir = tmp_path / ".claude" / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Review", encoding="utf-8")
+    (skill_dir / "assets").mkdir()
+    (skill_dir / "assets" / "rubric.md").write_text("criteria", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+    applied = execute_migration(list(result.migration_plan))
+
+    assert len(applied) >= 1
+    dest = tmp_path / ".apm" / "skills" / "review"
+    assert dest.is_dir()
+    assert (dest / "SKILL.md").read_text(encoding="utf-8") == "# Review"
+    assert (dest / "assets" / "rubric.md").read_text(encoding="utf-8") == "criteria"
+
+
+def test_migration_plan_includes_agents_shared_skill(tmp_path):
+    """Skills under .agents/skills/ are migrated to .apm/skills/."""
+    skill_dir = tmp_path / ".agents" / "skills" / "shared-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Shared", encoding="utf-8")
+
+    result = discover_agent_context(tmp_path, _config(), home_dir=tmp_path / "home", system_dirs=())
+
+    plan = {str(a.dest.relative_to(tmp_path)): a for a in result.migration_plan}
+    assert ".apm/skills/shared-skill" in plan

@@ -55,6 +55,14 @@ _MIGRATION_MAP: dict[tuple[str, str], tuple[str, str | None]] = {
     ("copilot", "instruction"): (".apm/instructions", ".instructions.md"),
     ("agents", "root-instructions"): (".apm/instructions", ".instructions.md"),
     ("agents", "style"): (".apm/styles", ".style.md"),
+    # Skills: the SKILL.md file anchors the discovery, but the entire parent
+    # directory is the deployable unit.  Extension None = copy dir as-is.
+    ("claude", "skill"): (".apm/skills", None),
+    ("agent-skills", "skill"): (".apm/skills", None),
+    ("cursor", "skill"): (".apm/skills", None),
+    ("opencode", "skill"): (".apm/skills", None),
+    ("gemini", "skill"): (".apm/skills", None),
+    ("windsurf", "skill"): (".apm/skills", None),
     # APM-native files misplaced outside .apm/ or .github/ (e.g. .claude/agents/*.agent.md)
     ("apm", "agent"): (".apm/agents", None),
     ("apm", "instruction"): (".apm/instructions", None),
@@ -81,12 +89,13 @@ _APM_EXTENSIONS = (
 
 @dataclass(frozen=True)
 class MigrationAction:
-    """One file to copy from its current location into .apm/."""
+    """One file (or directory for skills) to copy into .apm/."""
 
     source: Path
     dest: Path
     tool: str
     kind: str
+    is_dir: bool = False
 
 
 def _migration_dest_name(source_name: str, target_ext: str | None) -> str:
@@ -133,6 +142,23 @@ def compute_migration_plan(
             continue
 
         target_subdir, target_ext = mapping
+
+        # Skills are directory-based: SKILL.md anchors the discovery but the
+        # entire parent directory is the deployable unit.
+        if finding.kind == "skill":
+            skill_dir = finding.path.parent
+            skill_name = skill_dir.name
+            dest = project_root / target_subdir / skill_name
+            if dest in seen_dests or dest.exists():
+                continue
+            seen_dests.add(dest)
+            actions.append(
+                MigrationAction(
+                    source=skill_dir, dest=dest, tool=finding.tool, kind=finding.kind, is_dir=True
+                )
+            )
+            continue
+
         dest_name = _migration_dest_name(finding.path.name, target_ext)
         dest = project_root / target_subdir / dest_name
 
@@ -161,7 +187,10 @@ def execute_migration(actions: list[MigrationAction]) -> list[MigrationAction]:
         if action.dest.exists():
             continue
         action.dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(action.source, action.dest)
+        if action.is_dir:
+            shutil.copytree(action.source, action.dest)
+        else:
+            shutil.copy2(action.source, action.dest)
         applied.append(action)
     return applied
 
