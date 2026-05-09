@@ -143,7 +143,9 @@ class GitHubTokenManager:
         return max(1, min(val, cls.MAX_CREDENTIAL_TIMEOUT))
 
     @staticmethod
-    def resolve_credential_from_git(host: str, port: int | None = None) -> str | None:
+    def resolve_credential_from_git(
+        host: str, port: int | None = None, path: str | None = None
+    ) -> str | None:
         """Resolve a credential from the git credential store.
 
         Uses `git credential fill` to query the user's configured credential
@@ -155,15 +157,25 @@ class GitHubTokenManager:
             port: Optional non-standard git port (e.g. 7999 for Bitbucket DC).
                 Embedded into the ``host`` field per ``gitcredentials(7)`` --
                 a standalone ``port=`` line is not part of the protocol.
+            path: Optional repository path (``org/repo``). When provided,
+                a ``path=`` line is appended to the credential request so
+                helpers configured with ``credential.useHttpPath = true``
+                (notably Git Credential Manager for multi-account users)
+                can disambiguate the target URL and pick the right
+                stored account without prompting.
 
         Returns:
             The password/token from the credential store, or None if unavailable
         """
         host_field = _format_credential_host(host, port)
+        stdin_lines = ["protocol=https", f"host={host_field}"]
+        if path:
+            stdin_lines.append(f"path={path.lstrip('/')}")
+        stdin = "\n".join(stdin_lines) + "\n\n"
         try:
             result = subprocess.run(
                 ["git", "credential", "fill"],
-                input=f"protocol=https\nhost={host_field}\n\n",
+                input=stdin,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

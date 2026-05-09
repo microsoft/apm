@@ -172,8 +172,10 @@ class TestAutoDetectPath:
     def test_found_at_root(self, tmp_path):
         source = _make_source()
         mock_resolver = MagicMock()
+        seen_paths: list[str | None] = []
 
-        def mock_fetch(host, op, org=None, unauth_first=False):
+        def mock_fetch(host, op, org=None, path=None, unauth_first=False):
+            seen_paths.append(path)
             # First probe: marketplace.json at root -- found
             return {"name": "Test", "plugins": []}
 
@@ -182,13 +184,19 @@ class TestAutoDetectPath:
 
         path = client_mod._auto_detect_path(source, auth_resolver=mock_resolver)
         assert path == "marketplace.json"
+        # Per-URL disambiguation: marketplace fetches must thread `<owner>/<repo>`
+        # to try_with_fallback so credential helpers (e.g. GCM with useHttpPath)
+        # can pick the right account for multi-account users.
+        assert seen_paths == ["acme-org/plugins"], (
+            "marketplace fetch must pass path=<owner>/<repo> for per-URL disambiguation"
+        )
 
     def test_found_at_github_plugin(self, tmp_path):
         source = _make_source()
         mock_resolver = MagicMock()
         call_count = [0]
 
-        def mock_fetch(host, op, org=None, unauth_first=False):
+        def mock_fetch(host, op, org=None, path=None, unauth_first=False):
             call_count[0] += 1
             if call_count[0] == 1:
                 # First probe: root -- not found (404)
@@ -404,7 +412,7 @@ class TestPrivateRepoAuth:
         source = _make_source()
         call_count = [0]
 
-        def mock_try_with_fallback(host, op, org=None, unauth_first=False):
+        def mock_try_with_fallback(host, op, org=None, path=None, unauth_first=False):
             call_count[0] += 1
             if call_count[0] < 3:
                 # marketplace.json and .github/plugin/marketplace.json: 404 on private repo

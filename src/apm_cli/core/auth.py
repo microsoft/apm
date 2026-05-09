@@ -324,6 +324,7 @@ class AuthResolver:
         *,
         org: str | None = None,
         port: int | None = None,
+        path: str | None = None,
         unauth_first: bool = False,
         verbose_callback: Callable[[str], None] | None = None,
     ) -> T:
@@ -334,9 +335,14 @@ class AuthResolver:
         host:
             Target git host.
         operation:
-            ``operation(token, git_env) -> T`` — the work to do.
+            ``operation(token, git_env) -> T`` -- the work to do.
         org:
             Optional organisation for per-org token lookup.
+        path:
+            Optional repository path (``org/repo``) included in the
+            ``git credential fill`` request so helpers configured with
+            ``credential.useHttpPath = true`` can disambiguate per-URL
+            (notably Git Credential Manager for multi-account users).
         unauth_first:
             If *True*, try unauthenticated first (saves rate limits, EMU-safe).
         verbose_callback:
@@ -360,9 +366,11 @@ class AuthResolver:
 
             Walks the secondary chain in order: gh CLI (GitHub-like hosts;
             internal guard short-circuits unsupported hosts), then
-            ``git credential fill``. Sources already obtained from a
-            secondary chain (``gh-auth-token``, ``git-credential-fill``,
-            ``none``) skip retry to avoid double-invocation.
+            ``git credential fill`` (with ``path`` when known so
+            helpers can disambiguate per-URL). Sources already obtained
+            from a secondary chain (``gh-auth-token``,
+            ``git-credential-fill``, ``none``) skip retry to avoid
+            double-invocation.
             """
             if auth_ctx.source in ("gh-auth-token", "git-credential-fill", "none"):
                 raise exc
@@ -383,7 +391,7 @@ class AuthResolver:
                 )
             _log(f"trying git credential fill for {host_info.display_name}")
             cred = self._token_manager.resolve_credential_from_git(
-                host_info.host, port=host_info.port
+                host_info.host, port=host_info.port, path=path
             )
             if cred:
                 _log(f"git credential fill resolved a credential for {host_info.display_name}")

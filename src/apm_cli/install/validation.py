@@ -524,6 +524,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 _check_repo,
                 org=org,
                 port=port,
+                path=dep_ref.repo_url,
                 unauth_first=True,
                 verbose_callback=verbose_log,
             )
@@ -586,6 +587,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 host,
                 _check_repo_fallback,
                 org=org,
+                path=repo_path,
                 unauth_first=True,
                 verbose_callback=verbose_log,
             )

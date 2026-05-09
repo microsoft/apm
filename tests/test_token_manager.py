@@ -138,6 +138,31 @@ class TestResolveCredentialFromGit:
             call_kwargs = mock_run.call_args
             assert call_kwargs.kwargs["input"] == "protocol=https\nhost=github.com\n\n"
 
+    def test_path_appended_to_stdin(self):
+        """When path is provided, it is appended so GCM useHttpPath can disambiguate."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="acme/widgets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert stdin == "protocol=https\nhost=github.com\npath=acme/widgets\n\n", (
+                f"unexpected stdin: {stdin!r}"
+            )
+
+    def test_path_leading_slash_stripped(self):
+        """A leading '/' on the path is stripped (git credential helpers expect bare paths)."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="/acme/widgets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert stdin == "protocol=https\nhost=github.com\npath=acme/widgets\n\n"
+
+    def test_path_none_preserves_legacy_stdin(self):
+        """When path is None, stdin is identical to the pre-disambiguation format."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path=None)
+            assert mock_run.call_args.kwargs["input"] == "protocol=https\nhost=github.com\n\n"
+
     def test_git_terminal_prompt_disabled(self):
         """GIT_TERMINAL_PROMPT=0 is set in the subprocess env."""
         mock_result = MagicMock(returncode=0, stdout="password=tok\n")
