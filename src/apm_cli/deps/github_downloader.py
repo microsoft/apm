@@ -14,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union  # noqa: F401, UP035
 
-import git
 import requests
 from git import RemoteProgress, Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError  # noqa: F401
@@ -214,6 +213,15 @@ class GitHubPackageDownloader:
         # Delegate backend-specific download logic to the download delegate.
         self._strategies = DownloadDelegate(host=self)
 
+        # Artifactory orchestration is encapsulated in a dedicated facade
+        # (download_package / download_subdirectory) backed by the
+        # DownloadDelegate's HTTP archive downloader.
+        from .artifactory_orchestrator import ArtifactoryOrchestrator
+        from .git_reference_resolver import GitReferenceResolver
+
+        self._artifactory = ArtifactoryOrchestrator(archive_downloader=self._strategies)
+        self._refs = GitReferenceResolver(host=self)
+
         # WS2a (#1116): per-run shared clone cache for subdirectory dep
         # deduplication.  Set by the install pipeline before resolution
         # starts; None means no dedup (each subdir dep clones independently).
@@ -375,38 +383,22 @@ class GitHubPackageDownloader:
 
     @staticmethod
     def _is_artifactory_only() -> bool:
-        """Return True when registry-only mode is active.
+        """Backward-compat stub -- delegates to ArtifactoryRouter."""
+        from .artifactory_orchestrator import ArtifactoryRouter
 
-        Checks the canonical ``PROXY_REGISTRY_ONLY`` env var, falling back to the
-        deprecated ``ARTIFACTORY_ONLY`` alias.
-        """
-        from .registry_proxy import is_enforce_only
-
-        return is_enforce_only()
+        return ArtifactoryRouter.is_registry_only()
 
     def _should_use_artifactory_proxy(self, dep_ref: "DependencyReference") -> bool:
-        """Check if a dependency should be routed through the Artifactory transparent proxy."""
-        if dep_ref.is_artifactory():
-            return False  # already explicit Artifactory
-        if self._is_artifactory_only():
-            return True
-        if dep_ref.is_azure_devops():
-            return False
-        host = dep_ref.host or default_host()
-        return is_github_hostname(host)
+        """Backward-compat stub -- delegates to ArtifactoryRouter."""
+        from .artifactory_orchestrator import ArtifactoryRouter
+
+        return ArtifactoryRouter.should_use_proxy(dep_ref)
 
     def _parse_artifactory_base_url(self) -> tuple | None:
-        """Return ``(host, prefix, scheme)`` from the registry proxy config, or ``None``.
+        """Backward-compat stub -- delegates to ArtifactoryRouter."""
+        from .artifactory_orchestrator import ArtifactoryRouter
 
-        Delegates to :meth:`~apm_cli.deps.registry_proxy.RegistryConfig.from_env`
-        so that env-var precedence and deprecation warnings are handled in one place.
-        """
-        from .registry_proxy import RegistryConfig
-
-        cfg = RegistryConfig.from_env()
-        if cfg is None:
-            return None
-        return (cfg.host, cfg.prefix, cfg.scheme)
+        return ArtifactoryRouter.parse_proxy_config()
 
     def _resolve_dep_token(self, dep_ref: DependencyReference | None = None) -> str | None:
         """Resolve the per-dependency auth token via AuthResolver.
@@ -893,374 +885,28 @@ class GitHubPackageDownloader:
     def list_remote_refs(self, dep_ref: DependencyReference) -> list[RemoteRef]:
         """Enumerate remote tags and branches without cloning.
 
-        Uses ``git ls-remote --tags --heads`` for all git hosts (GitHub,
-        Azure DevOps, GitLab, generic).  Artifactory dependencies return
-        an empty list (no git repo).
-
-        Args:
-            dep_ref: Dependency reference describing the remote repo.
-
-        Returns:
-            Sorted list of RemoteRef -- tags first (semver descending),
-            then branches (alphabetically ascending).
-
-        Raises:
-            RuntimeError: If the git command fails.
+        Delegates to :class:`GitReferenceResolver`. Stub kept on the
+        downloader for backward compatibility with callers/tests that
+        access this method directly.
         """
-        # Artifactory: no git repo to query
-        if dep_ref.is_artifactory():
-            return []
-
-        is_ado = dep_ref.is_azure_devops()
-        dep_token = self._resolve_dep_token(dep_ref)
-        dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
-
-        # All git hosts: git ls-remote
-        repo_url_base = dep_ref.repo_url
-
-        # Build the env -- mirror _clone_with_fallback logic
-        if dep_token:
-            # For ADO bearer, use AuthContext git_env with header injection
-            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                ls_env = dep_auth_ctx.git_env
-            else:
-                ls_env = self.git_env
-        else:
-            ls_env = self._build_noninteractive_git_env(
-                preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
-                suppress_credential_helpers=bool(getattr(dep_ref, "is_insecure", False)),
-            )
-
-        # Build authenticated URL
-        remote_url = self._build_repo_url(
-            repo_url_base,
-            use_ssh=False,
-            dep_ref=dep_ref,
-            token=dep_token,
-            auth_scheme=dep_auth_scheme,
-        )
-
-        # Run primary attempt; on ADO auth failure, fall back via the
-        # canonical AuthResolver helper. We use a tuple "outcome" shape so
-        # primary_op can pass the GitCommandError through to is_auth_failure
-        # without the resolver needing to re-catch.
-        g = git.cmd.Git()
-
-        def _primary_op():
-            try:
-                output = g.ls_remote("--tags", "--heads", remote_url, env=ls_env)
-                return ("ok", output)
-            except GitCommandError as exc:
-                return ("err", exc)
-
-        def _bearer_op(bearer):
-            # SECURITY: _build_git_env(scheme="bearer") yields a clean env
-            # (no leaked PAT). JWT travels via http.extraHeader.
-            bearer_env = self.auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
-            bearer_url = self._build_repo_url(
-                repo_url_base,
-                use_ssh=False,
-                dep_ref=dep_ref,
-                token=None,
-                auth_scheme="bearer",
-            )
-            try:
-                output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
-                return ("ok", output)
-            except GitCommandError as exc:
-                return ("err", exc)
-
-        def _is_auth_failure(outcome):
-            if outcome is None or outcome[0] != "err":
-                return False
-            return is_ado_auth_failure_signal(str(outcome[1]))
-
-        ado_eligible = is_ado and dep_auth_scheme == "basic" and dep_token is not None
-
-        if ado_eligible:
-            fb = self.auth_resolver.execute_with_bearer_fallback(
-                dep_ref, _primary_op, _bearer_op, _is_auth_failure
-            )
-            outcome = fb.outcome
-            # bearer_also_failed only when the bearer leg actually ran AND failed auth.
-            ado_bearer_also_failed = fb.bearer_attempted and _is_auth_failure(outcome)
-        else:
-            outcome = _primary_op()
-            ado_bearer_also_failed = False
-
-        if outcome[0] == "ok":
-            refs = self._parse_ls_remote_output(outcome[1])
-            return self._sort_remote_refs(refs)
-
-        e = outcome[1]
-        dep_host = dep_ref.host
-        if dep_host:  # noqa: SIM108
-            is_github = is_github_hostname(dep_host)
-        else:
-            is_github = True
-        is_generic = not is_ado and not is_github
-
-        error_msg = f"Failed to list remote refs for {repo_url_base}. "
-        if is_generic:
-            if dep_host:
-                host_info = self.auth_resolver.classify_host(
-                    dep_host,
-                    port=dep_ref.port,
-                )
-                host_name = host_info.display_name
-            else:
-                host_name = "the target host"
-            error_msg += (
-                f"For private repositories on {host_name}, configure SSH keys "
-                f"or a git credential helper. "
-                f"APM delegates authentication to git for non-GitHub/ADO hosts."
-            )
-        else:
-            host = dep_host or default_host()
-            org = repo_url_base.split("/")[0] if repo_url_base else None
-            error_msg += self.auth_resolver.build_error_context(
-                host,
-                "list refs",
-                org=org,
-                port=dep_ref.port if dep_ref else None,
-                dep_url=dep_ref.repo_url if dep_ref else None,
-                bearer_also_failed=ado_bearer_also_failed,
-            )
-
-        sanitized = self._sanitize_git_error(str(e))
-        error_msg += f" Last error: {sanitized}"
-        raise RuntimeError(error_msg) from e
+        return self._refs.list_remote_refs(dep_ref)
 
     def resolve_git_reference(
         self, repo_ref: Union[str, "DependencyReference"]
     ) -> ResolvedReference:
         """Resolve a Git reference (branch/tag/commit) to a specific commit SHA.
 
-        Args:
-            repo_ref: Repository reference — either a DependencyReference object
-                or a string (e.g., "user/repo#branch"). Passing the object
-                directly avoids a lossy parse round-trip for generic git hosts.
-
-        Returns:
-            ResolvedReference: Resolved reference with commit SHA
-
-        Raises:
-            ValueError: If the reference format is invalid
-            RuntimeError: If Git operations fail
+        Delegates to :class:`GitReferenceResolver`.
         """
-        # Accept both string and DependencyReference to avoid lossy round-trips
-        if isinstance(repo_ref, DependencyReference):
-            dep_ref = repo_ref
-        else:
-            try:
-                dep_ref = DependencyReference.parse(repo_ref)
-            except ValueError as e:
-                raise ValueError(f"Invalid repository reference '{repo_ref}': {e}")  # noqa: B904
-
-        # Use user-specified ref; None means "use the remote's default branch"
-        ref = dep_ref.reference or None
-
-        # Normalize to string for ResolvedReference.original_ref
-        original_ref_str = str(dep_ref)
-
-        # Artifactory: no git repo to query, return ref-based resolution
-        if dep_ref.is_artifactory() or (
-            self._parse_artifactory_base_url() and self._should_use_artifactory_proxy(dep_ref)
-        ):
-            effective_ref = ref or "main"
-            is_commit = re.match(r"^[a-f0-9]{7,40}$", effective_ref.lower()) is not None
-            return ResolvedReference(
-                original_ref=original_ref_str,
-                ref_type=GitReferenceType.COMMIT if is_commit else GitReferenceType.BRANCH,
-                resolved_commit=None,
-                ref_name=effective_ref,
-            )
-
-        # Pre-analyze the reference type to determine the best approach
-        is_likely_commit = bool(ref) and re.match(r"^[a-f0-9]{7,40}$", ref.lower()) is not None
-
-        # Create a temporary directory for Git operations
-        temp_dir = None
-        try:
-            from ..config import get_apm_temp_dir
-
-            temp_dir = Path(tempfile.mkdtemp(dir=get_apm_temp_dir()))
-
-            if is_likely_commit:
-                # For commit SHAs, clone full repository first, then checkout the commit
-                try:
-                    # Ensure host is set for enterprise repos
-                    repo = self._clone_with_fallback(
-                        dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
-                    )
-                    commit = repo.commit(ref)
-                    ref_type = GitReferenceType.COMMIT
-                    resolved_commit = commit.hexsha
-                    ref_name = ref
-                except Exception as e:
-                    sanitized_error = self._sanitize_git_error(str(e))
-                    raise ValueError(  # noqa: B904
-                        f"Could not resolve commit '{ref}' in repository {dep_ref.repo_url}: {sanitized_error}"
-                    )
-            else:
-                # For branches and tags, try shallow clone first.
-                # When no ref is specified, omit --branch to let git use the remote HEAD.
-                try:
-                    clone_kwargs = {"depth": 1}
-                    if ref:
-                        clone_kwargs["branch"] = ref
-                    repo = self._clone_with_fallback(
-                        dep_ref.repo_url,
-                        temp_dir,
-                        progress_reporter=None,
-                        dep_ref=dep_ref,
-                        **clone_kwargs,
-                    )
-                    ref_type = GitReferenceType.BRANCH  # Could be branch or tag
-                    resolved_commit = repo.head.commit.hexsha
-                    ref_name = ref if ref else repo.active_branch.name
-
-                except GitCommandError:
-                    # If branch/tag clone fails, try full clone and resolve reference
-                    try:
-                        repo = self._clone_with_fallback(
-                            dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
-                        )
-
-                        # Try to resolve the reference
-                        try:
-                            # Try as branch first
-                            try:
-                                branch = repo.refs[f"origin/{ref}"]
-                                ref_type = GitReferenceType.BRANCH
-                                resolved_commit = branch.commit.hexsha
-                                ref_name = ref
-                            except IndexError:
-                                # Try as tag
-                                try:
-                                    tag = repo.tags[ref]
-                                    ref_type = GitReferenceType.TAG
-                                    resolved_commit = tag.commit.hexsha
-                                    ref_name = ref
-                                except IndexError:
-                                    raise ValueError(  # noqa: B904
-                                        f"Reference '{ref}' not found in repository {dep_ref.repo_url}"
-                                    )
-
-                        except Exception as e:
-                            sanitized_error = self._sanitize_git_error(str(e))
-                            raise ValueError(  # noqa: B904
-                                f"Could not resolve reference '{ref}' in repository {dep_ref.repo_url}: {sanitized_error}"
-                            )
-
-                    except GitCommandError as e:
-                        # Check if this might be a private repository access issue
-                        if "Authentication failed" in str(
-                            e
-                        ) or "remote: Repository not found" in str(e):
-                            error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
-                            host = dep_ref.host or default_host()
-                            org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url else None
-                            error_msg += self.auth_resolver.build_error_context(
-                                host,
-                                "resolve reference",
-                                org=org,
-                                port=dep_ref.port,
-                                dep_url=dep_ref.repo_url,
-                            )
-                            raise RuntimeError(error_msg)  # noqa: B904
-                        else:
-                            sanitized_error = self._sanitize_git_error(str(e))
-                            raise RuntimeError(  # noqa: B904
-                                f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
-                            )
-
-        finally:
-            if temp_dir and temp_dir.exists():
-                _rmtree(temp_dir)
-
-        return ResolvedReference(
-            original_ref=original_ref_str,
-            ref_type=ref_type,
-            resolved_commit=resolved_commit,
-            ref_name=ref_name,
-        )
+        return self._refs.resolve(repo_ref)
 
     def _resolve_commit_sha_for_ref(self, dep_ref: DependencyReference, ref: str) -> str | None:
-        """Resolve a Git ref to its 40-char commit SHA via the cheap GitHub commits API.
+        """Resolve a Git ref to its 40-char commit SHA via the cheap commits API.
 
-        Uses ``GET /repos/{owner}/{repo}/commits/{ref}`` with
-        ``Accept: application/vnd.github.sha`` which returns just the SHA in the
-        response body (no JSON parsing, no extra payload).
-
-        For Artifactory or Azure DevOps hosts, returns ``None`` -- no equivalent
-        cheap lookup is wired and the caller falls back to ``ref`` only.
-
-        Returns:
-            40-char commit SHA on success, ``None`` on any failure (404, network,
-            non-GitHub host, or unexpected body shape). Failures are swallowed
-            so callers can still record the ref name.
+        Delegates to :class:`GitReferenceResolver`. Stub kept on the
+        downloader for backward compatibility with internal callers.
         """
-        # Skip non-GitHub hosts -- Artifactory and Azure DevOps have no
-        # equivalent cheap commit-resolve endpoint we want to depend on here.
-        try:
-            if dep_ref.is_artifactory() or dep_ref.is_azure_devops():
-                return None
-        except Exception:
-            return None
-
-        host = dep_ref.host or default_host()
-
-        # If the user already passed a 40-char hex SHA, treat it as resolved.
-        if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
-            return ref.lower()
-
-        try:
-            dep_ref.repo_url.split("/", 1)
-        except (AttributeError, ValueError):
-            return None
-
-        # Build commits API URL via the per-host backend; this delegates
-        # the GitHub-family vs GHE-cloud vs GHES URL-shape decision to
-        # ``HostBackend.build_commits_api_url`` and gives us a None signal
-        # for already-resolved 40-char SHAs and for hosts without a cheap
-        # commit-resolve endpoint.
-        from .host_backends import backend_for
-
-        backend = backend_for(dep_ref, self.auth_resolver, fallback_host=host)
-        api_url = backend.build_commits_api_url(dep_ref, ref)
-        if api_url is None:
-            # Either the backend has no commit-resolve endpoint, the ref is
-            # already a 40-char SHA, or repo_url could not be split.
-            return None
-
-        # Resolve auth using the same path the file download uses.
-        org = None
-        parts = dep_ref.repo_url.split("/")
-        if parts:
-            org = parts[0]
-        try:
-            file_ctx = self.auth_resolver.resolve(host, org, port=dep_ref.port)
-            token = file_ctx.token
-        except Exception:
-            token = None
-
-        headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
-        if token:
-            headers["Authorization"] = f"token {token}"
-
-        try:
-            response = self._resilient_get(api_url, headers=headers, timeout=10)
-            if response.status_code != 200:
-                return None
-            body = (response.text or "").strip()
-            if re.match(r"^[a-f0-9]{40}$", body.lower()):
-                return body.lower()
-            return None
-        except Exception:
-            # Network errors, retries exhausted, etc -- never fail the install.
-            return None
+        return self._refs.resolve_commit_sha_for_ref(dep_ref, ref)
 
     def download_raw_file(
         self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
@@ -1948,66 +1594,13 @@ class GitHubPackageDownloader:
         progress_task_id=None,
         progress_obj=None,
     ) -> PackageInfo:
-        """Download an archive from Artifactory and extract a subdirectory."""
-        import tempfile
-
-        from ..config import get_apm_temp_dir
-
-        ref = dep_ref.reference or "main"
-        subdir_path = dep_ref.virtual_path
-        repo_parts = dep_ref.repo_url.split("/")
-        owner, repo = repo_parts[0], repo_parts[1] if len(repo_parts) > 1 else repo_parts[0]
-        host, prefix, scheme = proxy_info
-
-        if progress_obj and progress_task_id is not None:
-            progress_obj.update(progress_task_id, completed=10, total=100)
-
-        with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
-            temp_path = Path(temp_dir) / "full_pkg"
-            self._download_artifactory_archive(
-                host, prefix, owner, repo, ref, temp_path, scheme=scheme
-            )
-            if progress_obj and progress_task_id is not None:
-                progress_obj.update(progress_task_id, completed=60, total=100)
-            source_subdir = temp_path / subdir_path
-            if not source_subdir.exists() or not source_subdir.is_dir():
-                raise RuntimeError(
-                    f"Subdirectory '{subdir_path}' not found in archive from "
-                    f"Artifactory ({host}/{prefix}/{owner}/{repo}#{ref})"
-                )
-            target_path.mkdir(parents=True, exist_ok=True)
-            from ..utils.file_ops import robust_copy2, robust_copytree, robust_rmtree
-
-            if target_path.exists() and any(target_path.iterdir()):
-                robust_rmtree(target_path)
-                target_path.mkdir(parents=True, exist_ok=True)
-            for item in source_subdir.iterdir():
-                src = source_subdir / item.name
-                dst = target_path / item.name
-                if src.is_dir():
-                    robust_copytree(src, dst)
-                else:
-                    robust_copy2(src, dst)
-
-        if progress_obj and progress_task_id is not None:
-            progress_obj.update(progress_task_id, completed=80, total=100)
-        validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            raise RuntimeError(
-                f"Subdirectory is not a valid APM package: {'; '.join(validation_result.errors)}"
-            )
-        resolved_ref = ResolvedReference(
-            original_ref=ref, ref_name=ref, ref_type=GitReferenceType.BRANCH, resolved_commit=None
-        )
-        if progress_obj and progress_task_id is not None:
-            progress_obj.update(progress_task_id, completed=100, total=100)
-        return PackageInfo(
-            package=validation_result.package,
-            install_path=target_path,
-            resolved_reference=resolved_ref,
-            installed_at=datetime.now().isoformat(),
-            dependency_ref=dep_ref,
-            package_type=validation_result.package_type,
+        """Backward-compat stub -- delegates to ArtifactoryOrchestrator."""
+        return self._artifactory.download_subdirectory(
+            dep_ref,
+            target_path,
+            proxy_info,
+            progress_task_id=progress_task_id,
+            progress_obj=progress_obj,
         )
 
     def _download_package_from_artifactory(
@@ -2018,76 +1611,13 @@ class GitHubPackageDownloader:
         progress_task_id=None,
         progress_obj=None,
     ) -> PackageInfo:
-        """Download a package via Artifactory VCS archive."""
-        ref = dep_ref.reference or "main"
-        repo_parts = dep_ref.repo_url.split("/")
-        if len(repo_parts) < 2 or not repo_parts[0] or not repo_parts[1]:
-            raise ValueError(
-                f"Invalid Artifactory repo reference '{dep_ref.repo_url}': expected 'owner/repo' format"
-            )
-        owner, repo = repo_parts[0], repo_parts[1]
-
-        scheme = "https"
-        if dep_ref.is_artifactory():
-            host, prefix = dep_ref.host, dep_ref.artifactory_prefix
-            if not host or not prefix:
-                raise ValueError(
-                    f"Artifactory dependency '{dep_ref.repo_url}' is missing host or artifactory prefix"
-                )
-        elif proxy_info:
-            host, prefix, scheme = proxy_info
-        else:
-            raise RuntimeError("Artifactory download requires either FQDN or ARTIFACTORY_BASE_URL")
-
-        _debug(f"Downloading from Artifactory: {host}/{prefix}/{owner}/{repo}#{ref}")
-        if target_path.exists() and any(target_path.iterdir()):
-            from ..utils.file_ops import robust_rmtree
-
-            robust_rmtree(target_path)
-        target_path.mkdir(parents=True, exist_ok=True)
-        if progress_obj and progress_task_id is not None:
-            progress_obj.update(progress_task_id, total=100, completed=10)
-        try:
-            self._download_artifactory_archive(
-                host, prefix, owner, repo, ref, target_path, scheme=scheme
-            )
-        except RuntimeError:
-            if target_path.exists():
-                _rmtree(target_path)
-            raise
-        if progress_obj and progress_task_id is not None:
-            progress_obj.update(progress_task_id, completed=70, total=100)
-
-        validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            if target_path.exists():
-                _rmtree(target_path)
-            error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
-            for error in validation_result.errors:
-                error_msg += f"  - {error}\n"
-            raise RuntimeError(error_msg.strip())
-        if not validation_result.package:
-            raise RuntimeError(
-                f"Package validation succeeded but no package metadata found for {dep_ref.repo_url}"
-            )
-        package = validation_result.package
-        package.source = dep_ref.to_github_url()
-        package.resolved_commit = None
-        resolved_ref = ResolvedReference(
-            original_ref=f"{dep_ref.repo_url}#{ref}",
-            ref_type=GitReferenceType.BRANCH,
-            resolved_commit=None,
-            ref_name=ref,
-        )
-        if progress_obj and progress_task_id is not None:
-            progress_obj.update(progress_task_id, completed=100, total=100)
-        return PackageInfo(
-            package=package,
-            install_path=target_path,
-            resolved_reference=resolved_ref,
-            installed_at=datetime.now().isoformat(),
-            dependency_ref=dep_ref,
-            package_type=validation_result.package_type,
+        """Backward-compat stub -- delegates to ArtifactoryOrchestrator."""
+        return self._artifactory.download_package(
+            dep_ref,
+            target_path,
+            proxy_info=proxy_info,
+            progress_task_id=progress_task_id,
+            progress_obj=progress_obj,
         )
 
     def download_package(
