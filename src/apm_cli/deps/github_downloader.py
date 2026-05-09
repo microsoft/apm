@@ -1217,17 +1217,23 @@ class GitHubPackageDownloader:
             return ref.lower()
 
         try:
-            owner, repo = dep_ref.repo_url.split("/", 1)
-        except ValueError:
+            dep_ref.repo_url.split("/", 1)
+        except (AttributeError, ValueError):
             return None
 
-        # Build commits API URL -- mirrors the Contents API host shape.
-        if host == "github.com":
-            api_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{ref}"
-        elif host.lower().endswith(".ghe.com"):
-            api_url = f"https://api.{host}/repos/{owner}/{repo}/commits/{ref}"
-        else:
-            api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/commits/{ref}"
+        # Build commits API URL via the per-host backend; this delegates
+        # the GitHub-family vs GHE-cloud vs GHES URL-shape decision to
+        # ``HostBackend.build_commits_api_url`` and gives us a None signal
+        # for already-resolved 40-char SHAs and for hosts without a cheap
+        # commit-resolve endpoint.
+        from .host_backends import backend_for
+
+        backend = backend_for(dep_ref, self.auth_resolver, fallback_host=host)
+        api_url = backend.build_commits_api_url(dep_ref, ref)
+        if api_url is None:
+            # Either the backend has no commit-resolve endpoint, the ref is
+            # already a 40-char SHA, or repo_url could not be split.
+            return None
 
         # Resolve auth using the same path the file download uses.
         org = None

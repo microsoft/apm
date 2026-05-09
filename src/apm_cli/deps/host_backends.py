@@ -44,6 +44,7 @@ from ..utils.github_host import (
     build_https_clone_url,
     build_ssh_url,
     default_host,
+    is_github_hostname,
 )
 
 if TYPE_CHECKING:
@@ -476,17 +477,40 @@ def backend_for(
     if isinstance(info, HostInfo):
         cls = _BACKEND_BY_KIND.get(info.kind)
     if cls is None:
-        # Defensive: future ``classify_host`` kinds (or a mocked resolver)
-        # default to generic.
-        cls = GenericGitBackend
-        if not isinstance(info, HostInfo):
+        # Defensive fallback path for mocked / future ``classify_host``
+        # results: route by hostname so callers that wire only a partial
+        # mock (typical in unit tests) still get the right backend.
+        host_lower = (host or "").lower()
+        if is_github_hostname(host):
+            if host_lower == "github.com":
+                cls = GitHubBackend
+                kind = "github"
+                api_base = "https://api.github.com"
+            elif host_lower.endswith(".ghe.com"):
+                cls = GHECloudBackend
+                kind = "ghe_cloud"
+                api_base = f"https://api.{host}"
+            else:
+                cls = GHESBackend
+                kind = "ghes"
+                api_base = f"https://{host}/api/v3"
             info = HostInfo(
                 host=host,
-                kind="generic",
-                has_public_repos=False,
-                api_base=f"https://{host}",
+                kind=kind,
+                has_public_repos=host_lower == "github.com",
+                api_base=api_base,
                 port=port,
             )
+        else:
+            cls = GenericGitBackend
+            if not isinstance(info, HostInfo):
+                info = HostInfo(
+                    host=host,
+                    kind="generic",
+                    has_public_repos=False,
+                    api_base=f"https://{host}",
+                    port=port,
+                )
     return cls(host_info=info)
 
 
