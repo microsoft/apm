@@ -150,7 +150,7 @@ it via tool calls before emitting it as a finding. The procedure:
    - Look in `tests/integration/` for integration tests on the touched
      command or flow. New integration tests must follow the marker
      placement contract in
-     [`.apm/instructions/tests.instructions.md`](../instructions/tests.instructions.md);
+     [`.apm/instructions/tests.instructions.md`](../../.apm/instructions/tests.instructions.md);
      flag ungated live-network or runtime-binary calls in
      `tests/integration/` as `recommended` regardless of whether the
      test self-skips at runtime.
