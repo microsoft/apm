@@ -121,5 +121,5 @@ class TestSkillIntegratorSkipsSelfEntry:
         # Self-entry's owner string would have been '<self>' if not skipped.
         assert "<self>" not in owned_by.values()
         assert "<self>" not in native_owners.values()
-        # The remote dep's skill leaf-name is 'SKILL.md' (last path segment).
-        assert owned_by.get("SKILL.md") == "repo"
+        # The remote dep's skill key is the path under skills/ (skill identity).
+        assert owned_by.get("remote-skill/SKILL.md") == "repo"

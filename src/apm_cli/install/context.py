@@ -103,6 +103,7 @@ class InstallContext:
     intended_dep_keys: set[str] = field(default_factory=set)
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
+    package_namespaces: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
     # Integrate-internal channel (does NOT cross phase boundaries):
     # populated by _resolve_download_strategy in phases/integrate.py

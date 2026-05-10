@@ -37,6 +37,7 @@ apm init [PROJECT_NAME] [OPTIONS]
 - `-y, --yes` - Skip interactive prompts and use auto-detected defaults
 - `--plugin` - Initialize as a plugin authoring project (creates `plugin.json` + `apm.yml` with `devDependencies`)
 - `--marketplace` - Seed `apm.yml` with a `marketplace:` authoring block. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+- `--namespace TEXT` - Add an optional package namespace so package-owned skills install under `skills/<namespace>-<skill-name>/`
 
 **Examples:**
 ```bash
@@ -57,11 +58,15 @@ apm init my-plugin --plugin
 
 # Initialize a project that also publishes a marketplace
 apm init my-marketplace --marketplace
+
+# Initialize with a package namespace for owned skills
+apm init my-package --namespace acme
 ```
 
 **Behavior:**
 - **Minimal by default**: Creates only `apm.yml` with auto-detected metadata
 - **Interactive mode**: Prompts for project details unless `--yes` specified
+- **Namespace** (`--namespace`): Writes `namespace:` to `apm.yml`; interactive mode also prompts for it and allows an empty value
 - **Auto-detection**: Automatically detects author from `git config user.name` and description from project context
 - **Brownfield friendly**: Works cleanly in existing projects without file pollution
 - **Plugin mode** (`--plugin`): Creates both `plugin.json` and `apm.yml` with an empty `devDependencies` section. Plugin names must be kebab-case (`^[a-z][a-z0-9-]{0,63}$`), max 64 characters
@@ -135,6 +140,8 @@ See [Dependencies: Transport selection](../../guides/dependencies/#transport-sel
 - `apm install <package>`: Installs **only** the specified package (adds to `apm.yml` if not present)
 - Each `http://` dependency is warned at install time before any fetch begins
 - Transitive `http://` dependencies are allowed automatically when they use the same host as a direct insecure dependency you approved with `--allow-insecure`; other transitive hosts require `--allow-insecure-host HOSTNAME`
+- Packages that declare `namespace:` in `apm.yml` install package-owned skills under `skills/<namespace>-<skill-name>/` and show the namespace identity in install output, for example `Integrated skill acme/brand-guidelines -> .github/skills/acme-brand-guidelines/`
+- `apm install --verbose` keeps the same namespace-aware install tree while adding the usual file-level diagnostic detail; namespace routing is reported from the install summary layer, not as a second per-skill line
 
 **Claude Code: prompt `input:` -> slash command `arguments:`:**
 
@@ -364,6 +371,7 @@ Skills are copied directly to target directories:
 
 - **Primary**: `.github/skills/{skill-name}/` — Entire skill folder copied
 - **Compatibility**: `.claude/skills/{skill-name}/` — Also copied if `.claude/` folder exists
+- **Namespaced packages**: `.github/skills/{namespace}-{skill-name}/` and `.claude/skills/{namespace}-{skill-name}/`
 
 **Example Integration Output**:
 ```
@@ -1819,6 +1827,11 @@ target: [claude, copilot]  # multiple targets -- only these are compiled/install
 | `agent-skills` | .agents/skills/ only | Cross-client shared skills |
 | `agents` | *(deprecated)* alias for `vscode` | Use `copilot` or `agent-skills` instead |
 | `all` | All of the above (excludes `agent-skills`) | Universal compatibility |
+
+`apm compile --target vscode` and `apm compile --target all` no longer write
+`.github/copilot-instructions.md`. Existing files at that path are left under
+your control; keep them manually or move the content into an APM package if your
+workflow still depends on that file.
 
 **Examples:**
 ```bash

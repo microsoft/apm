@@ -623,6 +623,8 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         "description": config["description"],
         "author": config["author"],
     }
+    if config.get("namespace"):
+        apm_yml_data["namespace"] = config["namespace"]
 
     # Add targets field if present in config (plural list form -- canonical).
     # Older callers may still pass a singular CSV "target" string; honor that

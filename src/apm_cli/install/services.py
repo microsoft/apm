@@ -307,27 +307,57 @@ def integrate_package_primitives(
         targets=targets,
         skill_subset=skill_subset,
     )
+    # Resolve the package namespace once so install-summary labels can
+    # surface the namespace identity while deploy paths stay direct children
+    # of the target skills root for runtime compatibility.
+    _pkg_namespace = getattr(getattr(package_info, "package", None), "namespace", None)
+    # Group target_paths by their parent directory (the skills root) for the
+    # default summary. Namespaced native skills override this with exact
+    # deployed directories below.
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
         try:
-            rel = tp.relative_to(project_root)
-            if rel.parts:
-                _skill_target_dirs.add(rel.parts[0])
+            parent_rel = tp.parent.relative_to(project_root).as_posix()
+            _skill_target_dirs.add(parent_rel)
         except ValueError:
             # Dynamic-root target (copilot-cowork) -- path is outside project tree.
-            _skill_target_dirs.add("copilot-cowork")
-    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
+            label = "copilot-cowork/skills"
+            if _pkg_namespace:
+                label = f"{label}/{_pkg_namespace}"
+            _skill_target_dirs.add(label)
+    _skill_target_paths = [f"{d}/" for d in sorted(_skill_target_dirs)]
     if not _skill_target_paths:
         _skill_target_paths = ["skills/"]
     _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1
-        if _skill_expansion:
-            _log_integration("  |-- Skill integrated:")
-            for line in _skill_expansion:
+        _native_skill_paths = _skill_target_paths
+        _skill_label = "Integrated skill"
+        if _pkg_namespace:
+            _deployed_name = skill_result.skill_path.parent.name
+            _prefix = f"{_pkg_namespace}-"
+            _skill_name = (
+                _deployed_name[len(_prefix) :]
+                if _deployed_name.startswith(_prefix)
+                else _deployed_name
+            )
+            _skill_label = f"Integrated skill {_pkg_namespace}/{_skill_name}"
+            _native_skill_paths = [
+                f"{tp.relative_to(project_root).as_posix()}/"
+                for tp in skill_result.target_paths
+                if tp.name == _deployed_name
+            ]
+            if not _native_skill_paths:
+                _native_skill_paths = [
+                    f"{skill_result.skill_path.parent.relative_to(project_root).as_posix()}/"
+                ]
+        _native_suffix, _native_expansion = _format_target_collapse(_native_skill_paths, _verbose)
+        if _native_expansion:
+            _log_integration(f"  |-- {_skill_label} integrated:")
+            for line in _native_expansion:
                 _log_integration(line)
         else:
-            _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
+            _log_integration(f"  |-- {_skill_label} -> {_native_suffix}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
         if _skill_expansion:

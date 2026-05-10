@@ -12,6 +12,7 @@ from apm_cli.deps.lockfile import (
     get_lockfile_path,
     migrate_lockfile_if_needed,
 )
+from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -118,6 +119,23 @@ class TestLockedDependency:
     def test_from_dict_missing_hashes_defaults_empty(self):
         loaded = LockedDependency.from_dict({"repo_url": "owner/repo"})
         assert loaded.deployed_file_hashes == {}
+
+    def test_namespace_round_trip(self):
+        dep = LockedDependency(repo_url="owner/repo", namespace="example")
+        data = dep.to_dict()
+        assert data["namespace"] == "example"
+        restored = LockedDependency.from_dict(data)
+        assert restored.namespace == "example"
+
+    def test_namespace_omitted_when_empty(self):
+        dep = LockedDependency(repo_url="owner/repo")
+        assert "namespace" not in dep.to_dict()
+
+    def test_from_dict_drops_invalid_namespace(self):
+        dep = LockedDependency.from_dict(
+            {"repo_url": "owner/repo", "namespace": "../example--tools"}
+        )
+        assert dep.namespace is None
 
 
 class TestLockFile:
@@ -379,3 +397,16 @@ class TestLockFileSemanticEquivalence:
         a = self._make_lock()
         b = LockFile()
         assert not a.is_semantically_equivalent(b)
+
+
+class TestLockfileBuilderNamespaces:
+    """Tests for package namespace attachment during lockfile assembly."""
+
+    def test_attach_package_namespaces_records_dependency_namespace(self):
+        lock = LockFile()
+        lock.add_dependency(LockedDependency(repo_url="owner/repo"))
+        ctx = Mock(package_namespaces={"owner/repo": "example"})
+
+        LockfileBuilder(ctx)._attach_package_namespaces(lock)
+
+        assert lock.dependencies["owner/repo"].namespace == "example"

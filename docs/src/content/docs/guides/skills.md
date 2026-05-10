@@ -362,6 +362,52 @@ name: my-project
 target: vscode  # or claude, or all
 ```
 
+## Package Namespaces
+
+If you publish multiple APM packages from the same org, skills from different
+packages can otherwise collide in the flat layout. Namespaces isolate them:
+`acme-tools` and `acme-infra` can each own a skill directory without overwriting
+the other package's files.
+
+Package authors opt in with `namespace` in `apm.yml`:
+
+```yaml
+name: acme-tools
+version: 1.0.0
+namespace: acme
+type: skill
+```
+
+With this manifest, APM deploys package-owned skills under
+`.github/skills/acme-<skill-name>/` (and the equivalent skills directory for
+other targets). The skill remains a direct child of the target `skills/`
+directory so GitHub Copilot, Claude, Codex, and other harnesses can discover it
+without relying on recursive skill lookup. Packages without `namespace` keep
+the legacy flat layout.
+
+Before:
+
+```text
+.github/
+└── skills/
+    └── brand-guidelines/
+```
+
+After:
+
+```text
+.github/
+└── skills/
+    └── acme-brand-guidelines/
+```
+
+Use a namespace when your org publishes more than one package, when multiple
+teams publish skills with common names like `review` or `brand-guidelines`, or
+when you want dependency-owned skills to be visually separate from local skills.
+Adding or changing a namespace is a consumer-visible path change; run
+`apm install` after updating the manifest and remove any old flat-path skill
+directories only after confirming they are no longer referenced.
+
 ### Migrating from legacy paths
 
 When you upgrade APM and run `apm install`, the tool automatically detects legacy per-client skill paths (`.github/skills/`, `.cursor/skills/`, `.opencode/skills/`, `.gemini/skills/`) recorded in your `apm.lock.yaml` and migrates them to `.agents/skills/`:

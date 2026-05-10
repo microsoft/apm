@@ -6,6 +6,7 @@ Dependency and validation types have been extracted to sibling modules
 compatibility.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Union  # noqa: F401, UP035
@@ -50,7 +51,39 @@ __all__ = [  # noqa: RUF022
     "APMPackage",
     "PackageInfo",
     "clear_apm_yml_cache",
+    "validate_namespace",
 ]
+
+NAMESPACE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?!-))*[a-z0-9]$|^[a-z0-9]$")
+
+
+def validate_namespace(namespace: str, *, field_name: str = "namespace") -> str:
+    """Return a normalized package namespace or raise ``ValueError``."""
+    if not isinstance(namespace, str):
+        raise ValueError(
+            f"Invalid '{field_name}' field: expected string, got {type(namespace).__name__}"
+        )
+
+    normalized = namespace.strip()
+    if not normalized:
+        raise ValueError(f"'{field_name}' must not be empty")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError(f"'{field_name}' must be a single path segment")
+    if len(normalized) > 64:
+        raise ValueError(f"'{field_name}' must be 1-64 characters")
+    if "--" in normalized:
+        raise ValueError(f"'{field_name}' must not contain consecutive hyphens")
+    if not NAMESPACE_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            f"'{field_name}' must contain only lowercase letters, digits, "
+            "and hyphens, and must not start or end with a hyphen"
+        )
+
+    from ..utils.path_security import validate_path_segments
+
+    validate_path_segments(normalized, context=field_name, reject_empty=True)
+    return normalized
+
 
 # Module-level parse cache: (resolved apm.yml path, resolved source dir) ->
 # APMPackage. The source-dir half of the key is part of cache identity (#940)
@@ -98,6 +131,7 @@ class APMPackage:
         None  # Package content type: instructions, skill, hybrid, or prompts
     )
     includes: str | list[str] | None = None  # Include-only manifest: 'auto' or list of repo paths
+    namespace: str | None = None  # Optional skill namespace for deployed package skills
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
@@ -238,6 +272,10 @@ class APMPackage:
             else:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
 
+        namespace = None
+        if "namespace" in data and data["namespace"] is not None:
+            namespace = validate_namespace(data["namespace"])
+
         # Parse target field through the same validator as --target so a CSV
         # string like ``target: "claude,copilot"`` resolves identically to
         # ``--target claude,copilot`` and unknown tokens fail at parse time
@@ -261,6 +299,7 @@ class APMPackage:
             target=target_value,
             type=pkg_type,
             includes=includes,
+            namespace=namespace,
         )
         _apm_yml_cache[cache_key] = result
         return result

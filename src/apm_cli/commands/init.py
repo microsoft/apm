@@ -13,11 +13,13 @@ from ..core.target_detection import (
     TargetParamType,
     detect_signals,
 )
+from ..models.apm_package import validate_namespace
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
 )
 from ._helpers import (
+    ERROR,
     INFO,
     RESET,
     _create_minimal_apm_yml,
@@ -56,6 +58,10 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     help="Seed apm.yml with a 'marketplace:' authoring block",
 )
 @click.option(
+    "--namespace",
+    help="Optional namespace to prevent skill name collisions",
+)
+@click.option(
     "--target",
     "target_flag",
     type=TargetParamType(),
@@ -64,7 +70,7 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+def init(ctx, project_name, yes, plugin, marketplace_flag, namespace, target_flag, verbose):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
@@ -73,6 +79,9 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
     """
     logger = CommandLogger("init", verbose=verbose)
     try:
+        if namespace:
+            namespace = validate_namespace(namespace)
+
         # Handle explicit current directory
         if project_name == ".":
             project_name = None
@@ -123,10 +132,12 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
 
         # Get project configuration (interactive mode or defaults)
         if not yes:
-            config = _interactive_project_setup(final_project_name, logger)
+            config = _interactive_project_setup(final_project_name, logger, namespace=namespace)
         else:
             # Use auto-detected defaults
             config = _get_default_config(final_project_name)
+            if namespace:
+                config["namespace"] = namespace
 
         # --- Target selection (must run before the confirmation panel so
         #     the chosen targets render in the "About to create" summary). ---
@@ -256,7 +267,7 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
         sys.exit(1)
 
 
-def _interactive_project_setup(default_name, logger):
+def _interactive_project_setup(default_name, logger, namespace=None):
     """Interactive setup for new APM projects with auto-detection.
 
     Collects only the metadata fields here; target selection and final
@@ -288,6 +299,9 @@ def _interactive_project_setup(default_name, logger):
         version = Prompt.ask("Version", default="1.0.0").strip()
         description = Prompt.ask("Description", default=auto_description).strip()
         author = Prompt.ask("Author", default=auto_author).strip()
+        if namespace:
+            namespace = namespace.strip()
+            namespace = validate_namespace(namespace)
 
     except (ImportError, NameError):
         logger.progress("Setting up your APM project...")
@@ -305,13 +319,19 @@ def _interactive_project_setup(default_name, logger):
         version = click.prompt("Version", default="1.0.0").strip()
         description = click.prompt("Description", default=auto_description).strip()
         author = click.prompt("Author", default=auto_author).strip()
+        if namespace:
+            namespace = namespace.strip()
+            namespace = validate_namespace(namespace)
 
-    return {
+    config = {
         "name": name,
         "version": version,
         "description": description,
         "author": author,
     }
+    if namespace:
+        config["namespace"] = namespace
+    return config
 
 
 def _confirm_setup_summary(config: dict, logger) -> None:
@@ -321,6 +341,15 @@ def _confirm_setup_summary(config: dict, logger) -> None:
     """
     targets = config.get("targets")
     targets_line = ", ".join(targets) if targets else "(none -- auto-detect at compile time)"
+    summary_lines = [
+        f"name: {config['name']}",
+        f"version: {config['version']}",
+        f"description: {config['description']}",
+        f"author: {config['author']}",
+    ]
+    if config.get("namespace"):
+        summary_lines.append(f"namespace: {config['namespace']}")
+    summary_lines.append(f"targets: {targets_line}")
 
     try:
         from rich.console import Console  # type: ignore
@@ -328,13 +357,7 @@ def _confirm_setup_summary(config: dict, logger) -> None:
         from rich.prompt import Confirm  # type: ignore
 
         console = _get_console() or Console()
-        summary_content = (
-            f"name: {config['name']}\n"
-            f"version: {config['version']}\n"
-            f"description: {config['description']}\n"
-            f"author: {config['author']}\n"
-            f"targets: {targets_line}"
-        )
+        summary_content = "\n".join(summary_lines)
         console.print(Panel(summary_content, title="About to create", border_style="cyan"))
 
         if not Confirm.ask("\nIs this OK?", default=True):
@@ -346,6 +369,8 @@ def _confirm_setup_summary(config: dict, logger) -> None:
         click.echo(f"  version: {config['version']}")
         click.echo(f"  description: {config['description']}")
         click.echo(f"  author: {config['author']}")
+        if config.get("namespace"):
+            click.echo(f"  namespace: {config['namespace']}")
         click.echo(f"  targets: {targets_line}")
 
         if not click.confirm("\nIs this OK?", default=True):

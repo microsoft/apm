@@ -54,6 +54,33 @@ class TestInitCommand:
             finally:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
+    def test_init_namespace_yes_writes_manifest_field(self):
+        """--namespace makes the package namespace discoverable from apm init."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--yes", "--namespace", "acme"])
+
+                assert result.exit_code == 0
+                data = yaml.safe_load(Path("apm.yml").read_text(encoding="utf-8"))
+                assert data["namespace"] == "acme"
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_namespace_rejects_invalid_value(self):
+        """--namespace uses the same validation contract as apm.yml parsing."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--yes", "--namespace", "acme--tools"])
+
+                assert result.exit_code == 1
+                assert "consecutive" in result.output
+                assert "hyphens" in result.output
+                assert not Path("apm.yml").exists()
+            finally:
+                os.chdir(self.original_dir)
+
     def test_init_explicit_current_directory(self):
         """Test initialization with explicit '.' argument."""
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -160,8 +187,8 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-                # Simulate user input (includes target prompt: done + confirm empty)
-                user_input = "my-test-project\n1.5.0\nTest description\nTest Author\ny\ndone\ny\n"
+                # Simulate user input (empty namespace, then confirm setup)
+                user_input = "my-test-project\n1.5.0\nTest description\nTest Author\n\ny\n"
 
                 result = self.runner.invoke(cli, ["init"], input=user_input)
 
@@ -228,8 +255,8 @@ class TestInitCommand:
                 # Create existing apm.yml
                 Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
 
-                # Say yes to overwrite, then provide interactive setup input + target prompt
-                user_input = "y\nmy-project\n1.0.0\nA description\nAuthor\ny\ndone\ny\n"
+                # Say yes to overwrite, then provide interactive setup input
+                user_input = "y\nmy-project\n1.0.0\nA description\nAuthor\n\ny\n"
                 result = self.runner.invoke(cli, ["init"], input=user_input)
 
                 assert result.exit_code == 0
@@ -480,7 +507,7 @@ class TestInitProjectNameValidation:
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="bad/name\nmy-project\n1.0.0\n\n\ny\ndone\ny\n",
+                input="bad/name\nmy-project\n1.0.0\n\n\n\ny\n",
                 catch_exceptions=False,
             )
             assert "Invalid project name" in result.output
@@ -492,7 +519,7 @@ class TestInitProjectNameValidation:
             result = self.runner.invoke(
                 cli,
                 ["init"],
-                input="..\nmy-project\n1.0.0\n\n\ny\ndone\ny\n",
+                input="..\nmy-project\n1.0.0\n\n\n\ny\n",
                 catch_exceptions=False,
             )
             assert "Invalid project name" in result.output

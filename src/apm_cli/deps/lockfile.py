@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import yaml
 
-from ..models.apm_package import DependencyReference
+from ..models.apm_package import DependencyReference, validate_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class LockedDependency:
     depth: int = 1
     resolved_by: str | None = None
     package_type: str | None = None
+    namespace: str | None = None
     deployed_files: list[str] = field(default_factory=list)
     deployed_file_hashes: dict[str, str] = field(default_factory=dict)
     source: str | None = None  # "local" for local deps, None/absent for remote
@@ -79,6 +80,8 @@ class LockedDependency:
             result["resolved_by"] = self.resolved_by
         if self.package_type:
             result["package_type"] = self.package_type
+        if self.namespace:
+            result["namespace"] = self.namespace
         if self.deployed_files:
             result["deployed_files"] = sorted(self.deployed_files)
         if self.deployed_file_hashes:
@@ -131,6 +134,13 @@ class LockedDependency:
             if _p_int is not None and 1 <= _p_int <= 65535:
                 port = _p_int
 
+        namespace = data.get("namespace")
+        if namespace is not None:
+            try:
+                namespace = validate_namespace(namespace)
+            except ValueError:
+                namespace = None
+
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
@@ -144,6 +154,7 @@ class LockedDependency:
             depth=data.get("depth", 1),
             resolved_by=data.get("resolved_by"),
             package_type=data.get("package_type"),
+            namespace=namespace,
             deployed_files=deployed_files,
             deployed_file_hashes=dict(data.get("deployed_file_hashes") or {}),
             source=data.get("source"),

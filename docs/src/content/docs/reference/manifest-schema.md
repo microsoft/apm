@@ -47,6 +47,7 @@ author:        <string>
 license:       <string>
 target:        <enum>
 type:          <enum>
+namespace:     <string>
 scripts:       <map<string, string>>
 includes:      <enum | list<string>>
 dependencies:
@@ -165,7 +166,36 @@ Declares how the package's content is processed during install and compile. Curr
 | `hybrid` | Both AGENTS.md compilation and skill installation. |
 | `prompts` | Commands/prompts only. No instructions or skills. |
 
-### 3.8. `scripts`
+### 3.8. `namespace`
+
+| | |
+|---|---|
+| **Type** | `string` |
+| **Required** | OPTIONAL |
+| **Pattern** | `^[a-z0-9](?:[a-z0-9]|-(?!-))*[a-z0-9]$|^[a-z0-9]$` |
+| **Description** | Optional namespace for package-owned skills. Max 64 characters. Consecutive hyphens (`--`) are not allowed. |
+
+When present, installed native skills and promoted `.apm/skills/` entries are
+deployed under `skills/<namespace>-<skill-name>/` instead of the legacy flat
+`skills/<skill-name>/` layout. The namespace remains a direct child directory
+prefix because target harnesses document direct skill directories, not a
+portable recursive `skills/**/SKILL.md` contract. Packages without `namespace`
+continue to install flat for backward compatibility.
+
+Namespace values MUST be a single safe path segment. Resolvers MUST reject empty
+values, traversal (`.` or `..`), path separators, uppercase characters, and
+filesystem-unsafe punctuation.
+
+See also: [Package Namespaces](../../guides/skills/#package-namespaces).
+
+```yaml
+name: acme-tools
+version: 1.0.0
+namespace: acme
+type: skill
+```
+
+### 3.9. `scripts`
 
 | | |
 |---|---|
@@ -175,7 +205,7 @@ Declares how the package's content is processed during install and compile. Curr
 | **Value** | Shell command string |
 | **Description** | Named commands executed via `apm run <name>`. MUST support `--param key=value` substitution. |
 
-### 3.9. `includes`
+### 3.10. `includes`
 
 | | |
 |---|---|
@@ -207,7 +237,7 @@ includes: auto
 
 When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
 
-### 3.10. `policy`
+### 3.11. `policy`
 
 | | |
 |---|---|

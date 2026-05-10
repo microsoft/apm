@@ -11,6 +11,7 @@ import pytest
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
+    _skill_owner_key_from_deployed_path,
     copy_skill_to_target,
     normalize_skill_name,
     to_hyphen_case,
@@ -336,6 +337,7 @@ class TestSkillIntegrator:
         dependency_ref: DependencyReference = None,
         package_type: PackageType = None,
         content_type: "PackageContentType" = None,
+        namespace: str | None = None,
     ) -> PackageInfo:
         """Helper to create PackageInfo objects for tests.
 
@@ -350,6 +352,7 @@ class TestSkillIntegrator:
             source=source or f"github.com/test/{name}",
             description=description,
             type=content_type,
+            namespace=namespace,
         )
         resolved_ref = ResolvedReference(
             original_ref="main",
@@ -460,6 +463,162 @@ class TestSkillIntegrator:
         assert result.skill_path is not None
         # Skill directory should be created
         assert result.skill_path.exists()
+
+    def test_integrate_package_skill_uses_manifest_namespace(self):
+        """Packages with namespace get a direct, namespace-prefixed skill dir."""
+        package_dir = self.project_root / "my-skill"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# My Skill")
+
+        package_info = self._create_package_info(
+            name="my-skill",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace="example",
+        )
+
+        result = self.integrator.integrate_package_skill(package_info, self.project_root)
+
+        target = self.project_root / ".agents" / "skills" / "example-my-skill"
+        assert result.skill_created is True
+        assert result.skill_path == target / "SKILL.md"
+        assert (target / "SKILL.md").exists()
+        assert "name: example-my-skill" in (target / "SKILL.md").read_text()
+        assert not (self.project_root / ".github" / "skills" / "my-skill").exists()
+
+    def test_namespaced_deployed_path_maps_back_to_owner_key(self):
+        """Lockfile ownership keeps namespace identity for direct child paths."""
+        assert (
+            _skill_owner_key_from_deployed_path(
+                ".github/skills/example-my-skill",
+                namespace="example",
+            )
+            == "example/my-skill"
+        )
+
+    def test_nested_deployed_path_owner_key_stays_backward_compatible(self):
+        """Older nested lockfile paths already carry the namespace segment."""
+        assert (
+            _skill_owner_key_from_deployed_path(
+                ".github/skills/example/my-skill",
+                namespace="example",
+            )
+            == "example/my-skill"
+        )
+
+    def test_integrate_package_skill_namespace_does_not_emit_duplicate_verbose_log(self):
+        """Namespace routing is surfaced by install/services.py, not a second
+        inconsistent verbose line from the integrator.
+        """
+        package_dir = self.project_root / "brand-guidelines"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# Brand Guidelines")
+
+        package_info = self._create_package_info(
+            name="brand-guidelines",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace="acme",
+        )
+
+        captured: list[str] = []
+
+        class _StubLogger:
+            def verbose_detail(self, msg):
+                captured.append(msg)
+
+            def warning(self, *_args, **_kwargs):
+                pass
+
+            def info(self, *_args, **_kwargs):
+                pass
+
+        self.integrator.integrate_package_skill(
+            package_info, self.project_root, logger=_StubLogger()
+        )
+
+        assert not any("namespace" in m for m in captured), captured
+
+    def test_integrate_package_skill_namespace_no_log_when_absent(self):
+        """When no namespace is set, no namespace-specific verbose line fires."""
+        package_dir = self.project_root / "plain-skill"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# Plain")
+
+        package_info = self._create_package_info(
+            name="plain-skill",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace=None,
+        )
+
+        captured: list[str] = []
+
+        class _StubLogger:
+            def verbose_detail(self, msg):
+                captured.append(msg)
+
+            def warning(self, *_args, **_kwargs):
+                pass
+
+            def info(self, *_args, **_kwargs):
+                pass
+
+        self.integrator.integrate_package_skill(
+            package_info, self.project_root, logger=_StubLogger()
+        )
+
+        assert not any("namespace" in m for m in captured), captured
+
+    def test_integrate_package_skill_namespace_preserved_in_target_paths(self):
+        """IntegrationResult.target_paths must include the namespace prefix so
+        downstream consumers can reconstruct the full <namespace>/<skill-name>
+        identity without relying on recursive harness discovery.
+        """
+        package_dir = self.project_root / "my-skill"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# My Skill")
+
+        package_info = self._create_package_info(
+            name="my-skill",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace="acme",
+        )
+
+        result = self.integrator.integrate_package_skill(package_info, self.project_root)
+
+        assert result.target_paths, "expected at least one deployed path"
+        for tp in result.target_paths:
+            rel_parts = tp.relative_to(self.project_root).parts
+            assert "acme-my-skill" in rel_parts, f"namespace prefix missing from path: {tp}"
+            assert tp.parent.name == "skills", f"expected direct child of skills root: {tp}"
+
+    def test_integrate_sub_skills_uses_manifest_namespace(self):
+        """Sub-skills inherit the package namespace."""
+        package_dir = self.project_root / "bundle"
+        sub_skill = package_dir / ".apm" / "skills" / "helper"
+        sub_skill.mkdir(parents=True)
+        (sub_skill / "SKILL.md").write_text("# Helper")
+
+        package_info = self._create_package_info(
+            name="bundle",
+            install_path=package_dir,
+            package_type=PackageType.APM_PACKAGE,
+            namespace="example",
+        )
+
+        result = self.integrator.integrate_package_skill(package_info, self.project_root)
+
+        assert result.sub_skills_promoted == 1
+        assert (self.project_root / ".agents" / "skills" / "example-helper" / "SKILL.md").exists()
+        assert (
+            "name: example-helper"
+            in (
+                self.project_root / ".agents" / "skills" / "example-helper" / "SKILL.md"
+            ).read_text()
+        )
+        assert not (self.project_root / ".github" / "skills" / "helper").exists()
 
     def test_integrate_package_skill_multiple_virtual_file_packages_no_collision(self):
         """Test that multiple virtual FILE packages from same repo don't create conflicting Skills.
@@ -3771,10 +3930,10 @@ class TestUninstallPhase2SkillTargets:
 from dataclasses import replace as _dc_replace  # noqa: E402
 from unittest.mock import MagicMock  # noqa: E402
 
-from apm_cli.integration.targets import KNOWN_TARGETS  # noqa: E402
+from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile  # noqa: E402
 
 
-def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa: F821
+def _make_resolved_cowork_target(cowork_root: Path) -> TargetProfile:
     """Return a frozen TargetProfile with resolved_deploy_root set for cowork.
 
     Args:
@@ -3783,8 +3942,6 @@ def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa:
     Returns:
         A frozen TargetProfile suitable for cowork deployment tests.
     """
-    from apm_cli.integration.targets import TargetProfile  # noqa: F401
-
     return _dc_replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
@@ -3963,6 +4120,57 @@ class TestPromoteSubSkillsCowork:
         assert deployed_skill.exists()
         # .apm dir is excluded via shutil.ignore_patterns('.apm')
         assert not (cowork_root / "my-skill" / ".apm").exists()
+
+
+# =============================================================================
+# Path-containment guard (PR #1028 round 4 — supply-chain-security finding)
+# =============================================================================
+
+
+class TestSkillDirContainmentGuard:
+    """Regression tests for the runtime path-containment check inside
+    ``_skill_dir``. Parse-time regex validation rejects traversal in the
+    namespace value itself; this guard catches symlink-based escapes that
+    resolve only at runtime."""
+
+    def test_skill_dir_returns_namespaced_path_when_safe(self, tmp_path: Path) -> None:
+        from apm_cli.integration.skill_integrator import _skill_dir
+
+        skills_root = tmp_path / "skills"
+        skills_root.mkdir()
+        result = _skill_dir(skills_root, "my-skill", "acme")
+        assert result == skills_root / "acme-my-skill"
+
+    def test_skill_dir_returns_flat_path_when_no_namespace(self, tmp_path: Path) -> None:
+        from apm_cli.integration.skill_integrator import _skill_dir
+
+        skills_root = tmp_path / "skills"
+        skills_root.mkdir()
+        result = _skill_dir(skills_root, "my-skill", None)
+        assert result == skills_root / "my-skill"
+
+    def test_skill_dir_rejects_symlink_skill_escaping_root(self, tmp_path: Path) -> None:
+        """If a previous install planted the computed skill dir as a symlink
+        pointing outside the skills root, ``_skill_dir`` must raise
+        ``PathTraversalError`` so ``shutil.copytree`` cannot follow it and
+        write outside the deploy root."""
+        import pytest
+
+        from apm_cli.integration.skill_integrator import _skill_dir
+        from apm_cli.utils.path_security import PathTraversalError
+
+        skills_root = tmp_path / "skills"
+        skills_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        # Plant a malicious symlink at skills/evil-my-skill -> outside.
+        try:
+            (skills_root / "evil-my-skill").symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink creation not permitted on this platform: {exc}")
+
+        with pytest.raises(PathTraversalError):
+            _skill_dir(skills_root, "my-skill", "evil")
 
 
 class TestAgentSkillsDedupAndSecurity:
