@@ -24,6 +24,12 @@ from ...utils.path_security import (
 from ..validation import InvalidVirtualPackageExtensionError
 from .types import VirtualPackageType
 
+# Default ports per URI scheme -- used to normalise away redundant
+# explicit ports (e.g. https://host:443/...) so that lockfile keys
+# and error messages stay consistent regardless of how the user
+# spelled the URL.
+_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
+
 
 @dataclass
 class DependencyReference:
@@ -403,6 +409,9 @@ class DependencyReference:
         parsed = urllib.parse.urlparse(url)
         host = parsed.hostname or ""
         port = parsed.port  # int or None
+        # Normalise default SSH port so ssh://host:22/... matches ssh://host/...
+        if port == _DEFAULT_SCHEME_PORTS.get("ssh"):
+            port = None
         path = parsed.path.lstrip("/")
         fragment = parsed.fragment
 
@@ -957,6 +966,11 @@ class DependencyReference:
             parsed_url = urllib.parse.urlparse(repo_url)
             host = parsed_url.hostname or ""
             port = parsed_url.port  # capture :PORT from https://host:8443/...
+            # Normalise default-scheme ports (443 for HTTPS, 80 for HTTP)
+            # so lockfile keys are consistent regardless of URL spelling.
+            scheme = (parsed_url.scheme or "").lower()
+            if port == _DEFAULT_SCHEME_PORTS.get(scheme):
+                port = None
         else:
             parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
 

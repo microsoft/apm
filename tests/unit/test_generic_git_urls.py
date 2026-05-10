@@ -963,3 +963,46 @@ class TestGiteaVirtualPackageDetection:
         assert dep.repo_url == "owner/repo"
         assert dep.virtual_path == "prompts/review.prompt.md"
         assert dep.is_virtual is True
+
+
+class TestDefaultPortNormalisation:
+    """Issue #797: default-scheme ports are normalised to None at parse time."""
+
+    def test_default_https_port_normalised_to_none(self):
+        dep = DependencyReference.parse("https://github.com:443/owner/repo")
+        assert dep.port is None
+        assert dep.host == "github.com"
+        assert dep.repo_url == "owner/repo"
+
+    def test_default_ssh_port_normalised_to_none(self):
+        dep = DependencyReference.parse("ssh://git@gitlab.com:22/owner/repo.git")
+        assert dep.port is None
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "owner/repo"
+
+    def test_default_http_port_normalised_to_none(self):
+        dep = DependencyReference.parse("http://internal.git:80/team/repo")
+        assert dep.port is None
+        assert dep.host == "internal.git"
+        assert dep.repo_url == "team/repo"
+
+    def test_non_default_port_preserved(self):
+        dep = DependencyReference.parse("https://bitbucket.corp.com:7990/team/repo")
+        assert dep.port == 7990
+
+    def test_non_default_ssh_port_preserved(self):
+        dep = DependencyReference.parse("ssh://git@bitbucket.corp.com:7999/team/repo.git")
+        assert dep.port == 7999
+
+    def test_canonical_string_omits_normalised_default_port(self):
+        dep = DependencyReference.parse("https://gitlab.com:443/owner/repo")
+        canonical = dep.to_canonical()
+        assert ":443" not in canonical
+        assert "gitlab.com/owner/repo" in canonical
+
+    def test_https_url_with_port_443_matches_bare_url(self):
+        """Lockfile consistency: explicit :443 and bare URL produce the same key."""
+        dep_with_port = DependencyReference.parse("https://github.com:443/owner/repo")
+        dep_bare = DependencyReference.parse("https://github.com/owner/repo")
+        assert dep_with_port.port == dep_bare.port
+        assert dep_with_port.to_canonical() == dep_bare.to_canonical()
