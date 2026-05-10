@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import (
@@ -27,6 +28,15 @@ from apm_cli.marketplace.upstream_resolver import UpstreamResolver
 SHA_DIRECT = "a" * 40
 SHA_UPSTREAM_MANIFEST = "b" * 40
 SHA_UPSTREAM_PLUGIN = "c" * 40
+
+
+@pytest.fixture(autouse=True)
+def _enable_upstream_flag(monkeypatch):
+    """Patch the experimental flag so builder upstream paths run in unit tests."""
+    monkeypatch.setattr(
+        "apm_cli.core.experimental.is_enabled",
+        lambda _flag_name: True,
+    )
 
 
 # ---------------------------------------------------------------------------
