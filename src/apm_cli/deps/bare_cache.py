@@ -292,6 +292,166 @@ def bare_clone_with_fallback(
     )
 
 
+def fetch_sha_into_bare(
+    execute_transport_plan: Callable[..., None],
+    repo_url_base: str,
+    bare_path: Path,
+    sha: str,
+    *,
+    dep_ref: DependencyReference,
+) -> bool:
+    """Attempt to fetch a specific SHA into an existing bare repo.
+
+    Used to hydrate shallow bare clones that are missing a transitive
+    SHA-pinned commit.  Three-step strategy:
+
+    1. **Check first** -- ``git rev-parse --verify <sha>^{commit}`` against
+       the bare.  If the SHA is already present, returns ``True`` immediately
+       without any network I/O.
+    2. **Shallow fetch by SHA** (full 40-char SHAs only) -- invokes
+       ``execute_transport_plan`` with a fetch action that runs
+       ``git fetch <url> <sha>``.  Uses the authenticated URL supplied by
+       the transport plan, NOT ``git fetch origin <sha>``, because
+       ``remote.origin.url`` has been redacted to ``redacted://`` by
+       :func:`_scrub_bare_remote_url`.  After the fetch, verifies with
+       ``rev-parse --verify``.  Returns ``True`` on success.
+    3. **Broaden shallow** -- invokes ``execute_transport_plan`` with a
+       fetch action that runs ``git fetch <url>`` (no ref argument),
+       broadening the shallow boundary to include all remote refs.  After
+       the fetch, verifies with ``rev-parse --verify``.  Returns ``True``
+       on success.
+
+    On any failure in steps 2 or 3, returns ``False`` so the caller can
+    fall back to a fresh bare clone.
+
+    Note: this function deliberately does NOT call ``git update-ref HEAD``
+    after a successful fetch.  The consumer's :func:`materialize_from_bare`
+    handles SHA resolution independently via the ``known_sha`` parameter.
+
+    Args:
+        execute_transport_plan: Callable that orchestrates auth and protocol
+            fallback (typically ``self._execute_transport_plan``).
+        repo_url_base: Base repo URL (unauthenticated) passed to the
+            transport plan so it can inject credentials.
+        bare_path: Path to the existing bare repo on disk.
+        sha: The Git commit SHA to fetch.
+        dep_ref: Dependency reference used by the transport plan for
+            auth context.
+
+    Returns:
+        ``True`` if the SHA is now present in the bare, ``False`` otherwise.
+    """
+    from ..utils.git_env import get_git_executable
+
+    _log = logging.getLogger(__name__)
+    git_exe = get_git_executable()
+
+    def _rev_parse_present() -> bool:
+        """Return True if sha is already reachable in the bare."""
+        try:
+            result = subprocess.run(
+                [
+                    git_exe,
+                    "--git-dir",
+                    str(bare_path),
+                    "rev-parse",
+                    "--verify",
+                    f"{sha}^{{commit}}",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    # Step 1: check first -- no network if SHA already present.
+    _log.debug("fetch_sha_into_bare: checking if %s is present in %s", sha[:12], bare_path)
+    if _rev_parse_present():
+        _log.debug("fetch_sha_into_bare: SHA %s already present, skipping fetch", sha[:12])
+        return True
+
+    # Step 2: shallow fetch by full SHA (only for full 40-char SHAs).
+    if len(sha) == 40:
+        _log.debug(
+            "fetch_sha_into_bare: attempting shallow fetch of %s into %s", sha[:12], bare_path
+        )
+
+        def _fetch_action_sha(url: str, env: dict[str, str], target: Path) -> None:
+            subprocess.run(
+                [git_exe, "-C", str(bare_path), "fetch", "--depth=1", url, sha],
+                env=env,
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+
+        try:
+            execute_transport_plan(
+                repo_url_base,
+                bare_path,
+                dep_ref=dep_ref,
+                clone_action=_fetch_action_sha,
+            )
+            if _rev_parse_present():
+                _log.debug("fetch_sha_into_bare: shallow fetch of %s succeeded", sha[:12])
+                return True
+        except subprocess.CalledProcessError:
+            _log.debug(
+                "fetch_sha_into_bare: shallow fetch of %s failed, broadening shallow",
+                sha[:12],
+            )
+        except Exception:
+            _log.debug(
+                "fetch_sha_into_bare: shallow fetch of %s raised unexpected error",
+                sha[:12],
+                exc_info=True,
+            )
+
+    # Step 3: broaden shallow -- fetch all refs without a SHA argument.
+    _log.debug("fetch_sha_into_bare: broadening shallow in %s to find %s", bare_path, sha[:12])
+
+    def _fetch_action_broad(url: str, env: dict[str, str], target: Path) -> None:
+        subprocess.run(
+            [git_exe, "-C", str(bare_path), "fetch", url],
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+
+    try:
+        execute_transport_plan(
+            repo_url_base,
+            bare_path,
+            dep_ref=dep_ref,
+            clone_action=_fetch_action_broad,
+        )
+        if _rev_parse_present():
+            _log.debug("fetch_sha_into_bare: broad fetch succeeded, %s now present", sha[:12])
+            return True
+    except subprocess.CalledProcessError:
+        _log.debug(
+            "fetch_sha_into_bare: broad fetch failed for %s in %s",
+            sha[:12],
+            bare_path,
+        )
+    except Exception:
+        _log.debug(
+            "fetch_sha_into_bare: broad fetch raised unexpected error for %s",
+            sha[:12],
+            exc_info=True,
+        )
+
+    _log.debug(
+        "fetch_sha_into_bare: all fetch attempts exhausted for %s in %s; "
+        "caller should fall back to a fresh clone",
+        sha[:12],
+        bare_path,
+    )
+    return False
+
+
 def materialize_from_bare(
     bare_path: Path,
     consumer_dir: Path,
@@ -389,8 +549,9 @@ def materialize_from_bare(
             env=env,
             check=False,
         )
+    checkout_target = known_sha or "HEAD"
     subprocess.run(
-        [git_exe, "-C", str(consumer_dir), "checkout", "HEAD"],
+        [git_exe, "-C", str(consumer_dir), "checkout", checkout_target],
         capture_output=True,
         text=True,
         timeout=60,

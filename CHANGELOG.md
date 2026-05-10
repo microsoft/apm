@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now fetches missing SHA-pinned commits into existing shallow bare clones on demand, fixing mono-repo transitive dependencies that reference sibling packages at a commit other than HEAD. (#1258)
 - `apm marketplace add` accepts GitLab-class hosts (`gitlab.com` and self-managed instances configured via `GITLAB_HOST` / `APM_GITLAB_HOSTS`); unsupported generic hosts now show separate recovery hints for GHES (`GITHUB_HOST`) and self-managed GitLab instead of only `GITHUB_HOST`. (#1149)
 - **GitLab monorepo marketplaces:** `apm install plugin@marketplace` now resolves plugins whose sources live in a subdirectory of the marketplace repository on GitLab-class hosts (`gitlab.com` and self-managed GitLab when classified as GitLab), matching explicit `git:` + `path:` semantics without requiring that hand-written object form. (#1149)
 - `apm install` now rejects unsupported flat-format `dependencies` (e.g. `dependencies: [owner/repo]`) with a clear error and structured-format hint instead of silently ignoring them; the resolver also surfaces `ValueError` from malformed transitive manifests as warnings instead of swallowing them. (#1189)
