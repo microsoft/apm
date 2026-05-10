@@ -46,9 +46,7 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 # Primary token for requirement checking only (integration script handles actual usage)
 PRIMARY_TOKEN = GITHUB_APM_PAT or GITHUB_TOKEN
 
-pytestmark = pytest.mark.skipif(
-    not E2E_MODE, reason="E2E tests only run when APM_E2E_TESTS=1 is set"
-)
+pytestmark = pytest.mark.requires_e2e_mode
 
 
 def run_command(
