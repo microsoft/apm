@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
 - `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
 - Multi-account Git Credential Manager users: APM now selects the right GitHub account automatically per repository (no account-picker prompt) when `credential.useHttpPath = true` is set. Existing single-account setups are unaffected. (#1226)
+- Protocol-fallback port warnings are now deduplicated across parallel download workers via a threading lock, so each (host, repo, port) triple warns exactly once. (#1238)
 
 ## [0.12.4] - 2026-05-07
 
