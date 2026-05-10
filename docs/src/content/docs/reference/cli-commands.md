@@ -37,6 +37,9 @@ apm init [PROJECT_NAME] [OPTIONS]
 - `-y, --yes` - Skip interactive prompts and use auto-detected defaults
 - `--plugin` - Initialize as a plugin authoring project (creates `plugin.json` + `apm.yml` with `devDependencies`)
 - `--marketplace` - Seed `apm.yml` with a `marketplace:` authoring block. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+- `--discover` - Preview existing agent context files and propose an `apm.yml` for brownfield projects
+- `--write` - With `--discover`, write the proposed `apm.yml` after confirmation
+- `--format [text|json|yaml]` - Discovery output format
 
 **Examples:**
 ```bash
@@ -57,6 +60,16 @@ apm init my-plugin --plugin
 
 # Initialize a project that also publishes a marketplace
 apm init my-marketplace --marketplace
+
+# Preview existing agent context files without writing anything
+apm init --discover
+
+# Generate apm.yml from the discovery proposal
+apm init --discover --write
+
+# Migrate a Claude project to Codex (end-to-end)
+apm init --discover --write --yes   # discovers .claude/ files, migrates to .apm/
+apm install --target codex          # deploys .apm/ content to .codex/
 ```
 
 **Behavior:**
@@ -64,6 +77,14 @@ apm init my-marketplace --marketplace
 - **Interactive mode**: Prompts for project details unless `--yes` specified
 - **Auto-detection**: Automatically detects author from `git config user.name` and description from project context
 - **Brownfield friendly**: Works cleanly in existing projects without file pollution
+- **Discovery mode** (`--discover`): Scans known project, user, and safe system-level agent context locations for APM-native, convertible, and reference-only files, then prints a proposed `apm.yml`. It is read-only unless `--write` is provided
+- **Migration** (`--discover --write`): In addition to writing `apm.yml`, convertible files (e.g. `.claude/commands/*.md`) and misplaced APM-native files (e.g. `.claude/agents/*.agent.md`) are copied into their canonical `.apm/` locations so that `apm install --target <tool>` can deploy them. Files already in `.apm/` or `.github/` are left in place. The migration is idempotent -- running `--write` twice does not overwrite existing files. Plain `.md` skill files (e.g. `.claude/skills/render-validate.md`) are automatically wrapped into proper `<name>/SKILL.md` directory structures so the install pipeline can deploy them to all targets
+- **Includes tracking**: All directories containing discovered context files (`.github/`, `.claude/`, `.codex/`, etc.) are merged into `apm.yml` `includes`. `.apm/` is always scanned implicitly and not listed
+- **Harness discovery**: The discovery scan covers the full agent harness -- hooks (pre/post tool-use event handlers), commands (executable prompt files / slash commands), and styles (output style guides) -- in addition to instructions, agents, and skills. Discovered harness items are reported by tool, scope, kind, and importability:
+  - `hook`: `hooks/*.json`, `.apm/hooks/*.json` (APM-native); `.github/hooks/*.json` (Copilot)
+  - `hook-script`: shell/Python scripts under `hooks/scripts/`, `.github/hooks/scripts/`, `.claude/hooks/scripts/`
+  - `command`: `.apm/prompts/**/*.prompt.md` (APM-native); `.github/prompts/**/*.prompt.md` (Copilot); `.codex/commands/**/*.md` (Codex); `.claude/commands/**/*.md` (Claude); `.opencode/commands/**/*.md` (OpenCode); `.gemini/commands/**/*.md` (Gemini)
+  - `style`: `.apm/styles/*.style.md`, `.github/styles/*.style.md` (APM-native); `STYLE.md` (project-level)
 - **Plugin mode** (`--plugin`): Creates both `plugin.json` and `apm.yml` with an empty `devDependencies` section. Plugin names must be kebab-case (`^[a-z][a-z0-9-]{0,63}$`), max 64 characters
 
 **Creates:**

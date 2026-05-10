@@ -5,6 +5,7 @@
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm init [NAME]` | Initialize a new APM project | `-y` skip prompts, `--plugin` plugin authoring mode, `--marketplace` seed apm.yml with a `marketplace:` block |
+| `apm init --discover` | Brownfield discovery: scan existing agent context files (instructions, agents, hooks, commands, styles, skills) across all tools and scopes, then print a proposed `apm.yml` with migration plan. Plain skill files are wrapped into `SKILL.md` directories for cross-target install | `--write` persist the proposal and migrate convertible/misplaced files to `.apm/`, `--yes` skip confirmation, `--format [text\|yaml\|json]` output format |
 
 ## Dependency management
 

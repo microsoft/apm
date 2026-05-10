@@ -12,8 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
 - If you use the `gh` CLI, APM is now zero-config for private GitHub packages on github.com, `*.ghe.com`, and GHES: APM uses your active `gh auth login` token (`gh auth token --hostname <host>`) before falling back to `git credential fill`. Silently skipped when `gh` is not installed or not logged in for the host. (#630)
+- `apm init --discover --write` migrates convertible and misplaced files to `.apm/` with a preview-first plan. Enables end-to-end cross-tool migration (e.g. Claude to Codex). (#1122)
+- `apm init --discover` harness discovery: hooks, commands, and styles are now scanned alongside instructions, agents, and skills. (#1122)
 
 ### Fixed
+
 
 - `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback. The defensive expression broke gh-aw's bare-expression substitution regex, causing consumer-supplied `target:` values to be silently dropped; the `import-schema` default already covers the omitted-input case. (#1185)
 - `apm install --target all` no longer enumerates the experimental `copilot-cowork` target, which was crashing project-scope installs with a "requires --global" error and made `gh aw` workflows that pin `target: all` unusable. (#1191)
@@ -24,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --update` now falls back from a stale `ADO_APM_PAT` to an `az login` AAD bearer in the preflight auth probe, matching the behavior of `apm install` and every other ADO call site. Previously the preflight raised `AuthenticationError` on 401/403 even when `az login` would have succeeded. The bearer env also pops any pre-existing `GIT_TOKEN` so the JWT flows only via `GIT_CONFIG_VALUE_0`, and the per-host stale-PAT warning dedup is lock-guarded so parallel installs against the same ADO host emit one warning instead of one-per-thread. (#1212)
 - `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
 - `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
+- `apm init --discover` now merges discovered dirs into existing `apm.yml` `includes` instead of dropping them. (#1122)
+- `apm init --discover` migrates misplaced APM-native files outside `.apm/` and `.github/`. (#1122)
+- `apm init --discover` missing `copilot/instruction` migration mapping for `.github/copilot-instructions.md`. (#1122)
+- `apm init --discover` skill directories (all tools) are now migrated as complete directories including assets. (#1122)
+- `apm init --discover` adds missing Codex (`CODEX.md`, `.codex/skills/`, `.codex/instructions/`) and Copilot (`.github/skills/`, `.github/agents/`) context rules. (#1122)
+- `apm init --discover` wraps Claude plain `.md` skill files into `<name>/SKILL.md` directories so they install to all targets. (#1122)
+- `apm list` crash on `applyTo` field when value is a list instead of string. (#1122)
+- `apm compile` pre-flight check now scans `.github/` and includes dirs, preventing false "No APM content found" errors. (#1122)
 
 ## [0.12.4] - 2026-05-07
 
