@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 
+from ...core.docker_args import DockerArgsProcessor
+from ...core.token_manager import GitHubTokenManager
 from .copilot import CopilotClientAdapter
 
 
@@ -86,6 +88,168 @@ class CursorClientAdapter(CopilotClientAdapter):
                 return json.load(f)
         except (OSError, json.JSONDecodeError):
             return {}
+
+    # ------------------------------------------------------------------ #
+    # _format_server_config — Cursor-native schema
+    # ------------------------------------------------------------------ #
+
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        """Format server info into Cursor MCP configuration.
+
+        Cursor infers transport from which key is present (``command`` for
+        stdio, ``url`` for remote) and does not recognise Copilot-only
+        fields ``type``, ``tools``, or ``id``.
+
+        Args:
+            server_info: Server information from registry.
+            env_overrides: Pre-collected environment variable overrides.
+            runtime_vars: Pre-collected runtime variable values.
+
+        Returns:
+            dict suitable for writing to ``.cursor/mcp.json``.
+        """
+        if runtime_vars is None:
+            runtime_vars = {}
+
+        config: dict = {}
+
+        # --- raw stdio (self-defined deps) ---
+        raw = server_info.get("_raw_stdio")
+        if raw:
+            config["command"] = raw["command"]
+            resolved_env_for_args: dict = {}
+            if raw.get("env"):
+                resolved_env_for_args = self._resolve_environment_variables(
+                    raw["env"], env_overrides=env_overrides
+                )
+                config["env"] = resolved_env_for_args
+                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Cursor")
+            args = raw.get("args") or []
+            config["args"] = [
+                self._resolve_variable_placeholders(arg, resolved_env_for_args, runtime_vars)
+                if isinstance(arg, str)
+                else arg
+                for arg in args
+            ]
+            return config
+
+        # --- remote endpoints ---
+        remotes = server_info.get("remotes", [])
+        if remotes:
+            remote = self._select_remote_with_url(remotes) or remotes[0]
+
+            transport = (remote.get("transport_type") or "").strip()
+            if not transport:
+                transport = "http"
+            elif transport not in ("sse", "http", "streamable-http"):
+                raise ValueError(
+                    f"Unsupported remote transport '{transport}' for Cursor. "
+                    f"Server: {server_info.get('name', 'unknown')}. "
+                    f"Supported transports: http, sse, streamable-http."
+                )
+
+            config["url"] = (remote.get("url") or "").strip()
+
+            # Add authentication headers for GitHub MCP server
+            server_name = server_info.get("name", "")
+            is_github_server = self._is_github_server(server_name, remote.get("url", ""))
+
+            if is_github_server:
+                _tm = GitHubTokenManager()
+                github_token = _tm.get_token_for_purpose("copilot") or os.getenv(
+                    "GITHUB_PERSONAL_ACCESS_TOKEN"
+                )
+                if github_token:
+                    config["headers"] = {"Authorization": f"Bearer {github_token}"}
+
+            # Add any additional headers from registry if present
+            headers = remote.get("headers", [])
+            if headers:
+                if "headers" not in config:
+                    config["headers"] = {}
+                for header in headers:
+                    header_name = header.get("name", "")
+                    header_value = header.get("value", "")
+                    if header_name and header_value:
+                        resolved_value = self._resolve_env_variable(
+                            header_name, header_value, env_overrides
+                        )
+                        config["headers"][header_name] = resolved_value
+
+            # Warn about unresolvable ${input:...} references in headers
+            if config.get("headers"):
+                self._warn_input_variables(config["headers"], server_info.get("name", ""), "Cursor")
+
+            return config
+
+        # --- local packages ---
+        packages = server_info.get("packages", [])
+
+        if not packages and not remotes:
+            raise ValueError(
+                f"MCP server has incomplete configuration in registry - "
+                f"no package information or remote endpoints available. "
+                f"This appears to be a temporary registry issue. "
+                f"Server: {server_info.get('name', 'unknown')}"
+            )
+
+        if packages:
+            package = self._select_best_package(packages)
+
+            if package:
+                registry_name = self._infer_registry_name(package)
+                package_name = package.get("name", "")
+                runtime_hint = package.get("runtime_hint", "")
+                runtime_arguments = package.get("runtime_arguments", [])
+                package_arguments = package.get("package_arguments", [])
+                env_vars = package.get("environment_variables", [])
+
+                resolved_env = self._resolve_environment_variables(env_vars, env_overrides)
+                processed_runtime_args = self._process_arguments(
+                    runtime_arguments, resolved_env, runtime_vars
+                )
+                processed_package_args = self._process_arguments(
+                    package_arguments, resolved_env, runtime_vars
+                )
+
+                if registry_name == "npm":
+                    config["command"] = runtime_hint or "npx"
+                    config["args"] = (
+                        ["-y", package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
+                    )
+                    if resolved_env:
+                        config["env"] = resolved_env
+                elif registry_name == "docker":
+                    config["command"] = "docker"
+                    if processed_runtime_args:
+                        config["args"] = self._inject_env_vars_into_docker_args(
+                            processed_runtime_args, resolved_env
+                        )
+                    else:
+                        config["args"] = DockerArgsProcessor.process_docker_args(
+                            ["run", "-i", "--rm", package_name], resolved_env
+                        )
+                elif registry_name == "pypi":
+                    config["command"] = runtime_hint or "uvx"
+                    config["args"] = (
+                        [package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
+                    )
+                    if resolved_env:
+                        config["env"] = resolved_env
+                elif registry_name == "homebrew":
+                    config["command"] = (
+                        package_name.split("/")[-1] if "/" in package_name else package_name
+                    )
+                    config["args"] = processed_runtime_args + processed_package_args
+                    if resolved_env:
+                        config["env"] = resolved_env
+                else:
+                    config["command"] = runtime_hint or package_name
+                    config["args"] = processed_runtime_args + processed_package_args
+                    if resolved_env:
+                        config["env"] = resolved_env
+
+        return config
 
     # ------------------------------------------------------------------ #
     # configure_mcp_server — thin override for the print label

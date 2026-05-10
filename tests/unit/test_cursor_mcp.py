@@ -182,5 +182,89 @@ class TestMCPIntegratorCursorStaleCleanup(unittest.TestCase):
         self.assertNotIn("stale", data["mcpServers"])
 
 
+class TestCursorFormatServerConfig(unittest.TestCase):
+    """CursorClientAdapter._format_server_config emits Cursor-native schema."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cursor_dir = Path(self.tmp.name) / ".cursor"
+        self.cursor_dir.mkdir()
+
+        self.adapter = CursorClientAdapter()
+        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
+        self._cwd_patcher.start()
+
+    def tearDown(self):
+        self._cwd_patcher.stop()
+        self.tmp.cleanup()
+
+    # -- helpers --
+
+    _COPILOT_ONLY_KEYS = ("type", "tools", "id")
+
+    def _assert_no_copilot_fields(self, config):
+        for key in self._COPILOT_ONLY_KEYS:
+            self.assertNotIn(key, config, f"Cursor config must not contain '{key}'")
+
+    # -- tests --
+
+    def test_format_stdio_server_no_copilot_fields(self):
+        """Raw stdio server produces command/args/env, no type/tools/id."""
+        server_info = {
+            "id": "abc-123",
+            "name": "my-stdio-server",
+            "_raw_stdio": {
+                "command": "node",
+                "args": ["server.js", "--port", "3000"],
+                "env": {"API_KEY": "secret"},
+            },
+        }
+        config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["command"], "node")
+        self.assertIn("args", config)
+        self.assertIn("env", config)
+        self._assert_no_copilot_fields(config)
+
+    def test_format_remote_server_no_copilot_fields(self):
+        """Remote (HTTP) server produces url, no type/tools/id."""
+        server_info = {
+            "id": "remote-456",
+            "name": "my-remote-server",
+            "remotes": [
+                {
+                    "url": "https://mcp.example.com/sse",
+                    "transport_type": "http",
+                },
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["url"], "https://mcp.example.com/sse")
+        self._assert_no_copilot_fields(config)
+
+    def test_format_npm_package_no_copilot_fields(self):
+        """npm package server produces command=npx and args, no type/tools/id."""
+        server_info = {
+            "id": "npm-789",
+            "name": "my-npm-server",
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "@example/mcp-server",
+                    "runtime_arguments": [],
+                    "package_arguments": [],
+                    "environment_variables": [],
+                },
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["command"], "npx")
+        self.assertIn("-y", config["args"])
+        self.assertIn("@example/mcp-server", config["args"])
+        self._assert_no_copilot_fields(config)
+
+
 if __name__ == "__main__":
     unittest.main()
