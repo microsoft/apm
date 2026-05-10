@@ -9,7 +9,7 @@ promises" actually advertise:
     1. Portable by manifest -- ``apm init``, ``apm install``,
        ``apm compile``.
     2. Secure by default    -- ``apm audit``.
-    3. Governed by policy   -- ``apm policy`` surface reachable.
+    3. Governed by policy   -- ``apm policy status`` runs discovery.
 
 Scope rules
 -----------
@@ -237,26 +237,41 @@ class TestSecureByDefault:
 class TestGovernedByPolicy:
     """README promise 3: governed by policy.
 
-    Policy enforcement semantics (allow/deny lists, bypass tokens)
-    are tested against fixtures in the heavy suite. The smoke check
-    is just that the ``apm policy`` command surface is wired up and
-    its diagnostic subcommands respond -- catches regressions where
-    the policy module fails to import inside the PyInstaller bundle.
+    Concrete enforcement semantics (deny rules blocking installs,
+    bypass tokens, signature verification) are exercised against
+    configured fixtures in the heavy suite. The smoke check runs
+    the policy DISCOVERY pipeline end-to-end -- git-remote probing,
+    org resolution, cache lookup, rule evaluation -- and asserts
+    the diagnostic surface renders the result. A regression in any
+    layer of the policy stack (entry point, lazy imports inside
+    the PyInstaller bundle, discovery code path, status renderer)
+    surfaces here.
     """
 
-    def test_policy_command_surface_reachable(self, apm_binary_path: Path, tmp_path: Path) -> None:
-        """``apm policy --help`` must exit 0 and list subcommands.
+    def test_policy_status_runs_discovery(self, smoke_project: Path, apm_binary_path: Path) -> None:
+        """``apm policy status`` must run the discovery pipeline and exit 0.
 
-        Imports the policy module inside the binary; a regression
-        in the policy entry point or in any of its lazy imports
-        surfaces here without needing a configured policy file.
+        On the hermetic fixture (no git remote configured), the
+        discovery layer is expected to gracefully report
+        ``no_git_remote`` rather than crash; the status table itself
+        must render. This exercises far more of the governance stack
+        than ``--help`` would: Click entry point + policy module +
+        discovery + cache + rule evaluator + status renderer all
+        execute on the real binary.
         """
-        result = _run_apm(apm_binary_path, ["policy", "--help"], cwd=tmp_path)
+        result = _run_apm(apm_binary_path, ["policy", "status"], cwd=smoke_project)
         assert result.returncode == 0, (
-            f"apm policy --help failed (rc={result.returncode})\nstderr:\n{result.stderr}"
+            f"apm policy status failed (rc={result.returncode})\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-        assert "policy" in result.stdout.lower(), (
-            "apm policy --help output does not mention 'policy'"
+        stdout_lower = result.stdout.lower()
+        assert "policy status" in stdout_lower, (
+            "apm policy status output missing the 'Policy Status' header; "
+            "the diagnostic renderer did not run"
+        )
+        assert "outcome" in stdout_lower, (
+            "apm policy status output missing the 'Outcome' field; "
+            "the discovery layer did not report a result"
         )
 
 
