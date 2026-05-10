@@ -262,12 +262,30 @@ class InstallLogger(CommandLogger):
             if lockfile_count > 0:
                 _rich_info(f"Using apm.lock.yaml ({lockfile_count} locked dependencies)")
 
-    def nothing_to_install(self):
-        """Log when there's nothing to install — context-aware message."""
+    def nothing_to_install(
+        self,
+        lockfile_present: bool = False,
+        update_mode: bool = False,
+    ):
+        """Log when there's nothing to install -- context-aware message.
+
+        Args:
+            lockfile_present: True when apm.lock.yaml exists on disk at
+                the time of the no-op.  When True (and we're not in
+                update mode) we append the standard hint pointing at
+                ``apm update`` -- this is the #1203 nudge that keeps
+                users from believing ``apm install`` checks for newer
+                versions.
+            update_mode: True when this run was invoked with
+                ``--update`` or via ``apm update``.  Suppresses the
+                hint -- the user already asked to refresh.
+        """
         if self.partial:
             _rich_info("Requested packages are already installed.", symbol="check")
         else:
             _rich_success("All dependencies are up to date.", symbol="check")
+        if lockfile_present and not update_mode:
+            _rich_info("Lockfile already satisfied -- run 'apm update' to resolve latest refs.")
 
     # --- Download phase ---
 

@@ -218,6 +218,7 @@ def project(tmp_path):
     project_dir = tmp_path / "policy-e2e"
     project_dir.mkdir()
     (project_dir / ".github").mkdir()
+    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
     os.chdir(project_dir)
     yield project_dir, CliRunner()
     os.chdir(orig_cwd)

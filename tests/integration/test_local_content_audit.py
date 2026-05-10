@@ -64,9 +64,11 @@ def _seed_local_content(project: Path) -> None:
     instr_dir.mkdir(parents=True)
     (instr_dir / "bar.instructions.md").write_text("---\napplyTo: '**'\n---\n# Bar\nbody\n")
 
-    # .github/ already-exists triggers copilot target detection (and the
-    # default fallback is also copilot, so this is belt-and-suspenders).
+    # Post-#1154, the copilot target-detection signal is the
+    # .github/copilot-instructions.md file (a bare .github/ directory is no
+    # longer sufficient). Seed the marker so target detection succeeds.
     (project / ".github").mkdir()
+    (project / ".github" / "copilot-instructions.md").write_text("# test\n")
 
 
 def _make_project(tmp_path: Path, *, includes=None) -> Path:

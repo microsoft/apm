@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- The CLI self-updater moved from `apm update` to `apm self-update`. Inside an `apm.yml` project the bare `apm update` verb now refreshes project dependencies (matching `npm update`, `uv lock --upgrade`, `cargo update`); outside a project it forwards to `apm self-update` with a deprecation banner for one release. CI scripts that called `apm update` to refresh the binary should migrate now: `sed -i 's/apm update/apm self-update/g' your_scripts`. (#1244)
+
 ### Added
 
+- `apm update` now does what every npm/pip/cargo user expects -- resolve latest refs, show a structured plan, and ask before touching anything. Refreshes APM dependencies in the current project: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged) with an inline legend, and prompts `[y/N]` before mutating anything (`--yes` skips the prompt; `--dry-run` previews). (#1244)
+- `apm self-update`: updates the APM CLI binary itself (or shows distributor guidance when self-update is disabled at build time). Replaces the former `apm update` self-update path; supports `--check` to only check for a newer version. (#1244)
+- `apm install --frozen` performs a CI-safe, read-only install that fails fast (exit 1) when `apm.lock.yaml` is missing or out of sync with `apm.yml`; mutually exclusive with `--update`. Structural presence check only; use `apm audit` for on-disk SHA integrity. (#1244)
+- `apm install` now emits a one-line "Run 'apm update' to check for newer versions." hint on the no-op path when a lockfile is already present, pointing users at the verb that actually checks for newer refs. (#1244)
 - Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
 - **GitLab host support:** `gitlab.com` and self-managed instances (via `GITLAB_HOST` / `APM_GITLAB_HOSTS`) use GitLab REST **v4** for `marketplace.json` and install-time raw file reads; nested GitLab group paths are disambiguated in dependency references with object-form `git:` + `path:` where shorthand is ambiguous. GitHub, GHES, Azure DevOps, and registry-proxy behavior remain unchanged. (#1149)
@@ -17,12 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm install --force` help text now states explicitly that the flag does NOT refresh refs; users who want newer commits should run `apm update`. (#1244)
+- `apm update` now walks parent directories to find `apm.yml` (matching npm/cargo ergonomics), emits a one-time CI banner when invoked from a project root under `CI`/`GITHUB_ACTIONS` so pipelines see the dependency-refresh shift, and the no-op nudge copy now reads "Lockfile already satisfied -- run `apm update` to resolve latest refs." `apm install --frozen` adds a post-success "Run `apm audit` for on-disk content integrity." footer to set the right expectation, and FrozenInstallError now renders identically across `install` and `update`. (#1244)
 - `apm marketplace browse/search/add/update` route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub and GitLab host API fallbacks. (#1149)
 - Registry proxy now warns when `PROXY_REGISTRY_TOKEN` is set and `PROXY_REGISTRY_URL` uses `http://`, since the bearer token would be transmitted in plaintext; set `PROXY_REGISTRY_ALLOW_HTTP=1` to silence the warning for trusted internal proxies. (#1149)
 - Integration tests now use marker-driven discovery: 21 `pytestmark = pytest.mark.skipif(...)` chains across `tests/integration/` are replaced with declarative `requires_*` markers, with precondition logic centralized in `tests/integration/conftest.py` and auto-skipping at collection time. PR1 of #1166. (#1167)
 - Integration test apm-binary resolution now prefers the local build (`./dist/apm-<os>-<arch>/apm`) over a system-wide `apm` on `PATH`, so contributors validating the binary under test are not silently shadowed by a global install; the bearer-token marker (`requires_ado_bearer`) discards the captured JWT immediately and persists only the boolean outcome. (#1167)
 - `scripts/test-integration.sh` is now a thin orchestrator: it builds/locates the apm binary, sets up runtimes and tokens, then invokes `pytest tests/integration/` exactly once. The 28 per-file pytest enumerations were removed; the marker registry handles per-test gating, and new test files dropped into `tests/integration/` are picked up automatically. PR2 of #1166. (#1247)
 - Integration-test marker procedure codified as `.apm/instructions/tests.instructions.md` (wired into `test-coverage-expert` persona) and guarded by a regression-trap test that asserts `pyproject.toml`, `tests/integration/conftest.py::_MARKER_CHECKS`, the docs registry table, and the instructions rule stay in sync. (#1166)
+- Tier-2 smoke job runs `tests/integration/test_core_smoke.py` against the built apm binary, exercising `init` / `install` / `compile` / `audit` / `policy status` to fail fast on the README's three promises; replaces `test_runtime_smoke.py` (kept in heavy integration). (#1251)
 
 ### Fixed
 
@@ -40,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
 - Multi-account Git Credential Manager users: APM now selects the right GitHub account automatically per repository (no account-picker prompt) when `credential.useHttpPath = true` is set. Existing single-account setups are unaffected. (#1226)
 - Protocol-fallback port warnings are now deduplicated across parallel download workers via a threading lock, so each (host, repo, port) triple warns exactly once. (#1238)
+- `apm install --global <abs-local-path>` no longer rejects absolute local paths at user scope (regression introduced by #1149); restores the post-#937 contract that only relative local paths are ambiguous at user scope. (#1247)
+- Realigned the failing integration suite with current product contracts: copilot-target detection requires `.github/copilot-instructions.md` (post-#1154), `apm marketplace build` is removed in favor of `apm pack`, ADO virtual collections use the SUBDIRECTORY layout (post-#1094), and the `repo:` apm.yml key is replaced by `git:`. (#1247)
 
 ## [0.12.4] - 2026-05-07
 

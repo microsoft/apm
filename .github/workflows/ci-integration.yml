@@ -90,6 +90,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Artifact root is ./dist/ (least common ancestor of the uploaded paths
+      # in the build job), so download to ./dist/ to preserve the
+      # dist/apm-linux-x86_64/apm layout the conftest expects.
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: apm-mq-linux-x86_64
+          path: ./dist/
+
+      - name: Make binary executable
+        run: chmod +x ./dist/apm-linux-x86_64/apm
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -103,11 +115,18 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run smoke tests
+      # Smoke target is test_core_smoke.py: a hermetic, network-free pre-flight
+      # over the README's three promises (portable / secure / governed). It
+      # runs against the built binary in ~10s and fails the merge queue early
+      # if the bundle is broken before the 30-min integration suite even
+      # starts. The legacy test_runtime_smoke.py covers the experimental
+      # `apm run` execution layer and stays in the heavy integration job
+      # under requires_runtime_* markers.
+      - name: Run core smoke tests
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
-          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-        run: uv run pytest tests/integration/test_runtime_smoke.py -v
+          APM_E2E_TESTS: "1"
+          APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
+        run: uv run pytest tests/integration/test_core_smoke.py -v
 
   integration-tests:
     name: Integration Tests (Linux)

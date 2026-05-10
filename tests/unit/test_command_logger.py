@@ -256,6 +256,40 @@ class TestInstallLogger:
         logger.nothing_to_install()
         assert "up to date" in mock_success.call_args[0][0]
 
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_nothing_to_install_nudges_when_lockfile_present(self, mock_success, mock_info):
+        """Nudge to 'apm update' fires when install is a no-op AND lockfile exists.
+
+        Regression guard for the #1203 nudge branch: without this, users
+        would believe 'apm install' checks for newer refs.
+        """
+        logger = InstallLogger(partial=False)
+        logger.nothing_to_install(lockfile_present=True, update_mode=False)
+        assert "up to date" in mock_success.call_args[0][0]
+        assert mock_info.called, "nudge line was not emitted"
+        nudge_msg = mock_info.call_args[0][0]
+        assert "apm update" in nudge_msg
+        assert "latest refs" in nudge_msg
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_nothing_to_install_no_nudge_in_update_mode(self, mock_success, mock_info):
+        """No nudge when the user already asked for an update."""
+        logger = InstallLogger(partial=False)
+        logger.nothing_to_install(lockfile_present=True, update_mode=True)
+        assert "up to date" in mock_success.call_args[0][0]
+        assert not mock_info.called, "nudge should be suppressed in update mode"
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_nothing_to_install_no_nudge_without_lockfile(self, mock_success, mock_info):
+        """No nudge on first install (no lockfile yet)."""
+        logger = InstallLogger(partial=False)
+        logger.nothing_to_install(lockfile_present=False)
+        assert "up to date" in mock_success.call_args[0][0]
+        assert not mock_info.called
+
     @patch("apm_cli.core.command_logger._rich_success")
     def test_install_summary_apm_only(self, mock_success):
         logger = InstallLogger()
