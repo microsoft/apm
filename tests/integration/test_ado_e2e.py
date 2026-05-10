@@ -18,9 +18,7 @@ import pytest
 import yaml
 
 # Skip all tests in this module if ADO_APM_PAT is not set
-pytestmark = pytest.mark.skipif(
-    not os.getenv("ADO_APM_PAT"), reason="ADO_APM_PAT environment variable not set"
-)
+pytestmark = pytest.mark.requires_ado_pat
 
 
 def run_apm_command(cmd: str, cwd: Path, timeout: int = 60) -> subprocess.CompletedProcess:

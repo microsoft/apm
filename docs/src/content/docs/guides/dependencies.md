@@ -36,7 +36,9 @@ APM supports multiple dependency types:
 
 **Virtual File Packages** download a single file (like a prompt or instruction) and integrate it directly.
 
-For self-hosted **Gitea** and **Gogs**, virtual subdirectory and file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab is not yet supported for virtual packages -- use git-clone-based dependencies for GitLab repos.
+**Marketplaces:** Plugins installed as `apm install name@marketplace` resolve from a registered index. On **GitLab-class** hosts, monorepo plugins whose sources live in a subdirectory of the marketplace repository itself are supported without hand-writing object-form `git:` + `path:` entries. See the [Marketplaces guide](./marketplaces/).
+
+For self-hosted **Gitea** and **Gogs**, virtual subdirectory and file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). On **GitLab-class** hosts (gitlab.com and self-managed GitLab), virtual subdirectory and file packages resolve via the GitLab REST v4 `/projects/{id}/repository/files/{path}/raw` endpoint with `PRIVATE-TOKEN` auth.
 
 ### Claude Skills
 
@@ -178,7 +180,16 @@ and otherwise requires `--allow-insecure-host <hostname>` for each additional
 transitive host you want to allow.
 :::
 
-> **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
+> **Nested groups (GitLab, Gitea, etc.):** APM treats path segments after the host as the repository namespace and name. Shorthand works for many GitLab URLs (for example `gitlab.com/group/subgroup/repo`). When the namespace is **deeply nested** or a segment could be read either as part of the repo path or as a **virtual path**, prefer the **object form** with an explicit `git:` URL and `path:` so install and API resolution stay unambiguous:
+>
+> ```yaml
+> dependencies:
+>   apm:
+>     - git: https://gitlab.com/group/subgroup/repo.git
+>       path: registry/pkg
+> ```
+>
+> Virtual paths on simple two-segment repos still work in shorthand (`gitlab.com/owner/repo/file.prompt.md`). For **nested-group repos plus a virtual path in the same string**, the shorthand is ambiguous — use `git:` + `path:`:
 >
 > ```yaml
 > # DON'T — ambiguous: APM can't tell where the repo path ends
@@ -189,6 +200,41 @@ transitive host you want to allow.
 > - git: gitlab.com/group/subgroup/repo
 >   path: file.prompt.md
 > ```
+
+#### Monorepo sibling references with `git: parent`
+
+When an APM package lives **inside a monorepo** and depends on a sibling package in the same repository at the same ref, declare the dependency with the literal sentinel `git: parent` and a `path:` to the sibling. APM expands `parent` at resolve time to the consumer's clone coordinates -- you do not have to repeat the host, repo, or ref.
+
+```yaml
+# In agents/pkg-a/apm.yml inside org/monorepo
+dependencies:
+  apm:
+    - git: parent
+      path: skills/shared
+```
+
+When `org/monorepo` is installed at ref `main`, APM resolves the sibling to the same `host`, `repo_url`, and `ref`, with `virtual_path: skills/shared`. The lockfile records the **expanded** coordinates -- there is no `parent` sentinel persisted as durable identity:
+
+```yaml
+# apm.lock.yaml (excerpt)
+host: github.com
+repo_url: org/monorepo
+virtual_path: skills/shared
+resolved_ref: main
+resolved_commit: <sha>
+is_virtual: true
+```
+
+The expansion result is byte-for-byte identical to writing the explicit form below, so swapping between the two never invalidates the lockfile or causes a re-download:
+
+```yaml
+# Equivalent explicit form (verbose, but works outside the monorepo too)
+- git: https://github.com/org/monorepo.git
+  path: skills/shared
+  ref: main
+```
+
+Use `git: parent` only when both the consumer and the sibling live in the same git monorepo. A `parent` reference at the **top level** of an `apm.yml` (not transitively pulled in by a parent install) has no monorepo to inherit from and is rejected at resolve time. The `path` is required, must not be empty, and is normalised to a single relative path -- absolute paths and `..` traversal are refused.
 
 ### How Dependencies Are Stored (Canonical Format)
 

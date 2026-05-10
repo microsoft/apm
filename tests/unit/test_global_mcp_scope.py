@@ -344,5 +344,61 @@ class TestInstallCommandMCPScope(unittest.TestCase):
                     self.assertIsInstance(result, int)
 
 
+# ---------------------------------------------------------------------------
+# 5. Regression: update_lockfile receives scope-resolved path (#794)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateLockfileGlobalScope(unittest.TestCase):
+    """Regression tests for #794: update_lockfile must receive scope-resolved path."""
+
+    def test_install_module_passes_lock_path_to_update_lockfile(self):
+        """All update_lockfile calls in install.py pass _lock_path positionally."""
+        import ast
+        from pathlib import Path
+
+        install_src = Path(__file__).resolve().parent.parent.parent / (
+            "src/apm_cli/commands/install.py"
+        )
+        tree = ast.parse(install_src.read_text(encoding="utf-8"))
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "update_lockfile"
+            ):
+                # Must have at least 2 positional args (server_names, lock_path)
+                self.assertGreaterEqual(
+                    len(node.args),
+                    2,
+                    f"update_lockfile call at line {node.lineno} is missing "
+                    f"the lock_path positional argument (regression #794)",
+                )
+
+    def test_mcp_command_passes_lock_path_to_update_lockfile(self):
+        """update_lockfile call in mcp/command.py passes lock_path positionally."""
+        import ast
+        from pathlib import Path
+
+        cmd_src = Path(__file__).resolve().parent.parent.parent / (
+            "src/apm_cli/install/mcp/command.py"
+        )
+        tree = ast.parse(cmd_src.read_text(encoding="utf-8"))
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "update_lockfile"
+            ):
+                self.assertGreaterEqual(
+                    len(node.args),
+                    2,
+                    f"update_lockfile call at line {node.lineno} is missing "
+                    f"the lock_path positional argument (regression #794)",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -239,8 +239,8 @@ class TestMarketplaceAdd:
 
     # ------------------------------------------------------------------
     # Issue #1027: full HTTPS URLs and nested HOST/group/sub/.../REPO
-    # shorthand. The new parser also enforces a trusted-host gate so
-    # GitHub credentials are not forwarded to non-GitHub hosts.
+    # shorthand. Registration uses AuthResolver.classify_host so GitHub
+    # credentials are not forwarded to unsupported hosts (generic / ADO).
     # ------------------------------------------------------------------
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
@@ -307,24 +307,79 @@ class TestMarketplaceAdd:
         assert probe_source.owner == "acme/team/sub"
         assert probe_source.repo == "plugin-marketplace"
 
-    def test_add_rejects_non_github_host_with_actionable_error(self, runner):
-        """gitlab.com URLs are rejected at registration to avoid leaking creds."""
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_accepts_gitlab_com_https_url(self, mock_detect, mock_fetch, runner):
+        """GitLab SaaS HTTPS URL passes registration and probes the GitLab host."""
         from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
 
         result = runner.invoke(
             marketplace, ["add", "https://gitlab.com/acme/team/plugin-marketplace"]
         )
-        assert result.exit_code != 0
-        assert _quoted_hosts(result.output) == {"gitlab.com"}
-        assert "not supported" in result.output.lower()
+        assert result.exit_code == 0, result.output
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "gitlab.com"
+        assert probe_source.owner == "acme/team"
+        assert probe_source.repo == "plugin-marketplace"
 
-    def test_add_rejects_non_github_host_shorthand(self, runner):
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_accepts_gitlab_com_host_shorthand(self, mock_detect, mock_fetch, runner):
+        """Host-qualified shorthand for gitlab.com passes the registration gate."""
         from apm_cli.commands.marketplace import marketplace
 
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
+
         result = runner.invoke(marketplace, ["add", "gitlab.com/acme/team/plugin-marketplace"])
+        assert result.exit_code == 0, result.output
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "gitlab.com"
+        assert probe_source.owner == "acme/team"
+        assert probe_source.repo == "plugin-marketplace"
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_accepts_self_managed_gitlab_with_gitlab_host_env(
+        self, mock_detect, mock_fetch, runner, monkeypatch
+    ):
+        """Self-managed GitLab FQDN is accepted when GITLAB_HOST classifies it."""
+        from apm_cli.commands.marketplace import marketplace
+
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
+
+        result = runner.invoke(marketplace, ["add", "git.epam.com/epm-ease/apm-registry"])
+        assert result.exit_code == 0, result.output
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "git.epam.com"
+        assert probe_source.owner == "epm-ease"
+        assert probe_source.repo == "apm-registry"
+
+    def test_add_rejects_generic_host_without_gitlab_classification(self, runner):
+        """Unknown FQDN stays generic; registration fails with GHES and GitLab hints."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace, ["add", "https://git.example.com/acme/team/plugin-marketplace"]
+        )
         assert result.exit_code != 0
-        assert _quoted_hosts(result.output) == {"gitlab.com"}
+        assert _quoted_hosts(result.output) == {"git.example.com"}
         assert "not supported" in result.output.lower()
+        normalized = " ".join(result.output.split())
+        assert "export GITHUB_HOST=git.example.com" in normalized
+        assert "export GITLAB_HOST=git.example.com" in normalized
+        assert "APM_GITLAB_HOSTS" in result.output
 
     def test_add_rejects_http_url(self, runner):
         """Plain HTTP URLs are rejected -- no --allow-insecure escape hatch."""
@@ -409,7 +464,8 @@ class TestMarketplaceAdd:
         from apm_cli.commands.marketplace import marketplace
 
         result = runner.invoke(
-            marketplace, ["add", "https://gitlab.com/acme/team/plugin-marketplace"]
+            marketplace,
+            ["add", "https://git.example.com/acme/team/plugin-marketplace"],
         )
         assert result.exit_code != 0
         # First non-empty line must state the outcome ("not supported") and name
@@ -417,7 +473,7 @@ class TestMarketplaceAdd:
         # leak", etc.) must NOT appear in the default error path.
         first_line = next((line for line in result.output.splitlines() if line.strip()), "").lower()
         assert "not supported" in first_line
-        assert _quoted_hosts(first_line) == {"gitlab.com"}
+        assert _quoted_hosts(first_line) == {"git.example.com"}
         assert "credential" not in result.output.lower()
         assert "leak" not in result.output.lower()
 
@@ -435,6 +491,7 @@ class TestMarketplaceAdd:
         assert result.exit_code != 0
         normalized = " ".join(result.output.split())
         assert "export GITHUB_HOST=myghes.corp" in normalized
+        assert "export GITLAB_HOST=myghes.corp" in normalized
         assert "apm marketplace add myghes.corp/org/repo" in normalized
 
     def test_path_traversal_error_message_no_double_exception_text(self, runner):

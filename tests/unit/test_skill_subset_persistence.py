@@ -257,6 +257,20 @@ class TestApmYmlWriter:
         result = set_skill_subset_for_entry(manifest, "owner/repo", ["alpha"])
         assert result is False
 
+    def test_flat_list_deps_rejected(self, tmp_path):
+        """Flat list dependencies raise ValueError in the writer."""
+        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
+
+        manifest = self._write_manifest(
+            tmp_path,
+            """\
+            dependencies:
+              - owner/repo#main
+            """,
+        )
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
+            set_skill_subset_for_entry(manifest, "owner/repo", ["alpha"])
+
     def test_update_existing_dict_entry(self, tmp_path):
         """Dict entry with existing skills: gets updated."""
         from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry

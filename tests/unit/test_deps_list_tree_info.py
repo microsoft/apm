@@ -8,10 +8,10 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands.deps.cli import _deps_list_source_label
 
 
 def _force_rich_fallback():
@@ -77,6 +77,17 @@ class _DepsCmdBase:
                 yield Path(tmp_dir)
             finally:
                 os.chdir(self.original_dir)
+
+
+def test_deps_list_source_label_mapping():
+    """Source labels follow host class: local, ADO, GitLab, default GitHub bucket."""
+    assert _deps_list_source_label(None, is_local=True) == "local"
+    assert _deps_list_source_label(None, lockfile_source="local") == "local"
+    assert _deps_list_source_label("gitlab.com") == "gitlab"
+    assert _deps_list_source_label("dev.azure.com") == "azure-devops"
+    assert _deps_list_source_label("github.com") == "github"
+    # GHES / generic enterprise: not GitLab-class → github bucket for this column
+    assert _deps_list_source_label("ghes.example.org") == "github"
 
 
 class TestDepsListCommand(_DepsCmdBase):
@@ -322,6 +333,45 @@ class TestDepsListCommand(_DepsCmdBase):
             # (deps says "orphaned package(s) found", prune says
             # "Found N orphaned package(s)").
             assert "orphaned package(s) found" not in result.output
+
+    def test_list_shows_gitlab_source_for_gitlab_dependency(self):
+        """GitLab-class host from apm.yml shows Source column ``gitlab``."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "acme", "coding-standards", version="1.0.0")
+            (tmp / "apm.yml").write_text(
+                "name: proj\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - git: https://gitlab.com/acme/coding-standards.git\n",
+                encoding="utf-8",
+            )
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+        assert result.exit_code == 0, result.output
+        out = result.output.lower()
+        assert "acme/coding-standards" in out
+        assert "gitlab" in out
+        assert "orphaned" not in out.lower()
+
+    def test_list_shows_gitlab_source_from_lockfile_host(self):
+        """Lockfile-only dep with ``host: gitlab.com`` maps Source to ``gitlab``."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "lkorg", "lkrepo", version="2.0.0")
+            (tmp / "apm.lock.yaml").write_text(
+                'lockfile_version: "1"\n'
+                "generated_at: '2026-01-01T00:00:00+00:00'\n"
+                "dependencies:\n"
+                "  - repo_url: lkorg/lkrepo\n"
+                "    host: gitlab.com\n"
+                "    version: '2.0.0'\n",
+                encoding="utf-8",
+            )
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+        assert result.exit_code == 0, result.output
+        out = result.output.lower()
+        assert "lkorg/lkrepo" in out
+        assert "gitlab" in out
+        assert "orphaned" not in out.lower()
 
 
 class TestDepsTreeCommand(_DepsCmdBase):

@@ -28,6 +28,7 @@ from apm_cli.deps.host_backends import (
     GHECloudBackend,
     GHESBackend,
     GitHubBackend,
+    GitLabBackend,
     HostBackend,
     backend_for,
     backend_for_host,
@@ -374,8 +375,12 @@ class TestBackendDispatch:
         assert isinstance(backend, ADOBackend)
 
     def test_dispatch_generic(self):
-        backend = backend_for(_dep_ref(host="gitlab.com"), self.resolver)
+        backend = backend_for(_dep_ref(host="gitea.example.com"), self.resolver)
         assert isinstance(backend, GenericGitBackend)
+
+    def test_dispatch_gitlab(self):
+        backend = backend_for(_dep_ref(host="gitlab.com"), self.resolver)
+        assert isinstance(backend, GitLabBackend)
 
     def test_dispatch_ghes_via_github_host_env(self):
         with patch.dict(os.environ, {"GITHUB_HOST": "git.acme.com"}):

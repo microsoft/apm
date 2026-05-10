@@ -23,9 +23,7 @@ import pytest
 # Skip all tests in this module if not in E2E mode
 E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 
-pytestmark = pytest.mark.skipif(
-    not E2E_MODE, reason="E2E tests only run when APM_E2E_TESTS=1 is set"
-)
+pytestmark = pytest.mark.requires_e2e_mode
 
 
 @pytest.fixture(scope="module")

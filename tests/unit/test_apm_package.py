@@ -441,3 +441,121 @@ class TestIncludesField:
         )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.has_apm_dependencies() is False
+
+
+class TestInvalidDependencyTypes:
+    """Tests for non-dict dependency format rejection.
+
+    Only the structured mapping (``dependencies: {apm: [...]}``) is
+    supported. Any other type -- list, string, int -- must be rejected
+    with a clear error.
+    """
+
+    def test_flat_list_dependencies_rejected(self, tmp_path):
+        """Flat list dependencies raise ValueError."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": [
+                    "owner/repo1#abc123",
+                    "owner/repo2#def456",
+                ],
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_flat_list_empty_dependencies_rejected(self, tmp_path):
+        """Even an empty flat list is rejected."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": [],
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_flat_list_dev_dependencies_rejected(self, tmp_path):
+        """Flat list devDependencies raise ValueError."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": [
+                    "owner/dev-tool#v1",
+                ],
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_string_dependencies_rejected(self, tmp_path):
+        """String dependencies raise ValueError."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": "owner/repo",
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"expected a mapping.*got str"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_int_dependencies_rejected(self, tmp_path):
+        """Integer dependencies raise ValueError."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": 42,
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"expected a mapping.*got int"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_error_mentions_structured_format(self, tmp_path):
+        """Error message includes the correct structured format example."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": ["owner/repo"],
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"apm:"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_structured_format_still_works(self, tmp_path):
+        """Regression guard: structured format must not break."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": {
+                    "apm": ["owner/repo1"],
+                    "mcp": [],
+                },
+            },
+        )
+
+        pkg = APMPackage.from_apm_yml(yml)
+
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 1
+        assert deps[0].repo_url == "owner/repo1"
