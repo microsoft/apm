@@ -10,6 +10,7 @@ import pytest
 from apm_cli.core import azure_cli as _azure_cli_mod
 from apm_cli.core.auth import AuthResolver, HostInfo
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.models.dependency.reference import DependencyReference
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +20,13 @@ def _reset_bearer_singleton():
     _azure_cli_mod._provider_singleton = None
     yield
     _azure_cli_mod._provider_singleton = None
+
+
+@pytest.fixture(autouse=True)
+def _disable_gh_cli_fallback():
+    """Keep auth tests deterministic regardless of local gh login state."""
+    with patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +282,72 @@ class TestResolve:
                 ctx = resolver.resolve("github.com")
                 assert ctx.token == "cred-token"
                 assert ctx.source == "git-credential-fill"
+
+    def test_gh_cli_source_label(self):
+        """When gh CLI supplies the token, ctx.source == 'gh-auth-token'."""
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_cli_token",
+            ),
+        ):
+            resolver = AuthResolver()
+            ctx = resolver.resolve("github.com")
+            assert ctx.token == "gho_cli_token"
+            assert ctx.source == "gh-auth-token"
+
+    def test_try_with_fallback_uses_gh_cli(self):
+        """try_with_fallback retries via gh CLI before git credential fill."""
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "stale-token"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_fresh",
+            ),
+            patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ) as mock_cred,
+        ):
+            resolver = AuthResolver()
+            attempts = []
+
+            def op(token, env):
+                attempts.append(token)
+                if token == "gho_fresh":
+                    return token
+                raise RuntimeError("401 Unauthorized")
+
+            result = resolver.try_with_fallback("github.com", op)
+            assert result == "gho_fresh"
+            assert attempts == ["stale-token", None, "gho_fresh"]
+            # git credential fill must not be reached when gh CLI succeeds.
+            mock_cred.assert_not_called()
+
+    def test_resolve_for_dep_uses_standard_credential_fallback(self):
+        """Dependency-aware resolution still uses the standard host-based fallback chain."""
+        dep_ref = DependencyReference.parse("Devolutions/RDM/.claude/skills/add-culture-rdm")
+        with patch.dict(os.environ, {}, clear=True):
+            with (
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_gh_cli",
+                    return_value=None,
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_git",
+                    return_value="cred-token",
+                ) as mock_cred,
+            ):
+                resolver = AuthResolver()
+                ctx = resolver.resolve_for_dep(dep_ref)
+                assert ctx.token == "cred-token"
+                assert ctx.source == "git-credential-fill"
+                mock_gh.assert_called_once_with("github.com")
+                mock_cred.assert_called_once_with("github.com", port=None)
 
     def test_global_var_resolves_for_non_default_host(self):
         """GITHUB_APM_PAT resolves for *.ghe.com (any host, not just default)."""
@@ -1141,7 +1215,7 @@ class TestTryWithFallbackWithPort:
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
             captured: list = []
 
-            def fake_cred(host, port=None):
+            def fake_cred(host, port=None, path=None):
                 captured.append((host, port))
                 return "good"
 
@@ -1158,3 +1232,85 @@ class TestTryWithFallbackWithPort:
                 result = resolver.try_with_fallback("contoso.ghe.com", op, port=8443)
         assert result == "ok"
         assert captured == [("contoso.ghe.com", 8443)]
+
+
+class TestTryWithFallbackPathDisambiguation:
+    """try_with_fallback must thread `path` to credential fill (per-URL GCM)."""
+
+    def test_path_threaded_to_credential_fallback(self):
+        """When env token fails, path is forwarded to resolve_credential_from_git."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
+            seen_kwargs: list = []
+
+            def fake_cred(host, port=None, path=None):
+                seen_kwargs.append({"host": host, "port": port, "path": path})
+                return "good"
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
+            ):
+                resolver = AuthResolver()
+
+                def op(token, env):
+                    if token != "good":
+                        raise RuntimeError("rejected")
+                    return "ok"
+
+                result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
+        assert result == "ok"
+        assert seen_kwargs == [{"host": "github.com", "port": None, "path": "acme/widgets"}]
+
+    def test_path_default_none_preserves_legacy_call(self):
+        """Callers that omit path still invoke credential fill with path=None."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
+            seen_kwargs: list = []
+
+            def fake_cred(host, port=None, path=None):
+                seen_kwargs.append({"host": host, "port": port, "path": path})
+                return "good"
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
+            ):
+                resolver = AuthResolver()
+
+                def op(token, env):
+                    if token != "good":
+                        raise RuntimeError("rejected")
+                    return "ok"
+
+                resolver.try_with_fallback("github.com", op)
+        assert seen_kwargs == [{"host": "github.com", "port": None, "path": None}]
+
+
+class TestGhCliShortCircuitsCredentialFill:
+    """Regression trap: when gh CLI returns a token, credential fill must NOT run.
+
+    PR #630 added gh-CLI as the second resolver in the fallback chain. Without
+    this trap, a refactor that re-orders the chain (or accidentally calls
+    resolve_credential_from_git unconditionally) would silently re-introduce
+    the GCM account-picker prompt for users who configured gh.
+    """
+
+    def test_gh_cli_success_skips_credential_fill(self):
+        """resolve_credential_from_git must not be invoked when gh CLI returns a token."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
+            with patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_from_gh_cli",
+            ):
+                with patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git"
+                ) as mock_cred_fill:
+                    resolver = AuthResolver()
+
+                    def op(token, env):
+                        if token != "gho_from_gh_cli":
+                            raise RuntimeError("rejected")
+                        return f"ok:{token}"
+
+                    result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
+
+            assert result == "ok:gho_from_gh_cli"
+            mock_cred_fill.assert_not_called()

@@ -10,11 +10,11 @@ APM works without tokens for public packages on github.com. Authentication is ne
 
 APM resolves tokens per `(host, port, org)` pair. For each dependency, it walks a **host-class-specific** chain until it finds a token:
 
-1. **GitHub-class hosts** (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`): **Per-org env var** `GITHUB_APM_PAT_{ORG}` (when an org slug applies), then **global** `GITHUB_APM_PAT` → `GITHUB_TOKEN` → `GH_TOKEN`, then host-specific **git credential helper**.
-2. **GitLab-class hosts** (`gitlab.com`, or FQDNs listed via `GITLAB_HOST` / `APM_GITLAB_HOSTS`): **only** `GITLAB_APM_PAT` → `GITLAB_TOKEN`, then host-specific **git credential helper**. GitHub token env vars are **not** used for GitLab (including `GITHUB_APM_PAT`, `GITHUB_TOKEN`, and `GH_TOKEN`, and `GITHUB_APM_PAT_{ORG}` for group/namespace paths).
-3. **Generic hosts** (other FQDNs such as Bitbucket): host-specific **git credential helper** or unauthenticated/public access — **no** GitHub or GitLab platform env vars.
+1. **GitHub-class hosts** (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`): **Per-org env var** `GITHUB_APM_PAT_{ORG}` (when an org slug applies), then **global** `GITHUB_APM_PAT` -> `GITHUB_TOKEN` -> `GH_TOKEN`, then **GitHub CLI active account** (`gh auth token --hostname <host>`, silently skipped if `gh` is not installed or not logged in for the host), then host-specific **git credential helper**.
+2. **GitLab-class hosts** (`gitlab.com`, or FQDNs listed via `GITLAB_HOST` / `APM_GITLAB_HOSTS`): **only** `GITLAB_APM_PAT` -> `GITLAB_TOKEN`, then host-specific **git credential helper**. GitHub token env vars are **not** used for GitLab (including `GITHUB_APM_PAT`, `GITHUB_TOKEN`, and `GH_TOKEN`, and `GITHUB_APM_PAT_{ORG}` for group/namespace paths).
+3. **Generic hosts** (other FQDNs such as Bitbucket): host-specific **git credential helper** or unauthenticated/public access -- **no** GitHub or GitLab platform env vars.
 
-Azure DevOps uses its own chain (`ADO_APM_PAT` → Azure CLI bearer). See [Azure DevOps](#azure-devops).
+Azure DevOps uses its own chain (`ADO_APM_PAT` -> Azure CLI bearer). See [Azure DevOps](#azure-devops).
 If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency).
 
 Results are cached per-process for each `(host, port, org)` key. All token-bearing requests use HTTPS.
@@ -24,11 +24,12 @@ Results are cached per-process for each `(host, port, org)` key. All token-beari
 
 | Priority | Variable | Scope | Notes |
 |----------|----------|-------|-------|
-| 1 | `GITHUB_APM_PAT_{ORG}` | Per-org | Org name uppercased, hyphens → underscores |
+| 1 | `GITHUB_APM_PAT_{ORG}` | Per-org | Org name uppercased, hyphens -> underscores |
 | 2 | `GITHUB_APM_PAT` | Global | Falls back to git credential helpers if rejected |
 | 3 | `GITHUB_TOKEN` | Global | Often set in GitHub Actions |
 | 4 | `GH_TOKEN` | Global | Often set by `gh auth login` |
-| 5 | `git credential fill` | Per-host | System credential manager, `gh auth`, OS keychain |
+| 5 | `gh auth token --hostname <host>` | Per-host | Active `gh auth login` account; silently skipped if `gh` is missing or not logged in |
+| 6 | `git credential fill` | Per-host | System credential manager, OS keychain |
 
 ### GitLab-class hosts (`gitlab.com`, `GITLAB_HOST`, `APM_GITLAB_HOSTS`)
 
@@ -75,6 +76,33 @@ The org name comes from the dependency reference — `contoso/my-package` checks
 - `contoso-microsoft` → `GITHUB_APM_PAT_CONTOSO_MICROSOFT`
 
 Per-org tokens take priority over global tokens. Use this when different orgs require different PATs (e.g., separate SSO authorizations).
+
+## Multi-account Git Credential Manager
+
+APM forwards the repository path to `git credential fill`, so [Git Credential Manager (GCM)](https://github.com/git-ecosystem/git-credential-manager) can automatically pick the right GitHub account per organization -- no account-picker prompt. Existing single-account setups are unaffected: if `credential.useHttpPath` is not enabled, git credential helpers ignore the `path` attribute and match per host only.
+
+To opt in, enable path-aware matching once:
+
+```bash
+git config --global credential.useHttpPath true
+```
+
+GCM (v2.1+) matches credential URLs by **prefix**, so a single config entry per org typically covers every repo under that org:
+
+```bash
+git config --global credential.https://github.com/acme.username your-acme-account
+git config --global credential.https://github.com/personal-org.username your-personal-account
+```
+
+With the entries above, fetches against `acme/widgets`, `acme/payments`, and any other `acme/*` repo all resolve to `your-acme-account` without per-repo configuration. Other credential helpers (and older GCM versions) may require an exact path match -- consult your helper's documentation if a per-org entry is not picked up.
+
+### Seeing an account picker mid-install?
+
+If `apm install` triggers a GCM account-picker dialog while resolving a private repo:
+
+1. Confirm `credential.useHttpPath` is set globally: `git config --global --get credential.useHttpPath` should print `true`.
+2. Confirm a per-URL entry exists for the org: `git config --global --get-urlmatch credential https://github.com/<org>` should list the username.
+3. Re-run with `--verbose`; APM logs `trying git credential fill for <host> (path=<owner>/<repo>)` so you can confirm the path APM is sending matches your config entry.
 
 ## Fine-grained PAT setup
 
@@ -244,11 +272,11 @@ For GitHub and GHES, APM sends repository API requests with `Authorization: toke
 
 | Package source | Host | Auth behavior | Fallback |
 |---|---|---|---|
-| `org/repo` (bare) | `default_host()` | Global env vars → credential fill | Unauth for public repos |
-| `github.com/org/repo` | github.com | Global env vars → credential fill | Unauth for public repos |
-| `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars → credential fill | Auth-only (no public repos) |
-| GHES via `GITHUB_HOST` | ghes.company.com | Global env vars → credential fill | Unauth for public repos |
-| GitLab (`gitlab.com` or host listed in `GITLAB_HOST` / `APM_GITLAB_HOSTS`) | gitlab.com or self-managed | `GITLAB_APM_PAT` → `GITLAB_TOKEN` → credential helper; REST uses `PRIVATE-TOKEN`; GitHub env vars excluded | Unauth where the instance allows it |
+| `org/repo` (bare) | `default_host()` | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| `github.com/org/repo` | github.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars -> `gh auth token` -> credential fill | Auth-only (no public repos) |
+| GHES via `GITHUB_HOST` | ghes.company.com | Global env vars -> `gh auth token` -> credential fill | Unauth for public repos |
+| GitLab (`gitlab.com` or host listed in `GITLAB_HOST` / `APM_GITLAB_HOSTS`) | gitlab.com or self-managed | `GITLAB_APM_PAT` -> `GITLAB_TOKEN` -> credential helper; REST uses `PRIVATE-TOKEN`; GitHub env vars excluded | Unauth where the instance allows it |
 | `dev.azure.com/org/proj/repo` | ADO | `ADO_APM_PAT` -> AAD bearer via `az` | Auth-only |
 | Artifactory registry proxy | custom FQDN | `PROXY_REGISTRY_TOKEN` | Error if `PROXY_REGISTRY_ONLY=1` |
 
@@ -346,7 +374,9 @@ flowchart TD
     B -->|GITHUB_APM_PAT_ORG| C[Use per-org token]
     B -->|Not set| D{Global env var?}
     D -->|GITHUB_APM_PAT / GITHUB_TOKEN / GH_TOKEN| E[Use global token]
-    D -->|Not set| F{Git credential fill?}
+    D -->|Not set| GH{gh auth token?<br/>GitHub-like hosts only}
+    GH -->|Found| E
+    GH -->|Not found| F{Git credential fill?}
 
     HC -->|GitLab| GL{GitLab env var?}
     GL -->|GITLAB_APM_PAT / GITLAB_TOKEN| E
@@ -362,12 +392,12 @@ flowchart TD
     G --> I
     H --> I
 
-    I -->|Token works| J[Success]
-    I -->|Token fails| K{Credential-fill fallback}
-    K -->|Found credential| J
-    K -->|No credential| L{Host has public repos?}
-    L -->|Yes| M[Try unauthenticated]
-    L -->|No| N[Auth error with actionable message]
+    I -->|Token works| L[Success]
+    I -->|Token fails| M{Fallback credentials}
+    M -->|gh or git credential found| L
+    M -->|No credential| N{Host has public repos?}
+    N -->|Yes| O[Try unauthenticated]
+    N -->|No| P[Auth error with actionable message]
 ```
 
 ### Git credential helper not found

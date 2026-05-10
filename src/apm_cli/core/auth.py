@@ -358,6 +358,7 @@ class AuthResolver:
         *,
         org: str | None = None,
         port: int | None = None,
+        path: str | None = None,
         unauth_first: bool = False,
         verbose_callback: Callable[[str], None] | None = None,
     ) -> T:
@@ -368,9 +369,14 @@ class AuthResolver:
         host:
             Target git host.
         operation:
-            ``operation(token, git_env) -> T`` — the work to do.
+            ``operation(token, git_env) -> T`` -- the work to do.
         org:
             Optional organisation for per-org token lookup.
+        path:
+            Optional repository path (``org/repo``) included in the
+            ``git credential fill`` request so helpers configured with
+            ``credential.useHttpPath = true`` can disambiguate per-URL
+            (notably Git Credential Manager for multi-account users).
         unauth_first:
             If *True*, try unauthenticated first (saves rate limits, EMU-safe).
         verbose_callback:
@@ -378,7 +384,8 @@ class AuthResolver:
 
         When the resolved token comes from a global env var and fails
         (e.g. a github.com PAT tried on ``*.ghe.com``), the method
-        retries with ``git credential fill`` before giving up.
+        retries with ``gh auth token`` and then ``git credential fill``
+        before giving up.
         """
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
@@ -389,21 +396,44 @@ class AuthResolver:
                 verbose_callback(msg)
 
         def _try_credential_fallback(exc: Exception) -> T:
-            """Retry with git-credential-fill when an env-var token fails."""
-            if auth_ctx.source in ("git-credential-fill", "none"):
+            """Retry the operation when the originally-resolved token fails.
+
+            Walks the secondary chain in order: gh CLI (GitHub-like hosts;
+            internal guard short-circuits unsupported hosts), then
+            ``git credential fill`` (with ``path`` when known so
+            helpers can disambiguate per-URL). Sources already obtained
+            from a secondary chain (``gh-auth-token``,
+            ``git-credential-fill``, ``none``) skip retry to avoid
+            double-invocation.
+            """
+            if auth_ctx.source in ("gh-auth-token", "git-credential-fill", "none"):
                 raise exc
             # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
             if host_info.kind == "ado":
                 raise exc
             _log(
-                f"Token from {auth_ctx.source} failed, trying git credential fill "
-                f"for {host_info.display_name}"
+                f"Token from {auth_ctx.source} failed for {host_info.display_name}; "
+                "trying secondary credential sources"
             )
+            _log(f"trying gh auth token for {host_info.display_name}")
+            gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+            if gh_token:
+                _log(f"gh auth token resolved a credential for {host_info.display_name}")
+                return operation(
+                    gh_token,
+                    self._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
+                )
+            path_suffix = f" (path={path})" if path else ""
+            _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
             cred = self._token_manager.resolve_credential_from_git(
-                host_info.host, port=host_info.port
+                host_info.host, port=host_info.port, path=path
             )
             if cred:
-                return operation(cred, self._build_git_env(cred))
+                _log(f"git credential fill resolved a credential for {host_info.display_name}")
+                return operation(
+                    cred,
+                    self._build_git_env(cred, scheme="basic", host_kind=host_info.kind),
+                )
             raise exc
 
         # ADO bearer fallback machinery (PAT was tried first; bearer is the safety net)
@@ -691,8 +721,9 @@ class AuthResolver:
 
         Resolution order (GitHub-class: ``github``, ``ghe_cloud``, ``ghes``):
         1. Per-org ``GITHUB_APM_PAT_{ORG}`` when *org* is set
-        2. ``GITHUB_APM_PAT`` → ``GITHUB_TOKEN`` → ``GH_TOKEN``
-        3. Host-specific git credential helper
+        2. ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN`` -> ``GH_TOKEN``
+        3. ``gh auth token --hostname <host>`` (gh CLI active account)
+        4. Host-specific git credential helper
 
         Resolution order (``gitlab``): ``GITLAB_APM_PAT`` → ``GITLAB_TOKEN`` →
         credential helper. GitHub env vars are not consulted.
@@ -740,8 +771,23 @@ class AuthResolver:
             source = self._identify_env_source(purpose)
             return token, source, "basic"
 
-        # 3. Git credential helper (not for ADO)
+        # 3. gh CLI active account (eligibility gated inside the call;
+        #    unsupported hosts return None instantly without a subprocess)
+        gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+        if gh_token:
+            return gh_token, "gh-auth-token", "basic"
+
+        # 4. Git credential helper (not for ADO)
         if host_info.kind not in ("ado",):
+            # Note: path= is intentionally omitted here. _resolve_token is the
+            # primary credential-resolution leg invoked once per host; it has
+            # no per-call repository context. The fallback leg in
+            # _try_credential_fallback re-invokes resolve_credential_from_git
+            # WITH path= when the primary credential is rejected, so GCM
+            # multi-account users still get per-URL disambiguation -- they
+            # just pay one extra round-trip on the first miss. Adding path=
+            # here would require threading repo context through every
+            # resolve() call site, which is disproportionate to the benefit.
             credential = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port
             )

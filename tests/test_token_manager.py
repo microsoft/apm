@@ -2,11 +2,68 @@
 
 import os
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
-from src.apm_cli.core.token_manager import GitHubTokenManager
+from src.apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
+
+
+class TestSanitizeCredentialPath:
+    """Direct coverage of the security-critical credential-path sanitizer.
+
+    The four code paths (control-char reject, scheme allowlist, full-URL
+    extraction, valid passthrough) are exercised with parametrized cases
+    so a future refactor that drops a branch fails immediately rather than
+    silently widening the injection surface.
+    """
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            # Valid passthrough -- canonical owner/repo
+            ("acme/widgets", "acme/widgets"),
+            # Leading slash stripped
+            ("/acme/widgets", "acme/widgets"),
+            # Dots / hyphens / underscores allowed (GitHub's owner/repo charset)
+            ("acme-org/my.widget_v2", "acme-org/my.widget_v2"),
+            # Empty / whitespace-only -> empty
+            ("", ""),
+            ("/", ""),
+            # Newline (LF) injection -> empty (defense-in-depth)
+            ("acme/widgets\nusername=x", ""),
+            # Carriage return (CR) injection -> empty
+            ("acme/widgets\rusername=x", ""),
+            # NUL byte -> empty
+            ("acme/widgets\x00username=x", ""),
+            # Tab -> empty
+            ("acme/wid\tgets", ""),
+            # Other whitespace -> empty
+            ("acme/wid gets", ""),
+            # DEL (0x7f) -> empty
+            ("acme/widgets\x7f", ""),
+            # https:// URL -> path component extracted
+            ("https://github.com/acme/widgets", "acme/widgets"),
+            # http:// URL (allowlisted) -> path component extracted
+            ("http://example.com/acme/widgets", "acme/widgets"),
+            # ssh URL (allowlisted) -> path component extracted
+            ("ssh://git@github.com/acme/widgets", "acme/widgets"),
+            # data: URI -> rejected (not on allowlist; bypasses char-scan otherwise)
+            ("data:text/plain,acme/widgets%0Ausername=x", ""),
+            # file: URI -> rejected (not on allowlist)
+            ("file:///etc/passwd", ""),
+            # javascript: -> rejected
+            ("javascript:alert(1)", ""),
+        ],
+    )
+    def test_sanitize(self, raw, expected):
+        assert _sanitize_credential_path(raw) == expected
+
+    def test_scheme_allowlist_is_case_insensitive(self):
+        """Schemes are normalized to lowercase before allowlist check."""
+        assert _sanitize_credential_path("HTTPS://github.com/acme/widgets") == "acme/widgets"
+        assert _sanitize_credential_path("DATA:text/plain,x") == ""
 
 
 class TestModulesTokenPrecedence:
@@ -137,6 +194,75 @@ class TestResolveCredentialFromGit:
             call_kwargs = mock_run.call_args
             assert call_kwargs.kwargs["input"] == "protocol=https\nhost=github.com\n\n"
 
+    def test_path_appended_to_stdin(self):
+        """When path is provided, it is appended so GCM useHttpPath can disambiguate."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="acme/widgets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert stdin == "protocol=https\nhost=github.com\npath=acme/widgets\n\n", (
+                f"unexpected stdin: {stdin!r}"
+            )
+
+    def test_path_leading_slash_stripped(self):
+        """A leading '/' on the path is stripped (git credential helpers expect bare paths)."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="/acme/widgets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert stdin == "protocol=https\nhost=github.com\npath=acme/widgets\n\n"
+
+    def test_path_none_preserves_legacy_stdin(self):
+        """When path is None, stdin is identical to the pre-disambiguation format."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path=None)
+            assert mock_run.call_args.kwargs["input"] == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_newline_is_rejected(self):
+        """Newline in path is dropped to prevent credential-protocol injection."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="acme/widgets\nusername=attacker"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "\nusername=attacker" not in stdin
+            assert "path=" not in stdin, f"malformed path must be dropped entirely: {stdin!r}"
+            assert stdin == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_carriage_return_is_rejected(self):
+        """CR in path is dropped; helpers split on CRLF as well as LF."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="acme/widgets\rprotocol=ftp"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=" not in stdin
+            assert stdin == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_whitespace_is_rejected(self):
+        """Whitespace in path is dropped (real repo paths never contain it)."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="acme/wid gets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=" not in stdin
+
+    def test_path_with_full_url_is_extracted_via_urlparse(self):
+        """If a future caller mistakenly passes a full URL, only the URL path
+        component is forwarded -- never the scheme/host. Guards against the
+        naive lstrip('/') yielding 'https:/host/owner/repo'."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="https://github.com/acme/widgets"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=acme/widgets" in stdin
+            assert "https" not in stdin.split("path=", 1)[1].splitlines()[0]
+
     def test_git_terminal_prompt_disabled(self):
         """GIT_TERMINAL_PROMPT=0 is set in the subprocess env."""
         mock_result = MagicMock(returncode=0, stdout="password=tok\n")
@@ -151,7 +277,8 @@ class TestResolveCredentialFromGit:
         with patch("subprocess.run", return_value=mock_result) as mock_run:
             GitHubTokenManager.resolve_credential_from_git("github.com")
             call_env = mock_run.call_args.kwargs["env"]
-            assert call_env["GIT_ASKPASS"] == ""
+            expected = "echo" if sys.platform == "win32" else ""
+            assert call_env["GIT_ASKPASS"] == expected
 
     def test_rejects_password_prompt_as_token(self):
         """Rejects 'Password for ...' prompt text echoed back by GIT_ASKPASS."""
@@ -217,6 +344,73 @@ class TestResolveCredentialFromGit:
         with patch("subprocess.run", return_value=mock_result):
             token = GitHubTokenManager.resolve_credential_from_git("github.com")
             assert token == "gho_abc123def456"
+
+
+class TestResolveCredentialFromGhCli:
+    """Test resolve_credential_from_gh_cli static method."""
+
+    def test_success_returns_token(self):
+        mock_result = MagicMock(returncode=0, stdout="gho_cli_token\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            token = GitHubTokenManager.resolve_credential_from_gh_cli("github.com")
+            assert token == "gho_cli_token"
+            assert mock_run.call_args.args[0] == ["gh", "auth", "token", "--hostname", "github.com"]
+            kwargs = mock_run.call_args.kwargs
+            assert kwargs["env"]["GH_PROMPT_DISABLED"] == "1"
+            assert kwargs["env"]["GH_NO_UPDATE_NOTIFIER"] == "1"
+            assert kwargs["stdin"] is subprocess.DEVNULL
+
+    def test_ineligible_host_skips_subprocess(self):
+        """ADO/empty/unrelated hosts must short-circuit without spawning gh."""
+        with patch("subprocess.run") as mock_run:
+            assert GitHubTokenManager.resolve_credential_from_gh_cli(None) is None
+            assert GitHubTokenManager.resolve_credential_from_gh_cli("") is None
+            assert GitHubTokenManager.resolve_credential_from_gh_cli("dev.azure.com") is None
+            mock_run.assert_not_called()
+
+    def test_nonzero_exit_returns_none(self):
+        mock_result = MagicMock(returncode=1, stdout="", stderr="not logged in")
+        with patch("subprocess.run", return_value=mock_result):
+            assert GitHubTokenManager.resolve_credential_from_gh_cli("github.com") is None
+
+    def test_invalid_output_returns_none(self):
+        mock_result = MagicMock(returncode=0, stdout="Username for 'https://github.com':\n")
+        with patch("subprocess.run", return_value=mock_result):
+            assert GitHubTokenManager.resolve_credential_from_gh_cli("github.com") is None
+
+    def test_timeout_returns_none(self):
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=5)):
+            assert GitHubTokenManager.resolve_credential_from_gh_cli("github.com") is None
+
+
+class TestSupportsGhCliHost:
+    """Eligibility guard for the gh CLI fallback."""
+
+    def test_none_and_empty_unsupported(self):
+        assert GitHubTokenManager._supports_gh_cli_host(None) is False
+        assert GitHubTokenManager._supports_gh_cli_host("") is False
+
+    def test_ado_unsupported(self):
+        assert GitHubTokenManager._supports_gh_cli_host("dev.azure.com") is False
+
+    def test_github_com_supported(self):
+        assert GitHubTokenManager._supports_gh_cli_host("github.com") is True
+
+    def test_ghe_cloud_supported(self):
+        assert GitHubTokenManager._supports_gh_cli_host("acme.ghe.com") is True
+
+    def test_ghes_supported_when_matches_default_host(self):
+        with patch.dict(os.environ, {"GITHUB_HOST": "github.acme.com"}, clear=False):
+            assert GitHubTokenManager._supports_gh_cli_host("github.acme.com") is True
+
+    def test_ghes_unsupported_when_mismatches_default_host(self):
+        with patch.dict(os.environ, {"GITHUB_HOST": "github.acme.com"}, clear=False):
+            assert GitHubTokenManager._supports_gh_cli_host("github.other.com") is False
+
+    def test_ghes_unsupported_when_no_default_host(self):
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_HOST"}
+        with patch.dict(os.environ, env, clear=True):
+            assert GitHubTokenManager._supports_gh_cli_host("github.acme.com") is False
 
 
 class TestCredentialTimeout:
@@ -298,61 +492,119 @@ class TestGetTokenWithCredentialFallback:
         """Returns env var token and never calls credential fill."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "env-token"}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(GitHubTokenManager, "resolve_credential_from_git") as mock_cred:
+            with (
+                patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli") as mock_gh,
+                patch.object(GitHubTokenManager, "resolve_credential_from_git") as mock_cred,
+            ):
                 token = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert token == "env-token"
+                mock_gh.assert_not_called()
+                mock_cred.assert_not_called()
+
+    def test_falls_back_to_gh_cli_before_credential_fill(self):
+        """Uses gh CLI before git credential helpers when no env token exists."""
+        with patch.dict(os.environ, {}, clear=True):
+            manager = GitHubTokenManager()
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value="gh-token"
+                ) as mock_gh,
+                patch.object(GitHubTokenManager, "resolve_credential_from_git") as mock_cred,
+            ):
+                token = manager.get_token_with_credential_fallback("modules", "github.com")
+                assert token == "gh-token"
+                mock_gh.assert_called_once_with("github.com")
                 mock_cred.assert_not_called()
 
     def test_falls_back_to_credential_fill(self):
         """Falls back to resolve_credential_from_git when no env token."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
+                ) as mock_cred,
+            ):
                 token = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert token == "cred-token"
+                mock_gh.assert_called_once_with("github.com")
                 mock_cred.assert_called_once_with("github.com", port=None)
 
     def test_caches_credential_result(self):
         """Second call uses cache, subprocess not invoked again."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value="cached-tok"
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value="cached-tok"
+                ) as mock_cred,
+            ):
                 first = manager.get_token_with_credential_fallback("modules", "github.com")
                 second = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert first == second == "cached-tok"
+                mock_gh.assert_called_once_with("github.com")
                 mock_cred.assert_called_once()
 
     def test_caches_none_results(self):
         """None results are cached to avoid retrying failed lookups."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager, "resolve_credential_from_git", return_value=None
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value=None
+                ) as mock_cred,
+            ):
                 first = manager.get_token_with_credential_fallback("modules", "github.com")
                 second = manager.get_token_with_credential_fallback("modules", "github.com")
                 assert first is None
                 assert second is None
+                mock_gh.assert_called_once_with("github.com")
                 mock_cred.assert_called_once()
 
     def test_different_hosts_separate_cache(self):
         """Different hosts get independent cache entries."""
         with patch.dict(os.environ, {}, clear=True):
             manager = GitHubTokenManager()
-            with patch.object(
-                GitHubTokenManager,
-                "resolve_credential_from_git",
-                side_effect=lambda h, port=None: f"tok-{h}",
-            ) as mock_cred:
+            with (
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
+                ) as mock_gh,
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_git",
+                    side_effect=lambda h, port=None: f"tok-{h}",
+                ) as mock_cred,
+            ):
                 tok1 = manager.get_token_with_credential_fallback("modules", "github.com")
                 tok2 = manager.get_token_with_credential_fallback("modules", "gitlab.com")
                 assert tok1 == "tok-github.com"
                 assert tok2 == "tok-gitlab.com"
+                mock_gh.assert_called_once_with("github.com")
                 assert mock_cred.call_count == 2
+
+    def test_non_github_host_skips_gh_cli(self):
+        """Generic hosts should not invoke gh CLI fallback."""
+        with patch.dict(os.environ, {}, clear=True):
+            manager = GitHubTokenManager()
+            with (
+                patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli") as mock_gh,
+                patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
+                ) as mock_cred,
+            ):
+                token = manager.get_token_with_credential_fallback("modules", "gitlab.com")
+                assert token == "cred-token"
+                mock_gh.assert_not_called()
+                mock_cred.assert_called_once_with("gitlab.com", port=None)
 
     def test_same_host_different_ports_separate_cache(self):
         """Same host on different ports must not cross-contaminate credentials."""
