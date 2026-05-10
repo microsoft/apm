@@ -545,8 +545,24 @@ def run_baseline_checks(
     lockfile_path = get_lockfile_path(project_root)
 
     # If there's no apm.yml or no lockfile, the first check already passed
-    # (no deps needed).  Skip remaining checks.
+    # (no deps needed).  Skip remaining checks -- but warn if APM artifacts
+    # exist without a manifest (evidence of a deleted apm.yml).
     if not apm_yml_path.exists() or not lockfile_path.exists():
+        if not apm_yml_path.exists():
+            apm_dir = project_root / ".apm"
+            lock_file = project_root / "apm.lock.yaml"
+            if apm_dir.exists() or lock_file.exists():
+                result.checks.append(
+                    CheckResult(
+                        name="manifest-missing",
+                        passed=True,
+                        message=(
+                            "apm.yml is missing but APM artifacts"
+                            " (.apm/ or apm.lock.yaml) were found"
+                            " -- this may indicate a deleted manifest"
+                        ),
+                    )
+                )
         return result
 
     lock = LockFile.read(lockfile_path)
