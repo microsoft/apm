@@ -1718,7 +1718,7 @@ def _install_apm_packages(ctx, outcome):
             )
 
         # Persist the new MCP server set and configs in the lockfile
-        MCPIntegrator.update_lockfile(new_mcp_servers, mcp_configs=new_mcp_configs)
+        MCPIntegrator.update_lockfile(new_mcp_servers, _lock_path, mcp_configs=new_mcp_configs)
     elif should_install_mcp and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
         if old_mcp_servers:
@@ -1730,12 +1730,12 @@ def _install_apm_packages(ctx, outcome):
                 user_scope=(ctx.scope is InstallScope.USER),
                 scope=ctx.scope,
             )
-            MCPIntegrator.update_lockfile(builtins.set(), mcp_configs={})
+            MCPIntegrator.update_lockfile(builtins.set(), _lock_path, mcp_configs={})
         logger.verbose_detail("No MCP dependencies found in apm.yml")
     elif not should_install_mcp and old_mcp_servers:
         # --only=apm: APM install regenerated the lockfile and dropped
         # mcp_servers.  Restore the previous set so it is not lost.
-        MCPIntegrator.update_lockfile(old_mcp_servers, mcp_configs=old_mcp_configs)
+        MCPIntegrator.update_lockfile(old_mcp_servers, _lock_path, mcp_configs=old_mcp_configs)
 
     # Local .apm/ content integration is now handled inside the
     # install pipeline (phases/integrate.py + phases/post_deps_local.py,

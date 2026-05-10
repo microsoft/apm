@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --update` now falls back from a stale `ADO_APM_PAT` to an `az login` AAD bearer in the preflight auth probe, matching the behavior of `apm install` and every other ADO call site. Previously the preflight raised `AuthenticationError` on 401/403 even when `az login` would have succeeded. The bearer env also pops any pre-existing `GIT_TOKEN` so the JWT flows only via `GIT_CONFIG_VALUE_0`, and the per-host stale-PAT warning dedup is lock-guarded so parallel installs against the same ADO host emit one warning instead of one-per-thread. (#1212)
 - `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
 - `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
+- Multi-account Git Credential Manager users: APM now selects the right GitHub account automatically per repository (no account-picker prompt) when `credential.useHttpPath = true` is set. Existing single-account setups are unaffected. (#1226)
 
 ## [0.12.4] - 2026-05-07
 

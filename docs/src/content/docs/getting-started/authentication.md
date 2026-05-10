@@ -66,6 +66,33 @@ The org name comes from the dependency reference — `contoso/my-package` checks
 
 Per-org tokens take priority over global tokens. Use this when different orgs require different PATs (e.g., separate SSO authorizations).
 
+## Multi-account Git Credential Manager
+
+APM forwards the repository path to `git credential fill`, so [Git Credential Manager (GCM)](https://github.com/git-ecosystem/git-credential-manager) can automatically pick the right GitHub account per organization -- no account-picker prompt. Existing single-account setups are unaffected: if `credential.useHttpPath` is not enabled, git credential helpers ignore the `path` attribute and match per host only.
+
+To opt in, enable path-aware matching once:
+
+```bash
+git config --global credential.useHttpPath true
+```
+
+GCM (v2.1+) matches credential URLs by **prefix**, so a single config entry per org typically covers every repo under that org:
+
+```bash
+git config --global credential.https://github.com/acme.username your-acme-account
+git config --global credential.https://github.com/personal-org.username your-personal-account
+```
+
+With the entries above, fetches against `acme/widgets`, `acme/payments`, and any other `acme/*` repo all resolve to `your-acme-account` without per-repo configuration. Other credential helpers (and older GCM versions) may require an exact path match -- consult your helper's documentation if a per-org entry is not picked up.
+
+### Seeing an account picker mid-install?
+
+If `apm install` triggers a GCM account-picker dialog while resolving a private repo:
+
+1. Confirm `credential.useHttpPath` is set globally: `git config --global --get credential.useHttpPath` should print `true`.
+2. Confirm a per-URL entry exists for the org: `git config --global --get-urlmatch credential https://github.com/<org>` should list the username.
+3. Re-run with `--verbose`; APM logs `trying git credential fill for <host> (path=<owner>/<repo>)` so you can confirm the path APM is sending matches your config entry.
+
 ## Fine-grained PAT setup
 
 Fine-grained PATs (`github_pat_`) are scoped to a **single resource owner** — either a user account or an organization. A user-scoped fine-grained PAT **cannot** access repos owned by an organization, even if you are a member of that org.

@@ -274,6 +274,7 @@ def _fetch_file(
             source.host,
             _do_fetch,
             org=source.owner,
+            path=f"{source.owner}/{source.repo}",
             # Auth-first: marketplace repos may be private/org-scoped and the
             # GitHub API returns 404 (not 403) for unauthenticated requests to
             # private repos.  Because _do_fetch returns None on 404 (no

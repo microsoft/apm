@@ -53,7 +53,12 @@ def _get_config_getters():
 
 def _valid_config_keys() -> str:
     """Return valid config keys for messages."""
-    return ", ".join(["auto-integrate", "temp-dir", "copilot-cowork-skills-dir"])
+    from ..core.experimental import is_enabled
+
+    keys = ["auto-integrate", "temp-dir"]
+    if is_enabled("copilot_cowork"):
+        keys.append("copilot-cowork-skills-dir")
+    return ", ".join(keys)
 
 
 @click.group(help="Configure APM CLI", invoke_without_command=True)
