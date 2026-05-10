@@ -683,6 +683,22 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run #1149 GitLab install E2E -- offline (mocked HTTP, no network)
+    # Exercises GitHubPackageDownloader.download_package end-to-end against
+    # a host=gitlab.com virtual file dep, asserting GitLab REST v4 routing,
+    # PRIVATE-TOKEN header (sourced from GITLAB_APM_PAT), absence of an
+    # Authorization header (cross-host leakage trap), and the resulting
+    # LockedDependency entry preserving host=gitlab.com.
+    log_info "Running #1149 GitLab install E2E..."
+    echo "Command: pytest tests/integration/test_gitlab_install_e2e.py -v -s --tb=short -m integration"
+
+    if pytest tests/integration/test_gitlab_install_e2e.py -v -s --tb=short -m integration; then
+        log_success "#1149 GitLab install E2E passed!"
+    else
+        log_error "#1149 GitLab install E2E failed!"
+        exit 1
+    fi
+
     log_success "All integration test suites completed successfully!"
     
 
