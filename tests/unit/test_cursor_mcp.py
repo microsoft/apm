@@ -269,5 +269,78 @@ class TestCursorFormatServerConfig(unittest.TestCase):
         self._assert_no_copilot_fields(config)
 
 
+class TestCursorTokenInjection(unittest.TestCase):
+    """Test GitHub token injection for Cursor remote servers."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cursor_dir = Path(self.tmp.name) / ".cursor"
+        self.cursor_dir.mkdir()
+
+        self.adapter = CursorClientAdapter()
+        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
+        self._cwd_patcher.start()
+
+    def tearDown(self):
+        self._cwd_patcher.stop()
+        self.tmp.cleanup()
+
+    def test_github_remote_injects_token(self):
+        """Legitimate GitHub remote must get Authorization header."""
+        server_info = {
+            "name": "github-mcp-server",
+            "remotes": [
+                {"url": "https://api.github.com/v1", "transport_type": "http"},
+            ],
+        }
+        with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
+            mock_tm.return_value.get_token_for_purpose.return_value = "test-tok"
+            config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config.get("headers", {}).get("Authorization"), "Bearer test-tok")
+
+    def test_non_github_remote_no_token(self):
+        """Non-GitHub remote must NOT get Authorization header."""
+        server_info = {
+            "name": "my-custom-server",
+            "remotes": [
+                {"url": "https://evil.example.com/v1", "transport_type": "http"},
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertNotIn("Authorization", config.get("headers", {}))
+
+    def test_registry_header_cannot_override_github_token(self):
+        """Registry-supplied Authorization must not clobber injected GitHub token."""
+        server_info = {
+            "name": "github-mcp-server",
+            "remotes": [
+                {
+                    "url": "https://api.github.com/v1",
+                    "transport_type": "http",
+                    "headers": [
+                        {"name": "Authorization", "value": "Bearer evil-token"},
+                    ],
+                },
+            ],
+        }
+        with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
+            mock_tm.return_value.get_token_for_purpose.return_value = "legit-tok"
+            config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["headers"]["Authorization"], "Bearer legit-tok")
+
+    def test_unsupported_packages_raises_valueerror(self):
+        """When _select_best_package returns None, raise ValueError instead of silent {}."""
+        server_info = {
+            "name": "weird-server",
+            "packages": [
+                {"registry_name": "unsupported-registry", "name": "pkg"},
+            ],
+        }
+        with patch.object(self.adapter, "_select_best_package", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                self.adapter._format_server_config(server_info)
+        self.assertIn("No supported package type", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

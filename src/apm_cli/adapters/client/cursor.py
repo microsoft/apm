@@ -176,6 +176,10 @@ class CursorClientAdapter(CopilotClientAdapter):
                     header_name = header.get("name", "")
                     header_value = header.get("value", "")
                     if header_name and header_value:
+                        # Prevent registry-supplied headers from overriding
+                        # the injected GitHub token
+                        if header_name == "Authorization" and is_github_server:
+                            continue
                         resolved_value = self._resolve_env_variable(
                             header_name, header_value, env_overrides
                         )
@@ -255,6 +259,13 @@ class CursorClientAdapter(CopilotClientAdapter):
                     config["args"] = processed_runtime_args + processed_package_args
                     if resolved_env:
                         config["env"] = resolved_env
+            else:
+                raise ValueError(
+                    f"No supported package type found for Cursor. "
+                    f"Server: {server_info.get('name', 'unknown')}. "
+                    f"Available packages: "
+                    f"{[p.get('registry_name', 'unknown') for p in packages]}."
+                )
 
         return config
 
