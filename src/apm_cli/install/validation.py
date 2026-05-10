@@ -278,7 +278,6 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
             explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
             is_insecure = bool(getattr(dep_ref, "is_insecure", False))
-            prefer_web_probe_first = explicit_scheme in ("http", "https") or is_insecure
 
             # Strict-by-default cross-protocol policy (issue microsoft/apm#992):
             # an explicit ``http://`` / ``https://`` / ``ssh://`` URL is honored
@@ -295,11 +294,16 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             allow_fallback_env = is_fallback_allowed()
 
             # For generic hosts (not GitHub, not ADO), relax the env so native
-            # credential helpers (SSH keys, macOS Keychain, etc.) can work.
-            # This mirrors _clone_with_fallback() which does the same relaxation.
+            # credential helpers (macOS Keychain, credential-store,
+            # manager-core, SSH agent, etc.) can work.  Config isolation
+            # (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1) is only
+            # enforced for insecure plaintext HTTP connections where
+            # credential leakage is a real risk; HTTPS connections need
+            # access to user-configured helpers in ~/.gitconfig.  This
+            # matches _clone_with_fallback() and git_reference_resolver.
             if is_generic:
                 validate_env = ado_downloader._build_noninteractive_git_env(
-                    preserve_config_isolation=prefer_web_probe_first,
+                    preserve_config_isolation=is_insecure,
                     suppress_credential_helpers=is_insecure,
                 )
             else:
