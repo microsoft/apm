@@ -42,12 +42,14 @@ rule_a_hits=$(
 # auditable in one place).
 #   - install/validation.py: legacy direct provider use; refactor tracked
 #     as a follow-up to #1212.
-#   - deps/github_downloader.py: _execute_transport_plan clone path still
-#     open-codes the PAT->bearer protocol. Refactor onto
-#     execute_with_bearer_fallback is non-trivial because the loop wraps a
-#     stateful clone_action that mutates target_path; refactor tracked as
-#     a follow-up to #1212.
-rule_a_exempt="src/apm_cli/install/validation.py src/apm_cli/deps/github_downloader.py"
+#   - deps/github_downloader.py and deps/clone_engine.py: the
+#     transport-plan clone path open-codes the PAT->bearer protocol.
+#     Originally lived in github_downloader._execute_transport_plan;
+#     extracted to deps/clone_engine.CloneEngine.execute as part of the
+#     monolith decomposition. Refactor onto execute_with_bearer_fallback
+#     is non-trivial because the loop wraps a stateful clone_action that
+#     mutates target_path; refactor tracked as a follow-up to #1212.
+rule_a_exempt="src/apm_cli/install/validation.py src/apm_cli/deps/github_downloader.py src/apm_cli/deps/clone_engine.py"
 
 while IFS= read -r hit; do
     [ -z "$hit" ] && continue
