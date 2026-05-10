@@ -148,12 +148,16 @@ jobs:
       - name: Run integration tests
         env:
           APM_E2E_TESTS: "1"
+          APM_RUN_INTEGRATION_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 20
+        # Bumped from 20 to 30 minutes when test discovery widened from
+        # the 28 enumerated files to the full tests/integration/ suite
+        # (PR2 of #1166).
+        timeout-minutes: 30
 
   release-validation:
     name: Release Validation (Linux)

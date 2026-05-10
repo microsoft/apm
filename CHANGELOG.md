@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Registry proxy now warns when `PROXY_REGISTRY_TOKEN` is set and `PROXY_REGISTRY_URL` uses `http://`, since the bearer token would be transmitted in plaintext; set `PROXY_REGISTRY_ALLOW_HTTP=1` to silence the warning for trusted internal proxies. (#1149)
 - Integration tests now use marker-driven discovery: 21 `pytestmark = pytest.mark.skipif(...)` chains across `tests/integration/` are replaced with declarative `requires_*` markers, with precondition logic centralized in `tests/integration/conftest.py` and auto-skipping at collection time. PR1 of #1166. (#1167)
 - Integration test apm-binary resolution now prefers the local build (`./dist/apm-<os>-<arch>/apm`) over a system-wide `apm` on `PATH`, so contributors validating the binary under test are not silently shadowed by a global install; the bearer-token marker (`requires_ado_bearer`) discards the captured JWT immediately and persists only the boolean outcome. (#1167)
+- `scripts/test-integration.sh` is now a thin orchestrator: it builds/locates the apm binary, sets up runtimes and tokens, then invokes `pytest tests/integration/` exactly once. The 28 per-file pytest enumerations were removed; the marker registry handles per-test gating, and new test files dropped into `tests/integration/` are picked up automatically. PR2 of #1166. (#1247)
 
 ### Fixed
 
