@@ -35,54 +35,77 @@ APM uses a tiered approach to integration testing:
 
 ## Running Tests Locally
 
-### Smoke Tests
-```bash
-# Run all smoke tests
-pytest tests/integration/test_runtime_smoke.py -v
+Integration tests live under `tests/integration/` and run via `pytest`
+directly. Each test module declares the preconditions it needs as
+standard pytest markers; the registry in
+`tests/integration/conftest.py` (`_MARKER_CHECKS`) automatically skips
+tests whose precondition is not met, so you only have to install/set
+what the test family you want actually requires.
 
-# Run specific test
-pytest tests/integration/test_runtime_smoke.py::TestRuntimeSmoke::test_codex_runtime_setup -v
+### The marker registry
+
+| Marker | Precondition | How to satisfy it |
+| --- | --- | --- |
+| `requires_e2e_mode` | Opt-in for the heavyweight golden-scenario suite | `export APM_E2E_TESTS=1` |
+| `requires_network_integration` | Opt-in for tests that hit live registries | `export APM_RUN_INTEGRATION_TESTS=1` |
+| `requires_inference` | Opt-in for tests that call inference APIs | `export APM_RUN_INFERENCE_TESTS=1` |
+| `requires_github_token` | A token usable against `github.com` / GitHub Models | `export GITHUB_APM_PAT=...` (or `GITHUB_TOKEN`) |
+| `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
+| `requires_ado_bearer` | Azure CLI signed in + opt-in flag | `az login` and `export APM_TEST_ADO_BEARER=1` |
+| `requires_apm_binary` | A built `apm` binary on disk or `PATH` | `scripts/build-binary.sh` (or set `APM_BINARY_PATH`) |
+| `requires_runtime_codex` | The `codex` runtime installed under `~/.apm/runtimes/` | `apm runtime setup codex` |
+| `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
+| `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
+
+Without any of those env vars or runtimes a `pytest tests/integration`
+invocation is silent rather than red: every test is collected and
+reported as `SKIPPED` with a one-line reason, so you can see exactly
+what is missing and why.
+
+### Common invocations
+
+```bash
+# Run everything you currently have the prerequisites for
+uv run pytest tests/integration -v
+
+# Run a single suite (the marker registry still applies)
+uv run pytest tests/integration/test_golden_scenario_e2e.py -v
+
+# Run only a marker family
+uv run pytest tests/integration -m requires_github_token -v
 ```
 
-### E2E Tests
+### Apm binary resolution
 
-#### Option 1: Complete CI Process Simulation (Recommended)
-```bash
-export GITHUB_TOKEN=your_token_here
-./scripts/test-integration.sh
-```
+Tests that need to shell out to a real `apm` binary use the
+`apm_binary_path` fixture and the `requires_apm_binary` marker. The
+binary is resolved in this order, so a local build is preferred over a
+system install:
 
-This script (`scripts/test-integration.sh`) is a unified script that automatically adapts to your environment:
+1. `APM_BINARY_PATH` env var
+2. `./dist/apm-<os>-<arch>/apm` (the layout produced by `scripts/build-binary.sh`)
+3. `shutil.which("apm")`
 
-**Local mode** (no existing binary):
-1. **Builds binary** with PyInstaller (like CI build job)
-2. **Sets up symlink and PATH** (like CI artifacts download)
-3. **Installs runtimes** (codex/llm setup)
-4. **Installs test dependencies** (like CI test setup)
-5. **Runs integration tests** with the built binary (like CI integration-tests job)
+### Adding an integration test that needs a precondition
 
-**CI mode** (binary exists in `./dist/`):
-1. **Uses existing binary** from CI build artifacts
-2. **Sets up symlink and PATH** (standard CI process)
-3. **Installs runtimes** (codex/llm setup)
-4. **Installs test dependencies** (like CI test setup)  
-5. **Runs E2E tests** with pre-built binary
+1. Apply the marker at module or test level:
+   ```python
+   import pytest
+   pytestmark = pytest.mark.requires_github_token
+   ```
+2. If you need a brand-new precondition, add an entry to
+   `_MARKER_CHECKS` in `tests/integration/conftest.py` (predicate +
+   skip reason) and declare the marker in `pyproject.toml`. That is
+   the only place the precondition needs to live.
 
-#### Option 2: Direct pytest execution
-```bash
-# Set up environment
-export APM_E2E_TESTS=1
-export GITHUB_TOKEN=your_github_token_here
-export GITHUB_MODELS_KEY=your_github_token_here  # LLM runtime expects this specific env var
+### Legacy: `scripts/test-integration.sh`
 
-# Run E2E tests
-pytest tests/integration/test_golden_scenario_e2e.py -v -s
-
-# Run specific E2E test
-pytest tests/integration/test_golden_scenario_e2e.py::TestGoldenScenarioE2E::test_complete_golden_scenario_codex -v -s
-```
-
-**Note**: Both `GITHUB_TOKEN` and `GITHUB_MODELS_KEY` should contain the same GitHub token value, but different runtimes expect different environment variable names.
+`scripts/test-integration.sh` is the legacy wrapper that built a
+binary, set up runtimes, and shelled out to pytest. It is being
+retired (see `microsoft/apm#1166`); prefer the direct `pytest`
+invocations above. The script is still wired into CI for the moment
+and continues to work, but new test plumbing belongs in the marker
+registry, not in the bash script.
 
 ## CI/CD Integration
 
@@ -207,14 +230,24 @@ All integration tests run on:
 ## Adding New Tests
 
 ### For New Runtime Support:
-1. Add smoke test for runtime setup
-2. Add E2E test for golden scenario with new runtime
-3. Update CI matrix if new platform support
+1. Add a smoke test for runtime setup, marked
+   `@pytest.mark.requires_runtime_<name>` (and add the marker entry to
+   `_MARKER_CHECKS` in `tests/integration/conftest.py` if the runtime
+   is brand new).
+2. Add an E2E test for the golden scenario with the new runtime,
+   marked `@pytest.mark.requires_e2e_mode` and any token markers it
+   needs.
+3. Update the CI matrix if the runtime introduces new platform
+   support.
 
 ### For New Features:
-1. Add smoke test for compilation/validation
-2. Add E2E test if feature requires API calls
-3. Keep tests focused and fast
+1. Add a smoke test for compilation/validation.
+2. Add an E2E test if the feature requires API calls -- pick the
+   smallest set of markers that captures its real preconditions
+   (`requires_github_token`, `requires_network_integration`, etc.)
+   so contributors without those credentials still get a clean
+   `SKIPPED` rather than a hard failure.
+3. Keep tests focused and fast.
 
 ---
 

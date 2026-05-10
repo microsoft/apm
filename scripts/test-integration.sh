@@ -1,5 +1,15 @@
 #!/bin/bash
 # Integration testing script for both CI and local environments
+#
+# DEPRECATED (PR2 of #1166): This script is being retired in favour of
+# direct ``pytest tests/integration/`` invocations gated by the
+# marker-driven discovery system introduced in PR1
+# (microsoft/apm#1167). Once PR2 lands the canonical commands will be
+# documented in CONTRIBUTING.md and
+# docs/src/content/docs/contributing/integration-testing.md. Avoid
+# adding new logic here -- new test plumbing belongs in
+# ``tests/integration/conftest.py`` ``_MARKER_CHECKS``.
+#
 # Tests comprehensive runtime scenarios and edge cases:
 #   - Both Codex AND LLM runtime setup and interoperability
 #   - Complex pytest-based scenarios with error handling

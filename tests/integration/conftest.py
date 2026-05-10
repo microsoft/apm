@@ -16,9 +16,11 @@ See microsoft/apm#1166 for the design rationale.
 from __future__ import annotations
 
 import os
+import platform as _platform
 import shutil
 import subprocess
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -77,9 +79,64 @@ def _has_ado_bearer() -> bool:
             timeout=30,
             check=False,
         )
-        return result.returncode == 0 and result.stdout.startswith("eyJ")
+        # Discard the bearer token immediately; persist only the boolean
+        # outcome. Keeping the JWT in `result.stdout` would let it survive
+        # in a fixture/closure (or surface in pytest capture on failure).
+        ok = result.returncode == 0 and result.stdout.strip().startswith("eyJ")
+        del result
+        return ok
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+def _local_dist_apm_binary() -> Path | None:
+    """Return ``./dist/apm-<os>-<arch>/apm`` if it exists, else None.
+
+    Encapsulates the local-build naming convention used by
+    ``scripts/build-binary.sh`` so both the marker predicate and the
+    session fixture share one source of truth.
+    """
+    os_name = _platform.system().lower()
+    arch = _platform.machine().lower()
+    arch_map = {
+        "x86_64": "x86_64",
+        "amd64": "x86_64",
+        "arm64": "arm64",
+        "aarch64": "arm64",
+    }
+    binary_name = f"apm-{os_name}-{arch_map.get(arch, arch)}"
+    candidate = Path("dist") / binary_name / "apm"
+    return candidate if candidate.is_file() else None
+
+
+@lru_cache(maxsize=1)
+def _resolve_apm_binary() -> Path | None:
+    """Resolve the apm binary used by integration tests.
+
+    Resolution order (prefers the build under test over a system install):
+      1. ``APM_BINARY_PATH`` env var (CI sets this after the build step).
+      2. ``./dist/<platform>/apm`` (local build convention).
+      3. ``shutil.which("apm")`` lookup on ``PATH``.
+
+    The order intentionally pushes ``PATH`` last so that a globally
+    installed ``apm`` does not silently shadow the local build a
+    contributor is trying to validate.
+    """
+    env_path = os.environ.get("APM_BINARY_PATH")
+    if env_path:
+        candidate = Path(env_path)
+        if candidate.is_file():
+            return candidate.resolve()
+
+    local = _local_dist_apm_binary()
+    if local is not None:
+        return local.resolve()
+
+    on_path = shutil.which("apm")
+    if on_path:
+        return Path(on_path).resolve()
+
+    return None
 
 
 def _is_e2e_mode() -> bool:
@@ -95,9 +152,7 @@ def _is_inference_mode() -> bool:
 
 
 def _has_apm_binary() -> bool:
-    if os.environ.get("APM_BINARY_PATH"):
-        return Path(os.environ["APM_BINARY_PATH"]).is_file()
-    return shutil.which("apm") is not None
+    return _resolve_apm_binary() is not None
 
 
 def _has_runtime(name: str) -> bool:
@@ -162,38 +217,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 def apm_binary_path() -> Path:
     """Resolve the apm binary path for tests that need to shell out to it.
 
-    Resolution order:
-      1. ``APM_BINARY_PATH`` env var (CI sets this after the build step).
-      2. ``shutil.which("apm")`` lookup on ``PATH``.
-      3. ``./dist/<platform>/apm`` (local build convention).
-
-    Skips the test if no binary is found, with a message pointing at the
-    build script.
+    Delegates to :func:`_resolve_apm_binary` so the marker predicate
+    (collection-time skip decision) and the fixture (test-time path
+    handed to subprocess) cannot drift. See the helper docstring for
+    the full resolution order.
     """
-    env_path = os.environ.get("APM_BINARY_PATH")
-    if env_path:
-        candidate = Path(env_path)
-        if candidate.is_file():
-            return candidate.resolve()
-
-    on_path = shutil.which("apm")
-    if on_path:
-        return Path(on_path).resolve()
-
-    import platform as plat
-
-    os_name = plat.system().lower()
-    arch = plat.machine().lower()
-    arch_map = {
-        "x86_64": "x86_64",
-        "amd64": "x86_64",
-        "arm64": "arm64",
-        "aarch64": "arm64",
-    }
-    binary_name = f"apm-{os_name}-{arch_map.get(arch, arch)}"
-    local_path = Path("dist") / binary_name / "apm"
-    if local_path.is_file():
-        return local_path.resolve()
+    resolved = _resolve_apm_binary()
+    if resolved is not None:
+        return resolved
 
     pytest.skip("No apm binary found (set APM_BINARY_PATH or build via scripts/build-binary.sh)")
     raise RuntimeError("unreachable")  # for type-checker
