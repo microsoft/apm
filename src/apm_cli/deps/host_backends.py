@@ -42,6 +42,7 @@ from ..core.auth import HostInfo
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
+    build_gitlab_https_clone_url,
     build_https_clone_url,
     build_ssh_url,
     default_host,
@@ -348,6 +349,86 @@ class ADOBackend:
 
 
 @dataclass(frozen=True)
+class GitLabBackend:
+    """Backend for GitLab (gitlab.com and self-managed instances).
+
+    GitLab uses REST v4 for both commits and raw file fetches. Tokens are
+    embedded in clone URLs as ``oauth2:<token>@`` (not GitHub's
+    ``x-access-token``) when a PAT is available; otherwise falls back to
+    plain HTTPS so git credential helpers can supply auth.
+    """
+
+    host_info: HostInfo
+
+    @property
+    def kind(self) -> str:
+        return "gitlab"
+
+    @property
+    def is_github_family(self) -> bool:
+        return False
+
+    @property
+    def is_generic(self) -> bool:
+        # Token resolution paths treat GitLab the same as a generic host
+        # (defer to credential helpers / GITLAB_* env vars), not as a
+        # GitHub-family host.
+        return True
+
+    def build_clone_https_url(
+        self,
+        dep_ref: DependencyReference,
+        *,
+        token: str | None,
+        auth_scheme: str = "basic",
+    ) -> str:
+        port = getattr(dep_ref, "port", None)
+        host = getattr(dep_ref, "host", None) or self.host_info.host
+        # Bearer scheme is ADO-only; embed PAT as oauth2 basic when given.
+        if token and auth_scheme != "bearer":
+            return build_gitlab_https_clone_url(host, dep_ref.repo_url, token, port=port)
+        return build_https_clone_url(host, dep_ref.repo_url, token=None, port=port)
+
+    def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
+        host = getattr(dep_ref, "host", None) or self.host_info.host
+        return build_ssh_url(host, dep_ref.repo_url, port=getattr(dep_ref, "port", None))
+
+    def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
+        port = getattr(dep_ref, "port", None)
+        host = getattr(dep_ref, "host", None) or self.host_info.host
+        netloc = f"{host}:{port}" if port else host
+        return f"http://{netloc}/{dep_ref.repo_url}.git"
+
+    def build_commits_api_url(self, dep_ref: DependencyReference, ref: str) -> str | None:
+        # GitLab REST v4 commits endpoint: requires URL-encoded "namespace/project".
+        if re.match(r"^[a-f0-9]{40}$", (ref or "").lower()):
+            return None
+        try:
+            import urllib.parse as _up
+
+            project = _up.quote(dep_ref.repo_url, safe="")
+        except Exception:
+            return None
+        return f"{self.host_info.api_base}/projects/{project}/repository/commits/{ref}"
+
+    def build_contents_api_urls(
+        self,
+        owner: str,
+        repo: str,
+        file_path: str,
+        ref: str,
+    ) -> list[str]:
+        # GitLab raw file: GET /api/v4/projects/{id}/repository/files/{path}/raw?ref=...
+        import urllib.parse as _up
+
+        project = _up.quote(f"{owner}/{repo}", safe="")
+        encoded_path = _up.quote(file_path, safe="")
+        return [
+            f"{self.host_info.api_base}/projects/{project}/repository/files/{encoded_path}/raw?ref={ref}"
+        ]
+
+
+@dataclass(frozen=True)
 class GenericGitBackend:
     """Backend for non-GitHub non-ADO managed hosts (GitLab, Gitea, Gogs, Bitbucket).
 
@@ -427,6 +508,7 @@ _BACKEND_BY_KIND: dict[str, type] = {
     "ghe_cloud": GHECloudBackend,
     "ghes": GHESBackend,
     "ado": ADOBackend,
+    "gitlab": GitLabBackend,
     "generic": GenericGitBackend,
 }
 

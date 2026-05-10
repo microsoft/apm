@@ -220,3 +220,67 @@ def test_max_parallel_zero_clamped_to_one(tmp_path):
     """``max_parallel=0`` must coerce to 1 -- ThreadPoolExecutor rejects 0."""
     resolver = APMDependencyResolver(apm_modules_dir=tmp_path / "apm_modules", max_parallel=0)
     assert resolver._max_parallel == 1
+
+
+def test_transitive_malformed_deps_surfaces_warning(tmp_path, caplog):
+    """A transitive dep with flat-list ``dependencies`` must produce a
+    warning-level log (not silently swallowed) and resolution must
+    continue without the malformed dep's sub-dependencies."""
+    import logging
+
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+
+    # "good" has valid structured deps
+    _write_pkg(modules / "org", "good", deps=["org/leaf"])
+    _write_pkg(modules / "org", "leaf")
+
+    # "bad" has flat-list deps (invalid format)
+    bad_dir = modules / "org" / "bad"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "bad",
+                "version": "1.0.0",
+                "dependencies": ["org/should-not-resolve"],
+            }
+        )
+    )
+
+    # Root depends on both
+    (tmp_path / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "root",
+                "version": "0.0.1",
+                "dependencies": {"apm": ["org/good", "org/bad"], "mcp": []},
+            }
+        )
+    )
+
+    lock = threading.Lock()
+    log: list[str] = []
+
+    resolver = APMDependencyResolver(
+        apm_modules_dir=modules,
+        download_callback=_make_callback(log, lock),
+        max_parallel=1,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="apm_cli.deps.apm_resolver"):
+        graph = resolver.resolve_dependencies(tmp_path)
+
+    # "good" and its child "leaf" resolve; "bad" gets a node but its
+    # invalid sub-deps are not enqueued.
+    node_keys = list(graph.dependency_tree.nodes.keys())
+    assert any("good" in k for k in node_keys), node_keys
+    assert any("leaf" in k for k in node_keys), node_keys
+    assert any("bad" in k for k in node_keys), node_keys
+    assert not any("should-not-resolve" in k for k in node_keys), node_keys
+
+    # The warning must mention the structured-format error.
+    warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("expected a mapping" in msg for msg in warning_messages), (
+        f"Expected 'expected a mapping' warning; got: {warning_messages}"
+    )

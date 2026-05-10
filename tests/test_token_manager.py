@@ -5,9 +5,65 @@ import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
-from src.apm_cli.core.token_manager import GitHubTokenManager
+from src.apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
+
+
+class TestSanitizeCredentialPath:
+    """Direct coverage of the security-critical credential-path sanitizer.
+
+    The four code paths (control-char reject, scheme allowlist, full-URL
+    extraction, valid passthrough) are exercised with parametrized cases
+    so a future refactor that drops a branch fails immediately rather than
+    silently widening the injection surface.
+    """
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            # Valid passthrough -- canonical owner/repo
+            ("acme/widgets", "acme/widgets"),
+            # Leading slash stripped
+            ("/acme/widgets", "acme/widgets"),
+            # Dots / hyphens / underscores allowed (GitHub's owner/repo charset)
+            ("acme-org/my.widget_v2", "acme-org/my.widget_v2"),
+            # Empty / whitespace-only -> empty
+            ("", ""),
+            ("/", ""),
+            # Newline (LF) injection -> empty (defense-in-depth)
+            ("acme/widgets\nusername=x", ""),
+            # Carriage return (CR) injection -> empty
+            ("acme/widgets\rusername=x", ""),
+            # NUL byte -> empty
+            ("acme/widgets\x00username=x", ""),
+            # Tab -> empty
+            ("acme/wid\tgets", ""),
+            # Other whitespace -> empty
+            ("acme/wid gets", ""),
+            # DEL (0x7f) -> empty
+            ("acme/widgets\x7f", ""),
+            # https:// URL -> path component extracted
+            ("https://github.com/acme/widgets", "acme/widgets"),
+            # http:// URL (allowlisted) -> path component extracted
+            ("http://example.com/acme/widgets", "acme/widgets"),
+            # ssh URL (allowlisted) -> path component extracted
+            ("ssh://git@github.com/acme/widgets", "acme/widgets"),
+            # data: URI -> rejected (not on allowlist; bypasses char-scan otherwise)
+            ("data:text/plain,acme/widgets%0Ausername=x", ""),
+            # file: URI -> rejected (not on allowlist)
+            ("file:///etc/passwd", ""),
+            # javascript: -> rejected
+            ("javascript:alert(1)", ""),
+        ],
+    )
+    def test_sanitize(self, raw, expected):
+        assert _sanitize_credential_path(raw) == expected
+
+    def test_scheme_allowlist_is_case_insensitive(self):
+        """Schemes are normalized to lowercase before allowlist check."""
+        assert _sanitize_credential_path("HTTPS://github.com/acme/widgets") == "acme/widgets"
+        assert _sanitize_credential_path("DATA:text/plain,x") == ""
 
 
 class TestModulesTokenPrecedence:
@@ -137,6 +193,75 @@ class TestResolveCredentialFromGit:
             GitHubTokenManager.resolve_credential_from_git("github.com")
             call_kwargs = mock_run.call_args
             assert call_kwargs.kwargs["input"] == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_appended_to_stdin(self):
+        """When path is provided, it is appended so GCM useHttpPath can disambiguate."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="acme/widgets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert stdin == "protocol=https\nhost=github.com\npath=acme/widgets\n\n", (
+                f"unexpected stdin: {stdin!r}"
+            )
+
+    def test_path_leading_slash_stripped(self):
+        """A leading '/' on the path is stripped (git credential helpers expect bare paths)."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="/acme/widgets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert stdin == "protocol=https\nhost=github.com\npath=acme/widgets\n\n"
+
+    def test_path_none_preserves_legacy_stdin(self):
+        """When path is None, stdin is identical to the pre-disambiguation format."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path=None)
+            assert mock_run.call_args.kwargs["input"] == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_newline_is_rejected(self):
+        """Newline in path is dropped to prevent credential-protocol injection."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="acme/widgets\nusername=attacker"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "\nusername=attacker" not in stdin
+            assert "path=" not in stdin, f"malformed path must be dropped entirely: {stdin!r}"
+            assert stdin == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_carriage_return_is_rejected(self):
+        """CR in path is dropped; helpers split on CRLF as well as LF."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="acme/widgets\rprotocol=ftp"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=" not in stdin
+            assert stdin == "protocol=https\nhost=github.com\n\n"
+
+    def test_path_with_whitespace_is_rejected(self):
+        """Whitespace in path is dropped (real repo paths never contain it)."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git("github.com", path="acme/wid gets")
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=" not in stdin
+
+    def test_path_with_full_url_is_extracted_via_urlparse(self):
+        """If a future caller mistakenly passes a full URL, only the URL path
+        component is forwarded -- never the scheme/host. Guards against the
+        naive lstrip('/') yielding 'https:/host/owner/repo'."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                "github.com", path="https://github.com/acme/widgets"
+            )
+            stdin = mock_run.call_args.kwargs["input"]
+            assert "path=acme/widgets" in stdin
+            assert "https" not in stdin.split("path=", 1)[1].splitlines()[0]
 
     def test_git_terminal_prompt_disabled(self):
         """GIT_TERMINAL_PROMPT=0 is set in the subprocess env."""
