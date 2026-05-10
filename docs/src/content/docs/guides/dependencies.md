@@ -38,7 +38,7 @@ APM supports multiple dependency types:
 
 **Marketplaces:** Plugins installed as `apm install name@marketplace` resolve from a registered index. On **GitLab-class** hosts, monorepo plugins whose sources live in a subdirectory of the marketplace repository itself are supported without hand-writing object-form `git:` + `path:` entries. See the [Marketplaces guide](./marketplaces/).
 
-For self-hosted **Gitea** and **Gogs**, virtual subdirectory and file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab is not yet supported for virtual packages -- use git-clone-based dependencies for GitLab repos.
+For self-hosted **Gitea** and **Gogs**, virtual subdirectory and file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). On **GitLab-class** hosts (gitlab.com and self-managed GitLab), virtual subdirectory and file packages resolve via the GitLab REST v4 `/projects/{id}/repository/files/{path}/raw` endpoint with `PRIVATE-TOKEN` auth.
 
 ### Claude Skills
 
