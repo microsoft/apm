@@ -102,8 +102,9 @@ What these checks do **not** cover, by design:
   one thing and parses as another). That is the `apm audit` scan
   described below.
 - Org policy (allow-listed sources, forbidden primitives, scope
-  restrictions). Policy enforcement is an enterprise concern; see the
-  enterprise governance chapter.
+  restrictions). Policy enforcement is an enterprise concern; see
+  [Security and supply chain](../../enterprise/security-and-supply-chain/)
+  and [Drift detection](../../enterprise/drift-detection/).
 
 ## On-demand: `apm audit`
 

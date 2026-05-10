@@ -188,7 +188,7 @@ consumers running `apm install --update` on their own cadence.
 Org policy can restrict which marketplaces a consumer is allowed to
 register and which packages it can install from them. That gate runs
 on the consumer side at install time. See
-[Governance guide](../../enterprise/governance-guide/) for the
+[Governance overview](../../enterprise/governance-overview/) for the
 producer-side implications (signing, allow-listed sources).
 
 ## Where next
