@@ -16,6 +16,8 @@ import yaml  # noqa: F401
 from apm_cli.commands._helpers import (
     _atomic_write,
     _check_and_notify_updates,
+    _check_orphaned_packages,
+    _expand_with_ancestors,
     _get_default_script,
     _list_available_scripts,
     _load_apm_config,
@@ -250,6 +252,279 @@ class TestScanInstalledPackages:
 
 
 # ---------------------------------------------------------------------------
+# _expand_with_ancestors
+# ---------------------------------------------------------------------------
+
+
+class TestExpandWithAncestors:
+    """Tests for _expand_with_ancestors."""
+
+    def test_adds_intermediate_ancestors(self):
+        """Subdirectory path produces install-root ancestors only.
+
+        Depth-cap security contract: ancestors past depth 3 are NOT
+        emitted (see _expand_with_ancestors docstring). For a path
+        like ``owner/repo/.apm/skills/my-skill`` only the 2-segment
+        and 3-segment prefixes are added.
+        """
+        paths = {"owner/repo/.apm/skills/my-skill"}
+        result = _expand_with_ancestors(paths)
+        assert "owner/repo" in result
+        assert "owner/repo/.apm" in result
+        assert "owner/repo/.apm/skills/my-skill" in result
+        # Depth cap: deeper ancestors are intentionally not emitted.
+        assert "owner/repo/.apm/skills" not in result
+
+    def test_two_segment_path_unchanged(self):
+        """A 2-segment path has no intermediate ancestors to add."""
+        paths = {"owner/repo"}
+        result = _expand_with_ancestors(paths)
+        assert result == {"owner/repo"}
+
+    def test_empty_input(self):
+        """Empty set returns empty set."""
+        assert _expand_with_ancestors(set()) == set()
+
+    def test_three_segment_ado_path(self):
+        """ADO-style org/project/repo produces org/project as ancestor."""
+        paths = {"org/project/repo"}
+        result = _expand_with_ancestors(paths)
+        assert "org/project/repo" in result
+        assert "org/project" in result
+
+    def test_no_false_prefix_overlap(self):
+        """owner/repo-extra does not collide with owner/repo."""
+        paths = {"owner/repo-extra/.apm/skills/x"}
+        result = _expand_with_ancestors(paths)
+        assert "owner/repo-extra" in result
+        assert "owner/repo" not in result
+
+    def test_skips_path_traversal(self):
+        """Paths containing '..' are skipped during expansion."""
+        paths = {"owner/../etc/passwd"}
+        result = _expand_with_ancestors(paths)
+        # Original path is kept (it's in the input set), but no ancestors are generated
+        assert "owner/../etc/passwd" in result
+        assert "owner/.." not in result
+
+    def test_skips_backslash_traversal(self):
+        """Backslash-encoded traversal cannot bypass the '..' guard.
+
+        Regression for the supply-chain finding: prior implementation
+        called ``p.split('/')`` directly, so a token like
+        ``owner\\..\\evil/sub`` parsed as a single segment containing
+        ``..`` and slipped past the guard. The fix normalises ``\\``
+        -> ``/`` before splitting.
+        """
+        paths = {"owner\\..\\evil/sub"}
+        result = _expand_with_ancestors(paths)
+        # Original kept (membership semantics), but NO ancestor must
+        # leak into the expansion.
+        assert "owner\\..\\evil/sub" in result
+        assert "owner" not in result
+        assert "owner/.." not in result
+        assert "owner\\..\\evil" not in result
+
+    def test_installed_guard_protects_real_orphan(self):
+        """When ``installed`` lists a real standalone package that is
+        also an ancestor of an expected subdir dep, the ancestor is
+        NOT added to the expansion -- so the real package can still
+        be detected as an orphan.
+        """
+        paths = {"owner/repo/.apm/skills/foo"}
+        result = _expand_with_ancestors(paths, installed={"owner/repo"})
+        assert "owner/repo" not in result, (
+            "Real installed package must not be masked by ancestor expansion"
+        )
+
+    def test_depth_cap_bounds_ancestor_emission(self):
+        """Ancestors past depth 3 are not emitted (security cap).
+
+        ``_scan_installed_packages`` skips dotted dirs and doesn't see
+        intermediates past depth 3, so emitting them would only widen
+        the orphan-suppression surface.
+        """
+        paths = {"owner/repo/.apm/skills/foo/extra/deeper"}
+        result = _expand_with_ancestors(paths)
+        assert "owner/repo" in result
+        # Cap stops emission at depth 3 (exclusive index 4).
+        assert "owner/repo/.apm/skills" not in result
+        assert "owner/repo/.apm/skills/foo" not in result
+
+
+# ---------------------------------------------------------------------------
+# _check_orphaned_packages -- subdirectory ancestor false-positive fix
+# ---------------------------------------------------------------------------
+
+
+class TestCheckOrphanedPackagesSubdirectoryAncestor:
+    """Tests that parent directories of subdirectory virtual packages are not
+    falsely flagged as orphaned.
+
+    When a subdirectory package is installed at owner/repo/.apm/skills/name,
+    the intermediate owner/repo/ directory contains .apm/ and gets picked up
+    by _scan_installed_packages. The orphan check must recognise it as an
+    ancestor of an expected path rather than an orphaned package.
+    """
+
+    def test_parent_of_subdirectory_package_not_orphaned(self, tmp_path, monkeypatch):
+        """owner/repo is not orphaned when owner/repo/.apm/skills/x is expected."""
+        monkeypatch.chdir(tmp_path)
+
+        # Set up apm.yml with a dict-form dependency using git: + path:
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - git: github.example.com/owner/repo\n"
+            "      path: .apm/skills/my-skill\n",
+            encoding="utf-8",
+        )
+
+        # Simulate the on-disk layout: owner/repo/.apm/skills/my-skill/SKILL.md
+        apm_modules = tmp_path / "apm_modules"
+        skill_dir = apm_modules / "owner" / "repo" / ".apm" / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
+
+        orphaned = _check_orphaned_packages()
+        assert orphaned == [], f"Parent dir should not be orphaned; got: {orphaned}"
+
+    def test_actual_orphan_still_detected(self, tmp_path, monkeypatch):
+        """A truly orphaned package is still reported even with the ancestor fix."""
+        monkeypatch.chdir(tmp_path)
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - git: github.example.com/owner/repo\n"
+            "      path: .apm/skills/my-skill\n",
+            encoding="utf-8",
+        )
+
+        # Simulate an additional unrelated package that IS orphaned
+        apm_modules = tmp_path / "apm_modules"
+        skill_dir = apm_modules / "owner" / "repo" / ".apm" / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
+
+        orphan_dir = apm_modules / "other" / "stale-pkg"
+        orphan_dir.mkdir(parents=True)
+        (orphan_dir / "apm.yml").write_text("name: stale-pkg", encoding="utf-8")
+
+        orphaned = _check_orphaned_packages()
+        assert "other/stale-pkg" in orphaned
+
+    def test_whole_repo_dependency_not_orphaned(self, tmp_path, monkeypatch):
+        """A whole-repo dependency (owner/repo shorthand) is not flagged as orphaned."""
+        monkeypatch.chdir(tmp_path)
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - github.example.com/org/my-package\n",
+            encoding="utf-8",
+        )
+
+        # Simulate the installed whole-repo package with .apm content
+        apm_modules = tmp_path / "apm_modules"
+        pkg_dir = apm_modules / "org" / "my-package"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0", encoding="utf-8")
+        apm_dir = pkg_dir / ".apm"
+        apm_dir.mkdir()
+        instr_dir = apm_dir / "instructions"
+        instr_dir.mkdir()
+        (instr_dir / "example.instructions.md").write_text("# Instructions", encoding="utf-8")
+
+        orphaned = _check_orphaned_packages()
+        assert orphaned == [], f"Whole-repo package should not be orphaned; got: {orphaned}"
+
+    def test_whole_repo_with_unrelated_orphan(self, tmp_path, monkeypatch):
+        """Whole-repo dep is fine; an unrelated stale package IS orphaned."""
+        monkeypatch.chdir(tmp_path)
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - github.example.com/org/my-package\n",
+            encoding="utf-8",
+        )
+
+        apm_modules = tmp_path / "apm_modules"
+        # Declared package
+        pkg_dir = apm_modules / "org" / "my-package"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0", encoding="utf-8")
+
+        # Stale package not in apm.yml
+        stale_dir = apm_modules / "org" / "old-package"
+        stale_dir.mkdir(parents=True)
+        (stale_dir / "apm.yml").write_text("name: old-package\nversion: 0.1.0", encoding="utf-8")
+
+        orphaned = _check_orphaned_packages()
+        assert "org/my-package" not in orphaned
+        assert "org/old-package" in orphaned
+
+    def test_real_orphan_at_owner_repo_with_sibling_subdir_dep(self, tmp_path, monkeypatch):
+        """Regression: a real installed ``owner/repo`` package on disk MUST
+        still be flagged as orphaned even when a sibling subdirectory dep
+        ``owner/repo/.apm/skills/foo`` is declared in apm.yml.
+
+        Previously, ancestor expansion blindly added ``owner/repo`` to the
+        expected set whenever a subdir dep referenced it, silently
+        suppressing detection of a genuinely orphaned standalone package
+        that shared the same ``owner/repo`` filesystem root. ``apm prune``
+        is a safety command -- it must NEVER silently miss a real orphan.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        # Declare ONLY the subdirectory dep. The standalone owner/repo
+        # package on disk is NOT declared anywhere.
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - git: github.example.com/owner/repo\n"
+            "      path: .apm/skills/foo\n",
+            encoding="utf-8",
+        )
+
+        apm_modules = tmp_path / "apm_modules"
+        # Real installed standalone package at owner/repo (with apm.yml AND
+        # .apm marker). This is a genuine orphan -- nothing in apm.yml
+        # declares the whole repo as a dep.
+        pkg_dir = apm_modules / "owner" / "repo"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: repo\nversion: 1.0.0", encoding="utf-8")
+        # Subdirectory dep content (legitimately installed) shares the
+        # same ``owner/repo`` root.
+        skill_dir = pkg_dir / ".apm" / "skills" / "foo"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
+
+        orphaned = _check_orphaned_packages()
+        assert "owner/repo" in orphaned, (
+            "Real orphan at owner/repo must be flagged even when a "
+            "sibling subdirectory dep shares the same root; got: "
+            f"{orphaned}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # _check_and_notify_updates
 # ---------------------------------------------------------------------------
 
@@ -313,3 +588,90 @@ class TestCheckAndNotifyUpdates:
                 ):
                     # Should not raise
                     _check_and_notify_updates()
+
+
+# ---------------------------------------------------------------------------
+# Round-3 panel regressions:
+#   - traversal guard must route through canonical validate_path_segments
+#   - _standalone_installed_packages must NOT swallow corruption errors
+# ---------------------------------------------------------------------------
+
+
+class TestExpandWithAncestorsRoutesThroughCanonicalGuard:
+    """Round-3 supply-chain finding: ad-hoc ``..`` check must be replaced
+    by ``apm_cli.utils.path_security.validate_path_segments`` so the
+    project keeps a single chokepoint for path-segment validation and
+    also catches single-dot (``.``) traversal segments.
+    """
+
+    def test_helpers_traversal_uses_validate_path_segments(self):
+        """``_expand_with_ancestors`` calls the canonical guard once per
+        input path. Mocking the guard and asserting it was called proves
+        the hand-rolled ``".." in parts`` check is gone.
+        """
+        with patch("apm_cli.commands._helpers.validate_path_segments") as mock_guard:
+            _expand_with_ancestors({"owner/repo/.apm/skills/foo"})
+            assert mock_guard.called, (
+                "Ancestor expansion must route every input through "
+                "validate_path_segments rather than a hand-rolled '..' check"
+            )
+            called_paths = {call.args[0] for call in mock_guard.call_args_list}
+            assert "owner/repo/.apm/skills/foo" in called_paths
+
+    def test_single_dot_segment_now_rejected(self):
+        """Single-dot segments are rejected by the canonical guard
+        (which the prior ad-hoc ``".." in parts`` check missed). The
+        path is kept in the result (membership semantics) but no
+        ancestors are emitted.
+        """
+        result = _expand_with_ancestors({"owner/./repo"})
+        assert "owner/./repo" in result
+        assert "owner" not in result
+        assert "owner/." not in result
+
+
+class TestStandaloneInstalledDoesNotSwallowCorruption:
+    """Round-3 supply-chain finding: bare ``except Exception`` in
+    ``_standalone_installed_packages`` silently destroyed
+    ``lockfile_keys`` and failed open on lockfile corruption. The
+    narrowed ``except (AttributeError, TypeError, KeyError)`` clause
+    must let unexpected exceptions propagate.
+    """
+
+    def test_standalone_installed_does_not_swallow_lockfile_corruption(self, tmp_path):
+        """A lockfile object whose ``dependencies`` attribute raises an
+        unexpected exception (e.g. ``RuntimeError`` from a corrupted /
+        attacker-crafted backing store) must propagate, not silently
+        return an empty list.
+        """
+        from apm_cli.commands._helpers import _standalone_installed_packages
+
+        class CorruptLockfile:
+            @property
+            def dependencies(self):
+                raise RuntimeError("simulated lockfile corruption")
+
+        with pytest.raises(RuntimeError, match="simulated lockfile corruption"):
+            _standalone_installed_packages(["owner/repo"], tmp_path, lockfile=CorruptLockfile())
+
+    def test_standalone_installed_absorbs_narrow_shape_errors(self, tmp_path):
+        """Narrow shape errors (TypeError when ``dependencies`` is e.g.
+        an ``int`` due to YAML coercion) are intentionally absorbed and
+        degrade to the ``apm.yml``-only fallback.
+        """
+        from apm_cli.commands._helpers import _standalone_installed_packages
+
+        class BadShapeLockfile:
+            dependencies = 42  # not iterable -> TypeError on for-loop
+
+        # Create owner/repo with apm.yml so fallback marks it standalone.
+        (tmp_path / "owner" / "repo").mkdir(parents=True)
+        (tmp_path / "owner" / "repo" / "apm.yml").write_text(
+            "name: r\nversion: 1.0", encoding="utf-8"
+        )
+        result = _standalone_installed_packages(
+            ["owner/repo"], tmp_path, lockfile=BadShapeLockfile()
+        )
+        assert result == ["owner/repo"], (
+            "Narrow shape errors must degrade to apm.yml fallback, not propagate to caller"
+        )

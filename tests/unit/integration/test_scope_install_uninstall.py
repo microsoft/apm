@@ -7,6 +7,7 @@ For each target x scope combination, verifies:
 - Files at wrong-scope paths are never created
 """
 
+import os
 import shutil
 import tempfile
 from datetime import datetime
@@ -22,6 +23,23 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
+
+
+def _set_home(monkeypatch, home: Path) -> None:
+    """Portably set the user's home directory for ``Path.home()``.
+
+    On Windows, ``Path.home()`` ignores ``HOME`` and uses ``USERPROFILE``
+    (or ``HOMEDRIVE`` + ``HOMEPATH``).
+    """
+    home_str = str(home)
+    monkeypatch.setenv("HOME", home_str)
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", home_str)
+        drive, _, tail = home_str.partition(":")
+        if tail:
+            monkeypatch.setenv("HOMEDRIVE", f"{drive}:")
+            monkeypatch.setenv("HOMEPATH", tail)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -380,7 +398,7 @@ class TestClaudeInstallUninstallCycle:
 
     def test_user_scope_with_claude_config_dir(self, monkeypatch):
         """CLAUDE_CONFIG_DIR override: deploy lands at custom root and uninstall cleans it."""
-        monkeypatch.setenv("HOME", str(self.project_root))
+        _set_home(monkeypatch, self.project_root)
         custom = self.project_root / ".config" / "test-claude"
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(custom))
         custom.mkdir(parents=True)
@@ -734,7 +752,7 @@ class TestSkillInstallUninstallCycle:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_copilot_project_scope(self):
-        """Skill deploys to .github/skills/ at project scope."""
+        """Skill deploys to .agents/skills/ at project scope (convergence)."""
         target = KNOWN_TARGETS["copilot"].for_scope(user_scope=False)
         pkg_info = _make_pkg(
             self.project_root,
@@ -752,7 +770,7 @@ class TestSkillInstallUninstallCycle:
         assert len(result.target_paths) >= 1
 
         deployed = _posix_relpaths(self.project_root, result.target_paths)
-        assert any(p.startswith(".github/skills/") for p in deployed)
+        assert any(p.startswith(".agents/skills/") for p in deployed)
 
         for p in deployed:
             assert (self.project_root / p).exists()
@@ -770,7 +788,7 @@ class TestSkillInstallUninstallCycle:
             assert not (self.project_root / p).exists()
 
     def test_copilot_user_scope(self):
-        """Skill deploys to .copilot/skills/ at user scope."""
+        """Skill deploys to .agents/skills/ at user scope (convergence)."""
         target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
         assert target is not None
 
@@ -789,10 +807,11 @@ class TestSkillInstallUninstallCycle:
         assert len(result.target_paths) >= 1
 
         deployed = _posix_relpaths(self.project_root, result.target_paths)
-        assert any(p.startswith(".copilot/skills/") for p in deployed)
+        assert any(p.startswith(".agents/skills/") for p in deployed)
 
-        # .github/ must NOT be touched
+        # .github/ and .copilot/ must NOT be touched (skills converged on .agents/)
         assert not (self.project_root / ".github").exists()
+        assert not (self.project_root / ".copilot").exists()
 
         for p in deployed:
             assert (self.project_root / p).exists()
@@ -810,7 +829,7 @@ class TestSkillInstallUninstallCycle:
             assert not (self.project_root / p).exists()
 
     def test_opencode_user_scope(self):
-        """Skill deploys to .config/opencode/skills/ at user scope."""
+        """Skill deploys to .agents/skills/ at user scope (convergence)."""
         target = KNOWN_TARGETS["opencode"].for_scope(user_scope=True)
         assert target is not None
 
@@ -832,9 +851,9 @@ class TestSkillInstallUninstallCycle:
         assert len(result.target_paths) >= 1
 
         deployed = _posix_relpaths(self.project_root, result.target_paths)
-        assert any(p.startswith(".config/opencode/skills/") for p in deployed)
+        assert any(p.startswith(".agents/skills/") for p in deployed)
 
-        # .opencode/ must NOT be touched
+        # .opencode/ and .config/opencode/ must NOT be touched
         assert not (self.project_root / ".opencode").exists()
 
         for p in deployed:

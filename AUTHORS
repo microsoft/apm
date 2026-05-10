@@ -1,14 +1,20 @@
 # Authors
 
-## Project Maintainers
+## Maintainers
 
-* Daniel Meppiel (@danielmeppiel) - Creator and Lead Maintainer
-* Sergio Sisternes (@sergio-sisternes-epam) - Maintainer
+* Daniel Meppiel (@danielmeppiel) — Microsoft
+* Sergio Sisternes (@sergio-sisternes-epam) — EPAM Systems
+
+Maintainers' work on APM is supported by their employers. Project
+decisions are made in the interest of APM and its users, independent
+of any single employer's commercial priorities. Maintainers disclose
+conflicts of interest when they arise.
 
 ## Contributors
 
-Thank you to all our contributors! 
+APM is built by contributors from many organizations and independent
+developers. See the full list:
 
-[This space will be updated as contributors join the project]
+https://github.com/microsoft/apm/graphs/contributors
 
-Want to contribute? Check out our [Contributing Guidelines](CONTRIBUTING.md).
+Want to contribute? See [Contributing Guidelines](CONTRIBUTING.md).

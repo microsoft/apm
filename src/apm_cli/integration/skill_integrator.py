@@ -320,6 +320,7 @@ def copy_skill_to_target(
         skill_name = normalize_skill_name(raw_skill_name)
 
     deployed: list[Path] = []
+    seen_skill_dirs: set[Path] = set()
 
     # Deploy to all active targets that support skills.
     # When no targets are provided, fall back to project-scope detection.
@@ -341,12 +342,54 @@ def copy_skill_to_target(
             continue
 
         skill_dir = target_base / effective_root / "skills" / skill_name
+
+        # Security: reject traversal in skill name and validate containment.
+        # The containment check resolves the *base* (which may sit behind a
+        # symlink) but verifies the *unresolved* caller-controlled segment
+        # (skill_name) has no traversal parts.  This prevents a symlink at
+        # target_base / effective_root from silently redirecting writes
+        # outside the project root.
+        from apm_cli.utils.path_security import (
+            PathTraversalError,
+            ensure_path_within,
+            validate_path_segments,
+        )
+
+        validate_path_segments(skill_name, context="skill name")
+        if skill_dir.is_symlink():
+            raise PathTraversalError(
+                f"Skill destination {skill_dir} is a symlink -- refusing to deploy"
+            )
+
+        # Verify the resolved skill directory is within the project root.
+        # This catches the case where an ancestor directory (e.g.
+        # effective_root) is a symlink pointing outside the project.
+        resolved_project = target_base.resolve()
+        resolved_skill_dir = skill_dir.resolve()
+        if not resolved_skill_dir.is_relative_to(resolved_project):
+            raise PathTraversalError(
+                f"Skill directory '{skill_dir}' resolves to '{resolved_skill_dir}' "
+                f"which is outside the project root '{resolved_project}'"
+            )
+        ensure_path_within(skill_dir, target_base / effective_root / "skills")
+
+        # Dedup: skip if same resolved path already deployed.
+        resolved = skill_dir.resolve()
+        if resolved in seen_skill_dirs:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "%s -- already deployed, skipping for %s", skill_dir, target.name
+            )
+            continue
+        seen_skill_dirs.add(resolved)
+
         skill_dir.parent.mkdir(parents=True, exist_ok=True)
         if skill_dir.exists():
             shutil.rmtree(skill_dir)
-        from apm_cli.security.gate import ignore_symlinks
+        from apm_cli.security.gate import ignore_non_content
 
-        shutil.copytree(source_path, skill_dir, ignore=ignore_symlinks)
+        shutil.copytree(source_path, skill_dir, ignore=ignore_non_content)
         deployed.append(skill_dir)
 
     return deployed
@@ -601,9 +644,9 @@ class SkillIntegrator(BaseIntegrator):
                             pass
                 shutil.rmtree(target)
             target.mkdir(parents=True, exist_ok=True)
-            from apm_cli.security.gate import ignore_symlinks
+            from apm_cli.security.gate import ignore_non_content
 
-            shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_symlinks)
+            shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_non_content)
             promoted += 1
             deployed.append(target)
         return promoted, deployed
@@ -697,6 +740,7 @@ class SkillIntegrator(BaseIntegrator):
         owned_by = self._build_skill_ownership_map(project_root)
         count = 0
         all_deployed: list[Path] = []
+        seen_skill_dirs: set[Path] = set()
 
         for idx, target in enumerate(targets):
             if not target.supports("skills"):
@@ -710,6 +754,18 @@ class SkillIntegrator(BaseIntegrator):
             else:
                 effective_root = skills_mapping.deploy_root or target.root_dir
                 target_skills_root = project_root / effective_root / "skills"
+
+            # Dedup: skip if same resolved skills root already processed.
+            resolved_root = target_skills_root.resolve()
+            if resolved_root in seen_skill_dirs:
+                if logger:
+                    logger.progress(
+                        f"{target_skills_root} -- already deployed, skipping for {target.name}",
+                        symbol="info",
+                    )
+                continue
+            seen_skill_dirs.add(resolved_root)
+
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
             n, deployed = self._promote_sub_skills(
@@ -820,6 +876,8 @@ class SkillIntegrator(BaseIntegrator):
         dep_ref = package_info.dependency_ref
         current_key: str | None = dep_ref.get_unique_key() if dep_ref is not None else None
 
+        seen_skill_dirs: set[Path] = set()
+
         for idx, target in enumerate(targets):
             if not target.supports("skills"):
                 continue
@@ -832,6 +890,32 @@ class SkillIntegrator(BaseIntegrator):
             else:
                 effective_root = skills_mapping.deploy_root or target.root_dir
                 target_skill_dir = project_root / effective_root / "skills" / skill_name
+
+            # Security: validate name + containment + symlink rejection.
+            from apm_cli.utils.path_security import (
+                PathTraversalError,
+                ensure_path_within,
+                validate_path_segments,
+            )
+
+            validate_path_segments(skill_name, context="skill name")
+            if target_skill_dir.is_symlink():
+                raise PathTraversalError(
+                    f"Skill destination {target_skill_dir} is a symlink -- refusing to deploy"
+                )
+            if target.resolved_deploy_root is None:
+                ensure_path_within(target_skill_dir, project_root / effective_root / "skills")
+
+            # Dedup: skip if same resolved path already deployed.
+            resolved = target_skill_dir.resolve()
+            if resolved in seen_skill_dirs:
+                if logger:
+                    logger.progress(
+                        f"{target_skill_dir} -- already deployed, skipping for {target.name}",
+                        symbol="info",
+                    )
+                continue
+            seen_skill_dirs.add(resolved)
 
             if is_primary:
                 skill_created = not target_skill_dir.exists()
@@ -881,21 +965,17 @@ class SkillIntegrator(BaseIntegrator):
                 shutil.rmtree(target_skill_dir)
 
             target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-            from apm_cli.security.gate import ignore_symlinks as _ignore_symlinks
+            from apm_cli.security.gate import ignore_non_content
 
             _apm_filter = shutil.ignore_patterns(".apm")
 
-            def _ignore_symlinks_and_apm(directory, contents):
-                # Compose two ignore filters: drop symlinks (security gate)
-                # AND drop nested `.apm/` so consumers of the bundle do not
-                # see the author's primitive layout leak into the deployed
-                # skill tree.
+            def _ignore_non_content_and_apm(directory, contents):
                 return list(
-                    set(_ignore_symlinks(directory, contents))
+                    set(ignore_non_content(directory, contents))
                     | set(_apm_filter(directory, contents))  # noqa: B023
                 )
 
-            shutil.copytree(package_path, target_skill_dir, ignore=_ignore_symlinks_and_apm)
+            shutil.copytree(package_path, target_skill_dir, ignore=_ignore_non_content_and_apm)
             all_target_paths.append(target_skill_dir)
 
             if is_primary:
@@ -974,12 +1054,6 @@ class SkillIntegrator(BaseIntegrator):
         Returns:
             SkillIntegrationResult with all promoted skills.
         """
-        from apm_cli.security.gate import ignore_symlinks as _ignore_symlinks  # noqa: F401
-        from apm_cli.utils.path_security import (
-            ensure_path_within,  # noqa: F401
-            validate_path_segments,  # noqa: F401
-        )
-
         if targets is None:
             from apm_cli.integration.targets import active_targets
 
@@ -991,6 +1065,7 @@ class SkillIntegrator(BaseIntegrator):
         total_promoted = 0
         all_deployed: list[Path] = []
         any_created = False
+        seen_skill_dirs: set[Path] = set()
 
         # Convert skill_subset tuple to a set for O(1) lookup
         _name_filter = set(skill_subset) if skill_subset else None
@@ -1003,6 +1078,18 @@ class SkillIntegrator(BaseIntegrator):
             skills_mapping = target.primitives["skills"]
             effective_root = skills_mapping.deploy_root or target.root_dir
             target_skills_root = project_root / effective_root / "skills"
+
+            # Dedup: skip if same resolved skills root already processed.
+            resolved_root = target_skills_root.resolve()
+            if resolved_root in seen_skill_dirs:
+                if logger:
+                    logger.progress(
+                        f"{target_skills_root} -- already deployed, skipping for {target.name}",
+                        symbol="info",
+                    )
+                continue
+            seen_skill_dirs.add(resolved_root)
+
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
             n, deployed = self._promote_sub_skills(
@@ -1092,7 +1179,7 @@ class SkillIntegrator(BaseIntegrator):
                 target_paths=sub_deployed,
             )
 
-        # Skip virtual FILE and COLLECTION packages - they're individual files, not full packages
+        # Skip virtual FILE packages - they're individual files, not full packages
         # Multiple virtual files from the same repo would collide on skill name
         # BUT: subdirectory packages (like Claude Skills) SHOULD generate skills
         if package_info.dependency_ref and package_info.dependency_ref.is_virtual:
@@ -1315,6 +1402,7 @@ class SkillIntegrator(BaseIntegrator):
                         )
 
         # Clean all target skill directories dynamically
+        seen_cleanup_dirs: set[Path] = set()
         for t in source:
             if not t.supports("skills"):
                 continue
@@ -1328,24 +1416,47 @@ class SkillIntegrator(BaseIntegrator):
                     continue
 
             skills_dir = project_root / effective_root / "skills"
+
+            # Dedup: skip if same resolved skills dir already cleaned.
+            resolved_skills = skills_dir.resolve()
+            if resolved_skills in seen_cleanup_dirs:
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "%s -- already processed, skipping cleanup for %s", skills_dir, t.name
+                )
+                continue
+            seen_cleanup_dirs.add(resolved_skills)
+
             if skills_dir.exists():
-                result = self._clean_orphaned_skills(skills_dir, installed_skill_names)
+                result = self._clean_orphaned_skills(
+                    skills_dir, installed_skill_names, project_root=project_root
+                )
                 stats["files_removed"] += result["files_removed"]
                 stats["errors"] += result["errors"]
 
         return stats
 
     def _clean_orphaned_skills(
-        self, skills_dir: Path, installed_skill_names: set
+        self,
+        skills_dir: Path,
+        installed_skill_names: set,
+        *,
+        project_root: Path | None = None,
     ) -> dict[str, int]:
         """Clean orphaned skills from a skills directory.
 
         Uses npm-style approach: any skill directory not matching an installed
         package name is considered orphaned and removed.
 
+        For the cross-client ``.agents/skills/`` directory, only removes skill
+        directories that appear in the lockfile's ``deployed_files`` to avoid
+        deleting foreign skills placed by other tools (Codex CLI, manual).
+
         Args:
-            skills_dir: Path to skills directory (.github/skills/, .claude/skills/, or .cursor/skills/)
+            skills_dir: Path to skills directory (.github/skills/, .claude/skills/, etc.)
             installed_skill_names: Set of expected skill directory names
+            project_root: Project root for lockfile-based ownership check.
 
         Returns:
             Dict with cleanup statistics
@@ -1353,9 +1464,19 @@ class SkillIntegrator(BaseIntegrator):
         files_removed = 0
         errors = 0
 
+        # For .agents/skills/: only delete skills that APM owns (appear in lockfile).
+        is_agents_dir = skills_dir.parent.name == ".agents"
+        lockfile_owned_skills: set[str] | None = None
+        if is_agents_dir and project_root is not None:
+            lockfile_owned_skills = self._get_lockfile_owned_agent_skills(project_root)
+
         for skill_subdir in skills_dir.iterdir():
             if skill_subdir.is_dir():
                 if skill_subdir.name not in installed_skill_names:
+                    # Ownership check: skip foreign skills in .agents/skills/.
+                    if lockfile_owned_skills is not None:
+                        if skill_subdir.name not in lockfile_owned_skills:
+                            continue
                     try:
                         shutil.rmtree(skill_subdir)
                         files_removed += 1
@@ -1363,3 +1484,30 @@ class SkillIntegrator(BaseIntegrator):
                         errors += 1
 
         return {"files_removed": files_removed, "errors": errors}
+
+    @staticmethod
+    def _get_lockfile_owned_agent_skills(project_root: Path) -> set[str]:
+        """Return the set of skill names under ``.agents/skills/`` in the lockfile.
+
+        Used by ``_clean_orphaned_skills`` to avoid deleting foreign skills
+        in the cross-client ``.agents/`` directory.
+        """
+        owned: set[str] = set()
+        try:
+            from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+            lockfile = LockFile.read(get_lockfile_path(project_root))
+            if lockfile and lockfile.dependencies:
+                for dep in lockfile.dependencies.values():
+                    for f in dep.deployed_files:
+                        if f.startswith(".agents/skills/"):
+                            parts = f[len(".agents/skills/") :].split("/")
+                            if parts and parts[0]:
+                                owned.add(parts[0])
+        except (FileNotFoundError, OSError, KeyError, ValueError, TypeError, AttributeError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "Could not read lockfile for ownership check: %s", exc
+            )
+        return owned

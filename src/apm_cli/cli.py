@@ -6,6 +6,7 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 import ctypes
 import os
 import sys
+import warnings
 
 import click
 
@@ -17,6 +18,7 @@ from apm_cli.commands._helpers import (
     print_version,
 )
 from apm_cli.commands.audit import audit
+from apm_cli.commands.cache import cache
 from apm_cli.commands.compile import compile as compile_cmd
 from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
@@ -33,6 +35,8 @@ from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
 from apm_cli.commands.run import preview, run
 from apm_cli.commands.runtime import runtime
+from apm_cli.commands.self_update import self_update
+from apm_cli.commands.targets import targets
 from apm_cli.commands.uninstall import uninstall
 from apm_cli.commands.update import update
 from apm_cli.commands.view import view as view_cmd
@@ -52,6 +56,14 @@ def cli(ctx):
     """Main entry point for the APM CLI."""
     ctx.ensure_object(dict)
 
+    # Suppress only the agents-target deprecation warning so CLI users see
+    # the formatted logger.warning() in the install phase, not a double print.
+    # Scoped to AgentsTargetDeprecationWarning to avoid masking future
+    # DeprecationWarnings from apm_cli modules.
+    from apm_cli.core.target_detection import AgentsTargetDeprecationWarning
+
+    warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
+
     # Check for updates non-blockingly (only if not already showing version)
     if not ctx.resilient_parsing:
         _check_and_notify_updates()
@@ -59,6 +71,7 @@ def cli(ctx):
 
 # Register command groups
 cli.add_command(audit)
+cli.add_command(cache)
 cli.add_command(deps)
 cli.add_command(view_cmd)
 # Hidden backward-compatible alias: ``apm info`` → ``apm view``
@@ -78,6 +91,7 @@ cli.add_command(install)
 cli.add_command(uninstall)
 cli.add_command(prune)
 cli.add_command(update)
+cli.add_command(self_update)
 cli.add_command(compile_cmd, name="compile")
 cli.add_command(run)
 cli.add_command(preview)
@@ -85,6 +99,7 @@ cli.add_command(list_cmd, name="list")
 cli.add_command(config)
 cli.add_command(experimental)
 cli.add_command(runtime)
+cli.add_command(targets)
 cli.add_command(mcp)
 cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")

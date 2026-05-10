@@ -15,7 +15,7 @@ APM dependencies are git repositories containing `.apm/` directories with contex
 - **Build on tested context** instead of starting from scratch
 - **Maintain consistency** across multiple repositories and teams
 
-APM supports any git-accessible host — GitHub, GitLab, Bitbucket, self-hosted instances, and more.
+APM supports any git-accessible host — GitHub, GitLab, Bitbucket, Gitea, Gogs, self-hosted instances, and more. See [GitHub Authentication Setup](#github-authentication-setup) below for how tokens flow to non-GitHub hosts via the git credential helper.
 
 ## Dependency Types
 
@@ -35,6 +35,10 @@ APM supports multiple dependency types:
 **Virtual Subdirectory Packages** are skill folders from monorepos - they download an entire folder and may contain a SKILL.md plus resources.
 
 **Virtual File Packages** download a single file (like a prompt or instruction) and integrate it directly.
+
+**Marketplaces:** Plugins installed as `apm install name@marketplace` resolve from a registered index. On **GitLab-class** hosts, monorepo plugins whose sources live in a subdirectory of the marketplace repository itself are supported without hand-writing object-form `git:` + `path:` entries. See the [Marketplaces guide](./marketplaces/).
+
+For self-hosted **Gitea** and **Gogs**, virtual subdirectory and file packages resolve via the `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). On **GitLab-class** hosts (gitlab.com and self-managed GitLab), virtual subdirectory and file packages resolve via the GitLab REST v4 `/projects/{id}/repository/files/{path}/raw` endpoint with `PRIVATE-TOKEN` auth.
 
 ### Claude Skills
 
@@ -143,9 +147,23 @@ dependencies:
       alias: review                      # local alias (controls install directory name)
     - git: ssh://git@bitbucket.example.com:7999/project/repo.git  # Bitbucket Datacenter (custom SSH port)
       ref: v1.0
+    # Azure DevOps with sub-path and ref pin
+    - git: https://dev.azure.com/myorg/myproject/_git/myrepo
+      path: instructions/security
+      ref: v2.0
 ```
 
 Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS, HTTP or SSH clone URL.
+
+:::note[Azure DevOps + sub-path + ref]
+The shorthand form for the same ADO entry is:
+
+```yaml
+- dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
+```
+
+Use the **shorthand** or the **object form** for ADO sub-paths. The full `https://dev.azure.com/<org>/<project>/_git/<repo>/<sub-path>` URL form is not yet accepted by the parser. If you copy the URL straight from your ADO browser tab, switch to one of the two forms above. Spaces in project / repo names must be URL-encoded as `%20`.
+:::
 
 Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
 
@@ -162,7 +180,16 @@ and otherwise requires `--allow-insecure-host <hostname>` for each additional
 transitive host you want to allow.
 :::
 
-> **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
+> **Nested groups (GitLab, Gitea, etc.):** APM treats path segments after the host as the repository namespace and name. Shorthand works for many GitLab URLs (for example `gitlab.com/group/subgroup/repo`). When the namespace is **deeply nested** or a segment could be read either as part of the repo path or as a **virtual path**, prefer the **object form** with an explicit `git:` URL and `path:` so install and API resolution stay unambiguous:
+>
+> ```yaml
+> dependencies:
+>   apm:
+>     - git: https://gitlab.com/group/subgroup/repo.git
+>       path: registry/pkg
+> ```
+>
+> Virtual paths on simple two-segment repos still work in shorthand (`gitlab.com/owner/repo/file.prompt.md`). For **nested-group repos plus a virtual path in the same string**, the shorthand is ambiguous — use `git:` + `path:`:
 >
 > ```yaml
 > # DON'T — ambiguous: APM can't tell where the repo path ends
@@ -173,6 +200,41 @@ transitive host you want to allow.
 > - git: gitlab.com/group/subgroup/repo
 >   path: file.prompt.md
 > ```
+
+#### Monorepo sibling references with `git: parent`
+
+When an APM package lives **inside a monorepo** and depends on a sibling package in the same repository at the same ref, declare the dependency with the literal sentinel `git: parent` and a `path:` to the sibling. APM expands `parent` at resolve time to the consumer's clone coordinates -- you do not have to repeat the host, repo, or ref.
+
+```yaml
+# In agents/pkg-a/apm.yml inside org/monorepo
+dependencies:
+  apm:
+    - git: parent
+      path: skills/shared
+```
+
+When `org/monorepo` is installed at ref `main`, APM resolves the sibling to the same `host`, `repo_url`, and `ref`, with `virtual_path: skills/shared`. The lockfile records the **expanded** coordinates -- there is no `parent` sentinel persisted as durable identity:
+
+```yaml
+# apm.lock.yaml (excerpt)
+host: github.com
+repo_url: org/monorepo
+virtual_path: skills/shared
+resolved_ref: main
+resolved_commit: <sha>
+is_virtual: true
+```
+
+The expansion result is byte-for-byte identical to writing the explicit form below, so swapping between the two never invalidates the lockfile or causes a re-download:
+
+```yaml
+# Equivalent explicit form (verbose, but works outside the monorepo too)
+- git: https://github.com/org/monorepo.git
+  path: skills/shared
+  ref: main
+```
+
+Use `git: parent` only when both the consumer and the sibling live in the same git monorepo. A `parent` reference at the **top level** of an `apm.yml` (not transitively pulled in by a parent install) has no monorepo to inherit from and is rejected at resolve time. The `path` is required, must not be empty, and is normalised to a single relative path -- absolute paths and `..` traversal are refused.
 
 ### How Dependencies Are Stored (Canonical Format)
 
@@ -225,6 +287,18 @@ apm install --dry-run
 
 `apm install` also deploys the project's own `.apm/` content (instructions, prompts, agents, skills, hooks, commands) to target directories alongside dependency content. Local content takes priority over dependencies on collision. This works even with zero dependencies -- just `apm.yml` and a `.apm/` directory is enough. See the [CLI reference](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content) for details and exceptions.
 
+:::caution[Migrating from auto-copilot fallback]
+Older APM versions silently deployed to `.github/` (Copilot) when no harness signal was present in the project. Starting with the target-resolution overhaul, that silent fallback is gone: an empty repo with no `targets:` in `apm.yml` and no harness marker (`.claude/`, `.cursor/`, `.github/copilot-instructions.md`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`) now exits 2 with a teaching message.
+
+Pick one of the explicit fixes:
+
+- `apm install --target copilot` -- one-shot deploy to `.github/`.
+- Add `targets: [copilot]` (or any other harness) to `apm.yml` -- persists across runs.
+- Create the harness marker (e.g. `touch .github/copilot-instructions.md`) -- auto-detect picks it up.
+
+Run `apm targets` first to see what APM detects (or doesn't) in the current directory.
+:::
+
 ### 3. Verify Installation
 
 ```bash
@@ -251,6 +325,44 @@ apm compile
 # Instructions with matching applyTo patterns are merged from all sources
 ```
 
+## Updating dependencies
+
+`apm update` refreshes the APM packages declared in your `apm.yml` to their latest matching refs. It resolves the dependency graph against the network, prints a structured plan (added / updated / removed), and prompts before mutating anything.
+
+```bash
+# Interactive: resolve, show plan, prompt [y/N], then install
+apm update
+
+# Show the plan and exit -- no on-disk changes
+apm update --dry-run
+
+# CI-safe: skip the prompt
+apm update --yes
+```
+
+The plan output uses the standard bracket symbols (`[~]` updated, `[+]` added, `[-]` removed) and includes an inline legend in the footer. When nothing has changed, `apm update` prints `All dependencies already at their latest matching refs.` and exits cleanly.
+
+For lockfile-only enforcement in CI, pair `apm update` (in your branch / PR) with `apm install --frozen` (in CI):
+
+```bash
+# In CI -- exit 1 if apm.lock.yaml is missing or out of sync with apm.yml
+apm install --frozen
+```
+
+:::note[--frozen scope]
+`apm install --frozen` is a **structural presence check**: it verifies every direct dependency in `apm.yml` has a lock entry. It does NOT verify that on-disk content matches the locked SHA. Use `apm audit` for end-to-end integrity verification of deployed files.
+:::
+
+:::caution[Breaking change: `apm update` now refreshes dependencies]
+In earlier releases, `apm update` updated the APM CLI binary. That behaviour moved to `apm self-update`. Inside an `apm.yml` project, the bare `apm update` verb now refreshes project dependencies (matching `npm update`, `cargo update`, `uv lock --upgrade`).
+
+Outside a project, `apm update` still forwards to `apm self-update` with a deprecation banner for one release. CI scripts that called `apm update` to refresh the binary should migrate now:
+
+```bash
+sed -i 's/apm update/apm self-update/g' your_scripts
+```
+:::
+
 ## Development Dependencies
 
 Some packages are only needed during authoring — test fixtures, linting rules, internal helpers. Install them as dev dependencies so they stay out of distributed bundles:
@@ -267,9 +379,9 @@ devDependencies:
     - source: owner/test-helpers
 ```
 
-Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack --format plugin` output. See [Pack & Distribute](../pack-distribute/) for details.
+Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack` plugin output. See [Pack & Distribute](../pack-distribute/) for details.
 
-**Important:** plain `apm install` (no flag) deploys both `dependencies` and `devDependencies` -- there is currently no `--omit=dev` flag. The dev/prod separation kicks in at `apm pack --format plugin`. Maintainer-only primitives that you author yourself MUST live outside `.apm/` to be excluded from plugin bundles, because the local-content scanner operates on `.apm/` regardless of the devDep marker. See [Dev-only Primitives](../dev-only-primitives/) for the canonical pattern.
+**Important:** plain `apm install` (no flag) deploys both `dependencies` and `devDependencies` -- there is currently no `--omit=dev` flag. The dev/prod separation kicks in at `apm pack` (plugin format, the default). Maintainer-only primitives that you author yourself MUST live outside `.apm/` to be excluded from plugin bundles, because the local-content scanner operates on `.apm/` regardless of the devDep marker. See [Dev-only Primitives](../dev-only-primitives/) for the canonical pattern.
 
 ## Local Path Dependencies
 
@@ -298,6 +410,21 @@ dependencies:
 - Local packages are validated the same as remote packages (must have `apm.yml` or `SKILL.md`)
 - `apm compile` works identically regardless of dependency source
 - Transitive dependencies are resolved recursively (local packages can depend on remote packages)
+- **Anchor rule:** a `local_path` declared **inside another local package** is resolved relative to **that package's own directory**, not the consumer's project root. This matches npm/pip/cargo workspace behaviour and is what makes mono-repos with sibling helper packages portable across consumers. Sibling layouts that resolve **outside** the consuming project root (e.g. `../sibling-pkg` from a local dep at the project edge) are supported -- the consuming developer authored the manifest chain and trusts the layout. The security boundary lives upstream: see the next bullet.
+
+  ```yaml
+  # apm.yml at /repo/apm.yml
+  dependencies:
+    apm:
+      - ./packages/specialized
+
+  # apm.yml at /repo/packages/specialized/apm.yml
+  dependencies:
+    apm:
+      - ../base   # resolves to /repo/packages/base, NOT /repo/base
+  ```
+
+- **Remote packages may not declare local dependencies.** A package fetched from `owner/repo` cannot depend on a `local_path` -- such an entry would reach into the consumer's filesystem in unpredictable ways. Both relative and absolute local paths are rejected at `ERROR` severity. Authors of remote packages must publish their dependencies (or vendor them via subdirectory packages).
 
 **Re-install behavior:** Local deps are always re-copied on `apm install` since there is no commit SHA to cache against. This ensures you always get the latest local changes.
 
@@ -447,6 +574,23 @@ mcp:
 ```bash
 apm install --trust-transitive-mcp
 ```
+
+### Environment variable placeholders
+
+`env`, `headers`, and `args` values may reference environment variables using either of two equivalent forms:
+
+| Syntax        | Meaning                                                     |
+| ------------- | ----------------------------------------------------------- |
+| `${VAR}`      | Reference to an environment variable named `VAR`            |
+| `${env:VAR}`  | Same as above (VS Code-style prefix, normalized internally) |
+
+How APM materializes a placeholder depends on the target harness:
+
+- **Copilot CLI** (`~/.copilot/mcp-config.json`): the placeholder is preserved as `${VAR}` in the generated config and resolved by Copilot CLI from the host environment at server-start. APM never reads the value, so secrets stay in your shell. Make sure the variable is exported before launching `gh copilot`.
+- **VS Code** (`.vscode/mcp.json`): the placeholder is rewritten to VS Code's `${env:VAR}` form and resolved by VS Code at server-start.
+- **Other harnesses** (Cursor, Windsurf, OpenCode, Claude Desktop, Gemini, Codex): the placeholder is resolved from the current process environment at install time and the literal value is written into the harness config.
+
+The legacy `<VAR>` syntax is still accepted for backward compatibility but emits a deprecation warning; migrate to `${VAR}` in `apm.yml`.
 
 ### Validation
 
@@ -642,7 +786,7 @@ APM automatically retries failed HTTP requests with exponential backoff and jitt
 
 #### Parallel Downloads
 
-APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For subdirectory packages in monorepos, APM attempts git sparse-checkout (git 2.25+) to download only the needed directory, falling back to a shallow clone if sparse-checkout is unavailable.
+APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For sibling subdirectory packages from the same monorepo and ref (e.g. two skills under `skills/` in `github/awesome-copilot`), APM clones the repo bare exactly once into a shared cache and materializes each consumer's working tree from that cache via `git clone --local --shared --no-checkout`. This eliminates redundant network fetches and prevents the parallel races that affected earlier sparse-checkout based fetches.
 
 ### File Processing and Content Merging
 

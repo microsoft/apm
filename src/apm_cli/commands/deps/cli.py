@@ -3,21 +3,17 @@
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import click
 
 # Import existing APM components
-from ...constants import APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME  # noqa: F401
+from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
 from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package  # noqa: F401
+from .._helpers import _expand_with_ancestors, _standalone_installed_packages
 from ._utils import (
-    _count_package_files,  # noqa: F401
     _count_primitives,
-    _count_workflows,  # noqa: F401
-    _get_detailed_context_counts,  # noqa: F401
-    _get_detailed_package_info,  # noqa: F401
     _get_package_display_info,
     _is_nested_under_package,
 )
@@ -34,6 +30,24 @@ def _format_primitive_counts(primitives):
         if count > 0:
             parts.append(f"{count} {ptype}")
     return ", ".join(parts)
+
+
+def _deps_list_source_label(
+    host: str | None,
+    *,
+    is_local: bool = False,
+    lockfile_source: str | None = None,
+) -> str:
+    """Map host / local flags to the ``apm deps list`` Source column."""
+    from ...utils.github_host import is_azure_devops_hostname, is_gitlab_hostname
+
+    if is_local or lockfile_source == "local":
+        return "local"
+    if host and is_azure_devops_hostname(host):
+        return "azure-devops"
+    if host and is_gitlab_hostname(host):
+        return "gitlab"
+    return "github"
 
 
 def _dep_display_name(dep) -> str:
@@ -53,10 +67,7 @@ def _add_tree_children(parent_branch, parent_repo_url, children_map, has_rich, d
     kids = children_map.get(parent_repo_url, [])
     for child_dep in kids:
         child_name = _dep_display_name(child_dep)
-        if has_rich:  # noqa: SIM108
-            child_branch = parent_branch.add(f"[dim]{child_name}[/dim]")
-        else:
-            child_branch = child_name
+        child_branch = parent_branch.add(f"[dim]{child_name}[/dim]") if has_rich else child_name
         if depth < 5:  # Prevent infinite recursion
             _add_tree_children(child_branch, child_dep.repo_url, children_map, has_rich, depth + 1)
 
@@ -86,7 +97,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Load project dependencies to check for orphaned packages
     # GitHub: owner/repo or owner/virtual-pkg-name (2 levels)
     # Azure DevOps: org/project/repo or org/project/virtual-pkg-name (3 levels)
-    declared_sources = {}  # dep_path -> 'github' | 'azure-devops'
+    declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
     try:
         apm_yml_path = apm_dir / APM_YML_FILENAME
         if apm_yml_path.exists():
@@ -94,7 +105,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             for dep in project_package.get_apm_dependencies():
                 # Build the expected installed package name
                 repo_parts = dep.repo_url.split("/")
-                source = "azure-devops" if dep.is_azure_devops() else "github"
+                source = _deps_list_source_label(dep.host, is_local=dep.is_local)
                 is_ado = dep.is_azure_devops() and len(repo_parts) >= 3
                 is_gh = len(repo_parts) >= 2
 
@@ -138,7 +149,10 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 # Lockfile keys match declared_sources format (owner/repo)
                 dep_key = dep.get_unique_key()
                 if dep_key and dep_key not in declared_sources:
-                    declared_sources[dep_key] = "github"
+                    declared_sources[dep_key] = _deps_list_source_label(
+                        dep.host,
+                        lockfile_source=dep.source,
+                    )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
     except Exception:
@@ -147,8 +161,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Scan for installed packages in org-namespaced structure
     # Walks the tree to find directories containing apm.yml or SKILL.md,
     # handling GitHub (2-level), ADO (3-level), and subdirectory (4+ level) packages.
-    installed_packages = []
-    orphaned_packages = []
+    # First pass: collect valid candidate paths for ancestor-aware orphan check.
+    scanned_candidates = []
     for candidate in apm_modules_path.rglob("*"):
         if not candidate.is_dir() or candidate.name.startswith("."):
             continue
@@ -159,8 +173,6 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         rel_parts = candidate.relative_to(apm_modules_path).parts
         if len(rel_parts) < 2:
             continue
-        org_repo_name = "/".join(rel_parts)
-
         # Skip sub-skills inside .apm/ directories -- they belong to the parent package
         if ".apm" in rel_parts:
             continue
@@ -173,7 +185,34 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             and _is_nested_under_package(candidate, apm_modules_path)
         ):
             continue
+        scanned_candidates.append((candidate, "/".join(rel_parts), has_apm_yml, has_skill_md))
 
+    # Precompute expected paths + ancestors for O(1) orphan checks.
+    # Mirror prune.py / _check_orphaned_packages: pass the standalone
+    # installed paths (lockfile-membership + apm.yml fallback) so a
+    # genuinely orphaned ``owner/repo`` package is not masked when a
+    # sibling subdirectory dep shares the same install root.
+    try:
+        try:
+            lockfile_path_for_check = get_lockfile_path(apm_dir)
+            lockfile_for_check = (
+                LockFile.read(lockfile_path_for_check) if lockfile_path_for_check.exists() else None
+            )
+        except Exception:
+            lockfile_for_check = None
+        scanned_names = [name for _c, name, _h, _s in scanned_candidates]
+        standalone_installed_for_check = _standalone_installed_packages(
+            scanned_names, apm_modules_path, lockfile=lockfile_for_check
+        )
+    except Exception:
+        standalone_installed_for_check = []
+    declared_with_ancestors = _expand_with_ancestors(
+        declared_sources.keys(), standalone_installed_for_check
+    )
+
+    installed_packages = []
+    orphaned_packages = []
+    for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
         try:
             version = "unknown"
             if has_apm_yml:
@@ -181,7 +220,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = org_repo_name not in declared_sources
+            is_orphaned = org_repo_name not in declared_with_ancestors
             if is_orphaned:
                 orphaned_packages.append(org_repo_name)
 
@@ -210,7 +249,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     if insecure_only:
         installed_packages = [pkg for pkg in installed_packages if pkg["is_insecure"]]
 
-    return installed_packages, orphaned_packages
+    return installed_packages, sorted(orphaned_packages)
 
 
 @click.group(help="Manage APM package dependencies")
@@ -277,15 +316,15 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
         console.print(table)
 
-        # Show orphaned packages warning
+        # Show orphaned packages warning -- routed through CommandLogger
+        # so output goes through the central STATUS_SYMBOLS prefix path
+        # (no raw `[!]` literal that Rich would parse as markup) and so
+        # behaviour is consistent with prune.py.
         if orphaned_packages:
-            console.print(
-                f"\n[!]  {len(orphaned_packages)} orphaned package(s) found (not in apm.yml):",
-                style="yellow",
-            )
+            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
             for pkg in orphaned_packages:
-                console.print(f"  * {pkg}", style="dim yellow")
-            console.print("\n Run 'apm prune' to remove orphaned packages", style="cyan")
+                logger.warning(f"  - {pkg}")
+            logger.info("Run 'apm prune' to remove orphaned packages")
     else:
         # Fallback text table
         if insecure_only:
@@ -323,14 +362,13 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                     f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
                 )
 
-        # Show orphaned packages warning
+        # Show orphaned packages warning -- route through CommandLogger
+        # for consistency with the rich branch above and with prune.py.
         if orphaned_packages:
-            click.echo(
-                f"\n[!]  {len(orphaned_packages)} orphaned package(s) found (not in apm.yml):"
-            )
+            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
             for pkg in orphaned_packages:
-                click.echo(f"  * {pkg}")
-            click.echo("\n Run 'apm prune' to remove orphaned packages")
+                logger.warning(f"  - {pkg}")
+            logger.info("Run 'apm prune' to remove orphaned packages")
 
 
 @deps.command(name="list", help="List installed APM dependencies")
@@ -587,23 +625,22 @@ def tree(global_):
                             child_is_last = j == len(kids) - 1
                             child_prefix = "+-- " if child_is_last else "|-- "
                             click.echo(f"{sub_prefix}{child_prefix}{_dep_display_name(child)}")
-        else:  # noqa: PLR5501
-            # Fallback: scan apm_modules directory (no lockfile)
-            if has_rich:
-                root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
-                if not tree_data["has_modules"]:
-                    root_tree.add("[dim]No dependencies installed[/dim]")
-                else:
-                    for pkg in tree_data["scanned_packages"]:
-                        branch = root_tree.add(f"[green]{pkg['display_name']}[/green]")
-                        prim_summary = _format_primitive_counts(pkg["primitives"])
-                        if prim_summary:
-                            branch.add(f"[dim]{prim_summary}[/dim]")
-                console.print(root_tree)
+        # Fallback: scan apm_modules directory (no lockfile)
+        elif has_rich:
+            root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
+            if not tree_data["has_modules"]:
+                root_tree.add("[dim]No dependencies installed[/dim]")
             else:
-                click.echo(f"{project_name} (local)")
-                if not tree_data["has_modules"]:
-                    click.echo("+-- No dependencies installed")
+                for pkg in tree_data["scanned_packages"]:
+                    branch = root_tree.add(f"[green]{pkg['display_name']}[/green]")
+                    prim_summary = _format_primitive_counts(pkg["primitives"])
+                    if prim_summary:
+                        branch.add(f"[dim]{prim_summary}[/dim]")
+            console.print(root_tree)
+        else:
+            click.echo(f"{project_name} (local)")
+            if not tree_data["has_modules"]:
+                click.echo("+-- No dependencies installed")
 
     except Exception as e:
         logger.error(f"Error showing dependency tree: {e}")
@@ -676,7 +713,7 @@ def clean(dry_run: bool, yes: bool):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork').",
 )
 @click.option(
     "--parallel-downloads",
@@ -693,7 +730,18 @@ def clean(dry_run: bool, yes: bool):
     default=False,
     help="Update user-scope dependencies (~/.apm/)",
 )
-def update(packages, verbose, force, target, parallel_downloads, global_):
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Compatibility flag for projects that "
+        "need per-client skill layouts."
+    ),
+)
+def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
     """Update APM dependencies to latest git refs.
 
     Re-resolves git references (branches/tags) to their current SHAs,
@@ -792,10 +840,13 @@ def update(packages, verbose, force, target, parallel_downloads, global_):
 
     auth_resolver = AuthResolver()
 
-    if packages:  # noqa: SIM108
-        noun = f"{len(packages)} package(s)"
-    else:
-        noun = f"all {len(all_deps)} dependencies"
+    noun = f"{len(packages)} package(s)" if packages else f"all {len(all_deps)} dependencies"
+    # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
+    if not legacy_skill_paths:
+        from ...integration.targets import should_use_legacy_skill_paths
+
+        legacy_skill_paths = should_use_legacy_skill_paths()
+
     logger.start(f"Updating {noun}...")
 
     try:
@@ -810,6 +861,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_):
             auth_resolver=auth_resolver,
             target=target,
             scope=scope,
+            legacy_skill_paths=legacy_skill_paths,
         )
     except Exception as e:
         logger.error(f"Update failed: {e}")

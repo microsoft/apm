@@ -4,24 +4,32 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
+from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
     default_host,
     is_artifactory_path,
     is_azure_devops_hostname,
     is_github_hostname,
+    is_gitlab_hostname,
     is_supported_git_host,
+    maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
     unsupported_host_error,
 )
 from ...utils.path_security import (
-    PathTraversalError,  # noqa: F401
+    PathTraversalError,
     ensure_path_within,
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
 from .types import VirtualPackageType
+
+# Default ports per URI scheme -- used to normalise away redundant
+# explicit ports (e.g. https://host:443/...) so that lockfile keys
+# and error messages stay consistent regardless of how the user
+# spelled the URL.
+_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 
 
 @dataclass
@@ -37,7 +45,7 @@ class DependencyReference:
     reference: str | None = None  # e.g., "main", "v1.0.0", "abc123"
     alias: str | None = None  # Optional alias for the dependency
     virtual_path: str | None = None  # Path for virtual packages (e.g., "prompts/file.prompt.md")
-    is_virtual: bool = False  # True if this is a virtual package (individual file or collection)
+    is_virtual: bool = False  # True if this is a virtual package (individual file or subdirectory)
 
     # Azure DevOps specific fields (ADO uses org/project/repo structure)
     ado_organization: str | None = None  # e.g., "dmeppiel-org"
@@ -47,6 +55,9 @@ class DependencyReference:
     # Local path dependency fields
     is_local: bool = False  # True if this is a local filesystem dependency
     local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
+
+    # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
+    is_parent_repo_inheritance: bool = False
 
     artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
 
@@ -65,6 +76,18 @@ class DependencyReference:
         ".agent.md",
     )
 
+    # Removed collection-manifest extensions. URLs ending in one of these are
+    # rejected at parse time with a migration message; the legacy
+    # `.collection.yml` curated-aggregator format is replaced by `apm.yml`
+    # with a `dependencies` section (#1094).
+    REMOVED_COLLECTION_EXTENSIONS = (
+        ".collection.yml",
+        ".collection.yaml",
+    )
+
+    # First path segment after host that often starts in-repo virtual layout (GitLab heuristic).
+    _GITLAB_VIRTUAL_ROOT_SEGMENTS = frozenset({"prompts", "instructions", "collections"})
+
     def is_artifactory(self) -> bool:
         """Check if this reference points to a JFrog Artifactory VCS repository."""
         return self.artifactory_prefix is not None
@@ -77,35 +100,36 @@ class DependencyReference:
 
     @property
     def virtual_type(self) -> "VirtualPackageType | None":
-        """Return the type of virtual package, or None if not virtual."""
+        """Return the type of virtual package, or None if not virtual.
+
+        Classification is by extension only -- never by path segment.
+        ``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``
+        is FILE; everything else is SUBDIRECTORY (resolved at fetch time
+        by probing for ``apm.yml``, ``SKILL.md``, ``plugin.json``, etc).
+        Paths like ``collections/foo`` (no extension) are SUBDIRECTORY.
+        """
         if not self.is_virtual or not self.virtual_path:
             return None
         if any(self.virtual_path.endswith(ext) for ext in self.VIRTUAL_FILE_EXTENSIONS):
             return VirtualPackageType.FILE
-        if "/collections/" in self.virtual_path or self.virtual_path.startswith("collections/"):
-            return VirtualPackageType.COLLECTION
         return VirtualPackageType.SUBDIRECTORY
 
     def is_virtual_file(self) -> bool:
         """Check if this is a virtual file package (individual file)."""
         return self.virtual_type == VirtualPackageType.FILE
 
-    def is_virtual_collection(self) -> bool:
-        """Check if this is a virtual collection package."""
-        return self.virtual_type == VirtualPackageType.COLLECTION
-
     def is_virtual_subdirectory(self) -> bool:
         """Check if this is a virtual subdirectory package (e.g., Claude Skill).
 
-        A subdirectory package is a virtual package that:
-        - Has a virtual_path that is NOT a file extension we recognize
-        - Is NOT a collection (doesn't have /collections/ in path)
-        - Is a directory path (likely containing SKILL.md or apm.yml)
+        A subdirectory package is a virtual package whose ``virtual_path``
+        does not end in a recognized FILE extension. The actual on-disk
+        shape is resolved at fetch time -- ``apm.yml``, ``SKILL.md``,
+        ``plugin.json``, etc.
 
         Examples:
             - ComposioHQ/awesome-claude-skills/brand-guidelines -> True
             - owner/repo/prompts/file.prompt.md -> False (is_virtual_file)
-            - owner/repo/collections/name -> False (is_virtual_collection)
+            - owner/repo/collections/name -> True (resolved at fetch time)
         """
         return self.virtual_type == VirtualPackageType.SUBDIRECTORY
 
@@ -115,7 +139,6 @@ class DependencyReference:
         For virtual packages, we create a sanitized name from the path:
         - owner/repo/prompts/code-review.prompt.md -> repo-code-review
         - owner/repo/collections/project-planning -> repo-project-planning
-        - owner/repo/collections/project-planning.collection.yml -> repo-project-planning
         """
         if not self.is_virtual or not self.virtual_path:
             return self.repo_url.split("/")[-1]  # Return repo name as fallback
@@ -126,26 +149,14 @@ class DependencyReference:
 
         # Get the basename without extension
         path_parts = self.virtual_path.split("/")
-        if self.is_virtual_collection():
-            # For collections: use the collection name without extension
-            # collections/project-planning -> project-planning
-            # collections/project-planning.collection.yml -> project-planning
-            collection_name = path_parts[-1]
-            # Strip .collection.yml/.collection.yaml extension if present
-            for ext in (".collection.yml", ".collection.yaml"):
-                if collection_name.endswith(ext):
-                    collection_name = collection_name[: -len(ext)]
-                    break
-            return f"{repo_name}-{collection_name}"
-        else:
-            # For individual files: use the filename without extension
-            # prompts/code-review.prompt.md -> code-review
-            filename = path_parts[-1]
-            for ext in self.VIRTUAL_FILE_EXTENSIONS:
-                if filename.endswith(ext):
-                    filename = filename[: -len(ext)]
-                    break
-            return f"{repo_name}-{filename}"
+        last = path_parts[-1]
+        # Strip any recognised virtual file extension. The directory name
+        # (or file basename) is the user-visible package name.
+        for ext in self.VIRTUAL_FILE_EXTENSIONS:
+            if last.endswith(ext):
+                last = last[: -len(ext)]
+                break
+        return f"{repo_name}-{last}"
 
     @staticmethod
     def is_local_path(dep_str: str) -> bool:
@@ -163,14 +174,12 @@ class DependencyReference:
             return True
         # Windows absolute paths: drive letter + colon + separator (C:\ or C:/).
         # Only ASCII letters A-Z/a-z are valid drive letters.
-        if (  # noqa: SIM103
+        return bool(
             len(s) >= 3
-            and (("A" <= s[0] <= "Z") or ("a" <= s[0] <= "z"))
+            and ("A" <= s[0] <= "Z" or "a" <= s[0] <= "z")
             and s[1] == ":"
             and s[2] in ("\\", "/")
-        ):
-            return True
-        return False
+        )
 
     def get_unique_key(self) -> str:
         """Get a unique key for this dependency for deduplication.
@@ -362,14 +371,13 @@ class DependencyReference:
                 elif len(repo_parts) >= 2:
                     # owner/virtual-pkg-name (use first segment as namespace)
                     result = apm_modules_dir / repo_parts[0] / package_name
-        else:  # noqa: PLR5501
-            # Regular package: use full repo path
-            if self.is_azure_devops() and len(repo_parts) >= 3:
-                # ADO: org/project/repo
-                result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2]
-            elif len(repo_parts) >= 2:
-                # owner/repo or group/subgroup/repo (generic hosts)
-                result = apm_modules_dir.joinpath(*repo_parts)
+        # Regular package: use full repo path
+        elif self.is_azure_devops() and len(repo_parts) >= 3:
+            # ADO: org/project/repo
+            result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2]
+        elif len(repo_parts) >= 2:
+            # owner/repo or group/subgroup/repo (generic hosts)
+            result = apm_modules_dir.joinpath(*repo_parts)
 
         if result is None:
             # Fallback: join all parts
@@ -405,6 +413,9 @@ class DependencyReference:
         parsed = urllib.parse.urlparse(url)
         host = parsed.hostname or ""
         port = parsed.port  # int or None
+        # Normalise default SSH port so ssh://host:22/... matches ssh://host/...
+        if port == _DEFAULT_SCHEME_PORTS.get("ssh"):
+            port = None
         path = parsed.path.lstrip("/")
         fragment = parsed.fragment
 
@@ -434,6 +445,18 @@ class DependencyReference:
         validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
         return host, port, repo_url, reference, alias
+
+    @staticmethod
+    def _normalize_parent_repo_decl_path(raw: str) -> str:
+        """Normalize ``path`` for ``git: parent`` to a single canonical relative path."""
+        s = raw.strip().replace("\\", "/").strip()
+        s = s.strip("/")
+        segments = [seg for seg in s.split("/") if seg]
+        if not segments:
+            raise ValueError("'path' field must be a non-empty string")
+        normalized = "/".join(segments)
+        validate_path_segments(normalized, context="path")
+        return normalized
 
     @classmethod
     def parse_from_dict(cls, entry: dict) -> "DependencyReference":
@@ -469,9 +492,9 @@ class DependencyReference:
             local = local.strip()
             if not cls.is_local_path(local):
                 raise ValueError(
-                    f"Object-style dependency must have a 'git' field, "  # noqa: F541
-                    f"or 'path' must be a local filesystem path "  # noqa: F541
-                    f"(starting with './', '../', '/', or '~')"  # noqa: F541
+                    "Object-style dependency must have a 'git' field, "
+                    "or 'path' must be a local filesystem path "
+                    "(starting with './', '../', '/', or '~')"
                 )
             return cls.parse(local)
 
@@ -481,6 +504,46 @@ class DependencyReference:
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
+
+        # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
+        if git_url == "parent":
+            path_raw = entry.get("path")
+            if path_raw is None:
+                raise ValueError(
+                    "Object-style dependency with git: 'parent' requires a 'path' field"
+                )
+            if not isinstance(path_raw, str) or not path_raw.strip():
+                raise ValueError("'path' field must be a non-empty string")
+            normalized_path = cls._normalize_parent_repo_decl_path(path_raw)
+
+            ref_override = entry.get("ref")
+            alias_override = entry.get("alias")
+            reference: str | None = None
+            if ref_override is not None:
+                if not isinstance(ref_override, str) or not ref_override.strip():
+                    raise ValueError("'ref' field must be a non-empty string")
+                reference = ref_override.strip()
+
+            alias_val: str | None = None
+            if alias_override is not None:
+                if not isinstance(alias_override, str) or not alias_override.strip():
+                    raise ValueError("'alias' field must be a non-empty string")
+                alias_override = alias_override.strip()
+                if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
+                    raise ValueError(
+                        f"Invalid alias: {alias_override}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
+                    )
+                alias_val = alias_override
+
+            return cls(
+                repo_url="_parent",
+                host=None,
+                reference=reference,
+                alias=alias_val,
+                virtual_path=normalized_path,
+                is_virtual=True,
+                is_parent_repo_inheritance=True,
+            )
 
         sub_path = entry.get("path")
         ref_override = entry.get("ref")
@@ -550,6 +613,148 @@ class DependencyReference:
         return dep
 
     @classmethod
+    def virtual_suffix_is_installable_shape(cls, virtual_path: str) -> bool:
+        """Return whether *virtual_path* matches APM virtual package shape rules.
+
+        Used for GitLab direct host/path shorthand: a repo boundary is accepted
+        only when the remaining suffix would be a valid virtual path (file,
+        collection, or extension-less subdirectory), matching the rules applied
+        in :meth:`_detect_virtual_package` for the tail segments.
+        """
+        if not virtual_path or not virtual_path.strip():
+            return False
+        v = virtual_path.strip().strip("/")
+        try:
+            validate_path_segments(v, context="virtual path")
+        except PathTraversalError:
+            return False
+        if "/collections/" in v or v.startswith("collections/"):
+            return True
+        if any(v.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+            return True
+        last = v.split("/")[-1]
+        return "." not in last
+
+    @classmethod
+    def split_gitlab_direct_shorthand_parts(
+        cls, package: str
+    ) -> tuple[str, list[str], str | None] | None:
+        """If *package* is bare host/path shorthand, return (host, path_segments, ref_str).
+
+        Returns ``None`` for ``https://``, ``git@``, or non–GitLab-class hosts.
+        """
+        s = package.strip()
+        ref_out: str | None = None
+        if "#" in s:
+            s, r = s.rsplit("#", 1)
+            s = s.strip()
+            r = r.strip()
+            ref_out = r if r else None
+        maybe_raise_bare_fqdn_github_gitlab_conflict(package)
+        if s.startswith(("git@", "https://", "http://", "ssh://", "//")):
+            return None
+        if "/" not in s:
+            return None
+        parts = s.split("/")
+        host_cand = parts[0]
+        if "." not in host_cand:
+            return None
+        segs = [p for p in parts[1:] if p]
+        if len(segs) < 1:
+            return None
+        if not is_supported_git_host(host_cand) or not is_gitlab_hostname(host_cand):
+            return None
+        return (host_cand, segs, ref_out)
+
+    @classmethod
+    def needs_gitlab_direct_shorthand_probing(
+        cls, package: str, dep_ref: "DependencyReference"
+    ) -> bool:
+        """True when install should probe left-to-right repo boundaries (GitLab only)."""
+        if dep_ref.is_local:
+            return False
+        if dep_ref.is_virtual:
+            return False
+        sp = cls.split_gitlab_direct_shorthand_parts(package)
+        if not sp:
+            return False
+        _host, segs, _ref = sp
+        return len(segs) >= 3
+
+    @classmethod
+    def iter_gitlab_direct_shorthand_boundary_candidates(cls, path_segments: list[str]):
+        """Yield (repo_url, virtual_suffix) for k=2..n-1 (earliest k first)."""
+        n = len(path_segments)
+        if n < 3:
+            return
+        for k in range(2, n):
+            repo = "/".join(path_segments[:k])
+            suffix = "/".join(path_segments[k:])
+            if cls.virtual_suffix_is_installable_shape(suffix):
+                yield repo, suffix
+
+    @classmethod
+    def from_gitlab_shorthand_probe(
+        cls,
+        host: str,
+        repo_url: str,
+        virtual_path: str,
+        reference: str | None,
+    ) -> "DependencyReference":
+        """Build a virtual dependency ref for a resolved GitLab shorthand probe."""
+        return cls(
+            repo_url=repo_url,
+            host=host,
+            reference=reference,
+            virtual_path=virtual_path,
+            is_virtual=True,
+        )
+
+    @classmethod
+    def _gitlab_shorthand_repo_segment_count(
+        cls,
+        path_segments: list[str],
+        has_virtual_ext: bool,
+        has_collection: bool,
+    ) -> int:
+        """Return how many segments after the host belong to the GitLab project path.
+
+        GitLab allows nested groups; unlike GitHub's fixed ``owner/repo``, the
+        project slug may span 3+ segments. Virtual package shorthand must not
+        chop a nested group path after two segments.
+
+        Shorthand cannot disambiguate every deep namespace; ambiguous cases use
+        object form with ``git:`` + ``path:`` in ``apm.yml``.
+
+        This does **not** split extension-less paths (e.g. ``.../registry/pkg``)
+        into repo + virtual: that would mis-parse valid 5+ segment project
+        paths; use ``parse_from_dict`` with an explicit ``path`` for those.
+        """
+        n = len(path_segments)
+        if n < 2:
+            return n
+
+        if has_collection and "collections" in path_segments:
+            coll_idx = path_segments.index("collections")
+            if coll_idx >= 2:
+                return coll_idx
+            return n
+
+        if has_virtual_ext:
+            for idx, seg in enumerate(path_segments):
+                if idx >= 2 and seg in cls._GITLAB_VIRTUAL_ROOT_SEGMENTS:
+                    return idx
+            if n == 3:
+                return 2
+            if n == 4:
+                return 3
+            if n >= 5:
+                return 3
+            return 2
+
+        return n
+
+    @classmethod
     def _detect_virtual_package(cls, dependency_str: str):
         """Detect whether *dependency_str* refers to a virtual package.
 
@@ -589,7 +794,7 @@ class DependencyReference:
                 except (ValueError, AttributeError) as e:
                     if isinstance(e, ValueError) and "Invalid Git host" in str(e):
                         raise
-                    raise ValueError(unsupported_host_error(first_segment))  # noqa: B904
+                    raise ValueError(unsupported_host_error(first_segment)) from e
             elif check_str.startswith("gh/"):
                 check_str = "/".join(check_str.split("/")[1:])
 
@@ -601,6 +806,7 @@ class DependencyReference:
             and not is_github_hostname(validated_host)
             and not is_azure_devops_hostname(validated_host)
         )
+        is_gitlab_host = validated_host is not None and is_gitlab_hostname(validated_host)
 
         if is_ado and "_git" in path_segments:
             git_idx = path_segments.index("_git")
@@ -620,7 +826,11 @@ class DependencyReference:
                 for seg in path_segments
             )
             has_collection = "collections" in path_segments
-            if has_virtual_ext or has_collection:  # noqa: SIM108
+            if is_gitlab_host:
+                min_base_segments = cls._gitlab_shorthand_repo_segment_count(
+                    path_segments, has_virtual_ext, has_collection
+                )
+            elif has_virtual_ext or has_collection:
                 min_base_segments = 2
             else:
                 min_base_segments = len(path_segments)
@@ -636,11 +846,22 @@ class DependencyReference:
             # Security: reject path traversal in virtual path
             validate_path_segments(virtual_path, context="virtual path")
 
-            if (
-                "/collections/" in check_str
-                or virtual_path.startswith("collections/")
-                or any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS)
-            ):
+            # Reject removed `.collection.yml` extensions with a clear
+            # migration message (#1094). Curated dependency aggregators
+            # are now expressed as `apm.yml` with a `dependencies` block.
+            if any(virtual_path.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+                raise ValueError(
+                    f".collection.yml is no longer supported. "
+                    f"Convert '{virtual_path}' to an apm.yml with a "
+                    f"'dependencies' section. "
+                    f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                )
+
+            # Accept any path ending in a recognised virtual file
+            # extension. Reject other dotted final segments so typos like
+            # `prompts/file.txt` fail fast instead of silently
+            # mis-classifying as a subdirectory.
+            if any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                 pass
             else:
                 last_segment = virtual_path.split("/")[-1]
@@ -655,21 +876,25 @@ class DependencyReference:
 
     @staticmethod
     def _parse_ssh_url(dependency_str: str):
-        """Parse an SCP-shorthand SSH URL (``git@host:owner/repo``).
+        """Parse an SCP-shorthand SSH URL (``<user>@host:owner/repo``).
 
-        SCP shorthand cannot carry a port (``:`` is the path separator), so the
-        returned port is always ``None``. For custom SSH ports, use the
-        ``ssh://`` URL form which is handled by ``_parse_ssh_protocol_url``.
+        Accepts any SSH username (not just ``git``), so EMU and custom GHE
+        SSH accounts (e.g. ``enterprise-user@ghe.corp.com:org/repo``) parse
+        correctly. SCP shorthand cannot carry a port (``:`` is the path
+        separator), so the returned port is always ``None``. For custom SSH
+        ports, use the ``ssh://`` URL form which is handled by
+        ``_parse_ssh_protocol_url``.
 
         Returns:
             ``(host, port, repo_url, reference, alias)`` or *None* if not an SCP URL.
         """
-        ssh_match = re.match(r"^git@([^:]+):(.+)$", dependency_str)
+        ssh_match = SCP_LIKE_RE.match(dependency_str)
         if not ssh_match:
             return None
 
-        host = ssh_match.group(1)
-        ssh_repo_part = ssh_match.group(2)
+        user = ssh_match.group("user")
+        host = ssh_match.group("host")
+        ssh_repo_part = ssh_match.group("path")
 
         reference = None
         alias = None
@@ -704,19 +929,19 @@ class DependencyReference:
                     git_suffix = ".git" if had_git_suffix else ""
                     ref_suffix = f"#{reference}" if reference else ""
                     alias_suffix = f"@{alias}" if alias else ""
-                    suggested = f"ssh://git@{host}:{port_candidate}/{remaining_path}{git_suffix}{ref_suffix}{alias_suffix}"
+                    suggested = f"ssh://{user}@{host}:{port_candidate}/{remaining_path}{git_suffix}{ref_suffix}{alias_suffix}"
                     raise ValueError(
-                        f"It looks like '{first_segment}' in 'git@{host}:{repo_url}' "
-                        f"is a port number, but SCP-style URLs (git@host:path) cannot "
+                        f"It looks like '{first_segment}' in '{user}@{host}:{repo_url}' "
+                        f"is a port number, but SCP-style URLs (<user>@host:path) cannot "
                         f"carry a port. Use the ssh:// URL form instead:\n"
                         f"  {suggested}"
                     )
                 else:
                     raise ValueError(
-                        f"It looks like '{first_segment}' in 'git@{host}:{first_segment}' "
+                        f"It looks like '{first_segment}' in '{user}@{host}:{first_segment}' "
                         f"is a port number, but no repository path follows it. "
-                        f"SCP-style URLs (git@host:path) cannot carry a port. "
-                        f"Use the ssh:// URL form: ssh://git@{host}:{port_candidate}/<owner>/<repo>.git"
+                        f"SCP-style URLs (<user>@host:path) cannot carry a port. "
+                        f"Use the ssh:// URL form: ssh://{user}@{host}:{port_candidate}/<owner>/<repo>.git"
                     )
 
         # Security: reject traversal sequences in SSH repo paths
@@ -725,7 +950,7 @@ class DependencyReference:
         return host, None, repo_url, reference, alias
 
     @classmethod
-    def _resolve_virtual_shorthand_repo(cls, repo_url, validated_host):
+    def _resolve_virtual_shorthand_repo(cls, repo_url, validated_host, virtual_path=None):
         """Narrow a virtual-package shorthand to just the base repo path.
 
         When a virtual package is given without a URL scheme
@@ -755,6 +980,13 @@ class DependencyReference:
                 art_result = parse_artifactory_path(parts[1:])
                 if art_result:
                     repo_url = f"{art_result[1]}/{art_result[2]}"
+            elif is_gitlab_hostname(parts[0]) and virtual_path:
+                vparts = [p for p in virtual_path.split("/") if p]
+                tail = len(vparts)
+                if tail > 0 and len(parts) > 1 + tail:
+                    repo_url = "/".join(parts[1 : len(parts) - tail])
+                else:
+                    repo_url = "/".join(parts[1:])
             else:
                 repo_url = "/".join(parts[1:3])
         elif len(parts) >= 2:
@@ -802,7 +1034,7 @@ class DependencyReference:
                 else:
                     user_repo = "/".join(parts[1:])
             else:
-                user_repo = "/".join(parts[1:3])
+                user_repo = "/".join(parts[1:])
         elif len(parts) >= 2 and "." not in parts[0]:
             if not host:
                 host = default_host()
@@ -814,7 +1046,7 @@ class DependencyReference:
                 user_repo = "/".join(parts[:2])
         else:
             raise ValueError(
-                f"Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"  # noqa: F541
+                "Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"
             )
 
         if not user_repo or "/" not in user_repo:
@@ -830,9 +1062,8 @@ class DependencyReference:
                 raise ValueError(
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
-        else:  # noqa: PLR5501
-            if len(uparts) < 2:
-                raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
+        elif len(uparts) < 2:
+            raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
 
         allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
         validate_path_segments("/".join(uparts), context="repository path")
@@ -937,13 +1168,20 @@ class DependencyReference:
 
         # For virtual packages without a URL scheme, narrow to just owner/repo
         if is_virtual_package and not repo_url_lower.startswith(("https://", "http://")):
-            host, repo_url = cls._resolve_virtual_shorthand_repo(repo_url, validated_host)
+            host, repo_url = cls._resolve_virtual_shorthand_repo(
+                repo_url, validated_host, virtual_path
+            )
 
         # Normalize to URL format for secure parsing
         if repo_url_lower.startswith(("https://", "http://")):
             parsed_url = urllib.parse.urlparse(repo_url)
             host = parsed_url.hostname or ""
             port = parsed_url.port  # capture :PORT from https://host:8443/...
+            # Normalise default-scheme ports (443 for HTTPS, 80 for HTTP)
+            # so lockfile keys are consistent regardless of URL spelling.
+            scheme = (parsed_url.scheme or "").lower()
+            if port == _DEFAULT_SCHEME_PORTS.get(scheme):
+                port = None
         else:
             parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
 
@@ -1020,10 +1258,15 @@ class DependencyReference:
         - user/repo@alias
         - user/repo#ref@alias
         - user/repo/path/to/file.prompt.md (virtual file package)
-        - user/repo/collections/name (virtual collection package)
+        - user/repo/skills/foo (virtual subdirectory package)
+        - user/repo/collections/foo (virtual subdirectory package)
         - https://gitlab.com/owner/repo.git (generic HTTPS git URL)
         - git@gitlab.com:owner/repo.git (SSH git URL)
         - ssh://git@gitlab.com/owner/repo.git (SSH protocol URL)
+
+        Ambiguous GitLab nested-group shorthand cannot cover every depth; use
+        object form (``git:`` + ``path:`` in ``apm.yml``) as the supported
+        escape hatch.
 
         - ./local/path (local filesystem path)
         - /absolute/path (local filesystem path)
@@ -1069,6 +1312,8 @@ class DependencyReference:
             raise ValueError(
                 unsupported_host_error("//...", context="Protocol-relative URLs are not supported")
             )
+
+        maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 
         # Phase 1: detect virtual packages
         is_virtual_package, virtual_path, validated_host = cls._detect_virtual_package(

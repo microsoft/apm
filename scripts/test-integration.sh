@@ -1,14 +1,32 @@
 #!/bin/bash
-# Integration testing script for both CI and local environments
-# Tests comprehensive runtime scenarios and edge cases:
-#   - Both Codex AND LLM runtime setup and interoperability
-#   - Complex pytest-based scenarios with error handling
-#   - Template bundling verification
-#   - Authentication matrix testing
+# Integration testing orchestrator for both CI and local environments.
 #
-# - CI mode: Uses pre-built artifacts from build job, runs integration tests
-# - Local mode: Builds binary, runs comprehensive integration tests  
-# This ensures robust implementation testing before release validation
+# This script is intentionally a thin wrapper. Per-test gating
+# (tokens, runtimes, binary, network) lives in
+# tests/integration/conftest.py via the marker registry shipped in
+# PR1 of #1166 (microsoft/apm#1167). PR2 of #1166 retired the
+# per-file pytest enumeration that previously lived here in favour of
+# a single ``pytest tests/integration/`` invocation. New integration
+# test files dropped into tests/integration/ are picked up
+# automatically; add the right ``requires_*`` marker (see
+# pyproject.toml [tool.pytest.ini_options].markers) and the registry
+# will skip the test when its precondition is missing.
+#
+# This script's responsibilities are now narrow:
+#   - resolve GitHub / ADO tokens (via scripts/github-token-helper.sh)
+#   - detect platform and execution environment (CI vs local)
+#   - locate or build the apm PyInstaller binary
+#   - install runtimes the binary needs (codex / copilot / llm)
+#   - install python test deps (uv preferred)
+#   - invoke pytest tests/integration/ exactly once
+#
+# To run a focused subset locally, invoke pytest directly:
+#   APM_E2E_TESTS=1 pytest tests/integration/test_X.py -v
+# (the marker registry will still auto-skip preconditions that the
+# local env doesn't satisfy)
+#
+# - CI mode: Uses pre-built artifacts from build job.
+# - Local mode: Builds the binary up-front.
 
 set -euo pipefail
 
@@ -287,27 +305,32 @@ install_test_dependencies() {
     log_success "Test dependencies installed"
 }
 
-# Run integration tests (exactly like CI does)
+# Run integration tests via marker-driven discovery (issue #1166).
+#
+# All per-test gating (tokens, runtimes, binary, network) lives in
+# tests/integration/conftest.py via the _MARKER_CHECKS registry shipped
+# in PR1 (#1167). This function is intentionally a thin wrapper: pytest
+# discovers test files, the marker registry skips what the env can't
+# satisfy, and one exit code reports the result.
 run_e2e_tests() {
-    log_info "=== Running integration tests (mirroring CI) ==="
-    log_info "Testing comprehensive runtime scenarios:"
-    log_info "  - Zero-config auto-install (NEW HERO SCENARIO 1)"
-    log_info "  - 2-minute guardrailing (NEW HERO SCENARIO 2)"
-    log_info "  - MCP registry integration"
-    log_info "  - APM Dependencies with real repositories"
-    log_info "  - Environment variable handling"
-    log_info "  - Docker args processing"
-    
-    # Set environment variables (like CI does)
+    log_info "=== Running integration tests (pytest tests/integration/) ==="
+
+    # Set environment variables (mirrors what CI does)
     export APM_E2E_TESTS="1"
-    
-    # Only export GITHUB_TOKEN if it's set (avoid unbound variable error)
+    if [[ -n "${APM_RUN_INTEGRATION_TESTS:-}" ]]; then
+        export APM_RUN_INTEGRATION_TESTS
+    fi
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         export GITHUB_TOKEN="$GITHUB_TOKEN"
     fi
-    
+
     log_info "Environment:"
     echo "  APM_E2E_TESTS: $APM_E2E_TESTS"
+    if [[ -n "${APM_RUN_INTEGRATION_TESTS:-}" ]]; then
+        echo "  APM_RUN_INTEGRATION_TESTS: $APM_RUN_INTEGRATION_TESTS"
+    else
+        echo "  APM_RUN_INTEGRATION_TESTS: (not set; network-integration tests will be skipped)"
+    fi
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         echo "  GITHUB_TOKEN: (set)"
     else
@@ -325,101 +348,20 @@ run_e2e_tests() {
     fi
     echo "  PATH contains: $(dirname "$(which apm)")"
     echo "  APM binary: $(which apm)"
-    
+    echo "  APM_BINARY_PATH: ${APM_BINARY_PATH:-(unset)}"
+
     # Activate virtual environment if it exists
     if [[ -f ".venv/bin/activate" ]]; then
         source .venv/bin/activate
     fi
-    
-    # Run NEW hero scenario test (zero-config auto-install)
-    log_info "Running NEW HERO SCENARIO 1: Zero-config auto-install test..."
-    echo "Command: pytest tests/integration/test_auto_install_e2e.py -v -s --tb=short"
-    
-    if pytest tests/integration/test_auto_install_e2e.py -v -s --tb=short; then
-        log_success "Zero-config auto-install tests passed!"
-    else
-        log_error "Zero-config auto-install tests failed!"
-        exit 1
-    fi
-    
-    # Run NEW hero scenario test (2-minute guardrailing)
-    log_info "Running NEW HERO SCENARIO 2: 2-minute guardrailing test..."
-    echo "Command: pytest tests/integration/test_guardrailing_hero_e2e.py -v -s --tb=short"
-    
-    if pytest tests/integration/test_guardrailing_hero_e2e.py -v -s --tb=short; then
-        log_success "2-minute guardrailing tests passed!"
-    else
-        log_error "2-minute guardrailing tests failed!"
-        exit 1
-    fi
-    
-    # NOTE: Legacy golden scenario tests removed - replaced by faster auto-install tests above
-    # The auto-install tests cover the same hero scenario but with early termination for speed
-    
-    # Run MCP registry E2E tests (new - covers our implemented functionality)
-    log_info "Running MCP registry E2E tests..."
-    echo "Command: pytest tests/integration/test_mcp_registry_e2e.py -v -s --tb=short"
-    
-    if pytest tests/integration/test_mcp_registry_e2e.py -v -s --tb=short; then
-        log_success "MCP registry tests passed!"
-    else
-        log_error "MCP registry tests failed!"
-        exit 1
-    fi
 
-    # Run MCP env-var headers E2E tests (regression guard for ${VAR} -> ${env:VAR})
-    log_info "Running MCP env-var headers E2E tests..."
-    echo "Command: pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short; then
-        log_success "MCP env-var headers tests passed!"
+    log_info "Invoking pytest tests/integration/ (marker registry handles per-test gating)"
+    if pytest tests/integration/ -v --tb=short; then
+        log_success "Integration test suite passed (collected and ran via pytest discovery)"
     else
-        log_error "MCP env-var headers tests failed!"
+        log_error "Integration test suite reported failures"
         exit 1
     fi
-    
-    # Run APM Dependencies integration tests (NEW - Task 8A)
-    log_info "Running APM Dependencies integration tests with real repositories..."
-    echo "Command: pytest tests/integration/test_apm_dependencies.py -v -s --tb=short -m integration"
-    
-    if pytest tests/integration/test_apm_dependencies.py -v -s --tb=short -m integration; then
-        log_success "APM Dependencies integration tests passed!"
-    else
-        log_error "APM Dependencies integration tests failed!"
-        exit 1
-    fi
-    
-    # Run Transport Selection integration tests (issue #778)
-    # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
-    # when no usable SSH key is available for git@github.com.
-    log_info "Running Transport Selection integration tests..."
-    echo "Command: APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short"
-
-    if APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short; then
-        log_success "Transport Selection integration tests passed!"
-    else
-        log_error "Transport Selection integration tests failed!"
-        exit 1
-    fi
-
-    # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
-    if [[ -n "${ADO_APM_PAT:-}" ]]; then
-        log_info "Running Azure DevOps E2E tests..."
-        echo "Command: pytest tests/integration/test_ado_e2e.py -v -s --tb=short"
-        
-        if pytest tests/integration/test_ado_e2e.py -v -s --tb=short; then
-            log_success "Azure DevOps E2E tests passed!"
-        else
-            log_error "Azure DevOps E2E tests failed!"
-            exit 1
-        fi
-    else
-        log_info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
-    fi
-    
-    log_success "All integration test suites completed successfully!"
-    
-
 }
 
 # Main execution
@@ -427,8 +369,8 @@ main() {
     echo "APM CLI Integration Testing - Unified CI/Local Script"
     echo "====================================================="
     echo ""
-    echo "This script adapts to CI (using artifacts) or local (building) environments"
-    echo "Tests comprehensive runtime scenarios and implementation robustness"
+    echo "This script adapts to CI (using artifacts) or local (building) environments."
+    echo "Resolves tokens, builds/locates the apm binary, sets up runtimes, then invokes pytest tests/integration/ once."
     echo ""
     
     check_prerequisites
@@ -436,40 +378,17 @@ main() {
     detect_environment
     build_binary
     setup_binary_for_testing
-    setup_runtimes  # Integration Testing Coverage!
+    setup_runtimes
     install_test_dependencies
     run_e2e_tests
     
     log_success "All integration tests completed successfully!"
     echo ""
     if [[ "$USE_EXISTING_BINARY" == "true" ]]; then
-        echo "✅ CI mode: Used pre-built artifacts and validated integration workflow"
+        echo "CI mode: Used pre-built artifacts and validated integration workflow"
     else
-        echo "✅ Local mode: Built binary and validated full integration process"
+        echo "Local mode: Built binary and validated full integration process"
     fi
-    echo ""
-    echo "Integration validation complete - COMPREHENSIVE TESTING:"
-    echo "  1. Prerequisites (GITHUB_TOKEN) ✅"
-    echo ""
-    echo "  HERO SCENARIO 1: 30-Second Zero-Config ✨"
-    echo "    - Run virtual package directly ✅"
-    echo "    - Auto-install on first run ✅"
-    echo "    - Use cached package on second run ✅"
-    echo ""
-    echo "  HERO SCENARIO 2: 2-Minute Guardrailing ✨"
-    echo "    - Project initialization ✅"
-    echo "    - Install multiple APM packages ✅"
-    echo "    - Compile to AGENTS.md with combined guardrails ✅"
-    echo "    - Run prompts from installed packages ✅"
-    echo ""
-    echo "  3. MCP registry search & show ✅"
-    echo "  4. Registry-based installation ✅"
-    echo "  5. APM Dependencies integration ✅"
-    echo "  6. Environment variable handling ✅"
-    echo "  7. Docker args with -e flags ✅"
-    echo "  8. Empty string & defaults logic ✅"
-    echo "  9. Cross-adapter consistency ✅"
-    echo "  10. Duplication prevention ✅"
     echo ""
     log_success "Ready for release validation!"
 }

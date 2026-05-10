@@ -13,7 +13,6 @@ Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
 import json  # noqa: F401
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,10 +21,7 @@ import pytest
 import yaml
 
 # Skip all tests if no GitHub token is available
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark = pytest.mark.requires_github_token
 
 
 @pytest.fixture
@@ -191,7 +187,7 @@ class TestDeployedFilesInLockfile:
             assert "-apm." not in rel_path, f"Deployed file path {rel_path} still uses -apm suffix"
 
     def test_skill_deployed_files_tracked(self, temp_project, apm_command):
-        """Skill packages should have deployed_files entries for .github/skills/."""
+        """Skill packages should have deployed_files entries for .agents/skills/."""
         result = _run_apm(
             apm_command,
             ["install", "anthropics/skills/skills/brand-guidelines"],
@@ -220,7 +216,7 @@ class TestDeployedFilesInLockfile:
 
         assert dep is not None, "Skill dependency not found in lockfile"
         assert "deployed_files" in dep, "deployed_files missing for skill"
-        skill_paths = [p for p in dep["deployed_files"] if ".github/skills/" in p]
+        skill_paths = [p for p in dep["deployed_files"] if ".agents/skills/" in p]
         assert len(skill_paths) > 0, "No skill paths in deployed_files"
 
 

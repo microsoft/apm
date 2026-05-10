@@ -258,9 +258,9 @@ function Test-HeroGuardrailing {
     Write-TestHeader "HERO SCENARIO 2: 2-Minute Guardrailing (README lines 46-60)"
 
     # Step 1: apm init my-project
-    Write-Host "Running: $script:BINARY_PATH init my-project --yes"
+    Write-Host "Running: $script:BINARY_PATH init my-project --yes --target copilot"
     Write-Host "--- Command Output Start ---"
-    $result = & $script:BINARY_PATH init my-project --yes 2>&1
+    $result = & $script:BINARY_PATH init my-project --yes --target copilot 2>&1
     $exitCode = $LASTEXITCODE
     $result | Out-Host
     Write-Host "--- Command Output End ---"

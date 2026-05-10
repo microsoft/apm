@@ -4,36 +4,11 @@ sidebar:
   order: 4
 ---
 
-APM supports plugins through the `plugin.json` format. Plugins are automatically detected and integrated into your project as standard APM dependencies.
+APM treats plugins and packages as the same artifact. Every APM package is plugin-compatible by default: `apm pack` writes a `plugin.json` at the root of the bundle so any plugin host (Claude Code and other Claude-plugin-compatible runtimes) can load it natively.
 
 ## Plugin authoring
 
-For where plugins fit relative to APM's source layout, see [Anatomy -- Why not just ship a `plugin.json`?](../../introduction/anatomy-of-an-apm-package/#why-not-just-ship-a-pluginjson).
-
-Plugin ecosystems handle distribution but lack dependency management, security scanning, version locking, and dev/prod separation. As plugins depend on shared primitives, these gaps compound.
-
-APM is the supply-chain layer. Author packages with full tooling — transitive dependencies, lockfile pinning, [security scanning](../../enterprise/security/), [`devDependencies`](../../reference/manifest-schema/#5-devdependencies) — then export as standard plugins. Consumers never need APM installed.
-
-### Three modes
-
-| Mode | Manifests | Use when |
-|------|-----------|----------|
-| **APM-only** | `apm.yml` | Full APM workflow — deploy to `.github/`, `.claude/`, `.cursor/`, `.opencode/` |
-| **Plugin-only** | `plugin.json` | Standard plugin consumed by APM via `apm install` — metadata synthesized automatically |
-| **Hybrid** | `apm.yml` + `plugin.json` | Author with dependency management + security, export as standalone plugins |
-
-**APM-only** is the default for teams using APM end-to-end. **Plugin-only** requires no changes to existing plugins — APM consumes them as-is. **Hybrid** is for plugin authors who want APM's supply-chain features during development while distributing standard plugins.
-
-### Hybrid authoring workflow
-
-```bash
-apm init my-plugin --plugin    # Creates both apm.yml and plugin.json
-apm install --dev owner/helpers # Dev-only dependency (excluded from export)
-apm install owner/core-rules   # Production dependency
-apm pack --format plugin       # Export — dev deps excluded, security scanned
-```
-
-The exported plugin directory contains no APM-specific files. See [Pack & Distribute — Plugin format](../../guides/pack-distribute/#plugin-format) for the output mapping.
+For the authoring flow (`apm init --plugin`, dev/prod dependency split, `apm pack` output mapping, hybrid mode with `apm.yml` + `plugin.json`), see [Pack & Distribute](../../guides/pack-distribute/) and the [first package walkthrough](../../getting-started/first-package/#6-ship-as-a-plugin-optional). For why APM still adds value when you already have a `plugin.json`, see [Anatomy -- Why not just ship a `plugin.json`?](../../introduction/anatomy-of-an-apm-package/#why-not-just-ship-a-pluginjson).
 
 ## Overview
 
@@ -362,7 +337,7 @@ This:
 
 ## Exporting APM packages as plugins
 
-Use the [hybrid authoring workflow](#hybrid-authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute — Plugin format](../../guides/pack-distribute/#plugin-format) for the output mapping and structure.
+Use the [authoring workflow](#plugin-authoring) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and structure.
 
 ## Finding Plugins
 

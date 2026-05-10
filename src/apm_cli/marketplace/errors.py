@@ -10,11 +10,17 @@ class MarketplaceError(Exception):
 class MarketplaceNotFoundError(MarketplaceError):
     """Raised when a registered marketplace cannot be found."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, host: str = "github.com"):
         self.name = name
+        self.host = host
+        # Interpolate the active host so GHES users get a copy-paste-ready
+        # URL that works for them. Callers should pass the current host
+        # (e.g. default_host()); fall back to github.com to preserve the
+        # public-cloud default.
         super().__init__(
             f"Marketplace '{name}' is not registered. "
-            f"Run 'apm marketplace add OWNER/REPO' to register it, "
+            f"Run 'apm marketplace add https://{host}/OWNER/REPO' "
+            f"or 'apm marketplace add OWNER/REPO' to register it, "
             f"or 'apm marketplace list' to see registered marketplaces."
         )
 

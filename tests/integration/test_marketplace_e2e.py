@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.requires_apm_binary
+
 SAMPLE_MARKETPLACE_NAME = "test-mkt"
 
 

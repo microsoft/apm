@@ -34,7 +34,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import Any, Dict, List, Mapping, Optional, Tuple  # noqa: F401, UP035
 
 import yaml
 
@@ -96,8 +96,61 @@ _PACKAGE_ENTRY_KEYS = frozenset(
         "description",
         "homepage",
         "tags",
+        "author",
+        "license",
+        "repository",
+        "keywords",
     }
 )
+
+# Limits for keywords/tags array to prevent DoS via oversized manifests (S4).
+_MAX_TAGS_COUNT = 50
+_MAX_TAG_LENGTH = 100
+
+# Keys permitted inside an ``author`` object (rejected if anything else
+# present). Mirrors the Claude Code plugin manifest schema.
+_AUTHOR_OBJECT_KEYS = frozenset({"name", "email", "url"})
+
+
+def _parse_author(raw: Any, index: int) -> dict[str, str] | None:
+    """Normalize a curator-supplied ``author`` value to a Claude-Code-
+    compliant object ``{name, email?, url?}``.
+
+    Accepts either a non-empty string (treated as ``name``) or a mapping
+    with at least ``name`` and only the permitted keys. Returns ``None``
+    when ``raw`` is ``None``. Raises :class:`MarketplaceYmlError` on any
+    other shape.
+    """
+    if raw is None:
+        return None
+    ctx = f"packages[{index}].author"
+    if isinstance(raw, str):
+        name = raw.strip()
+        if not name:
+            raise MarketplaceYmlError(f"'{ctx}' must be a non-empty string or object with 'name'")
+        return {"name": name}
+    if isinstance(raw, dict):
+        unknown = set(raw.keys()) - _AUTHOR_OBJECT_KEYS
+        if unknown:
+            raise MarketplaceYmlError(
+                f"'{ctx}' has unknown key(s): "
+                f"{', '.join(sorted(unknown))}; allowed: "
+                f"{', '.join(sorted(_AUTHOR_OBJECT_KEYS))}"
+            )
+        name = raw.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise MarketplaceYmlError(f"'{ctx}.name' is required and must be a non-empty string")
+        out: dict[str, str] = {"name": name.strip()}
+        for key in ("email", "url"):
+            val = raw.get(key)
+            if val is None:
+                continue
+            if not isinstance(val, str) or not val.strip():
+                raise MarketplaceYmlError(f"'{ctx}.{key}' must be a non-empty string")
+            out[key] = val.strip()
+        return out
+    raise MarketplaceYmlError(f"'{ctx}' must be a string or object, got {type(raw).__name__}")
+
 
 # Keys permitted inside the ``marketplace:`` block of apm.yml.  This is
 # distinct from the legacy top-level keys (which include ``name``,
@@ -163,6 +216,12 @@ class PackageEntry:
     description: str | None = None
     homepage: str | None = None
     tags: tuple[str, ...] = ()
+    # ``author`` is normalized to a Claude-Code-compliant object:
+    # ``{"name": str, "email"?: str, "url"?: str}``. Accepts either a
+    # bare string (treated as ``name``) or a mapping at parse time.
+    author: Mapping[str, str] | None = None
+    license: str | None = None
+    repository: str | None = None
     # Derived (set by loader, not by user)
     is_local: bool = False
 
@@ -394,7 +453,64 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
     if raw_tags is not None:
         if not isinstance(raw_tags, list):
             raise MarketplaceYmlError(f"'packages[{index}].tags' must be a list of strings")
+        for i, item in enumerate(raw_tags):
+            if not isinstance(item, str):
+                raise MarketplaceYmlError(
+                    f"'packages[{index}].tags[{i}]' must be a string, got {type(item).__name__}"
+                )
         tags = tuple(str(t) for t in raw_tags)
+
+    # Anthropic pass-through: keywords (alias for tags -- merged, deduplicated)
+    raw_keywords = raw.get("keywords")
+    if raw_keywords is not None:
+        if not isinstance(raw_keywords, list):
+            raise MarketplaceYmlError(f"'packages[{index}].keywords' must be a list of strings")
+        for i, item in enumerate(raw_keywords):
+            if not isinstance(item, str):
+                raise MarketplaceYmlError(
+                    f"'packages[{index}].keywords[{i}]' must be a string, got {type(item).__name__}"
+                )
+        # Merge: tags first, then keywords entries (deduplicated)
+        seen = set(tags)
+        merged = list(tags)
+        for kw in raw_keywords:
+            if kw not in seen:
+                seen.add(kw)
+                merged.append(kw)
+        tags = tuple(merged)
+
+    # S4: cap tags array length and item length
+    if len(tags) > _MAX_TAGS_COUNT:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "packages[%d] ('%s'): tags truncated from %d to %d items",
+            index,
+            name,
+            len(tags),
+            _MAX_TAGS_COUNT,
+        )
+        tags = tags[:_MAX_TAGS_COUNT]
+    tags = tuple(t[:_MAX_TAG_LENGTH] for t in tags)
+
+    # Anthropic pass-through: author -- accept string OR object input,
+    # normalize to ``{name, email?, url?}`` per the Claude Code plugin
+    # manifest schema (json.schemastore.org/claude-code-plugin-manifest.json).
+    author = _parse_author(raw.get("author"), index)
+
+    # Anthropic pass-through: license (S3 -- must be str)
+    license_val: str | None = raw.get("license")
+    if license_val is not None:
+        if not isinstance(license_val, str) or not license_val.strip():
+            raise MarketplaceYmlError(f"'packages[{index}].license' must be a non-empty string")
+        license_val = license_val.strip()
+
+    # Anthropic pass-through: repository (S3 -- must be str)
+    repository: str | None = raw.get("repository")
+    if repository is not None:
+        if not isinstance(repository, str) or not repository.strip():
+            raise MarketplaceYmlError(f"'packages[{index}].repository' must be a non-empty string")
+        repository = repository.strip()
 
     return PackageEntry(
         name=name,
@@ -407,6 +523,9 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
         description=description,
         homepage=homepage,
         tags=tags,
+        author=author,
+        license=license_val,
+        repository=repository,
         is_local=is_local,
     )
 
@@ -633,6 +752,18 @@ def _build_config(
         if not isinstance(raw_metadata, dict):
             raise MarketplaceYmlError("'metadata' must be a mapping")
         metadata = dict(raw_metadata)
+
+    # S1: validate pluginRoot with path-safety checks if present.
+    plugin_root = metadata.get("pluginRoot")
+    if plugin_root is not None and isinstance(plugin_root, str) and plugin_root.strip():
+        try:
+            validate_path_segments(
+                plugin_root.strip(),
+                context="metadata.pluginRoot",
+                allow_current_dir=True,
+            )
+        except PathTraversalError as exc:
+            raise MarketplaceYmlError(str(exc)) from exc
 
     # -- build --
     build = _parse_build(marketplace_dict.get("build"))

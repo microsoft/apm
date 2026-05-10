@@ -228,6 +228,27 @@ class TestInstallCommandAutoBootstrap:
             assert "invalid format" in result.output
 
     @patch("apm_cli.commands.install._validate_package_exists")
+    def test_install_collection_yml_argument_surfaces_migration_message(self, mock_validate):
+        """`apm install owner/repo/.../foo.collection.yml` (CLI arg, not in
+        apm.yml) MUST surface the migration ValueError end-to-end.
+
+        Regression-trap for #1094 rework: the parse-time ValueError from
+        ``DependencyReference.parse()`` flows through
+        ``_resolve_package_references`` -> ``invalid_outcomes`` ->
+        validation summary. If a future refactor swallows this, users
+        would silently see "package not found" instead of the actionable
+        migration text.
+        """
+        with self._chdir_tmp():
+            result = self.runner.invoke(
+                cli, ["install", "owner/repo/collections/writing.collection.yml"]
+            )
+            assert ".collection.yml is no" in result.output  # text wraps in CLI
+            assert "longer supported" in result.output
+            assert "apm.yml" in result.output
+            assert "All packages failed validation" in result.output
+
+    @patch("apm_cli.commands.install._validate_package_exists")
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
@@ -297,6 +318,36 @@ class TestValidationFailureReasonMessages:
             result = self.runner.invoke(cli, ["install", "owner/repo", "--verbose"])
             assert "not accessible or doesn't exist" in result.output
             assert "run with --verbose for auth details" not in result.output
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_failure_names_all_probes(self, mock_validate):
+        """Round-4 (devx-ux): when a virtual subdir+ref exhausts all four
+        probes, the failure reason must name them by step so the user
+        knows what was attempted before the failure.
+        """
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(cli, ["install", "owner/repo/skills/foo#v1.2.0"])
+            output = " ".join(result.output.split())
+            assert "all probes failed" in output
+            assert "marker-file" in output
+            assert "Contents API" in output
+            assert "git ls-remote" in output
+            assert "shallow-fetch" in output
+            assert "run with --verbose for the full probe log" in output
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_failure_verbose_omits_probe_log_hint(self, mock_validate):
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(
+                cli, ["install", "owner/repo/skills/foo#v1.2.0", "--verbose"]
+            )
+            output = " ".join(result.output.split())
+            assert "all probes failed" in output
+            # The "(run with --verbose...)" hint is suppressed once the
+            # user is already in verbose mode.
+            assert "run with --verbose for the full probe log" not in output
 
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
@@ -482,7 +533,7 @@ class TestTransitiveDepParentChain:
         # Track what the callback receives
         callback_calls = []
 
-        def tracking_callback(dep_ref, mods_dir, parent_chain=""):
+        def tracking_callback(dep_ref, mods_dir, parent_chain="", parent_pkg=None):
             callback_calls.append(
                 {
                     "dep": dep_ref.get_display_name(),
@@ -538,6 +589,8 @@ class TestDownloadCallbackErrorMessages:
                 }
             )
         )
+        # v2 target resolution requires a harness signal (#1154).
+        (tmp_path / ".claude").mkdir(exist_ok=True)
 
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
@@ -596,6 +649,8 @@ class TestCallbackFailureDeduplication:
                 }
             )
         )
+        # v2 target resolution requires a harness signal (#1154).
+        (tmp_path / ".claude").mkdir(exist_ok=True)
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
         with patch("apm_cli.deps.github_downloader.GitHubPackageDownloader") as MockDownloader:
@@ -835,64 +890,6 @@ class TestInstallGlobalFlag:
                     result = self.runner.invoke(cli, ["install", "--global"])
                 assert result.exit_code == 1
                 assert "apm.yml" in result.output
-            finally:
-                os.chdir(self.original_dir)
-
-    def test_global_rejects_local_path_package(self):
-        """--global should reject local path packages with a clear error."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            try:
-                os.chdir(tmp_dir)
-                fake_home = Path(tmp_dir) / "fakehome"
-                fake_home.mkdir()
-                # Create a local package directory that would pass normal validation
-                local_pkg = Path(tmp_dir) / "my-local-pkg"
-                local_pkg.mkdir()
-                (local_pkg / "apm.yml").write_text("name: my-local-pkg\n")
-
-                with patch.object(Path, "home", return_value=fake_home):
-                    result = self.runner.invoke(cli, ["install", "--global", "./my-local-pkg"])
-
-                # Should fail with clear message about local packages
-                # Use shorter substring to tolerate Rich word-wrapping on
-                # platforms with long temp paths (Windows).
-                assert "not supported at user scope" in result.output
-                # Should suggest using remote reference
-                assert "owner/repo" in result.output
-            finally:
-                os.chdir(self.original_dir)
-
-    def test_global_rejects_absolute_local_path(self):
-        """--global should reject absolute local paths too."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            try:
-                os.chdir(tmp_dir)
-                fake_home = Path(tmp_dir) / "fakehome"
-                fake_home.mkdir()
-                local_pkg = Path(tmp_dir) / "abs-pkg"
-                local_pkg.mkdir()
-                (local_pkg / "apm.yml").write_text("name: abs-pkg\n")
-
-                with patch.object(Path, "home", return_value=fake_home):
-                    result = self.runner.invoke(cli, ["install", "--global", str(local_pkg)])
-
-                normalized = " ".join(result.output.split())
-                assert "not supported at user scope" in normalized
-            finally:
-                os.chdir(self.original_dir)
-
-    def test_global_rejects_tilde_local_path(self):
-        """--global should reject ~/path local packages."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            try:
-                os.chdir(tmp_dir)
-                fake_home = Path(tmp_dir) / "fakehome"
-                fake_home.mkdir()
-
-                with patch.object(Path, "home", return_value=fake_home):
-                    result = self.runner.invoke(cli, ["install", "--global", "~/some-pkg"])
-
-                assert "not supported at user scope" in result.output
             finally:
                 os.chdir(self.original_dir)
 

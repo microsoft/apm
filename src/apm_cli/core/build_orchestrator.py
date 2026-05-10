@@ -37,7 +37,7 @@ class BuildOptions:
     project_root: Path
     apm_yml_path: Path
     # Bundle-only options
-    bundle_format: str = "apm"
+    bundle_format: str = "plugin"
     bundle_target: Any = None
     bundle_archive: bool = False
     bundle_output: Path | None = None

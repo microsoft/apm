@@ -142,11 +142,14 @@ def get_manifest_path(scope: InstallScope) -> Path:
     :func:`set_source_root_override`.  This keeps ``apm install --root``
     reading the manifest from the user's original working directory
     rather than from the (typically empty) deploy root.
+
+    User scope delegates to :func:`get_apm_dir` so the user-level
+    location can't drift between this helper and the dir helper.
     """
     from ..constants import APM_YML_FILENAME
 
     if scope is InstallScope.USER:
-        return Path.home() / USER_APM_DIR / APM_YML_FILENAME
+        return get_apm_dir(scope) / APM_YML_FILENAME
     return get_source_root(scope) / APM_YML_FILENAME
 
 

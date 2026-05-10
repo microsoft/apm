@@ -30,9 +30,9 @@ is embedded in each bundle.
 Examples:
 
   # Bundle only (most common -- just dependencies: in apm.yml):
-  apm pack
+  apm pack                              # Claude Code plugin (default)
   apm pack --target claude --archive
-  apm pack --format plugin -o ./dist
+  apm pack --format apm -o ./dist       # Legacy APM bundle layout
 
   # Marketplace only (marketplace: in apm.yml, no dependencies:):
   apm pack
@@ -56,16 +56,16 @@ Exit codes:
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["apm", "plugin"]),
-    default="apm",
-    help="Bundle format: 'apm' (default) for standard bundles, 'plugin' for standalone plugin directories with plugin.json.",
+    type=click.Choice(["plugin", "apm"]),
+    default="plugin",
+    help="Bundle format. 'plugin' (default) emits a Claude Code plugin directory with plugin.json. 'apm' produces the legacy APM bundle layout (kept for tooling that still consumes it).",
 )
 @click.option(
     "--target",
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
+    help="[Deprecated] Target platform filter. Bundles are now target-agnostic; the consumer's project decides where files land at install time. Value is recorded in pack.target as informational metadata only and is ignored by 'apm install'. The flag will be removed in a future release.",
 )
 @click.option(
     "--archive",
@@ -106,6 +106,17 @@ Exit codes:
     default=None,
     help="Marketplace: override output path (default: .claude-plugin/marketplace.json).",
 )
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Compatibility flag for projects that "
+        "need per-client skill layouts."
+    ),
+)
 @click.pass_context
 def pack_cmd(
     ctx,
@@ -119,15 +130,37 @@ def pack_cmd(
     offline,
     include_prerelease,
     marketplace_output,
+    legacy_skill_paths,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
     project_root = Path(".").resolve()
+    # Issue #1207 D1: when --target is not given, detect the project's
+    # actual target so the embedded ``pack.target`` reflects what was
+    # tested rather than a hardcoded "copilot".  ``pack.target`` is now
+    # informational metadata only -- consumer-side install resolves the
+    # deploy target from the consumer project's context, not from the
+    # bundle.
+    if target is None:
+        from ..core.target_detection import detect_target
+
+        try:
+            detected, _reason = detect_target(project_root)
+            effective_target = detected if detected else None
+        except Exception:
+            effective_target = None
+    else:
+        logger.warning(
+            "--target is deprecated and will be removed in a future release. "
+            "Bundles are target-agnostic; the value is recorded as informational "
+            "pack.target metadata only and is ignored by 'apm install'."
+        )
+        effective_target = target
     options = BuildOptions(
         project_root=project_root,
         apm_yml_path=project_root / "apm.yml",
         bundle_format=fmt,
-        bundle_target=target,
+        bundle_target=effective_target,
         bundle_archive=archive,
         bundle_output=Path(output),
         bundle_force=force,
@@ -187,10 +220,16 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
             logger.verbose_detail(f"    {f}")
         if fmt == "plugin":
             logger.progress(
-                "Plugin bundle ready -- contains plugin.json and "
-                "plugin-native directories (agents/, skills/, commands/, ...). "
-                "No APM-specific files included."
+                "Plugin bundle ready -- contains plugin.json plus "
+                "plugin-native directories (agents/, skills/, commands/, ...) "
+                "and an embedded apm.lock.yaml for install-time integrity "
+                "verification."
             )
+        # Issue #1207: target-agnostic bundles install into any consumer
+        # project.  Print a copy-pasteable share line so packing creates
+        # the social hand-off naturally.
+        if pack_result.bundle_path:
+            logger.info(f"Share with: apm install {pack_result.bundle_path}")
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
@@ -212,7 +251,13 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
     )
 
 
-@click.command(name="unpack", help="Extract an APM bundle into the current project")
+@click.command(
+    name="unpack",
+    help=(
+        "[Deprecated] Extract an APM bundle into the current project. "
+        "Use 'apm install <bundle-path>' instead -- this command will be removed in v0.14."
+    ),
+)
 @click.argument("bundle_path", type=click.Path(exists=True))
 @click.option(
     "-o",
@@ -236,6 +281,10 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
+    logger.warning(
+        "'apm unpack' is deprecated and will be removed in v0.14. "
+        "Use 'apm install <bundle-path>' instead.",
+    )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
 
@@ -317,7 +366,9 @@ def _warn_empty(logger, target, result):
             logger.warning(f"No files to pack for target '{target}'")
         else:
             logger.warning(f"No files to pack for target '{target}'")
-            logger.verbose_detail(f"    Hint: use '--target all' to include all platforms")  # noqa: F541
+            logger.verbose_detail(
+                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
+            )
     else:
         logger.warning("No deployed files found -- empty bundle created")
 

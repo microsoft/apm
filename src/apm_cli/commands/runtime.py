@@ -16,7 +16,7 @@ from ._helpers import HIGHLIGHT, RESET, _get_console
 list = builtins.list
 
 
-@click.group(help="Manage AI runtimes")
+@click.group(help="Manage AI runtimes (experimental)")
 def runtime():
     """Manage Coding Agent CLI runtime installations and configurations."""
     pass

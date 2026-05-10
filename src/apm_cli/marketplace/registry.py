@@ -32,7 +32,7 @@ def _ensure_file() -> str:
     ensure_config_exists()
     path = _marketplaces_path()
     if not os.path.exists(path):
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({"marketplaces": []}, f, indent=2)
     return path
 
@@ -51,7 +51,7 @@ def _load() -> list[MarketplaceSource]:
             return list(_registry_cache)
         path = _ensure_file()
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read %s: %s", path, exc)
@@ -72,7 +72,7 @@ def _save(sources: list[MarketplaceSource]) -> None:
     path = _ensure_file()
     data = {"marketplaces": [s.to_dict() for s in sources]}
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     os.replace(tmp, path)
     with _registry_lock:
@@ -97,7 +97,9 @@ def get_marketplace_by_name(name: str) -> MarketplaceSource:
     for src in _load():
         if src.name.lower() == lower:
             return src
-    raise MarketplaceNotFoundError(name)
+    from ..utils.github_host import default_host
+
+    raise MarketplaceNotFoundError(name, host=default_host())
 
 
 def add_marketplace(source: MarketplaceSource) -> None:
@@ -117,7 +119,9 @@ def remove_marketplace(name: str) -> None:
     before = _load()
     after = [s for s in before if s.name.lower() != name.lower()]
     if len(after) == len(before):
-        raise MarketplaceNotFoundError(name)
+        from ..utils.github_host import default_host
+
+        raise MarketplaceNotFoundError(name, host=default_host())
     _save(after)
     logger.debug("Removed marketplace '%s'", name)
 

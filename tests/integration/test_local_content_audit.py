@@ -23,6 +23,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.requires_apm_binary
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -154,7 +156,7 @@ class TestLocalContentAudit:
         assert hashes, f"local_deployed_file_hashes empty: {lock!r}"
 
         # Both seeded primitives should be deployed under .github/ (copilot
-        # target).  Skill goes to .github/skills/foo/, instruction to
+        # target).  Skill goes to .agents/skills/foo/, instruction to
         # .github/instructions/bar.instructions.md.
         assert any("instructions/bar.instructions.md" in p for p in deployed), (
             f"instruction not deployed: {deployed}"

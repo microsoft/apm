@@ -52,10 +52,12 @@ The lock file serves four goals:
 | Event | Effect on `apm.lock.yaml` |
 |-------|----------------------|
 | `apm install` (first run) | Created. All dependencies resolved, commits pinned, files recorded. |
-| `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. |
-| `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits. |
+| `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. File only written when semantic content changes (dependencies, MCP servers/configs, `lockfile_version`); no churn from `generated_at` or `apm_version` fields. |
+| `apm install --frozen` | Read-only. Fails fast (exit 1) if the lockfile is missing or any direct dependency in `apm.yml` is absent from the lockfile. Mutually exclusive with `--update`. Use in CI to catch drift between manifest and lockfile. |
+| `apm update` | Re-resolved with confirmation gate. Resolves `apm.yml` against the latest matching refs, prints a structured plan (added/updated/removed/unchanged), and writes only after the user confirms (default `[y/N]`; bypass with `--yes`, preview with `--dry-run`). |
+| `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits without a confirmation prompt. Prefer `apm update` for interactive flows. |
 | `apm deps update` | Re-resolved. Refreshes versions for specified or all dependencies. |
-| `apm pack` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). |
+| `apm pack` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). Both `--format plugin` (default) and `--format apm` embed the enriched copy when a project lockfile exists. |
 | `apm uninstall` | Updated. Removed dependency entries and their `deployed_files` references. |
 
 The lock file SHOULD be committed to version control. It MUST NOT be
@@ -122,7 +124,7 @@ fields:
 | `resolved_by` | string | MAY | `repo_url` of the parent that introduced this transitive dependency. Present only when `depth >= 2`. |
 | `package_type` | string | MUST | Package type: `apm_package`, `plugin`, `virtual`, or other registered types. |
 | `content_hash` | string | MAY | SHA-256 hash of the package file tree, in the format `"sha256:<hex>"`. Used to verify cached packages on subsequent installs. Omitted for local path dependencies. See [section 4.4](#44-content-integrity). |
-| `is_dev` | boolean | MAY | `true` if the dependency was resolved through [`devDependencies`](../manifest-schema/#5-devdependencies). Omitted when `false`. Dev deps are excluded from `apm pack --format plugin` bundles. |
+| `is_dev` | boolean | MAY | `true` if the dependency was resolved through [`devDependencies`](../manifest-schema/#5-devdependencies). Omitted when `false`. Dev deps are excluded from `apm pack` plugin output (and from `--format apm` bundles). |
 | `deployed_files` | array of strings | MUST | Every file path APM deployed for this dependency, relative to project root. |
 | `source` | string | MAY | Dependency source. `"local"` for local path dependencies. Omitted for remote (git) dependencies. |
 | `local_path` | string | MAY | Filesystem path (relative or absolute) to the local package. Present only when `source` is `"local"`. |
@@ -132,7 +134,7 @@ fields:
 Fields with empty or default values (empty strings, `false` booleans, empty
 lists) SHOULD be omitted from the serialized output to keep the file concise.
 
-**Dev dependency tracking:** Packages installed via `apm install --dev` are marked with `is_dev: true`. When building plugin bundles (`apm pack --format plugin`), dev dependencies are excluded from the output. Resolvers and CI tools should respect this flag when producing distributable artifacts.
+**Dev dependency tracking:** Packages installed via `apm install --dev` are marked with `is_dev: true`. `apm pack` (plugin format, the default) and `apm pack --format apm` both exclude dev dependencies from output. Resolvers and CI tools should respect this flag when producing distributable artifacts.
 
 ### 4.3 Unique Key
 
@@ -188,10 +190,10 @@ The synthesized entry MUST follow this convention:
 | `deployed_files` | populated from `local_deployed_files` |
 | `deployed_file_hashes` | populated from `local_deployed_file_hashes` |
 
-`is_dev: true` is non-negotiable. Plugin bundle exporters (`apm pack --format
-plugin`) skip dev dependencies; this flag ensures the host project's own content
-is excluded from distributable bundles via the existing dev-dependency filter,
-without requiring exporters to special-case the self-entry.
+`is_dev: true` is non-negotiable. `apm pack` (both formats) skips dev
+dependencies; this flag ensures the host project's own content is excluded from
+distributable bundles via the existing dev-dependency filter, without requiring
+exporters to special-case the self-entry.
 
 Consumers iterating `dependencies` SHOULD treat the `"."` key as the host
 project. Consumers reading the on-disk YAML directly will not see this entry --
@@ -219,15 +221,19 @@ produce consistent diffs in version control.
 
 ## 6. Pack Enrichment
 
-When `apm pack` creates a bundle, it prepends a `pack:` section to the lock
-file copy included in the bundle. This section is informational and is not
-written back to the project's `apm.lock.yaml`.
+When `apm pack` creates a bundle, it prepends a `pack:` section to the
+lock file copy included in the bundle. Both `--format plugin` (default)
+and `--format apm` embed the enriched copy when the project has a
+lockfile; bundles built without a project lockfile (rare) skip the
+embedded copy and emit no `pack:` section. The `pack:` section is
+informational and is not written back to the project's `apm.lock.yaml`.
 
 ```yaml
 pack:
   format: apm
-  target: vscode
   packed_at: "2026-03-09T14:30:00Z"
+  bundle_files:
+    .github/agents/architect.md: a1b2c3...
 
 lockfile_version: "1"
 generated_at: "2026-03-09T14:00:00Z"
@@ -239,8 +245,9 @@ generated_at: "2026-03-09T14:00:00Z"
 | Field | Type | Description |
 |-------|------|-------------|
 | `pack.format` | string | Bundle format: `"apm"` or `"plugin"`. |
-| `pack.target` | string | Target environment: `"vscode"`, `"claude"`, or `"all"`. |
+| `pack.target` | string (deprecated, optional) | Historical target hint. Bundles are now target-agnostic; the consumer's project decides where files land at install time. The field is still recorded in every bundle for diagnostic purposes (typically `"all"` for target-agnostic packs, or the project's detected target) and is not authoritative at install time. |
 | `pack.packed_at` | string (ISO 8601) | UTC timestamp of when the bundle was created. |
+| `pack.bundle_files` | map[string -> string] | Per-file SHA-256 manifest of the bundle's deployable contents (relative path -> hex digest). Drives the install-side deploy loop. |
 
 The original lock file is not mutated. The enriched copy exists only inside the
 packed archive.
@@ -256,6 +263,19 @@ The dependency resolver interacts with the lock file as follows:
    to their latest commits. If a resolved commit matches the existing lock
    file entry and the local checkout is intact, the download is skipped.
    Otherwise, the package is re-fetched. The lock file is always refreshed.
+4. **Interactive update** (`apm update`) -- re-resolve all refs and render
+   a structured plan (added/updated/removed/unchanged) before any
+   mutation. Defaults to a confirmation prompt; `--dry-run` exits after
+   the plan with no on-disk changes; `--yes` skips the prompt for CI
+   automation. On confirmation, behaves like (3) and refreshes the lock
+   file.
+5. **Frozen** (`apm install --frozen`) -- read `apm.lock.yaml` and
+   structurally verify every direct dependency declared in `apm.yml`
+   has a corresponding lock entry. Exit code 1 when the lockfile is
+   missing or any direct dep is unlocked; never resolves, never
+   mutates. Mutually exclusive with `--update`. Note: this is a
+   structural presence check; on-disk SHA integrity is the job of
+   `apm audit`.
 
 When a locked commit is no longer reachable (force-pushed branch, deleted tag),
 APM MUST report an error and refuse to install until the lock file is updated.

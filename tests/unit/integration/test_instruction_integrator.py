@@ -1127,3 +1127,151 @@ class TestClaudeRulesSyncIntegration:
 
         assert result["files_removed"] == 0
         assert result["errors"] == 0
+
+
+# ==================================================================
+# Windsurf Rules (.md with trigger/globs) tests
+# ==================================================================
+
+
+class TestConvertToWindsurfRules:
+    """Test the Windsurf frontmatter conversion helper."""
+
+    def test_maps_apply_to_to_trigger_glob(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# Python rules"
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert "trigger: glob" in result
+        assert 'globs: "**/*.py"' in result
+        assert "applyTo" not in result
+
+    def test_no_apply_to_becomes_always_on(self):
+        content = "---\ndescription: General rules\n---\n\n# Rules"
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert "trigger: always_on" in result
+        assert "globs" not in result
+
+    def test_no_frontmatter_becomes_always_on(self):
+        content = "# Simple rules\n\nJust some guidelines."
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert result.startswith("---\n")
+        assert "trigger: always_on" in result
+        assert "# Simple rules" in result
+
+    def test_body_preserved(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# Python rules\n\nUse type hints."
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert "# Python rules" in result
+        assert "Use type hints." in result
+
+    def test_quoted_apply_to_unquoted(self):
+        content = "---\napplyTo: 'src/**/*.ts'\n---\n\n# TS"
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert 'globs: "src/**/*.ts"' in result
+
+    def test_double_quoted_apply_to(self):
+        content = '---\napplyTo: "src/**/*.ts"\n---\n\n# TS'
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert 'globs: "src/**/*.ts"' in result
+
+
+class TestWindsurfRulesIntegration:
+    """Test end-to-end Windsurf rules deployment."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project_root = Path(self.temp_dir)
+        self.integrator = InstructionIntegrator()
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_deploys_when_windsurf_dir_exists(self):
+        """Deploys .md rules when .windsurf/ exists."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n\n# Python rules"
+        )
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root
+        )
+
+        assert result.files_integrated == 1
+        target = self.project_root / ".windsurf" / "rules" / "python.md"
+        assert target.exists()
+        content = target.read_text()
+        assert "trigger: glob" in content
+        assert 'globs: "**/*.py"' in content
+        assert "# Python rules" in content
+
+    def test_filename_strips_instructions_md_suffix(self):
+        """Converts python.instructions.md -> python.md."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "security.instructions.md").write_text("# Security")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root
+        )
+
+        assert len(result.target_paths) == 1
+        assert result.target_paths[0].name == "security.md"
+
+    def test_no_apply_to_gets_always_on_trigger(self):
+        """Instructions without applyTo get trigger: always_on."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "general.instructions.md").write_text("# General guidelines")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root
+        )
+
+        assert result.files_integrated == 1
+        content = (self.project_root / ".windsurf" / "rules" / "general.md").read_text()
+        assert "trigger: always_on" in content
+
+    def test_multiple_files(self):
+        """Integrates multiple instruction files as .md rules."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Python")
+        (inst_dir / "testing.instructions.md").write_text("# Testing")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root
+        )
+
+        assert result.files_integrated == 2
+        rules_dir = self.project_root / ".windsurf" / "rules"
+        assert (rules_dir / "python.md").exists()
+        assert (rules_dir / "testing.md").exists()

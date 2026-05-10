@@ -681,3 +681,155 @@ class TestOutputPathTraversalGuard:
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="traversal"):
             load_marketplace_yml(yml)
+
+
+# ---------------------------------------------------------------------------
+# New fields: author, license, repository, keywords
+# ---------------------------------------------------------------------------
+
+
+class TestNewPassthroughFields:
+    """Tests for author, license, repository, and keywords fields."""
+
+    def test_package_entry_accepts_author_license_repository(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                '    author: "ACME Inc"\n'
+                '    license: "MIT"\n'
+                '    repository: "https://github.com/acme/tool"\n'
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        # String author is normalized to an object per the Claude schema.
+        assert entry.author == {"name": "ACME Inc"}
+        assert entry.license == "MIT"
+        assert entry.repository == "https://github.com/acme/tool"
+
+    def test_package_entry_accepts_author_object(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                "    author:\n"
+                '      name: "ACME"\n'
+                '      email: "team@acme.example"\n'
+                '      url: "https://acme.example"\n'
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.author == {
+            "name": "ACME",
+            "email": "team@acme.example",
+            "url": "https://acme.example",
+        }
+
+    def test_author_object_requires_name(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                "    author:\n"
+                '      email: "team@acme.example"\n'
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match=r"author.name.*required"):
+            load_marketplace_yml(yml)
+
+    def test_author_object_rejects_unknown_keys(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                "    author:\n"
+                "      name: ACME\n"
+                '      website: "https://acme.example"\n'
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match=r"author.*unknown key"):
+            load_marketplace_yml(yml)
+
+    def test_package_entry_new_fields_optional(self, tmp_path: Path):
+        content = _minimal_yml()
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.author is None
+        assert entry.license is None
+        assert entry.repository is None
+
+    def test_keywords_merges_into_tags(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                "    tags: [ai, tools]\n"
+                "    keywords: [tools, agents]\n"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        # tags first, then keywords (deduplicated)
+        assert entry.tags == ("ai", "tools", "agents")
+
+    def test_keywords_alone_populates_tags(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                "    keywords: [ai, agents]\n"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.tags == ("ai", "agents")
+
+    def test_new_fields_type_validation_rejects_non_string(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                "    author: 123\n"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match=r"author.*string or object"):
+            load_marketplace_yml(yml)
+
+    def test_tags_length_cap_applied(self, tmp_path: Path):
+        tags_list = ", ".join(f"t{i}" for i in range(60))
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                '    version: ">=1.0.0"\n'
+                f"    tags: [{tags_list}]\n"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        assert len(result.packages[0].tags) == 50

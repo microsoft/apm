@@ -195,22 +195,49 @@ class TestPolicyGateFailClosed:
         ctx.logger.policy_discovery_miss.assert_called_once()
 
     @patch(_PATCH_DISCOVER)
-    def test_absent_block_does_not_raise(self, mock_discover):
-        """absent / no_git_remote / empty are NOT fetch failures."""
+    def test_absent_block_raises(self, mock_discover):
+        """#1159 install parity: absent/no_git_remote/empty now honour block."""
         mock_discover.return_value = _fetch("absent", source="org:foo/.github")
         ctx = _FakeCtx(
             logger=MagicMock(),
             policy_fetch_failure_default="block",
         )
-        run(ctx)  # Must not raise
-        assert ctx.policy_enforcement_active is False
+        with pytest.raises(PolicyViolationError) as excinfo:
+            run(ctx)
+        assert "no enforceable org policy" in str(excinfo.value)
+        assert "outcome=absent" in str(excinfo.value)
 
     @patch(_PATCH_DISCOVER)
-    def test_no_git_remote_block_does_not_raise(self, mock_discover):
+    def test_no_git_remote_block_raises(self, mock_discover):
+        """#1159 install parity: no_git_remote now honours block."""
         mock_discover.return_value = _fetch("no_git_remote", source="")
         ctx = _FakeCtx(
             logger=MagicMock(),
             policy_fetch_failure_default="block",
+        )
+        with pytest.raises(PolicyViolationError) as excinfo:
+            run(ctx)
+        assert "outcome=no_git_remote" in str(excinfo.value)
+
+    @patch(_PATCH_DISCOVER)
+    def test_empty_block_raises(self, mock_discover):
+        """#1159 install parity: empty now honours block."""
+        mock_discover.return_value = _fetch("empty", source="org:foo/.github")
+        ctx = _FakeCtx(
+            logger=MagicMock(),
+            policy_fetch_failure_default="block",
+        )
+        with pytest.raises(PolicyViolationError) as excinfo:
+            run(ctx)
+        assert "outcome=empty" in str(excinfo.value)
+
+    @patch(_PATCH_DISCOVER)
+    def test_absent_warn_does_not_raise(self, mock_discover):
+        """Default warn keeps fail-open for no-policy outcomes."""
+        mock_discover.return_value = _fetch("absent", source="org:foo/.github")
+        ctx = _FakeCtx(
+            logger=MagicMock(),
+            policy_fetch_failure_default="warn",
         )
         run(ctx)
         assert ctx.policy_enforcement_active is False

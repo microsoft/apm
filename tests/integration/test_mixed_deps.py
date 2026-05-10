@@ -6,7 +6,6 @@ as dependencies, and that both types work correctly together.
 These tests require network access to GitHub.
 """
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,10 +13,7 @@ from pathlib import Path
 import pytest
 
 # Skip all tests if GITHUB_APM_PAT is not set
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark = pytest.mark.requires_github_token
 
 
 @pytest.fixture
@@ -31,6 +27,7 @@ def temp_project(tmp_path):
     apm_yml.write_text("""name: mixed-deps-project
 version: 1.0.0
 description: Test project with mixed dependencies
+target: copilot
 dependencies:
   apm: []
   mcp: []
@@ -160,9 +157,9 @@ This is a test.
         agents_md = temp_project / "AGENTS.md"
         assert agents_md.exists(), "AGENTS.md not generated"
 
-        # Verify skill was integrated to .github/skills/
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
-        assert skill_integrated.exists(), "Skill not integrated to .github/skills/"
+        # Verify skill was integrated to .agents/skills/
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
+        assert skill_integrated.exists(), "Skill not integrated to .agents/skills/"
 
     def test_compile_output_mentions_sources(self, temp_project, apm_command):
         """Compile output should mention different source types."""
@@ -223,7 +220,7 @@ class TestDependencyTypeDetection:
         assert (skill_path / "SKILL.md").exists(), "Claude Skill missing SKILL.md"
 
     def test_skill_gets_integrated_to_github_skills(self, temp_project, apm_command):
-        """Claude Skills get integrated to .github/skills/ directory."""
+        """Claude Skills get integrated to .agents/skills/ directory."""
         subprocess.run(
             [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
             cwd=temp_project,
@@ -232,9 +229,9 @@ class TestDependencyTypeDetection:
             timeout=120,
         )
 
-        skill_integrated = temp_project / ".github" / "skills" / "brand-guidelines" / "SKILL.md"
+        skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
 
-        assert skill_integrated.exists(), "Claude Skill should be integrated to .github/skills/"
+        assert skill_integrated.exists(), "Claude Skill should be integrated to .agents/skills/"
 
         content = skill_integrated.read_text()
         assert len(content) > 0, "Integrated SKILL.md should not be empty"

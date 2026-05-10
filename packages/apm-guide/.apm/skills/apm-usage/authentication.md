@@ -10,8 +10,13 @@ APM checks these sources in order, using the first valid token found:
 | 2 | `GITHUB_APM_PAT` | Global | Falls back to git credential if rejected |
 | 3 | `GITHUB_TOKEN` | Global | Shared with GitHub Actions |
 | 4 | `GH_TOKEN` | Global | Set by `gh auth login` |
-| 5 | `git credential fill` | Per-host | System credential manager |
+| 5 | `gh auth token --hostname <host>` | GitHub-like hosts | Active `gh auth login` account |
+| 6 | `git credential fill` | Per-host | System credential manager. APM forwards `path=<owner>/<repo>` so Git Credential Manager users with `credential.useHttpPath = true` get per-URL account selection (no account-picker prompt). |
 | -- | None | -- | Unauthenticated (public GitHub repos only) |
+
+APM checks the active `gh` CLI account before invoking OS credential helpers. This reduces ambiguous multi-account prompts on hosts like github.com. If the `gh` CLI is not installed or no account is active, APM skips this step silently and continues to `git credential fill`.
+
+For multi-account Git Credential Manager setups, see the [Multi-account Git Credential Manager](https://microsoft.github.io/apm/getting-started/authentication/#multi-account-git-credential-manager) section in the main authentication guide.
 
 ## Per-org setup
 
@@ -117,13 +122,33 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
 never contacts GitHub directly.
 
+## Install validation chain
+
+`apm install <package>` validates a virtual subdirectory package (`owner/repo/path#ref`) before writing it to `apm.yml`. The chain mirrors the actual clone auth path so a credential that succeeds for `git clone` is never false-rejected by the installer:
+
+1. **Marker-file probes** via raw content -- `apm.yml`, `SKILL.md`, `plugin.json`, `README.md`. Fast positive signal; absence is not a failure.
+2. **Contents API directory probe** -- `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}`. Confirms the directory exists at the ref.
+3. **`git ls-remote`** with the install auth chain (PAT header-injected, then plain HTTPS w/ credential helper, then SSH if `--ssh` or `--allow-protocol-fallback`). Confirms the ref exists.
+4. **Shallow `git fetch --depth=1 --filter=tree:0` + `git ls-tree`** at the resolved ref -- the path probe that confirms the subdirectory exists at that ref. Required to close the fail-open hole where step 3 would otherwise pass any successful repo handshake.
+
+Steps 3 and 4 only run for explicit `#ref` pins (not for unpinned default-branch deps), and only when the API steps fail. Azure DevOps tokens (PAT or AAD bearer) are injected via `http.extraheader` (`Authorization: Bearer ...`) and never embedded in the clone URL.
+
+**Yellow signal:** when steps 1-2 fail and steps 3-4 succeed, APM emits a stderr warning -- `[!] API validation skipped for {pkg}; resolved via git credential fallback.` This is security-relevant: a scoped fine-grained PAT may have *correctly* rejected a package on the API surface and the broader git credential chain accepted it. Operators should be able to see that signal in default CI logs.
+
+**Terminal error** when all four steps fail: `[x] all probes failed (marker-file, Contents API, git ls-remote, shallow-fetch) -- verify the path and ref exist and that your credentials have read access (run with --verbose for the full probe log)`.
+
+```bash
+# See the full probe log when validation fails
+apm install --verbose owner/repo/path#v1.2.0
+```
+
 ## Troubleshooting
 
 ```bash
 # Diagnose the auth chain -- shows which token source is used
 apm install --verbose your-org/package
 
-# Increase git credential timeout (default 30s, max 180s)
+# Increase git credential timeout (default 60s, max 180s)
 export APM_GIT_CREDENTIAL_TIMEOUT=120
 ```
 

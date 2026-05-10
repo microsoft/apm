@@ -871,13 +871,6 @@ class TestProxyRegistryOnlyMode:
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package("owner/repo/prompts/deploy.prompt.md", Path("/tmp/test-pkg"))
 
-    def test_virtual_collection_errors_without_base_url(self):
-        """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual collection packages."""
-        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
-            dl = GitHubPackageDownloader()
-            with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
-                dl.download_package("owner/repo/collections/my-collection", Path("/tmp/test-pkg"))
-
     def test_virtual_subdirectory_errors_without_base_url(self):
         """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual subdirectory packages."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
@@ -898,17 +891,19 @@ class TestProxyRegistryOnlyMode:
             with patch.object(dl, "download_virtual_file_package", return_value=MagicMock()):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
-    def test_explicit_artifactory_fqdn_virtual_collection_passes(self):
-        """Explicit Artifactory FQDN on virtual collection dep is NOT blocked by PROXY_REGISTRY_ONLY."""
+    def test_explicit_artifactory_fqdn_virtual_subdirectory_passes(self):
+        """Explicit Artifactory FQDN on virtual subdirectory dep is NOT blocked by PROXY_REGISTRY_ONLY."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             dep = DependencyReference.parse(
                 "art.example.com/artifactory/github/owner/repo/collections/my-collection"
             )
             assert dep.is_artifactory()
-            assert dep.is_virtual_collection()
+            assert dep.is_virtual_subdirectory()
             # Should not raise - explicit Artifactory FQDN bypasses the guard
-            with patch.object(dl, "download_collection_package", return_value=MagicMock()):
+            with patch.object(
+                dl, "_download_subdirectory_from_artifactory", return_value=MagicMock()
+            ):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
     def test_proxy_registry_only_is_canonical(self):
@@ -998,6 +993,82 @@ class TestRegistryConfig:
         assert cfg.host == "art.example.com"
         assert any("ARTIFACTORY_BASE_URL" in str(warning.message) for warning in w)
         assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
+
+    def test_http_url_with_token_warns(self):
+        """PROXY_REGISTRY_TOKEN over http://  emits a UserWarning."""
+        import warnings
+
+        from apm_cli.deps.registry_proxy import RegistryConfig
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
+                    "PROXY_REGISTRY_TOKEN": "secret",
+                },
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as w,
+        ):
+            warnings.simplefilter("always")
+            cfg = RegistryConfig.from_env()
+        assert cfg is not None
+        assert cfg.scheme == "http"
+        assert cfg.token == "secret"
+        assert any(
+            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
+            for warning in w
+        )
+
+    def test_http_url_with_token_silenced_by_allow_http(self):
+        """PROXY_REGISTRY_ALLOW_HTTP=1 silences the plaintext-token warning."""
+        import warnings
+
+        from apm_cli.deps.registry_proxy import RegistryConfig
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
+                    "PROXY_REGISTRY_TOKEN": "secret",
+                    "PROXY_REGISTRY_ALLOW_HTTP": "1",
+                },
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as w,
+        ):
+            warnings.simplefilter("always")
+            cfg = RegistryConfig.from_env()
+        assert cfg is not None
+        assert not any(
+            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
+            for warning in w
+        )
+
+    def test_http_url_without_token_does_not_warn(self):
+        """No warning when PROXY_REGISTRY_TOKEN is unset, even on http://."""
+        import warnings
+
+        from apm_cli.deps.registry_proxy import RegistryConfig
+
+        with (
+            patch.dict(
+                os.environ,
+                {"PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github"},
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as w,
+        ):
+            warnings.simplefilter("always")
+            cfg = RegistryConfig.from_env()
+        assert cfg is not None
+        assert cfg.token is None
+        assert not any(
+            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
+            for warning in w
+        )
 
     def test_registry_config_lockfile_round_trip(self):
         """host and registry_prefix survive YAML write -> read round trip."""

@@ -11,6 +11,10 @@ Environment variables (canonical)::
     PROXY_REGISTRY_TOKEN    -- Bearer token for the proxy.
     PROXY_REGISTRY_ONLY     -- Set to ``1``/``true``/``yes`` to block all
                             direct VCS downloads.
+    PROXY_REGISTRY_ALLOW_HTTP -- Set to ``1`` to silence the plaintext-token
+                            warning when ``PROXY_REGISTRY_URL`` uses ``http://``
+                            and ``PROXY_REGISTRY_TOKEN`` is set (intended for
+                            trusted internal proxies; not recommended).
 
 Deprecated aliases (still functional, emit ``DeprecationWarning``)::
 
@@ -133,6 +137,16 @@ class RegistryConfig:
             return None
 
         token = os.environ.get("PROXY_REGISTRY_TOKEN") or _read_deprecated_token()
+
+        if token and parsed.scheme == "http" and not os.environ.get("PROXY_REGISTRY_ALLOW_HTTP"):
+            warnings.warn(
+                f"PROXY_REGISTRY_TOKEN is set but PROXY_REGISTRY_URL uses http:// "
+                f"({url!r}); the bearer token will be transmitted in plaintext. "
+                f"Use https:// in production, or set PROXY_REGISTRY_ALLOW_HTTP=1 "
+                f"to silence this warning when targeting a trusted internal proxy.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         enforce_str = os.environ.get("PROXY_REGISTRY_ONLY", "")
         if not enforce_str:

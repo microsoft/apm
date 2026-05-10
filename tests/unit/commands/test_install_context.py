@@ -61,10 +61,15 @@ class TestInstallContextFields:
         "no_policy",
         "install_mode",
         "packages",
+        "refresh",
+        "legacy_skill_paths",
         # optional (default=None)
         "only_packages",
         "manifest_snapshot",
         "snapshot_manifest_path",
+        # issue #1203: --frozen + plan-callback for `apm update`
+        "frozen",
+        "plan_callback",
     )
 
     def test_all_required_fields_present(self):

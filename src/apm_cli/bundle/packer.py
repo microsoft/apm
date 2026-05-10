@@ -39,7 +39,7 @@ def pack_bundle(
     Args:
         project_root: Root of the project containing ``apm.lock.yaml`` and ``apm.yml``.
         output_dir: Directory where the bundle will be created.
-        fmt: Bundle format  -- ``"apm"`` (default) or ``"plugin"``.
+        fmt: Bundle format  -- ``"plugin"`` (default, Claude Code plugin layout) or ``"apm"`` (legacy APM bundle).
         target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, a list of
             target strings (e.g. ``["claude", "vscode"]``), or *None*
             (auto-detect from apm.yml / project structure).
@@ -251,9 +251,9 @@ def pack_bundle(
         if not dest.resolve().is_relative_to(bundle_dir_resolved):
             raise ValueError(f"Refusing to write outside bundle directory: {rel_path!r}")
         if src.is_dir():
-            from ..security.gate import ignore_symlinks
+            from ..security.gate import ignore_non_content
 
-            shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_symlinks)
+            shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_non_content)
         else:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest, follow_symlinks=False)

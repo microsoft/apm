@@ -191,6 +191,24 @@ class TestValidatePathSegments:
         with pytest.raises(PathTraversalError):
             validate_path_segments("..")
 
+    def test_rejects_percent_encoded_dotdot(self):
+        """Round 4 panel (supply-chain required): single-pass percent-encoded
+        '..' must not slip past the segment guard."""
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("owner/%2E%2E/evil")
+
+    def test_rejects_double_percent_encoded_dotdot(self):
+        """Round 4 panel (supply-chain required): doubly percent-encoded '..'
+        ('%252E%252E') must not slip past the segment guard. The guard
+        iteratively unquotes each segment until stable so multi-encoded
+        traversal markers cannot bypass the reject set."""
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("owner/%252E%252E/evil")
+
+    def test_rejects_percent_encoded_dot(self):
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("owner/%2E/evil")
+
     def test_allow_current_dir_accepts_dot_segments(self):
         # ./bin/server pattern for shell command call sites
         validate_path_segments("./bin/server", allow_current_dir=True)

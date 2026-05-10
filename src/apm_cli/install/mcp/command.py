@@ -116,7 +116,8 @@ def run_mcp_install(
             logger.verbose_detail(f"Registry: {registry_url}")
         with registry_env_override(registry_url):
             try:
-                _existing_lock = LockFile.read(get_lockfile_path(apm_dir))
+                _mcp_lock_path = get_lockfile_path(apm_dir)
+                _existing_lock = LockFile.read(_mcp_lock_path)
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
                 MCPIntegrator.install(
@@ -132,7 +133,9 @@ def run_mcp_install(
                 merged_names = old_servers | new_names
                 merged_configs = dict(old_configs)
                 merged_configs.update(new_configs)
-                MCPIntegrator.update_lockfile(merged_names, mcp_configs=merged_configs)
+                MCPIntegrator.update_lockfile(
+                    merged_names, _mcp_lock_path, mcp_configs=merged_configs
+                )
             except Exception as exc:
                 # Keep the raw exception (which may contain internal paths,
                 # credentials, or stack-trace fragments) at verbose level

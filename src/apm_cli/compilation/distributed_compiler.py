@@ -20,7 +20,11 @@ from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .context_optimizer import ContextOptimizer
 from .link_resolver import UnifiedLinkResolver
-from .template_builder import TemplateData, find_chatmode_by_name  # noqa: F401
+from .template_builder import (  # noqa: F401
+    TemplateData,
+    find_chatmode_by_name,
+    render_instructions_block,
+)
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -577,38 +581,26 @@ class DistributedAgentsCompiler:
 
         sections.append("")
 
-        # Group instructions by pattern
-        pattern_groups: builtins.dict[str, builtins.list[Instruction]] = defaultdict(list)
-        for instruction in placement.instructions:
-            if instruction.apply_to:
-                pattern_groups[instruction.apply_to].append(instruction)
+        def _emit(instruction: Instruction) -> builtins.list[str]:
+            lines: builtins.list[str] = []
+            if placement.source_attribution:
+                source = placement.source_attribution.get(str(instruction.file_path), "local")
+                # Source files live under source_dir (equal to base_dir
+                # except under ``apm compile --root``), so format the
+                # display path relative to source_dir.
+                rel_path = portable_relpath(instruction.file_path, self.source_dir)
+                lines.append(f"<!-- Source: {source} {rel_path} -->")
+            lines.append(instruction.content.strip())
+            lines.append("")
+            return lines
 
-        # Generate sections for each pattern
-        for pattern, pattern_instructions in sorted(pattern_groups.items()):
-            sections.append(f"## Files matching `{pattern}`")
-            sections.append("")
-
-            for instruction in sorted(
-                pattern_instructions,
-                key=lambda i: portable_relpath(i.file_path, self.source_dir),
-            ):
-                content = instruction.content.strip()
-                if content:
-                    # Add source attribution for individual instructions.
-                    # Source files live under source_dir (which equals
-                    # base_dir except when `apm compile --root` is in
-                    # play), so format the display path relative to
-                    # source_dir for stable output.
-                    if placement.source_attribution:
-                        source = placement.source_attribution.get(
-                            str(instruction.file_path), "local"
-                        )
-                        rel_path = portable_relpath(instruction.file_path, self.source_dir)
-
-                        sections.append(f"<!-- Source: {source} {rel_path} -->")
-
-                    sections.append(content)
-                    sections.append("")
+        sections.extend(
+            render_instructions_block(
+                placement.instructions,
+                base_dir=self.source_dir,
+                emit_instruction=_emit,
+            )
+        )
 
         # Footer
         sections.append("---")

@@ -121,8 +121,8 @@ def _run_outdated_cwd(extra_args=()):
 class TestOutdatedVersionRanges:
     """Verify upgrade classification for version-range entries."""
 
-    def test_exit_code_always_zero(self, tmp_path: Path):
-        """outdated must exit 0 regardless of upgrade availability."""
+    def test_exit_code_one_when_upgradable(self, tmp_path: Path):
+        """outdated must exit 1 when upgradable packages exist."""
         runner = CliRunner()
         (tmp_path / "marketplace.yml").write_text(_OUTDATED_YML, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
@@ -134,7 +134,7 @@ class TestOutdatedVersionRanges:
                 side_effect=_side_effect,
             ):
                 result = runner.invoke(outdated, [], catch_exceptions=False)
-        assert result.exit_code == 0
+        assert result.exit_code == 1
 
     def test_package_names_appear_in_output(self, tmp_path: Path):
         """Output must mention every package entry."""

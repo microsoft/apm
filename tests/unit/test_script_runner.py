@@ -601,33 +601,6 @@ class TestScriptRunnerAutoInstall:
         assert result is True
         mock_downloader.download_virtual_file_package.assert_called_once()
 
-    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
-    @patch("apm_cli.core.script_runner.Path.mkdir")
-    @patch("apm_cli.core.script_runner.Path.exists")
-    def test_auto_install_virtual_package_collection_success(
-        self, mock_exists, mock_mkdir, mock_downloader_class
-    ):
-        """Test successful auto-install of virtual collection package."""
-        # Setup mocks
-        mock_exists.return_value = False  # Package not already installed
-        mock_downloader = MagicMock()
-        mock_downloader_class.return_value = mock_downloader
-
-        # Mock package info
-        mock_package = MagicMock()
-        mock_package.name = "test-repo-project-planning"
-        mock_package.version = "1.0.0"
-        mock_package_info = MagicMock()
-        mock_package_info.package = mock_package
-        mock_downloader.download_virtual_collection_package.return_value = mock_package_info
-
-        # Test auto-install
-        ref = "owner/test-repo/collections/project-planning"
-        result = self.script_runner._auto_install_virtual_package(ref)
-
-        assert result is True
-        mock_downloader.download_virtual_collection_package.assert_called_once()
-
     @patch("apm_cli.core.script_runner.Path.exists")
     def test_auto_install_virtual_package_already_installed(self, mock_exists):
         """Test auto-install skips when package already installed."""

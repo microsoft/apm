@@ -328,8 +328,11 @@ class TestUpdateNoPolicy:
     def test_update_no_policy_flag_rejected(self):
         """`apm update --no-policy` exits non-zero with usage error.
 
-        ``apm update`` is the CLI self-updater (refreshes the apm binary), not a
-        dependency refresh. A `--no-policy` flag would be misleading and dead.
+        ``apm update`` is the dependency-graph refresh command (since
+        issue #1203). The CLI self-updater moved to ``apm self-update``.
+        ``apm update`` does not surface ``--no-policy`` because policy
+        enforcement is fixed-on for the refresh flow; users who need the
+        opt-out must use ``apm install --update --no-policy``.
         """
         result = self.runner.invoke(cli, ["update", "--no-policy"])
         assert result.exit_code != 0, f"Expected non-zero exit, got 0\nOutput: {result.output}"

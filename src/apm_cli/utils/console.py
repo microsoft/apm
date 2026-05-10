@@ -26,7 +26,7 @@ except ImportError:
 try:
     from colorama import Fore, Style, init
 
-    init(autoreset=True)
+    init(autoreset=False)
     COLORAMA_AVAILABLE = True
 except ImportError:
     COLORAMA_AVAILABLE = False
@@ -56,6 +56,9 @@ STATUS_SYMBOLS = {
     "plugin": "[>]",  # Plugin-related operations
     "search": "[>]",  # Search operations
     "download": "[>]",  # Download operations
+    "update": "[~]",  # Plan diff: dep refreshed to a new ref/commit
+    "remove": "[-]",  # Plan diff: dep removed from manifest
+    "equal": "[=]",  # Plan diff: dep unchanged (verbose only)
 }
 
 

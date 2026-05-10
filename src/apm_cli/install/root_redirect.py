@@ -20,19 +20,32 @@ CLI invocations (test runners, REPL sessions, embedded callers).
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional
 
 
 @contextmanager
-def install_root_redirect(root: Optional[str | os.PathLike]) -> Iterator[None]:
+def install_root_redirect(
+    root: str | os.PathLike | None,
+    *,
+    dry_run: bool = False,
+) -> Iterator[None]:
     """Redirect deploy-side writes into *root* for the wrapped block.
 
     When *root* is ``None`` or empty, this is a no-op so callers can
-    wrap unconditionally.  When set, ensures *root* exists, captures
-    the current working directory as the source root, ``chdir``s into
-    *root*, and restores both on exit (success or exception).
+    wrap unconditionally.
+
+    When set, captures the current working directory as the source
+    root, ``chdir``s into *root*, and restores both on exit (success
+    or exception).
+
+    ``dry_run`` controls whether *root* is created when missing.  In
+    write mode the directory is created (mirroring ``pip install
+    --target`` and ``npm install --prefix`` UX).  In dry-run the
+    context manager refuses to mutate the filesystem -- if *root*
+    does not exist a ``click.UsageError`` is raised so the preview
+    cannot silently create directories on disk.
     """
     if not root:
         yield
@@ -41,7 +54,17 @@ def install_root_redirect(root: Optional[str | os.PathLike]) -> Iterator[None]:
     from ..core.scope import set_source_root_override
 
     target = Path(root)
-    target.mkdir(parents=True, exist_ok=True)
+    if dry_run:
+        if not target.exists():
+            import click
+
+            raise click.UsageError(
+                f"--root {target} does not exist. "
+                "Create the directory before --dry-run, or drop --dry-run "
+                "to let install/compile create it."
+            )
+    else:
+        target.mkdir(parents=True, exist_ok=True)
     original = Path.cwd()
     set_source_root_override(original)
     os.chdir(target)

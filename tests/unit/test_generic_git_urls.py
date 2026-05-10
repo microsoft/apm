@@ -131,6 +131,20 @@ class TestGitLabSSH:
         assert dep.host == "gitlab.company.internal"
         assert dep.repo_url == "team/rules"
 
+    # --- Regression: #1159 -- SCP shorthand must accept any user, not just `git` ---
+
+    def test_scp_emu_enterprise_user(self):
+        """EMU/GHE SSH URLs use a non-`git` user (e.g. enterprise-user@)."""
+        dep = DependencyReference.parse("enterprise-user@ghe.corp.com:contoso/rules.git")
+        assert dep.host == "ghe.corp.com"
+        assert dep.repo_url == "contoso/rules"
+
+    def test_scp_custom_user_with_ref(self):
+        dep = DependencyReference.parse("alice@gitlab.company.internal:team/rules.git#main")
+        assert dep.host == "gitlab.company.internal"
+        assert dep.repo_url == "team/rules"
+        assert dep.reference == "main"
+
     def test_self_hosted_ssh_protocol(self):
         dep = DependencyReference.parse("ssh://git@gitlab.company.internal/team/rules.git")
         assert dep.host == "gitlab.company.internal"
@@ -181,6 +195,17 @@ class TestBitbucketSSH:
         dep = DependencyReference.parse("ssh://git@bitbucket.org/acme/security-rules.git")
         assert dep.host == "bitbucket.org"
         assert dep.repo_url == "acme/security-rules"
+
+
+class TestGitHubFQDNVirtualPath:
+    """GitHub FQDN shorthand keeps owner/repo + virtual (not GitLab heuristics)."""
+
+    def test_github_com_owner_repo_extra_segment_is_virtual(self):
+        dep = DependencyReference.parse("github.com/owner/repo/extra")
+        assert dep.host == "github.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "extra"
+        assert dep.is_virtual is True
 
 
 class TestGitHubURLs:
@@ -454,13 +479,14 @@ class TestFQDNVirtualPaths:
         assert dep.is_virtual is True
         assert dep.is_virtual_file() is True
 
-    def test_bitbucket_virtual_collection(self):
-        dep = DependencyReference.parse("bitbucket.org/team/rules/collections/security")
-        assert dep.host == "bitbucket.org"
-        assert dep.repo_url == "team/rules"
-        assert dep.virtual_path == "collections/security"
-        assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+    def test_bitbucket_collection_yml_url_raises(self):
+        """`.collection.yml` URLs raise migration error on generic hosts too."""
+        import pytest
+
+        with pytest.raises(ValueError, match=r"\.collection\.yml is no longer supported"):
+            DependencyReference.parse(
+                "bitbucket.org/team/rules/collections/security.collection.yml"
+            )
 
     def test_self_hosted_virtual_subdirectory(self):
         """Without virtual indicators, all segments are repo path on generic hosts.
@@ -604,7 +630,11 @@ class TestNestedGroupSupport:
         assert dep.is_virtual is True
 
     def test_nested_group_virtual_requires_dict_format(self):
-        """For nested groups + virtual, dict format is required."""
+        """Dict format remains the robust choice for ambiguous nested + virtual.
+
+        Shorthand covers common GitLab patterns (see nested-group + file tests);
+        use ``git:`` + ``path:`` when the project depth is unclear.
+        """
         dep = DependencyReference.parse_from_dict(
             {"git": "gitlab.com/group/subgroup/repo", "path": "prompts/review.prompt.md"}
         )
@@ -674,18 +704,21 @@ class TestNestedGroupSupport:
 
     # --- Ambiguity: nested group + virtual path (shorthand vs dict) ---
 
-    def test_shorthand_ambiguity_virtual_ext_collapses_repo(self):
-        """Shorthand with virtual extension treats owner/repo as 2-segment base.
+    def test_gitlab_nested_group_file_at_repo_root_shorthand(self):
+        """GitLab-classified hosts: nested project + file at repo root (no dict).
 
-        gitlab.com/group/subgroup/repo/file.prompt.md → the parser sees the
-        .prompt.md extension and assumes a 2-segment repo (group/subgroup)
-        with virtual path repo/file.prompt.md. This is WRONG if the user
-        meant repo=group/subgroup/repo. That's why dict format is required.
+        For gitlab.com, virtual file extensions no longer force a 2-segment
+        repo (nested groups vs virtual_path).
         """
         dep = DependencyReference.parse("gitlab.com/group/subgroup/repo/file.prompt.md")
-        # Parser sees virtual indicator → assumes 2-segment base
-        assert dep.repo_url == "group/subgroup"
-        assert dep.virtual_path == "repo/file.prompt.md"
+        assert dep.repo_url == "group/subgroup/repo"
+        assert dep.virtual_path == "file.prompt.md"
+        assert dep.is_virtual is True
+
+    def test_gitlab_nested_group_virtual_subdirectory_with_file_shorthand(self):
+        dep = DependencyReference.parse("gitlab.com/group/subgroup/repo/path/file.prompt.md")
+        assert dep.repo_url == "group/subgroup/repo"
+        assert dep.virtual_path == "path/file.prompt.md"
         assert dep.is_virtual is True
 
     def test_dict_format_resolves_ambiguity(self):
@@ -813,7 +846,7 @@ class TestSCPPortDetection:
             DependencyReference.parse("git@host.example.com:7999")
 
     def test_scp_port_trailing_slash_no_path_raises(self):
-        """git@host:7999/ — trailing slash but empty remaining path."""
+        """git@host:7999/ -- trailing slash but empty remaining path."""
         with pytest.raises(ValueError, match="no repository path follows"):
             DependencyReference.parse("git@host.example.com:7999/")
 
@@ -887,3 +920,237 @@ class TestSCPPortDetection:
         assert dep.host == "bitbucket.example.com"
         assert dep.port == 7999
         assert dep.repo_url == "project/repo"
+
+
+class TestGitLabClassifiedSelfHostedParsing:
+    """Self-managed GitLab via GITLAB_HOST uses the same nested heuristics as SaaS."""
+
+    def test_five_segment_path_without_virtual_indicators_is_whole_repo(self, monkeypatch):
+        """Extension-less paths stay one project slug; ``registry/pkg`` needs ``path:``.
+
+        Five (or more) segments can still be a single GitLab project path; we
+        do not guess a repo/virtual split without a virtual indicator.
+        """
+        monkeypatch.setenv("GITLAB_HOST", "git.example.com")
+        dep = DependencyReference.parse("git.example.com/org/team/project/registry/pkg")
+        assert dep.host == "git.example.com"
+        assert dep.repo_url == "org/team/project/registry/pkg"
+        assert dep.is_virtual is False
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+    def test_registry_pkg_split_via_object_form(self, monkeypatch):
+        monkeypatch.setenv("GITLAB_HOST", "git.example.com")
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "https://git.example.com/org/team/project.git",
+                "path": "registry/pkg",
+            }
+        )
+        assert dep.host == "git.example.com"
+        assert dep.repo_url == "org/team/project"
+        assert dep.virtual_path == "registry/pkg"
+        assert dep.is_virtual is True
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+
+class TestGitLabDirectShorthandReferenceHelpers:
+    """Helpers and canonical form for GitLab host/path shorthand resolution (install-time)."""
+
+    def test_virtual_suffix_installable_skill_path(self):
+        assert DependencyReference.virtual_suffix_is_installable_shape("agents/reverse-architect")
+
+    def test_virtual_suffix_rejects_dotted_last_segment(self):
+        assert not DependencyReference.virtual_suffix_is_installable_shape(
+            "child/not-a-virtual.pkg"
+        )
+
+    def test_from_gitlab_probe_to_canonical_string(self, monkeypatch):
+        """Resolved probe ref round-trips as FQDN string (not forced object-form)."""
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        dep = DependencyReference.from_gitlab_shorthand_probe(
+            "git.epam.com",
+            "epm-ease/apm-registry",
+            "agents/reverse-architect",
+            None,
+        )
+        assert dep.to_canonical() == "git.epam.com/epm-ease/apm-registry/agents/reverse-architect"
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+    def test_needs_probe_false_for_parse_with_virtual_markers(self, monkeypatch):
+        monkeypatch.setenv("GITLAB_HOST", "git.example.com")
+        s = "git.example.com/org/team/project/registry/pkg"
+        dep = DependencyReference.parse(s)
+        assert not dep.is_virtual
+        assert DependencyReference.needs_gitlab_direct_shorthand_probing(s, dep)
+        dep2 = DependencyReference.parse("git.example.com/org/team/project/prompts/x.prompt.md")
+        assert dep2.is_virtual
+        assert not DependencyReference.needs_gitlab_direct_shorthand_probing(
+            "git.example.com/org/team/project/prompts/x.prompt.md", dep2
+        )
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+    def test_parse_from_dict_gitlab_nested_unchanged(self, monkeypatch):
+        monkeypatch.setenv("GITLAB_HOST", "git.example.com")
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "https://git.example.com/org/team/project.git",
+                "path": "registry/pkg",
+            }
+        )
+        assert dep.repo_url == "org/team/project"
+        assert dep.virtual_path == "registry/pkg"
+        assert dep.is_virtual_subdirectory()
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+
+class TestGithubGitlabHostConflict:
+    """Bare FQDN shorthand when GITHUB_HOST and GITLAB_HOST claim the same host."""
+
+    def test_bare_fqdn_conflict_raises_with_remediation(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        with pytest.raises(ValueError, match=r"object form in apm\.yml"):
+            DependencyReference.parse("git.epam.com/epm-ease/apm-registry/agents/ai-run-ba-flow")
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+    def test_two_segment_repo_unchanged_under_conflict(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        dep = DependencyReference.parse("git.epam.com/epm-ease/apm-registry")
+        assert dep.host == "git.epam.com"
+        assert dep.repo_url == "epm-ease/apm-registry"
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+    def test_explicit_https_not_guarded(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        dep = DependencyReference.parse("https://git.epam.com/epm-ease/apm-registry.git")
+        assert dep.host == "git.epam.com"
+        assert dep.repo_url == "epm-ease/apm-registry"
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+    def test_explicit_ssh_scp_not_guarded(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        dep = DependencyReference.parse("git@git.epam.com:epm-ease/apm-registry.git")
+        assert dep.host == "git.epam.com"
+        assert dep.repo_url == "epm-ease/apm-registry"
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+    def test_split_gitlab_direct_shorthand_raises_under_conflict(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        with pytest.raises(ValueError, match="env -u GITHUB_HOST"):
+            DependencyReference.split_gitlab_direct_shorthand_parts(
+                "git.epam.com/epm-ease/apm-registry/agents/foo"
+            )
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+
+class TestGiteaVirtualPackageDetection:
+    """Gitea-specific virtual package detection -- supplements TestFQDNVirtualPaths
+    and TestNestedGroupSupport with Gitea host fixtures and regression guards
+    for the len(path_segments) > 2 over-trigger."""
+
+    # --- Must NOT be virtual (nested-group repo, no virtual indicators) ---
+
+    def test_three_segment_gitea_path_is_not_virtual(self):
+        """group/subgroup/repo on Gitea is a nested-group repo, not virtual."""
+        dep = DependencyReference.parse("gitea.myorg.com/group/subgroup/repo")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "group/subgroup/repo"
+        assert dep.is_virtual is False
+
+    def test_two_segment_gitea_path_is_not_virtual(self):
+        """Simple owner/repo on a Gitea host is never virtual."""
+        dep = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.is_virtual is False
+
+    def test_four_segment_generic_path_without_indicators_is_not_virtual(self):
+        """Deep nested groups without file extensions or /collections/ are not virtual."""
+        dep = DependencyReference.parse("git.company.internal/team/skills/brand-guidelines")
+        assert dep.is_virtual is False
+        assert dep.repo_url == "team/skills/brand-guidelines"
+
+    # --- Must be virtual (explicit virtual indicators) ---
+
+    def test_gitea_virtual_file_extension(self):
+        """Path with virtual file extension on Gitea is detected as virtual."""
+        dep = DependencyReference.parse("gitea.myorg.com/owner/repo/file.prompt.md")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "file.prompt.md"
+        assert dep.is_virtual is True
+        assert dep.is_virtual_file() is True
+
+    def test_gitea_collections_path_is_virtual(self):
+        """Path with /collections/ on Gitea is detected as a virtual subdirectory package."""
+        dep = DependencyReference.parse("gitea.myorg.com/owner/repo/collections/security")
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "collections/security"
+        assert dep.is_virtual is True
+        assert dep.is_virtual_subdirectory() is True
+
+    def test_dict_format_virtual_on_gitea(self):
+        """Dict format with path= on Gitea host yields a virtual package."""
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "gitea.myorg.com/owner/repo",
+                "path": "prompts/review.prompt.md",
+            }
+        )
+        assert dep.host == "gitea.myorg.com"
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "prompts/review.prompt.md"
+        assert dep.is_virtual is True
+
+
+class TestDefaultPortNormalisation:
+    """Issue #797: default-scheme ports are normalised to None at parse time."""
+
+    def test_default_https_port_normalised_to_none(self):
+        dep = DependencyReference.parse("https://github.com:443/owner/repo")
+        assert dep.port is None
+        assert dep.host == "github.com"
+        assert dep.repo_url == "owner/repo"
+
+    def test_default_ssh_port_normalised_to_none(self):
+        dep = DependencyReference.parse("ssh://git@gitlab.com:22/owner/repo.git")
+        assert dep.port is None
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "owner/repo"
+
+    def test_default_http_port_normalised_to_none(self):
+        dep = DependencyReference.parse("http://internal.git:80/team/repo")
+        assert dep.port is None
+        assert dep.host == "internal.git"
+        assert dep.repo_url == "team/repo"
+
+    def test_non_default_port_preserved(self):
+        dep = DependencyReference.parse("https://bitbucket.corp.com:7990/team/repo")
+        assert dep.port == 7990
+
+    def test_non_default_ssh_port_preserved(self):
+        dep = DependencyReference.parse("ssh://git@bitbucket.corp.com:7999/team/repo.git")
+        assert dep.port == 7999
+
+    def test_canonical_string_omits_normalised_default_port(self):
+        dep = DependencyReference.parse("https://gitlab.com:443/owner/repo")
+        canonical = dep.to_canonical()
+        assert ":443" not in canonical
+        assert "gitlab.com/owner/repo" in canonical
+
+    def test_https_url_with_port_443_matches_bare_url(self):
+        """Lockfile consistency: explicit :443 and bare URL produce the same key."""
+        dep_with_port = DependencyReference.parse("https://github.com:443/owner/repo")
+        dep_bare = DependencyReference.parse("https://github.com/owner/repo")
+        assert dep_with_port.port == dep_bare.port
+        assert dep_with_port.to_canonical() == dep_bare.to_canonical()

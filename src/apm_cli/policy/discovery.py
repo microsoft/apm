@@ -33,6 +33,7 @@ from urllib.parse import urlparse
 import requests
 import yaml
 
+from ..cache.url_normalize import SCP_LIKE_RE
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
@@ -663,22 +664,35 @@ def _extract_org_from_git_remote(
 def _parse_remote_url(url: str) -> tuple[str, str] | None:
     """Parse a git remote URL into (org, host).
 
+    Accepts SCP-style SSH URLs with any username (not just ``git@``), so
+    EMU/GHE deployments that use a non-``git`` SSH user
+    (e.g. ``enterprise-user@ghe.corp.com:org/repo.git``) parse correctly.
+    Also handles Azure DevOps SSH URLs which carry an extra ``v3/``
+    path prefix (``git@ssh.dev.azure.com:v3/<org>/<project>/<repo>``).
+
     Returns None if URL can't be parsed.
     """
     if not url:
         return None
 
-    # SSH: git@github.com:owner/repo.git
-    if url.startswith("git@"):
+    # SCP-like SSH: <user>@<host>:<path> -- any user, not just `git`.
+    # Closes #1159 for non-`git` SSH users (EMU, custom GHE accounts).
+    scp_match = SCP_LIKE_RE.match(url)
+    if scp_match:
+        host = scp_match.group("host")
+        path_part = scp_match.group("path")
         try:
-            host_part, path_part = url.split(":", 1)
-            host = host_part.replace("git@", "")
             parts = path_part.rstrip("/").removesuffix(".git").split("/")
-            if parts and parts[0]:
-                return (parts[0], host)
+            parts = [p for p in parts if p]
+            if not parts:
+                return None
+            # Azure DevOps SSH carries a leading 'v3/' segment that is
+            # NOT the org. The org is the second segment.
+            if host == "ssh.dev.azure.com" and parts[0] == "v3" and len(parts) >= 2:
+                return (parts[1], host)
+            return (parts[0], host)
         except (ValueError, IndexError):
             return None
-        return None
 
     # HTTPS: https://github.com/owner/repo.git
     # ADO:   https://dev.azure.com/org/project/_git/repo
