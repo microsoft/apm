@@ -128,7 +128,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [tool.pytest.ini_options]
-addopts = "-m 'not benchmark'"
+addopts = "-m 'not benchmark and not live'"
 markers = [
     "integration: marks tests as integration tests that may require network access",
     "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",

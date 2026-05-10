@@ -1,24 +1,32 @@
 #!/bin/bash
-# Integration testing script for both CI and local environments
+# Integration testing orchestrator for both CI and local environments.
 #
-# DEPRECATED (PR2 of #1166): This script is being retired in favour of
-# direct ``pytest tests/integration/`` invocations gated by the
-# marker-driven discovery system introduced in PR1
-# (microsoft/apm#1167). Once PR2 lands the canonical commands will be
-# documented in CONTRIBUTING.md and
-# docs/src/content/docs/contributing/integration-testing.md. Avoid
-# adding new logic here -- new test plumbing belongs in
-# ``tests/integration/conftest.py`` ``_MARKER_CHECKS``.
+# This script is intentionally a thin wrapper. Per-test gating
+# (tokens, runtimes, binary, network) lives in
+# tests/integration/conftest.py via the marker registry shipped in
+# PR1 of #1166 (microsoft/apm#1167). PR2 of #1166 retired the
+# per-file pytest enumeration that previously lived here in favour of
+# a single ``pytest tests/integration/`` invocation. New integration
+# test files dropped into tests/integration/ are picked up
+# automatically; add the right ``requires_*`` marker (see
+# pyproject.toml [tool.pytest.ini_options].markers) and the registry
+# will skip the test when its precondition is missing.
 #
-# Tests comprehensive runtime scenarios and edge cases:
-#   - Both Codex AND LLM runtime setup and interoperability
-#   - Complex pytest-based scenarios with error handling
-#   - Template bundling verification
-#   - Authentication matrix testing
+# This script's responsibilities are now narrow:
+#   - resolve GitHub / ADO tokens (via scripts/github-token-helper.sh)
+#   - detect platform and execution environment (CI vs local)
+#   - locate or build the apm PyInstaller binary
+#   - install runtimes the binary needs (codex / copilot / llm)
+#   - install python test deps (uv preferred)
+#   - invoke pytest tests/integration/ exactly once
 #
-# - CI mode: Uses pre-built artifacts from build job, runs integration tests
-# - Local mode: Builds binary, runs comprehensive integration tests  
-# This ensures robust implementation testing before release validation
+# To run a focused subset locally, invoke pytest directly:
+#   APM_E2E_TESTS=1 pytest tests/integration/test_X.py -v
+# (the marker registry will still auto-skip preconditions that the
+# local env doesn't satisfy)
+#
+# - CI mode: Uses pre-built artifacts from build job.
+# - Local mode: Builds the binary up-front.
 
 set -euo pipefail
 
@@ -297,27 +305,32 @@ install_test_dependencies() {
     log_success "Test dependencies installed"
 }
 
-# Run integration tests (exactly like CI does)
+# Run integration tests via marker-driven discovery (issue #1166).
+#
+# All per-test gating (tokens, runtimes, binary, network) lives in
+# tests/integration/conftest.py via the _MARKER_CHECKS registry shipped
+# in PR1 (#1167). This function is intentionally a thin wrapper: pytest
+# discovers test files, the marker registry skips what the env can't
+# satisfy, and one exit code reports the result.
 run_e2e_tests() {
-    log_info "=== Running integration tests (mirroring CI) ==="
-    log_info "Testing comprehensive runtime scenarios:"
-    log_info "  - Zero-config auto-install (NEW HERO SCENARIO 1)"
-    log_info "  - 2-minute guardrailing (NEW HERO SCENARIO 2)"
-    log_info "  - MCP registry integration"
-    log_info "  - APM Dependencies with real repositories"
-    log_info "  - Environment variable handling"
-    log_info "  - Docker args processing"
-    
-    # Set environment variables (like CI does)
+    log_info "=== Running integration tests (pytest tests/integration/) ==="
+
+    # Set environment variables (mirrors what CI does)
     export APM_E2E_TESTS="1"
-    
-    # Only export GITHUB_TOKEN if it's set (avoid unbound variable error)
+    if [[ -n "${APM_RUN_INTEGRATION_TESTS:-}" ]]; then
+        export APM_RUN_INTEGRATION_TESTS
+    fi
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         export GITHUB_TOKEN="$GITHUB_TOKEN"
     fi
-    
+
     log_info "Environment:"
     echo "  APM_E2E_TESTS: $APM_E2E_TESTS"
+    if [[ -n "${APM_RUN_INTEGRATION_TESTS:-}" ]]; then
+        echo "  APM_RUN_INTEGRATION_TESTS: $APM_RUN_INTEGRATION_TESTS"
+    else
+        echo "  APM_RUN_INTEGRATION_TESTS: (not set; network-integration tests will be skipped)"
+    fi
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         echo "  GITHUB_TOKEN: (set)"
     else
@@ -335,383 +348,20 @@ run_e2e_tests() {
     fi
     echo "  PATH contains: $(dirname "$(which apm)")"
     echo "  APM binary: $(which apm)"
-    
+    echo "  APM_BINARY_PATH: ${APM_BINARY_PATH:-(unset)}"
+
     # Activate virtual environment if it exists
     if [[ -f ".venv/bin/activate" ]]; then
         source .venv/bin/activate
     fi
-    
-    # Run NEW hero scenario test (zero-config auto-install)
-    log_info "Running NEW HERO SCENARIO 1: Zero-config auto-install test..."
-    echo "Command: pytest tests/integration/test_auto_install_e2e.py -v -s --tb=short"
-    
-    if pytest tests/integration/test_auto_install_e2e.py -v -s --tb=short; then
-        log_success "Zero-config auto-install tests passed!"
+
+    log_info "Invoking pytest tests/integration/ (marker registry handles per-test gating)"
+    if pytest tests/integration/ -v --tb=short; then
+        log_success "Integration test suite passed (collected and ran via pytest discovery)"
     else
-        log_error "Zero-config auto-install tests failed!"
+        log_error "Integration test suite reported failures"
         exit 1
     fi
-    
-    # Run NEW hero scenario test (2-minute guardrailing)
-    log_info "Running NEW HERO SCENARIO 2: 2-minute guardrailing test..."
-    echo "Command: pytest tests/integration/test_guardrailing_hero_e2e.py -v -s --tb=short"
-    
-    if pytest tests/integration/test_guardrailing_hero_e2e.py -v -s --tb=short; then
-        log_success "2-minute guardrailing tests passed!"
-    else
-        log_error "2-minute guardrailing tests failed!"
-        exit 1
-    fi
-    
-    # NOTE: Legacy golden scenario tests removed - replaced by faster auto-install tests above
-    # The auto-install tests cover the same hero scenario but with early termination for speed
-    
-    # Run MCP registry E2E tests (new - covers our implemented functionality)
-    log_info "Running MCP registry E2E tests..."
-    echo "Command: pytest tests/integration/test_mcp_registry_e2e.py -v -s --tb=short"
-    
-    if pytest tests/integration/test_mcp_registry_e2e.py -v -s --tb=short; then
-        log_success "MCP registry tests passed!"
-    else
-        log_error "MCP registry tests failed!"
-        exit 1
-    fi
-
-    # Run MCP env-var headers E2E tests (regression guard for ${VAR} -> ${env:VAR})
-    log_info "Running MCP env-var headers E2E tests..."
-    echo "Command: pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short; then
-        log_success "MCP env-var headers tests passed!"
-    else
-        log_error "MCP env-var headers tests failed!"
-        exit 1
-    fi
-
-    # #1212 anti-regression: ADO --update preflight must fall back from a
-    # stale ADO_APM_PAT to an az-cli AAD bearer when az is logged in. Uses
-    # PATH-injected fake `git` and `az` binaries so the test is hermetic.
-    log_info "Running #1212 ADO preflight bearer-fallback E2E..."
-    echo "Command: pytest tests/integration/test_ado_preflight_bearer_fallback_e2e.py -v --tb=short"
-
-    if pytest tests/integration/test_ado_preflight_bearer_fallback_e2e.py -v --tb=short; then
-        log_success "#1212 ADO preflight bearer-fallback tests passed!"
-    else
-        log_error "#1212 ADO preflight bearer-fallback tests failed!"
-        exit 1
-    fi
-    
-    # Run APM Dependencies integration tests (NEW - Task 8A)
-    log_info "Running APM Dependencies integration tests with real repositories..."
-    echo "Command: pytest tests/integration/test_apm_dependencies.py -v -s --tb=short -m integration"
-    
-    if pytest tests/integration/test_apm_dependencies.py -v -s --tb=short -m integration; then
-        log_success "APM Dependencies integration tests passed!"
-    else
-        log_error "APM Dependencies integration tests failed!"
-        exit 1
-    fi
-
-    # Subdirectory dedup race E2E (#1126): two sibling subdirs of the
-    # same upstream repo+ref must install in parallel without the
-    # "Subdirectory ... not found" race the v1 cache produced.
-    log_info "Running #1126 parallel subdir dedup E2E..."
-    echo "Command: pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration"
-
-    if pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration; then
-        log_success "#1126 subdir dedup E2E passed!"
-    else
-        log_error "#1126 subdir dedup E2E failed!"
-        exit 1
-    fi
-
-    # Branch-ref drift + lockfile self-heal regression E2E (#1158).
-    # Defends the heal pipeline (BranchRefDriftHeal,
-    # BuggyLockfileRecoveryHeal) and the supply-chain interlock against
-    # the 3-way drift bug. Uses the public danielmeppiel/apm-update-repro
-    # fixture with mutable refs.
-    log_info "Running #1158 branch-ref drift + heal pipeline E2E..."
-    echo "Command: pytest tests/integration/test_diff_aware_install_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_diff_aware_install_e2e.py -v -s --tb=short; then
-        log_success "#1158 branch-ref drift + heal pipeline E2E passed!"
-    else
-        log_error "#1158 branch-ref drift + heal pipeline E2E failed!"
-        exit 1
-    fi
-
-    # Target resolution overhaul E2E (#1154 + 10 sister issues).
-    # Offline tests: exercises detection whitelist, resolution priority,
-    # provenance line, error renderer, dry-run, apm targets command.
-    # NO GitHub token required (uses local bundles).
-    log_info "Running #1154 target resolution E2E..."
-    echo "Command: pytest tests/integration/test_target_resolution_e2e.py -v -s --tb=short -m integration"
-
-    if pytest tests/integration/test_target_resolution_e2e.py -v -s --tb=short -m integration; then
-        log_success "#1154 target resolution E2E passed!"
-    else
-        log_error "#1154 target resolution E2E failed!"
-        exit 1
-    fi
-
-    # apm deps update CLI E2E -- defends the explicit update workflow
-    # (lockfile bump across all packages, selective package update,
-    # global-scope update, unknown-package error).
-    log_info "Running apm deps update CLI E2E..."
-    echo "Command: pytest tests/integration/test_deps_update_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_deps_update_e2e.py -v -s --tb=short; then
-        log_success "apm deps update CLI E2E passed!"
-    else
-        log_error "apm deps update CLI E2E failed!"
-        exit 1
-    fi
-
-    # Run Transport Selection integration tests (issue #778)
-    # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
-    # when no usable SSH key is available for git@github.com.
-    log_info "Running Transport Selection integration tests..."
-    echo "Command: APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short"
-
-    if APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short; then
-        log_success "Transport Selection integration tests passed!"
-    else
-        log_error "Transport Selection integration tests failed!"
-        exit 1
-    fi
-
-    # Run global-scope (--global / -g) E2E tests -- offline, no tokens needed
-    log_info "Running global-scope E2E tests..."
-    echo "Command: pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short; then
-        log_success "Global-scope E2E tests passed!"
-    else
-        log_error "Global-scope E2E tests failed!"
-        exit 1
-    fi
-
-    # Run Claude Code MCP schema-fidelity tests -- offline, golden fixtures
-    # captured from the upstream `claude` CLI (see fixtures/README.md)
-    log_info "Running Claude Code MCP schema-fidelity tests..."
-    echo "Command: pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short"
-
-    if pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short; then
-        log_success "Claude Code MCP schema-fidelity tests passed!"
-    else
-        log_error "Claude Code MCP schema-fidelity tests failed!"
-        exit 1
-    fi
-
-    # Run local-bundle install E2E tests -- offline, no tokens needed
-    log_info "Running local-bundle install E2E tests..."
-    echo "Command: pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short; then
-        log_success "Local-bundle install E2E tests passed!"
-    else
-        log_error "Local-bundle install E2E tests failed!"
-        exit 1
-    fi
-
-    # Run cache lockfile-parity test (requires GITHUB_APM_PAT or GITHUB_TOKEN).
-    # Asserts byte-identical apm.lock.yaml across cold / warm / no-cache
-    # regimes -- the worst silent regression the cache layer could introduce.
-    log_info "Running cache lockfile-parity E2E test..."
-    echo "Command: pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short"
-
-    if pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short; then
-        log_success "Cache lockfile-parity E2E test passed!"
-    else
-        log_error "Cache lockfile-parity E2E test failed!"
-        exit 1
-    fi
-
-    # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
-    if [[ -n "${ADO_APM_PAT:-}" ]]; then
-        log_info "Running Azure DevOps E2E tests..."
-        echo "Command: pytest tests/integration/test_ado_e2e.py -v -s --tb=short"
-        
-        if pytest tests/integration/test_ado_e2e.py -v -s --tb=short; then
-            log_success "Azure DevOps E2E tests passed!"
-        else
-            log_error "Azure DevOps E2E tests failed!"
-            exit 1
-        fi
-    else
-        log_info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
-    fi
-
-    # Run agent-skills target E2E tests -- offline, no tokens needed
-    log_info "Running agent-skills target E2E tests..."
-    echo "Command: pytest tests/integration/test_agent_skills_target.py -v -s --tb=short"
-
-    if pytest tests/integration/test_agent_skills_target.py -v -s --tb=short; then
-        log_success "Agent-skills target E2E tests passed!"
-    else
-        log_error "Agent-skills target E2E tests failed!"
-        exit 1
-    fi
-
-    # Run skill install E2E tests -- requires GITHUB_APM_PAT (pytestmark skips otherwise).
-    # Guards skill install idempotency and .apm-pin no-leak invariant on reinstall.
-    log_info "Running skill install E2E tests..."
-    echo "Command: pytest tests/integration/test_skill_install.py -v -s --tb=short"
-
-    if pytest tests/integration/test_skill_install.py -v -s --tb=short; then
-        log_success "Skill install E2E tests passed!"
-    else
-        log_error "Skill install E2E tests failed!"
-        exit 1
-    fi
-
-    # Run unified pack format E2E tests -- offline, no tokens needed
-    # Guards the 0.12.0 default flip from --format apm to --format plugin.
-    log_info "Running unified pack format E2E tests..."
-    echo "Command: pytest tests/integration/test_pack_unified.py -v -s --tb=short"
-
-    if pytest tests/integration/test_pack_unified.py -v -s --tb=short; then
-        log_success "Unified pack format E2E tests passed!"
-    else
-        log_error "Unified pack format E2E tests failed!"
-        exit 1
-    fi
-
-    # Run Copilot compile target E2E tests -- offline, no tokens needed
-    # Guards .github/copilot-instructions.md generation + idempotent cleanup.
-    log_info "Running Copilot compile target E2E tests..."
-    echo "Command: pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short"
-
-    if pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short; then
-        log_success "Copilot compile target E2E tests passed!"
-    else
-        log_error "Copilot compile target E2E tests failed!"
-        exit 1
-    fi
-
-    # Run transitive local-path chain E2E tests -- offline, no tokens needed
-    # Guards local_path anchoring across multi-level local dependency chains.
-    log_info "Running transitive local-path chain E2E tests..."
-    echo "Command: pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short; then
-        log_success "Transitive local-path chain E2E tests passed!"
-    else
-        log_error "Transitive local-path chain E2E tests failed!"
-        exit 1
-    fi
-
-    # Run drift-detection integration tests -- offline, no tokens needed
-    # Guards `apm audit` drift replay (Phase D) across all 9 drift cases,
-    # multi-target, --no-drift opt-out, and false-positive guards
-    # (CRLF, BOM, Build ID line). Pinning these tests prevents silent
-    # regression of the drift contract.
-    log_info "Running drift detection integration tests..."
-    echo "Command: pytest tests/integration/test_drift_check.py -v -s --tb=short"
-
-    if pytest tests/integration/test_drift_check.py -v -s --tb=short; then
-        log_success "Drift detection integration tests passed!"
-    else
-        log_error "Drift detection integration tests failed!"
-        exit 1
-    fi
-
-    # Run drift-detection E2E tests -- offline, no tokens needed
-    # Verifies the no-write contract, air-gap proof, performance smoke,
-    # and JSON/SARIF output shapes for the `apm audit` drift surface.
-    log_info "Running drift detection E2E tests..."
-    echo "Command: pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short; then
-        log_success "Drift detection E2E tests passed!"
-    else
-        log_error "Drift detection E2E tests failed!"
-        exit 1
-    fi
-
-    # Run #1147 in-package link rewrite E2E -- offline, no tokens needed
-    # Defends the install-time link rewriter against the .agents/.github
-    # split regression: instructions/prompts/skills with relative links
-    # to in-package siblings must resolve on disk after `apm install`.
-    # Covers happy path, mixed link types, path-traversal escape
-    # (security), in-bundle skill links, and multi-target installs.
-    log_info "Running #1147 in-package link rewrite E2E..."
-    echo "Command: pytest tests/integration/test_link_rewrite_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_link_rewrite_e2e.py -v -s --tb=short; then
-        log_success "#1147 in-package link rewrite E2E passed!"
-    else
-        log_error "#1147 in-package link rewrite E2E failed!"
-        exit 1
-    fi
-
-    # Run #1159 audit silent-skip E2E -- offline, no tokens needed
-    # Defends the audit --ci CI gate against silent fall-through when
-    # auto-discovery hits no_git_remote / absent / empty / disabled
-    # outcomes. Real `git init`, real CliRunner. Covers exit codes,
-    # stderr cleanliness for both JSON and SARIF formats, and the
-    # policy.fetch_failure_default=block enforcement contract.
-    log_info "Running #1159 audit silent-skip E2E..."
-    echo "Command: pytest tests/integration/test_audit_silent_skip_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_audit_silent_skip_e2e.py -v -s --tb=short; then
-        log_success "#1159 audit silent-skip E2E passed!"
-    else
-        log_error "#1159 audit silent-skip E2E failed!"
-        exit 1
-    fi
-
-    # Run #1159 install silent-skip parity E2E -- offline, no tokens
-    # Defends the install pipeline parity for #1159: real `git init`
-    # with no remote configured + project policy.fetch_failure_default=block
-    # must raise PolicyViolationError through the policy_gate phase.
-    # Mirrors the audit-side block contract on the install codepath.
-    log_info "Running #1159 install silent-skip parity E2E..."
-    echo "Command: pytest tests/integration/test_install_silent_skip_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_install_silent_skip_e2e.py -v -s --tb=short; then
-        log_success "#1159 install silent-skip parity E2E passed!"
-    else
-        log_error "#1159 install silent-skip parity E2E failed!"
-        exit 1
-    fi
-
-    # Run #1159 SCP/EMU + ADO v3 SSH URL parsing E2E -- offline
-    # Defends the shared SCP_LIKE_RE regex against regressions on its
-    # three consumers: cache.url_normalize, policy.discovery, and
-    # models.dependency.reference. Real `git init` + real `git remote
-    # add origin` for EMU (enterprise-user@), GHE custom hosts, and
-    # ADO v3 SSH (git@ssh.dev.azure.com:v3/<org>/...). Also exercises
-    # APMPackage.from_apm_yml on the same URL forms.
-    log_info "Running #1159 dep URL parsing E2E..."
-    echo "Command: pytest tests/integration/test_dep_url_parsing_e2e.py -v -s --tb=short"
-
-    if pytest tests/integration/test_dep_url_parsing_e2e.py -v -s --tb=short; then
-        log_success "#1159 dep URL parsing E2E passed!"
-    else
-        log_error "#1159 dep URL parsing E2E failed!"
-        exit 1
-    fi
-
-    # Run #1149 GitLab install E2E -- offline (mocked HTTP, no network)
-    # Exercises GitHubPackageDownloader.download_package end-to-end against
-    # a host=gitlab.com virtual file dep, asserting GitLab REST v4 routing,
-    # PRIVATE-TOKEN header (sourced from GITLAB_APM_PAT), absence of an
-    # Authorization header (cross-host leakage trap), and the resulting
-    # LockedDependency entry preserving host=gitlab.com.
-    log_info "Running #1149 GitLab install E2E..."
-    echo "Command: pytest tests/integration/test_gitlab_install_e2e.py -v -s --tb=short -m integration"
-
-    if pytest tests/integration/test_gitlab_install_e2e.py -v -s --tb=short -m integration; then
-        log_success "#1149 GitLab install E2E passed!"
-    else
-        log_error "#1149 GitLab install E2E failed!"
-        exit 1
-    fi
-
-    log_success "All integration test suites completed successfully!"
-    
-
 }
 
 # Main execution
@@ -719,8 +369,8 @@ main() {
     echo "APM CLI Integration Testing - Unified CI/Local Script"
     echo "====================================================="
     echo ""
-    echo "This script adapts to CI (using artifacts) or local (building) environments"
-    echo "Tests comprehensive runtime scenarios and implementation robustness"
+    echo "This script adapts to CI (using artifacts) or local (building) environments."
+    echo "Resolves tokens, builds/locates the apm binary, sets up runtimes, then invokes pytest tests/integration/ once."
     echo ""
     
     check_prerequisites
@@ -728,40 +378,17 @@ main() {
     detect_environment
     build_binary
     setup_binary_for_testing
-    setup_runtimes  # Integration Testing Coverage!
+    setup_runtimes
     install_test_dependencies
     run_e2e_tests
     
     log_success "All integration tests completed successfully!"
     echo ""
     if [[ "$USE_EXISTING_BINARY" == "true" ]]; then
-        echo "✅ CI mode: Used pre-built artifacts and validated integration workflow"
+        echo "CI mode: Used pre-built artifacts and validated integration workflow"
     else
-        echo "✅ Local mode: Built binary and validated full integration process"
+        echo "Local mode: Built binary and validated full integration process"
     fi
-    echo ""
-    echo "Integration validation complete - COMPREHENSIVE TESTING:"
-    echo "  1. Prerequisites (GITHUB_TOKEN) ✅"
-    echo ""
-    echo "  HERO SCENARIO 1: 30-Second Zero-Config ✨"
-    echo "    - Run virtual package directly ✅"
-    echo "    - Auto-install on first run ✅"
-    echo "    - Use cached package on second run ✅"
-    echo ""
-    echo "  HERO SCENARIO 2: 2-Minute Guardrailing ✨"
-    echo "    - Project initialization ✅"
-    echo "    - Install multiple APM packages ✅"
-    echo "    - Compile to AGENTS.md with combined guardrails ✅"
-    echo "    - Run prompts from installed packages ✅"
-    echo ""
-    echo "  3. MCP registry search & show ✅"
-    echo "  4. Registry-based installation ✅"
-    echo "  5. APM Dependencies integration ✅"
-    echo "  6. Environment variable handling ✅"
-    echo "  7. Docker args with -e flags ✅"
-    echo "  8. Empty string & defaults logic ✅"
-    echo "  9. Cross-adapter consistency ✅"
-    echo "  10. Duplication prevention ✅"
     echo ""
     log_success "Ready for release validation!"
 }

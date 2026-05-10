@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.requires_e2e_mode
+
 
 # Test fixtures and utilities
 @pytest.fixture(scope="module")
