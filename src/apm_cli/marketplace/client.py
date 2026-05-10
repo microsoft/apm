@@ -17,7 +17,7 @@ from typing import Dict, List, Optional  # noqa: F401, UP035
 
 import requests
 
-from .errors import MarketplaceFetchError
+from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -143,13 +143,17 @@ def _clear_cache(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _try_proxy_fetch(
-    source: MarketplaceSource,
+def _try_proxy_fetch_raw(
+    owner: str,
+    repo: str,
     file_path: str,
-) -> dict | None:
-    """Try to fetch marketplace JSON via the registry proxy.
+    ref: str,
+) -> bytes | None:
+    """Try to fetch a file as raw bytes via the registry proxy.
 
-    Returns parsed JSON dict on success, ``None`` when no proxy is
+    The proxy host is governed by ``PROXY_REGISTRY_URL``; the caller's git
+    host is intentionally ignored here -- the proxy is the single routing
+    endpoint.  Returns raw bytes on success, ``None`` when no proxy is
     configured or the entry download fails.
     """
     from ..deps.registry_proxy import RegistryConfig
@@ -160,15 +164,31 @@ def _try_proxy_fetch(
 
     from ..deps.artifactory_entry import fetch_entry_from_archive
 
-    content = fetch_entry_from_archive(
+    return fetch_entry_from_archive(
         host=cfg.host,
         prefix=cfg.prefix,
-        owner=source.owner,
-        repo=source.repo,
+        owner=owner,
+        repo=repo,
         file_path=file_path,
-        ref=source.branch,
+        ref=ref,
         scheme=cfg.scheme,
         headers=cfg.get_headers(),
+    )
+
+
+def _try_proxy_fetch(
+    source: MarketplaceSource,
+    file_path: str,
+) -> dict | None:
+    """Try to fetch marketplace JSON via the registry proxy.
+
+    Returns parsed JSON dict on success, ``None`` when no proxy is
+    configured or the entry download fails.  Delegates the byte-level
+    fetch to :func:`_try_proxy_fetch_raw` so the proxy I/O path stays
+    DRY between marketplace.json and arbitrary-file callers.
+    """
+    content = _try_proxy_fetch_raw(
+        source.owner, source.repo, file_path, source.branch
     )
     if content is None:
         return None
@@ -185,13 +205,121 @@ def _try_proxy_fetch(
         return None
 
 
-def _github_contents_url(source: MarketplaceSource, file_path: str) -> str:
-    """Build the GitHub Contents API URL for a file."""
+def _github_contents_url_generic(
+    host: str, owner: str, repo: str, file_path: str, ref: str
+) -> str:
+    """Build the GitHub Contents API URL for an arbitrary (host, owner, repo)."""
     from ..core.auth import AuthResolver
 
-    host_info = AuthResolver.classify_host(source.host)
+    host_info = AuthResolver.classify_host(host)
     api_base = host_info.api_base
-    return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={source.branch}"
+    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+
+
+def _github_contents_url(source: MarketplaceSource, file_path: str) -> str:
+    """Build the GitHub Contents API URL for a marketplace source."""
+    return _github_contents_url_generic(
+        source.host, source.owner, source.repo, file_path, source.branch
+    )
+
+
+def fetch_raw(
+    host: str,
+    owner: str,
+    repo: str,
+    file_path: str,
+    ref: str,
+    *,
+    auth_resolver: object | None = None,
+) -> bytes | None:
+    """Fetch a file as raw bytes from a GitHub-compatible host.
+
+    Low-level primitive used by ``marketplace audit`` to fetch plugin
+    apm.yml content.  Honors the same proxy + auth semantics as
+    :func:`_fetch_file`.
+
+    Returns raw bytes on success, or ``None`` if the file is confirmed
+    not to exist (HTTP 404 from the upstream API).
+
+    Raises:
+        MarketplaceError: On unexpected failures (network, auth, 5xx);
+            when ``PROXY_REGISTRY_ONLY=1`` blocks the GitHub fallback
+            after a proxy miss -- in that case the file's existence
+            cannot be verified, which is distinct from a confirmed 404
+            and must not be silently treated as ``no manifest`` by
+            callers like ``marketplace audit``; and when ``host`` is
+            not a supported GitHub variant (defense-in-depth so we
+            never attach a GitHub PAT to a request aimed at an
+            unrelated host).
+            Raised as the neutral base class so callers can wrap the
+            error with their own context (e.g. plugin-specific wording).
+    """
+    proxy_bytes = _try_proxy_fetch_raw(owner, repo, file_path, ref)
+    if proxy_bytes is not None:
+        return proxy_bytes
+
+    from ..deps.registry_proxy import RegistryConfig
+
+    cfg = RegistryConfig.from_env()
+    if cfg is not None and cfg.enforce_only:
+        raise MarketplaceError(
+            f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
+            "PROXY_REGISTRY_ONLY blocks the GitHub fallback after a proxy miss"
+        )
+
+    # Defense-in-depth host-kind guard, mirroring the check in
+    # ``_fetch_file``.  Plugin sources are validated upstream, but if a
+    # non-GitHub host (e.g. ``gitlab.com``) reached this fallback path we
+    # MUST NOT attach ``Authorization: token <github_pat>`` to a request
+    # aimed at it -- doing so would leak GitHub credentials to an
+    # unrelated host.  Fail closed.
+    from ..core.auth import AuthResolver as _AuthResolver
+
+    host_info = _AuthResolver.classify_host(host)
+    if host_info.kind not in ("github", "ghe_cloud", "ghes"):
+        raise MarketplaceError(
+            f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
+            f"host {host!r} is not a supported plugin source. Only GitHub, "
+            f"GitHub Enterprise Cloud (*.ghe.com), and GHES (GITHUB_HOST) "
+            f"are supported; refusing to fetch to avoid forwarding GitHub "
+            f"credentials to a non-GitHub host."
+        )
+
+    url = _github_contents_url_generic(host, owner, repo, file_path, ref)
+
+    def _do_fetch(token, _git_env):
+        headers = {
+            "Accept": "application/vnd.github.v3.raw",
+            "User-Agent": "apm-cli",
+        }
+        # Only attach GitHub-namespaced credentials when the resolver-derived
+        # host kind is a GitHub variant. The outer guard already enforces
+        # this, but keep the conditional explicit so the credential-attach
+        # site is locally auditable.
+        if token and host_info.kind in ("github", "ghe_cloud", "ghes"):
+            headers["Authorization"] = f"token {token}"
+        resp = requests.get(url, headers=headers, timeout=30)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.content
+
+    if auth_resolver is None:
+        from ..core.auth import AuthResolver
+
+        auth_resolver = AuthResolver()
+
+    try:
+        return auth_resolver.try_with_fallback(
+            host,
+            _do_fetch,
+            org=owner,
+            unauth_first=False,
+        )
+    except Exception as exc:
+        raise MarketplaceError(
+            f"fetching {owner}/{repo}/{file_path}@{ref}: {exc}"
+        ) from exc
 
 
 def _fetch_file(

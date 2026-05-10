@@ -84,6 +84,7 @@ class MarketplaceGroup(click.Group):
         "init",
         "check",
         "outdated",
+        "audit",
         "doctor",
         "publish",
         "package",
@@ -1342,6 +1343,7 @@ def search(expression, limit, verbose):
         sys.exit(1)
 
 
+from .audit import audit  # noqa: E402
 from .check import check  # noqa: E402
 from .doctor import doctor  # noqa: E402
 from .init import init  # noqa: E402
@@ -1382,6 +1384,7 @@ __all__ = [
     "SemVer",
     "TargetResult",
     "add",
+    "audit",
     "browse",
     "check",
     "detect_config_source",

@@ -1494,6 +1494,40 @@ apm marketplace check
 apm marketplace check --offline
 ```
 
+#### `apm marketplace audit` - Audit transitive dependencies for marketplace bypass
+
+Fetch each plugin's own `apm.yml` at its pinned ref and warn when a `dependencies.apm` entry would be resolved outside the marketplace catalogue. Such transitive deps would resolve via direct git clone and track HEAD, defeating the supply-chain pinning the marketplace provides.
+
+The marketplace manifest is always re-fetched fresh (the 1-hour `marketplace.json` cache is bypassed) so the audit is run against the current published catalogue rather than stale local data.
+
+```bash
+apm marketplace audit NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Registered marketplace name (required)
+
+**Options:**
+- `--strict` - Exit non-zero on any bypass warning or unverifiable plugin (CI-friendly)
+- `-v, --verbose` - Show clean plugins and skipped reasons inline
+
+**Classification:**
+- *Bypasses (warn)* - bare `owner/repo`, `owner/repo/subpath`, `https://`/`ssh://` git URLs, and `{git: URL, ...}` object-form entries
+- *Clean* - `name@marketplace` refs and local paths (`./x`, `/abs`, `../x`)
+- *Skipped* - plugin has no `apm.yml` at the pinned ref, or the source type is not an addressable github manifest
+- *Unverifiable* - fetch failure or malformed YAML (per-plugin isolation: one bad plugin does not abort the run)
+
+**Exit codes:**
+- `0` - Default mode always exits 0; `--strict` exits 0 only when nothing bypasses and no plugin is unverifiable
+- `1` - `--strict` mode with bypass warnings or unverifiable plugins
+
+**Examples:**
+```bash
+apm marketplace audit my-marketplace
+apm marketplace audit my-marketplace --strict   # CI gate
+apm marketplace audit my-marketplace -v         # show clean & skipped detail
+```
+
 #### `apm marketplace doctor` - Environment diagnostics
 
 Check git, network reachability, authentication, `gh` CLI availability, and the presence of a marketplace config (in `apm.yml` or legacy `marketplace.yml`). Run this first when `apm pack` or `publish` fails in an unfamiliar environment.
