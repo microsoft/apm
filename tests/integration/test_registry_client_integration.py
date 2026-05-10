@@ -3,9 +3,12 @@
 import os  # noqa: F401
 import unittest
 
+import pytest
 import requests
 
 from apm_cli.registry.client import SimpleRegistryClient
+
+pytestmark = pytest.mark.requires_network_integration
 
 
 class TestRegistryClientIntegration(unittest.TestCase):
