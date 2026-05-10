@@ -56,6 +56,7 @@ what the test family you want actually requires.
 | `requires_runtime_codex` | The `codex` runtime installed under `~/.apm/runtimes/` | `apm runtime setup codex` |
 | `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
 | `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
+| `live` | Tests that hit real GitHub repos via cloning; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
 
 Without any of those env vars or runtimes a `pytest tests/integration`
 invocation is silent rather than red: every test is collected and
@@ -106,13 +107,14 @@ GitHub / ADO tokens, detect platform, locate or build the apm
 PyInstaller binary, install runtimes (codex / copilot / llm),
 install python test dependencies, and run
 `pytest tests/integration/` once. All per-test gating lives in the
-marker registry described above; the script no longer enumerates
-individual test files. New integration tests dropped into
-`tests/integration/` are picked up automatically.
+marker registry described above. New integration tests dropped into
+`tests/integration/` are picked up automatically; add the right
+`requires_*` marker and the registry will skip the test when its
+precondition is missing.
 
-For local iteration prefer the direct `pytest` invocations earlier
-on this page; the orchestrator script is mainly intended for
-reproducing the full CI environment end-to-end.
+The orchestrator is mainly intended for reproducing the full CI
+environment end-to-end; for local iteration prefer the direct
+`pytest` invocations earlier on this page.
 
 ## CI/CD Integration
 

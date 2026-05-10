@@ -154,6 +154,9 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
+        # Bumped from 20 to 30 minutes when test discovery widened from
+        # the 28 enumerated files to the full tests/integration/ suite
+        # (PR2 of #1166).
         timeout-minutes: 30
 
   release-validation:

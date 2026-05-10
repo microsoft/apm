@@ -317,6 +317,9 @@ run_e2e_tests() {
 
     # Set environment variables (mirrors what CI does)
     export APM_E2E_TESTS="1"
+    if [[ -n "${APM_RUN_INTEGRATION_TESTS:-}" ]]; then
+        export APM_RUN_INTEGRATION_TESTS
+    fi
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         export GITHUB_TOKEN="$GITHUB_TOKEN"
     fi
@@ -366,8 +369,8 @@ main() {
     echo "APM CLI Integration Testing - Unified CI/Local Script"
     echo "====================================================="
     echo ""
-    echo "This script adapts to CI (using artifacts) or local (building) environments"
-    echo "Tests comprehensive runtime scenarios and implementation robustness"
+    echo "This script adapts to CI (using artifacts) or local (building) environments."
+    echo "Resolves tokens, builds/locates the apm binary, sets up runtimes, then invokes pytest tests/integration/ once."
     echo ""
     
     check_prerequisites
@@ -375,7 +378,7 @@ main() {
     detect_environment
     build_binary
     setup_binary_for_testing
-    setup_runtimes  # Integration Testing Coverage!
+    setup_runtimes
     install_test_dependencies
     run_e2e_tests
     
