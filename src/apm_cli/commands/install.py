@@ -6,13 +6,22 @@ import dataclasses
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import click
 
-from apm_cli.install.errors import AuthenticationError, DirectDependencyError, PolicyViolationError
+from apm_cli.install.errors import (
+    AuthenticationError,
+    DirectDependencyError,
+    FrozenInstallError,
+    PolicyViolationError,
+)
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
+
+if TYPE_CHECKING:
+    from apm_cli.install.plan import UpdatePlan
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
@@ -101,7 +110,7 @@ from ..install.mcp.registry import (
 from ..install.mcp.registry import (
     validate_registry_url as _validate_registry_url,
 )
-from ..utils.console import _rich_echo, _rich_error, _rich_success  # noqa: F401
+from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success  # noqa: F401
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
@@ -215,6 +224,8 @@ class InstallContext:
     manifest_snapshot: bytes | None = None
     snapshot_manifest_path: Optional["Path"] = None
     legacy_skill_paths: bool = False
+    frozen: bool = False
+    plan_callback: "Callable[[UpdatePlan], bool] | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -833,12 +844,21 @@ def _handle_mcp_install(
     type=click.Choice(["apm", "mcp"]),
     help="Install only specific dependency type",
 )
-@click.option("--update", is_flag=True, help="Update dependencies to latest Git references")
+@click.option(
+    "--update",
+    is_flag=True,
+    help="Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI)",
+)
 @click.option("--dry-run", is_flag=True, help="Show what would be installed without installing")
 @click.option(
     "--force",
     is_flag=True,
-    help="Overwrite locally-authored files on collision and deploy despite critical security findings",
+    help="Overwrite locally-authored files on collision and deploy despite critical security findings (does NOT refresh refs; use 'apm update' for that)",
+)
+@click.option(
+    "--frozen",
+    is_flag=True,
+    help="Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (CI-safe; mutually exclusive with --update). Structural presence check only; use 'apm audit' for on-disk integrity.",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
 @click.option(
@@ -1015,6 +1035,7 @@ def install(  # noqa: PLR0913
     update,
     dry_run,
     force,
+    frozen,
     verbose,
     trust_transitive_mcp,
     parallel_downloads,
@@ -1076,6 +1097,11 @@ def install(  # noqa: PLR0913
     install_started_at = time.perf_counter()
     summary_rendered = False
     logger = None
+    if frozen and update:
+        raise click.UsageError(
+            "--frozen and --update are mutually exclusive. "
+            "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
+        )
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1401,6 +1427,8 @@ def install(  # noqa: PLR0913
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
             legacy_skill_paths=legacy_skill_paths,
+            frozen=frozen,
+            plan_callback=None,
         )
 
         apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
@@ -1417,6 +1445,17 @@ def install(  # noqa: PLR0913
             elapsed_seconds=time.perf_counter() - install_started_at,
         )
         summary_rendered = True
+
+        if frozen and apm_count > 0:
+            # --frozen verifies LOCKFILE STRUCTURE (every apm.yml dep
+            # has a lock entry), not on-disk content integrity. Make
+            # the scope explicit so a CI pipeline that skips
+            # 'apm audit' on the assumption that --frozen covers SHA
+            # verification is corrected at the moment of use.
+            _rich_info(
+                "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
+                symbol="info",
+            )
 
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
@@ -1615,6 +1654,8 @@ def _install_apm_packages(ctx, outcome):
                 allow_protocol_fallback=ctx.allow_protocol_fallback,
                 no_policy=ctx.no_policy,
                 legacy_skill_paths=ctx.legacy_skill_paths,
+                frozen=ctx.frozen,
+                plan_callback=ctx.plan_callback,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
@@ -1627,6 +1668,12 @@ def _install_apm_packages(ctx, outcome):
             _rich_error(str(e))
             if e.diagnostic_context:
                 _rich_echo(e.diagnostic_context)
+            sys.exit(1)
+        except FrozenInstallError as e:
+            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
+            _rich_error(str(e))
+            for reason in e.reasons:
+                _rich_echo(reason)
             sys.exit(1)
         except Exception as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
@@ -1826,6 +1873,8 @@ def _install_apm_dependencies(  # noqa: PLR0913
     skill_subset: "builtins.tuple | None" = None,
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
+    frozen: bool = False,
+    plan_callback=None,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1861,5 +1910,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         legacy_skill_paths=legacy_skill_paths,
+        frozen=frozen,
+        plan_callback=plan_callback,
     )
     return InstallService().run(request)

@@ -325,6 +325,44 @@ apm compile
 # Instructions with matching applyTo patterns are merged from all sources
 ```
 
+## Updating dependencies
+
+`apm update` refreshes the APM packages declared in your `apm.yml` to their latest matching refs. It resolves the dependency graph against the network, prints a structured plan (added / updated / removed), and prompts before mutating anything.
+
+```bash
+# Interactive: resolve, show plan, prompt [y/N], then install
+apm update
+
+# Show the plan and exit -- no on-disk changes
+apm update --dry-run
+
+# CI-safe: skip the prompt
+apm update --yes
+```
+
+The plan output uses the standard bracket symbols (`[~]` updated, `[+]` added, `[-]` removed) and includes an inline legend in the footer. When nothing has changed, `apm update` prints `All dependencies already at their latest matching refs.` and exits cleanly.
+
+For lockfile-only enforcement in CI, pair `apm update` (in your branch / PR) with `apm install --frozen` (in CI):
+
+```bash
+# In CI -- exit 1 if apm.lock.yaml is missing or out of sync with apm.yml
+apm install --frozen
+```
+
+:::note[--frozen scope]
+`apm install --frozen` is a **structural presence check**: it verifies every direct dependency in `apm.yml` has a lock entry. It does NOT verify that on-disk content matches the locked SHA. Use `apm audit` for end-to-end integrity verification of deployed files.
+:::
+
+:::caution[Breaking change: `apm update` now refreshes dependencies]
+In earlier releases, `apm update` updated the APM CLI binary. That behaviour moved to `apm self-update`. Inside an `apm.yml` project, the bare `apm update` verb now refreshes project dependencies (matching `npm update`, `cargo update`, `uv lock --upgrade`).
+
+Outside a project, `apm update` still forwards to `apm self-update` with a deprecation banner for one release. CI scripts that called `apm update` to refresh the binary should migrate now:
+
+```bash
+sed -i 's/apm update/apm self-update/g' your_scripts
+```
+:::
+
 ## Development Dependencies
 
 Some packages are only needed during authoring — test fixtures, linting rules, internal helpers. Install them as dev dependencies so they stay out of distributed bundles:
