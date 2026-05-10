@@ -264,6 +264,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     skill_subset: tuple | None = None,
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
+    plan_callback=None,
 ):
     """Install APM package dependencies.
 
@@ -401,8 +402,32 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
     if not ctx.deps_to_install and not ctx.root_has_local_primitives and not _has_orphan_deps:
         if logger:
-            logger.nothing_to_install()
+            logger.nothing_to_install(
+                lockfile_present=_early_lockfile is not None,
+                update_mode=update_refs,
+            )
         return InstallResult()
+
+    # ------------------------------------------------------------------
+    # Plan-gate checkpoint (#1203): show the user what install/update
+    # is about to do and let them confirm.  Invoked AFTER resolve so we
+    # have ``ctx.deps_to_install`` with resolved refs, BEFORE downloads
+    # begin so a "no" answer cancels cleanly without touching the
+    # cache.
+    #
+    # Only ``apm update`` passes a callback today; all other entry
+    # points pass ``None`` and the checkpoint is a no-op.  The TUI is
+    # already exited (see the ``finally`` above), so callbacks can
+    # write directly to stdout / call ``click.confirm`` without
+    # collision.
+    # ------------------------------------------------------------------
+    if plan_callback is not None:
+        from .plan import build_update_plan
+
+        plan = build_update_plan(_early_lockfile, ctx.deps_to_install)
+        proceed = plan_callback(plan)
+        if not proceed:
+            return InstallResult()
 
     ctx.tui.__enter__()
     try:

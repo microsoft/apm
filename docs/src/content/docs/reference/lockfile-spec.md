@@ -53,7 +53,9 @@ The lock file serves four goals:
 |-------|----------------------|
 | `apm install` (first run) | Created. All dependencies resolved, commits pinned, files recorded. |
 | `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. File only written when semantic content changes (dependencies, MCP servers/configs, `lockfile_version`); no churn from `generated_at` or `apm_version` fields. |
-| `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits. |
+| `apm install --frozen` | Read-only. Fails fast (exit 1) if the lockfile is missing or any direct dependency in `apm.yml` is absent from the lockfile. Mutually exclusive with `--update`. Use in CI to catch drift between manifest and lockfile. |
+| `apm update` | Re-resolved with confirmation gate. Resolves `apm.yml` against the latest matching refs, prints a structured plan (added/updated/removed/unchanged), and writes only after the user confirms (default `[y/N]`; bypass with `--yes`, preview with `--dry-run`). |
+| `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits without a confirmation prompt. Prefer `apm update` for interactive flows. |
 | `apm deps update` | Re-resolved. Refreshes versions for specified or all dependencies. |
 | `apm pack` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). Both `--format plugin` (default) and `--format apm` embed the enriched copy when a project lockfile exists. |
 | `apm uninstall` | Updated. Removed dependency entries and their `deployed_files` references. |
@@ -261,6 +263,19 @@ The dependency resolver interacts with the lock file as follows:
    to their latest commits. If a resolved commit matches the existing lock
    file entry and the local checkout is intact, the download is skipped.
    Otherwise, the package is re-fetched. The lock file is always refreshed.
+4. **Interactive update** (`apm update`) -- re-resolve all refs and render
+   a structured plan (added/updated/removed/unchanged) before any
+   mutation. Defaults to a confirmation prompt; `--dry-run` exits after
+   the plan with no on-disk changes; `--yes` skips the prompt for CI
+   automation. On confirmation, behaves like (3) and refreshes the lock
+   file.
+5. **Frozen** (`apm install --frozen`) -- read `apm.lock.yaml` and
+   structurally verify every direct dependency declared in `apm.yml`
+   has a corresponding lock entry. Exit code 1 when the lockfile is
+   missing or any direct dep is unlocked; never resolves, never
+   mutates. Mutually exclusive with `--update`. Note: this is a
+   structural presence check; on-disk SHA integrity is the job of
+   `apm audit`.
 
 When a locked commit is no longer reachable (force-pushed branch, deleted tag),
 APM MUST report an error and refuse to install until the lock file is updated.

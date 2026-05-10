@@ -62,6 +62,29 @@ class AuthenticationError(RuntimeError):
         self.diagnostic_context = diagnostic_context
 
 
+class FrozenInstallError(RuntimeError):
+    """Raised when ``apm install --frozen`` cannot proceed.
+
+    Two trigger conditions:
+
+    * Lockfile (``apm.lock.yaml``) is missing entirely.
+    * Lockfile is structurally out of sync with ``apm.yml`` -- a direct
+      dependency declared in the manifest has no entry in the lockfile.
+      In that case ``reasons`` carries one human-readable line per
+      missing dep so the renderer can list them.
+
+    The check is intentionally narrow: it flags the cases where running
+    install without ``--frozen`` would mutate the lockfile.  Drift in
+    transitive deps or removed deps is allowed, mirroring how ``uv``
+    treats ``--frozen`` and how ``npm ci`` only enforces direct-deps
+    presence.
+    """
+
+    def __init__(self, message: str, *, reasons: list[str] | None = None):
+        super().__init__(message)
+        self.reasons = list(reasons or [])
+
+
 class PolicyViolationError(RuntimeError):
     """Raised when org-policy enforcement halts an install.
 

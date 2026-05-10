@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from click.testing import CliRunner
 
-import apm_cli.commands.update as update_module
+import apm_cli.commands.self_update as update_module
 from apm_cli.cli import cli
 
 
@@ -39,9 +39,9 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertIn("aka.ms/apm-windows", command)
         self.assertIn("powershell", command.lower())
 
-    @patch("apm_cli.commands.update.is_self_update_enabled", return_value=False)
+    @patch("apm_cli.commands.self_update.is_self_update_enabled", return_value=False)
     @patch(
-        "apm_cli.commands.update.get_self_update_disabled_message",
+        "apm_cli.commands.self_update.get_self_update_disabled_message",
         return_value="Update with: pixi update apm-cli",
     )
     @patch("subprocess.run")
@@ -54,7 +54,7 @@ class TestUpdateCommand(unittest.TestCase):
         mock_enabled,
     ):
         """Disabled self-update policy should print guidance and skip installer."""
-        result = self.runner.invoke(cli, ["update"])
+        result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Update with: pixi update apm-cli", result.output)
@@ -63,9 +63,9 @@ class TestUpdateCommand(unittest.TestCase):
 
     @patch("requests.get")
     @patch("subprocess.run")
-    @patch("apm_cli.commands.update.get_version", return_value="0.6.3")
-    @patch("apm_cli.commands.update.shutil.which", return_value="powershell.exe")
-    @patch("apm_cli.commands.update.os.chmod")
+    @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
+    @patch("apm_cli.commands.self_update.shutil.which", return_value="powershell.exe")
+    @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_powershell_installer_on_windows(
         self,
@@ -84,7 +84,7 @@ class TestUpdateCommand(unittest.TestCase):
         mock_run.return_value = Mock(returncode=0)
 
         with patch.object(update_module.sys, "platform", "win32"):
-            result = self.runner.invoke(cli, ["update"])
+            result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Successfully updated to version 0.7.0", result.output)
@@ -103,8 +103,8 @@ class TestUpdateCommand(unittest.TestCase):
 
     @patch("requests.get")
     @patch("subprocess.run")
-    @patch("apm_cli.commands.update.get_version", return_value="0.6.3")
-    @patch("apm_cli.commands.update.os.chmod")
+    @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
+    @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_shell_installer_on_unix(
         self,
@@ -123,9 +123,9 @@ class TestUpdateCommand(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "darwin"),
-            patch("apm_cli.commands.update.os.path.exists", return_value=True),
+            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
         ):
-            result = self.runner.invoke(cli, ["update"])
+            result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Successfully updated to version 0.7.0", result.output)
@@ -240,46 +240,46 @@ class TestUpdateCommandLogic(unittest.TestCase):
             os.environ["APM_TEMP_DIR"] = self._prev_apm_temp_dir
         self._tempdir.cleanup()
 
-    @patch("apm_cli.commands.update.get_version", return_value="unknown")
+    @patch("apm_cli.commands.self_update.get_version", return_value="unknown")
     def test_update_dev_version_warns_and_returns(self, mock_version):
-        result = self.runner.invoke(cli, ["update"])
+        result = self.runner.invoke(cli, ["self-update"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("development mode", result.output)
 
-    @patch("apm_cli.commands.update.get_version", return_value="unknown")
+    @patch("apm_cli.commands.self_update.get_version", return_value="unknown")
     def test_update_dev_version_check_flag_no_reinstall_hint(self, mock_version):
         """When --check is passed with dev version, reinstall hint should be suppressed."""
-        result = self.runner.invoke(cli, ["update", "--check"])
+        result = self.runner.invoke(cli, ["self-update", "--check"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("development mode", result.output)
         self.assertNotIn("reinstall", result.output)
 
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value=None)
-    @patch("apm_cli.commands.update.get_version", return_value="1.0.0")
+    @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
     def test_update_cannot_fetch_latest_exits_1(self, mock_version, mock_latest):
-        result = self.runner.invoke(cli, ["update"])
+        result = self.runner.invoke(cli, ["self-update"])
         self.assertEqual(result.exit_code, 1)
         self.assertIn("Unable to fetch latest version", result.output)
 
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.0.0")
-    @patch("apm_cli.commands.update.get_version", return_value="1.0.0")
+    @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
     def test_update_already_on_latest(self, mock_version, mock_latest):
-        result = self.runner.invoke(cli, ["update"])
+        result = self.runner.invoke(cli, ["self-update"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("latest version", result.output)
 
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
-    @patch("apm_cli.commands.update.get_version", return_value="1.0.0")
+    @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
     def test_update_check_flag_shows_available_no_install(self, mock_version, mock_latest):
-        result = self.runner.invoke(cli, ["update", "--check"])
+        result = self.runner.invoke(cli, ["self-update", "--check"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("1.0.0", result.output)
         self.assertIn("1.1.0", result.output)
 
     @patch("requests.get")
     @patch("subprocess.run")
-    @patch("apm_cli.commands.update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.update.os.chmod")
+    @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
+    @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_installer_failure_exits_1(
         self, mock_latest, mock_chmod, mock_version, mock_run, mock_get
@@ -292,14 +292,14 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.update.os.path.exists", return_value=True),
+            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
         ):
-            result = self.runner.invoke(cli, ["update"])
+            result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn("Installation failed", result.output)
 
-    @patch("apm_cli.commands.update.get_version", return_value="1.0.0")
+    @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_requests_not_available_exits_1(self, mock_latest, mock_version):
         """When requests library is missing, exit with clear message."""
@@ -316,28 +316,28 @@ class TestUpdateCommandLogic(unittest.TestCase):
             patch("builtins.__import__", side_effect=mock_import),
             patch.object(update_module.sys, "platform", "linux"),
         ):
-            result = self.runner.invoke(cli, ["update"])
+            result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn("requests", result.output)
 
     @patch("requests.get")
-    @patch("apm_cli.commands.update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.update.os.chmod")
+    @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
+    @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_network_error_exits_1(self, mock_latest, mock_chmod, mock_version, mock_get):
         mock_get.side_effect = Exception("Network error")
 
         with patch.object(update_module.sys, "platform", "linux"):
-            result = self.runner.invoke(cli, ["update"])
+            result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn("Update failed", result.output)
 
     @patch("requests.get")
     @patch("subprocess.run")
-    @patch("apm_cli.commands.update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.update.os.chmod")
+    @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
+    @patch("apm_cli.commands.self_update.os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_temp_file_cleanup_on_success(
         self, mock_latest, mock_chmod, mock_version, mock_run, mock_get
@@ -358,10 +358,10 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.update.os.path.exists", return_value=True),
+            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
             patch.object(update_module.os, "unlink", side_effect=tracking_unlink),
         ):
-            result = self.runner.invoke(cli, ["update"])
+            result = self.runner.invoke(cli, ["self-update"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(len(deleted_paths), 1)
