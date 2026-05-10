@@ -153,6 +153,7 @@ def _parse_instruction(
         author=metadata.get("author"),
         version=metadata.get("version"),
         source=source,
+        placement=metadata.get("placement"),
     )
 
 

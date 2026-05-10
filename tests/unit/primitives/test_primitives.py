@@ -437,6 +437,7 @@ Provide constructive feedback and suggestions for improvement.
         instruction_content = """---
 description: Python coding standards and conventions
 applyTo: "**/*.py"
+placement: "subdirectory"
 author: Development Team
 ---
 
@@ -468,6 +469,7 @@ Follow these coding standards when writing Python code:
         self.assertEqual(primitive.name, "python-standards")
         self.assertEqual(primitive.description, "Python coding standards and conventions")
         self.assertEqual(primitive.apply_to, "**/*.py")
+        self.assertEqual(primitive.placement, "subdirectory")
         self.assertEqual(primitive.author, "Development Team")
         self.assertIn("Python Coding Standards", primitive.content)
 

@@ -44,6 +44,7 @@ class Instruction:
     author: str | None = None
     version: str | None = None
     source: str | None = None  # Source of primitive: "local" or "dependency:{package_name}"
+    placement: str | None = None  # Optional compile placement override
 
     def validate(self) -> list[str]:
         """Validate instruction structure.

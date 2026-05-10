@@ -518,6 +518,15 @@ class CompilationFormatter:
             lines.append("Mathematical Optimization Analysis")
 
         lines.append("")
+        manual_override_count = sum(
+            1 for decision in decisions if decision.strategy == PlacementStrategy.MANUAL_OVERRIDE
+        )
+        if manual_override_count:
+            lines.append(
+                f"Manual Override: {manual_override_count} instruction"
+                f"{'s' if manual_override_count != 1 else ''}"
+            )
+            lines.append("")
 
         if self.use_color and RICH_AVAILABLE:
             # Coverage-First Strategy Table
@@ -530,7 +539,7 @@ class CompilationFormatter:
             strategy_table.add_column("Pattern", style="white", width=25)
             strategy_table.add_column("Source", style="yellow", width=15)
             strategy_table.add_column("Distribution", style="yellow", width=12)
-            strategy_table.add_column("Strategy", style="green", width=15)
+            strategy_table.add_column("Strategy", style="green", width=18, no_wrap=True)
             strategy_table.add_column("Coverage Guarantee", style="blue", width=20)
 
             for decision in decisions:
@@ -548,17 +557,26 @@ class CompilationFormatter:
                 score = decision.distribution_score
                 if score < 0.3:
                     dist_display = f"{score:.3f} (Low)"
-                    strategy_name = "Single Point"
-                    coverage_status = "[+] Perfect"
                 elif score > 0.7:
                     dist_display = f"{score:.3f} (High)"
-                    strategy_name = "Distributed"
-                    coverage_status = "[+] Universal"
                 else:
                     dist_display = f"{score:.3f} (Medium)"
-                    strategy_name = "Selective Multi"
+
+                if decision.strategy == PlacementStrategy.MANUAL_OVERRIDE:
+                    strategy_name = decision.strategy.value
+                    coverage_status = "[+] Override"
+                elif decision.strategy == PlacementStrategy.SINGLE_POINT:
+                    strategy_name = decision.strategy.value
+                    coverage_status = "[+] Perfect"
+                elif decision.strategy == PlacementStrategy.DISTRIBUTED:
+                    strategy_name = decision.strategy.value
+                    coverage_status = "[+] Universal"
+                else:
+                    strategy_name = decision.strategy.value
                     # Check if root placement was used (indicates coverage fallback)
-                    if any(str(p) == "." or p.name == "" for p in decision.placement_directories):
+                    if any(
+                        self._is_root_placement(path) for path in decision.placement_directories
+                    ):
                         coverage_status = "[!] Root Fallback"
                     else:
                         coverage_status = "[+] Verified"
@@ -597,7 +615,9 @@ class CompilationFormatter:
                     placement = self._get_relative_display_path(decision.placement_directories[0])
 
                     # Analyze coverage outcome
-                    if str(decision.placement_directories[0]).endswith("."):
+                    if decision.strategy == PlacementStrategy.MANUAL_OVERRIDE:
+                        coverage_result = "Manual -> Coverage verified"
+                    elif self._is_root_placement(decision.placement_directories[0]):
                         coverage_result = "Root -> All files inherit"
                     elif decision.distribution_score < 0.3:
                         coverage_result = "Local -> Perfect efficiency"
@@ -655,9 +675,12 @@ hierarchical inheritance. Coverage takes priority over efficiency."""
                 pattern = decision.pattern if decision.pattern else "(global)"
                 score = f"{decision.distribution_score:.3f}"
                 strategy = decision.strategy.value
-                coverage = (
-                    "[+] Verified" if decision.distribution_score < 0.7 else "[!] Root Fallback"
-                )
+                if decision.strategy == PlacementStrategy.MANUAL_OVERRIDE:
+                    coverage = "[+] Override"
+                else:
+                    coverage = (
+                        "[+] Verified" if decision.distribution_score < 0.7 else "[!] Root Fallback"
+                    )
                 lines.append(f"  {pattern:<30} {score:<8} {strategy:<15} {coverage}")
 
             lines.append("")
@@ -899,6 +922,7 @@ Example: 36.7% efficiency means agents working in specific directories see only 
             PlacementStrategy.SINGLE_POINT: "*",
             PlacementStrategy.SELECTIVE_MULTI: "*",
             PlacementStrategy.DISTRIBUTED: "*",
+            PlacementStrategy.MANUAL_OVERRIDE: "*",
         }
         return symbols.get(strategy, "*")
 
@@ -908,18 +932,28 @@ Example: 36.7% efficiency means agents working in specific directories see only 
             PlacementStrategy.SINGLE_POINT: "green",
             PlacementStrategy.SELECTIVE_MULTI: "yellow",
             PlacementStrategy.DISTRIBUTED: "blue",
+            PlacementStrategy.MANUAL_OVERRIDE: "magenta",
         }
         return colors.get(strategy, "white")
 
     def _get_relative_display_path(self, path: Path) -> str:
         """Get display-friendly relative path."""
         try:
-            rel_path = path.relative_to(Path.cwd())
+            rel_path = path.resolve().relative_to(Path.cwd().resolve())
             if rel_path == Path("."):
                 return f"./{self._target_name}"
             return str(rel_path / self._target_name)
         except ValueError:
             return str(path / self._target_name)
+
+    def _is_root_placement(self, path: Path) -> bool:
+        """Return True when a placement path renders as the project root target."""
+        if self._get_relative_display_path(path) == f"./{self._target_name}":
+            return True
+        try:
+            return path.resolve() == Path.cwd().resolve()
+        except OSError:
+            return False
 
     def _format_coverage_explanation(self, stats) -> list[str]:
         """Explain the coverage vs. efficiency trade-off."""

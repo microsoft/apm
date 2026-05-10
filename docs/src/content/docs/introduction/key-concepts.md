@@ -197,6 +197,7 @@ Instructions provide coding standards, conventions, and guidelines that apply to
 **Frontmatter:**
 - `description` (required) - Clear explanation of the standards
 - `applyTo` (optional) - Glob pattern for file targeting (e.g., `"**/*.py"`). When omitted, the instruction is treated as global and rendered under a `## Global Instructions` section in the compiled `AGENTS.md`/`CLAUDE.md` (applies to every file).
+- `placement` (optional) - Compile placement override for scoped instructions. Use `"root"`, `"subdirectory"` (the lowest common directory for `applyTo` matches), or a project-relative directory such as `"apps/bar"`. When omitted, APM uses automatic placement. `subdirectory` and explicit directory overrides fall back to automatic placement when `applyTo` has no matches.
 - `author` (optional) - Creator information
 - `version` (optional) - Version string
 

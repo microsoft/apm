@@ -11,17 +11,42 @@ Covers:
 """
 
 import glob as glob_module
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 from apm_cli.compilation.context_optimizer import ContextOptimizer
-from apm_cli.primitives.models import Instruction
+from apm_cli.output.formatters import RICH_AVAILABLE, CompilationFormatter
+from apm_cli.output.models import OptimizationDecision, PlacementStrategy
+from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
 
 def _touch(base: Path, rel: str) -> None:
     p = base / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.touch()
+
+
+def _make_high_distribution_apps_project(base: Path) -> None:
+    for index in range(8):
+        _touch(base, f"apps/bar/package-{index}/src/file-{index}.ts")
+    _touch(base, "apps/foo/src/file.ts")
+    _touch(base, "docs/readme.md")
+    _touch(base, "README.md")
+
+
+def _bar_instruction(placement: object | None = None) -> Instruction:
+    return Instruction(
+        name="bar-standards",
+        file_path=Path("bar.instructions.md"),
+        description="Bar app standards",
+        apply_to="apps/bar/**",
+        content="Bar standards",
+        placement=placement,
+    )
 
 
 class TestCachedGlobUsesFileList:
@@ -163,3 +188,180 @@ class TestSinglePointPlacementNonRootLCA:
         assert rel.as_posix() == "Engine/Plugins", (
             f"expected LCA Engine/Plugins, got {rel.as_posix()}"
         )
+
+
+class TestInstructionPlacementOverride:
+    """Tests for per-instruction ``placement:`` frontmatter overrides."""
+
+    def test_absent_placement_preserves_high_distribution_root_placement(
+        self, tmp_path: Path
+    ) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+        result = optimizer.optimize_instruction_placement([_bar_instruction()])
+
+        assert len(result) == 1
+        placement_dir = next(iter(result.keys()))
+        assert placement_dir.resolve() == tmp_path.resolve()
+        assert optimizer._optimization_decisions[-1].strategy == PlacementStrategy.DISTRIBUTED
+
+    def test_subdirectory_override_places_high_distribution_pattern_at_lca(
+        self, tmp_path: Path
+    ) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+        result = optimizer.optimize_instruction_placement([_bar_instruction("subdirectory")])
+
+        assert len(result) == 1
+        placement_dir = next(iter(result.keys()))
+        assert placement_dir.resolve().relative_to(tmp_path.resolve()).as_posix() == "apps/bar"
+        assert optimizer._optimization_decisions[-1].strategy == PlacementStrategy.MANUAL_OVERRIDE
+
+    def test_root_override_places_instruction_at_project_root(self, tmp_path: Path) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+        result = optimizer.optimize_instruction_placement([_bar_instruction("root")])
+
+        assert len(result) == 1
+        placement_dir = next(iter(result.keys()))
+        assert placement_dir.resolve() == tmp_path.resolve()
+        assert optimizer._optimization_decisions[-1].strategy == PlacementStrategy.MANUAL_OVERRIDE
+
+    def test_explicit_path_override_places_instruction_at_valid_directory(
+        self, tmp_path: Path
+    ) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+        result = optimizer.optimize_instruction_placement([_bar_instruction("apps/bar")])
+
+        assert len(result) == 1
+        placement_dir = next(iter(result.keys()))
+        assert placement_dir.resolve().relative_to(tmp_path.resolve()).as_posix() == "apps/bar"
+        assert optimizer._optimization_decisions[-1].strategy == PlacementStrategy.MANUAL_OVERRIDE
+
+    def test_invalid_explicit_path_overrides_warn_and_fall_back_to_auto(
+        self, tmp_path: Path
+    ) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        _touch(tmp_path, "README.md")
+        cases = [
+            (str(tmp_path.parent / "outside"), "absolute paths are not allowed"),
+            ("../outside", "traversal sequence"),
+            ("%2e%2e/outside", "traversal sequence"),
+            ("apps/missing", "path does not exist"),
+            ("README.md", "path is not a directory"),
+            ("apps/foo", "path does not cover all directories matched by applyTo"),
+        ]
+
+        for placement, warning_fragment in cases:
+            optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+            result = optimizer.optimize_instruction_placement([_bar_instruction(placement)])
+
+            assert len(result) == 1
+            placement_dir = next(iter(result.keys()))
+            assert placement_dir.resolve() == tmp_path.resolve()
+            assert optimizer._optimization_decisions[-1].strategy == PlacementStrategy.DISTRIBUTED
+            assert any(
+                warning_fragment in warning and "Falling back to automatic placement" in warning
+                for warning in optimizer._warnings
+            )
+
+    def test_non_string_placement_override_warns_and_falls_back_to_auto(
+        self, tmp_path: Path
+    ) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+        result = optimizer.optimize_instruction_placement([_bar_instruction(True)])
+
+        assert len(result) == 1
+        placement_dir = next(iter(result.keys()))
+        assert placement_dir.resolve() == tmp_path.resolve()
+        assert optimizer._optimization_decisions[-1].strategy == PlacementStrategy.DISTRIBUTED
+        assert any(
+            "placement must be a string" in warning
+            and "Falling back to automatic placement" in warning
+            for warning in optimizer._warnings
+        )
+
+    def test_symlink_placement_override_outside_project_warns_and_falls_back(
+        self, tmp_path: Path
+    ) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        outside_dir = tmp_path.parent / f"{tmp_path.name}-outside"
+        outside_dir.mkdir()
+        symlink_path = tmp_path / "apps" / "escape"
+        try:
+            symlink_path.symlink_to(outside_dir, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink creation is not available: {exc}")
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+
+        result = optimizer.optimize_instruction_placement([_bar_instruction("apps/escape")])
+
+        assert len(result) == 1
+        placement_dir = next(iter(result.keys()))
+        assert placement_dir.resolve() == tmp_path.resolve()
+        assert optimizer._optimization_decisions[-1].strategy == PlacementStrategy.DISTRIBUTED
+        assert any(
+            "outside the allowed base directory" in warning
+            and "Falling back to automatic placement" in warning
+            for warning in optimizer._warnings
+        )
+
+    def test_compile_dry_run_reports_manual_override(self, tmp_path: Path) -> None:
+        _make_high_distribution_apps_project(tmp_path)
+        primitives = PrimitiveCollection()
+        primitives.instructions.append(_bar_instruction("subdirectory"))
+        logger = _RecordingLogger()
+
+        result = AgentsCompiler(str(tmp_path)).compile(
+            CompilationConfig(target="agents", dry_run=True, debug=True),
+            primitives,
+            logger=logger,
+        )
+
+        assert result.success
+        assert "apps/bar/AGENTS.md" in result.content
+        assert "Manual Override" in "\n".join(logger.messages)
+
+    @pytest.mark.skipif(not RICH_AVAILABLE, reason="Rich output is not available")
+    def test_verbose_formatter_reports_absolute_root_placement_as_root_coverage(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        formatter = CompilationFormatter(use_color=True)
+        decision = OptimizationDecision(
+            instruction=_bar_instruction(),
+            pattern="apps/bar/**",
+            matching_directories=8,
+            total_directories=10,
+            distribution_score=0.5,
+            strategy=PlacementStrategy.SELECTIVE_MULTI,
+            placement_directories=[tmp_path],
+            reasoning="Root fallback placement",
+        )
+
+        output = "\n".join(formatter._format_mathematical_analysis([decision]))
+
+        assert "Root -> All files" in output
+        assert "inherit" in output
+
+
+class _RecordingLogger:
+    """Collect compiler output emitted through CommandLogger-compatible methods."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def __getattr__(self, _name: str) -> Callable[..., None]:
+        def record(message: str = "", **_kwargs: object) -> None:
+            if message:
+                self.messages.append(str(message))
+
+        return record

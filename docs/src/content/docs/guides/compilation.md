@@ -161,6 +161,56 @@ DIVERSITY_FACTOR_BASE = 0.5  # Mathematical constant
 | 0.3 - 0.7 | Selective Multi | `_optimize_selective_placement()` |
 | > 0.7 | Distributed | `_optimize_distributed_placement()` |
 
+### Per-Instruction Placement Overrides
+
+By default, APM chooses placement automatically from the distribution score above.
+Scoped instructions can opt out of that automatic decision with `placement:` frontmatter:
+
+```yaml
+---
+applyTo: "apps/bar/**"
+placement: "subdirectory" # place at the lowest common directory, e.g. apps/bar/AGENTS.md
+---
+```
+
+Supported values:
+
+| Value | Effect |
+|---|---|
+| `root` | Place the instruction in the root `AGENTS.md` / `CLAUDE.md`. |
+| `subdirectory` | Place the instruction at the lowest common directory that covers all files matched by `applyTo`. |
+| Project-relative directory, e.g. `apps/bar` | Place the instruction at that directory when it exists and covers all matched files. |
+
+For example, a monorepo can keep a high-distribution app rule local to that app:
+
+```text
+repo/
+  apps/bar/package-a/src/index.ts
+  apps/bar/package-b/src/index.ts
+  apps/bar/package-c/src/index.ts
+  apps/foo/src/index.ts
+```
+
+Without an override, a broad `apps/bar/**` rule may be placed in the root file by
+the distributed-placement strategy. With this frontmatter:
+
+```yaml
+---
+applyTo: "apps/bar/**"
+placement: "subdirectory"
+---
+```
+
+`apm compile --dry-run --verbose` previews the instruction in `apps/bar/AGENTS.md`
+and reports the strategy as `Manual Override`.
+
+Invalid overrides are ignored with a warning, and APM falls back to automatic placement.
+Absolute paths, `..` traversal, missing paths, non-directories, and paths that do not cover
+the matched files are rejected.
+`subdirectory` and project-relative directory overrides also require `applyTo` to match at
+least one existing directory so APM can verify coverage. If no matches are found, APM warns
+and uses the normal no-match automatic fallback.
+
 ### Constraint Satisfaction Weights
 
 The optimization engine uses mathematically calibrated weights:

@@ -14,6 +14,7 @@ class PlacementStrategy(Enum):
     SINGLE_POINT = "Single Point"
     SELECTIVE_MULTI = "Selective Multi"
     DISTRIBUTED = "Distributed"
+    MANUAL_OVERRIDE = "Manual Override"
 
 
 @dataclass

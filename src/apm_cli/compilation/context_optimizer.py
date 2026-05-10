@@ -26,6 +26,7 @@ from ..output.models import (
 )
 from ..primitives.models import Instruction
 from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.path_security import ensure_path_within, validate_path_segments
 from ..utils.paths import portable_relpath
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
@@ -566,6 +567,15 @@ class ContextOptimizer:
 
         # Find all directories with matching files
         matching_directories = self._find_matching_directories(pattern)
+        distribution_score = self._calculate_distribution_score(matching_directories)
+
+        manual_placements = self._try_manual_placement_override(
+            instruction,
+            matching_directories,
+            distribution_score,
+        )
+        if manual_placements is not None:
+            return manual_placements
 
         if not matching_directories:
             # Smart fallback: Try to place in semantically appropriate directory
@@ -605,9 +615,6 @@ class ContextOptimizer:
             self._optimization_decisions.append(decision)
 
             return [placement]
-
-        # Calculate distribution score with diversity factor
-        distribution_score = self._calculate_distribution_score(matching_directories)
 
         # Apply three-tier placement strategy based on mathematical analysis
         if distribution_score < self.LOW_DISTRIBUTION_THRESHOLD:
@@ -654,6 +661,195 @@ class ContextOptimizer:
         self._optimization_decisions.append(decision)
 
         return placements
+
+    def _try_manual_placement_override(
+        self,
+        instruction: Instruction,
+        matching_directories: builtins.set[Path],
+        distribution_score: float,
+    ) -> builtins.list[Path] | None:
+        """Apply an instruction-level placement override when it is valid."""
+        raw_placement = getattr(instruction, "placement", None)
+        if raw_placement is None:
+            return None
+        if not isinstance(raw_placement, str):
+            self._warn_invalid_placement_override(
+                instruction,
+                str(raw_placement),
+                "placement must be a string",
+            )
+            return None
+
+        placement = raw_placement.strip()
+        if not placement:
+            self._warn_invalid_placement_override(
+                instruction,
+                raw_placement,
+                "placement must not be empty",
+            )
+            return None
+
+        placement_mode = placement.lower()
+        if placement_mode == "root":
+            return self._record_manual_placement_decision(
+                instruction,
+                matching_directories,
+                distribution_score,
+                self.base_dir,
+                "Manual placement override 'root' placed instruction at project root",
+            )
+
+        if not matching_directories:
+            self._warn_invalid_placement_override(
+                instruction,
+                placement,
+                "applyTo matched no directories, so coverage cannot be verified",
+            )
+            return None
+
+        if placement_mode == "subdirectory":
+            placement_dir = self._find_minimal_coverage_placement(matching_directories)
+            if placement_dir is None:
+                self._warn_invalid_placement_override(
+                    instruction,
+                    placement,
+                    "APM could not find a common subdirectory for matched files",
+                )
+                return None
+
+            rel_path = portable_relpath(placement_dir, self.base_dir)
+            return self._record_manual_placement_decision(
+                instruction,
+                matching_directories,
+                distribution_score,
+                placement_dir,
+                f"Manual placement override 'subdirectory' placed instruction at '{rel_path}'",
+            )
+
+        placement_dir = self._resolve_explicit_placement_override(
+            instruction,
+            placement,
+            matching_directories,
+        )
+        if placement_dir is None:
+            return None
+
+        rel_path = portable_relpath(placement_dir, self.base_dir)
+        return self._record_manual_placement_decision(
+            instruction,
+            matching_directories,
+            distribution_score,
+            placement_dir,
+            f"Manual placement override '{placement}' placed instruction at '{rel_path}'",
+        )
+
+    def _resolve_explicit_placement_override(
+        self,
+        instruction: Instruction,
+        placement: str,
+        matching_directories: builtins.set[Path],
+    ) -> Path | None:
+        """Validate and resolve a project-relative placement override."""
+        placement_path = Path(placement)
+        if placement_path.is_absolute():
+            self._warn_invalid_placement_override(
+                instruction,
+                placement,
+                "absolute paths are not allowed",
+            )
+            return None
+
+        try:
+            validate_path_segments(placement, context="placement override")
+        except ValueError as exc:
+            self._warn_invalid_placement_override(
+                instruction,
+                placement,
+                str(exc),
+            )
+            return None
+
+        try:
+            placement_dir = ensure_path_within(self.base_dir / placement_path, self.base_dir)
+        except (OSError, ValueError) as exc:
+            self._warn_invalid_placement_override(
+                instruction,
+                placement,
+                str(exc),
+            )
+            return None
+
+        if not placement_dir.exists():
+            self._warn_invalid_placement_override(
+                instruction,
+                placement,
+                "path does not exist",
+            )
+            return None
+
+        if not placement_dir.is_dir():
+            self._warn_invalid_placement_override(
+                instruction,
+                placement,
+                "path is not a directory",
+            )
+            return None
+
+        covered_directories = self._calculate_hierarchical_coverage(
+            [placement_dir],
+            matching_directories,
+        )
+        if covered_directories != matching_directories:
+            self._warn_invalid_placement_override(
+                instruction,
+                placement,
+                "path does not cover all directories matched by applyTo",
+            )
+            return None
+
+        return placement_dir
+
+    def _record_manual_placement_decision(
+        self,
+        instruction: Instruction,
+        matching_directories: builtins.set[Path],
+        distribution_score: float,
+        placement: Path,
+        reasoning: str,
+    ) -> builtins.list[Path]:
+        """Record and return a successful manual placement override."""
+        relevance_score = 0.0
+        if placement in self._directory_cache:
+            relevance_score = self._calculate_coverage_efficiency(placement, instruction.apply_to)
+
+        decision = OptimizationDecision(
+            instruction=instruction,
+            pattern=instruction.apply_to,
+            matching_directories=len(matching_directories),
+            total_directories=len(self._directory_cache),
+            distribution_score=distribution_score,
+            strategy=PlacementStrategy.MANUAL_OVERRIDE,
+            placement_directories=[placement],
+            reasoning=reasoning,
+            relevance_score=relevance_score,
+        )
+        self._optimization_decisions.append(decision)
+        return [placement]
+
+    def _warn_invalid_placement_override(
+        self,
+        instruction: Instruction,
+        placement: str,
+        problem: str,
+    ) -> None:
+        """Warn that a placement override was ignored and auto-placement will be used."""
+        fallback_name = getattr(instruction, "file_path", "<unknown>")
+        instruction_name = getattr(instruction, "name", None) or str(fallback_name)
+        self._warnings.append(
+            f"Ignoring placement override '{placement}' for instruction '{instruction_name}': "
+            f"{problem}. Use 'root', 'subdirectory', or a project-relative directory that "
+            "covers all files matching applyTo. Falling back to automatic placement."
+        )
 
     def _extract_intended_directory_from_pattern(self, pattern: str) -> Path | None:
         """Extract the intended directory from a pattern like 'docs/**/*.md' -> 'docs'.
