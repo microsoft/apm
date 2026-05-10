@@ -1025,6 +1025,20 @@ def _handle_mcp_install(
         "local-bundle installs; passing --as without a local bundle path is rejected."
     ),
 )
+@click.option(
+    "--root",
+    "root",
+    type=click.Path(file_okay=False, resolve_path=True),
+    default=None,
+    metavar="DIR",
+    help=(
+        "Install into DIR instead of $PWD: apm_modules/, apm.lock.yaml, "
+        ".claude/, .codex/, .agents/, .opencode/ are written under DIR "
+        "while sources (apm.yml, .apm/, local-path packages) continue "
+        "resolving from $PWD. Mirrors `pip install --target`/"
+        "`npm install --prefix`. Project-scope only."
+    ),
+)
 @click.pass_context
 def install(  # noqa: PLR0913
     ctx,
@@ -1059,6 +1073,7 @@ def install(  # noqa: PLR0913
     refresh,
     legacy_skill_paths,
     alias,
+    root,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
@@ -1102,399 +1117,408 @@ def install(  # noqa: PLR0913
             "--frozen and --update are mutually exclusive. "
             "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
         )
-    try:
+    # --root: see apm_cli.install.root_redirect.install_root_redirect.
+    # Conflicts with --global (user scope writes are anchored at $HOME
+    # and have no concept of an arbitrary deploy root).  ``--dry-run``
+    # is threaded through so the context manager skips the ``mkdir``
+    # side-effect on previews.
+    if root and global_:
+        raise click.UsageError("--root is not valid with --global (user scope)")
+    from ..install.root_redirect import install_root_redirect
+    with install_root_redirect(root, dry_run=dry_run):
+        try:
         # Create structured logger for install output early so exception
-        # handlers can always reference it (avoids UnboundLocalError if
-        # scope initialisation below throws).
-        is_partial = bool(packages)
-        logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+            # handlers can always reference it (avoids UnboundLocalError if
+            # scope initialisation below throws).
+            is_partial = bool(packages)
+            logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
 
-        # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
-        # _validate_and_add_packages_to_apm_yml mutates apm.yml. Initialised
-        # to None here -- BEFORE any branch that might raise (e.g. the local
-        # bundle early-exit path below) -- so the `except` handlers at the
-        # bottom of this function can always reference both names without
-        # UnboundLocalError. The bug this prevents: an exception raised in
-        # the local-bundle branch (e.g. a click.Abort from integrity-verify
-        # failure on Windows) would otherwise be masked by an
-        # UnboundLocalError inside the handler that calls
-        # _maybe_rollback_manifest(_snapshot_manifest_path, ...).
-        _manifest_snapshot: bytes | None = None
-        _snapshot_manifest_path: Path | None = None
+            # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
+            # _validate_and_add_packages_to_apm_yml mutates apm.yml. Initialised
+            # to None here -- BEFORE any branch that might raise (e.g. the local
+            # bundle early-exit path below) -- so the `except` handlers at the
+            # bottom of this function can always reference both names without
+            # UnboundLocalError. The bug this prevents: an exception raised in
+            # the local-bundle branch (e.g. a click.Abort from integrity-verify
+            # failure on Windows) would otherwise be masked by an
+            # UnboundLocalError inside the handler that calls
+            # _maybe_rollback_manifest(_snapshot_manifest_path, ...).
+            _manifest_snapshot: bytes | None = None
+            _snapshot_manifest_path: Path | None = None
 
-        # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
-        if not legacy_skill_paths:
-            from ..integration.targets import should_use_legacy_skill_paths
+            # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
+            if not legacy_skill_paths:
+                from ..integration.targets import should_use_legacy_skill_paths
 
-            legacy_skill_paths = should_use_legacy_skill_paths()
+                legacy_skill_paths = should_use_legacy_skill_paths()
 
-        # ----------------------------------------------------------------
-        # Local-bundle early-exit (issue #1098).  When the sole positional
-        # argument is a filesystem path that detect_local_bundle() recognises
-        # as an APM-pack bundle, we skip the dependency-resolution pipeline
-        # entirely and deploy the bundle's files directly.  Local bundles
-        # are imperative deploys -- they do NOT mutate apm.yml.
-        # ----------------------------------------------------------------
-        if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
-            from ..bundle.local_bundle import detect_local_bundle as _detect_lb
-            from ..install.local_bundle_handler import install_local_bundle as _install_lb
+            # ----------------------------------------------------------------
+            # Local-bundle early-exit (issue #1098).  When the sole positional
+            # argument is a filesystem path that detect_local_bundle() recognises
+            # as an APM-pack bundle, we skip the dependency-resolution pipeline
+            # entirely and deploy the bundle's files directly.  Local bundles
+            # are imperative deploys -- they do NOT mutate apm.yml.
+            # ----------------------------------------------------------------
+            if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
+                from ..bundle.local_bundle import detect_local_bundle as _detect_lb
+                from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
-            _bundle_info = _detect_lb(_probe)
-            if _bundle_info is not None:
-                _install_lb(
-                    bundle_info=_bundle_info,
-                    bundle_arg=packages[0],
-                    target=target,
-                    global_=global_,
-                    force=force,
-                    dry_run=dry_run,
-                    verbose=verbose,
-                    alias=alias,
-                    logger=logger,
-                    legacy_skill_paths=legacy_skill_paths,
-                    # Rejected-flag context for consolidated UsageError:
-                    rejected_flags={
-                        "--update": update,
-                        "--only": only,
-                        "--runtime": runtime,
-                        "--exclude": exclude,
-                        "--dev": dev,
-                        "--ssh": use_ssh,
-                        "--https": use_https,
-                        "--allow-protocol-fallback": allow_protocol_fallback,
-                        "--mcp": mcp_name,
-                        "--registry": registry_url,
-                        "--skill": bool(skill_names),
-                        "--parallel-downloads": parallel_downloads != 4,
-                        "--allow-insecure": allow_insecure,
-                        "--allow-insecure-host": bool(allow_insecure_hosts),
-                        "--no-policy": no_policy,
-                    },
-                )
-                # Local bundle install renders its own summary; mark
-                # ``summary_rendered = True`` so the finally-block (line ~1423)
-                # does not emit a misleading "install interrupted" line on the
-                # success path.  See issue #1207 D3.
-                summary_rendered = True
-                return
-            # IM7: path exists but isn't a recognised bundle.  For tarball
-            # extensions (.tar.gz / .tgz) the user clearly meant a bundle
-            # artifact, so raise a targeted UsageError instead of falling
-            # through to the registry path (which would try to clone).
-            # For bare directories we still fall through, because
-            # ``apm install ./packages/source-pkg`` is a supported local-path
-            # install that goes through the dependency-resolver pipeline.
-            _suffix = _probe.name.lower()
-            if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
-                # Distinguish legacy --format apm bundles (apm.lock.yaml
-                # present, plugin.json absent) from arbitrary tarballs so
-                # the error message guides the user to the right next step.
-                from ..bundle.local_bundle import _looks_like_legacy_apm_bundle
-
-                if _looks_like_legacy_apm_bundle(_probe):
-                    raise click.UsageError(
-                        f"'{packages[0]}' was packed with '--format apm' (legacy format). "
-                        "'apm install <bundle>' requires the plugin format. "
-                        "Repack with 'apm pack --format plugin --archive', "
-                        "or use 'apm unpack' to deploy the legacy bundle."
+                _bundle_info = _detect_lb(_probe)
+                if _bundle_info is not None:
+                    _install_lb(
+                        bundle_info=_bundle_info,
+                        bundle_arg=packages[0],
+                        target=target,
+                        global_=global_,
+                        force=force,
+                        dry_run=dry_run,
+                        verbose=verbose,
+                        alias=alias,
+                        logger=logger,
+                        legacy_skill_paths=legacy_skill_paths,
+                        # Rejected-flag context for consolidated UsageError:
+                        rejected_flags={
+                            "--update": update,
+                            "--only": only,
+                            "--runtime": runtime,
+                            "--exclude": exclude,
+                            "--dev": dev,
+                            "--ssh": use_ssh,
+                            "--https": use_https,
+                            "--allow-protocol-fallback": allow_protocol_fallback,
+                            "--mcp": mcp_name,
+                            "--registry": registry_url,
+                            "--skill": bool(skill_names),
+                            "--parallel-downloads": parallel_downloads != 4,
+                            "--allow-insecure": allow_insecure,
+                            "--allow-insecure-host": bool(allow_insecure_hosts),
+                            "--no-policy": no_policy,
+                        },
                     )
+                    # Local bundle install renders its own summary; mark
+                    # ``summary_rendered = True`` so the finally-block (line ~1423)
+                    # does not emit a misleading "install interrupted" line on the
+                    # success path.  See issue #1207 D3.
+                    summary_rendered = True
+                    return
+                # IM7: path exists but isn't a recognised bundle.  For tarball
+                # extensions (.tar.gz / .tgz) the user clearly meant a bundle
+                # artifact, so raise a targeted UsageError instead of falling
+                # through to the registry path (which would try to clone).
+                # For bare directories we still fall through, because
+                # ``apm install ./packages/source-pkg`` is a supported local-path
+                # install that goes through the dependency-resolver pipeline.
+                _suffix = _probe.name.lower()
+                if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
+                    # Distinguish legacy --format apm bundles (apm.lock.yaml
+                    # present, plugin.json absent) from arbitrary tarballs so
+                    # the error message guides the user to the right next step.
+                    from ..bundle.local_bundle import _looks_like_legacy_apm_bundle
+
+                    if _looks_like_legacy_apm_bundle(_probe):
+                        raise click.UsageError(
+                            f"'{packages[0]}' was packed with '--format apm' (legacy format). "
+                            "'apm install <bundle>' requires the plugin format. "
+                            "Repack with 'apm pack --format plugin --archive', "
+                            "or use 'apm unpack' to deploy the legacy bundle."
+                        )
+                    raise click.UsageError(
+                        f"'{packages[0]}' is not a valid APM bundle archive "
+                        "(no plugin.json found at the bundle root). "
+                        "Use 'apm install org/package' for registry installs, "
+                        "or repack the source with 'apm pack'."
+                    )
+            # IM8: --as is only meaningful for local-bundle installs.  If we get
+            # here, no local bundle was detected, so reject --as instead of
+            # silently ignoring it.
+            if alias:
                 raise click.UsageError(
-                    f"'{packages[0]}' is not a valid APM bundle archive "
-                    "(no plugin.json found at the bundle root). "
-                    "Use 'apm install org/package' for registry installs, "
-                    "or repack the source with 'apm pack'."
+                    "--as requires a local bundle path (directory or .tar.gz "
+                    "produced by 'apm pack'). It has no effect on registry installs."
                 )
-        # IM8: --as is only meaningful for local-bundle installs.  If we get
-        # here, no local bundle was detected, so reject --as instead of
-        # silently ignoring it.
-        if alias:
-            raise click.UsageError(
-                "--as requires a local bundle path (directory or .tar.gz "
-                "produced by 'apm pack'). It has no effect on registry installs."
-            )
-        # HACK(#852): surface --verbose to deeper auth layers via env var until
-        # AuthResolver gains a first-class verbose channel. Restored in finally
-        # below to keep the mutation scoped to this command invocation.
-        if verbose:
-            os.environ["APM_VERBOSE"] = "1"
+            # HACK(#852): surface --verbose to deeper auth layers via env var until
+            # AuthResolver gains a first-class verbose channel. Restored in finally
+            # below to keep the mutation scoped to this command invocation.
+            if verbose:
+                os.environ["APM_VERBOSE"] = "1"
 
-        # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
-        # _validate_and_add_packages_to_apm_yml mutates apm.yml.
-        # NOTE: variables are initialised at the top of the try block
-        # (above the local-bundle early-exit) so exception handlers can
-        # always reference them without UnboundLocalError.
+            # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
+            # _validate_and_add_packages_to_apm_yml mutates apm.yml.
+            # NOTE: variables are initialised at the top of the try block
+            # (above the local-bundle early-exit) so exception handlers can
+            # always reference them without UnboundLocalError.
 
-        # ----------------------------------------------------------------
-        # --mcp branch (W3): when --mcp is set, route to the dedicated
-        # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
-        # silent handling: see _split_argv_at_double_dash().
-        # ----------------------------------------------------------------
-        _, command_argv = _split_argv_at_double_dash(_get_invocation_argv())
-        # `packages` from Click already includes the post-`--` items; the
-        # pre-`--` portion is what the user typed as positional packages.
-        if command_argv:
-            split_idx = len(packages) - len(command_argv)
-            split_idx = max(split_idx, 0)
-            pre_dash_packages = builtins.tuple(packages[:split_idx])
-        else:
-            pre_dash_packages = builtins.tuple(packages)
+            # ----------------------------------------------------------------
+            # --mcp branch (W3): when --mcp is set, route to the dedicated
+            # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
+            # silent handling: see _split_argv_at_double_dash().
+            # ----------------------------------------------------------------
+            _, command_argv = _split_argv_at_double_dash(_get_invocation_argv())
+            # `packages` from Click already includes the post-`--` items; the
+            # pre-`--` portion is what the user typed as positional packages.
+            if command_argv:
+                split_idx = len(packages) - len(command_argv)
+                split_idx = max(split_idx, 0)
+                pre_dash_packages = builtins.tuple(packages[:split_idx])
+            else:
+                pre_dash_packages = builtins.tuple(packages)
 
-        # Validate --registry (raises UsageError on a bad URL).
-        validated_registry_url = _validate_registry_url(registry_url)
+            # Validate --registry (raises UsageError on a bad URL).
+            validated_registry_url = _validate_registry_url(registry_url)
 
-        _validate_mcp_conflicts(
-            mcp_name=mcp_name,
-            packages=packages,
-            pre_dash_packages=pre_dash_packages,
-            transport=transport,
-            url=url,
-            env=env_pairs,
-            headers=header_pairs,
-            mcp_version=mcp_version,
-            command_argv=command_argv,
-            global_=global_,
-            only=only,
-            update=update,
-            use_ssh=use_ssh,
-            use_https=use_https,
-            allow_protocol_fallback=allow_protocol_fallback,
-            registry_url=validated_registry_url,
-        )
-
-        # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
-        _skill_subset = None
-        if skill_names:
-            if mcp_name is not None:
-                raise click.UsageError("--skill cannot be combined with --mcp.")
-            if not any(s == "*" for s in skill_names):
-                _skill_subset = builtins.tuple(skill_names)
-
-        if mcp_name is not None:
-            _handle_mcp_install(
+            _validate_mcp_conflicts(
                 mcp_name=mcp_name,
+                packages=packages,
+                pre_dash_packages=pre_dash_packages,
                 transport=transport,
                 url=url,
-                env_pairs=env_pairs,
-                header_pairs=header_pairs,
+                env=env_pairs,
+                headers=header_pairs,
                 mcp_version=mcp_version,
                 command_argv=command_argv,
-                dev=dev,
+                global_=global_,
+                only=only,
+                update=update,
+                use_ssh=use_ssh,
+                use_https=use_https,
+                allow_protocol_fallback=allow_protocol_fallback,
+                registry_url=validated_registry_url,
+            )
+
+            # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
+            _skill_subset = None
+            if skill_names:
+                if mcp_name is not None:
+                    raise click.UsageError("--skill cannot be combined with --mcp.")
+                if not any(s == "*" for s in skill_names):
+                    _skill_subset = builtins.tuple(skill_names)
+
+            if mcp_name is not None:
+                _handle_mcp_install(
+                    mcp_name=mcp_name,
+                    transport=transport,
+                    url=url,
+                    env_pairs=env_pairs,
+                    header_pairs=header_pairs,
+                    mcp_version=mcp_version,
+                    command_argv=command_argv,
+                    dev=dev,
+                    force=force,
+                    runtime=runtime,
+                    exclude=exclude,
+                    verbose=verbose,
+                    dry_run=dry_run,
+                    logger=logger,
+                    no_policy=no_policy,
+                    validated_registry_url=validated_registry_url,
+                )
+                return
+
+            # Resolve transport selection inputs.
+            from ..deps.transport_selection import (
+                ProtocolPreference,
+                is_fallback_allowed,
+                protocol_pref_from_env,
+            )
+
+            if use_ssh and use_https:
+                _rich_error("Options --ssh and --https are mutually exclusive.", symbol="error")
+                sys.exit(2)
+            if use_ssh:
+                protocol_pref = ProtocolPreference.SSH
+            elif use_https:
+                protocol_pref = ProtocolPreference.HTTPS
+            else:
+                protocol_pref = protocol_pref_from_env()
+            # CLI flag OR env var enables fallback.
+            allow_protocol_fallback = allow_protocol_fallback or is_fallback_allowed()
+
+            # Resolve scope
+            from ..core.scope import (
+                InstallScope,
+                ensure_user_dirs,
+                get_apm_dir,
+                get_manifest_path,
+                warn_unsupported_user_scope,
+            )
+
+            scope = InstallScope.USER if global_ else InstallScope.PROJECT
+
+            if scope is InstallScope.USER:
+                ensure_user_dirs()
+                logger.progress("Installing to user scope (~/.apm/)")
+                _scope_warn = warn_unsupported_user_scope()
+                if _scope_warn:
+                    logger.warning(_scope_warn)
+
+            # Scope-aware paths
+            manifest_path = get_manifest_path(scope)
+            apm_dir = get_apm_dir(scope)
+            # Display name for messages (short for project scope, full for user scope)
+            manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
+
+            # Project root for integration (used by both dep and local integration)
+            from ..core.scope import get_deploy_root
+
+            project_root = get_deploy_root(scope)
+
+            # Create shared auth resolver for all downloads in this CLI invocation
+            # to ensure credentials are cached and reused (prevents duplicate auth popups)
+            auth_resolver = AuthResolver()
+            # F2/F3 #856: thread the InstallLogger into AuthResolver so the verbose
+            # auth-source line and the deferred stale-PAT [!] warning route through
+            # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
+            auth_resolver.set_logger(logger)
+
+            # Check if apm.yml exists
+            apm_yml_exists = manifest_path.exists()
+
+            # Auto-bootstrap: create minimal apm.yml when packages specified but no apm.yml
+            if not apm_yml_exists and packages:
+                # Get current directory name as project name
+                project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
+                config = _get_default_config(project_name)
+                _create_minimal_apm_yml(config, target_path=manifest_path)
+                logger.success(f"Created {manifest_display}")
+
+            # Error when NO apm.yml AND NO packages
+            if not apm_yml_exists and not packages:
+                logger.error(f"No {manifest_display} found")
+                if scope is InstallScope.USER:
+                    logger.progress("Run 'apm install -g <org/repo>' to auto-create + install")
+                else:
+                    logger.progress("Run 'apm init' to create one, or:")
+                    logger.progress("  apm install <org/repo> to auto-create + install")
+                sys.exit(1)
+
+            # If packages are specified, validate and add them to apm.yml first
+            validated_packages = []
+            outcome = None
+            if packages:
+                # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
+                # _validate_and_add_packages_to_apm_yml does a YAML round-trip
+                # (load + dump) which may alter whitespace, key ordering, or
+                # trailing newlines.  We snapshot the raw bytes so rollback is
+                # byte-exact -- no YAML drift.
+                if manifest_path.exists():
+                    _manifest_snapshot = manifest_path.read_bytes()
+                    _snapshot_manifest_path = manifest_path
+
+                validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
+                    packages,
+                    dry_run,
+                    dev=dev,
+                    logger=logger,
+                    manifest_path=manifest_path,
+                    auth_resolver=auth_resolver,
+                    scope=scope,
+                    allow_insecure=allow_insecure,
+                )
+                # Short-circuit: all packages failed validation -- nothing to install
+                if outcome.all_failed:
+                    return
+                # Note: Empty validated_packages is OK if packages are already in apm.yml
+                # We'll proceed with installation from apm.yml to ensure everything is synced
+
+            # Build install context
+            install_ctx = InstallContext(
+                scope=scope,
+                manifest_path=manifest_path,
+                manifest_display=manifest_display,
+                apm_dir=apm_dir,
+                project_root=project_root,
+                logger=logger,
+                auth_resolver=auth_resolver,
+                verbose=verbose,
                 force=force,
+                dry_run=dry_run,
+                update=update,
+                dev=dev,
                 runtime=runtime,
                 exclude=exclude,
-                verbose=verbose,
-                dry_run=dry_run,
-                logger=logger,
-                no_policy=no_policy,
-                validated_registry_url=validated_registry_url,
-            )
-            return
-
-        # Resolve transport selection inputs.
-        from ..deps.transport_selection import (
-            ProtocolPreference,
-            is_fallback_allowed,
-            protocol_pref_from_env,
-        )
-
-        if use_ssh and use_https:
-            _rich_error("Options --ssh and --https are mutually exclusive.", symbol="error")
-            sys.exit(2)
-        if use_ssh:
-            protocol_pref = ProtocolPreference.SSH
-        elif use_https:
-            protocol_pref = ProtocolPreference.HTTPS
-        else:
-            protocol_pref = protocol_pref_from_env()
-        # CLI flag OR env var enables fallback.
-        allow_protocol_fallback = allow_protocol_fallback or is_fallback_allowed()
-
-        # Resolve scope
-        from ..core.scope import (
-            InstallScope,
-            ensure_user_dirs,
-            get_apm_dir,
-            get_manifest_path,
-            warn_unsupported_user_scope,
-        )
-
-        scope = InstallScope.USER if global_ else InstallScope.PROJECT
-
-        if scope is InstallScope.USER:
-            ensure_user_dirs()
-            logger.progress("Installing to user scope (~/.apm/)")
-            _scope_warn = warn_unsupported_user_scope()
-            if _scope_warn:
-                logger.warning(_scope_warn)
-
-        # Scope-aware paths
-        manifest_path = get_manifest_path(scope)
-        apm_dir = get_apm_dir(scope)
-        # Display name for messages (short for project scope, full for user scope)
-        manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
-
-        # Project root for integration (used by both dep and local integration)
-        from ..core.scope import get_deploy_root
-
-        project_root = get_deploy_root(scope)
-
-        # Create shared auth resolver for all downloads in this CLI invocation
-        # to ensure credentials are cached and reused (prevents duplicate auth popups)
-        auth_resolver = AuthResolver()
-        # F2/F3 #856: thread the InstallLogger into AuthResolver so the verbose
-        # auth-source line and the deferred stale-PAT [!] warning route through
-        # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
-        auth_resolver.set_logger(logger)
-
-        # Check if apm.yml exists
-        apm_yml_exists = manifest_path.exists()
-
-        # Auto-bootstrap: create minimal apm.yml when packages specified but no apm.yml
-        if not apm_yml_exists and packages:
-            # Get current directory name as project name
-            project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
-            config = _get_default_config(project_name)
-            _create_minimal_apm_yml(config, target_path=manifest_path)
-            logger.success(f"Created {manifest_display}")
-
-        # Error when NO apm.yml AND NO packages
-        if not apm_yml_exists and not packages:
-            logger.error(f"No {manifest_display} found")
-            if scope is InstallScope.USER:
-                logger.progress("Run 'apm install -g <org/repo>' to auto-create + install")
-            else:
-                logger.progress("Run 'apm init' to create one, or:")
-                logger.progress("  apm install <org/repo> to auto-create + install")
-            sys.exit(1)
-
-        # If packages are specified, validate and add them to apm.yml first
-        validated_packages = []
-        outcome = None
-        if packages:
-            # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
-            # _validate_and_add_packages_to_apm_yml does a YAML round-trip
-            # (load + dump) which may alter whitespace, key ordering, or
-            # trailing newlines.  We snapshot the raw bytes so rollback is
-            # byte-exact -- no YAML drift.
-            if manifest_path.exists():
-                _manifest_snapshot = manifest_path.read_bytes()
-                _snapshot_manifest_path = manifest_path
-
-            validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
-                packages,
-                dry_run,
-                dev=dev,
-                logger=logger,
-                manifest_path=manifest_path,
-                auth_resolver=auth_resolver,
-                scope=scope,
+                target=target,
+                parallel_downloads=parallel_downloads,
                 allow_insecure=allow_insecure,
-            )
-            # Short-circuit: all packages failed validation -- nothing to install
-            if outcome.all_failed:
-                return
-            # Note: Empty validated_packages is OK if packages are already in apm.yml
-            # We'll proceed with installation from apm.yml to ensure everything is synced
-
-        # Build install context
-        install_ctx = InstallContext(
-            scope=scope,
-            manifest_path=manifest_path,
-            manifest_display=manifest_display,
-            apm_dir=apm_dir,
-            project_root=project_root,
-            logger=logger,
-            auth_resolver=auth_resolver,
-            verbose=verbose,
-            force=force,
-            dry_run=dry_run,
-            update=update,
-            dev=dev,
-            runtime=runtime,
-            exclude=exclude,
-            target=target,
-            parallel_downloads=parallel_downloads,
-            allow_insecure=allow_insecure,
-            allow_insecure_hosts=allow_insecure_hosts,
-            protocol_pref=protocol_pref,
-            allow_protocol_fallback=allow_protocol_fallback,
-            trust_transitive_mcp=trust_transitive_mcp,
-            no_policy=no_policy,
-            install_mode=InstallMode(only) if only else InstallMode.ALL,
-            packages=packages,
-            refresh=refresh,
-            only_packages=builtins.list(validated_packages) if packages else None,
-            manifest_snapshot=_manifest_snapshot,
-            snapshot_manifest_path=_snapshot_manifest_path,
-            legacy_skill_paths=legacy_skill_paths,
-            frozen=frozen,
-            plan_callback=None,
-        )
-
-        apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
-            install_ctx,
-            outcome,
-        )
-
-        _post_install_summary(
-            logger=logger,
-            apm_count=apm_count,
-            mcp_count=mcp_count,
-            apm_diagnostics=apm_diagnostics,
-            force=force,
-            elapsed_seconds=time.perf_counter() - install_started_at,
-        )
-        summary_rendered = True
-
-        if frozen and apm_count > 0:
-            # --frozen verifies LOCKFILE STRUCTURE (every apm.yml dep
-            # has a lock entry), not on-disk content integrity. Make
-            # the scope explicit so a CI pipeline that skips
-            # 'apm audit' on the assumption that --frozen covers SHA
-            # verification is corrected at the moment of use.
-            _rich_info(
-                "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
-                symbol="info",
+                allow_insecure_hosts=allow_insecure_hosts,
+                protocol_pref=protocol_pref,
+                allow_protocol_fallback=allow_protocol_fallback,
+                trust_transitive_mcp=trust_transitive_mcp,
+                no_policy=no_policy,
+                install_mode=InstallMode(only) if only else InstallMode.ALL,
+                packages=packages,
+                refresh=refresh,
+                only_packages=builtins.list(validated_packages) if packages else None,
+                manifest_snapshot=_manifest_snapshot,
+                snapshot_manifest_path=_snapshot_manifest_path,
+                legacy_skill_paths=legacy_skill_paths,
+                frozen=frozen,
+                plan_callback=None,
             )
 
-    except InsecureDependencyPolicyError:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        sys.exit(1)
-    except AuthenticationError as e:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        _rich_error(str(e))
-        if e.diagnostic_context:
-            _rich_echo(e.diagnostic_context)
-        sys.exit(1)
-    except DirectDependencyError as e:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        logger.error(str(e))
-        sys.exit(1)
-    except click.UsageError:
-        # Conflict matrix / argv parser raises UsageError -- let Click
-        # render with exit code 2 and the standard "Usage: ..." prefix.
-        raise
-    except Exception as e:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        if logger:
-            logger.error(f"Error installing dependencies: {e}")
-            if not verbose:
-                logger.progress("Run with --verbose for detailed diagnostics")
-        else:
-            _rich_error(f"Error installing dependencies: {e}")
-        sys.exit(1)
-    finally:
-        # F5 (#1116): render minimal elapsed-time line on exit paths that
-        # did not already render the full install summary. Best-effort:
-        # never let a render failure mask the original exception/exit.
-        if not summary_rendered and logger is not None:
-            with contextlib.suppress(Exception):
-                logger.install_interrupted(elapsed_seconds=time.perf_counter() - install_started_at)
-        # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
-        if _apm_verbose_prev is None:
-            os.environ.pop("APM_VERBOSE", None)
-        else:
-            os.environ["APM_VERBOSE"] = _apm_verbose_prev
+            apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
+                install_ctx,
+                outcome,
+            )
+
+            _post_install_summary(
+                logger=logger,
+                apm_count=apm_count,
+                mcp_count=mcp_count,
+                apm_diagnostics=apm_diagnostics,
+                force=force,
+                elapsed_seconds=time.perf_counter() - install_started_at,
+            )
+            summary_rendered = True
+
+            if frozen and apm_count > 0:
+                # --frozen verifies LOCKFILE STRUCTURE (every apm.yml dep
+                # has a lock entry), not on-disk content integrity. Make
+                # the scope explicit so a CI pipeline that skips
+                # 'apm audit' on the assumption that --frozen covers SHA
+                # verification is corrected at the moment of use.
+                _rich_info(
+                    "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
+                    symbol="info",
+                )
+
+        except InsecureDependencyPolicyError:
+            _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+            sys.exit(1)
+        except AuthenticationError as e:
+            _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+            _rich_error(str(e))
+            if e.diagnostic_context:
+                _rich_echo(e.diagnostic_context)
+            sys.exit(1)
+        except DirectDependencyError as e:
+            _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+            logger.error(str(e))
+            sys.exit(1)
+        except click.UsageError:
+            # Conflict matrix / argv parser raises UsageError -- let Click
+            # render with exit code 2 and the standard "Usage: ..." prefix.
+            raise
+        except Exception as e:
+            _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+            if logger:
+                logger.error(f"Error installing dependencies: {e}")
+                if not verbose:
+                    logger.progress("Run with --verbose for detailed diagnostics")
+            else:
+                _rich_error(f"Error installing dependencies: {e}")
+            sys.exit(1)
+        finally:
+            # F5 (#1116): render minimal elapsed-time line on exit paths that
+            # did not already render the full install summary. Best-effort:
+            # never let a render failure mask the original exception/exit.
+            if not summary_rendered and logger is not None:
+                with contextlib.suppress(Exception):
+                    logger.install_interrupted(elapsed_seconds=time.perf_counter() - install_started_at)
+            # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
+            if _apm_verbose_prev is None:
+                os.environ.pop("APM_VERBOSE", None)
+            else:
+                os.environ["APM_VERBOSE"] = _apm_verbose_prev
 
 
 # ---------------------------------------------------------------------------

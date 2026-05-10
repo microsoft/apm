@@ -151,6 +151,11 @@ def run(ctx: InstallContext) -> None:
     # This matches the original code's closure over function-level locals.
     scope = ctx.scope
     project_root = ctx.project_root
+    # Local-path package references in apm.yml are relative to the
+    # manifest's location (source_root), not the deploy override.
+    # source_root is required on InstallContext; equals project_root
+    # when --root is not used.
+    source_root = ctx.source_root
     update_refs = ctx.update_refs
     logger = ctx.logger
     verbose = ctx.verbose  # noqa: F841
@@ -210,10 +215,16 @@ def run(ctx: InstallContext) -> None:
                 # Anchor relative paths on the *declaring* package's source
                 # directory when available (#857). Falls back to project_root
                 # for direct deps and for parents that predate source_path.
+                # Direct deps from the root project anchor at ``source_root``
+                # (which equals ``project_root`` unless ``apm install --root``
+                # redirects writes -- then it stays at $PWD).  Transitive
+                # deps from a parent local package anchor at that package's
+                # source_path, which is already an absolute path and not
+                # affected by ``--root``.
                 base_dir = (
                     parent_pkg.source_path
                     if parent_pkg is not None and parent_pkg.source_path is not None
-                    else project_root
+                    else source_root
                 )
                 result_path = _copy_local_package(
                     dep_ref,
@@ -304,7 +315,10 @@ def run(ctx: InstallContext) -> None:
         download_callback=download_callback,
     )
 
-    dependency_graph = resolver.resolve_dependencies(ctx.apm_dir)
+    # Resolver reads ``source_root / "apm.yml"`` -- always the source
+    # root, never the deploy root, so ``apm install --root`` keeps
+    # finding the manifest in the user's working directory.
+    dependency_graph = resolver.resolve_dependencies(ctx.source_root)
     ctx.dependency_graph = dependency_graph
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so

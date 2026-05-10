@@ -40,6 +40,7 @@ def _make_ctx(tmp_path: Path, dep_keys: list[str]) -> InstallContext:
     ctx = InstallContext(
         project_root=project_root,
         apm_dir=apm_dir,
+        source_root=project_root,
     )
     ctx.apm_modules_dir = modules
     ctx.deps_to_install = list(deps)

@@ -120,6 +120,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
 - `--as ALIAS` - Override the log/display label used when reporting a local-bundle install. Only valid when `PACKAGES` is a single local-bundle path (directory or `.tar.gz`); rejected on registry installs. Falls back to `plugin.json["id"]`, then to the bundle directory name when omitted. Note: this label affects log output only -- the lockfile records `local_deployed_files` (paths) and does not currently namespace by alias.
 - `--legacy-skill-paths` - Restore per-client skill directories (`.github/skills/`, `.cursor/skills/`, etc.) instead of the converged `.agents/skills/` routing. Equivalent env var: `APM_LEGACY_SKILL_PATHS=1`.
+- `--root DIR` - Install into `DIR` instead of `$PWD`. `apm_modules/`, `apm.lock.yaml`, `.claude/`, `.codex/`, `.agents/`, `.opencode/` are written under `DIR` while sources (`apm.yml`, `.apm/`, local-path packages) continue resolving from `$PWD`. Mirrors `pip install --target` and `npm install --prefix`. Project scope only -- conflicts with `--global` (user-scope writes are anchored at `$HOME` and have no concept of an arbitrary deploy root). With `--dry-run`, `DIR` must already exist; the redirect refuses to create directories during a preview.
 
 **Transport env vars:**
 
@@ -1778,6 +1779,7 @@ apm compile [OPTIONS]
 - `-v, --verbose` - Show detailed source attribution and optimizer analysis
 - `--local-only` - Ignore dependencies, compile only local primitives
 - `--clean` - Remove orphaned AGENTS.md files that are no longer generated
+- `--root DIR` - Write `AGENTS.md` / `CLAUDE.md` outputs under `DIR` instead of `$PWD`; sources (`apm.yml`, `.apm/`, project tree for placement scoring) continue resolving from `$PWD`. Pairs with `apm install --root` for scratch-dir verification (e.g. CI freshness checks). Cannot be combined with `--watch` (the watch loop uses bare-relative paths and would scan the deploy root). With `--dry-run`, `DIR` must already exist.
 
 **Target Auto-Detection:**
 

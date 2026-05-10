@@ -185,12 +185,20 @@ def test_install_py_under_legacy_budget():
     by the new ``apm update`` command and CI-safe install flow. All
     additions are entry-point glue at the Click handler boundary; the
     actual logic lives in ``apm_cli/install/`` (plan, errors, service).
+
+    Issue #888 (``--root``) raised 2010 -> 2050 to land the ``--root``
+    Click option, the ``--root + --global`` UsageError, and the
+    ``install_root_redirect`` context manager around the handler body.
+    The body re-indent for the ``with`` block does not add lines, but
+    the option declaration + validation + UsageError preamble add
+    ~25 LOC of CLI surface.  The redirect itself is fully extracted
+    into :mod:`apm_cli.install.root_redirect`.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2010, (
-        f"commands/install.py grew to {n} LOC (budget 2010). "
+    assert n <= 2050, (
+        f"commands/install.py grew to {n} LOC (budget 2050). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."
