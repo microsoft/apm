@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration tests now use marker-driven discovery: 21 `pytestmark = pytest.mark.skipif(...)` chains across `tests/integration/` are replaced with declarative `requires_*` markers, with precondition logic centralized in `tests/integration/conftest.py` and auto-skipping at collection time. PR1 of #1166. (#1167)
 - Integration test apm-binary resolution now prefers the local build (`./dist/apm-<os>-<arch>/apm`) over a system-wide `apm` on `PATH`, so contributors validating the binary under test are not silently shadowed by a global install; the bearer-token marker (`requires_ado_bearer`) discards the captured JWT immediately and persists only the boolean outcome. (#1167)
 - `scripts/test-integration.sh` is now a thin orchestrator: it builds/locates the apm binary, sets up runtimes and tokens, then invokes `pytest tests/integration/` exactly once. The 28 per-file pytest enumerations were removed; the marker registry handles per-test gating, and new test files dropped into `tests/integration/` are picked up automatically. PR2 of #1166. (#1247)
+- Integration-test marker procedure codified as `.apm/instructions/tests.instructions.md` (wired into `test-coverage-expert` persona) and guarded by a regression-trap test that asserts `pyproject.toml`, `tests/integration/conftest.py::_MARKER_CHECKS`, the docs registry table, and the instructions rule stay in sync. (#1166)
 
 ### Fixed
 
