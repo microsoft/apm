@@ -134,7 +134,9 @@ Full pattern, the three pack-time gotchas, and verification steps: [Dev-only pri
 1. Explicit `--target <slug>` flag, when passed.
 2. The `targets:` field in `apm.yml`, when present.
 3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`) already exists in the workspace is selected.
-4. Fallback: `copilot`.
+4. Fallback: `minimal` -- APM writes `AGENTS.md` only and skips folder
+   integration. Create one of the harness folders above (or set
+   `targets:` explicitly) for full integration.
 
 Unknown target slugs are rejected upstream by the manifest parser; they never silently fall through to the default.
 
