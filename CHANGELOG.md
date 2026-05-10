@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- The CLI self-updater moved from `apm update` to `apm self-update`. Inside an `apm.yml` project the bare `apm update` verb now refreshes project dependencies (matching `npm update`, `uv lock --upgrade`, `cargo update`); outside a project it forwards to `apm self-update` with a deprecation banner for one release. CI scripts that called `apm update` to refresh the binary should migrate now: `sed -i 's/apm update/apm self-update/g' your_scripts`. (#1244)
+
 ### Added
 
-- `apm update` refreshes APM dependencies in the current project: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged), and prompts `[y/N]` before mutating anything (`--yes` skips the prompt; `--dry-run` previews). (#1244)
-- `apm install --frozen` performs a CI-safe, read-only install that fails fast (exit 1) when `apm.lock.yaml` is missing or out of sync with `apm.yml`; mutually exclusive with `--update`. (#1244)
+- `apm update` now does what every npm/pip/cargo user expects -- resolve latest refs, show a structured plan, and ask before touching anything. Refreshes APM dependencies in the current project: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged) with an inline legend, and prompts `[y/N]` before mutating anything (`--yes` skips the prompt; `--dry-run` previews). (#1244)
+- `apm self-update`: updates the APM CLI binary itself (or shows distributor guidance when self-update is disabled at build time). Replaces the former `apm update` self-update path; supports `--check` to only check for a newer version. (#1244)
+- `apm install --frozen` performs a CI-safe, read-only install that fails fast (exit 1) when `apm.lock.yaml` is missing or out of sync with `apm.yml`; mutually exclusive with `--update`. Structural presence check only; use `apm audit` for on-disk SHA integrity. (#1244)
 - `apm install` now emits a one-line "Run 'apm update' to check for newer versions." hint on the no-op path when a lockfile is already present, pointing users at the verb that actually checks for newer refs. (#1244)
 - Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
@@ -20,7 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The CLI self-updater moved from `apm update` to `apm self-update`; the bare `apm update` verb now refreshes project dependencies (matching `npm update`, `uv lock --upgrade`, `cargo update`). Outside an `apm.yml` project `apm update` still forwards to `apm self-update` with a deprecation banner for one release. (#1244)
 - `apm install --force` help text now states explicitly that the flag does NOT refresh refs; users who want newer commits should run `apm update`. (#1244)
 - `apm marketplace browse/search/add/update` route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub and GitLab host API fallbacks. (#1149)
 - Registry proxy now warns when `PROXY_REGISTRY_TOKEN` is set and `PROXY_REGISTRY_URL` uses `http://`, since the bearer token would be transmitted in plaintext; set `PROXY_REGISTRY_ALLOW_HTTP=1` to silence the warning for trusted internal proxies. (#1149)

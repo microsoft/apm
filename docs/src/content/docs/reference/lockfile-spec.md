@@ -263,6 +263,19 @@ The dependency resolver interacts with the lock file as follows:
    to their latest commits. If a resolved commit matches the existing lock
    file entry and the local checkout is intact, the download is skipped.
    Otherwise, the package is re-fetched. The lock file is always refreshed.
+4. **Interactive update** (`apm update`) -- re-resolve all refs and render
+   a structured plan (added/updated/removed/unchanged) before any
+   mutation. Defaults to a confirmation prompt; `--dry-run` exits after
+   the plan with no on-disk changes; `--yes` skips the prompt for CI
+   automation. On confirmation, behaves like (3) and refreshes the lock
+   file.
+5. **Frozen** (`apm install --frozen`) -- read `apm.lock.yaml` and
+   structurally verify every direct dependency declared in `apm.yml`
+   has a corresponding lock entry. Exit code 1 when the lockfile is
+   missing or any direct dep is unlocked; never resolves, never
+   mutates. Mutually exclusive with `--update`. Note: this is a
+   structural presence check; on-disk SHA integrity is the job of
+   `apm audit`.
 
 When a locked commit is no longer reachable (force-pushed branch, deleted tag),
 APM MUST report an error and refuse to install until the lock file is updated.

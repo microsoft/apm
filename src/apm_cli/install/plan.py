@@ -37,9 +37,13 @@ Design notes
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING
+
+from apm_cli.utils.console import STATUS_SYMBOLS
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.dependency.reference import DependencyReference
 
@@ -352,15 +356,26 @@ def render_plan_text(plan: UpdatePlan, *, verbose: bool = False) -> str:
         summary_parts.append(f"{counts[_ACTION_UNCHANGED]} unchanged")
     if summary_parts:
         lines.append("  " + ", ".join(summary_parts))
+        legend_bits = []
+        if counts.get(_ACTION_UPDATE):
+            legend_bits.append(f"{_ACTION_SYMBOLS[_ACTION_UPDATE]} updated")
+        if counts.get(_ACTION_ADD):
+            legend_bits.append(f"{_ACTION_SYMBOLS[_ACTION_ADD]} added")
+        if counts.get(_ACTION_REMOVE):
+            legend_bits.append(f"{_ACTION_SYMBOLS[_ACTION_REMOVE]} removed")
+        if verbose and counts.get(_ACTION_UNCHANGED):
+            legend_bits.append(f"{_ACTION_SYMBOLS[_ACTION_UNCHANGED]} unchanged")
+        if legend_bits:
+            lines.append("  " + "  ".join(legend_bits))
 
     return "\n".join(lines).rstrip()
 
 
 _ACTION_SYMBOLS = {
-    _ACTION_UPDATE: "[~]",
-    _ACTION_ADD: "[+]",
-    _ACTION_REMOVE: "[-]",
-    _ACTION_UNCHANGED: "[=]",
+    _ACTION_UPDATE: STATUS_SYMBOLS["update"],
+    _ACTION_ADD: STATUS_SYMBOLS["check"],
+    _ACTION_REMOVE: STATUS_SYMBOLS["remove"],
+    _ACTION_UNCHANGED: STATUS_SYMBOLS["equal"],
 }
 
 

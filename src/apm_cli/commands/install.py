@@ -6,8 +6,9 @@ import dataclasses
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import click
 
@@ -18,6 +19,9 @@ from apm_cli.install.errors import (
     PolicyViolationError,
 )
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
+
+if TYPE_CHECKING:
+    from apm_cli.install.plan import UpdatePlan
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
@@ -221,7 +225,7 @@ class InstallContext:
     snapshot_manifest_path: Optional["Path"] = None
     legacy_skill_paths: bool = False
     frozen: bool = False
-    plan_callback: Any = None  # Callable[[UpdatePlan], bool] | None
+    plan_callback: "Callable[[UpdatePlan], bool] | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -843,7 +847,7 @@ def _handle_mcp_install(
 @click.option(
     "--update",
     is_flag=True,
-    help="Update dependencies to latest Git references (consider 'apm update' for an interactive plan)",
+    help="Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI)",
 )
 @click.option("--dry-run", is_flag=True, help="Show what would be installed without installing")
 @click.option(
@@ -854,7 +858,7 @@ def _handle_mcp_install(
 @click.option(
     "--frozen",
     is_flag=True,
-    help="Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (CI-safe; mutually exclusive with --update)",
+    help="Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (CI-safe; mutually exclusive with --update). Structural presence check only; use 'apm audit' for on-disk integrity.",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
 @click.option(
@@ -1455,17 +1459,6 @@ def install(  # noqa: PLR0913
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         logger.error(str(e))
         sys.exit(1)
-    except FrozenInstallError as e:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        if logger is not None:
-            logger.error(str(e))
-            for reason in e.reasons:
-                _rich_echo(reason)
-        else:
-            _rich_error(str(e))
-            for reason in e.reasons:
-                _rich_echo(reason)
-        sys.exit(1)
     except click.UsageError:
         # Conflict matrix / argv parser raises UsageError -- let Click
         # render with exit code 2 and the standard "Usage: ..." prefix.
@@ -1650,8 +1643,8 @@ def _install_apm_packages(ctx, outcome):
                 allow_protocol_fallback=ctx.allow_protocol_fallback,
                 no_policy=ctx.no_policy,
                 legacy_skill_paths=ctx.legacy_skill_paths,
-                frozen=getattr(ctx, "frozen", False),
-                plan_callback=getattr(ctx, "plan_callback", None),
+                frozen=ctx.frozen,
+                plan_callback=ctx.plan_callback,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics

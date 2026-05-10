@@ -141,12 +141,17 @@ def update(
         return
 
     if check_only:
-        raise click.UsageError(
-            "'apm update --check' is reserved for the deprecated self-update shim "
-            "and only works outside an apm.yml project. Inside a project, use "
-            "'apm update --dry-run' to preview dependency changes, or "
-            "'apm self-update --check' to check for a new CLI binary."
+        from apm_cli.commands.self_update import self_update as _self_update_cmd
+
+        _rich_warning(
+            "'apm update --check' is the deprecated self-updater shim. "
+            "Use 'apm update --dry-run' to preview dependency changes, "
+            "or 'apm self-update --check' to check for a new CLI binary. "
+            "Forwarding for back-compat (deprecated).",
+            symbol="warning",
         )
+        ctx.invoke(_self_update_cmd, check=True)
+        return
 
     _run_dep_update(assume_yes=assume_yes, dry_run=dry_run, verbose=verbose)
 
@@ -180,7 +185,10 @@ def _run_dep_update(*, assume_yes: bool, dry_run: bool, verbose: bool) -> None:
         plan_state["plan"] = plan
 
         if not plan.has_changes:
-            _rich_success("All dependencies already at their latest matching refs.")
+            _rich_success(
+                "All dependencies already at their latest matching refs.",
+                symbol="check",
+            )
             return False
 
         rendered = render_plan_text(plan, verbose=verbose)
@@ -189,7 +197,10 @@ def _run_dep_update(*, assume_yes: bool, dry_run: bool, verbose: bool) -> None:
             _rich_echo("")
 
         if dry_run:
-            _rich_info("Dry run: no changes applied. Re-run without --dry-run to update.")
+            _rich_info(
+                "Dry run: no changes applied. Re-run without --dry-run to update.",
+                symbol="info",
+            )
             return False
 
         if assume_yes:
@@ -201,12 +212,12 @@ def _run_dep_update(*, assume_yes: bool, dry_run: bool, verbose: bool) -> None:
                 "Cannot prompt for confirmation in non-interactive shell. "
                 "Re-run with --yes to apply, or --dry-run to preview."
             )
-            return False
+            sys.exit(1)
 
         proceed = click.confirm("Apply these changes?", default=False, show_default=True)
         plan_state["proceeded"] = proceed
         if not proceed:
-            _rich_info("No changes applied.")
+            _rich_info("No changes applied.", symbol="info")
         return proceed
 
     try:

@@ -104,14 +104,19 @@ class TestUpdateAssumeYes:
 
 class TestUpdateNonTty:
     def test_non_tty_aborts_without_yes_flag(self, runner, tmp_path):
-        """No --yes + non-TTY stdin -> abort, do not mutate."""
+        """No --yes + non-TTY stdin -> exit 1 (CI-safe failure, do not mutate).
+
+        Regression guard for the exit-code bug: non-TTY callers must see
+        a non-zero exit code so CI pipelines fail fast on accidental
+        'apm update' invocations.
+        """
         with runner.isolated_filesystem(temp_dir=tmp_path):
             _make_apm_yml(Path.cwd())
-            captured = {}
 
             def fake_install(_apm, **kwargs):
                 cb = kwargs["plan_callback"]
-                captured["proceeded"] = cb(_stub_plan_with_changes())
+                # The callback should sys.exit(1) -- propagate as SystemExit
+                cb(_stub_plan_with_changes())
                 from apm_cli.models.results import InstallResult
 
                 return InstallResult()
@@ -121,8 +126,8 @@ class TestUpdateNonTty:
             ):
                 result = runner.invoke(cli, ["update"])
 
+            assert result.exit_code == 1, result.output
             assert "non-interactive" in result.output
-            assert captured["proceeded"] is False
 
 
 class TestUpdateNoChanges:
