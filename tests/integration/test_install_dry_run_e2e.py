@@ -9,7 +9,6 @@ Uses the real `microsoft/apm-sample-package` from GitHub. Requires
 GITHUB_APM_PAT or GITHUB_TOKEN for API access.
 """
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,10 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark = pytest.mark.requires_github_token
 
 
 @pytest.fixture

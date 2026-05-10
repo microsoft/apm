@@ -1,5 +1,6 @@
-import pytest  # noqa: F401
+import pytest
 
+from apm_cli.utils import github_host
 from apm_cli.utils.github_host import build_raw_content_url, is_valid_fqdn
 
 
@@ -56,11 +57,6 @@ def test_invalid_fqdns():
         assert not is_valid_fqdn(host), f"Expected '{host}' to be invalid FQDN"
 
 
-import os  # noqa: E402, F401
-
-from apm_cli.utils import github_host  # noqa: E402
-
-
 def test_default_host_env_override(monkeypatch):
     monkeypatch.setenv("GITHUB_HOST", "example.ghe.com")
     assert github_host.default_host() == "example.ghe.com"
@@ -71,6 +67,77 @@ def test_is_github_hostname_defaults():
     assert github_host.is_github_hostname(github_host.default_host())
     assert github_host.is_github_hostname("org.ghe.com")
     assert not github_host.is_github_hostname("example.com")
+
+
+def test_is_gitlab_hostname_saas():
+    assert github_host.is_gitlab_hostname("gitlab.com")
+    assert github_host.is_gitlab_hostname("GitLab.COM")
+
+
+def test_is_gitlab_hostname_env_gitlab_host(monkeypatch):
+    monkeypatch.setenv("GITLAB_HOST", "git.selfmanaged.example.org")
+    assert github_host.is_gitlab_hostname("git.selfmanaged.example.org")
+    assert not github_host.is_gitlab_hostname("other.example.org")
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+
+def test_is_gitlab_hostname_env_apm_gitlab_hosts(monkeypatch):
+    monkeypatch.setenv("APM_GITLAB_HOSTS", "a.example.com, b.example.com")
+    assert github_host.is_gitlab_hostname("a.example.com")
+    assert github_host.is_gitlab_hostname("b.example.com")
+    monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+
+
+def test_is_gitlab_hostname_ghes_precedence_over_gitlab_list(monkeypatch):
+    """GITHUB_HOST match is GHES, not GitLab, even if also listed for GitLab."""
+    monkeypatch.setenv("GITHUB_HOST", "git.company.com")
+    monkeypatch.setenv("APM_GITLAB_HOSTS", "git.company.com, other.gitlab.org")
+    assert not github_host.is_gitlab_hostname("git.company.com")
+    assert github_host.is_gitlab_hostname("other.gitlab.org")
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+
+
+def test_has_github_gitlab_host_env_conflict_gitlab_host(monkeypatch):
+    monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+    monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+    assert github_host.has_github_gitlab_host_env_conflict("git.epam.com")
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+
+def test_has_github_gitlab_host_env_conflict_apm_gitlab_hosts(monkeypatch):
+    monkeypatch.setenv("GITHUB_HOST", "git.company.com")
+    monkeypatch.setenv("APM_GITLAB_HOSTS", "git.company.com, other.gitlab.org")
+    assert github_host.has_github_gitlab_host_env_conflict("git.company.com")
+    assert not github_host.has_github_gitlab_host_env_conflict("other.gitlab.org")
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+
+
+def test_has_github_gitlab_host_env_conflict_false_gitlab_only(monkeypatch):
+    monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+    assert not github_host.has_github_gitlab_host_env_conflict("git.epam.com")
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+
+def test_maybe_raise_bare_fqdn_two_segments_after_host_no_raise(monkeypatch):
+    monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+    monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+    github_host.maybe_raise_bare_fqdn_github_gitlab_conflict("git.epam.com/epm-ease/apm-registry")
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
+
+
+def test_maybe_raise_bare_fqdn_ambiguous_raises(monkeypatch):
+    monkeypatch.setenv("GITHUB_HOST", "git.epam.com")
+    monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+    with pytest.raises(ValueError, match="both GitHub Enterprise"):
+        github_host.maybe_raise_bare_fqdn_github_gitlab_conflict(
+            "git.epam.com/epm-ease/apm-registry/agents/ai-run-ba-flow"
+        )
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    monkeypatch.delenv("GITLAB_HOST", raising=False)
 
 
 def test_is_azure_devops_hostname():
@@ -131,6 +198,33 @@ def test_sanitize_token_url_in_message():
     msg = f"fatal: Authentication failed for 'https://ghp_secret@{host}/user/repo.git'"
     sanitized = github_host.sanitize_token_url_in_message(msg, host=host)
     assert f"***@{host}" in sanitized
+
+
+def test_build_gitlab_https_clone_url_encodes_token_specials():
+    from urllib.parse import unquote, urlsplit
+
+    url = github_host.build_gitlab_https_clone_url("gitlab.com", "group/sub/repo", "x:y/z")
+    assert "x-access-token" not in url.lower()
+    sp = urlsplit(url)
+    assert sp.hostname == "gitlab.com"
+    assert sp.username == "oauth2"
+    assert unquote(sp.password) == "x:y/z"
+    assert sp.path == "/group/sub/repo.git"
+
+
+def test_build_gitlab_https_clone_url_preserves_port():
+    from urllib.parse import urlsplit
+
+    url = github_host.build_gitlab_https_clone_url(
+        "gitlab.corp.example",
+        "group/repo",
+        "glpat-secret",
+        port=8443,
+    )
+    sp = urlsplit(url)
+    assert sp.hostname == "gitlab.corp.example"
+    assert sp.port == 8443
+    assert sp.username == "oauth2"
 
 
 def test_unsupported_host_error_message():
@@ -248,27 +342,6 @@ def test_build_ado_bearer_git_env_does_not_url_encode():
     assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {token}"
 
 
-# Unsupported host error message tests
-
-
-def test_unsupported_host_error_message():  # noqa: F811
-    """Test that unsupported host error provides actionable guidance."""
-    error_msg = github_host.unsupported_host_error("github.company.com")
-
-    # Should mention the hostname
-    assert "github.company.com" in error_msg
-
-    # Should list supported hosts
-    assert "github.com" in error_msg
-    assert "*.ghe.com" in error_msg
-    assert "dev.azure.com" in error_msg
-
-    # Should provide fix instructions for all platforms
-    assert "export GITHUB_HOST=" in error_msg
-    assert "$env:GITHUB_HOST" in error_msg
-    assert "set GITHUB_HOST=" in error_msg
-
-
 def test_unsupported_host_error_with_context():
     """Test that context message is included when provided."""
     error_msg = github_host.unsupported_host_error(
@@ -281,16 +354,3 @@ def test_unsupported_host_error_with_context():
     # Should still include standard guidance
     assert "github.com" in error_msg
     assert "GITHUB_HOST" in error_msg
-
-
-def test_unsupported_host_error_shows_current_host(monkeypatch):  # noqa: F811
-    """Test that error shows current GITHUB_HOST if set."""
-    monkeypatch.setenv("GITHUB_HOST", "other.company.com")
-
-    error_msg = github_host.unsupported_host_error("github.company.com")
-
-    # Should show the mismatch
-    assert "other.company.com" in error_msg
-    assert "github.company.com" in error_msg
-
-    monkeypatch.delenv("GITHUB_HOST", raising=False)

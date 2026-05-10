@@ -11,7 +11,9 @@ Token Architecture:
 - GITHUB_TOKEN: User-scoped PAT for GitHub Models API access
 
 Platform Token Selection:
-- GitHub: GITHUB_APM_PAT -> GITHUB_TOKEN -> GH_TOKEN -> gh auth token -> git credential helpers
+- GitHub-class: GITHUB_APM_PAT -> GITHUB_TOKEN -> GH_TOKEN -> gh auth token -> git credential helpers
+- GitLab-class: GITLAB_APM_PAT -> GITLAB_TOKEN -> git credential helpers
+- Generic FQDN hosts: git credential helpers only (no GitHub/GitLab platform env vars)
 - Azure DevOps: ADO_APM_PAT
 
 Runtime Requirements:
@@ -23,6 +25,7 @@ import os
 import subprocess
 import sys
 from typing import Dict, Optional, Tuple  # noqa: F401, UP035
+from urllib.parse import urlparse
 
 from apm_cli.utils.github_host import (
     default_host,
@@ -48,6 +51,44 @@ def _format_credential_host(host: str, port: int | None) -> str:
     return f"{host}:{port}" if port is not None else host
 
 
+def _sanitize_credential_path(path: str) -> str:
+    """Strip leading ``/``, reject control chars, allowlist URL schemes.
+
+    The git credential protocol is line-oriented: a stray newline in the
+    ``path`` value would let an attacker inject arbitrary attribute lines
+    (``\\nusername=...`` etc.) into the credential request. Even though
+    ``path`` originates from a parsed dependency reference (already
+    constrained to URL components), we defensively reject any value that
+    contains control characters or whitespace, returning an empty string
+    so the caller skips the ``path=`` line entirely. This preserves the
+    pre-disambiguation request rather than ever sending a malformed one.
+
+    We also guard against accidental full-URL inputs (``https://...``).
+    Today every caller passes ``owner/repo``, but if a future caller ever
+    passes a full URL the naive ``lstrip('/')`` would yield
+    ``https:/host/owner/repo`` which GCM silently ignores. Detect this
+    via ``urlparse`` and use the URL's path component instead.
+
+    Schemes are allowlisted to ``https``/``http``/``ssh`` (and the
+    schemeless owner/repo case). ``urlparse`` is greedy about consuming
+    embedded characters in non-hierarchical schemes (notably ``data:``
+    and ``file:``), which would let those URI families bypass the
+    char-scan -- the ``parsed.path`` after such schemes can still embed
+    bytes the scan would otherwise reject. Reject anything off-allowlist.
+    """
+    parsed = urlparse(path)
+    scheme = parsed.scheme.lower()
+    if scheme and scheme not in ("https", "http", "ssh"):
+        return ""
+    cleaned = parsed.path.lstrip("/") if scheme else path.lstrip("/")
+    if not cleaned:
+        return ""
+    for ch in cleaned:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F or ch.isspace():
+            return ""
+    return cleaned
+
+
 class GitHubTokenManager:
     """Manages GitHub token environment setup for different AI runtimes."""
 
@@ -62,7 +103,12 @@ class GitHubTokenManager:
             "GITHUB_TOKEN",
             "GITHUB_APM_PAT",
         ],  # GitHub Models prefers user-scoped PAT, falls back to APM PAT
-        "modules": ["GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN"],  # APM module access (GitHub)
+        "modules": ["GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN"],  # GitHub-class module access
+        "gitlab_modules": [
+            "GITLAB_APM_PAT",
+            "GITLAB_TOKEN",
+        ],  # GitLab SaaS / self-managed API + git HTTPS
+        "generic_modules": [],  # Non-GitHub / non-GitLab FQDN: env PATs deferred to credential fill only
         "ado_modules": ["ADO_APM_PAT"],  # APM module access (Azure DevOps)
         "artifactory_modules": ["ARTIFACTORY_APM_TOKEN"],  # APM module access (JFrog Artifactory)
     }
@@ -143,7 +189,9 @@ class GitHubTokenManager:
         return max(1, min(val, cls.MAX_CREDENTIAL_TIMEOUT))
 
     @staticmethod
-    def resolve_credential_from_git(host: str, port: int | None = None) -> str | None:
+    def resolve_credential_from_git(
+        host: str, port: int | None = None, path: str | None = None
+    ) -> str | None:
         """Resolve a credential from the git credential store.
 
         Uses `git credential fill` to query the user's configured credential
@@ -155,15 +203,27 @@ class GitHubTokenManager:
             port: Optional non-standard git port (e.g. 7999 for Bitbucket DC).
                 Embedded into the ``host`` field per ``gitcredentials(7)`` --
                 a standalone ``port=`` line is not part of the protocol.
+            path: Optional repository path (``org/repo``). When provided,
+                a ``path=`` line is appended to the credential request so
+                helpers configured with ``credential.useHttpPath = true``
+                (notably Git Credential Manager for multi-account users)
+                can disambiguate the target URL and pick the right
+                stored account without prompting.
 
         Returns:
             The password/token from the credential store, or None if unavailable
         """
         host_field = _format_credential_host(host, port)
+        stdin_lines = ["protocol=https", f"host={host_field}"]
+        if path:
+            sanitized = _sanitize_credential_path(path)
+            if sanitized:
+                stdin_lines.append(f"path={sanitized}")
+        stdin = "\n".join(stdin_lines) + "\n\n"
         try:
             result = subprocess.run(
                 ["git", "credential", "fill"],
-                input=f"protocol=https\nhost={host_field}\n\n",
+                input=stdin,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

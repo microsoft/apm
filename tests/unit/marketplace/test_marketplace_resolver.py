@@ -1,16 +1,24 @@
 """Tests for marketplace resolver -- regex and source type resolution."""
 
+from unittest.mock import patch
+
 import pytest
 
-from apm_cli.marketplace.models import MarketplacePlugin
+from apm_cli.marketplace.models import (
+    MarketplaceManifest,
+    MarketplacePlugin,
+    MarketplaceSource,
+)
 from apm_cli.marketplace.resolver import (
     _resolve_git_subdir_source,
     _resolve_github_source,
     _resolve_relative_source,
     _resolve_url_source,
     parse_marketplace_ref,
+    resolve_marketplace_plugin,
     resolve_plugin_source,
 )
+from apm_cli.models.dependency.reference import DependencyReference
 
 
 class TestParseMarketplaceRef:
@@ -410,6 +418,29 @@ class TestResolvePluginSource:
         with pytest.raises(ValueError, match="no source defined"):
             resolve_plugin_source(p)
 
+    def test_dict_kind_key_instead_of_type(self):
+        """``kind: github`` (no ``type``) is normalized for resolution."""
+        p = MarketplacePlugin(
+            name="k",
+            source={
+                "kind": "github",
+                "repo": "acme/mkt",
+                "path": "pkg/x",
+            },
+        )
+        assert resolve_plugin_source(p) == "acme/mkt/pkg/x"
+
+    def test_type_field_case_insensitive(self):
+        p = MarketplacePlugin(
+            name="k",
+            source={
+                "type": "GitHub",
+                "repo": "acme/mkt",
+                "path": "pkg/x",
+            },
+        )
+        assert resolve_plugin_source(p) == "acme/mkt/pkg/x"
+
 
 class TestOldFormatIntegration:
     """Integration tests verifying old-format marketplace entries resolve correctly."""
@@ -455,3 +486,331 @@ class TestOldFormatIntegration:
         )
         with pytest.raises(ValueError, match=r"expected 'owner/repo' but got a URL"):
             resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
+
+
+class TestResolveMarketplacePluginGitLabMonorepo:
+    """Non-GitHub FQDN + in-marketplace subdirectory → explicit git+path DependencyReference."""
+
+    @pytest.fixture
+    def gitlab_marketplace_source(self) -> MarketplaceSource:
+        return MarketplaceSource(
+            name="apm-reg",
+            owner="epm-ease",
+            repo="ai-apm-registry",
+            host="gitlab.com",
+            branch="main",
+        )
+
+    @pytest.fixture
+    def self_managed_git_fqdn_source(self) -> MarketplaceSource:
+        """Host not in GITLAB_HOST — classified *generic* but still GitLab in practice."""
+        return MarketplaceSource(
+            name="apm-reg",
+            owner="epm-ease",
+            repo="ai-apm-registry",
+            host="git.epam.com",
+            branch="main",
+        )
+
+    @staticmethod
+    def _manifest_with_plugin(plugin: MarketplacePlugin) -> MarketplaceManifest:
+        return MarketplaceManifest(
+            name="apm-reg",
+            plugins=(plugin,),
+            plugin_root="",
+        )
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_relative_path_sets_virtual_path_not_in_repo_url(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        plugin = MarketplacePlugin(
+            name="optimize-prompt",
+            source="registry/optimize-prompt",
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("optimize-prompt", "apm-reg")
+        canonical, resolved = result
+
+        assert resolved.name == "optimize-prompt"
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "epm-ease/ai-apm-registry"
+        assert dep.virtual_path == "registry/optimize-prompt"
+        assert dep.is_virtual is True
+        assert dep.to_canonical() == canonical
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_self_managed_fqdn_not_in_gitlab_env_still_gets_dependency_reference(
+        self, mock_get, mock_fetch, self_managed_git_fqdn_source
+    ):
+        """Regression: host-qualified git-subdir repo must keep the marketplace project root."""
+        plugin = MarketplacePlugin(
+            name="optimize-prompt",
+            source={
+                "type": "git-subdir",
+                "repo": "git.epam.com/epm-ease/ai-apm-registry",
+                "subdir": "registry/optimize-prompt",
+            },
+        )
+        mock_get.return_value = self_managed_git_fqdn_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("optimize-prompt", "apm-reg")
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.host == "git.epam.com"
+        assert dep.repo_url == "epm-ease/ai-apm-registry"
+        assert dep.virtual_path == "registry/optimize-prompt"
+        assert result.canonical == "git.epam.com/epm-ease/ai-apm-registry/registry/optimize-prompt"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_unpack_two_tuple_backward_compatible(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        plugin = MarketplacePlugin(name="p", source="pkg/a")
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        canonical, resolved_plugin = resolve_marketplace_plugin("p", "apm-reg")
+        assert "pkg/a" in canonical
+        assert resolved_plugin.name == "p"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_github_host_no_dependency_reference(
+        self,
+        mock_get,
+        mock_fetch,
+    ):
+        gh_source = MarketplaceSource(
+            name="mkt",
+            owner="acme",
+            repo="marketplace",
+            host="github.com",
+        )
+        plugin = MarketplacePlugin(name="p", source="plugins/foo")
+        mock_get.return_value = gh_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("p", "mkt")
+        assert result.dependency_reference is None
+        assert result.canonical == "acme/marketplace/plugins/foo"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_external_git_subdir_on_gitlab_no_monorepo_rule(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        plugin = MarketplacePlugin(
+            name="ext",
+            source={
+                "type": "git-subdir",
+                "repo": "other/external-repo",
+                "subdir": "packages/x",
+                "ref": "main",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("ext", "apm-reg")
+        assert result.dependency_reference is None
+        assert result.canonical == "other/external-repo/packages/x#main"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_in_marketplace_git_subdir_dict(self, mock_get, mock_fetch, gitlab_marketplace_source):
+        plugin = MarketplacePlugin(
+            name="mono",
+            source={
+                "type": "git-subdir",
+                "repo": "epm-ease/ai-apm-registry",
+                "subdir": "registry/pkg",
+                "ref": "v1",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("mono", "apm-reg")
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.repo_url == "epm-ease/ai-apm-registry"
+        assert dep.virtual_path == "registry/pkg"
+        assert dep.reference == "v1"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_in_marketplace_gitlab_dict_type_gets_dependency_reference(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        """GitLab-native ``type: gitlab`` must emit structured git+path like ``git-subdir``."""
+        plugin = MarketplacePlugin(
+            name="mono-gitlab-type",
+            source={
+                "type": "gitlab",
+                "repo": "epm-ease/ai-apm-registry",
+                "path": "agents/reverse-architect",
+                "ref": "main",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("mono-gitlab-type", "apm-reg")
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.repo_url == "epm-ease/ai-apm-registry"
+        assert dep.virtual_path == "agents/reverse-architect"
+        assert dep.reference == "main"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_external_gitlab_dict_type_no_monorepo_rule(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        plugin = MarketplacePlugin(
+            name="ext-gitlab",
+            source={
+                "type": "gitlab",
+                "repo": "other/external-repo",
+                "path": "packages/x",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("ext-gitlab", "apm-reg")
+        assert result.dependency_reference is None
+        assert "other/external-repo" in result.canonical
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_repo_match_normalizes_git_suffix_and_case(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        plugin = MarketplacePlugin(
+            name="z",
+            source={
+                "type": "github",
+                "repo": "Epm-Ease/AI-APM-Registry.git",
+                "path": "registry/z",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("z", "apm-reg")
+        assert result.dependency_reference is not None
+        assert result.dependency_reference.virtual_path == "registry/z"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_path_traversal_still_rejected(self, mock_get, mock_fetch, gitlab_marketplace_source):
+        plugin = MarketplacePlugin(name="bad", source="../escape")
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        with pytest.raises(ValueError, match="traversal"):
+            resolve_marketplace_plugin("bad", "apm-reg")
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_host_env_relative_source_sets_dependency_reference(
+        self, mock_get, mock_fetch, self_managed_git_fqdn_source, monkeypatch
+    ):
+        """With GITLAB_HOST, monorepos still get structured ref (install must not re-parse FQDN)."""
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        plugin = MarketplacePlugin(
+            name="reverse-architect",
+            source="agents/reverse-architect",
+        )
+        mock_get.return_value = self_managed_git_fqdn_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("reverse-architect", "apm-reg")
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.host == "git.epam.com"
+        assert dep.repo_url == "epm-ease/ai-apm-registry"
+        assert dep.virtual_path == "agents/reverse-architect"
+        assert dep.is_virtual is True
+        # Same result as explicit object form (the shape install expects)
+        from_dict = DependencyReference.parse_from_dict(
+            {
+                "git": "https://git.epam.com/epm-ease/ai-apm-registry.git",
+                "path": "agents/reverse-architect",
+            }
+        )
+        assert dep.repo_url == from_dict.repo_url
+        assert dep.virtual_path == from_dict.virtual_path
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_apm_gitlab_hosts_env_list_sets_dependency_reference(
+        self, mock_get, mock_fetch, self_managed_git_fqdn_source, monkeypatch
+    ):
+        """APM_GITLAB_HOSTS must classify the host the same for parity with GITLAB_HOST."""
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.setenv("APM_GITLAB_HOSTS", "other.example.com,git.epam.com")
+        plugin = MarketplacePlugin(name="p", source="registry/pkg")
+        mock_get.return_value = self_managed_git_fqdn_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("p", "apm-reg")
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.repo_url == "epm-ease/ai-apm-registry"
+        assert dep.virtual_path == "registry/pkg"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_kind_key_github_dict_in_marketplace_gets_structured_ref(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        """``kind: github`` (Claude) without ``type`` key must still match the marketplace repo."""
+        plugin = MarketplacePlugin(
+            name="k",
+            source={
+                "kind": "github",
+                "repo": "epm-ease/ai-apm-registry",
+                "path": "registry/pkg",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("k", "apm-reg")
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.virtual_path == "registry/pkg"
+        assert dep.repo_url == "epm-ease/ai-apm-registry"
+
+
+class TestGitLabShorthandParseVsStructuredRef:
+    """``DependencyReference.parse`` on a long FQDN does not split monorepo paths on GitLab hosts."""
+
+    def test_fqdn_shorthand_without_git_path_misclassifies(self, monkeypatch):
+        # Install must use structured object-form; plain shorthand is not safe to re-parse.
+        monkeypatch.setenv("GITLAB_HOST", "git.epam.com")
+        bad = DependencyReference.parse(
+            "git.epam.com/epm-ease/ai-apm-registry/agents/reverse-architect"
+        )
+        assert bad.is_virtual is False
+        assert "agents" in bad.repo_url
+        good = DependencyReference.parse_from_dict(
+            {
+                "git": "https://git.epam.com/epm-ease/ai-apm-registry.git",
+                "path": "agents/reverse-architect",
+            }
+        )
+        assert good.is_virtual is True
+        assert good.repo_url == "epm-ease/ai-apm-registry"
+        assert good.virtual_path == "agents/reverse-architect"

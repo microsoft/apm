@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.core import azure_cli as _azure_cli_mod
-from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo  # noqa: F401
+from apm_cli.core.auth import AuthResolver, HostInfo
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -61,8 +61,51 @@ class TestClassifyHost:
             hi = AuthResolver.classify_host("github.mycompany.com")
             assert hi.kind == "ghes"
 
-    def test_generic_fqdn(self):
+    def test_gitlab_com(self):
         hi = AuthResolver.classify_host("gitlab.com")
+        assert hi.kind == "gitlab"
+        assert hi.api_base == "https://gitlab.com/api/v4"
+        assert hi.has_public_repos is True
+
+    def test_gitlab_com_not_ghes_even_if_github_host_env_set(self):
+        """gitlab.com is well-known SaaS; do not treat as GHES when GITHUB_HOST matches."""
+        with patch.dict(os.environ, {"GITHUB_HOST": "gitlab.com"}, clear=False):
+            hi = AuthResolver.classify_host("gitlab.com")
+            assert hi.kind == "gitlab"
+            assert hi.api_base == "https://gitlab.com/api/v4"
+
+    def test_gitlab_self_managed_gitlab_host_env(self):
+        with patch.dict(os.environ, {"GITLAB_HOST": "git.corp.example.com"}, clear=False):
+            hi = AuthResolver.classify_host("git.corp.example.com")
+            assert hi.kind == "gitlab"
+            assert hi.api_base == "https://git.corp.example.com/api/v4"
+
+    def test_gitlab_self_managed_apm_gitlab_hosts_env(self):
+        with patch.dict(
+            os.environ,
+            {"APM_GITLAB_HOSTS": "git.epam.com, gitlab.corp.io"},
+            clear=False,
+        ):
+            hi = AuthResolver.classify_host("gitlab.corp.io")
+            assert hi.kind == "gitlab"
+            assert hi.api_base == "https://gitlab.corp.io/api/v4"
+
+    def test_ghes_wins_over_gitlab_when_same_host_in_both_envs(self):
+        """GITHUB_HOST match must not be reclassified as GitLab (spec Critical Rules)."""
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_HOST": "git.company.com",
+                "APM_GITLAB_HOSTS": "git.company.com",
+            },
+            clear=False,
+        ):
+            hi = AuthResolver.classify_host("git.company.com")
+            assert hi.kind == "ghes"
+            assert "api/v3" in hi.api_base
+
+    def test_generic_fqdn_not_in_gitlab_allowlist(self):
+        hi = AuthResolver.classify_host("bitbucket.org")
         assert hi.kind == "generic"
 
     def test_case_insensitive(self):
@@ -96,6 +139,25 @@ class TestDetectTokenType:
 
     def test_unknown(self):
         assert AuthResolver.detect_token_type("some-random-token") == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# TestGitlabRestHeaders
+# ---------------------------------------------------------------------------
+
+
+class TestGitlabRestHeaders:
+    def test_no_token_returns_empty_dict(self):
+        assert AuthResolver.gitlab_rest_headers(None) == {}
+        assert AuthResolver.gitlab_rest_headers("") == {}
+
+    def test_pat_uses_private_token_header(self):
+        headers = AuthResolver.gitlab_rest_headers("glpat-secret")
+        assert headers == {"PRIVATE-TOKEN": "glpat-secret"}
+
+    def test_oauth_bearer_style(self):
+        headers = AuthResolver.gitlab_rest_headers("oauth-access-token", oauth_bearer=True)
+        assert headers == {"Authorization": "Bearer oauth-access-token"}
 
 
 # ---------------------------------------------------------------------------
@@ -173,36 +235,34 @@ class TestResolve:
             time.sleep(0.05)
             return ("cred-token", "git-credential-fill", "basic")
 
-        with (
-            patch.object(
-                AuthResolver, "_resolve_token", side_effect=_slow_resolve_token
-            ) as mock_resolve,
-            ThreadPoolExecutor(max_workers=8) as pool,
-        ):
-            futures = [pool.submit(resolver.resolve, "github.com", "microsoft") for _ in range(8)]
-            contexts = [f.result() for f in futures]
+        with patch.object(
+            AuthResolver, "_resolve_token", side_effect=_slow_resolve_token
+        ) as mock_resolve:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = [
+                    pool.submit(resolver.resolve, "github.com", "microsoft") for _ in range(8)
+                ]
+                contexts = [f.result() for f in futures]
 
         assert mock_resolve.call_count == 1
         assert all(ctx is contexts[0] for ctx in contexts)
 
     def test_different_orgs_different_cache(self):
         """Different orgs get different cache entries."""
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "GITHUB_APM_PAT_ORG_A": "token-a",
-                    "GITHUB_APM_PAT_ORG_B": "token-b",
-                },
-                clear=True,
-            ),
-            patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None),
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_APM_PAT_ORG_A": "token-a",
+                "GITHUB_APM_PAT_ORG_B": "token-b",
+            },
+            clear=True,
         ):
-            resolver = AuthResolver()
-            ctx_a = resolver.resolve("github.com", org="org-a")
-            ctx_b = resolver.resolve("github.com", org="org-b")
-            assert ctx_a.token == "token-a"
-            assert ctx_b.token == "token-b"
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                ctx_a = resolver.resolve("github.com", org="org-a")
+                ctx_b = resolver.resolve("github.com", org="org-b")
+                assert ctx_a.token == "token-a"
+                assert ctx_b.token == "token-b"
 
     def test_ado_token(self):
         """ADO host resolves ADO_APM_PAT."""
@@ -214,16 +274,14 @@ class TestResolve:
 
     def test_credential_fallback(self):
         """Falls back to git credential helper when no env vars."""
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
-            ),
-        ):
-            resolver = AuthResolver()
-            ctx = resolver.resolve("github.com")
-            assert ctx.token == "cred-token"
-            assert ctx.source == "git-credential-fill"
+            ):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("github.com")
+                assert ctx.token == "cred-token"
+                assert ctx.source == "git-credential-fill"
 
     def test_gh_cli_source_label(self):
         """When gh CLI supplies the token, ctx.source == 'gh-auth-token'."""
@@ -322,6 +380,100 @@ class TestResolve:
                 resolver = AuthResolver()
                 ctx = resolver.resolve("github.com")
                 assert ctx.git_env.get("GIT_TERMINAL_PROMPT") == "0"
+
+    def test_gitlab_prefers_gitlab_apm_pat_over_github_token(self):
+        env = {
+            "GITLAB_APM_PAT": "glpat_primary",
+            "GITHUB_TOKEN": "gh_actions_token",
+            "GITHUB_APM_PAT": "ghp_should_not_pick",
+            "GH_TOKEN": "gh_cli_token",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("gitlab.com")
+        assert ctx.token == "glpat_primary"
+        assert ctx.source == "GITLAB_APM_PAT"
+        assert ctx.host_info.kind == "gitlab"
+
+    def test_gitlab_uses_gitlab_token_when_gitlab_apm_pat_absent(self):
+        env = {"GITLAB_TOKEN": "glpat_from_gitlab_token", "GITHUB_TOKEN": "gh_should_ignore"}
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("gitlab.com")
+        assert ctx.token == "glpat_from_gitlab_token"
+        assert ctx.source == "GITLAB_TOKEN"
+
+    def test_gitlab_returns_none_when_only_github_env_vars(self):
+        env = {
+            "GITHUB_TOKEN": "gh_only",
+            "GH_TOKEN": "gh_cli_only",
+            "GITHUB_APM_PAT": "github_apm_pat_only",
+            "GITHUB_APM_PAT_MYGROUP": "per_org_github",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("gitlab.com", org="mygroup")
+        assert ctx.token is None
+        assert ctx.source == "none"
+
+    def test_gitlab_uses_github_per_org_var_is_not_selected(self):
+        """Namespace segment must not activate GITHUB_APM_PAT_<ORG> on GitLab."""
+        env = {
+            "GITHUB_APM_PAT_ACME": "ghp_github_org_token",
+            "GITLAB_TOKEN": "glpat_correct",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("gitlab.com", org="acme")
+        assert ctx.token == "glpat_correct"
+        assert ctx.source == "GITLAB_TOKEN"
+
+    def test_gitlab_fallback_to_git_credential_when_no_gitlab_env(self):
+        with patch.dict(
+            os.environ,
+            {"GITHUB_TOKEN": "ignored", "GITHUB_APM_PAT": "ignored2"},
+            clear=True,
+        ):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value="from-helper"
+            ):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("gitlab.com")
+        assert ctx.token == "from-helper"
+        assert ctx.source == "git-credential-fill"
+
+    def test_generic_host_does_not_use_github_or_gitlab_env_tokens(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_TOKEN": "gh_bb",
+                "GH_TOKEN": "gh_cli_bb",
+                "GITHUB_APM_PAT": "apm_bb",
+                "GITLAB_TOKEN": "glpat_bb",
+                "GITLAB_APM_PAT": "glpat_apm_bb",
+            },
+            clear=True,
+        ):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("bitbucket.org")
+        assert ctx.token is None
+        assert ctx.source == "none"
+        assert ctx.host_info.kind == "generic"
+
+    def test_generic_host_uses_credential_helper_when_configured(self):
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "ignored"}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value="bb-cred"
+            ):
+                resolver = AuthResolver()
+                ctx = resolver.resolve("bitbucket.org")
+        assert ctx.token == "bb-cred"
+        assert ctx.source == "git-credential-fill"
 
 
 # ---------------------------------------------------------------------------
@@ -445,19 +597,17 @@ class TestTryWithFallback:
 
     def test_no_credential_fallback_when_source_is_credential(self):
         """When token already came from git-credential-fill, no retry on failure."""
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value="cred-token"
-            ),
-        ):
-            resolver = AuthResolver()
+            ):
+                resolver = AuthResolver()
 
-            def op(token, env):
-                raise RuntimeError("Bad credentials")
+                def op(token, env):
+                    raise RuntimeError("Bad credentials")
 
-            with pytest.raises(RuntimeError, match="Bad credentials"):
-                resolver.try_with_fallback("contoso.ghe.com", op)
+                with pytest.raises(RuntimeError, match="Bad credentials"):
+                    resolver.try_with_fallback("contoso.ghe.com", op)
 
     def test_credential_fallback_on_auth_first_path(self):
         """Auth-first on public host: auth fails, unauth fails → credential fill kicks in."""
@@ -529,6 +679,38 @@ class TestBuildErrorContext:
                 resolver = AuthResolver()
                 msg = resolver.build_error_context("github.com", "clone", org="microsoft")
                 assert "GITHUB_APM_PAT_MICROSOFT" in msg
+
+    def test_gitlab_no_token_mentions_gitlab_env_not_github(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("gitlab.com", "clone")
+        assert "GITLAB_APM_PAT" in msg
+        assert "GITLAB_TOKEN" in msg
+        assert "GITHUB_TOKEN" not in msg
+
+    def test_gitlab_with_token_no_github_settings_link(self):
+        with patch.dict(os.environ, {"GITLAB_TOKEN": "glpat"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("gitlab.com", "fetch")
+        assert "GITLAB_TOKEN" in msg
+        assert "github.com/settings/tokens" not in msg
+
+    def test_generic_no_token_excludes_github_remediation(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("bitbucket.org", "clone")
+        assert "GITHUB_APM_PAT" not in msg
+        assert "GITHUB_TOKEN" not in msg
+
+    def test_gitlab_org_does_not_suggest_github_per_org_var(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("gitlab.com", "clone", org="acme-group")
+        assert "GITHUB_APM_PAT_" not in msg
 
     def test_token_present_shows_source(self):
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_tok"}, clear=True):
@@ -887,6 +1069,37 @@ class TestHostInfoPort:
         assert hi.kind == "github"
         assert hi.port == 8443
 
+    def test_display_name_suppresses_default_port_443(self):
+        """Defence-in-depth: display_name never renders well-known default ports."""
+        hi = HostInfo(
+            host="github.com",
+            kind="github",
+            has_public_repos=True,
+            api_base="x",
+            port=443,
+        )
+        assert hi.display_name == "github.com"
+
+    def test_display_name_suppresses_default_port_22(self):
+        hi = HostInfo(
+            host="gitlab.com",
+            kind="generic",
+            has_public_repos=True,
+            api_base="x",
+            port=22,
+        )
+        assert hi.display_name == "gitlab.com"
+
+    def test_display_name_suppresses_default_port_80(self):
+        hi = HostInfo(
+            host="internal.git",
+            kind="generic",
+            has_public_repos=True,
+            api_base="x",
+            port=80,
+        )
+        assert hi.display_name == "internal.git"
+
 
 # ---------------------------------------------------------------------------
 # TestResolvePortDiscrimination -- same host, different ports must not
@@ -1033,7 +1246,7 @@ class TestTryWithFallbackWithPort:
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
             captured: list = []
 
-            def fake_cred(host, port=None):
+            def fake_cred(host, port=None, path=None):
                 captured.append((host, port))
                 return "good"
 
@@ -1050,3 +1263,85 @@ class TestTryWithFallbackWithPort:
                 result = resolver.try_with_fallback("contoso.ghe.com", op, port=8443)
         assert result == "ok"
         assert captured == [("contoso.ghe.com", 8443)]
+
+
+class TestTryWithFallbackPathDisambiguation:
+    """try_with_fallback must thread `path` to credential fill (per-URL GCM)."""
+
+    def test_path_threaded_to_credential_fallback(self):
+        """When env token fails, path is forwarded to resolve_credential_from_git."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
+            seen_kwargs: list = []
+
+            def fake_cred(host, port=None, path=None):
+                seen_kwargs.append({"host": host, "port": port, "path": path})
+                return "good"
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
+            ):
+                resolver = AuthResolver()
+
+                def op(token, env):
+                    if token != "good":
+                        raise RuntimeError("rejected")
+                    return "ok"
+
+                result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
+        assert result == "ok"
+        assert seen_kwargs == [{"host": "github.com", "port": None, "path": "acme/widgets"}]
+
+    def test_path_default_none_preserves_legacy_call(self):
+        """Callers that omit path still invoke credential fill with path=None."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
+            seen_kwargs: list = []
+
+            def fake_cred(host, port=None, path=None):
+                seen_kwargs.append({"host": host, "port": port, "path": path})
+                return "good"
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
+            ):
+                resolver = AuthResolver()
+
+                def op(token, env):
+                    if token != "good":
+                        raise RuntimeError("rejected")
+                    return "ok"
+
+                resolver.try_with_fallback("github.com", op)
+        assert seen_kwargs == [{"host": "github.com", "port": None, "path": None}]
+
+
+class TestGhCliShortCircuitsCredentialFill:
+    """Regression trap: when gh CLI returns a token, credential fill must NOT run.
+
+    PR #630 added gh-CLI as the second resolver in the fallback chain. Without
+    this trap, a refactor that re-orders the chain (or accidentally calls
+    resolve_credential_from_git unconditionally) would silently re-introduce
+    the GCM account-picker prompt for users who configured gh.
+    """
+
+    def test_gh_cli_success_skips_credential_fill(self):
+        """resolve_credential_from_git must not be invoked when gh CLI returns a token."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
+            with patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_from_gh_cli",
+            ):
+                with patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git"
+                ) as mock_cred_fill:
+                    resolver = AuthResolver()
+
+                    def op(token, env):
+                        if token != "gho_from_gh_cli":
+                            raise RuntimeError("rejected")
+                        return f"ok:{token}"
+
+                    result = resolver.try_with_fallback("github.com", op, path="acme/widgets")
+
+            assert result == "ok:gho_from_gh_cli"
+            mock_cred_fill.assert_not_called()

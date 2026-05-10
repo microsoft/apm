@@ -352,7 +352,40 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
 # credential-leakage guard at registration time uses the same single source of
 # truth as the fetch-time guard in marketplace/client.py. Adding a second
 # implementation here would create silent drift on a security-critical path.
-_TRUSTED_MARKETPLACE_HOST_KINDS = ("github", "ghe_cloud", "ghes")
+_TRUSTED_MARKETPLACE_HOST_KINDS = ("github", "ghe_cloud", "ghes", "gitlab")
+
+
+def _marketplace_add_unsupported_host_error(
+    resolved_host: str,
+    quoted_repo: str,
+    quoted_host: str,
+    host_kind: str,
+) -> str:
+    """User-facing error when ``apm marketplace add`` rejects the resolved host.
+
+    *quoted_repo* and *quoted_host* must already be ``shlex.quote``-safe for shell
+    copy-paste (see call sites).
+    """
+    if host_kind == "ado":
+        return (
+            f"Host '{resolved_host}' is not supported for marketplace registration.\n"
+            "APM marketplaces must be hosted on GitHub, GitHub Enterprise, or GitLab."
+        )
+    return (
+        f"Host '{resolved_host}' is not supported.\n"
+        "Supported marketplace hosts: github.com, *.ghe.com, "
+        "GitHub Enterprise Server (configure GITHUB_HOST), "
+        "and GitLab (gitlab.com or self-managed via GITLAB_HOST or APM_GITLAB_HOSTS).\n\n"
+        "To use GitHub Enterprise Server on this host:\n"
+        f"  export GITHUB_HOST={quoted_host}\n"
+        "Then re-run:\n"
+        f"  apm marketplace add {quoted_repo}\n\n"
+        "To use self-managed GitLab on this host:\n"
+        f"  export GITLAB_HOST={quoted_host}\n"
+        "(or list the host in APM_GITLAB_HOSTS for multiple instances.)\n"
+        "Then re-run:\n"
+        f"  apm marketplace add {quoted_repo}\n"
+    )
 
 
 @marketplace.command(help="Register a marketplace")
@@ -404,22 +437,16 @@ def add(repo, name, branch, host, verbose):
         # single classification implementation.
         from ...core.auth import AuthResolver
 
-        if AuthResolver.classify_host(resolved_host).kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
-            # Build a one-copy-paste recovery: tell the GHES user the exact
-            # export and the exact re-run command, with the resolved host
-            # and original repo string interpolated and shell-quoted.
+        host_info = AuthResolver.classify_host(resolved_host)
+        if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
             import shlex as _shlex
 
             quoted_repo = _shlex.quote(repo)
             quoted_host = _shlex.quote(resolved_host)
             logger.error(
-                f"Host '{resolved_host}' is not supported.\n"
-                f"Supported hosts: github.com, *.ghe.com, "
-                f"or the host set via GITHUB_HOST.\n"
-                f"To use this host:\n"
-                f"  export GITHUB_HOST={quoted_host}\n"
-                f"Then re-run:\n"
-                f"  apm marketplace add {quoted_repo}"
+                _marketplace_add_unsupported_host_error(
+                    resolved_host, quoted_repo, quoted_host, host_info.kind
+                )
             )
             sys.exit(1)
 

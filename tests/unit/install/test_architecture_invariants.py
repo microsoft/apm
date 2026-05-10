@@ -165,12 +165,25 @@ def test_install_py_under_legacy_budget():
     v0.12.4 (orphan-cleanup gate) raised 1840 -> 1855 to add the
     ``_has_orphan_deps_in_lock`` short-circuit so emptying apm.yml
     actually removes deployed files (regression dating back to #1116).
+
+    Issue #<TBD> (test re-export restoration) raised 1855 -> 1950 to land
+    module-level re-exports for 15 names that tests still import from
+    apm_cli.commands.install (_copy_local_package, _has_local_apm_content,
+    _local_path_no_markers_hint, _collect_insecure_dependency_infos,
+    _format_insecure_dependency_warning,
+    _guard_transitive_insecure_dependencies, _InsecureDependencyInfo,
+    _hash_deployed, _rich_success, DiagnosticCollector,
+    _pre_deploy_security_scan, _add_mcp_to_apm_yml, _build_mcp_entry,
+    _integrate_package_primitives, _integrate_local_content). The
+    re-exports are mechanical aliases over already-extracted helpers and
+    add no new logic. The pending --mcp extraction will recover this
+    budget.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1855, (
-        f"commands/install.py grew to {n} LOC (budget 1855). "
+    assert n <= 1950, (
+        f"commands/install.py grew to {n} LOC (budget 1950). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."
