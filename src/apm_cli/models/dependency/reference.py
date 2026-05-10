@@ -1078,16 +1078,24 @@ class DependencyReference:
         return parsed_url, host
 
     @classmethod
-    def _validate_url_repo_path(cls, parsed_url):
+    def _validate_url_repo_path(cls, parsed_url) -> tuple[str, str | None]:
         """Validate and normalise the repository path from a parsed URL.
 
         Checks host support, strips ``.git`` suffixes, removes ``_git``
         segments, and validates each path component against the allowed
         character set for the detected host type.
 
+        For Azure DevOps URLs with extra path segments beyond
+        ``org/project/repo`` (e.g.
+        ``https://dev.azure.com/org/proj/_git/repo/sub/path``), the extra
+        segments are extracted as a virtual package path and validated with
+        the same rules as the shorthand virtual-path detector.
+
         Returns:
-            repo_url (str): Normalised repository path
-                (e.g. ``owner/repo`` or ``org/project/repo``).
+            ``(repo_url, virtual_path)`` where *repo_url* is the normalised
+            base repository path (e.g. ``owner/repo`` or
+            ``org/project/repo``) and *virtual_path* is ``None`` unless
+            extra ADO sub-path segments were detected.
         """
         hostname = parsed_url.hostname or ""
         if not is_supported_git_host(hostname):
@@ -1107,11 +1115,46 @@ class DependencyReference:
 
         is_ado_host = is_azure_devops_hostname(hostname)
 
+        url_virtual_path: str | None = None
+
         if is_ado_host:
-            if len(path_parts) != 3:
+            if len(path_parts) < 3:
                 raise ValueError(
                     f"Invalid Azure DevOps repository path: expected 'org/project/repo', got '{path}'"
                 )
+            if len(path_parts) > 3:
+                # Extra segments are a virtual sub-path (e.g. sub/path in
+                # https://dev.azure.com/org/proj/_git/repo/sub/path).
+                ado_virtual = "/".join(path_parts[3:])
+
+                # Security: reject path traversal in virtual path.
+                validate_path_segments(ado_virtual, context="virtual path")
+
+                # Reject removed .collection.yml extensions.
+                if any(ado_virtual.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+                    raise ValueError(
+                        f".collection.yml is no longer supported. "
+                        f"Convert '{ado_virtual}' to an apm.yml with a "
+                        f"'dependencies' section. "
+                        f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                    )
+
+                # Accept any recognised virtual file extension; reject other
+                # dotted final segments (mirrors shorthand virtual detection).
+                if any(ado_virtual.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+                    pass
+                else:
+                    last_segment = ado_virtual.split("/")[-1]
+                    if "." in last_segment:
+                        raise InvalidVirtualPackageExtensionError(
+                            f"Invalid virtual package path '{ado_virtual}'. "
+                            f"Individual files must end with one of: "
+                            f"{', '.join(cls.VIRTUAL_FILE_EXTENSIONS)}. "
+                            f"For subdirectory packages, the path should not have a file extension."
+                        )
+
+                url_virtual_path = ado_virtual
+                path_parts = path_parts[:3]
         else:
             if len(path_parts) < 2:
                 raise ValueError(
@@ -1134,19 +1177,25 @@ class DependencyReference:
             if not re.match(allowed_pattern, part):
                 raise ValueError(f"Invalid repository path component: {part}")
 
-        return "/".join(path_parts)
+        return "/".join(path_parts), url_virtual_path
 
     @classmethod
     def _parse_standard_url(
-        cls, dependency_str: str, is_virtual_package: bool, virtual_path, validated_host
-    ):
+        cls,
+        dependency_str: str,
+        is_virtual_package: bool,
+        virtual_path: str | None,
+        validated_host: str | None,
+    ) -> tuple[str, int | None, str, str | None, str | None, bool, str | None]:
         """Parse a non-SSH dependency string (HTTPS, FQDN, or shorthand).
 
         Detects scheme vs shorthand, delegates host-specific resolution to
         helpers, then validates the resulting URL path.
 
         Returns:
-            ``(host, port, repo_url, reference, alias)``
+            ``(host, port, repo_url, reference, alias, effective_is_virtual,
+            effective_virtual_path)`` -- the last two reflect any ADO sub-path
+            segments embedded in the URL itself (issue #1128).
         """
         host = None
         port = None
@@ -1185,12 +1234,21 @@ class DependencyReference:
         else:
             parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
 
-        repo_url = cls._validate_url_repo_path(parsed_url)
+        repo_url, url_virtual_path = cls._validate_url_repo_path(parsed_url)
+
+        # If URL contained extra ADO sub-path segments, they become the virtual
+        # path (overriding the _detect_virtual_package result which returns
+        # early for https:// URLs).
+        effective_is_virtual = is_virtual_package
+        effective_virtual_path = virtual_path
+        if url_virtual_path is not None:
+            effective_is_virtual = True
+            effective_virtual_path = url_virtual_path
 
         if not host:
             host = default_host()
 
-        return host, port, repo_url, reference, alias
+        return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
     @classmethod
     def _validate_final_repo_fields(cls, host, repo_url):
@@ -1333,8 +1391,10 @@ class DependencyReference:
                 host, port, repo_url, reference, alias = scp_result
                 explicit_scheme = "ssh"
             else:
-                host, port, repo_url, reference, alias = cls._parse_standard_url(
-                    dependency_str, is_virtual_package, virtual_path, validated_host
+                host, port, repo_url, reference, alias, is_virtual_package, virtual_path = (
+                    cls._parse_standard_url(
+                        dependency_str, is_virtual_package, virtual_path, validated_host
+                    )
                 )
                 _stripped = dependency_str.strip().lower()
                 if _stripped.startswith("https://"):

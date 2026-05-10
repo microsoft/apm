@@ -615,3 +615,47 @@ class TestADOPruneCommand:
         ado_parts = ["org", "project", "repo"]
         ado_path = base.joinpath(*ado_parts)
         assert ado_path.as_posix().endswith("/tmp/apm_modules/org/project/repo")
+
+
+class TestADOFullURLSubPath:
+    """Test 8-shape matrix for ADO URL parsing (issue #1128)."""
+
+    @pytest.mark.parametrize(
+        "input_str,expected_virtual,expected_virtual_path,expected_ref",
+        [
+            # Case 1: shorthand base
+            ("dev.azure.com/org/proj/_git/repo", False, None, None),
+            # Case 2: shorthand + virtual
+            ("dev.azure.com/org/proj/_git/repo/sub/path", True, "sub/path", None),
+            # Case 3: shorthand + ref
+            ("dev.azure.com/org/proj/_git/repo#main", False, None, "main"),
+            # Case 4: shorthand + virtual + ref
+            ("dev.azure.com/org/proj/_git/repo/sub/path#main", True, "sub/path", "main"),
+            # Case 5: full URL base
+            ("https://dev.azure.com/org/proj/_git/repo", False, None, None),
+            # Case 6: full URL + ref
+            ("https://dev.azure.com/org/proj/_git/repo#main", False, None, "main"),
+            # Case 7: full URL + virtual (THE BUG)
+            ("https://dev.azure.com/org/proj/_git/repo/sub/path", True, "sub/path", None),
+            # Case 8: full URL + virtual + ref (THE BUG)
+            ("https://dev.azure.com/org/proj/_git/repo/sub/path#main", True, "sub/path", "main"),
+        ],
+    )
+    def test_ado_url_matrix(
+        self,
+        input_str: str,
+        expected_virtual: bool,
+        expected_virtual_path: str | None,
+        expected_ref: str | None,
+    ) -> None:
+        """All 8 ADO URL forms parse correctly (issue #1128)."""
+        dep = DependencyReference.parse(input_str)
+
+        assert dep.host == "dev.azure.com"
+        assert dep.repo_url == "org/proj/repo"
+        assert dep.ado_organization == "org"
+        assert dep.ado_project == "proj"
+        assert dep.ado_repo == "repo"
+        assert dep.is_virtual == expected_virtual
+        assert dep.virtual_path == expected_virtual_path
+        assert dep.reference == expected_ref
