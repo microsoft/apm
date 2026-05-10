@@ -52,8 +52,10 @@ def temp_project(tmp_path):
         "  mcp: []\n"
     )
 
-    # Create .github folder so VSCode target is detected
+    # Create .github/copilot-instructions.md so the copilot target is
+    # detected (post-#1154 the bare directory is no longer a signal).
     (project_dir / ".github").mkdir()
+    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
 
     return project_dir
 

@@ -340,14 +340,18 @@ def test_azure_devops_virtual_collection_not_flagged_as_orphan(tmp_path):
     with open(project_dir / "apm.yml", "w") as f:
         yaml.dump(apm_yml_content, f)
 
-    # Simulate installed ADO virtual collection package
-    # ADO 3-level structure: apm_modules/org/project/virtual-pkg-name
+    # Simulate installed ADO virtual collection package.
+    # Per #1094, virtual collection packages now use the SUBDIRECTORY layout,
+    # so the on-disk structure preserves the natural path:
+    #   apm_modules/org/project/repo/collections/<name>
     collection_dir = (
         project_dir
         / "apm_modules"
         / "company"
         / "my-azurecollection"
-        / "copilot-instructions-csharp-ddd-cleanarchitecture"
+        / "copilot-instructions"
+        / "collections"
+        / "csharp-ddd-cleanarchitecture"
     )
     collection_dir.mkdir(parents=True)
 
@@ -375,9 +379,9 @@ def test_azure_devops_virtual_collection_not_flagged_as_orphan(tmp_path):
         f"ADO virtual collection should not be flagged as orphaned. Found: {orphaned_packages}. Expected: {expected_installed}"
     )
 
-    # Verify the expected path is correct for ADO 3-level structure
+    # Verify the expected path is correct for ADO virtual subdirectory layout
     assert (
-        "company/my-azurecollection/copilot-instructions-csharp-ddd-cleanarchitecture"
+        "company/my-azurecollection/copilot-instructions/collections/csharp-ddd-cleanarchitecture"
         in expected_installed
     )
 
@@ -452,11 +456,13 @@ def test_get_dependency_declaration_order_ado_virtual(tmp_path):
     # Get dependency order
     dep_order = get_dependency_declaration_order(str(project_dir))
 
-    # Should return the correct installed path for ADO virtual collection
+    # Should return the correct installed path for ADO virtual collection.
+    # Per #1094, virtual collection packages use the SUBDIRECTORY layout
+    # (natural slash path), not the flattened name.
     assert len(dep_order) == 1
     assert (
         dep_order[0]
-        == "company/my-azurecollection/copilot-instructions-csharp-ddd-cleanarchitecture"
+        == "company/my-azurecollection/copilot-instructions/collections/csharp-ddd-cleanarchitecture"
     )
 
 
@@ -495,8 +501,8 @@ def test_get_dependency_declaration_order_mixed_github_and_ado(tmp_path):
     )  # GitHub virtual subdirectory: owner/repo/subdir
     assert dep_order[2] == "company/project/repo"  # ADO regular: org/project/repo
     assert (
-        dep_order[3] == "company/my-azurecollection/copilot-instructions-csharp-ddd"
-    )  # ADO virtual: org/project/virtual-pkg-name
+        dep_order[3] == "company/my-azurecollection/copilot-instructions/collections/csharp-ddd"
+    )  # ADO virtual subdirectory: org/project/repo/collections/<name>
 
 
 @pytest.mark.integration

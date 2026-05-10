@@ -67,6 +67,7 @@ def _seed_local_content(project: Path) -> None:
     # .github/ already-exists triggers copilot target detection (and the
     # default fallback is also copilot, so this is belt-and-suspenders).
     (project / ".github").mkdir()
+    (project / ".github" / "copilot-instructions.md").write_text("# test\n")
 
 
 def _make_project(tmp_path: Path, *, includes=None) -> Path:

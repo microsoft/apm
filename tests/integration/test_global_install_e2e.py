@@ -216,6 +216,7 @@ class TestGlobalInstallDeploysRealPackage:
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / ".github").mkdir()
+        (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
         (project_dir / "apm.yml").write_text(
             yaml.dump(
                 {

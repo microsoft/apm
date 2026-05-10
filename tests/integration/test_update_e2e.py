@@ -228,7 +228,7 @@ def _write_apm_yml_with_ref(project_dir: Path, package: str, *, ref: str) -> Non
         "name": "update-test",
         "version": "1.0.0",
         "dependencies": {
-            "apm": [{"repo": package, "ref": ref}],
+            "apm": [{"git": package, "ref": ref}],
             "mcp": [],
         },
     }

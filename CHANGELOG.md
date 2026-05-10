@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
 - `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
 - Multi-account Git Credential Manager users: APM now selects the right GitHub account automatically per repository (no account-picker prompt) when `credential.useHttpPath = true` is set. Existing single-account setups are unaffected. (#1226)
+- `apm install --global <abs-local-path>` no longer rejects absolute local paths at user scope (regression introduced by #1149); restores the post-#937 contract that only relative local paths are ambiguous at user scope. (#1247)
+- Realigned the failing integration suite with current product contracts: copilot-target detection requires `.github/copilot-instructions.md` (post-#1154), `apm marketplace build` is removed in favor of `apm pack`, ADO virtual collections use the SUBDIRECTORY layout (post-#1094), and the `repo:` apm.yml key is replaced by `git:`. (#1247)
 
 ## [0.12.4] - 2026-05-07
 

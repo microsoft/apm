@@ -256,11 +256,13 @@ class TestBuildCLI:
     """Tests that invoke `apm marketplace build` via subprocess."""
 
     def test_missing_yml_exits_1(self, tmp_path: Path):
-        """Missing marketplace.yml must exit 1."""
+        """`apm marketplace build` was removed; the stub exits 2 with a
+        deprecation message that points users at `apm pack`."""
         result = run_cli(["marketplace", "build"], cwd=tmp_path)
-        assert result.returncode == 1
+        assert result.returncode == 2
         combined = result.stdout + result.stderr
-        assert "marketplace.yml" in combined
+        assert "removed" in combined.lower()
+        assert "apm pack" in combined
 
     def test_schema_error_exits_2(self, tmp_path: Path):
         """Malformed marketplace.yml must exit 2."""
@@ -269,10 +271,12 @@ class TestBuildCLI:
         assert result.returncode == 2
 
     def test_dry_run_flag_present(self, tmp_path: Path, mock_ref_resolver):
-        """--dry-run must be accepted by the CLI (no crash)."""
+        """The removed `apm marketplace build` accepts --dry-run without
+        crashing on unknown args; exit is the deprecation code (2) and
+        there is no Python traceback."""
         _write_yml(tmp_path, MINIMAL_YML)
         result = run_cli(["marketplace", "build", "--dry-run"], cwd=tmp_path)
-        # Without real network, build will fail resolving refs; exit != 0 is OK.
-        # Key check: exit code is not 2 (schema error) and no Python traceback.
-        assert result.returncode != 2
+        assert result.returncode == 2
         assert "Traceback" not in result.stderr
+        combined = result.stdout + result.stderr
+        assert "removed" in combined.lower()
