@@ -86,7 +86,10 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
 
     if dep_ref.is_local and scope is InstallScope.USER:
         local_path = dep_ref.local_path or ""
-        if not Path(local_path).is_absolute():
+        # Match the rest of the install pipeline (sources.py, phases/resolve.py)
+        # which expanduser()s local paths before consuming them: `~/pkg` is
+        # absolute after expansion and must NOT be rejected here.
+        if not Path(local_path).expanduser().is_absolute():
             return (
                 "relative local paths are not supported at user scope (--global). "
                 "Use an absolute path or a remote reference (owner/repo) instead"

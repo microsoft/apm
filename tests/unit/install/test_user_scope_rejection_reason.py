@@ -122,6 +122,19 @@ def test_user_scope_accepts_absolute_local_path(tmp_path):
     assert user_scope_rejection_reason(_local_ref(abs_path), scope=InstallScope.USER) is None
 
 
+@pytest.mark.parametrize("tilde_path", ["~/pkg", "~/sub/pkg"])
+def test_user_scope_accepts_tilde_local_path(tilde_path):
+    """`~/pkg` is absolute after expanduser() and must NOT be rejected.
+
+    The rest of the install pipeline (sources.py, phases/resolve.py)
+    expanduser()s local paths before consuming them, so a `~`-prefixed
+    path reaches `_copy_local_package` as an absolute path. The
+    rejection predicate must mirror that contract -- without it, every
+    `apm install --global ~/pkg` invocation is incorrectly rejected.
+    """
+    assert user_scope_rejection_reason(_local_ref(tilde_path), scope=InstallScope.USER) is None
+
+
 def test_user_scope_handles_empty_local_path_defensively():
     """A malformed ref with empty local_path is treated as relative (rejected).
 
