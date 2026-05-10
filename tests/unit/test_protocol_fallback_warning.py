@@ -399,6 +399,8 @@ class TestConcurrentFallbackWarning:
                 captured.append((message, symbol))
 
         barrier = threading.Barrier(4)
+        worker_errors: list[BaseException] = []
+        errors_lock = threading.Lock()
 
         def _worker():
             with (
@@ -414,7 +416,12 @@ class TestConcurrentFallbackWarning:
                 ),
             ):
                 MockRepo.clone_from.side_effect = _fake_clone
-                barrier.wait()
+                try:
+                    barrier.wait(timeout=10)
+                except threading.BrokenBarrierError as exc:
+                    with errors_lock:
+                        worker_errors.append(exc)
+                    return
                 target = Path(tempfile.mkdtemp())
                 try:
                     dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
@@ -428,6 +435,16 @@ class TestConcurrentFallbackWarning:
             t.start()
         for t in threads:
             t.join(timeout=10)
+
+        assert not worker_errors, (
+            f"Worker(s) failed to reach the barrier within the timeout "
+            f"(barrier broken or slow start): {worker_errors}"
+        )
+        for t in threads:
+            assert not t.is_alive(), (
+                f"Thread {t.name!r} is still alive after join(timeout=10); "
+                "the worker may have hung inside _clone_with_fallback"
+            )
 
         port_warnings = [msg for msg, sym in captured if "Custom port" in msg]
         assert len(port_warnings) == 1, (
