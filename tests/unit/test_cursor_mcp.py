@@ -200,7 +200,7 @@ class TestCursorFormatServerConfig(unittest.TestCase):
 
     # -- helpers --
 
-    _COPILOT_ONLY_KEYS = ("type", "tools", "id")
+    _COPILOT_ONLY_KEYS = ("tools", "id")
 
     def _assert_no_copilot_fields(self, config):
         for key in self._COPILOT_ONLY_KEYS:
@@ -208,8 +208,8 @@ class TestCursorFormatServerConfig(unittest.TestCase):
 
     # -- tests --
 
-    def test_format_stdio_server_no_copilot_fields(self):
-        """Raw stdio server produces command/args/env, no type/tools/id."""
+    def test_format_stdio_server_emits_type_stdio(self):
+        """Raw stdio server produces type=stdio, command/args/env, no tools/id."""
         server_info = {
             "id": "abc-123",
             "name": "my-stdio-server",
@@ -221,13 +221,14 @@ class TestCursorFormatServerConfig(unittest.TestCase):
         }
         config = self.adapter._format_server_config(server_info)
 
+        self.assertEqual(config["type"], "stdio")
         self.assertEqual(config["command"], "node")
         self.assertIn("args", config)
         self.assertIn("env", config)
         self._assert_no_copilot_fields(config)
 
-    def test_format_remote_server_no_copilot_fields(self):
-        """Remote (HTTP) server produces url, no type/tools/id."""
+    def test_format_remote_server_emits_type_http(self):
+        """Remote (HTTP) server produces type=http, url, no tools/id."""
         server_info = {
             "id": "remote-456",
             "name": "my-remote-server",
@@ -240,11 +241,12 @@ class TestCursorFormatServerConfig(unittest.TestCase):
         }
         config = self.adapter._format_server_config(server_info)
 
+        self.assertEqual(config["type"], "http")
         self.assertEqual(config["url"], "https://mcp.example.com/sse")
         self._assert_no_copilot_fields(config)
 
-    def test_format_npm_package_no_copilot_fields(self):
-        """npm package server produces command=npx and args, no type/tools/id."""
+    def test_format_npm_package_emits_type_stdio(self):
+        """npm package server produces type=stdio, command=npx and args, no tools/id."""
         server_info = {
             "id": "npm-789",
             "name": "my-npm-server",
@@ -260,6 +262,7 @@ class TestCursorFormatServerConfig(unittest.TestCase):
         }
         config = self.adapter._format_server_config(server_info)
 
+        self.assertEqual(config["type"], "stdio")
         self.assertEqual(config["command"], "npx")
         self.assertIn("-y", config["args"])
         self.assertIn("@example/mcp-server", config["args"])

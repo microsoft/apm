@@ -1,8 +1,13 @@
 """Schema-fidelity integration tests for the Cursor MCP adapter.
 
 Verifies that ``apm install --target cursor`` writes ``.cursor/mcp.json``
-entries that conform to Cursor's native schema -- no Copilot-only fields
-(``type``, ``tools``, ``id``) may appear.  Regression guard for #844.
+entries that conform to Cursor's native schema:
+
+- ``type`` must be present and set to the correct transport discriminator
+  (``"stdio"`` for local/stdio servers, ``"http"`` for remote servers).
+- Copilot-only fields ``tools`` and ``id`` must never appear.
+
+Regression guard for #844.
 """
 
 import json
@@ -38,7 +43,7 @@ def _write_apm_yml(project_dir: Path, mcp_servers: list[dict]) -> None:
 
 
 # Keys that must NEVER appear in Cursor's .cursor/mcp.json entries.
-_COPILOT_ONLY_KEYS = {"type", "tools", "id"}
+_COPILOT_ONLY_KEYS = {"tools", "id"}
 
 
 def _assert_no_copilot_fields(server_config: dict, label: str) -> None:
@@ -53,7 +58,7 @@ def _assert_no_copilot_fields(server_config: dict, label: str) -> None:
 class TestCursorStdioSchemaFidelity:
     """Verify stdio MCP servers produce Cursor-native schema on disk."""
 
-    def test_stdio_server_has_no_copilot_fields(self, tmp_path, apm_command):
+    def test_stdio_server_emits_type_stdio(self, tmp_path, apm_command):
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / ".cursor").mkdir()
@@ -99,6 +104,7 @@ class TestCursorStdioSchemaFidelity:
         )
 
         server = servers["test-stdio-server"]
+        assert server["type"] == "stdio", f"Expected type='stdio', got: {server.get('type')!r}"
         assert server["command"] == "echo"
         assert "args" in server
         assert "--greeting" in server["args"]
@@ -109,7 +115,7 @@ class TestCursorStdioSchemaFidelity:
 class TestCursorHttpSchemaFidelity:
     """Verify HTTP MCP servers produce Cursor-native schema on disk."""
 
-    def test_http_server_has_no_copilot_fields(self, tmp_path, apm_command):
+    def test_http_server_emits_type_http(self, tmp_path, apm_command):
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / ".cursor").mkdir()
@@ -153,5 +159,6 @@ class TestCursorHttpSchemaFidelity:
         )
 
         server = servers["test-http-server"]
+        assert server["type"] == "http", f"Expected type='http', got: {server.get('type')!r}"
         assert server["url"] == "https://example.com/mcp"
         _assert_no_copilot_fields(server, "http")

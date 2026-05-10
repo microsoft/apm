@@ -1,12 +1,12 @@
 """Cursor IDE implementation of MCP client adapter.
 
 Cursor uses the standard ``mcpServers`` JSON format at ``.cursor/mcp.json``
-(repo-local).  The config schema is identical to GitHub Copilot CLI, so this
-adapter subclasses :class:`CopilotClientAdapter` and only overrides the
-config-path logic and the user-facing labels.
+(repo-local).  Unlike the Copilot adapter, this adapter emits Cursor-native
+transport discriminators (``type: stdio`` / ``type: http``) and omits
+Copilot-only fields (``tools``, ``id``).
 
 APM only writes to ``.cursor/mcp.json`` when the ``.cursor/`` directory
-already exists — Cursor support is opt-in.
+already exists -- Cursor support is opt-in.
 """
 
 import json
@@ -21,10 +21,9 @@ from .copilot import CopilotClientAdapter
 class CursorClientAdapter(CopilotClientAdapter):
     """Cursor IDE MCP client adapter.
 
-    Inherits all config formatting from :class:`CopilotClientAdapter`
-    (``mcpServers`` JSON with ``command``/``args``/``env``).  Only the
-    config-file location differs: repo-local ``.cursor/mcp.json`` instead
-    of global ``~/.copilot/mcp-config.json``.
+    Inherits config-path and read/write logic from
+    :class:`CopilotClientAdapter` but overrides ``_format_server_config`` to
+    emit Cursor-native transport discriminators instead of Copilot-only fields.
     """
 
     supports_user_scope: bool = False
@@ -45,14 +44,14 @@ class CursorClientAdapter(CopilotClientAdapter):
         """Return the path to ``.cursor/mcp.json`` in the repository root.
 
         Unlike the Copilot adapter this is a **repo-local** path.  The
-        ``.cursor/`` directory is *not* created automatically — APM only
+        ``.cursor/`` directory is *not* created automatically -- APM only
         writes here when the directory already exists.
         """
         cursor_dir = self.project_root / ".cursor"
         return str(cursor_dir / "mcp.json")
 
     # ------------------------------------------------------------------ #
-    # Config read / write — override to avoid auto-creating the directory
+    # Config read / write -- override to avoid auto-creating the directory
     # ------------------------------------------------------------------ #
 
     def update_config(self, config_updates):
@@ -90,15 +89,19 @@ class CursorClientAdapter(CopilotClientAdapter):
             return {}
 
     # ------------------------------------------------------------------ #
-    # _format_server_config — Cursor-native schema
+    # _format_server_config -- Cursor-native schema
     # ------------------------------------------------------------------ #
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
         """Format server info into Cursor MCP configuration.
 
-        Cursor infers transport from which key is present (``command`` for
-        stdio, ``url`` for remote) and does not recognise Copilot-only
-        fields ``type``, ``tools``, or ``id``.
+        Cursor uses a transport discriminator field ``type`` to determine how
+        to launch an MCP server:
+
+        - ``"type": "stdio"`` for local process servers (raw stdio or packages)
+        - ``"type": "http"`` for remote HTTP/SSE servers
+
+        Copilot-only fields ``tools`` and ``id`` are never emitted.
 
         Args:
             server_info: Server information from registry.
@@ -116,6 +119,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         # --- raw stdio (self-defined deps) ---
         raw = server_info.get("_raw_stdio")
         if raw:
+            config["type"] = "stdio"
             config["command"] = raw["command"]
             resolved_env_for_args: dict = {}
             if raw.get("env"):
@@ -148,6 +152,7 @@ class CursorClientAdapter(CopilotClientAdapter):
                     f"Supported transports: http, sse, streamable-http."
                 )
 
+            config["type"] = "http"
             config["url"] = (remote.get("url") or "").strip()
 
             # Add authentication headers for GitHub MCP server
@@ -212,6 +217,8 @@ class CursorClientAdapter(CopilotClientAdapter):
                     package_arguments, resolved_env, runtime_vars
                 )
 
+                config["type"] = "stdio"
+
                 if registry_name == "npm":
                     config["command"] = runtime_hint or "npx"
                     config["args"] = (
@@ -252,7 +259,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         return config
 
     # ------------------------------------------------------------------ #
-    # configure_mcp_server — thin override for the print label
+    # configure_mcp_server -- thin override for the print label
     # ------------------------------------------------------------------ #
 
     def configure_mcp_server(
