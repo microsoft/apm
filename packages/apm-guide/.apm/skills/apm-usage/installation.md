@@ -50,6 +50,19 @@ curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
 
+## Installer options (Windows PowerShell)
+
+Uses the same variables as `install.sh` where applicable (`GITHUB_URL`, `APM_REPO`, `VERSION`, `APM_INSTALL_DIR`). Pin a version to skip the releases/latest API (recommended offline).
+
+```powershell
+$env:VERSION = "v1.2.3"; irm https://aka.ms/apm-windows | iex
+
+$env:GITHUB_URL = "https://github.corp.com"
+$env:APM_REPO = "my-org/apm"
+$env:VERSION = "v1.2.3"
+irm https://aka.ms/apm-windows | iex
+```
+
 ## Troubleshooting
 
 - **macOS/Linux "command not found":** ensure your install directory (default `/usr/local/bin`) is in `$PATH`.

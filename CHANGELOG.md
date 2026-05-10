@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`install.ps1` (Windows)** now mirrors **`install.sh`**: `APM_INSTALL_DIR`, `GITHUB_URL`, `APM_REPO`, and `VERSION` environment variables; pinning `VERSION` skips the releases/latest API; `GITHUB_URL` selects GitHub.com (`api.github.com`) vs GHES (`{host}/api/v3`) for latest discovery. (#668)
 - Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
 - **GitLab host support:** `gitlab.com` and self-managed instances (via `GITLAB_HOST` / `APM_GITLAB_HOSTS`) use GitLab REST **v4** for `marketplace.json` and install-time raw file reads; nested GitLab group paths are disambiguated in dependency references with object-form `git:` + `path:` where shorthand is ambiguous. GitHub, GHES, Azure DevOps, and registry-proxy behavior remain unchanged. (#1149)
