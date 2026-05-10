@@ -98,14 +98,21 @@ system install:
    skip reason) and declare the marker in `pyproject.toml`. That is
    the only place the precondition needs to live.
 
-### Legacy: `scripts/test-integration.sh`
+### CI orchestrator: `scripts/test-integration.sh`
 
-`scripts/test-integration.sh` is the legacy wrapper that built a
-binary, set up runtimes, and shelled out to pytest. It is being
-retired (see `microsoft/apm#1166`); prefer the direct `pytest`
-invocations above. The script is still wired into CI for the moment
-and continues to work, but new test plumbing belongs in the marker
-registry, not in the bash script.
+`scripts/test-integration.sh` is the thin orchestrator the CI
+integration job invokes. Its sole responsibilities are: resolve
+GitHub / ADO tokens, detect platform, locate or build the apm
+PyInstaller binary, install runtimes (codex / copilot / llm),
+install python test dependencies, and run
+`pytest tests/integration/` once. All per-test gating lives in the
+marker registry described above; the script no longer enumerates
+individual test files. New integration tests dropped into
+`tests/integration/` are picked up automatically.
+
+For local iteration prefer the direct `pytest` invocations earlier
+on this page; the orchestrator script is mainly intended for
+reproducing the full CI environment end-to-end.
 
 ## CI/CD Integration
 
