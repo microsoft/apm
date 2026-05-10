@@ -1249,6 +1249,9 @@ class CopilotClientAdapter(MCPClientAdapter):
         if url:
             try:
                 parsed_url = urlparse(url)
+                # Reject non-HTTPS URLs to prevent cleartext token leakage
+                if parsed_url.scheme and parsed_url.scheme.lower() != "https":
+                    return False
                 hostname = parsed_url.hostname
             except Exception:
                 return False

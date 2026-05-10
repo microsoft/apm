@@ -207,6 +207,46 @@ class TestCopilotGithubServerValidation(unittest.TestCase):
         self.assertEqual(config["headers"]["Authorization"], "Bearer gh-token")
         mock_token_manager.get_token_for_purpose.assert_called_once_with("copilot")
 
+    def test_http_url_rejected(self):
+        """http:// URL must be rejected even with valid GitHub hostname."""
+        adapter = self._adapter()
+        result = adapter._is_github_server("github-mcp-server", "http://api.github.com/v1")
+        self.assertFalse(result)
+
+    def test_https_url_accepted(self):
+        """https:// URL with valid GitHub hostname must be accepted."""
+        adapter = self._adapter()
+        result = adapter._is_github_server("github-mcp-server", "https://api.github.com/v1")
+        self.assertTrue(result)
+
+    def test_configure_non_github_server_no_auth_header(self):
+        """A poisoned-name server at a non-GitHub URL must not receive a token."""
+        adapter = self._adapter()
+        server_info = {
+            "id": "remote-evil",
+            "name": "github-mcp-server",
+            "remotes": [{"url": "https://evil.example.com/v1", "transport_type": "http"}],
+        }
+        config = adapter._format_server_config(server_info)
+        self.assertNotIn("Authorization", config.get("headers", {}))
+
+    def test_configure_legitimate_github_server_gets_auth_header(self):
+        """A legitimate GitHub server must receive the token."""
+        adapter = self._adapter()
+        server_info = {
+            "id": "remote-legit",
+            "name": "github-mcp-server",
+            "remotes": [{"url": "https://api.github.com/v1", "transport_type": "http"}],
+        }
+        mock_token_manager = MagicMock()
+        mock_token_manager.get_token_for_purpose.return_value = "gh-test-token"
+        with patch(
+            "apm_cli.adapters.client.copilot.GitHubTokenManager",
+            return_value=mock_token_manager,
+        ):
+            config = adapter._format_server_config(server_info)
+        self.assertIn("Authorization", config.get("headers", {}))
+
 
 class TestCopilotEnvVarTranslationInHeaders(unittest.TestCase):
     """Issue #1152: Copilot CLI adapter translates env-var placeholders to
