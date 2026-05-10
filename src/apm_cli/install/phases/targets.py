@@ -305,7 +305,13 @@ def run(ctx: InstallContext) -> None:
         # User-scope: legacy target directory creation and logging.
         if ctx.logger:
             if _targets:
-                _target_names = ", ".join(f"{t.name} (~/{t.root_dir}/)" for t in _targets)
+
+                def _fmt_target(t):
+                    if t.resolved_deploy_root is not None:
+                        return f"{t.name} ({t.resolved_deploy_root})"
+                    return f"{t.name} (~/{t.root_dir}/)"
+
+                _target_names = ", ".join(_fmt_target(t) for t in _targets)
                 ctx.logger.verbose_detail(f"Active global targets: {_target_names}")
                 from apm_cli.deps.lockfile import get_lockfile_path
 

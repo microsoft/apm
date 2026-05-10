@@ -66,17 +66,19 @@ class HostInfo:
 
     @property
     def display_name(self) -> str:
-        """``host:port`` when a custom port is set, else bare ``host``.
+        """``host:port`` when a non-default port is set, else bare ``host``.
 
-        Use this wherever user-facing text identifies the host — errors, log
-        lines, diagnostic output. Bare ``host`` in those places misleads
-        users when port is what actually differentiates the target.
+        Well-known default ports (443, 80, 22) are suppressed even if
+        stored explicitly, as defence-in-depth against callers that
+        construct a ``HostInfo`` without prior normalisation.
 
-        Uses ``is not None`` (not truthy) for symmetry with the
-        ``host_info.port is not None`` checks elsewhere in the resolver and
-        to avoid silently dropping any non-default integer ports.
+        Use this wherever user-facing text identifies the host -- errors, log
+        lines, diagnostic output.
         """
-        return f"{self.host}:{self.port}" if self.port is not None else self.host
+        _well_known_default_ports = {443, 80, 22}
+        if self.port is not None and self.port not in _well_known_default_ports:
+            return f"{self.host}:{self.port}"
+        return self.host
 
 
 @dataclass
