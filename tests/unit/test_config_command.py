@@ -886,3 +886,29 @@ class TestFlagGatingRegression:
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
             result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/some/path"])
         assert result.exit_code == 1
+
+
+class TestValidConfigKeys:
+    """Tests for _valid_config_keys() feature-flag gating."""
+
+    def test_valid_config_keys_excludes_cowork_when_flag_off(self):
+        """copilot-cowork-skills-dir is hidden when the copilot_cowork flag is off."""
+        from apm_cli.commands.config import _valid_config_keys
+
+        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
+            result = _valid_config_keys()
+
+        assert "auto-integrate" in result
+        assert "temp-dir" in result
+        assert "copilot-cowork-skills-dir" not in result
+
+    def test_valid_config_keys_includes_cowork_when_flag_on(self):
+        """copilot-cowork-skills-dir is listed when the copilot_cowork flag is on."""
+        from apm_cli.commands.config import _valid_config_keys
+
+        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
+            result = _valid_config_keys()
+
+        assert "auto-integrate" in result
+        assert "temp-dir" in result
+        assert "copilot-cowork-skills-dir" in result

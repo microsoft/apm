@@ -1,7 +1,7 @@
 """GitHub package downloader for APM dependencies."""
 
+import contextlib
 import os
-import random  # noqa: F401
 import re
 import stat  # noqa: F401
 import subprocess
@@ -12,14 +12,14 @@ import time  # noqa: F401
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union  # noqa: F401, UP035
+from typing import Any, Union
 
 import git  # noqa: F401  # re-exported for tests that patch github_downloader.git
 import requests
 from git import RemoteProgress, Repo
-from git.exc import GitCommandError, InvalidGitRepositoryError  # noqa: F401
+from git.exc import GitCommandError
 
-from ..core.auth import AuthContext, AuthResolver  # noqa: F401
+from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     APMPackage,
     DependencyReference,
@@ -32,13 +32,6 @@ from ..models.apm_package import (
 )
 from ..utils.console import _rich_warning  # noqa: F401  # re-exported for tests
 from ..utils.github_host import (
-    build_ado_api_url,  # noqa: F401
-    build_ado_https_clone_url,  # noqa: F401
-    build_ado_ssh_url,  # noqa: F401
-    build_artifactory_archive_url,  # noqa: F401
-    build_https_clone_url,  # noqa: F401
-    build_raw_content_url,  # noqa: F401
-    build_ssh_url,  # noqa: F401
     default_host,
     is_azure_devops_hostname,  # noqa: F401
     is_github_hostname,
@@ -57,8 +50,6 @@ from .git_remote_ops import (
     sort_remote_refs,
 )
 from .transport_selection import (
-    GitConfigInsteadOfResolver,  # noqa: F401
-    InsteadOfResolver,  # noqa: F401
     ProtocolPreference,
     TransportSelector,
     is_fallback_allowed,
@@ -84,14 +75,10 @@ def _close_repo(repo) -> None:
     """Release GitPython handles so directories can be deleted on Windows."""
     if repo is None:
         return
-    try:  # noqa: SIM105
+    with contextlib.suppress(Exception):
         repo.git.clear_cache()
-    except Exception:
-        pass
-    try:  # noqa: SIM105
+    with contextlib.suppress(Exception):
         repo.close()
-    except Exception:
-        pass
 
 
 def _rmtree(path) -> None:
@@ -189,8 +176,6 @@ class GitHubPackageDownloader:
                 (legacy behavior). When None, reads
                 APM_ALLOW_PROTOCOL_FALLBACK env.
         """
-        from apm_cli.core.auth import AuthResolver  # noqa: F811
-
         self.auth_resolver = auth_resolver or AuthResolver()
         self.token_manager = self.auth_resolver._token_manager  # Backward compat
         self.git_env = self._setup_git_environment()
@@ -262,6 +247,10 @@ class GitHubPackageDownloader:
         self.has_github_token = self.github_token is not None
         self._github_token_from_credential_fill = False
 
+        # GitLab (env-only at init; lazy auth resolution happens per dep)
+        self.gitlab_token = self.token_manager.get_token_for_purpose("gitlab_modules", env)
+        self.has_gitlab_token = self.gitlab_token is not None
+
         # Azure DevOps (env-only at init; lazy auth resolution happens per dep)
         self.ado_token = self.token_manager.get_token_for_purpose("ado_modules", env)
         self.has_ado_token = self.ado_token is not None
@@ -274,6 +263,7 @@ class GitHubPackageDownloader:
 
         _debug(
             f"Token setup: has_github_token={self.has_github_token}, "
+            f"has_gitlab_token={self.has_gitlab_token}, "
             f"has_ado_token={self.has_ado_token}, "
             f"has_artifactory_token={self.has_artifactory_token}"
             f"{', source=credential_helper' if self._github_token_from_credential_fill else ''}"
@@ -356,6 +346,15 @@ class GitHubPackageDownloader:
 
         return ArtifactoryRouter.should_use_proxy(dep_ref)
 
+    def _is_generic_dependency_host(self, dep_ref: DependencyReference | None) -> bool:
+        """Return True for hosts where git credential helpers own auth."""
+        if dep_ref is None or dep_ref.is_azure_devops():
+            return False
+        dep_host = dep_ref.host
+        if not dep_host or is_github_hostname(dep_host):
+            return False
+        return self.auth_resolver.classify_host(dep_host, port=dep_ref.port).kind != "gitlab"
+
     def _parse_artifactory_base_url(self) -> tuple | None:
         """Backward-compat stub -- delegates to ArtifactoryRouter."""
         from .artifactory_orchestrator import ArtifactoryRouter
@@ -365,9 +364,9 @@ class GitHubPackageDownloader:
     def _resolve_dep_token(self, dep_ref: DependencyReference | None = None) -> str | None:
         """Resolve the per-dependency auth token via AuthResolver.
 
-        GitHub and ADO hosts use the token resolved by AuthResolver.
-        Generic hosts (GitLab, Bitbucket, etc.) return None so git
-        credential helpers can provide credentials instead.
+        GitHub, GitLab, and ADO hosts use the token resolved by AuthResolver.
+        Other generic hosts return None so git credential helpers can provide
+        credentials instead.
 
         Args:
             dep_ref: Optional dependency reference for host/org lookup.
@@ -378,15 +377,7 @@ class GitHubPackageDownloader:
         if dep_ref is None:
             return self.github_token
 
-        is_ado = dep_ref.is_azure_devops()
-        dep_host = dep_ref.host
-        if dep_host:  # noqa: SIM108
-            is_github = is_github_hostname(dep_host)
-        else:
-            is_github = True
-        is_generic = not is_ado and not is_github
-
-        if is_generic:
+        if self._is_generic_dependency_host(dep_ref):
             return None
 
         dep_ctx = self.auth_resolver.resolve_for_dep(dep_ref)
@@ -403,15 +394,8 @@ class GitHubPackageDownloader:
         if dep_ref is None:
             return None
 
-        is_ado = dep_ref.is_azure_devops()
         dep_host = dep_ref.host
-        if dep_host:  # noqa: SIM108
-            is_github = is_github_hostname(dep_host)
-        else:
-            is_github = True
-        is_generic = not is_ado and not is_github
-
-        if is_generic:
+        if self._is_generic_dependency_host(dep_ref):
             return None
 
         ctx = self.auth_resolver.resolve_for_dep(dep_ref)
@@ -470,11 +454,15 @@ class GitHubPackageDownloader:
         sanitized = re.sub(r"https://[^@\s]+@([^\s/]+)", r"https://***@\1", sanitized)
 
         # Remove any tokens that might appear as standalone values
-        sanitized = re.sub(r"(ghp_|gho_|ghu_|ghs_|ghr_)[a-zA-Z0-9_]+", "***", sanitized)
+        sanitized = re.sub(
+            r"(ghp_|gho_|ghu_|ghs_|ghr_|glpat[_-])[a-zA-Z0-9_\-]+",
+            "***",
+            sanitized,
+        )
 
         # Remove environment variable values that might contain tokens
         sanitized = re.sub(
-            r"(GITHUB_TOKEN|GITHUB_APM_PAT|ADO_APM_PAT|GH_TOKEN|GITHUB_COPILOT_PAT)=[^\s]+",
+            r"(GITHUB_TOKEN|GITHUB_APM_PAT|ADO_APM_PAT|GH_TOKEN|GITHUB_COPILOT_PAT|GITLAB_APM_PAT|GITLAB_TOKEN)=[^\s]+",
             r"\1=***",
             sanitized,
         )
@@ -650,7 +638,7 @@ class GitHubPackageDownloader:
         Raises:
             RuntimeError: If download fails or file not found
         """
-        host = dep_ref.host or default_host()  # noqa: F841
+        _ = dep_ref.host or default_host()
 
         # Check if this is Artifactory (Mode 1: explicit FQDN)
         if dep_ref.is_artifactory():
@@ -697,10 +685,31 @@ class GitHubPackageDownloader:
         """Backward-compat stub -- delegates to download strategies."""
         return self._strategies.try_raw_download(owner, repo, ref, file_path)
 
-    def _download_github_file(
-        self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
+    def _download_gitlab_file(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
     ) -> bytes:
-        """Backward-compat stub -- delegates to download strategies."""
+        """Backward-compat stub -- delegates to backend-specific strategies."""
+        return self._strategies.download_gitlab_file(
+            dep_ref, file_path, ref=ref, verbose_callback=verbose_callback
+        )
+
+    def _download_github_file(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+    ) -> bytes:
+        """Backward-compat stub -- delegates to backend-specific strategies."""
+        host = dep_ref.host or default_host()
+        if self.auth_resolver.classify_host(host).kind == "gitlab":
+            return self._download_gitlab_file(
+                dep_ref, file_path, ref, verbose_callback=verbose_callback
+            )
         return self._strategies.download_github_file(
             dep_ref,
             file_path,
@@ -818,7 +827,7 @@ class GitHubPackageDownloader:
         try:
             file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, ref)
         except RuntimeError as e:
-            raise RuntimeError(f"Failed to download virtual package: {e}")  # noqa: B904
+            raise RuntimeError(f"Failed to download virtual package: {e}") from e
 
         # Update progress - processing
         if progress_obj and progress_task_id is not None:
@@ -925,7 +934,7 @@ class GitHubPackageDownloader:
         dep_ref: DependencyReference,
         temp_clone_path: Path,
         subdir_path: str,
-        ref: str = None,  # noqa: RUF013
+        ref: str | None = None,
     ) -> bool:
         """Attempt sparse-checkout to download only a subdirectory (git 2.25+).
 
@@ -1380,7 +1389,7 @@ class GitHubPackageDownloader:
             try:
                 dep_ref = DependencyReference.parse(repo_ref)
             except ValueError as e:
-                raise ValueError(f"Invalid repository reference '{repo_ref}': {e}")  # noqa: B904
+                raise ValueError(f"Invalid repository reference '{repo_ref}': {e}") from e
 
         # Handle virtual packages differently
         if dep_ref.is_virtual:
@@ -1572,12 +1581,12 @@ class GitHubPackageDownloader:
                     port=dep_ref.port,
                     dep_url=dep_ref.repo_url,
                 )
-                raise RuntimeError(error_msg)  # noqa: B904
+                raise RuntimeError(error_msg) from e
             else:
                 sanitized_error = self._sanitize_git_error(str(e))
-                raise RuntimeError(  # noqa: B904
+                raise RuntimeError(
                     f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
-                )
+                ) from e
         except RuntimeError:
             # Re-raise RuntimeError from _clone_with_fallback
             raise

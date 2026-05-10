@@ -1,5 +1,15 @@
 #!/bin/bash
 # Integration testing script for both CI and local environments
+#
+# DEPRECATED (PR2 of #1166): This script is being retired in favour of
+# direct ``pytest tests/integration/`` invocations gated by the
+# marker-driven discovery system introduced in PR1
+# (microsoft/apm#1167). Once PR2 lands the canonical commands will be
+# documented in CONTRIBUTING.md and
+# docs/src/content/docs/contributing/integration-testing.md. Avoid
+# adding new logic here -- new test plumbing belongs in
+# ``tests/integration/conftest.py`` ``_MARKER_CHECKS``.
+#
 # Tests comprehensive runtime scenarios and edge cases:
 #   - Both Codex AND LLM runtime setup and interoperability
 #   - Complex pytest-based scenarios with error handling
@@ -680,6 +690,22 @@ run_e2e_tests() {
         log_success "#1159 dep URL parsing E2E passed!"
     else
         log_error "#1159 dep URL parsing E2E failed!"
+        exit 1
+    fi
+
+    # Run #1149 GitLab install E2E -- offline (mocked HTTP, no network)
+    # Exercises GitHubPackageDownloader.download_package end-to-end against
+    # a host=gitlab.com virtual file dep, asserting GitLab REST v4 routing,
+    # PRIVATE-TOKEN header (sourced from GITLAB_APM_PAT), absence of an
+    # Authorization header (cross-host leakage trap), and the resulting
+    # LockedDependency entry preserving host=gitlab.com.
+    log_info "Running #1149 GitLab install E2E..."
+    echo "Command: pytest tests/integration/test_gitlab_install_e2e.py -v -s --tb=short -m integration"
+
+    if pytest tests/integration/test_gitlab_install_e2e.py -v -s --tb=short -m integration; then
+        log_success "#1149 GitLab install E2E passed!"
+    else
+        log_error "#1149 GitLab install E2E failed!"
         exit 1
     fi
 
