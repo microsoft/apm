@@ -234,6 +234,18 @@ no_impact_paths:
   - ".apm/**"        # primitive changes don't directly touch user docs
   - "scripts/**"
   - "*.md"           # root-level meta docs (CHANGELOG, CONTRIBUTING)
+  - "pyproject.toml"
+  - "uv.lock"
+
+# Secondary doc surface: changes here are NOT the human-facing corpus
+# (`docs/src/content/docs/**`) but ARE downstream documentation that
+# may need a follow-up. The classifier should NOTE these in
+# `reasoning` but NOT include them in `scope_pages[]` -- they have
+# their own review path (apm-guide maintainers).
+also_consider_paths:
+  - "packages/apm-guide/.apm/skills/apm-usage/**"
+  - "README.md"
+  - "MANIFESTO.md"
 
 # Path patterns that indicate USER-OBSERVABLE surface change. Any
 # PR touching these survives the L0 gate and proceeds to L1 symbol

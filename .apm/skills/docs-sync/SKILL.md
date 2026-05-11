@@ -119,9 +119,23 @@ spawn the localizer for those downstream pages.
 
 ### Step 3 -- Fan-out panel
 
-For each page in the per-page task brief, spawn TWO parallel tasks:
+**Cascade-size mitigation (PR 1244 class).** If `scope_pages[]` has
+>8 entries, the per-page fan-out at one writer call per page would
+approach the 15-call ceiling with no headroom for verifier redrafts.
+BEFORE spawning, group `scope_pages[]` into SECTIONS:
 
-1. **doc-writer** task -- drafts the patch for that page's specific section(s). Output: JSON with `before:`, `after:` for each section.
+- Pages under the same TOC section (e.g. all `consumer/**`) with the
+  SAME conceptual fix (e.g. "rename apm update -> apm self-update in
+  every mention") become ONE writer task with a `pages_in_section[]`
+  array in its brief.
+- A 9-page rename cascade collapses to 2-3 section writer tasks.
+
+The python-architect verifier still runs per `verify_claims[]` (not
+per page), because S7 evidence is keyed on claims, not pages.
+
+For each page-or-section in the per-page task brief, spawn TWO parallel tasks:
+
+1. **doc-writer** task -- drafts the patch for that page's (or section's) specific edits. Output: JSON with `before:`, `after:` for each location.
 2. **python-architect** task -- for each `verify_claims[]` in the page brief, run the actual command (S7 tool bridge: `apm <verb> --help`, `grep -n <symbol> src/`). Output: JSON with `claim: verified | refuted | inconclusive` per claim.
 
 In parallel with the per-page fan-out, spawn ONCE each:

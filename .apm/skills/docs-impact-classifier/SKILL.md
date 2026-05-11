@@ -77,12 +77,15 @@ envelope (must fit in ~8 KB tokens):
 - `.apm/docs-index.yml` (the whole file; it's ~8 KB seeded, may grow)
 - L1 candidate pages with +/-5 lines of context per hit
 - Path-classification summary from L0
+- **`pr_doc_diff_paths[]`**: the list of paths under `docs/src/content/docs/**`
+  that the PR itself already modifies (drives the `in_place_resolved`
+  downgrade rule in "In-place-resolved detection" below).
 
 Ask doc-analyser to return JSON matching this schema:
 
 ```json
 {
-  "verdict": "no_change" | "in_place" | "structural",
+  "verdict": "no_change" | "in_place_resolved" | "in_place" | "structural",
   "confidence": "low" | "medium" | "high",
   "scope_pages": ["docs/src/content/docs/..."],
   "structural_proposal": {
@@ -101,15 +104,47 @@ Ask doc-analyser to return JSON matching this schema:
 
 | Verdict | Meaning | Panel size | Cost |
 |---|---|---|---|
-| `no_change` | No user-observable surface changed, OR all changes are already covered by existing doc text | 0 panel spawns | ~0-1 LLM call |
+| `no_change` | No user-observable surface changed | 0 panel spawns | ~0-1 LLM call |
+| `in_place_resolved` | Doc impact existed, but the PR's OWN diff already patches every page in `scope_pages` -- author already did the work | 0 panel spawns; skill emits NO advisory | ~1 LLM call |
 | `in_place` | One to a few pages need a paragraph or section update; no new pages, no TOC change | N candidate pages x (doc-writer + python-architect) + editorial-owner + growth-hacker + CDO | ~6-12 LLM calls |
 | `structural` | A new page is needed, OR an existing page should be split/merged, OR the TOC needs to change to fit a new concept | architect first (TOC delta), then in-place panel for affected pages | ~10-15 LLM calls |
+
+## In-place-resolved detection (false-alarm killer)
+
+BEFORE returning `in_place`, intersect your `scope_pages[]` with the
+list of files the PR itself touches under `docs/**` (provided to you
+by the orchestrator under `pr_doc_diff_paths[]`). If EVERY scope page
+already appears in `pr_doc_diff_paths`, downgrade to `in_place_resolved`
+and emit `reasoning` of the form "Author already patched <page list>".
+This is the well-behaved-author path; the skill stays silent.
+
+If only SOME scope pages are pre-patched, keep `in_place` and list the
+REMAINING (unpatched) pages in `scope_pages[]`. Note the pre-patched
+ones in `reasoning` for transparency.
+
+## Rename / breaking-change heuristic (PR 1244 class)
+
+When the L1 layer reports an ADDED public symbol that matches an
+EXISTING public symbol's name in the corpus (e.g. PR adds `apm update`
+but `apm update` already appears in 9 docs pages with different
+semantics), this is a RENAME or BREAKING SEMANTIC CHANGE. Bias toward
+`structural` (not `in_place`):
+- the existing page describing the OLD semantics may need to SPLIT
+  into two pages (old verb under new name + new verb keeping old name)
+- the TOC may need a NEW reference page for the renamed verb
+- every passing mention in the corpus needs verification
+
+Do NOT collapse a rename into `in_place` just because the affected
+pages already exist. The shape of the work is structural even when no
+new page is strictly required.
 
 ## Anti-patterns (verdict shape errors)
 
 - Returning `in_place` with empty `scope_pages` -- invalid; orchestrator will reject.
 - Returning `structural` without `structural_proposal` -- invalid.
+- Returning `in_place` when EVERY scope page is in `pr_doc_diff_paths` -- should be `in_place_resolved`.
 - Inflating `structural` to seem thorough -- the CDO will catch this. Return the minimal true verdict.
+- Missing the rename heuristic above and emitting `in_place` for a verb-swap PR.
 - Reading the corpus (the .md files themselves) at L2 -- context budget breach. You read the index, not the corpus.
 
 ## Output contract
