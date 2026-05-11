@@ -1,7 +1,8 @@
 """Unit-test conftest: hermetic HOME isolation.
 
-The session-scoped autouse fixture below pins ``Path.home()`` to a tmp
-directory for the entire unit-test session. Two reasons:
+This module sets ``HOME`` (POSIX) / ``USERPROFILE`` + ``HOMEDRIVE`` +
+``HOMEPATH`` (Windows) to a process-wide tmp directory **at import
+time**, before any fixture or test resolution. Two reasons:
 
 1. Hermeticity. Unit tests must not read or write the contributor's real
    ``~`` (config files, runtimes, caches). Tests that call
@@ -9,31 +10,41 @@ directory for the entire unit-test session. Two reasons:
    whatever HOME the runner had.
 2. Windows runner robustness. On the ``windows-2025-vs2026`` GitHub
    Actions image the ``USERPROFILE`` / ``HOMEDRIVE`` + ``HOMEPATH``
-   triplet is not set under the pytest worker subprocess, so
+   triplet is not set under the pytest-xdist worker subprocess, so
    ``Path.home()`` raises ``RuntimeError: Could not determine home
-   directory.`` This fixture sets the platform-correct trio so
-   ``Path.home()`` always resolves to ``<tmp>`` regardless of runner
-   image.
+   directory.``
+
+Why import-time and not a session-scoped autouse fixture: a previous
+attempt used ``@pytest.fixture(scope="session", autouse=True)`` and
+still failed on a single xdist worker (``gw2`` on Windows). Whatever
+the cause (worker scheduling order, a downstream fixture resolving
+``Path.home()`` before the autouse fixture's setup completed), running
+the env mutation at conftest import time guarantees the env vars are
+in place before pytest collects, schedules, or runs anything in this
+worker process. Pytest imports each test directory's conftest.py once
+per worker, before any fixtures run.
 
 Per-test fixtures that need a different HOME (e.g. tests/unit/integration
 that exercise scope resolution) keep using ``monkeypatch.setenv`` and
-override this baseline; the function-scoped monkeypatch wins over the
-session-scoped baseline for the duration of the test.
+override this baseline; monkeypatch's snapshot/restore cycle preserves
+this baseline across tests.
 """
 
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
-
-import pytest
 
 
 def _set_home_env(home: Path) -> None:
     """Set ``HOME`` and the Windows-equivalent vars to ``home``.
 
     ``Path.home()`` consults ``HOME`` on POSIX but ``USERPROFILE``
-    (with ``HOMEDRIVE`` + ``HOMEPATH`` fallback) on Windows.
+    (with ``HOMEDRIVE`` + ``HOMEPATH`` fallback) on Windows. We
+    overwrite unconditionally because the Windows runner sometimes
+    leaves these keys present but empty, which still trips
+    ``Path.home()``.
     """
     home_str = str(home)
     os.environ["HOME"] = home_str
@@ -45,19 +56,5 @@ def _set_home_env(home: Path) -> None:
             os.environ["HOMEPATH"] = tail
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _hermetic_home(tmp_path_factory: pytest.TempPathFactory) -> None:
-    """Pin ``Path.home()`` to a per-session tmp dir for all unit tests."""
-    home = tmp_path_factory.mktemp("apm-unit-home")
-    previous = {
-        key: os.environ.get(key) for key in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
-    }
-    _set_home_env(home)
-    try:
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+_TMP_HOME = Path(tempfile.mkdtemp(prefix="apm-unit-home-"))
+_set_home_env(_TMP_HOME)
