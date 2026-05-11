@@ -33,7 +33,7 @@ jobs:
 
 ### Private Dependencies
 
-For private repositories, pass a token via the workflow `env:` block. See the [Authentication guide](../../getting-started/authentication/) for all supported tokens and priority rules.
+For private repositories, pass a token via the workflow `env:` block. See the [Authentication guide](../../consumer/authentication/) for all supported tokens and priority rules.
 
 ```yaml
       - name: Install APM packages
@@ -133,7 +133,7 @@ jobs:
         # Do not set ADO_APM_PAT -- APM picks up the az session.
 ```
 
-See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for resolution precedence and verbose output.
+See [Azure DevOps AAD bearer tokens](../../enterprise/security/#azure-devops-aad-bearer-tokens) for resolution precedence and verbose output.
 
 ## General CI
 
