@@ -1145,8 +1145,11 @@ class TestFetchShaIntoBare:
         assert result is True
         # execute_transport_plan should NOT be called
         mock_execute.assert_not_called()
-        # Only one rev-parse call (the initial check)
-        assert mock_run.call_count == 1
+        # Two subprocess.run calls: rev-parse (check) + update-ref (pin ref)
+        assert mock_run.call_count == 2
+        pin_call_argv = mock_run.call_args_list[1][0][0]
+        assert "update-ref" in pin_call_argv
+        assert f"refs/heads/apm-pin-{sha[:12]}" in pin_call_argv
 
     def test_shallow_fetch_full_sha_succeeds(self, tmp_path: Path) -> None:
         """Full 40-char SHA: shallow fetch via transport plan succeeds."""
@@ -1175,6 +1178,7 @@ class TestFetchShaIntoBare:
             mock_run.side_effect = [
                 MagicMock(returncode=1),  # SHA not present initially
                 MagicMock(returncode=0),  # SHA present after fetch
+                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
             ]
 
             result = fetch_sha_into_bare(
@@ -1226,6 +1230,7 @@ class TestFetchShaIntoBare:
             mock_run.side_effect = [
                 MagicMock(returncode=1),  # SHA not present
                 MagicMock(returncode=0),  # SHA present after broad fetch
+                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
             ]
 
             result = fetch_sha_into_bare(
@@ -1306,6 +1311,7 @@ class TestFetchShaIntoBare:
             mock_run.side_effect = [
                 MagicMock(returncode=1),  # SHA not present
                 MagicMock(returncode=0),  # SHA present after fetch
+                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
             ]
 
             fetch_sha_into_bare(

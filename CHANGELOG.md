@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bare-cache git commands now use `--git-dir` instead of `-C` for compatibility with git 2.53.0 (`safe.bareRepository=explicit` default), and fetched SHAs are pinned as synthetic refs so `git clone --local --shared` includes them in the object transfer. (#1267)
 - `apm install` no longer silently overwrites pre-existing governance files; `check_collision()` now treats `managed_files=None` (first install, no lockfile yet) as an empty set so hand-rolled files in `.github/instructions/` and other governance directories are correctly detected and protected from silent overwrite. (#1256)
 - `test_find_server_by_reference_uuid_not_found` no longer leaks a live HTTP call to `api.mcp.github.com` (fixing Windows CI failures from `socket.gaierror`); the `search_servers` fallback is now mocked. (#1264)
 - ADO full HTTPS URLs with sub-path virtual packages (e.g. `https://dev.azure.com/org/proj/_git/repo/sub/path`) are now parsed correctly instead of being rejected. (#1254)
