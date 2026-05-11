@@ -61,6 +61,12 @@ on:
 # allowed through.
 if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'docs-sync' }}
 
+# Defense-in-depth against the "pwn request" attack pattern: never check out
+# the PR head. We only consume the diff via `gh pr view` / `gh pr diff` which
+# return inert text. Combined with read-only permissions below, this makes
+# arbitrary code in the PR head physically unreachable from the workflow.
+checkout: false
+
 # Agent job runs READ-ONLY. Safe-output jobs are auto-granted scoped write.
 permissions:
   contents: read
