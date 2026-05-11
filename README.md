@@ -152,8 +152,6 @@ Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, Gemin
 apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS
 ```
 
-> *Codex CLI currently does not support remote MCP servers; the install will skip Codex with a notice. Omit `--transport http` to use the local Docker variant on Codex (requires `GITHUB_PERSONAL_ACCESS_TOKEN`).*
-
 See the **[Getting Started guide](https://microsoft.github.io/apm/getting-started/quick-start/)** for the full walkthrough.
 
 ## Works with agentrc
