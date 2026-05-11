@@ -182,5 +182,165 @@ class TestMCPIntegratorCursorStaleCleanup(unittest.TestCase):
         self.assertNotIn("stale", data["mcpServers"])
 
 
+class TestCursorFormatServerConfig(unittest.TestCase):
+    """CursorClientAdapter._format_server_config emits Cursor-native schema."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cursor_dir = Path(self.tmp.name) / ".cursor"
+        self.cursor_dir.mkdir()
+
+        self.adapter = CursorClientAdapter()
+        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
+        self._cwd_patcher.start()
+
+    def tearDown(self):
+        self._cwd_patcher.stop()
+        self.tmp.cleanup()
+
+    # -- helpers --
+
+    _COPILOT_ONLY_KEYS = ("tools", "id")
+
+    def _assert_no_copilot_fields(self, config):
+        for key in self._COPILOT_ONLY_KEYS:
+            self.assertNotIn(key, config, f"Cursor config must not contain '{key}'")
+
+    # -- tests --
+
+    def test_format_stdio_server_emits_type_stdio(self):
+        """Raw stdio server produces type=stdio, command/args/env, no tools/id."""
+        server_info = {
+            "id": "abc-123",
+            "name": "my-stdio-server",
+            "_raw_stdio": {
+                "command": "node",
+                "args": ["server.js", "--port", "3000"],
+                "env": {"API_KEY": "secret"},
+            },
+        }
+        config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "stdio")
+        self.assertEqual(config["command"], "node")
+        self.assertIn("args", config)
+        self.assertIn("env", config)
+        self._assert_no_copilot_fields(config)
+
+    def test_format_remote_server_emits_type_http(self):
+        """Remote (HTTP) server produces type=http, url, no tools/id."""
+        server_info = {
+            "id": "remote-456",
+            "name": "my-remote-server",
+            "remotes": [
+                {
+                    "url": "https://mcp.example.com/sse",
+                    "transport_type": "http",
+                },
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "http")
+        self.assertEqual(config["url"], "https://mcp.example.com/sse")
+        self._assert_no_copilot_fields(config)
+
+    def test_format_npm_package_emits_type_stdio(self):
+        """npm package server produces type=stdio, command=npx and args, no tools/id."""
+        server_info = {
+            "id": "npm-789",
+            "name": "my-npm-server",
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "@example/mcp-server",
+                    "runtime_arguments": [],
+                    "package_arguments": [],
+                    "environment_variables": [],
+                },
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "stdio")
+        self.assertEqual(config["command"], "npx")
+        self.assertIn("-y", config["args"])
+        self.assertIn("@example/mcp-server", config["args"])
+        self._assert_no_copilot_fields(config)
+
+
+class TestCursorTokenInjection(unittest.TestCase):
+    """Test GitHub token injection for Cursor remote servers."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cursor_dir = Path(self.tmp.name) / ".cursor"
+        self.cursor_dir.mkdir()
+
+        self.adapter = CursorClientAdapter()
+        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
+        self._cwd_patcher.start()
+
+    def tearDown(self):
+        self._cwd_patcher.stop()
+        self.tmp.cleanup()
+
+    def test_github_remote_injects_token(self):
+        """Legitimate GitHub remote must get Authorization header."""
+        server_info = {
+            "name": "github-mcp-server",
+            "remotes": [
+                {"url": "https://api.github.com/v1", "transport_type": "http"},
+            ],
+        }
+        with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
+            mock_tm.return_value.get_token_for_purpose.return_value = "test-tok"
+            config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config.get("headers", {}).get("Authorization"), "Bearer test-tok")
+
+    def test_non_github_remote_no_token(self):
+        """Non-GitHub remote must NOT get Authorization header."""
+        server_info = {
+            "name": "my-custom-server",
+            "remotes": [
+                {"url": "https://evil.example.com/v1", "transport_type": "http"},
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertNotIn("Authorization", config.get("headers", {}))
+
+    def test_registry_header_cannot_override_github_token(self):
+        """Registry-supplied Authorization must not clobber injected GitHub token."""
+        server_info = {
+            "name": "github-mcp-server",
+            "remotes": [
+                {
+                    "url": "https://api.github.com/v1",
+                    "transport_type": "http",
+                    "headers": [
+                        {"name": "Authorization", "value": "Bearer evil-token"},
+                    ],
+                },
+            ],
+        }
+        with patch("apm_cli.adapters.client.cursor.GitHubTokenManager") as mock_tm:
+            mock_tm.return_value.get_token_for_purpose.return_value = "legit-tok"
+            config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["headers"]["Authorization"], "Bearer legit-tok")
+
+    def test_unsupported_packages_raises_valueerror(self):
+        """When _select_best_package returns None, raise ValueError instead of silent {}."""
+        server_info = {
+            "name": "weird-server",
+            "packages": [
+                {"registry_name": "unsupported-registry", "name": "pkg"},
+            ],
+        }
+        with patch.object(self.adapter, "_select_best_package", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                self.adapter._format_server_config(server_info)
+        self.assertIn("No supported package type", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
