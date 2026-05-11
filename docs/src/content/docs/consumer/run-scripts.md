@@ -3,6 +3,14 @@ title: Run scripts
 description: Execute named scripts from apm.yml on any AI runtime, npm-style.
 ---
 
+:::caution[Experimental surface]
+`apm run` is an experimental script runner -- think `npx` for AI
+runtime CLIs. It is optional and off the critical path: every package
+you install is already wired into your detected harnesses without it.
+Use it when you want a single, reproducible entrypoint to invoke a
+runtime CLI against an installed prompt; skip it otherwise.
+:::
+
 After `apm install` wires primitives into your harnesses, `apm run` executes
 a named script declared in `apm.yml`. This is APM's npm-scripts surface for
 AI runtimes -- one manifest, any runtime CLI you have on your `PATH`.

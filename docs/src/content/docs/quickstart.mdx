@@ -76,8 +76,8 @@ Three fields matter day one:
 
 - `dependencies.apm` -- the packages you install. Empty until step 3.
 - `dependencies.mcp` -- MCP servers, wired into every detected harness.
-- `scripts` -- named shell commands you run with `apm run`. Empty until
-  step 4.
+- `scripts` -- optional named shell commands you run with the
+  experimental `apm run` (see [Run scripts](/apm/consumer/run-scripts/)).
 
 `includes: auto` ships any local `.apm/` content you author. The
 `targets:` block is commented out so APM auto-detects the harnesses
@@ -148,38 +148,13 @@ For private packages, set `GITHUB_APM_PAT` -- see
 [private packages](/apm/consumer/private-and-org-packages/).
 :::
 
-## 4. Run an agent
-
-`apm init` generated an empty `scripts: {}` block. Add one script that
-runs an installed prompt through a CLI runtime. Edit `apm.yml`:
-
-```yaml
-scripts:
-  start: "copilot -p .github/prompts/design-review.prompt.md"
-```
-
-Install the Copilot CLI runtime once (Node.js 22+ required):
-
-```bash
-apm runtime setup copilot
-```
-
-Then run your script:
-
-```bash
-apm run start
-```
-
-`apm run` resolves the script name against your `apm.yml`, expands the
-command, and executes it in your shell. Pass parameters with `-p
-name=value`. Run `apm run` with no arguments to list every script
-available in this project.
-
-Other runtimes work the same way -- swap `copilot` for `codex` or `llm`
-in both the `apm runtime setup` and the script body. See
-[Agent workflows](/apm/producer/author-primitives/instructions-and-agents/) for the full matrix.
-
 ## What next
+
+Your project is ready: dependencies pinned, primitives deployed, every
+detected harness configured. The package's prompts and skills are
+already discoverable from your AI tool of choice -- start a Copilot
+chat, open Claude Code, or invoke the agent from any harness that
+read its instructions on disk.
 
 <CardGrid>
   <Card title="Use more packages" icon="open-book">
@@ -198,6 +173,14 @@ in both the `apm runtime setup` and the script body. See
     [Governance guide](/apm/enterprise/governance-guide/)
   </Card>
 </CardGrid>
+
+:::note[Looking for `apm run`?]
+APM also ships an experimental script runner -- think `npx` for AI
+runtime CLIs. Declare a `scripts:` entry in `apm.yml` and execute it
+with `apm run <name>`. It is optional, off the critical path, and
+not required to use any installed package. See
+[Run scripts](/apm/consumer/run-scripts/) if you want to wire one up.
+:::
 
 If something failed along the way, check
 [Troubleshooting](/apm/troubleshooting/ssl-issues/).
