@@ -196,7 +196,7 @@ class CodexClientAdapter(MCPClientAdapter):
             runtime_vars (dict, optional): Runtime variable values.
 
         Returns:
-            dict: Formatted server configuration for Codex CLI.
+            dict | None: Formatted server configuration for Codex CLI, or None if unsupported (e.g. SSE remote).
         """
         # Default configuration structure with registry ID for conflict detection
         config = {
