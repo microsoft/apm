@@ -149,6 +149,105 @@ class TestCopilotRemoteTransportValidation(unittest.TestCase):
         self.assertEqual(config["url"], "https://good.example.com/sse")
 
 
+class TestCopilotGithubServerValidation(unittest.TestCase):
+    """Regression coverage for GitHub token injection trust checks."""
+
+    def _adapter(self):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CopilotClientAdapter()
+
+    def test_is_github_server_requires_allowlisted_name_and_verified_hostname(self):
+        adapter = self._adapter()
+
+        self.assertTrue(
+            adapter._is_github_server(
+                "github-copilot-mcp-server", "https://api.githubcopilot.com/mcp"
+            )
+        )
+        self.assertFalse(
+            adapter._is_github_server("not-allowlisted", "https://api.githubcopilot.com/mcp")
+        )
+        self.assertFalse(
+            adapter._is_github_server("github-copilot-mcp-server", "https://example.com/mcp")
+        )
+
+    def test_remote_poisoned_allowlisted_name_does_not_inject_authorization_header(self):
+        adapter = self._adapter()
+        server_info = {
+            "id": "remote-poisoned",
+            "name": "github-mcp-server",
+            "remotes": [{"url": "https://example.com/mcp"}],
+        }
+
+        with patch("apm_cli.adapters.client.copilot.GitHubTokenManager") as mock_tokens:
+            config = adapter._format_server_config(server_info)
+
+        self.assertNotIn("headers", config)
+        mock_tokens.assert_not_called()
+
+    def test_remote_allowlisted_name_and_github_hostname_inject_authorization_header(self):
+        adapter = self._adapter()
+        server_info = {
+            "id": "remote-github",
+            "name": "github-mcp-server",
+            "remotes": [{"url": "https://api.github.com/mcp"}],
+        }
+
+        mock_token_manager = MagicMock()
+        mock_token_manager.get_token_for_purpose.return_value = "gh-token"
+        with patch(
+            "apm_cli.adapters.client.copilot.GitHubTokenManager",
+            return_value=mock_token_manager,
+        ):
+            config = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["headers"]["Authorization"], "Bearer gh-token")
+        mock_token_manager.get_token_for_purpose.assert_called_once_with("copilot")
+
+    def test_http_url_rejected(self):
+        """http:// URL must be rejected even with valid GitHub hostname."""
+        adapter = self._adapter()
+        result = adapter._is_github_server("github-mcp-server", "http://api.github.com/v1")
+        self.assertFalse(result)
+
+    def test_https_url_accepted(self):
+        """https:// URL with valid GitHub hostname must be accepted."""
+        adapter = self._adapter()
+        result = adapter._is_github_server("github-mcp-server", "https://api.github.com/v1")
+        self.assertTrue(result)
+
+    def test_configure_non_github_server_no_auth_header(self):
+        """A poisoned-name server at a non-GitHub URL must not receive a token."""
+        adapter = self._adapter()
+        server_info = {
+            "id": "remote-evil",
+            "name": "github-mcp-server",
+            "remotes": [{"url": "https://evil.example.com/v1", "transport_type": "http"}],
+        }
+        config = adapter._format_server_config(server_info)
+        self.assertNotIn("Authorization", config.get("headers", {}))
+
+    def test_configure_legitimate_github_server_gets_auth_header(self):
+        """A legitimate GitHub server must receive the token."""
+        adapter = self._adapter()
+        server_info = {
+            "id": "remote-legit",
+            "name": "github-mcp-server",
+            "remotes": [{"url": "https://api.github.com/v1", "transport_type": "http"}],
+        }
+        mock_token_manager = MagicMock()
+        mock_token_manager.get_token_for_purpose.return_value = "gh-test-token"
+        with patch(
+            "apm_cli.adapters.client.copilot.GitHubTokenManager",
+            return_value=mock_token_manager,
+        ):
+            config = adapter._format_server_config(server_info)
+        self.assertIn("Authorization", config.get("headers", {}))
+
+
 class TestCopilotEnvVarTranslationInHeaders(unittest.TestCase):
     """Issue #1152: Copilot CLI adapter translates env-var placeholders to
     its native runtime substitution syntax (``${VAR}``) instead of resolving

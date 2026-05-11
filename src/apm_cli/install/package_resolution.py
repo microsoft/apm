@@ -72,16 +72,28 @@ def resolve_parsed_dependency_reference(
 
 
 def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
-    """Return a validation-fail reason if *dep_ref* is invalid at user scope."""
+    """Return a validation-fail reason if *dep_ref* is invalid at user scope.
+
+    Per #937, only relative local paths are rejected at user scope -- absolute
+    local paths are unambiguous and flow through the same _copy_local_package
+    code path as project scope.
+    """
     if scope is None:
         return None
+    from pathlib import Path
+
     from apm_cli.core.scope import InstallScope
 
     if dep_ref.is_local and scope is InstallScope.USER:
-        return (
-            "local packages are not supported at user scope (--global). "
-            "Use a remote reference (owner/repo) instead"
-        )
+        local_path = dep_ref.local_path or ""
+        # Match the rest of the install pipeline (sources.py, phases/resolve.py)
+        # which expanduser()s local paths before consuming them: `~/pkg` is
+        # absolute after expansion and must NOT be rejected here.
+        if not Path(local_path).expanduser().is_absolute():
+            return (
+                "relative local paths are not supported at user scope (--global). "
+                "Use an absolute path or a remote reference (owner/repo) instead"
+            )
     if dep_ref.is_parent_repo_inheritance and scope is InstallScope.USER:
         return GIT_PARENT_USER_SCOPE_ERROR
     return None

@@ -7,6 +7,7 @@ import stat  # noqa: F401
 import subprocess
 import sys
 import tempfile
+import threading
 import time  # noqa: F401
 from collections.abc import Callable
 from datetime import datetime
@@ -190,6 +191,7 @@ class GitHubPackageDownloader:
         # clone, then the actual dep clone). We want the warning exactly once
         # per (host, repo, port) identity across all those calls.
         self._fallback_port_warned: set = set()
+        self._fallback_port_warned_lock = threading.Lock()
 
         # Delegate backend-specific download logic to the download delegate.
         self._strategies = DownloadDelegate(host=self)

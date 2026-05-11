@@ -48,6 +48,7 @@ class TestInstallInvalidDepsFormatE2E:
             encoding="utf-8",
         )
         (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "copilot-instructions.md").write_text("# test\n")
 
         with patch(_PATCH_UPDATES, return_value=None):
             result = runner.invoke(cli, ["install"], catch_exceptions=False)
@@ -55,7 +56,7 @@ class TestInstallInvalidDepsFormatE2E:
         assert result.exit_code != 0, (
             f"Expected non-zero exit for flat-list deps; got 0.\nstdout:\n{result.stdout}"
         )
-        combined = (result.output or "") + (result.stderr or "")
+        combined = " ".join(((result.output or "") + (result.stderr or "")).split())
         assert "expected a mapping" in combined, (
             f"Expected 'expected a mapping' in output:\n{combined}"
         )
@@ -74,6 +75,7 @@ class TestInstallInvalidDepsFormatE2E:
             encoding="utf-8",
         )
         (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "copilot-instructions.md").write_text("# test\n")
 
         with patch(_PATCH_UPDATES, return_value=None):
             result = runner.invoke(cli, ["install"], catch_exceptions=False)
@@ -81,7 +83,7 @@ class TestInstallInvalidDepsFormatE2E:
         assert result.exit_code != 0, (
             f"Expected non-zero exit for string deps; got 0.\nstdout:\n{result.stdout}"
         )
-        combined = (result.output or "") + (result.stderr or "")
+        combined = " ".join(((result.output or "") + (result.stderr or "")).split())
         assert "expected a mapping" in combined, (
             f"Expected 'expected a mapping' in output:\n{combined}"
         )
@@ -103,6 +105,7 @@ class TestInstallInvalidDepsFormatE2E:
             encoding="utf-8",
         )
         (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "copilot-instructions.md").write_text("# test\n")
 
         with patch(_PATCH_UPDATES, return_value=None):
             result = runner.invoke(cli, ["install"], catch_exceptions=False)
