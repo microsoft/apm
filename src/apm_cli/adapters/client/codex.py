@@ -206,6 +206,9 @@ class CodexClientAdapter(MCPClientAdapter):
         Returns:
             dict: Formatted server configuration for Codex CLI.
         """
+        if runtime_vars is None:
+            runtime_vars = {}
+
         # Default configuration structure with registry ID for conflict detection
         config = {
             "command": "unknown",
@@ -214,14 +217,30 @@ class CodexClientAdapter(MCPClientAdapter):
             "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
         }
 
-        # Self-defined stdio deps carry raw command/args  -- use directly
+        # Self-defined stdio deps carry raw command/args. Route ``env`` and
+        # ``args`` through the resolver pipeline so all three placeholder
+        # syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``) are resolved at
+        # install time before being written to ~/.codex/config.toml.
+        # See issue #1266.
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
-            config["args"] = [self.normalize_project_arg(arg) for arg in raw["args"]]
+            resolved_env_for_args: dict = {}
             if raw.get("env"):
-                config["env"] = raw["env"]
+                resolved_env_for_args = self._resolve_environment_variables(
+                    raw["env"], env_overrides=env_overrides
+                )
+                config["env"] = resolved_env_for_args
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
+
+            def _process_stdio_arg(arg):
+                if isinstance(arg, str):
+                    arg = self._resolve_variable_placeholders(
+                        arg, resolved_env_for_args, runtime_vars
+                    )
+                return self.normalize_project_arg(arg)
+
+            config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
             return config
 
         # Note: Remote servers (SSE type) are handled in configure_mcp_server and rejected early
@@ -460,48 +479,6 @@ class CodexClientAdapter(MCPClientAdapter):
                         resolved[name] = default_github_env[name]
 
         return resolved
-
-    def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
-        """Resolve both environment and runtime variable placeholders in values.
-
-        Args:
-            value (str): Value that may contain placeholders like <TOKEN_NAME> or {runtime_var}
-            resolved_env (dict): Dictionary of resolved environment variables.
-            runtime_vars (dict): Dictionary of resolved runtime variables.
-
-        Returns:
-            str: Processed value with actual variable values.
-        """
-        import re
-
-        if not value:
-            return value
-
-        processed = str(value)
-
-        # Replace <TOKEN_NAME> with actual values from resolved_env (for Docker env vars)
-        env_pattern = r"<([A-Z_][A-Z0-9_]*)>"
-
-        def replace_env_var(match):
-            env_name = match.group(1)
-            return resolved_env.get(env_name, match.group(0))  # Return original if not found
-
-        processed = re.sub(env_pattern, replace_env_var, processed)
-
-        # Replace {runtime_var} with actual values from runtime_vars
-        runtime_pattern = r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
-
-        def replace_runtime_var(match):
-            var_name = match.group(1)
-            return runtime_vars.get(var_name, match.group(0))  # Return original if not found
-
-        processed = re.sub(runtime_pattern, replace_runtime_var, processed)
-
-        return processed
-
-    def _resolve_env_placeholders(self, value, resolved_env):
-        """Legacy method for backward compatibility. Use _resolve_variable_placeholders instead."""
-        return self._resolve_variable_placeholders(value, resolved_env, {})
 
     def _ensure_docker_env_flags(self, base_args, env_vars):
         """Ensure all environment variables are represented as -e flags in Docker args.

@@ -7,7 +7,6 @@ architecture specification.
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import ClassVar
 
@@ -19,78 +18,7 @@ from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
 from ...utils.github_host import is_github_hostname
-from .base import _ENV_VAR_RE, MCPClientAdapter
-
-# Combined env-var placeholder regex covering all three syntaxes Copilot accepts:
-#   <VARNAME>          legacy APM (group 1, uppercase only)
-#   ${VARNAME}         POSIX shell (group 2)
-#   ${env:VARNAME}     VS Code-flavored (group 2)
-# A single-pass substitution preserves the original ``<VAR>`` semantics:
-# resolved values are NOT re-scanned, so a token whose literal text contains
-# ``${...}`` does not get recursively expanded. Module-level compile avoids
-# per-call cost. ``${input:...}`` is intentionally not matched here.
-_COPILOT_ENV_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
-
-# Detects the legacy ``<VAR>`` placeholder syntax. Used both for translation
-# and for emitting an aggregated deprecation warning, mirroring the analogous
-# pattern in ``vscode.py``.
-_LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
-
-
-def _translate_env_placeholder(value):
-    """Pure-textual translation of env-var placeholders to Copilot CLI's
-    native runtime substitution syntax (``${VAR}``).
-
-    This is the security-critical helper for issue #1152: it MUST NOT read
-    ``os.environ`` and MUST NOT resolve placeholders to their literal values.
-    Copilot CLI resolves ``${VAR}`` from the host environment at server-start
-    time, so APM emits placeholders verbatim rather than baking secrets into
-    ``~/.copilot/mcp-config.json``.
-
-    Translations:
-        ``${env:VAR}``     -> ``${VAR}``     (strip ``env:`` prefix)
-        ``${VAR}``         -> ``${VAR}``     (no-op)
-        ``<VAR>``          -> ``${VAR}``     (legacy syntax migration)
-        ``${VAR:-default}``-> passthrough    (regex doesn't match)
-        ``$VAR`` (bare)    -> passthrough    (regex doesn't match)
-        ``${input:foo}``   -> passthrough    (regex doesn't match)
-        non-string         -> passthrough
-
-    The translation is idempotent: applying it twice produces the same
-    result as applying it once.
-    """
-    if not isinstance(value, str):
-        return value
-
-    def _to_brace(match):
-        # group(1) = legacy <VAR>; group(2) = ${VAR} / ${env:VAR}
-        var_name = match.group(1) or match.group(2)
-        return "${" + var_name + "}"
-
-    return _COPILOT_ENV_RE.sub(_to_brace, value)
-
-
-def _extract_legacy_angle_vars(value):
-    """Return the set of legacy ``<VAR>`` names present in *value*.
-
-    Used to aggregate deprecation warnings across all servers in a single
-    install run, so authors see one helpful list instead of one warning per
-    occurrence.
-    """
-    if not isinstance(value, str):
-        return set()
-    return set(_LEGACY_ANGLE_VAR_RE.findall(value))
-
-
-def _has_env_placeholder(value):
-    """True if *value* is a string containing any recognised env-var
-    placeholder syntax (``${VAR}``, ``${env:VAR}``, or legacy ``<VAR>``).
-    Used to distinguish placeholder-sourced env values (which translate)
-    from hardcoded literal defaults (which stay literal).
-    """
-    if not isinstance(value, str):
-        return False
-    return bool(_COPILOT_ENV_RE.search(value))
+from .base import _ENV_VAR_RE, MCPClientAdapter, _has_env_placeholder
 
 
 def _stringify_env_literal(value):
@@ -169,14 +97,6 @@ class CopilotClientAdapter(MCPClientAdapter):
         super().__init__(project_root=project_root, user_scope=user_scope)
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
-        # Per-server tracking of placeholder-sourced env-var keys, populated
-        # during ``_format_server_config`` and consumed by the post-install
-        # summary line. Keys: env-var names; never holds resolved values.
-        self._last_env_placeholder_keys = set()
-        # Per-server collection of legacy ``<VAR>`` offenders, populated by
-        # the resolution helpers and consumed by ``configure_mcp_server`` to
-        # feed the aggregated deprecation warning.
-        self._last_legacy_angle_vars = set()
 
     def get_config_path(self):
         """Get the path to the Copilot CLI MCP configuration file.
@@ -1119,74 +1039,6 @@ class CopilotClientAdapter(MCPClientAdapter):
                 processed.append(processed_value)
 
         return processed
-
-    def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
-        """Resolve runtime template variables and translate or resolve env-var
-        placeholders in argument strings.
-
-        Behaviour depends on ``self._supports_runtime_env_substitution``:
-
-        - True (Copilot CLI default): env-var placeholders (``<VAR>``,
-          ``${VAR}``, ``${env:VAR}``) are translated to ``${VAR}`` for
-          runtime substitution by Copilot CLI. APM template variables
-          (``{runtime_var}``) are still resolved at install time because
-          they are an APM-internal concept Copilot cannot interpret.
-
-        - False (legacy / sibling-adapter behaviour): legacy ``<VAR>``
-          placeholders are resolved against ``resolved_env`` (the dict of
-          literal env-var values), and ``{runtime_var}`` against
-          ``runtime_vars``. Newer ``${VAR}`` / ``${env:VAR}`` syntaxes are
-          left as-is for backward compatibility.
-
-        Args:
-            value (str): Value that may contain placeholders.
-            resolved_env (dict): Dictionary of resolved env vars (legacy
-                mode) or placeholder strings (translate mode).
-            runtime_vars (dict): Dictionary of resolved runtime variables.
-
-        Returns:
-            str: Processed value with placeholders translated or resolved.
-        """
-        import re
-
-        if not value:
-            return value
-
-        processed = str(value)
-
-        if self._supports_runtime_env_substitution:
-            # Track legacy <VAR> offenders before translating them away.
-            self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(processed))
-            # Translate all three env-var placeholder syntaxes to ${VAR}.
-            processed = _translate_env_placeholder(processed)
-        else:
-            # Replace <TOKEN_NAME> with actual values from resolved_env (for Docker env vars)
-            env_pattern = r"<([A-Z_][A-Z0-9_]*)>"
-
-            def replace_env_var(match):
-                env_name = match.group(1)
-                return resolved_env.get(env_name, match.group(0))  # Return original if not found
-
-            processed = re.sub(env_pattern, replace_env_var, processed)
-
-        # Replace {runtime_var} with actual values from runtime_vars (for NPM args).
-        # Negative lookbehind on `$` so we never re-substitute inside an already-translated
-        # ${VAR} env placeholder (the brace is part of a Copilot CLI runtime substitution,
-        # not an APM template variable).
-        if runtime_vars:
-            runtime_pattern = r"(?<!\$)\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
-
-            def replace_runtime_var(match):
-                var_name = match.group(1)
-                return runtime_vars.get(var_name, match.group(0))
-
-            processed = re.sub(runtime_pattern, replace_runtime_var, processed)
-
-        return processed
-
-    def _resolve_env_placeholders(self, value, resolved_env):
-        """Legacy method for backward compatibility. Use _resolve_variable_placeholders instead."""
-        return self._resolve_variable_placeholders(value, resolved_env, {})
 
     @staticmethod
     def _select_remote_with_url(remotes):

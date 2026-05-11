@@ -136,13 +136,26 @@ class GeminiClientAdapter(CopilotClientAdapter):
         config: dict = {}
 
         # --- raw stdio (self-defined deps) ---
+        # Route ``env`` and ``args`` through the resolver pipeline so all
+        # three placeholder syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``)
+        # are resolved at install time before being written to
+        # ``.gemini/settings.json``. See issue #1266.
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
-            config["args"] = raw["args"]
+            resolved_env_for_args: dict = {}
             if raw.get("env"):
-                config["env"] = raw["env"]
+                resolved_env_for_args = self._resolve_environment_variables(
+                    raw["env"], env_overrides=env_overrides
+                )
+                config["env"] = resolved_env_for_args
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Gemini CLI")
+            config["args"] = [
+                self._resolve_variable_placeholders(arg, resolved_env_for_args, runtime_vars)
+                if isinstance(arg, str)
+                else arg
+                for arg in raw.get("args") or []
+            ]
             return config
 
         # --- remote endpoints ---

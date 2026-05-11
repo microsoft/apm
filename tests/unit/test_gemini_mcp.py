@@ -1,6 +1,7 @@
 """Tests for the Gemini CLI MCP client adapter."""
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -363,3 +364,96 @@ class TestGeminiFormatServerConfig(unittest.TestCase):
         self.assertEqual(config["url"], "https://api.example.com/sse")
         self.assertNotIn("httpUrl", config)
         self.assertNotIn("type", config)
+
+
+class TestGeminiSelfDefinedStdioEnvResolution(unittest.TestCase):
+    """Regression coverage for issue #1266.
+
+    Self-defined stdio MCP servers declared in apm.yml pass their env block
+    through the adapter as a plain dict (the _raw_stdio["env"] shape).
+    Before #1266, the Gemini adapter wrote that dict to disk verbatim, so
+    placeholders like ${TOKEN} ended up as literal strings in
+    .gemini/settings.json. The fix routes the dict through
+    _resolve_environment_variables in legacy mode so all three placeholder
+    syntaxes resolve to literal values from env_overrides -> os.environ at
+    install time.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.gemini_dir = Path(self.tmp.name) / ".gemini"
+        self.gemini_dir.mkdir()
+        self.settings_json = self.gemini_dir / "settings.json"
+        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
+        self._cwd_patcher.start()
+        self.adapter = GeminiClientAdapter()
+
+    def tearDown(self):
+        self._cwd_patcher.stop()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _server_info_with_placeholders():
+        return {
+            "name": "bitbucket",
+            "id": "",
+            "_raw_stdio": {
+                "command": "pnpx",
+                "args": ["@aashari/mcp-server-atlassian-bitbucket@3.1.0"],
+                "env": {
+                    "TOKEN_DOLLAR": "${ATLASSIAN_API_TOKEN}",
+                    "TOKEN_ENVPREFIX": "${env:ATLASSIAN_API_TOKEN}",
+                    "TOKEN_ANGLE": "<ATLASSIAN_API_TOKEN>",
+                    "LITERAL_EMAIL": "user@example.com",
+                },
+            },
+        }
+
+    def test_all_three_placeholder_syntaxes_resolve_to_literal(self):
+        env_overrides = {"ATLASSIAN_API_TOKEN": "real-secret-xyz123"}
+        with patch.object(self.adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = (
+                self._server_info_with_placeholders()
+            )
+            ok = self.adapter.configure_mcp_server("bitbucket", env_overrides=env_overrides)
+
+        self.assertTrue(ok)
+        env_block = json.loads(self.settings_json.read_text())["mcpServers"]["bitbucket"]["env"]
+        self.assertEqual(env_block["TOKEN_DOLLAR"], "real-secret-xyz123")
+        self.assertEqual(env_block["TOKEN_ENVPREFIX"], "real-secret-xyz123")
+        self.assertEqual(env_block["TOKEN_ANGLE"], "real-secret-xyz123")
+        self.assertEqual(env_block["LITERAL_EMAIL"], "user@example.com")
+
+    def test_unresolvable_placeholder_is_preserved(self):
+        # patch.dict snapshots os.environ on enter and restores on exit, so
+        # the pop is reverted automatically after the test.
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ATLASSIAN_API_TOKEN", None)
+            with patch.object(self.adapter, "registry_client") as mock_registry:
+                mock_registry.find_server_by_reference.return_value = (
+                    self._server_info_with_placeholders()
+                )
+                self.adapter.configure_mcp_server("bitbucket")
+
+        env_block = json.loads(self.settings_json.read_text())["mcpServers"]["bitbucket"]["env"]
+        self.assertEqual(env_block["TOKEN_DOLLAR"], "${ATLASSIAN_API_TOKEN}")
+        self.assertEqual(env_block["TOKEN_ENVPREFIX"], "${env:ATLASSIAN_API_TOKEN}")
+        self.assertEqual(env_block["TOKEN_ANGLE"], "<ATLASSIAN_API_TOKEN>")
+
+    def test_placeholders_in_args_also_resolve(self):
+        server_info = {
+            "name": "demo",
+            "id": "",
+            "_raw_stdio": {
+                "command": "demo",
+                "args": ["--token", "<API_TOKEN>"],
+                "env": {"API_TOKEN": "<API_TOKEN>"},
+            },
+        }
+        with patch.object(self.adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = server_info
+            self.adapter.configure_mcp_server("demo", env_overrides={"API_TOKEN": "tok-abc"})
+
+        srv = json.loads(self.settings_json.read_text())["mcpServers"]["demo"]
+        self.assertEqual(srv["env"]["API_TOKEN"], "tok-abc")
+        self.assertEqual(srv["args"], ["--token", "tok-abc"])
