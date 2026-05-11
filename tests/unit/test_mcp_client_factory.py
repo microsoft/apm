@@ -159,33 +159,28 @@ class TestCodexClientAdapter(unittest.TestCase):
         server_config = config["mcp_servers"]["my_server"]
         self.assertEqual(server_config["command"], "npx")
 
+    @patch("apm_cli.adapters.client.codex._rich_warning")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
-    def test_configure_mcp_server_remote_rejected(self, mock_find_server):
-        """Test that remote servers (SSE type) are rejected by Codex adapter."""
-        # Mock registry response for remote-only server
+    def test_configure_mcp_server_sse_remote_rejected(self, mock_find_server, mock_warn):
+        """SSE remotes are rejected with a warning that points to streamable-http."""
         mock_server_info = {
             "id": "remote-server-id",
             "name": "remote-server",
             "remotes": [{"transport_type": "sse", "url": "https://example.com/mcp"}],
-            "packages": [],  # No packages, only remote endpoints
+            "packages": [],
         }
         mock_find_server.return_value = mock_server_info
 
-        # Capture printed output
-        with patch("builtins.print") as mock_print:
-            result = self.adapter.configure_mcp_server("remote-server")
+        result = self.adapter.configure_mcp_server("remote-server")
 
-        # Should return False (rejected)
         self.assertFalse(result)
         mock_find_server.assert_called_once_with("remote-server")
 
-        # Verify warning message was printed
-        mock_print.assert_any_call(
-            "[!]  Warning: MCP server 'remote-server' is a remote server (SSE type)"
-        )
-        mock_print.assert_any_call(
-            "   Codex CLI only supports local servers with command/args configuration"
-        )
+        mock_warn.assert_called_once()
+        warn_message = mock_warn.call_args[0][0]
+        self.assertIn("remote-server", warn_message)
+        self.assertIn("SSE", warn_message)
+        self.assertIn("streamable-http", warn_message)
 
         # Verify no config was updated
         config = self.adapter.get_current_config()
@@ -273,6 +268,87 @@ class TestCodexClientAdapter(unittest.TestCase):
             config["args"],
             ["-y", "@modelcontextprotocol/server-filesystem", ".", "."],
         )
+
+    def test_format_server_config_streamable_http_writes_url_and_id(self):
+        """Streamable-HTTP remote produces url + id (no http_headers when none)."""
+        server_info = {
+            "name": "figma",
+            "id": "ab12cd34-0000-0000-0000-000000000000",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                }
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["url"], "https://mcp.figma.com/mcp")
+        self.assertEqual(config["id"], "ab12cd34-0000-0000-0000-000000000000")
+        self.assertNotIn("http_headers", config)
+
+    def test_format_server_config_streamable_http_writes_headers(self):
+        """Registry-supplied headers land under ``http_headers``."""
+        server_info = {
+            "name": "figma",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [
+                        {"name": "Authorization", "value": "Bearer ghp_xxx"},
+                        {"name": "X-Figma-Region", "value": "us-east-1"},
+                    ],
+                }
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(
+            config["http_headers"],
+            {
+                "Authorization": "Bearer ghp_xxx",
+                "X-Figma-Region": "us-east-1",
+            },
+        )
+
+    def test_format_server_config_streamable_http_self_defined(self):
+        """Self-defined streamable-http info produces a remote config."""
+        server_info = {
+            "name": "my-remote",
+            "remotes": [
+                {
+                    "transport_type": "streamable-http",
+                    "url": "https://example.com/mcp",
+                    "headers": [{"name": "Authorization", "value": "Bearer xyz"}],
+                }
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["url"], "https://example.com/mcp")
+        self.assertEqual(config["http_headers"], {"Authorization": "Bearer xyz"})
+
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_streamable_http_writes_toml_entry(self, mock_find_server):
+        """End-to-end install of a streamable-HTTP server writes a parseable TOML entry."""
+        mock_find_server.return_value = {
+            "name": "figma",
+            "id": "ab12cd34-0000-0000-0000-000000000000",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [{"name": "Authorization", "value": "Bearer ghp_xxx"}],
+                }
+            ],
+        }
+
+        result = self.adapter.configure_mcp_server("figma/figma")
+
+        self.assertTrue(result)
+        config = self.adapter.get_current_config()
+        figma = config["mcp_servers"]["figma"]
+        self.assertEqual(figma["url"], "https://mcp.figma.com/mcp")
+        self.assertEqual(figma["id"], "ab12cd34-0000-0000-0000-000000000000")
+        self.assertEqual(figma["http_headers"], {"Authorization": "Bearer ghp_xxx"})
 
 
 if __name__ == "__main__":
