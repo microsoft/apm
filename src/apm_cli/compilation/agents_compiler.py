@@ -574,7 +574,8 @@ class AgentsCompiler:
         if skip_instructions:
             self._log(
                 "progress",
-                "Instructions already in .claude/rules/ -- skipping from CLAUDE.md",
+                "Instructions already in .claude/rules/ -- omitting from CLAUDE.md"
+                " to avoid duplicate context",
                 symbol="info",
             )
 
@@ -662,8 +663,8 @@ class AgentsCompiler:
         if files_written == 0 and skip_instructions:
             self._log(
                 "progress",
-                "CLAUDE.md not generated (instructions in .claude/rules/, "
-                "no constitution or dependencies to emit)",
+                "CLAUDE.md not generated -- Claude Code reads .claude/rules/ directly,"
+                " no further action needed",
                 symbol="info",
             )
 
