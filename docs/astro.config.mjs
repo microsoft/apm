@@ -15,40 +15,47 @@ export default defineConfig({
 		prefetchAll: true,
 		defaultStrategy: 'viewport',
 	},
+	// Astro applies the `base` prefix automatically to redirect SOURCE
+	// keys, but NOT to redirect DESTINATIONS -- destinations are emitted
+	// as literal strings into the redirect HTML's meta refresh / canonical
+	// link. Every destination below MUST therefore start with `/apm/` to
+	// land on the actual deployed URL on https://microsoft.github.io/apm/.
+	// Source keys MUST NOT include `/apm` -- the base is added at build
+	// time and the source would otherwise resolve under `/apm/apm/`.
 	redirects: {
 		// Legacy enterprise slugs
-		'/enterprise/teams': '/enterprise/making-the-case',
-		'/enterprise/governance': '/enterprise/governance-guide',
+		'/enterprise/teams': '/apm/enterprise/making-the-case',
+		'/enterprise/governance': '/apm/enterprise/governance-guide',
 		// Legacy intro section -> concepts
-		'/introduction/what-is-apm': '/concepts/what-is-apm',
-		'/introduction/why-apm': '/concepts/the-three-promises',
-		'/introduction/how-it-works': '/concepts/lifecycle',
-		'/introduction/key-concepts': '/concepts/glossary',
-		'/introduction/anatomy-of-an-apm-package': '/concepts/package-anatomy',
+		'/introduction/what-is-apm': '/apm/concepts/what-is-apm',
+		'/introduction/why-apm': '/apm/concepts/the-three-promises',
+		'/introduction/how-it-works': '/apm/concepts/lifecycle',
+		'/introduction/key-concepts': '/apm/concepts/glossary',
+		'/introduction/anatomy-of-an-apm-package': '/apm/concepts/package-anatomy',
 		// Legacy getting-started -> persona ramps
-		'/getting-started/quick-start': '/quickstart',
-		'/getting-started/installation': '/quickstart',
-		'/getting-started/authentication': '/consumer/authentication',
-		'/getting-started/migration': '/troubleshooting/migration',
+		'/getting-started/quick-start': '/apm/quickstart',
+		'/getting-started/installation': '/apm/quickstart',
+		'/getting-started/authentication': '/apm/consumer/authentication',
+		'/getting-started/migration': '/apm/troubleshooting/migration',
 		// Legacy guides -> consumer/producer ramps
-		'/guides/dependencies': '/consumer/manage-dependencies',
-		'/guides/skills': '/producer/author-primitives/skills',
-		'/guides/prompts': '/producer/author-primitives/prompts',
-		'/guides/agent-workflows': '/producer/author-primitives/instructions-and-agents',
-		'/guides/compilation': '/producer/compile',
-		'/guides/dev-only-primitives': '/producer/author-primitives',
-		'/guides/package-relative-links': '/producer/package-relative-links',
-		'/guides/marketplaces': '/consumer/private-and-org-packages',
-		'/guides/marketplace-authoring': '/producer/publish-to-a-marketplace',
-		'/guides/plugins': '/producer/author-primitives',
-		'/guides/mcp-servers': '/consumer/install-mcp-servers',
-		'/guides/pack-distribute': '/producer',
-		'/guides/private-packages': '/consumer/private-and-org-packages',
-		'/guides/org-packages': '/consumer/private-and-org-packages',
-		'/guides/ci-policy-setup': '/enterprise/enforce-in-ci',
-		'/guides/drift-detection': '/enterprise/drift-detection',
+		'/guides/dependencies': '/apm/consumer/manage-dependencies',
+		'/guides/skills': '/apm/producer/author-primitives/skills',
+		'/guides/prompts': '/apm/producer/author-primitives/prompts',
+		'/guides/agent-workflows': '/apm/producer/author-primitives/instructions-and-agents',
+		'/guides/compilation': '/apm/producer/compile',
+		'/guides/dev-only-primitives': '/apm/producer/author-primitives',
+		'/guides/package-relative-links': '/apm/producer/package-relative-links',
+		'/guides/marketplaces': '/apm/consumer/private-and-org-packages',
+		'/guides/marketplace-authoring': '/apm/producer/publish-to-a-marketplace',
+		'/guides/plugins': '/apm/producer/author-primitives',
+		'/guides/mcp-servers': '/apm/consumer/install-mcp-servers',
+		'/guides/pack-distribute': '/apm/producer',
+		'/guides/private-packages': '/apm/consumer/private-and-org-packages',
+		'/guides/org-packages': '/apm/consumer/private-and-org-packages',
+		'/guides/ci-policy-setup': '/apm/enterprise/enforce-in-ci',
+		'/guides/drift-detection': '/apm/enterprise/drift-detection',
 		// Legacy reference monolith -> per-command
-		'/reference/cli-commands': '/reference/cli/install',
+		'/reference/cli-commands': '/apm/reference/cli/install',
 	},
 	integrations: [
 		sitemap(),
