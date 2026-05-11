@@ -16,7 +16,7 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
 APM is a dependency manager for AI agents. Declare the skills, prompts, instructions, plugins, and MCP servers your project needs in one `apm.yml`, then any developer runs `apm install` and gets the same agent context across GitHub Copilot, Claude Code, Cursor, OpenCode, Codex, Gemini, and Windsurf.
 
@@ -32,14 +32,26 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
   </Card>
 </CardGrid>
 
-## Install
+## Install APM
+
+<Tabs syncKey="os">
+  <TabItem label="macOS / Linux" icon="apple">
+    ```bash
+    curl -sSL https://aka.ms/apm-unix | sh
+    ```
+  </TabItem>
+  <TabItem label="Windows" icon="seti:windows">
+    ```powershell
+    irm https://aka.ms/apm-windows | iex
+    ```
+  </TabItem>
+</Tabs>
+
+Then try it on a sample package:
 
 ```bash
-curl -sSL https://aka.ms/apm-unix | sh
 apm install microsoft/apm-sample-package
 ```
-
-> Windows: `irm https://aka.ms/apm-windows | iex`
 
 ## The manifest
 
@@ -71,10 +83,6 @@ git clone <repo> && cd <repo> && apm install
 ```
 
 That's it. Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf -- every harness configured in one command, every dependency pinned, every MCP server policy-checked before it touches disk.
-
-## Manage MCP servers by manifest
-
-Today MCP servers are configured per-IDE, ad-hoc, drifting between developers and machines. APM treats them as first-class manifest dependencies: same `apm install`, same `apm.lock.yaml`, same policy gate as any other primitive. When a transitive package pulls in a new MCP server, the user is prompted before it touches disk; org policy can allow-list MCP sources globally and block the rest. See [Install MCP servers](/apm/consumer/install-mcp-servers/).
 
 ## Pick your path
 
