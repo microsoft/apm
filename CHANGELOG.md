@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `test_find_server_by_reference_uuid_not_found` no longer leaks a live HTTP call to `api.mcp.github.com` (fixing Windows CI failures from `socket.gaierror`); the `search_servers` fallback is now mocked. (#1264)
 - ADO full HTTPS URLs with sub-path virtual packages (e.g. `https://dev.azure.com/org/proj/_git/repo/sub/path`) are now parsed correctly instead of being rejected. (#1254)
 - Fixed `apm install` crash (exit code 128) when a mono-repo package depends on a sibling pinned to a non-HEAD commit; installs now resolve with a single in-place fetch, and multiple SHA-pinned references to the same repository share a single cached clone. (#1258)
 - MCP server token injection now requires both an allowlisted server name and a verified HTTPS GitHub hostname, preventing PAT exfiltration via poisoned registry entries. (#1239)
