@@ -21,8 +21,8 @@ Pack distributable artifacts from your APM project.
 Reads apm.yml to decide what to produce:
 
   dependencies: block  ->  bundle (directory or .tar.gz)
-  marketplace: block   ->  .claude-plugin/marketplace.json
-  both blocks present  ->  both artifacts
+  marketplace: block   ->  selected marketplace artifacts
+  both blocks present  ->  bundle plus selected marketplace artifacts
 
 The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy
 is embedded in each bundle.
@@ -42,7 +42,7 @@ Examples:
   apm pack
   apm pack --archive --offline
 
-  # Override marketplace.json location:
+  # Override Claude marketplace.json location:
   apm pack --marketplace-output ./build/marketplace.json
 
 Exit codes:
@@ -104,7 +104,10 @@ Exit codes:
     "marketplace_output",
     type=click.Path(),
     default=None,
-    help="Marketplace: override output path (default: .claude-plugin/marketplace.json).",
+    help=(
+        "Marketplace: override Claude/Anthropic output path "
+        "(default: .claude-plugin/marketplace.json)."
+    ),
 )
 @click.option(
     "--legacy-skill-paths",
@@ -180,7 +183,7 @@ def pack_cmd(
         if sub.kind is OutputKind.BUNDLE:
             _render_bundle_result(logger, sub.payload, fmt, target, dry_run)
         elif sub.kind is OutputKind.MARKETPLACE:
-            _render_marketplace_result(logger, sub.payload, dry_run, sub.warnings)
+            _render_marketplace_result(logger, sub.payload, dry_run, sub.warnings, sub.outputs)
 
 
 def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
@@ -232,23 +235,29 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
             logger.info(f"Share with: apm install {pack_result.bundle_path}")
 
 
-def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
+def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
     """Render the marketplace producer's report (one-liner summary)."""
-    if report is None:
-        return
     for warn_msg in extra_warnings or []:
         logger.warning(warn_msg)
+    output_reports = tuple(getattr(report, "outputs", ()) or ())
+    if not output_reports:
+        for output in outputs or []:
+            if dry_run:
+                logger.dry_run_notice(f"Would write marketplace.json -> {output}")
+            else:
+                logger.success(f"Built marketplace.json -> {output}")
+        return
     for warn_msg in report.warnings:
         logger.warning(warn_msg)
-    if dry_run or report.dry_run:
-        logger.dry_run_notice(
-            f"Would write marketplace.json ({len(report.resolved)} package(s)) "
-            f"-> {report.output_path}"
+    for output_report in output_reports:
+        message = (
+            f"marketplace.json [{output_report.profile}] "
+            f"({len(output_report.resolved)} package(s)) -> {output_report.output_path}"
         )
-        return
-    logger.success(
-        f"Built marketplace.json ({len(report.resolved)} package(s)) -> {report.output_path}"
-    )
+        if dry_run or output_report.dry_run:
+            logger.dry_run_notice(f"Would write {message}")
+        else:
+            logger.success(f"Built {message}")
 
 
 @click.command(

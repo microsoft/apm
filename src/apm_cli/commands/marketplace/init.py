@@ -109,7 +109,8 @@ def init(force, no_gitignore_check, name, owner, verbose):
     next_steps = [
         "Edit the 'marketplace:' block in apm.yml to add your packages",
         "Run 'apm pack' to generate .claude-plugin/marketplace.json",
-        "Commit BOTH apm.yml and the generated marketplace.json",
+        "Add 'codex' to marketplace.outputs to also generate .agents/plugins/marketplace.json",
+        "Commit apm.yml and the generated marketplace file(s)",
     ]
 
     try:

@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
+from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder, ResolvedPackage
 from apm_cli.marketplace.migration import load_marketplace_config
+from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS
 
 _APM_WITH_LOCAL_BLOCK = """\
 name: my-project
@@ -27,6 +28,7 @@ marketplace:
       description: A locally vendored tool.
       homepage: https://example.com/local-tool
       version: 0.1.0
+      category: Productivity
       tags: [local, demo]
     - name: remote-tool
       source: acme/remote-tool
@@ -79,6 +81,142 @@ def test_compose_emits_local_source_as_string(
     assert plugin["description"] == "A locally vendored tool."
     assert plugin["version"] == "0.1.0"
     assert plugin["homepage"] == "https://example.com/local-tool"
+    assert "category" not in plugin
+
+
+def test_compose_codex_marketplace_includes_local_and_remote_plugins(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: codex-marketplace
+        description: A project.
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          outputs: [codex]
+          packages:
+            - name: local-tool
+              source: ./plugins/local-tool
+              version: 0.1.0
+              category: Productivity
+            - name: remote-tool
+              source: acme/remote-tool
+              ref: v1.0.0
+              category: Developer Tools
+            - name: remote-subdir-tool
+              source: acme/monorepo
+              subdir: plugins/remote-subdir-tool
+              ref: v2.0.0
+              category: Coding
+        """,
+    )
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    remote_entry = next(p for p in config.packages if p.name == "remote-tool")
+    remote_subdir_entry = next(p for p in config.packages if p.name == "remote-subdir-tool")
+    resolved = [
+        builder._resolve_entry(local_entry),
+        # Construct the remote resolved shape directly; this test is about
+        # Codex composition, not git ref resolution.
+        ResolvedPackage(
+            name=remote_entry.name,
+            source_repo=remote_entry.source,
+            subdir=remote_entry.subdir,
+            ref="v1.0.0",
+            sha="a" * 40,
+            requested_version=None,
+            tags=(),
+            is_prerelease=False,
+        ),
+        ResolvedPackage(
+            name=remote_subdir_entry.name,
+            source_repo=remote_subdir_entry.source,
+            subdir=remote_subdir_entry.subdir,
+            ref="v2.0.0",
+            sha="b" * 40,
+            requested_version=None,
+            tags=(),
+            is_prerelease=False,
+        ),
+    ]
+
+    doc, warnings = builder.compose_codex_marketplace_json(resolved)
+
+    assert doc == {
+        "name": "codex-marketplace",
+        "interface": {"displayName": "codex-marketplace"},
+        "plugins": [
+            {
+                "name": "local-tool",
+                "source": {"source": "local", "path": "./plugins/local-tool"},
+                "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+                "category": "Productivity",
+            },
+            {
+                "name": "remote-tool",
+                "source": {
+                    "source": "url",
+                    "url": "acme/remote-tool",
+                    "ref": "v1.0.0",
+                    "sha": "a" * 40,
+                },
+                "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+                "category": "Developer Tools",
+            },
+            {
+                "name": "remote-subdir-tool",
+                "source": {
+                    "source": "git-subdir",
+                    "url": "acme/monorepo",
+                    "path": "plugins/remote-subdir-tool",
+                    "ref": "v2.0.0",
+                    "sha": "b" * 40,
+                },
+                "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+                "category": "Coding",
+            },
+        ],
+    }
+    assert warnings == ()
+
+
+def test_write_codex_output_profile(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: codex-marketplace
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          outputs: [codex]
+          codex:
+            output: .agents/plugins/marketplace.json
+          packages:
+            - name: local-tool
+              source: ./plugins/local-tool
+              category: Productivity
+        """,
+    )
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = config.packages[0]
+    resolved = (builder._resolve_entry(local_entry),)
+
+    report = builder.write_output(
+        MARKETPLACE_OUTPUTS["codex"],
+        resolved,
+        tmp_path / ".agents" / "plugins" / "marketplace.json",
+    )
+
+    assert report.warnings == ()
+    assert report.output_path == tmp_path / ".agents" / "plugins" / "marketplace.json"
+    assert report.resolved == resolved
+    text = report.output_path.read_text(encoding="utf-8")
+    assert '"source": "local"' in text
+    assert '"path": "./plugins/local-tool"' in text
 
 
 def test_compose_inherited_top_level_omits_description_and_version(

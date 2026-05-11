@@ -104,6 +104,38 @@ class TestPackUnified:
         # No bundle directory should appear
         assert not (tmp_path / "build").exists()
 
+    def test_pack_marketplace_writes_codex_when_selected(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [claude, codex]\n  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 0, result.output
+        claude_out = tmp_path / ".claude-plugin" / "marketplace.json"
+        codex_out = tmp_path / ".agents" / "plugins" / "marketplace.json"
+        assert claude_out.exists()
+        assert codex_out.exists()
+        data = json.loads(codex_out.read_text(encoding="utf-8"))
+        assert data["plugins"][0]["source"] == {
+            "source": "local",
+            "path": "./.github/plugins/azure",
+        }
+
     def test_pack_both(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         # Add both blocks

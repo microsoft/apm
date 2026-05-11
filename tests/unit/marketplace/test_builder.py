@@ -1047,9 +1047,9 @@ class TestComposeMarketplaceJson:
 
 
 class TestOutputOverride:
-    """Tests for --output flag."""
+    """Tests for --marketplace-output flag plumbing."""
 
-    def test_custom_output_path(self, tmp_path: Path) -> None:
+    def test_custom_marketplace_output_path(self, tmp_path: Path) -> None:
         yml = """\
         name: test-mkt
         description: Test
@@ -1063,7 +1063,7 @@ class TestOutputOverride:
         """
         refs = {"acme/pkg1": _make_refs("v1.0.0")}
         custom_out = tmp_path / "custom" / "output.json"
-        opts = BuildOptions(output_override=custom_out)
+        opts = BuildOptions(marketplace_output=custom_out)
         report = _build_with_mock(tmp_path, yml, refs, options=opts)
         assert report.output_path == custom_out
         assert custom_out.exists()
