@@ -30,6 +30,15 @@ and are not touched by `apm compile`. See
 [Primitives and targets](../../../concepts/primitives-and-targets/)
 for the full reach map.
 
+**When you actually need it:** compile is **optional for the
+`copilot` target** -- GitHub Copilot natively reads
+`.github/instructions/*.instructions.md` (with their `applyTo:`
+frontmatter) that `apm install` already deploys. Compile is
+**recommended for every other target** (`claude`, `cursor`, `codex`,
+`gemini`, `opencode`, `windsurf`), which load instructions through a
+root context file or harness-specific rules folder that compile
+generates.
+
 Resolution order for which targets to compile:
 
 1. `--target` / `--all` on the command line

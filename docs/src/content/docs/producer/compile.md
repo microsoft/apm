@@ -9,6 +9,21 @@ root context files each agent harness reads at startup. It does not
 fetch packages, does not resolve dependencies, does not write the
 lockfile, and does not deploy other primitive types.
 
+:::note[When you actually need it]
+Compile is **optional for the `copilot` target** -- GitHub Copilot
+natively reads `.github/instructions/*.instructions.md` (with their
+`applyTo:` frontmatter) that `apm install` already deploys, so the
+aggregated `AGENTS.md` / `copilot-instructions.md` it produces are a
+nice-to-have, not a requirement.
+
+Compile is **recommended for every other target** (`claude`,
+`cursor`, `codex`, `gemini`, `opencode`, `windsurf`) -- those
+harnesses load instructions through the root context file
+(`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
+folder that compile generates. Without it, your instructions are
+on disk but the harness will not pick them up.
+:::
+
 ```bash
 apm compile
 ```
@@ -97,15 +112,15 @@ every machine. Full rules and the per-target output map live in
 
 Per target, with the rules shape on disk after compile:
 
-| Target | Root context file | Per-rule output |
-|---|---|---|
-| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) |
-| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` |
-| `cursor` | -- | `.cursor/rules/<name>.mdc` |
-| `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy |
-| `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy |
-| `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy |
-| `windsurf` | -- | `.windsurf/rules/<name>.md` |
+| Target | Root context file | Per-rule output | Compile required? |
+|---|---|---|---|
+| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively |
+| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- `CLAUDE.md` is the entry point |
+| `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
+| `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
+| `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
+| `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
+| `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
 
 ## compile vs install
 
