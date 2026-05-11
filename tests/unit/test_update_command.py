@@ -40,6 +40,7 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertIn("powershell", command.lower())
 
     @patch("apm_cli.commands.self_update.is_self_update_enabled", return_value=False)
+    @patch("apm_cli.commands._helpers.is_self_update_enabled", return_value=False)
     @patch(
         "apm_cli.commands.self_update.get_self_update_disabled_message",
         return_value="Update with: pixi update apm-cli",
@@ -51,6 +52,7 @@ class TestUpdateCommand(unittest.TestCase):
         mock_get,
         mock_run,
         mock_message,
+        mock_enabled_helpers,
         mock_enabled,
     ):
         """Disabled self-update policy should print guidance and skip installer."""
