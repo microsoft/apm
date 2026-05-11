@@ -22,13 +22,22 @@ Push this one file to your org's `.github` repo and every repo in the
 org is governed by it on the next `apm install`. No per-repo wiring,
 no settings page.
 
-You can also point at a policy explicitly during testing:
+You can also point at a policy explicitly during testing -- before
+the file is committed to your `.github` repo:
 
 ```bash
-apm install --policy ./apm-policy.yml
-apm install --policy https://example.com/apm-policy.yml
-apm install --policy contoso/governance     # any owner/repo
+# Preview what the policy would do, against any source:
+apm policy status --policy-source ./apm-policy.yml
+apm policy status --policy-source https://example.com/apm-policy.yml
+apm policy status --policy-source contoso/governance     # any owner/repo
+
+# Gate CI on a policy without auto-discovery:
+apm audit --ci --policy ./apm-policy.yml
 ```
+
+(`apm install` does not take a `--policy` flag -- discovery on install
+runs automatically from your git remote, or you can force-skip it
+with `--no-policy` / `APM_POLICY_DISABLE=1`.)
 
 The result is cached locally for 1 hour by default; `--no-cache` forces
 a fresh fetch.
