@@ -25,8 +25,10 @@ E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 
 pytestmark = [
     pytest.mark.requires_e2e_mode,
-    # Mutates os.environ["HOME"]; must be serialized on a single xdist
-    # worker so parallel tests do not race on global env state.
+    # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
+    # Requires --dist loadgroup in the xdist invocation (the only
+    # scheduler that honors xdist_group); without it the marker is
+    # silently ignored and tests would race on global env state.
     pytest.mark.xdist_group(name="home_env"),
 ]
 

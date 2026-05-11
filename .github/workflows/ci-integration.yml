@@ -173,12 +173,10 @@ jobs:
       - name: Install test dependencies
         run: uv sync --extra dev
 
-      # Cache APM's git/HTTP cache across runs. Most integration tests
-      # re-clone microsoft/apm-sample-package, github/awesome-copilot,
-      # and anthropics/skills repeatedly. Caching the resolved cache dir
-      # cuts the network jitter and PAT rate-limit risk on every run.
-      # Key includes a weekly bucket so the cache refreshes regularly
-      # without becoming load-bearing for correctness.
+      # APM resolves its cache dir to ~/.cache/apm by default on Linux
+      # (XDG_CACHE_HOME unset -> $HOME/.cache/apm). actions/cache restores
+      # straight into that path, so the apm binary picks it up natively
+      # with no symlink or env override required.
       - name: Compute cache week bucket
         id: cache-bucket
         run: echo "week=$(date -u +'%Y-%U')" >> "$GITHUB_OUTPUT"
@@ -198,26 +196,16 @@ jobs:
           APM_RUN_INTEGRATION_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
-          # Force the resolved-cache dir to a stable path so actions/cache
-          # captures the right directory regardless of XDG defaults.
-          XDG_CACHE_HOME: ${{ github.workspace }}/.xdg-cache
+          # Sharded + parallel pytest invocation passed through to
+          # scripts/test-integration.sh, which still owns runtime setup
+          # (apm runtime setup copilot/codex/llm) and token resolution.
+          # --dist loadgroup is required: it is the only xdist scheduler
+          # that honors pytest.mark.xdist_group, which we use to keep
+          # HOME-mutating tests serialized on a single worker.
+          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10"
         run: |
-          mkdir -p "$XDG_CACHE_HOME/apm"
-          # Symlink so actions/cache (which uses ~/.cache/apm) and the
-          # apm binary (which honours XDG_CACHE_HOME) point at the same
-          # directory. Avoids a copy step at the end.
-          rm -rf "$HOME/.cache/apm"
-          mkdir -p "$HOME/.cache"
-          ln -sfn "$XDG_CACHE_HOME/apm" "$HOME/.cache/apm"
-
-          # pytest-split partitions tests deterministically across shards.
-          # xdist with --dist worksteal balances within a shard and reaps
-          # the wait-on-subprocess time most integration tests spend.
-          uv run pytest tests/integration/ \
-            -v --tb=short \
-            --splits 4 --group ${{ matrix.shard }} \
-            -n 2 --dist worksteal \
-            --maxfail 10
+          chmod +x scripts/test-integration.sh
+          uv run ./scripts/test-integration.sh
         # Per-shard timeout is ~1/4 of the original 30 min budget plus
         # headroom for the slowest shard (HOME-group tests).
         timeout-minutes: 15
