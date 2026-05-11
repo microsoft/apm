@@ -156,6 +156,14 @@ already discoverable from your AI tool of choice -- start a Copilot
 chat, open Claude Code, or invoke the agent from any harness that
 read its instructions on disk.
 
+:::note[Looking for `apm run`?]
+APM also ships an experimental script runner -- think `npx` for AI
+runtime CLIs. Declare a `scripts:` entry in `apm.yml` and execute it
+with `apm run <name>`. It is optional, off the critical path, and
+not required to use any installed package. See
+[Run scripts](/apm/consumer/run-scripts/) if you want to wire one up.
+:::
+
 <CardGrid>
   <Card title="Use more packages" icon="open-book">
     Browse the consumer guide: search marketplaces, pin versions, manage
@@ -173,14 +181,6 @@ read its instructions on disk.
     [Governance guide](/apm/enterprise/governance-guide/)
   </Card>
 </CardGrid>
-
-:::note[Looking for `apm run`?]
-APM also ships an experimental script runner -- think `npx` for AI
-runtime CLIs. Declare a `scripts:` entry in `apm.yml` and execute it
-with `apm run <name>`. It is optional, off the critical path, and
-not required to use any installed package. See
-[Run scripts](/apm/consumer/run-scripts/) if you want to wire one up.
-:::
 
 If something failed along the way, check
 [Troubleshooting](/apm/troubleshooting/ssl-issues/).
