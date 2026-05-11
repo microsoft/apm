@@ -30,7 +30,6 @@ export default defineConfig({
 		'/getting-started/installation': '/quickstart',
 		'/getting-started/authentication': '/consumer/authentication',
 		'/getting-started/migration': '/troubleshooting/migration',
-		'/getting-started/first-package': '/producer',
 		// Legacy guides -> consumer/producer ramps
 		'/guides/dependencies': '/consumer/manage-dependencies',
 		'/guides/skills': '/producer/author-primitives/skills',
