@@ -60,11 +60,10 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 brew install microsoft/apm/apm
 ```
 
-**Scoop (Windows):**
+**WinGet (Windows):**
 
 ```powershell
-scoop bucket add apm https://github.com/microsoft/scoop-apm
-scoop install apm
+winget install Microsoft.APM
 ```
 
 ## pip install
