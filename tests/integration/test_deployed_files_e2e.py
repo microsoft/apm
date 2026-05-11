@@ -162,8 +162,16 @@ class TestDeployedFilesInLockfile:
             full_path = temp_project / rel_path
             assert full_path.exists(), f"Deployed file {rel_path} does not exist on disk"
 
-    def test_deployed_files_are_under_github_or_claude(self, temp_project, apm_command):
-        """deployed_files should only be under .github/ or .claude/ directories."""
+    def test_deployed_files_are_under_known_target_roots(self, temp_project, apm_command):
+        """deployed_files must land under one of the known target roots.
+
+        Plugin-style packages whose primitives include skills also deploy a
+        copy under the AGENTS family root (``.agents/``) -- AGENTS.md is
+        the cross-tool common skills format used by Codex / Cursor /
+        OpenCode. The post-#1257 lockfile correctly records those paths,
+        so the assertion must allow ``.agents/`` alongside ``.github/``
+        and ``.claude/``.
+        """
         result = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
         assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
@@ -171,9 +179,10 @@ class TestDeployedFilesInLockfile:
         dep = _get_locked_dep(lockfile, "microsoft/apm-sample-package")
         assert dep is not None
 
+        allowed_roots = (".github/", ".claude/", ".agents/")
         for rel_path in dep["deployed_files"]:
-            assert rel_path.startswith(".github/") or rel_path.startswith(".claude/"), (
-                f"Deployed file {rel_path} is not under .github/ or .claude/"
+            assert rel_path.startswith(allowed_roots), (
+                f"Deployed file {rel_path} is not under any of {allowed_roots}"
             )
 
     def test_deployed_files_have_clean_names_in_lockfile(self, temp_project, apm_command):
