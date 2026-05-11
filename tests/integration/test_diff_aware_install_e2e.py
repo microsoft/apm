@@ -11,7 +11,6 @@ Uses real packages from GitHub:
   - microsoft/apm-sample-package (deployed prompts, agents, etc.)
 """
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,10 +19,7 @@ import pytest
 import yaml
 
 # Skip all tests if no GitHub token is available
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark = pytest.mark.requires_github_token
 
 
 @pytest.fixture

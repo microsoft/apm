@@ -1,5 +1,6 @@
 """Tests for GitHub package downloader."""
 
+import contextlib
 import os
 import shutil
 import stat
@@ -72,14 +73,12 @@ class TestGitHubPackageDownloader:
 
     def test_setup_git_environment_does_not_eagerly_call_credential_helper(self):
         """Constructor should not invoke git credential helper (lazy per-dep auth)."""
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch(
+        with patch.dict(os.environ, {}, clear=True):
+            with patch(
                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git"
-            ) as mock_cred,
-        ):
-            GitHubPackageDownloader()
-            mock_cred.assert_not_called()
+            ) as mock_cred:
+                GitHubPackageDownloader()
+                mock_cred.assert_not_called()
 
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("tempfile.mkdtemp")
@@ -363,7 +362,7 @@ class TestEnterpriseHostHandling:
         target_path = Path("/tmp/test_enterprise")
 
         with patch("pathlib.Path.exists", return_value=False):
-            result = downloader._clone_with_fallback("team/internal-repo", target_path)  # noqa: F841
+            downloader._clone_with_fallback("team/internal-repo", target_path)
 
         # Verify Method 3 used enterprise host, NOT github.com
         calls = mock_repo_class.clone_from.call_args_list
@@ -854,12 +853,10 @@ class TestAzureDevOpsSupport:
                 with patch("apm_cli.deps.github_downloader.Repo") as mock_repo:
                     mock_repo.clone_from.return_value = Mock()
 
-                    try:  # noqa: SIM105
+                    with contextlib.suppress(Exception):
                         downloader._clone_with_fallback(
                             dep_ref.repo_url, self.temp_dir, dep_ref=dep_ref
                         )
-                    except Exception:
-                        pass  # May fail due to mocking, we just want to check the call
 
                     # Verify _build_repo_url was called with dep_ref
                     if mock_build.called:
@@ -1263,7 +1260,7 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
 
     def test_sparse_checkout_success_closes_sha_repo_before_rmtree(self, tmp_path):
         """When sparse checkout succeeds the SHA-capture Repo is closed before _rmtree."""
-        from apm_cli.deps.github_downloader import _close_repo  # noqa: F401
+        from apm_cli.deps.github_downloader import _close_repo  # noqa
 
         downloader = GitHubPackageDownloader()
         dep = self._make_dep_ref()
@@ -1365,18 +1362,19 @@ class TestGitEnvironmentPlatformBehavior:
 class TestDownloaderCredentialFallback:
     """Test credential fallback behavior in GitHubPackageDownloader."""
 
-    def test_credential_fill_used_when_no_env_token(self):
-        """When no env tokens are set, credential helpers should be used."""
+    def test_credential_fill_not_used_at_constructor_without_env_token(self):
+        """Constructor keeps ``github_token`` env-only; credential helper runs lazily via AuthResolver."""
         with (
             patch.dict(os.environ, {}, clear=True),
             patch(
                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
                 return_value="credential-token",
-            ),
+            ) as mock_cred,
         ):
             downloader = GitHubPackageDownloader()
-            assert downloader.github_token == "credential-token"
-            assert downloader._github_token_from_credential_fill is True
+            assert downloader.github_token is None
+            assert downloader._github_token_from_credential_fill is False
+            mock_cred.assert_not_called()
 
     def test_env_token_takes_priority_over_credential_fill(self):
         """GITHUB_APM_PAT should take priority over credential helpers."""
@@ -1423,7 +1421,7 @@ class TestDownloaderCredentialFallback:
                 result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
                 assert result == b"file content"
 
-                call_headers = mock_get.call_args[1].get(  # noqa: F841
+                mock_get.call_args[1].get(
                     "headers", mock_get.call_args[0][1] if len(mock_get.call_args[0]) > 1 else {}
                 )
                 # _resilient_get is called as (url, headers=headers, timeout=30)
@@ -1709,7 +1707,7 @@ class TestRawContentCDNDownload:
                 # Raw CDN: 404, then API: 404 with specific ref error
                 mock_get.side_effect = [mock_raw_404, mock_api_404]
 
-                with pytest.raises(RuntimeError, match="File not found.*at ref 'v2.0.0'"):  # noqa: RUF043
+                with pytest.raises(RuntimeError, match=r"File not found.*at ref 'v2\.0\.0'"):
                     downloader._download_github_file(dep_ref, "agents/bot.agent.md", "v2.0.0")
 
             # Should be exactly 2 calls: 1 raw CDN (no master fallback) + 1 API
@@ -2104,6 +2102,128 @@ class TestRefExistsViaLsRemote:
             assert "ghp_supersecret" not in joined, f"Token leaked into verbose log: {joined!r}"
         finally:
             self._exit(ctxs)
+
+
+class TestGitLabInstallFileDownload:
+    """GitLab REST v4 raw file fetch must not use GitHub Contents API URLs."""
+
+    def test_gitlab_download_uses_v4_raw_not_github_contents(self):
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+            dep_ref = DependencyReference(repo_url="group/sub/repo", host="gitlab.com")
+
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.content = b"gitlab raw bytes"
+            mock_response.raise_for_status = Mock()
+
+            with patch.object(downloader, "_resilient_get", return_value=mock_response) as mock_get:
+                result = downloader._download_github_file(dep_ref, "nested/file.md", "main")
+
+            assert result == b"gitlab raw bytes"
+            url = mock_get.call_args[0][0]
+            assert "gitlab.com/api/v4" in url
+            assert "repository/files" in url
+            assert "/raw?" in url
+            assert "group%2Fsub%2Frepo" in url
+            assert "nested%2Ffile.md" in url
+            assert "/repos/" not in url
+            assert "contents/" not in url
+
+    def test_gitlab_download_uses_auth_resolver_gitlab_headers(self):
+        with patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-test"}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+            dep_ref = DependencyReference(repo_url="acme/standards", host="gitlab.com")
+
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.content = b"ok"
+            mock_response.raise_for_status = Mock()
+
+            with patch.object(downloader, "_resilient_get", return_value=mock_response) as mock_get:
+                downloader._download_github_file(dep_ref, "SKILL.md", "main")
+
+            headers = mock_get.call_args[1]["headers"]
+            assert headers.get("PRIVATE-TOKEN") == "glpat-test"
+            assert "Authorization" not in headers
+
+    def test_gitlab_github_env_vars_do_not_populate_private_token_header(self):
+        """GitHub PAT env vars must not appear as GitLab PRIVATE-TOKEN (cross-host leakage)."""
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "gh_github_pat"}, clear=True),
+            _CRED_FILL_PATCH,
+        ):
+            downloader = GitHubPackageDownloader()
+            dep_ref = DependencyReference(repo_url="acme/standards", host="gitlab.com")
+
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.content = b"ok"
+            mock_response.raise_for_status = Mock()
+
+            with patch.object(downloader, "_resilient_get", return_value=mock_response) as mock_get:
+                downloader._download_github_file(dep_ref, "SKILL.md", "main")
+
+            headers = mock_get.call_args[1]["headers"]
+            assert "PRIVATE-TOKEN" not in headers
+
+    def test_resolve_dep_token_includes_gitlab_host(self):
+        with patch.dict(os.environ, {"GITLAB_APM_PAT": "gitlab-pat"}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+            dep_ref = DependencyReference(repo_url="a/b", host="gitlab.com")
+            assert downloader._resolve_dep_token(dep_ref) == "gitlab-pat"
+
+    def test_gitlab_pat_primary_https_uses_oauth2_not_x_access_token(self):
+        """GitLab-class remotes embed PAT via oauth2 basic form (not GitHub x-access-token)."""
+        with (
+            patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-resolved-value"}, clear=True),
+            _CRED_FILL_PATCH,
+        ):
+            downloader = GitHubPackageDownloader()
+            gitlab_dep = DependencyReference(repo_url="group/nested/repo", host="gitlab.com")
+            resolved = downloader._resolve_dep_token(gitlab_dep)
+            assert resolved == "glpat-resolved-value"
+            url = downloader._build_repo_url(
+                "group/nested/repo",
+                use_ssh=False,
+                dep_ref=gitlab_dep,
+                token=resolved,
+            )
+        assert "x-access-token" not in url.lower()
+        assert "oauth2" in url
+        assert "glpat-resolved-value" in url
+        from urllib.parse import urlsplit
+
+        sp = urlsplit(url)
+        assert sp.scheme == "https"
+        assert sp.hostname == "gitlab.com"
+        assert sp.username == "oauth2"
+        assert sp.path == "/group/nested/repo.git"
+
+    def test_gitlab_git_error_redacts_oauth2_url(self):
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+        raw = (
+            "fatal: could not read Password for 'https://oauth2:glpat_secret@gitlab.com': "
+            "terminal prompts disabled"
+        )
+        sanitized = downloader._sanitize_git_error(raw)
+        assert "glpat_secret" not in sanitized
+        assert "***@gitlab.com" in sanitized
+
+    def test_gitlab_git_error_redacts_standalone_token_and_env_vars(self):
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+        raw = (
+            "remote rejected token glpat_secret_value; "
+            "GITLAB_APM_PAT=glpat-apm-secret GITLAB_TOKEN=glpat_token_secret"
+        )
+        sanitized = downloader._sanitize_git_error(raw)
+        assert "glpat_secret_value" not in sanitized
+        assert "glpat-apm-secret" not in sanitized
+        assert "glpat_token_secret" not in sanitized
+        assert "GITLAB_APM_PAT=***" in sanitized
+        assert "GITLAB_TOKEN=***" in sanitized
 
 
 # ---------------------------------------------------------------------------

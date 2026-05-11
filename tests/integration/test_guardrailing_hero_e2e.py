@@ -29,9 +29,7 @@ GITHUB_APM_PAT = os.environ.get("GITHUB_APM_PAT")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 PRIMARY_TOKEN = GITHUB_APM_PAT or GITHUB_TOKEN
 
-pytestmark = pytest.mark.skipif(
-    not E2E_MODE, reason="E2E tests only run when APM_E2E_TESTS=1 is set"
-)
+pytestmark = pytest.mark.requires_e2e_mode
 
 
 def run_command(

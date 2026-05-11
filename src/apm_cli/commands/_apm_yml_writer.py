@@ -25,7 +25,18 @@ def set_skill_subset_for_entry(
     Returns True if file was modified.
     """
     data = load_yaml(manifest_path) or {}
-    deps_section = data.get("dependencies", {})
+    deps_section = data.get("dependencies")
+    if deps_section is None:
+        deps_section = {}
+    if not isinstance(deps_section, dict):
+        raise ValueError(
+            f"Invalid 'dependencies' in {manifest_path}: expected a mapping "
+            f"with 'apm:' key, got {type(deps_section).__name__}. "
+            "Use the structured format:\n"
+            "  dependencies:\n"
+            "    apm:\n"
+            "      - owner/repo"
+        )
     apm_deps = deps_section.get("apm", [])
     if not apm_deps:
         return False

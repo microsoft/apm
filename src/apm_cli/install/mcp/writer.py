@@ -125,3 +125,8 @@ def add_mcp_to_apm_yml(
     data[section_name]["mcp"] = mcp_list
     dump_yaml(data, apm_yml_path)
     return status, diff
+
+
+# Backward-compatibility alias for tests and legacy callers that imported
+# the underscore-prefixed name from apm_cli.commands.install.
+_add_mcp_to_apm_yml = add_mcp_to_apm_yml

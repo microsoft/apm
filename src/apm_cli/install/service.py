@@ -50,7 +50,18 @@ class InstallService:
             InstallNotAvailableError: if the dependency subsystem failed
                 to import (e.g. missing optional extras).  Adapters are
                 responsible for presenting this to the user.
+            FrozenInstallError: when ``request.frozen`` is True and the
+                lockfile is missing or structurally out of sync with
+                ``request.apm_package``.  Raised before the pipeline
+                runs so no resolve / download work is wasted.
         """
+        # Enforce --frozen BEFORE invoking the pipeline.  The check is
+        # purely structural (no network) so it must succeed or fail in
+        # well under a second; running it here keeps the contract simple
+        # for the pipeline (which never sees a `frozen` flag).
+        if request.frozen:
+            self._enforce_frozen(request)
+
         # Local import keeps service module import-cheap and matches the
         # existing pipeline's lazy-import discipline.
         try:
@@ -78,4 +89,58 @@ class InstallService:
             skill_subset=request.skill_subset,
             skill_subset_from_cli=request.skill_subset_from_cli,
             legacy_skill_paths=request.legacy_skill_paths,
+            plan_callback=request.plan_callback,
         )
+
+    @staticmethod
+    def _enforce_frozen(request: InstallRequest) -> None:
+        """Raise :class:`FrozenInstallError` if lockfile is absent or stale.
+
+        Looks up ``apm.lock.yaml`` next to the manifest's ``apm.yml``,
+        loads it, and runs ``lockfile_satisfies_manifest`` against the
+        manifest's direct deps (regular + dev).  Any miss raises with a
+        list of human-readable reasons the renderer can show.
+        """
+        from pathlib import Path
+
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.plan import lockfile_satisfies_manifest
+
+        manifest_path = getattr(request.apm_package, "package_path", None)
+        if manifest_path is None:
+            project_dir = Path(".")
+        elif Path(manifest_path).is_file():
+            project_dir = Path(manifest_path).parent
+        else:
+            project_dir = Path(manifest_path)
+        lockfile_path = project_dir / "apm.lock.yaml"
+
+        if not lockfile_path.exists():
+            raise FrozenInstallError(
+                "--frozen requires apm.lock.yaml to exist. "
+                "Run 'apm install' (without --frozen) or 'apm update' first.",
+            )
+
+        try:
+            lockfile = LockFile.read(lockfile_path)
+        except Exception as e:
+            raise FrozenInstallError(
+                f"--frozen could not read apm.lock.yaml: {e}",
+            ) from e
+
+        if lockfile is None:
+            raise FrozenInstallError(
+                "--frozen requires apm.lock.yaml to exist. "
+                "Run 'apm install' (without --frozen) or 'apm update' first.",
+            )
+
+        manifest_deps = list(request.apm_package.get_apm_dependencies())
+        manifest_deps.extend(request.apm_package.get_dev_apm_dependencies())
+
+        satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
+        if not satisfied:
+            raise FrozenInstallError(
+                "--frozen: apm.lock.yaml is out of sync with apm.yml.",
+                reasons=reasons,
+            )

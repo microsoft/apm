@@ -61,6 +61,10 @@ This is where it gets interesting. Install a package and watch what happens:
 apm install microsoft/apm-sample-package#v1.0.0
 ```
 
+:::tip[Already use the gh CLI?]
+If you are logged in with `gh auth login`, APM is already authenticated for private GitHub packages on github.com, `*.ghe.com`, and GHES -- no env vars to set.
+:::
+
 APM downloads the package, resolves its dependencies, and deploys files directly into the directories your AI tools already watch:
 
 ```

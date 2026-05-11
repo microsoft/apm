@@ -1,6 +1,6 @@
 """Typed inputs for the install pipeline (Application Service input).
 
-Bundles the 11 kwargs previously passed to ``run_install_pipeline`` into a
+Bundles the kwargs previously passed to ``run_install_pipeline`` into a
 single immutable record that the Click handler builds from CLI args and
 the ``InstallService`` consumes.  This is the typed-IO companion to
 ``InstallResult`` (the Service output, defined in ``apm_cli.models.results``).
@@ -9,12 +9,13 @@ the ``InstallService`` consumes.  This is the typed-IO companion to
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 if TYPE_CHECKING:
     from apm_cli.core.auth import AuthResolver
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.scope import InstallScope
+    from apm_cli.install.plan import UpdatePlan
     from apm_cli.models.apm_package import APMPackage
 
 
@@ -45,3 +46,15 @@ class InstallRequest:
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS
+
+    # --frozen: refuse to install if lockfile is missing or stale relative
+    # to apm.yml.  Enforced in InstallService.run() BEFORE delegating to
+    # the pipeline, so the failure surfaces without running resolve.
+    frozen: bool = False
+
+    # Plan-gate hook: if set, run_install_pipeline invokes this callable
+    # AFTER resolve completes and BEFORE downloads begin, passing the
+    # computed UpdatePlan.  The callable returns True to proceed or
+    # False to abort cleanly with a "no changes applied" message.  Used
+    # by ``apm update`` to render the plan and prompt the user.
+    plan_callback: Callable[[UpdatePlan], bool] | None = None

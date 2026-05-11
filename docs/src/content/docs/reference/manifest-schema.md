@@ -329,6 +329,16 @@ Local path dependency (development only):
 - path: ./packages/my-shared-skills
 ```
 
+Monorepo sibling reference (`git: parent`):
+
+```yaml
+# In agents/pkg-a/apm.yml inside org/monorepo
+- git: parent
+  path: skills/shared
+```
+
+The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates -- `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. `ref` and `alias` overrides are accepted; when `ref` is omitted the parent's resolved ref is inherited.
+
 #### 4.1.3. Virtual Packages
 
 A dependency MAY target a subdirectory or a file within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:
