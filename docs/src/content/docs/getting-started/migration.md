@@ -92,7 +92,7 @@ skill collection layout reference.
 - [Quick start](../quick-start/) -- first-time setup walkthrough
 - [Dependencies](../../guides/dependencies/) -- managing external packages
 - [Manifest schema](../../reference/manifest-schema/) -- full `apm.yml` reference
-- [CLI commands](../../reference/cli-commands/) -- complete command reference
+- [CLI commands](../../reference/cli/install/) -- complete command reference
 
 ## Deprecated targets
 

@@ -1,13 +1,13 @@
 ---
-title: APM – Agent Package Manager
-description: An open-source dependency manager for AI agents. Declare the skills, prompts, instructions, and tools your project needs in one manifest.
+title: APM - Agent Package Manager
+description: A dependency manager for AI agents. Declare the skills, prompts, instructions, plugins, and MCP servers your project needs in one apm.yml.
 template: splash
 hero:
   title: Agent Package Manager
-  tagline: <strong>Same AI coding superpowers. Every developer. By default.</strong>
+  tagline: A dependency manager for AI agents -- like npm for agent context.
   actions:
-    - text: Get Started
-      link: /apm/getting-started/quick-start/
+    - text: Quickstart
+      link: /apm/quickstart/
       icon: right-arrow
       variant: primary
     - text: View on GitHub
@@ -18,89 +18,86 @@ hero:
 
 import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
-**An open-source dependency manager for AI agents.** Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent configuration.
-
-AI coding agents need context and capabilities to be useful — instructions, skills, prompts, plugins, MCP servers. But today every developer configures theirs differently. Nothing is portable. Nothing is reproducible. Nothing is governed.
-
-APM fixes this. You declare your project's agent configuration once in `apm.yml` — and every developer who clones your repo gets a fully configured agent setup in seconds, locked to exact versions, scanned for hidden threats, and gated by the policies your organization defines.
+APM is a dependency manager for AI agents. Declare the skills, prompts, instructions, plugins, and MCP servers your project needs in one `apm.yml`, then any developer runs `apm install` and gets the same agent context across GitHub Copilot, Claude Code, Cursor, OpenCode, Codex, Gemini, and Windsurf.
 
 <CardGrid>
   <Card title="Portable by manifest" icon="document">
-    One `apm.yml` declares skills, instructions, prompts, agents, hooks, plugins, and MCP servers. Transitive dependencies resolve like npm or pip; `apm.lock.yaml` pins exact versions for reproducible installs across Copilot, Claude Code, Cursor, OpenCode, Codex, and Gemini.
+    One `apm.yml`, every harness, every machine. The lockfile pins exact versions and content hashes so a fresh clone reproduces the same agent setup byte-for-byte.
   </Card>
   <Card title="Secure by default" icon="approve-check-circle">
-    Skills, prompts, instructions, hooks — everything agents execute is an attack surface. `apm install` scans packages for hidden Unicode and other tampering before they reach your agents; `apm audit` reports the full chain of trust.
+    Every install scans for hidden Unicode, pins content hashes, and gates transitive MCP servers behind explicit trust prompts. No opt-in required.
   </Card>
   <Card title="Governed by policy" icon="setting">
-    `apm-policy.yml` lets platform teams allow-list dependencies, restrict deploy targets, and enforce trust rules at install time — across every repo, from a single source of truth. See the [Governance Guide](/apm/enterprise/governance-guide/).
-  </Card>
-  <Card title="Any git host" icon="github">
-    Install from GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, or any self-hosted git server. No registry to run, no central service to depend on.
+    `apm-policy.yml` is enforced at install time, including transitive MCP. Tighten-only inheritance flows enterprise -> org -> repo. See the [Governance Guide](/apm/enterprise/governance-guide/).
   </Card>
 </CardGrid>
 
-## Quick Start
+## Install APM
 
-<Tabs>
-  <TabItem label="macOS / Linux">
+<Tabs syncKey="os">
+  <TabItem label="macOS / Linux" icon="apple">
     ```bash
     curl -sSL https://aka.ms/apm-unix | sh
     ```
   </TabItem>
-  <TabItem label="Windows">
+  <TabItem label="Windows" icon="seti:windows">
     ```powershell
     irm https://aka.ms/apm-windows | iex
     ```
   </TabItem>
 </Tabs>
 
-Then add packages to your project:
+Then try it on a sample package:
 
 ```bash
 apm install microsoft/apm-sample-package
-apm install anthropics/skills/skills/frontend-design
 ```
 
-## Example: apm.yml
+## The manifest
 
 ```yaml
-# apm.yml — ships with your project, like package.json
-name: your project
+# apm.yml -- ships with your repo, like package.json
+name: my-project
 version: 1.0.0
 dependencies:
   apm:
-    # Skills from any GitHub repository
+    # Skills, prompts, agents, plugins -- from any GitHub repo, with version pinning
     - anthropics/skills/skills/frontend-design
-    - microsoft/GitHub-Copilot-for-Azure/plugin/skills/azure-compliance
-    # A full package with rules, skills, prompts, hooks...
     - microsoft/apm-sample-package
-    # Plugins
     - github/awesome-copilot/plugins/context-engineering#v2.1
-    # Agents
     - github/awesome-copilot/agents/api-architect.agent.md
-    # GitLab, Azure DevOps, any git host — with version pinning
+    # GitLab, Azure DevOps, Bitbucket, Gitea, any git server
     - git: https://gitlab.com/acme/coding-standards.git
       path: instructions/security
       ref: v2.0
-    - git: dev.azure.com/org/project/repo
-      path: prompts/review.prompt.md
+    - dev.azure.com/acme/platform/_git/prompts/review.prompt.md
+    - bitbucket.org/team/agent-rules#main
+  mcp:
+    # MCP servers governed by the same manifest
+    - io.github.github/github-mcp-server
+    - io.github.microsoft/playwright-mcp
 ```
-
-New developer joins the team:
 
 ```bash
-git clone <org/repo> && cd <repo> && apm install
+git clone <repo> && cd <repo> && apm install
 ```
 
-**That's it.** Copilot, Claude, Cursor, OpenCode, Codex, Gemini — every harness is configured with the right context and capabilities. The manifest defines the project's custom and portable Agentic SDLC setup installable in a single command.
+That's it. Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf -- every harness configured in one command, every dependency pinned, every MCP server policy-checked before it touches disk.
 
-## Open Source & Community
+## Pick your path
 
-APM is an open-source, MIT-licensed community project under the [`microsoft`](https://github.com/microsoft) org. It's early days — the tool is evolving fast, shaped by developers building real agent workflows. We ship frequently, welcome contributions, and value feedback over perfection.
-
-Built on the standards the community has already adopted:
-[AGENTS.md](https://agents.md) · [Agent Skills](https://agentskills.io) · [MCP](https://modelcontextprotocol.io)
+<CardGrid>
+  <Card title="Use a package" icon="rocket">
+    Install someone else's primitives and run them on your harness. Start in the [consumer ramp](/apm/consumer/).
+  </Card>
+  <Card title="Author and publish" icon="open-book">
+    Build skills, prompts, plugins, or full packages others can install. Start in the [producer ramp](/apm/producer/).
+  </Card>
+  <Card title="Govern at fleet scale" icon="setting">
+    Policy, audit, and CI gating across the org. Start in the [enterprise ramp](/apm/enterprise/).
+  </Card>
+</CardGrid>
 
 ---
 
-*We've enforced dependency management on code for decades. It was only a matter of time before AI agents needed it too.*
+APM is open source under the [microsoft](https://github.com/microsoft/apm) org, MIT-licensed. Built on [AGENTS.md](https://agents.md), [Agent Skills](https://agentskills.io), [MCP](https://modelcontextprotocol.io). See the [changelog](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for what shipped recently.

@@ -10,6 +10,7 @@
     "astro": "astro"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.7.2",
     "@astrojs/starlight": "0.38.4",
     "astro": "6.2.1",
     "astro-mermaid": "^2.0.1",
@@ -18,7 +19,6 @@
     "starlight-llms-txt": "^0.8.1"
   },
   "overrides": {
-    "@astrojs/sitemap": "3.7.2",
     "uuid": "^14.0.0"
   }
 }

@@ -1,0 +1,141 @@
+---
+title: Update and refresh
+description: Refresh project dependencies, lock down installs for CI, and update the apm CLI binary. One verb per job.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="tip" title="Coming from npm? You already know this.">
+`apm update` refreshes your project's package dependencies, just like
+`npm update`. To update the `apm` CLI binary itself, use
+`apm self-update` (think `npm install -g npm`).
+</Aside>
+
+Two things drift out of date in an APM project:
+
+1. The package versions pinned in `apm.lock.yaml`.
+2. The `apm` CLI binary on your machine.
+
+They are managed by separate commands. Pick the right one.
+
+## Refresh project dependencies
+
+```bash
+apm update
+```
+
+Re-resolves every dependency in `apm.yml` to its latest matching Git
+reference, prints the planned changes, and prompts for consent before
+rewriting `apm.lock.yaml` and redeploying primitives.
+
+Useful flags:
+
+- `--dry-run` -- show the resolution plan and exit; never writes.
+- `--yes` -- skip the consent prompt (for scripts and CI).
+- `-v, --verbose` -- show per-dependency resolution detail.
+
+This is the command that actually changes versions in your project.
+
+## Inspect first
+
+```bash
+apm outdated
+```
+
+Compares each entry in `apm.lock.yaml` against its remote source and
+reports which dependencies have new commits or new tags available.
+Read-only.
+
+Useful flags:
+
+- `-v, --verbose` -- show available tags for outdated tag-pinned deps.
+- `-g, --global` -- check user-scope dependencies under `~/.apm/`
+  instead of the current project.
+- `-j, --parallel-checks N` -- cap concurrent remote checks (default 4;
+  `0` for sequential).
+
+Run `apm outdated` before `apm update` to know what you are about to
+bump.
+
+## Plain `apm install` is a sync
+
+```bash
+apm install
+```
+
+With no flags, `apm install` reproduces exactly the versions pinned in
+`apm.lock.yaml`. New entries you have added to `apm.yml` get resolved
+and locked; existing ones stay on their locked SHAs.
+
+When the lockfile is already satisfied, install prints:
+
+```text
+[i] Run 'apm update' to check for newer versions.
+```
+
+That is the nudge: install never silently bumps versions. Use
+`apm update` when you want to.
+
+See [Promise 1: Portable by manifest](../../concepts/the-three-promises/)
+for why this matters in CI and for new contributors.
+
+## Lock down for CI
+
+```bash
+apm install --frozen
+```
+
+Lockfile-only install. Refuses to resolve anything new and exits with
+status 1 if `apm.yml` and `apm.lock.yaml` have drifted. Mirrors
+`npm ci`. Use this in CI to catch a manifest change that was not
+followed by an `apm update`.
+
+`--frozen` is mutually exclusive with `--update`: one trusts the
+lockfile, the other rewrites it.
+
+Note that `apm install --force` does not refresh remote refs either.
+It only bypasses the security gate for an already-resolved set. If you
+want new commit SHAs, run `apm update`.
+
+## Update the apm CLI binary
+
+```bash
+apm self-update
+```
+
+Downloads the latest release of the `apm` CLI from the official
+installer URL and replaces the binary in place. Use `--check` to see
+whether an update exists without installing it:
+
+```bash
+apm self-update --check
+```
+
+That is the entire surface. It does not read `apm.yml`. It does not
+touch `apm_modules/`. It does not modify the lockfile.
+
+<Aside type="note" title="Back-compat shim">
+If you run the legacy `apm update --check` or `apm update --self`, the
+CLI prints a deprecation notice and forwards to `apm self-update`.
+Update your scripts to call `apm self-update` directly.
+</Aside>
+
+## When to use which
+
+| You want to... | Run |
+|---|---|
+| See which deps have new versions | `apm outdated` |
+| Preview a dep refresh | `apm update --dry-run` |
+| Bump deps and rewrite the lockfile | `apm update` |
+| Reproduce the locked versions exactly | `apm install` |
+| Fail CI on lockfile drift | `apm install --frozen` |
+| Update the `apm` CLI itself | `apm self-update` |
+| See if a CLI update exists | `apm self-update --check` |
+
+## Next steps
+
+- Add, remove, or change versions in `apm.yml`:
+  [Manage dependencies](../manage-dependencies/).
+- Re-scan refreshed packages for hidden Unicode and other issues:
+  [Drift and secure by default](../drift-and-secure-by-default/).
+- Full flag reference: [CLI commands](../../reference/cli/install/).

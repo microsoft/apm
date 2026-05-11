@@ -1,430 +1,256 @@
 ---
-title: "Lock File Specification"
-description: "The apm.lock.yaml format — how APM pins dependencies to exact versions for reproducible installs."
+title: Lockfile specification
+description: The apm.lock.yaml format - fields, lifecycle, and how install, audit, prune, and view consume it.
 sidebar:
-  order: 3
+  order: 4
 ---
 
-<dl>
-<dt>Version</dt><dd>0.1 (Working Draft)</dd>
-<dt>Date</dt><dd>2026-03-09</dd>
-<dt>Editors</dt><dd>Daniel Meppiel (Microsoft)</dd>
-<dt>Repository</dt><dd>https://github.com/microsoft/apm</dd>
-<dt>Format</dt><dd>YAML 1.2</dd>
-</dl>
+`apm.lock.yaml` is the pinned record of every resolved dependency and every
+file APM deployed into the workspace. It is the source of truth for
+reproducible installs and for drift detection. Commit it.
 
-## Status of This Document
+## Purpose
 
-This is a **Working Draft**. The lock file format is stable at version `"1"` and
-breaking changes will be gated behind a `lockfile_version` bump.
+The lockfile gives APM four things:
 
-## Abstract
+1. **Reproducibility.** `apm install --frozen` reinstalls the exact commits
+   recorded here - no resolution, no network drift.
+2. **Integrity.** Recorded SHA-256 hashes let `apm audit` detect tampering
+   with deployed files.
+3. **Cleanup.** The list of deployed files lets `apm prune` remove orphans
+   when a dependency is dropped from `apm.yml`.
+4. **Inspection.** `apm view --lock` and `apm audit` read the lockfile to
+   answer "what is actually installed".
 
-`apm.lock.yaml` records the exact resolved state of every dependency in an APM
-project. It is the receipt of what was installed — commit SHAs, source URLs,
-and every file deployed into the workspace. Its role is analogous to
-`package-lock.json` (npm) or `.terraform.lock.hcl` (Terraform): given the same
-lock file, APM MUST reproduce the same file tree.
+## Location
 
----
+The lockfile lives at the project root next to `apm.yml`:
 
-## 1. Conformance
+```
+my-project/
+|- apm.yml
+|- apm.lock.yaml      <- here
+|- apm_modules/
+```
 
-The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT", and "MAY" in this
-document are to be interpreted as described in [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119).
+Always commit it. The lockfile is what makes a fresh clone install identically
+on any machine.
 
-## 2. Purpose
-
-The lock file serves four goals:
-
-1. **Reproducibility** — the same lock file yields the same deployed files on
-   every machine, every time.
-2. **Provenance** — every dependency is traceable to an exact source commit.
-3. **Completeness** — `deployed_files` lists every file APM placed in the
-   project, enabling precise removal.
-4. **Auditability** — `git log apm.lock.yaml` provides a full history of dependency
-   changes across the lifetime of the project.
-
-## 3. Lifecycle
-
-`apm.lock.yaml` is created and updated at well-defined points:
-
-| Event | Effect on `apm.lock.yaml` |
-|-------|----------------------|
-| `apm install` (first run) | Created. All dependencies resolved, commits pinned, files recorded. |
-| `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. File only written when semantic content changes (dependencies, MCP servers/configs, `lockfile_version`); no churn from `generated_at` or `apm_version` fields. |
-| `apm install --frozen` | Read-only. Fails fast (exit 1) if the lockfile is missing or any direct dependency in `apm.yml` is absent from the lockfile. Mutually exclusive with `--update`. Use in CI to catch drift between manifest and lockfile. |
-| `apm update` | Re-resolved with confirmation gate. Resolves `apm.yml` against the latest matching refs, prints a structured plan (added/updated/removed/unchanged), and writes only after the user confirms (default `[y/N]`; bypass with `--yes`, preview with `--dry-run`). |
-| `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits without a confirmation prompt. Prefer `apm update` for interactive flows. |
-| `apm deps update` | Re-resolved. Refreshes versions for specified or all dependencies. |
-| `apm pack` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). Both `--format plugin` (default) and `--format apm` embed the enriched copy when a project lockfile exists. |
-| `apm uninstall` | Updated. Removed dependency entries and their `deployed_files` references. |
-
-The lock file SHOULD be committed to version control. It MUST NOT be
-manually edited — APM is the sole writer.
-
-## 4. Document Structure
-
-A conforming lock file MUST be a YAML 1.2 document with the following
-top-level structure:
+## Top-level structure
 
 ```yaml
 lockfile_version: "1"
-generated_at: "2026-03-09T14:00:00Z"
-apm_version: "0.7.7"
-
+generated_at: "2026-05-10T20:14:00+00:00"
+apm_version: "0.6.4"
 dependencies:
-  - repo_url: https://github.com/acme-corp/security-baseline
-    resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
-    resolved_ref: v2.1.0
-    version: "2.1.0"
-    depth: 1
-    package_type: apm_package
-    deployed_files:
-      - .github/instructions/security.instructions.md
-      - .github/agents/security-auditor.agent.md
-
-  - repo_url: https://github.com/acme-corp/common-prompts
-    resolved_commit: f6e5d4c3b2a1098765432109876543210fedcba9
-    resolved_ref: main
-    depth: 2
-    resolved_by: https://github.com/acme-corp/security-baseline
-    package_type: apm_package
-    deployed_files:
-      - .github/instructions/common-guidelines.instructions.md
-```
-
-### 4.1 Top-Level Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `lockfile_version` | string | MUST | Lock file format version. Currently `"1"`. |
-| `generated_at` | string (ISO 8601) | MUST | UTC timestamp of when the lock file was last written. |
-| `apm_version` | string | MUST | Version of APM that generated this lock file. |
-| `dependencies` | array | MUST | Ordered list of resolved dependencies (see [section 4.2](#42-dependency-entries)). |
-| `mcp_servers` | array | MAY | List of MCP server identifiers registered by installed packages. |
-| `mcp_configs` | mapping | MAY | Mapping of MCP server name to its manifest configuration dict. Used for diff-aware installation — when config in `apm.yml` changes, `apm install` detects the drift and re-applies without `--force`. |
-
-### 4.2 Dependency Entries
-
-The `dependencies` list MUST be sorted by `depth` (ascending), then by
-`repo_url` (lexicographic). Each entry is a YAML mapping with the following
-fields:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `repo_url` | string | MUST | Source repository URL, or `_local/<name>` for local path dependencies. |
-| `host` | string | MAY | Git host identifier (e.g., `github.com`). Omitted when inferrable from `repo_url`. |
-| `resolved_commit` | string | MUST (remote) | Full 40-character commit SHA that was checked out. Required for remote (git) dependencies; MUST be omitted for local (`source: "local"`) dependencies. |
-| `resolved_ref` | string | MUST (remote) | Git ref (tag, branch, SHA) that resolved to `resolved_commit`. Required for remote (git) dependencies; MUST be omitted for local (`source: "local"`) dependencies. |
-| `version` | string | MAY | Semantic version of the package, if declared in its manifest. |
-| `virtual_path` | string | MAY | Sub-path within the repository for virtual (monorepo) packages. |
-| `is_virtual` | boolean | MAY | `true` if the package is a virtual sub-package. Omitted when `false`. |
-| `depth` | integer | MUST | Dependency depth. `1` = direct dependency, `2`+ = transitive. |
-| `resolved_by` | string | MAY | `repo_url` of the parent that introduced this transitive dependency. Present only when `depth >= 2`. |
-| `package_type` | string | MUST | Package type: `apm_package`, `plugin`, `virtual`, or other registered types. |
-| `content_hash` | string | MAY | SHA-256 hash of the package file tree, in the format `"sha256:<hex>"`. Used to verify cached packages on subsequent installs. Omitted for local path dependencies. See [section 4.4](#44-content-integrity). |
-| `is_dev` | boolean | MAY | `true` if the dependency was resolved through [`devDependencies`](../manifest-schema/#5-devdependencies). Omitted when `false`. Dev deps are excluded from `apm pack` plugin output (and from `--format apm` bundles). |
-| `deployed_files` | array of strings | MUST | Every file path APM deployed for this dependency, relative to project root. |
-| `source` | string | MAY | Dependency source. `"local"` for local path dependencies. Omitted for remote (git) dependencies. |
-| `local_path` | string | MAY | Filesystem path (relative or absolute) to the local package. Present only when `source` is `"local"`. |
-| `is_insecure` | boolean | MAY | `true` when the dep was fetched over HTTP (unencrypted). Omitted when `false`. Presence forces re-approval on the next install: the apm.yml entry MUST carry `allow_insecure: true` and the invocation MUST pass `--allow-insecure` (or `--allow-insecure-host` for transitive deps). Absent or `false` means HTTPS/SSH. |
-| `allow_insecure` | boolean | MAY | `true` when the user's manifest explicitly approved the HTTP fetch with `allow_insecure: true`. Persisted alongside `is_insecure` for replay safety: a legacy lockfile with `is_insecure: true` but no `allow_insecure` fail-closes to `allow_insecure: false`, forcing re-approval. Omitted when `false`. |
-
-Fields with empty or default values (empty strings, `false` booleans, empty
-lists) SHOULD be omitted from the serialized output to keep the file concise.
-
-**Dev dependency tracking:** Packages installed via `apm install --dev` are marked with `is_dev: true`. `apm pack` (plugin format, the default) and `apm pack --format apm` both exclude dev dependencies from output. Resolvers and CI tools should respect this flag when producing distributable artifacts.
-
-### 4.3 Unique Key
-
-Each dependency is uniquely identified by its `repo_url`, or by the
-combination of `repo_url` and `virtual_path` for virtual packages.
-For local path dependencies (`source: "local"`), the unique key is the
-`local_path` value. A conforming lock file MUST NOT contain duplicate
-entries for the same key.
-
-### 4.4 Content Integrity
-
-APM computes a SHA-256 hash of each package's file tree after download and stores
-it as `content_hash` in the lock file. On subsequent installs, cached packages are
-verified against this hash. A mismatch triggers a warning and re-download.
-
-The hash covers all regular files sorted by POSIX path (deterministic regardless of
-filesystem ordering). `.git/` and `__pycache__/` directories are excluded.
-
-```yaml
-dependencies:
-  - repo_url: https://github.com/acme-corp/security-baseline
-    resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
-    content_hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  - repo_url: github.com/octocat/example-skills
+    resolved_commit: 7f3c9a...
     # ...
+mcp_servers:
+  - github
+mcp_configs:
+  github:
+    type: stdio
+    command: docker
+    args: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"]
+local_deployed_files:
+  - .github/skills/my-local-skill/SKILL.md
+local_deployed_file_hashes:
+  .github/skills/my-local-skill/SKILL.md: "a1b2c3..."
 ```
 
-Lock files generated before this feature omit `content_hash`. APM handles this
-gracefully — verification is skipped and the hash is populated on the next install.
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `lockfile_version` | string | yes | Schema version. Currently `"1"`. Bumped on breaking format changes. |
+| `generated_at` | ISO 8601 string | yes | UTC timestamp of the last write. Ignored by equivalence checks. |
+| `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
+| `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
+| `mcp_servers` | list of strings | no | Names of MCP servers declared in the manifest at install time. |
+| `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
+| `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). See [self entry](#self-entry). |
+| `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
 
-### 4.5 Self-Entry Convention
+## Per-entry fields
 
-For uniform traversal, the in-memory `dependencies` map includes a synthesized
-entry representing the host project's own local `.apm/` content. This entry is
-materialized on read and stripped on write -- it is **never serialized** to disk.
+Each item in `dependencies` describes one resolved package.
 
-The on-disk YAML format is unchanged: the host project's local content lives in
-the flat top-level fields `local_deployed_files` and `local_deployed_file_hashes`
-(see [section 4.4](#44-content-integrity) for the hashing scheme used for
-verification). `LockFile.from_yaml()` synthesizes the self-entry from those
-fields; `LockFile.to_yaml()` removes it before serialization. Round-trip is
-byte-stable.
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `repo_url` | string | yes | Canonical repo URL (e.g. `github.com/owner/repo`). Unique key for the entry, except for virtual and local entries (see below). |
+| `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
+| `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
+| `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
+| `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
+| `resolved_commit` | string | no | Exact 40-char commit SHA installed. The pin. |
+| `version` | string | no | Resolved semver when the source advertises one. |
+| `virtual_path` | string | no | Subpath inside the repo for virtual packages (monorepo subpaths). |
+| `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
+| `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
+| `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. |
+| `package_type` | string | no | Kind of package: `apm`, `skill_bundle`, etc. Drives target placement. |
+| `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
+| `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. |
+| `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Directory entries (trailing `/`) have no hash. |
+| `source` | string | no | `"local"` for path dependencies. Absent for remote deps. |
+| `local_path` | string | no | Original path from `apm.yml` for local deps, relative to project root. |
+| `content_hash` | string | no | SHA-256 of the local package's source tree. Lets APM detect upstream changes to a path dep. |
+| `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
+| `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
+| `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |
+| `is_insecure` | bool | no | `true` when the source URL was `http://`. |
+| `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
 
-The synthesized entry MUST follow this convention:
+Fields are emitted only when set. A minimal entry is just `repo_url` plus
+`resolved_commit`.
 
-| Field | Value |
-|-------|-------|
-| Map key | `"."` (single dot) |
-| `repo_url` | `"<self>"` |
-| `local_path` | `"."` |
-| `source` | `"local"` |
-| `is_dev` | `true` |
-| `depth` | `0` |
-| `deployed_files` | populated from `local_deployed_files` |
-| `deployed_file_hashes` | populated from `local_deployed_file_hashes` |
+## Self entry
 
-`is_dev: true` is non-negotiable. `apm pack` (both formats) skips dev
-dependencies; this flag ensures the host project's own content is excluded from
-distributable bundles via the existing dev-dependency filter, without requiring
-exporters to special-case the self-entry.
+A project that ships its own primitives (skills, agents, prompts under
+`.github/`, `.claude/`, etc.) records the files it deploys to its own targets
+under `local_deployed_files` and `local_deployed_file_hashes` at the top
+level.
 
-Consumers iterating `dependencies` SHOULD treat the `"."` key as the host
-project. Consumers reading the on-disk YAML directly will not see this entry --
-they MUST read `local_deployed_files` and `local_deployed_file_hashes` instead.
+Internally, when the lockfile is loaded, APM synthesizes a virtual dependency
+entry keyed by `"."` so that orphan detection, audit, and prune can iterate
+all "owned" files uniformly. This synthesized entry has:
 
-## 5. Path Conventions
+- `repo_url: <self>`
+- `source: local`
+- `local_path: "."`
+- `depth: 0`
+- `is_dev: true`
+- `deployed_files` and `deployed_file_hashes` copied from the top-level
+  `local_deployed_*` fields.
 
-All paths in `deployed_files` MUST use forward slashes (POSIX format),
-regardless of the host operating system. Paths are relative to the project
-root directory.
+The synthesized entry is **not** written back to YAML - the flat
+`local_deployed_*` fields remain the on-disk source of truth. Treat the self
+entry as an implementation detail; do not author it by hand.
 
-```yaml
-# Correct
-deployed_files:
-  - .github/instructions/security.instructions.md
-  - .github/agents/code-review.agent.md
+## Pack section
 
-# Incorrect — backslashes are not permitted
-deployed_files:
-  - .github\instructions\security.instructions.md
-```
-
-This convention ensures lock files are portable across operating systems and
-produce consistent diffs in version control.
-
-## 6. Pack Enrichment
-
-When `apm pack` creates a bundle, it prepends a `pack:` section to the
-lock file copy included in the bundle. Both `--format plugin` (default)
-and `--format apm` embed the enriched copy when the project has a
-lockfile; bundles built without a project lockfile (rare) skip the
-embedded copy and emit no `pack:` section. The `pack:` section is
-informational and is not written back to the project's `apm.lock.yaml`.
+When a project is packed with `apm pack`, the bundled lockfile is enriched
+with a top-level `pack:` block:
 
 ```yaml
 pack:
-  format: apm
-  packed_at: "2026-03-09T14:30:00Z"
-  bundle_files:
-    .github/agents/architect.md: a1b2c3...
-
-lockfile_version: "1"
-generated_at: "2026-03-09T14:00:00Z"
-# ... rest of lock file
+  format: apm           # or "plugin"
+  target: copilot       # or comma-joined list, or "all"
+  packed_at: "2026-05-10T20:14:00+00:00"
+  mapped_from:          # only when cross-target path remapping happened
+    - .claude/skills/
+  bundle_files:         # only for plugin bundles
+    skills/my-skill/SKILL.md: "a1b2..."
 ```
 
-### 6.1 Pack Fields
+The pack block is read by `apm unpack` to verify bundle integrity and to
+restore correct target paths. It is stripped from project lockfiles and only
+appears inside packed bundles.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `pack.format` | string | Bundle format: `"apm"` or `"plugin"`. |
-| `pack.target` | string (deprecated, optional) | Historical target hint. Bundles are now target-agnostic; the consumer's project decides where files land at install time. The field is still recorded in every bundle for diagnostic purposes (typically `"all"` for target-agnostic packs, or the project's detected target) and is not authoritative at install time. |
-| `pack.packed_at` | string (ISO 8601) | UTC timestamp of when the bundle was created. |
-| `pack.bundle_files` | map[string -> string] | Per-file SHA-256 manifest of the bundle's deployable contents (relative path -> hex digest). Drives the install-side deploy loop. |
+`local_deployed_files` and `local_deployed_file_hashes` are stripped from
+bundle lockfiles - they describe the packager's own repo, which is not
+shipped.
 
-The original lock file is not mutated. The enriched copy exists only inside the
-packed archive.
+## Lifecycle
 
-## 7. Resolver Behaviour
+| Command | Reads | Writes |
+|---|---|---|
+| `apm install` | existing lockfile (for `--frozen` and incremental reuse) | full rewrite on resolution change |
+| `apm install --frozen` | required | never writes; fails on missing pin |
+| `apm compile` | yes (resolution + integrity) | no |
+| `apm audit` | yes | no |
+| `apm prune` | yes (to identify orphans) | yes (after removing orphans) |
+| `apm view --lock` | yes | no |
+| `apm unpack` | bundle's pack-enriched lockfile | merges into project lockfile |
 
-The dependency resolver interacts with the lock file as follows:
+`apm install` only rewrites the file when its semantic content changes
+(`generated_at` and `apm_version` are ignored when comparing). A no-op install
+leaves the file untouched.
 
-1. **First install** — resolve all refs to commits, write `apm.lock.yaml`.
-2. **Subsequent installs** — read `apm.lock.yaml`, reuse locked commits. Only
-   newly added dependencies trigger resolution.
-3. **Update** (`--update` flag or `apm deps update`) -- re-resolve all refs
-   to their latest commits. If a resolved commit matches the existing lock
-   file entry and the local checkout is intact, the download is skipped.
-   Otherwise, the package is re-fetched. The lock file is always refreshed.
-4. **Interactive update** (`apm update`) -- re-resolve all refs and render
-   a structured plan (added/updated/removed/unchanged) before any
-   mutation. Defaults to a confirmation prompt; `--dry-run` exits after
-   the plan with no on-disk changes; `--yes` skips the prompt for CI
-   automation. On confirmation, behaves like (3) and refreshes the lock
-   file.
-5. **Frozen** (`apm install --frozen`) -- read `apm.lock.yaml` and
-   structurally verify every direct dependency declared in `apm.yml`
-   has a corresponding lock entry. Exit code 1 when the lockfile is
-   missing or any direct dep is unlocked; never resolves, never
-   mutates. Mutually exclusive with `--update`. Note: this is a
-   structural presence check; on-disk SHA integrity is the job of
-   `apm audit`.
+## Drift and integrity
 
-When a locked commit is no longer reachable (force-pushed branch, deleted tag),
-APM MUST report an error and refuse to install until the lock file is updated.
+The lockfile is what `apm audit` compares the workspace against. Each baseline
+check maps to specific lockfile fields:
 
-## 8. Migration
+| Check | Backed by |
+|---|---|
+| `lockfile-exists` | file presence at project root |
+| `dependency-refs-match` | `resolved_ref` per entry vs. `apm.yml` |
+| `deployed-files-present` | `deployed_files` per entry (and self entry) |
+| `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
+| `skill-subset-match` | `skill_subset` per `skill_bundle` entry |
+| `mcp-configs-match` | `mcp_servers` and `mcp_configs` |
+| `no-orphan-packages` | `dependencies` keys vs. `apm.yml` |
 
-The lock file reader supports the following historical migrations:
+Files listed in `deployed_files` without a corresponding hash entry (typically
+directory markers ending in `/`) are skipped by content-integrity. Missing
+files are reported by `deployed-files-present`, not by content-integrity, so
+the two checks do not double-count.
 
-- **`deployed_skills`** — renamed to `deployed_files`. If a lock file contains
-  the legacy key, it is silently migrated on read. New lock files MUST use
-  `deployed_files`.
+Orphan detection works in two directions:
 
-- **`apm.lock` → `apm.lock.yaml`** — the lock file was renamed from `apm.lock`
-  to `apm.lock.yaml` (for IDE syntax highlighting). On the next `apm install`,
-  an existing `apm.lock` is automatically renamed to `apm.lock.yaml` when the
-  new file does not yet exist. The bundle unpacker also falls back to `apm.lock`
-  when reading older bundles.
+- **Orphan packages** - entries in `dependencies` that the manifest no longer
+  declares. `apm prune` removes them and their `deployed_files`.
+- **Orphan files** - files under managed target directories that no lockfile
+  entry claims. `apm prune` removes them too.
 
-## 9. Auditing Patterns
+## Versioning
 
-Because `apm.lock.yaml` is committed to version control, standard Git operations
-provide a complete audit trail:
+`lockfile_version` is the schema version of the file format itself.
 
-```bash
-# Full history of dependency changes
-git log --oneline apm.lock.yaml
+- The current version is `"1"`.
+- APM additively extends entries within version `"1"` - new optional fields
+  may appear without bumping the version. Older APM clients ignore unknown
+  fields.
+- Breaking changes (renames, removals, semantic shifts) require bumping
+  `lockfile_version`. APM refuses to operate on a lockfile whose version it
+  does not recognize, and will instruct the user to upgrade or regenerate.
 
-# What changed in the last commit
-git diff HEAD~1 -- apm.lock.yaml
+A lockfile that fails to parse is treated as absent - APM logs the error and,
+for non-frozen installs, proceeds to regenerate from `apm.yml`.
 
-# State of dependencies at a specific release
-git show v4.2.1:apm.lock.yaml
+## Example
 
-# Who last modified the lock file
-git log -1 --format='%an <%ae> %ai' -- apm.lock.yaml
-```
-
-In CI pipelines, `apm audit --ci` verifies lockfile consistency (exit 0 = pass,
-1 = fail). Add `--policy org` for organizational policy enforcement.
-
-### 9.1 SOC 2 evidence
-
-The lock file is the system of record for "what configuration was active when".
-Three SOC 2-relevant questions answered directly from git:
-
-- **Change authorization.** Every change to `apm.lock.yaml` is reviewed in a pull
-  request before merge. The PR record is the change-authorization evidence.
-- **Change history.** `git log apm.lock.yaml` produces a complete, tamper-evident
-  history in git of every dependency change with author, timestamp, and commit message.
-- **Point-in-time state.** `git show <ref>:apm.lock.yaml` reproduces the exact
-  dependency set active at any tag, branch, or commit -- including past releases.
-
-### 9.2 Security audit / incident forensics
-
-When a vulnerability is disclosed in a dependency or a security incident requires
-identifying which environments were exposed:
-
-```bash
-# Was the vulnerable package ever in the lock file?
-git log -p apm.lock.yaml | grep -B2 -A2 "vulnerable-package"
-
-# Which release included the vulnerable version?
-git log --all --oneline -S 'vulnerable-package' -- apm.lock.yaml
-
-# What is the current state of the dependency in production?
-git show production:apm.lock.yaml | grep -A5 "vulnerable-package"
-```
-
-### 9.3 Change management pipeline
-
-The lockfile-as-audit-trail model maps onto a standard 5-step change management
-pipeline:
-
-1. **Declaration** -- developer edits `apm.yml` and opens a PR.
-2. **Resolution** -- `apm install` updates `apm.lock.yaml` with pinned versions.
-3. **Review** -- PR reviewers see the manifest and lockfile diff together.
-4. **Verification** -- CI runs `apm audit --ci` to confirm consistency and
-   (optionally) policy compliance.
-5. **Traceability** -- the merge commit becomes the durable record of the change,
-   readable by every downstream environment via `apm install` from the same ref.
-
-For organization-wide policy enforcement on top of this lockfile audit trail,
-see [Governance](../../enterprise/governance-guide/).
-
-## 10. Example: Complete Lock File
+A small project with one remote APM package, one MCP server, and its own
+local skill:
 
 ```yaml
 lockfile_version: "1"
-generated_at: "2026-03-09T14:00:00Z"
-apm_version: "0.7.7"
-
+generated_at: "2026-05-10T20:14:00+00:00"
+apm_version: "0.6.4"
 dependencies:
-  - repo_url: https://github.com/acme-corp/security-baseline
-    resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
-    resolved_ref: v2.1.0
-    version: "2.1.0"
+  - repo_url: github.com/octocat/example-skills
+    resolved_ref: v1.2.0
+    resolved_commit: 7f3c9a4d2e1b8c7f0a9e6d5c4b3a2918f7e6d5c4
+    version: 1.2.0
+    package_type: skill_bundle
     depth: 1
-    package_type: apm_package
-    content_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    skill_subset:
+      - code-review
+      - test-writing
     deployed_files:
-      - .github/instructions/security.instructions.md
-      - .github/agents/security-auditor.agent.md
-      - .github/agents/threat-model.agent.md
-
-  - repo_url: https://github.com/acme-corp/common-prompts
-    resolved_commit: f6e5d4c3b2a1098765432109876543210fedcba9
-    resolved_ref: main
-    depth: 2
-    resolved_by: https://github.com/acme-corp/security-baseline
-    package_type: apm_package
-    content_hash: "sha256:d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
-    deployed_files:
-      - .github/instructions/common-guidelines.instructions.md
-
-  - repo_url: https://github.com/example-org/monorepo-tools
-    host: github.com
-    resolved_commit: 0123456789abcdef0123456789abcdef01234567
-    resolved_ref: v1.0.0
-    version: "1.0.0"
-    virtual_path: packages/linter-config
-    is_virtual: true
-    depth: 1
-    package_type: virtual
-    deployed_files:
-      - .github/instructions/linter.instructions.md
-
-  - repo_url: https://github.com/acme-corp/test-helpers
-    resolved_commit: abcdef1234567890abcdef1234567890abcdef12
-    resolved_ref: main
-    depth: 1
-    package_type: apm_package
-    is_dev: true
-    content_hash: "sha256:4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5"
-    deployed_files:
-      - .github/instructions/test-helpers.instructions.md
-
+      - .github/skills/code-review/SKILL.md
+      - .github/skills/test-writing/SKILL.md
+    deployed_file_hashes:
+      .github/skills/code-review/SKILL.md: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      .github/skills/test-writing/SKILL.md: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
 mcp_servers:
-  - security-scanner
-
+  - github
 mcp_configs:
-  security-scanner:
-    name: security-scanner
-    transport: stdio
+  github:
+    type: stdio
+    command: docker
+    args: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"]
+local_deployed_files:
+  - .github/skills/my-local-skill/SKILL.md
+local_deployed_file_hashes:
+  .github/skills/my-local-skill/SKILL.md: "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
 ```
 
----
+## See also
 
-## Appendix A: Revision History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 0.1 | 2026-03-09 | Initial working draft. |
+- [`apm install`](../cli/install/) - resolves and writes the lockfile
+- [`apm audit`](../cli/audit/) - validates the workspace against the lockfile
+- [`apm prune`](../cli/prune/) - removes orphan packages and files
+- [`apm view`](../cli/view/) - inspect resolved state (`--lock`)
+- [Baseline checks](../baseline-checks/) - the drift checks the lockfile feeds
+- [Manifest schema](../manifest-schema/) - the `apm.yml` it pins

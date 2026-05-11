@@ -76,3 +76,4 @@ scout-pipeline-result.png
 .cursor/mcp.json
 .playwright-mcp/
 server.pid
+.docs-rewrite-plan/

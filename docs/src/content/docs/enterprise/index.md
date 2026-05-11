@@ -7,7 +7,7 @@ sidebar:
 
 APM for organizations rests on three pillars:
 
-- **[Portable by manifest](../getting-started/quick-start/)** -- one `apm.yml` declares every dependency; `apm.lock.yaml` pins exact versions; every developer and every CI run gets the same agent setup.
+- **[Portable by manifest](../quickstart/)** -- one `apm.yml` declares every dependency; `apm.lock.yaml` pins exact versions; every developer and every CI run gets the same agent setup.
 - **[Secure by default](./security/)** -- `apm install` scans every package for hidden Unicode and other tampering before agents read it. Attack surface, scanners, and the MCP trust boundary are documented for procurement review.
 - **[Governed by policy](./governance-guide/)** -- `apm-policy.yml` lets platform teams allow-list dependencies, restrict deploy targets, and enforce trust rules at install time across every repo, from a single source of truth.
 
