@@ -18,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` performs a CI-safe, read-only install that fails fast (exit 1) when `apm.lock.yaml` is missing or out of sync with `apm.yml`; mutually exclusive with `--update`. Structural presence check only; use `apm audit` for on-disk SHA integrity. (#1244)
 - `apm install` now emits a one-line "Run 'apm update' to check for newer versions." hint on the no-op path when a lockfile is already present, pointing users at the verb that actually checks for newer refs. (#1244)
 - Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
-- `apm audit --ci` now emits a `manifest-missing` warning when `apm.yml` is absent but APM artifacts (`.apm/` or `apm.lock.yaml`) are found, preventing silent bypass of all baseline checks. (#1255)
 - `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
 - **GitLab host support:** `gitlab.com` and self-managed instances (via `GITLAB_HOST` / `APM_GITLAB_HOSTS`) use GitLab REST **v4** for `marketplace.json` and install-time raw file reads; nested GitLab group paths are disambiguated in dependency references with object-form `git:` + `path:` where shorthand is ambiguous. GitHub, GHES, Azure DevOps, and registry-proxy behavior remain unchanged. (#1149)
 - **`git: parent` monorepo transitive dependency inheritance:** packages in a git monorepo can reference sibling paths via `{ git: parent, path: ... }` without repeating the full `git:` URL; the lockfile stores expanded host, repository, subdirectory path, and resolved ref/commit like other virtual git dependencies (no `parent` sentinel as durable identity). (#1149)
@@ -38,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit --ci` now fails with a `manifest-missing` check when `apm.yml` is absent but APM artifacts (`.apm/`, `apm.lock.yaml`, or `apm.lock`) are found, preventing silent bypass of all baseline checks; interactive `apm audit` still warns without failing. (#1056)
 - `apm install` no longer silently overwrites pre-existing governance files; `check_collision()` now treats `managed_files=None` (first install, no lockfile yet) as an empty set so hand-rolled files in `.github/instructions/` and other governance directories are correctly detected and protected from silent overwrite. (#1256)
 - `test_find_server_by_reference_uuid_not_found` no longer leaks a live HTTP call to `api.mcp.github.com` (fixing Windows CI failures from `socket.gaierror`); the `search_servers` fallback is now mocked. (#1264)
 - ADO full HTTPS URLs with sub-path virtual packages (e.g. `https://dev.azure.com/org/proj/_git/repo/sub/path`) are now parsed correctly instead of being rejected. (#1254)

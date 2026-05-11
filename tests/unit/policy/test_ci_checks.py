@@ -1156,3 +1156,43 @@ class TestManifestMissingWarning:
         result = run_baseline_checks(tmp_path)
         names = [c.name for c in result.checks]
         assert "manifest-missing" not in names
+
+    def test_apm_dir_ci_mode_fails(self, tmp_path: Path) -> None:
+        """In CI mode, .apm/ without apm.yml fails the check."""
+        (tmp_path / ".apm").mkdir()
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+
+    def test_lockfile_ci_mode_fails(self, tmp_path: Path) -> None:
+        """In CI mode, apm.lock.yaml without apm.yml fails the check."""
+        (tmp_path / "apm.lock.yaml").write_text("packages: []\n", encoding="utf-8")
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+
+    def test_legacy_lockfile_triggers_warning(self, tmp_path: Path) -> None:
+        """apm.yml absent but legacy apm.lock exists -> manifest-missing warning."""
+        (tmp_path / "apm.lock").write_text("packages: []\n", encoding="utf-8")
+        result = run_baseline_checks(tmp_path)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" in names
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is True
+
+    def test_legacy_lockfile_ci_mode_fails(self, tmp_path: Path) -> None:
+        """In CI mode, legacy apm.lock without apm.yml fails the check."""
+        (tmp_path / "apm.lock").write_text("packages: []\n", encoding="utf-8")
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+
+    def test_no_artifacts_ci_mode_still_passes(self, tmp_path: Path) -> None:
+        """Clean project with no APM artifacts passes even in CI mode."""
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" not in names
+        assert result.passed
