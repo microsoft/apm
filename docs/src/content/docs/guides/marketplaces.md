@@ -4,11 +4,11 @@ sidebar:
   order: 5
 ---
 
-Marketplaces are curated indexes of plugins hosted as GitHub repositories. Each marketplace contains a `marketplace.json` file that maps plugin names to source locations. APM resolves these entries to Git URLs, so plugins installed from marketplaces get the same version locking, security scanning, and governance as any other APM dependency.
+Marketplaces are curated indexes of plugins hosted in a Git repository (typically GitHub or GitLab). Each marketplace contains a `marketplace.json` file that maps plugin names to source locations. APM resolves these entries to Git URLs, so plugins installed from marketplaces get the same version locking, security scanning, and governance as any other APM dependency.
 
 ## How marketplaces work
 
-A marketplace is a GitHub repository with a `marketplace.json` at its root. The file lists plugins with their source type and location:
+A marketplace is a repository with a `marketplace.json` at its root (GitHub or GitLab). The file lists plugins with their source type and location:
 
 ```json
 {
@@ -135,6 +135,22 @@ apm marketplace add acme/plugin-marketplace --host ghes.corp.example.com
 apm marketplace add ghes.corp.example.com/acme/plugin-marketplace
 ```
 
+## GitLab-hosted marketplaces
+
+`gitlab.com` is recognized as GitLab automatically. For **self-managed** GitLab, set `GITLAB_HOST` to that instance’s FQDN, or list several hosts in `APM_GITLAB_HOSTS` (comma-separated). See [Authentication](../../getting-started/authentication/#gitlab-saas-and-self-managed) for host configuration and tokens.
+
+APM fetches `marketplace.json` via the **GitLab REST v4** raw-file API when the host classifies as GitLab (not the GitHub Contents API). Candidate paths are unchanged: repository root, `.github/plugin/marketplace.json`, and `.claude-plugin/marketplace.json`.
+
+```bash
+# GitLab.com (FQDN in the argument or via --host)
+apm marketplace add mygroup/plugin-marketplace --host gitlab.com
+apm marketplace add gitlab.com/mygroup/plugin-marketplace
+
+# Self-managed GitLab (set GITLAB_HOST or APM_GITLAB_HOSTS so APM classifies the instance as GitLab, then use FQDN in the path or --host)
+apm marketplace add git.company.com/mygroup/plugin-marketplace
+apm marketplace add mygroup/plugin-marketplace --host git.company.com
+```
+
 ## List registered marketplaces
 
 ```bash
@@ -189,6 +205,8 @@ The `#` separator carries a raw git ref that overrides the `source.ref` from the
 
 APM resolves the plugin name against the marketplace index, fetches the underlying Git repository using the resolved ref, and installs it as a standard APM dependency. The resolved source appears in `apm.yml` and `apm.lock.yaml` just like any direct dependency.
 
+On **GitLab-class** hosts (`gitlab.com` and self-managed instances when APM classifies the host as GitLab), monorepo layouts—plugins whose `marketplace.json` sources point at a subdirectory **inside** the marketplace repository—work with this syntax; you do not need a manual `git:` + `path:` dependency entry for `apm install`. When you declare Git dependencies yourself in `apm.yml`, nested paths may still need the object form with explicit `git:` and `path:`—see the [Dependencies guide](./dependencies/).
+
 For full `apm install` options, see [CLI Commands](../../reference/cli-commands/).
 
 ## View plugin details
@@ -232,7 +250,17 @@ apm marketplace update
 
 ## Registry proxy support
 
-Marketplace commands (`add`, `browse`, `search`, `update`) honor the `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY` environment variables, fetching `marketplace.json` through the configured proxy with optional GitHub Contents API fallback. See [Registry Proxy & Air-gapped](../../enterprise/registry-proxy/) for full configuration, the bypass-prevention contract, and the air-gapped CI playbook.
+When `PROXY_REGISTRY_URL` is set, marketplace commands (`add`, `browse`, `search`, `update`) fetch `marketplace.json` through the registry proxy (Artifactory Archive Entry Download) **first**. Only if the proxy does not return the file does APM fall back to the host API: **GitHub Contents API** for GitHub/GHES, or **GitLab REST v4** raw file endpoints for GitLab-classified hosts. When `PROXY_REGISTRY_ONLY=1` is also set, that direct host API fallback is blocked entirely, enabling fully air-gapped marketplace discovery for both GitHub- and GitLab-backed indexes.
+
+```bash
+export PROXY_REGISTRY_URL="https://art.corp.example.com/artifactory/github"
+export PROXY_REGISTRY_ONLY=1  # optional: block direct GitHub/GitLab API access
+
+apm marketplace add anthropics/skills   # fetches via Artifactory
+apm marketplace browse skills           # fetches via Artifactory
+```
+
+This builds on the same proxy infrastructure used by `apm install`. See [Registry Proxy & Air-gapped](../enterprise/registry-proxy/) for full configuration, the bypass-prevention contract, and the air-gapped CI playbook.
 
 ## Manage marketplaces
 

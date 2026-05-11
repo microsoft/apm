@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from apm_cli.models.apm_package import clear_apm_yml_cache
+from apm_cli.policy.inheritance import merge_policies
 from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.policy_checks import (
     _check_compilation_strategy,
@@ -652,6 +653,53 @@ class TestUnmanagedFiles:
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert result.passed
         assert "capped" in result.message.lower()
+
+    def test_action_none_resolves_to_ignore(self, tmp_path):
+        """action=None standalone: effective_action resolves to 'ignore', check passes."""
+        policy = UnmanagedFilesPolicy(action=None)
+        result = _check_unmanaged_files(tmp_path, None, policy)
+        assert result.passed
+
+    def test_action_none_inherits_parent_deny(self, tmp_path):
+        """action=None + parent deny: merge propagates deny to child."""
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        )
+        child = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action=None))
+        merged = merge_policies(parent, child)
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
+        assert not result.passed
+
+    def test_rogue_file_caught_parent_deny_child_omits_block(self, tmp_path):
+        """Rogue file is caught when parent says deny but child omits unmanaged_files block."""
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        )
+        child = ApmPolicy()  # child omits unmanaged_files entirely (defaults to action=None)
+        merged = merge_policies(parent, child)
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
+        assert not result.passed
+        assert ".github/agents/rogue.md" in result.details
+
+    def test_integration_chain_deny_propagates(self, tmp_path):
+        """Integration chain: parent deny + child omits block -> merge -> check catches rogue file."""
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
+        parent_policy = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        )
+        child_policy = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action=None))
+        merged = merge_policies(parent_policy, child_policy)
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
+        assert not result.passed
+        assert ".github/agents/rogue.md" in result.details
 
 
 # -- Integration: run_policy_checks ---------------------------------

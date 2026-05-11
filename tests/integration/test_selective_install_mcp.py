@@ -56,6 +56,17 @@ def _make_pkg(
     )
 
 
+def _mark_copilot(project_root: Path) -> None:
+    """Mark *project_root* as a copilot harness so target detection passes.
+
+    Post-#1154 the bare ``.github/`` directory is no longer a signal --
+    ``.github/copilot-instructions.md`` is the canonical marker file.
+    """
+    github = project_root / ".github"
+    github.mkdir(exist_ok=True)
+    (github / "copilot-instructions.md").write_text("# test\n")
+
+
 def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list = None):  # noqa: RUF013
     """Write a lockfile pre-populated with given dependencies."""
     lf = LockFile()
@@ -90,6 +101,9 @@ def cli_env(tmp_path):
 
     # Root project declares squad-alpha as a dep
     _write_apm_yml(tmp_path / "apm.yml", deps=["acme/squad-alpha"])
+
+    # Mark project as a copilot harness so target detection succeeds
+    _mark_copilot(tmp_path)
 
     # squad-alpha has no MCP, depends on infra-cloud
     _make_pkg(apm_modules, "acme/squad-alpha", apm_deps=["acme/infra-cloud"])
@@ -214,6 +228,7 @@ class TestDeepChainIntegration:
             apm_modules = tmp_path / "apm_modules"
 
             _write_apm_yml(tmp_path / "apm.yml", deps=["acme/pkg-a"])
+            _mark_copilot(tmp_path)
             _make_pkg(apm_modules, "acme/pkg-a", apm_deps=["acme/pkg-b"])
             _make_pkg(apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-c"])
             _make_pkg(apm_modules, "acme/pkg-c", apm_deps=["acme/pkg-d"])
@@ -286,6 +301,7 @@ class TestDiamondDependencyIntegration:
             apm_modules = tmp_path / "apm_modules"
 
             _write_apm_yml(tmp_path / "apm.yml", deps=["acme/pkg-a"])
+            _mark_copilot(tmp_path)
             _make_pkg(apm_modules, "acme/pkg-a", apm_deps=["acme/pkg-b", "acme/pkg-c"])
             _make_pkg(apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-d"])
             _make_pkg(apm_modules, "acme/pkg-c", apm_deps=["acme/pkg-d"])
@@ -365,6 +381,7 @@ class TestMultiPackageSelectiveInstallIntegration:
             apm_modules = tmp_path / "apm_modules"
 
             _write_apm_yml(tmp_path / "apm.yml", deps=["acme/pkg-x", "acme/pkg-y"])
+            _mark_copilot(tmp_path)
 
             # pkg-x → dep-x (has mcp-x)
             _make_pkg(apm_modules, "acme/pkg-x", apm_deps=["acme/dep-x"])
@@ -464,6 +481,7 @@ class TestStaleRemovalAfterUpdate:
 
             # Root depends on infra-cloud
             _write_apm_yml(tmp_path / "apm.yml", deps=["acme/infra-cloud"])
+            _mark_copilot(tmp_path)
 
             # infra-cloud NOW declares only mcp-beta (dropped mcp-alpha)
             _make_pkg(

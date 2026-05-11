@@ -91,29 +91,31 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
 the correct target-specific form.
 
-## Manifest fields: `target:` validation contract
+## Manifest fields: `targets:` validation contract
 
-The `target:` field in `apm.yml` controls which output runtimes the package
-compiles and installs to. Both `apm.yml`'s `target:` and the `--target` CLI
-flag share the same validator, so identical input is rejected or accepted
-the same way at every entry point. Invalid values fail at parse time with a
-message naming the apm.yml path and the offending token -- they do **not**
-silently fall through to auto-detect.
+Two keys control which output runtimes a package compiles and installs to:
+
+- **`targets:` (canonical, plural list)** -- `targets: [claude, copilot]`.
+- **`target:` (singular sugar)** -- `target: claude` or `target: "claude,copilot"` (CSV-string form).
+
+Setting both keys in the same `apm.yml` is a parse error (`ConflictingTargetsError`); pick one. An empty `targets: []` is also a parse error -- omit the line if you mean auto-detect.
+
+Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same validator, so identical input is rejected or accepted the same way at every entry point. Invalid values fail at parse time with a message naming the apm.yml path and the offending token -- they do **not** silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
-| `target: copilot` | Single token; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `all` |
-| `target: [claude, copilot]` | List form; only listed targets are compiled/installed |
-| `target: claude,copilot` | CSV-string form; parses identically to the list form (the shared validator splits on `,`). Before #820 was fixed, this silently produced zero deployment |
-| `target:` omitted entirely | Auto-detect from project folders (`.github/`, `.claude/`, `.codex/`, `.windsurf/`, etc.) |
+| `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
+| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `all` |
+| `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
+| `targets:` and `target:` both set | **Parse error** -- pick one |
+| `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
-| `target: ""` or `target: []` (empty) | **Parse error** -- remove the line if you meant auto-detect |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
-Error messages always name the `apm.yml` path and the offending token, so the
-fix point is unambiguous. The list form (`target: [a, b]`) is the recommended
-shape; the CSV-string form is supported for parity with `--target a,b` on the
-CLI but reads less cleanly in YAML.
+Error messages always name the `apm.yml` path and the offending token, so the fix point is unambiguous. The list form (`targets: [a, b]`) is the recommended shape; the singular `target:` and CSV-string forms are supported indefinitely as sugar.
+
+The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
 
 ## The 7 primitive types
 

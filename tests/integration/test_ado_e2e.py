@@ -18,9 +18,7 @@ import pytest
 import yaml
 
 # Skip all tests in this module if ADO_APM_PAT is not set
-pytestmark = pytest.mark.skipif(
-    not os.getenv("ADO_APM_PAT"), reason="ADO_APM_PAT environment variable not set"
-)
+pytestmark = pytest.mark.requires_ado_pat
 
 
 def run_apm_command(cmd: str, cwd: Path, timeout: int = 60) -> subprocess.CompletedProcess:
@@ -65,7 +63,12 @@ class TestADOInstall:
         apm_yml = project_dir / "apm.yml"
         apm_yml.write_text(
             yaml.dump(
-                {"name": "test-project", "version": "1.0.0", "dependencies": {"apm": [], "mcp": []}}
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "target": "copilot",
+                    "dependencies": {"apm": [], "mcp": []},
+                }
             )
         )
 
@@ -102,6 +105,7 @@ class TestADODepsAndPrune:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_TEST_REPO], "mcp": []},
                 }
             )
@@ -130,6 +134,7 @@ class TestADODepsAndPrune:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_TEST_REPO], "mcp": []},
                 }
             )
@@ -162,6 +167,7 @@ class TestADOCompile:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_TEST_REPO], "mcp": []},
                 }
             )
@@ -197,7 +203,12 @@ class TestADOVirtualPackage:
         apm_yml = project_dir / "apm.yml"
         apm_yml.write_text(
             yaml.dump(
-                {"name": "test-project", "version": "1.0.0", "dependencies": {"apm": [], "mcp": []}}
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "target": "copilot",
+                    "dependencies": {"apm": [], "mcp": []},
+                }
             )
         )
 
@@ -225,6 +236,7 @@ class TestADOVirtualPackage:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.ADO_VIRTUAL_PACKAGE], "mcp": []},
                 }
             )
@@ -259,6 +271,7 @@ class TestMixedDependencies:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.GITHUB_PACKAGE, self.ADO_PACKAGE], "mcp": []},
                 }
             )
@@ -291,6 +304,7 @@ class TestMixedDependencies:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.GITHUB_PACKAGE, self.ADO_PACKAGE], "mcp": []},
                 }
             )
@@ -323,6 +337,7 @@ class TestMixedDependencies:
                 {
                     "name": "test-project",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {"apm": [self.GITHUB_PACKAGE, self.ADO_PACKAGE], "mcp": []},
                 }
             )

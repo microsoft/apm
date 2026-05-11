@@ -5,8 +5,8 @@ All dataclasses are frozen for thread-safety.
 """
 
 import logging
-from dataclasses import dataclass, field  # noqa: F401
-from typing import Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class MarketplacePlugin:
     """A single plugin entry inside a marketplace manifest."""
 
     name: str  # Plugin name (unique within marketplace)
-    source: Any = None  # String (relative) or dict (github/url/git-subdir)
+    source: Any = None  # String (relative) or dict (github/url/git-subdir/gitlab)
     description: str = ""
     version: str = ""
     tags: tuple[str, ...] = ()

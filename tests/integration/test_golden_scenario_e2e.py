@@ -46,9 +46,14 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 # Primary token for requirement checking only (integration script handles actual usage)
 PRIMARY_TOKEN = GITHUB_APM_PAT or GITHUB_TOKEN
 
-pytestmark = pytest.mark.skipif(
-    not E2E_MODE, reason="E2E tests only run when APM_E2E_TESTS=1 is set"
-)
+pytestmark = [
+    pytest.mark.requires_e2e_mode,
+    # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
+    # Requires --dist loadgroup in the xdist invocation (the only
+    # scheduler that honors xdist_group); without it the marker is
+    # silently ignored and tests would race on global env state.
+    pytest.mark.xdist_group(name="home_env"),
+]
 
 
 def run_command(
@@ -223,7 +228,7 @@ class TestGoldenScenarioE2E:
 
             print("\n=== Step 3: Transform your project with AI-Native structure ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project --yes",
+                f"{apm_binary} init my-ai-native-project --yes --target copilot",
                 cwd=project_workspace,
                 show_output=True,
             )
@@ -442,7 +447,8 @@ Basic instructions for E2E testing.
 
             print("\n=== Initializing Codex test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-codex --yes", cwd=project_workspace
+                f"{apm_binary} init my-ai-native-project-codex --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -592,7 +598,8 @@ Instructions for Codex E2E testing.
 
             print("\\n=== Initializing LLM test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-llm --yes", cwd=project_workspace
+                f"{apm_binary} init my-ai-native-project-llm --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -748,7 +755,8 @@ Instructions for LLM E2E testing.
 
             print("\n=== Initializing Gemini test project ===")
             result = run_command(
-                f"{apm_binary} init my-ai-native-project-gemini --yes", cwd=project_workspace
+                f"{apm_binary} init my-ai-native-project-gemini --yes --target copilot",
+                cwd=project_workspace,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 
@@ -908,7 +916,9 @@ Instructions for Gemini CLI E2E testing.
 
             # Test apm init
             result = run_command(
-                f"{apm_binary} init template-test-project --yes", cwd=workspace, show_output=True
+                f"{apm_binary} init template-test-project --yes --target copilot",
+                cwd=workspace,
+                show_output=True,
             )
             assert result.returncode == 0, f"APM init failed: {result.stderr}"
 

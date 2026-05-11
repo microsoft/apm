@@ -23,12 +23,13 @@ _local_path_no_markers_hint
     Scan a local directory for nested installable packages and hint the user.
 """
 
+import re
 from pathlib import Path
 
 import requests
 
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
-from ..utils.github_host import default_host
+from ..utils.github_host import default_host, is_ado_auth_failure_signal
 from .errors import AuthenticationError
 
 # ---------------------------------------------------------------------------
@@ -133,11 +134,15 @@ def _local_path_no_markers_hint(local_dir, logger=None):
             _rich_echo(f"      ... and {len(found) - 5} more", color="dim")
 
 
-def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=None):
-    """Validate that a package exists and is accessible on GitHub, Azure DevOps, or locally."""
+def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=None, dep_ref=None):
+    """Validate that a package exists and is accessible on GitHub, Azure DevOps, or locally.
+
+    When *dep_ref* is provided (for example, marketplace GitLab monorepo
+    resolution), use it instead of reparsing *package* so explicit ``git`` +
+    ``path`` semantics are preserved.
+    """
     import os
     import subprocess
-    import tempfile  # noqa: F401
 
     from apm_cli.core.auth import AuthResolver
 
@@ -154,7 +159,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.models.apm_package import DependencyReference
 
-        dep_ref = DependencyReference.parse(package)
+        if dep_ref is None:
+            dep_ref = DependencyReference.parse(package)
 
         # For local packages, validate directory exists and has valid package content
         if dep_ref.is_local and dep_ref.local_path:
@@ -175,8 +181,19 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             _local_path_no_markers_hint(local, logger=logger)
             return False
 
-        # For virtual packages, use the downloader's validation method
-        if dep_ref.is_virtual:
+        from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
+
+        virtual_subdir_repo_probe = (
+            dep_ref.is_virtual
+            and dep_ref.is_virtual_subdirectory()
+            and not is_github_hostname(dep_ref.host or default_host())
+            and not dep_ref.is_azure_devops()
+        )
+
+        # For virtual packages, use the downloader's validation method unless
+        # the virtual path is a subdirectory on a non-GitHub host. Those should
+        # validate the clone root with git, preserving SSH/credential-helper flows.
+        if dep_ref.is_virtual and not virtual_subdir_repo_probe:
             ctx = auth_resolver.resolve_for_dep(dep_ref)
             host = dep_ref.host or default_host()
             org = (
@@ -238,15 +255,21 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         # For Azure DevOps or GitHub Enterprise (non-github.com hosts),
         # use the downloader which handles authentication properly
-        if dep_ref.is_azure_devops() or (dep_ref.host and dep_ref.host != "github.com"):
-            from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
-
+        if (
+            virtual_subdir_repo_probe
+            or dep_ref.is_azure_devops()
+            or (dep_ref.host and dep_ref.host != "github.com")
+        ):
             # Determine host type before building the URL so we know whether to
             # embed a token.  Generic (non-GitHub, non-ADO) hosts are excluded
             # from APM-managed auth; they rely on git credential helpers via the
-            # relaxed validate_env below.
-            is_generic = not is_github_hostname(dep_ref.host) and not is_azure_devops_hostname(
-                dep_ref.host
+            # relaxed validate_env below. GitLab hosts are managed when classified
+            # as GitLab because they need oauth2 HTTPS token formatting.
+            is_gitlab = auth_resolver.classify_host(dep_ref.host).kind == "gitlab"
+            is_generic = (
+                not is_github_hostname(dep_ref.host)
+                and not is_azure_devops_hostname(dep_ref.host)
+                and not is_gitlab
             )
 
             # For GHES / ADO: resolve per-dependency auth up front so the URL
@@ -278,7 +301,6 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
             explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
             is_insecure = bool(getattr(dep_ref, "is_insecure", False))
-            prefer_web_probe_first = explicit_scheme in ("http", "https") or is_insecure
 
             # Strict-by-default cross-protocol policy (issue microsoft/apm#992):
             # an explicit ``http://`` / ``https://`` / ``ssh://`` URL is honored
@@ -295,11 +317,16 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             allow_fallback_env = is_fallback_allowed()
 
             # For generic hosts (not GitHub, not ADO), relax the env so native
-            # credential helpers (SSH keys, macOS Keychain, etc.) can work.
-            # This mirrors _clone_with_fallback() which does the same relaxation.
+            # credential helpers (macOS Keychain, credential-store,
+            # manager-core, SSH agent, etc.) can work.  Config isolation
+            # (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1) is only
+            # enforced for insecure plaintext HTTP connections where
+            # credential leakage is a real risk; HTTPS connections need
+            # access to user-configured helpers in ~/.gitconfig.  This
+            # matches _clone_with_fallback() and git_reference_resolver.
             if is_generic:
                 validate_env = ado_downloader._build_noninteractive_git_env(
-                    preserve_config_isolation=prefer_web_probe_first,
+                    preserve_config_isolation=is_insecure,
                     suppress_credential_helpers=is_insecure,
                 )
             else:
@@ -391,15 +418,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 and result.returncode != 0
                 and dep_ref.is_azure_devops()
                 and _url_token is not None  # we had a PAT
-                and (
-                    "401" in (result.stderr or "")
-                    or "Authentication failed" in (result.stderr or "")
-                    or "Unauthorized" in (result.stderr or "")
-                )
+                and is_ado_auth_failure_signal(result.stderr or "")
             ):
                 try:
                     from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
-                    from apm_cli.utils.github_host import build_ado_bearer_git_env
 
                     provider = get_bearer_provider()
                     if provider.is_available():
@@ -412,7 +434,17 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                                 token=None,
                                 auth_scheme="bearer",
                             )
-                            bearer_env = {**validate_env, **build_ado_bearer_git_env(bearer)}
+                            # SECURITY: build a CLEAN env via _build_git_env(scheme="bearer")
+                            # rather than {**validate_env, **build_ado_bearer_git_env(bearer)}.
+                            # validate_env still carries the PAT-context GIT_CONFIG_*
+                            # entries from _ctx_git_env; merging the bearer env on top
+                            # would keep the rejected PAT visible in the child-process
+                            # env (visible in /proc/<pid>/environ on Linux). _build_git_env
+                            # explicitly skips GIT_TOKEN for scheme="bearer" and emits
+                            # only the bearer-specific GIT_CONFIG_* injection.
+                            bearer_env = auth_resolver._build_git_env(
+                                bearer, scheme="bearer", host_kind="ado"
+                            )
                             cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
                             bearer_result = subprocess.run(
                                 cmd,
@@ -449,15 +481,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # exception with actionable diagnostics; non-auth failures keep
             # the legacy False return so the caller can word its own message.
             if result.returncode != 0 and not is_generic:
-                _stderr = (result.stderr or "").lower()
-                _auth_signals = (
-                    "401" in _stderr
-                    or "403" in _stderr
-                    or "authentication failed" in _stderr
-                    or "unauthorized" in _stderr
-                    or "could not read username" in _stderr
-                )
-                if _auth_signals:
+                if is_ado_auth_failure_signal(result.stderr or ""):
                     _host = dep_ref.host or "dev.azure.com"
                     _org = (
                         dep_ref.repo_url.split("/")[0]
@@ -527,6 +551,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 _check_repo,
                 org=org,
                 port=port,
+                # dep_ref.repo_url is owner/repo (never a full URL per the
+                # DependencyReference invariant); forwarded as path= so GCM
+                # multi-account users get per-URL credential matching.
+                path=dep_ref.repo_url,
                 unauth_first=True,
                 verbose_callback=verbose_log,
             )
@@ -558,6 +586,15 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         host = default_host()
         org = package.split("/")[0] if "/" in package else None
         repo_path = package  # owner/repo format
+        # Defensive owner/repo guard: when DependencyReference.parse raises,
+        # we fall back to embedding `repo_path` directly into an API URL and
+        # forwarding it as `path=` to git credential fill. Reject anything
+        # that isn't a strict <owner>/<repo> slug so path-confusion sequences
+        # (`../`, embedded slashes, control bytes) cannot reach either sink.
+        # Allows GitHub's documented owner/repo characters: alphanumeric,
+        # dot, underscore, hyphen.
+        if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo_path):
+            return False
 
         def _check_repo_fallback(token, git_env):
             host_info = auth_resolver.classify_host(host)
@@ -589,6 +626,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 host,
                 _check_repo_fallback,
                 org=org,
+                path=repo_path,
                 unauth_first=True,
                 verbose_callback=verbose_log,
             )

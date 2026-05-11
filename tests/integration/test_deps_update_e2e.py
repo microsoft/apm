@@ -22,10 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark = pytest.mark.requires_github_token
 
 
 SAMPLE_REPO_URL = "microsoft/apm-sample-package"
@@ -92,6 +89,7 @@ def _write_apm_yml(target_dir, packages):
     config = {
         "name": "deps-update-test",
         "version": "1.0.0",
+        "target": "copilot",
         "dependencies": {"apm": packages, "mcp": []},
     }
     (target_dir / "apm.yml").write_text(
@@ -244,6 +242,7 @@ def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
                 {
                     "name": "global-deps-update-test",
                     "version": "1.0.0",
+                    "target": "copilot",
                     "dependencies": {
                         "apm": [{"git": SAMPLE_GIT_URL, "ref": ref}],
                         "mcp": [],

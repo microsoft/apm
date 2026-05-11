@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.requires_apm_binary
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -68,6 +70,7 @@ def temp_workspace(tmp_path):
     )
     # Create .github directory for instructions deployment
     (consumer / ".github").mkdir()
+    (consumer / ".github" / "copilot-instructions.md").write_text("# test\n")
 
     # Local skills package
     skills_pkg = workspace / "packages" / "local-skills"
@@ -691,3 +694,8 @@ class TestLocalMixedWithRemote:
             data = yaml.safe_load(f)
         apm_deps = data.get("dependencies", {}).get("apm", [])
         assert "../packages/local-skills" in apm_deps
+
+
+# NOTE: Issue #1147 (in-package relative link rewriting) has its own
+# dedicated E2E test module at tests/integration/test_link_rewrite_e2e.py
+# wired into scripts/test-integration.sh.

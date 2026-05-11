@@ -329,6 +329,43 @@ class TestAdoBearerHeaderInjection:
         header_value = env.get("GIT_CONFIG_VALUE_0", "")
         assert header_value == f"Authorization: Bearer {secret}"
 
+    def test_gitlab_pat_injected_as_oauth2_basic_header_not_url(self) -> None:
+        """GitLab validation matches oauth2 PAT clone semantics without URL userinfo."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(repo_url="group/repo", host="gitlab.com")
+        secret = "glpat_VALIDATION_SECRET"
+
+        mock_ctx = MagicMock()
+        mock_ctx.auth_scheme = "basic"
+        mock_ctx.git_env = {}
+
+        with (
+            patch.object(downloader, "_resolve_dep_token", return_value=secret),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=mock_ctx),
+            patch.object(
+                downloader, "_build_repo_url", return_value="https://gitlab.com/group/repo"
+            ),
+            patch.object(
+                downloader,
+                "_build_noninteractive_git_env",
+                return_value={},
+            ),
+        ):
+            attempts = gdv._build_validation_attempts(downloader, dep_ref, log=lambda _m: None)
+
+        gitlab_attempts = [a for a in attempts if "gitlab" in a.label.lower()]
+        assert len(gitlab_attempts) == 1
+        _label, url, env = gitlab_attempts[0]
+        assert secret not in url
+        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        assert header_value.startswith("Authorization: Basic "), header_value
+
+        import base64
+
+        expected = base64.b64encode(f"oauth2:{secret}".encode()).decode("ascii")
+        assert expected in header_value
+        assert secret not in header_value
+
 
 # ---------------------------------------------------------------------------
 # Mechanical guards

@@ -8,6 +8,7 @@ from apm_cli.security.gate import (
     ScanPolicy,
     ScanVerdict,
     SecurityGate,
+    ignore_non_content,
     ignore_symlinks,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "ScanPolicy",
     "ScanVerdict",
     "SecurityGate",
+    "ignore_non_content",
     "ignore_symlinks",
 ]

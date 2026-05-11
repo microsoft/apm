@@ -35,6 +35,8 @@ from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
 from apm_cli.commands.run import preview, run
 from apm_cli.commands.runtime import runtime
+from apm_cli.commands.self_update import self_update
+from apm_cli.commands.targets import targets
 from apm_cli.commands.uninstall import uninstall
 from apm_cli.commands.update import update
 from apm_cli.commands.view import view as view_cmd
@@ -89,6 +91,7 @@ cli.add_command(install)
 cli.add_command(uninstall)
 cli.add_command(prune)
 cli.add_command(update)
+cli.add_command(self_update)
 cli.add_command(compile_cmd, name="compile")
 cli.add_command(run)
 cli.add_command(preview)
@@ -96,6 +99,7 @@ cli.add_command(list_cmd, name="list")
 cli.add_command(config)
 cli.add_command(experimental)
 cli.add_command(runtime)
+cli.add_command(targets)
 cli.add_command(mcp)
 cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")

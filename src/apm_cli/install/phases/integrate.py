@@ -19,6 +19,7 @@ import builtins
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
 
+from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
 from apm_cli.install.template import run_integration_template
@@ -88,6 +89,12 @@ def _resolve_download_strategy(
     # Phase 5 (#171): Also skip when lockfile SHA matches local HEAD
     # -- but not when the manifest ref has changed (user wants different version).
     lockfile_match = False
+    # Track whether lockfile_match was satisfied via content-hash fallback only
+    # (no git HEAD verification possible -- typical for virtual packages, where
+    # install_path is a carved-out subdirectory rather than a git repo).
+    # The self-heal logic below uses this to recover from the v<=0.12.2
+    # branch-ref drift bug for upgrading users.
+    lockfile_match_via_content_hash_only = False
     if install_path.exists() and existing_lockfile:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
         if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
@@ -105,13 +112,15 @@ def _resolve_download_strategy(
                         if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                             lockfile_match = True
                     except Exception:
-                        # Git check failed (e.g. .git removed). Fall back to
-                        # content-hash verification (#763).
+                        # Git check failed (e.g. .git removed, or virtual
+                        # package install_path is not a git repo). Fall back
+                        # to content-hash verification (#763).
                         if locked_dep.content_hash and install_path.is_dir():
                             from apm_cli.utils.content_hash import verify_package_hash
 
                             if verify_package_hash(install_path, locked_dep.content_hash):
                                 lockfile_match = True
+                                lockfile_match_via_content_hash_only = True
             elif not ref_changed:
                 # Normal mode: compare local HEAD with lockfile SHA.
                 try:
@@ -121,13 +130,40 @@ def _resolve_download_strategy(
                     if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                         lockfile_match = True
                 except Exception:
-                    # Git check failed (e.g. .git removed). Fall back to
+                    # Git check failed (e.g. .git removed, or virtual package
+                    # install_path is not a git repo). Fall back to
                     # content-hash verification (#763).
                     if locked_dep.content_hash and install_path.is_dir():
                         from apm_cli.utils.content_hash import verify_package_hash
 
                         if verify_package_hash(install_path, locked_dep.content_hash):
                             lockfile_match = True
+                            lockfile_match_via_content_hash_only = True
+
+    # Self-heal pipeline (PR #1158).
+    #
+    # All install-time heals (branch-ref drift detection, v<=0.12.2
+    # buggy-lockfile recovery, future heals) live in
+    # ``apm_cli.install.heals`` and are dispatched by ``run_heal_chain``.
+    # Each heal is an isolated, individually-testable Chain-of-
+    # Responsibility handler that may turn ``lockfile_match`` False,
+    # set ``ref_changed`` True, and add a bypass key telling
+    # ``FreshDependencySource`` that an upcoming content_hash change is
+    # legitimate recovery, not a supply-chain attack.
+    #
+    # The dispatcher (not individual heals) renders user-facing
+    # diagnostics + log messages, so heals stay pure and testable.
+    lockfile_match, ref_changed = run_heal_chain(
+        ctx,
+        dep_ref,
+        resolved_ref=resolved_ref,
+        existing_lockfile=existing_lockfile,
+        lockfile_match=lockfile_match,
+        lockfile_match_via_content_hash_only=lockfile_match_via_content_hash_only,
+        update_refs=update_refs,
+        ref_changed=ref_changed,
+    )
+
     skip_download = install_path.exists() and (
         (is_cacheable and not update_refs)
         or (already_resolved and not update_refs)

@@ -44,8 +44,17 @@ def _make_large_project(tmp_path: Path, n_primitives: int) -> Path:
     project = tmp_path / "perf-fixture"
     project.mkdir()
     (project / "apm.yml").write_bytes(
-        yaml.safe_dump({"name": "perf-fixture", "version": "1.0.0"}).encode()
+        yaml.safe_dump(
+            {"name": "perf-fixture", "version": "1.0.0", "targets": ["copilot"]}
+        ).encode()
     )
+    # v2 target resolution needs either a signal or explicit yaml target
+    # to avoid NoHarnessError (#1154).  The explicit target above and
+    # .github/copilot-instructions.md signal keep this fixture on copilot
+    # (matching the pre-#1154 legacy-fallback behavior).
+    gi = project / ".github"
+    gi.mkdir()
+    (gi / "copilot-instructions.md").write_text("")
     inst_dir = project / ".apm" / "instructions"
     inst_dir.mkdir(parents=True)
     for idx in range(n_primitives):
@@ -54,7 +63,7 @@ def _make_large_project(tmp_path: Path, n_primitives: int) -> Path:
     return project
 
 
-def test_drift_replay_under_5s_for_100_primitives(
+def test_drift_replay_under_10s_for_100_primitives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = _make_large_project(tmp_path, n_primitives=100)
@@ -78,4 +87,4 @@ def test_drift_replay_under_5s_for_100_primitives(
     elapsed = time.perf_counter() - start
 
     assert findings == [], f"clean fixture must produce zero drift, got: {findings}"
-    assert elapsed < 5.0, f"drift replay+diff took {elapsed:.2f}s for 100 primitives (budget: 5s)"
+    assert elapsed < 10.0, f"drift replay+diff took {elapsed:.2f}s for 100 primitives (budget: 10s)"

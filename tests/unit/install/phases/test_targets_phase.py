@@ -183,6 +183,14 @@ class TestProjectScopeGateForCowork:
         copilot = KNOWN_TARGETS["copilot"]
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
+        from apm_cli.core.target_detection import ResolvedTargets
+
+        _v2_result = ResolvedTargets(
+            targets=["copilot"],
+            source="auto-detect from .github/copilot-instructions.md",
+            auto_create=True,
+        )
+
         with (
             patch(
                 "apm_cli.integration.targets.resolve_targets",
@@ -190,6 +198,10 @@ class TestProjectScopeGateForCowork:
             ),
             patch(
                 "apm_cli.core.target_detection.detect_target",
+            ),
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=_v2_result,
             ),
         ):
             from apm_cli.install.phases.targets import run

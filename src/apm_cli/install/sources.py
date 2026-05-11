@@ -287,6 +287,56 @@ class CachedDependencySource(DependencySource):
         # ctx.callback_downloaded.
         self.fetched_this_run = fetched_this_run
 
+    def _resolve_cached_commit(self) -> str | None:
+        """Determine the SHA to record in the lockfile for the cached path.
+
+        Invariant: when ``skip_download=True``, the SHA we record MUST
+        equal what is actually on disk. The previous logic promoted
+        ``resolved_ref.resolved_commit`` to the top of the priority list,
+        which silently wrote the remote HEAD even when bytes had not been
+        re-materialized -- producing a phantom identity in the lockfile
+        (3-way drift bug, PR #1158).
+
+        Priority:
+        * ``fetched_this_run``: bytes were just downloaded by the
+          resolver callback. Use the SHA captured at fetch time
+          (callback) or the resolver's own SHA. Both reflect what
+          landed on disk in this run. By construction the upstream
+          download path always populates one of those two for a
+          freshly-fetched dep, so we never fall back to the lockfile
+          here -- doing so would risk overwriting on-disk bytes with a
+          stale lockfile SHA.
+        * true cached path: trust the existing lockfile SHA. It was
+          written by a previous successful install and matches what is
+          on disk (verified upstream by the lockfile_match check).
+          NEVER use ``resolved_ref`` here.
+        * fallback to ``dep_ref.reference`` only when no lockfile SHA
+          is available (cold-path with no prior install) or when the
+          fetched-this-run path failed to capture a SHA at all.
+        """
+        ctx = self.ctx
+        dep_key = self.dep_key
+        resolved_ref = self.resolved_ref
+        dep_ref = self.dep_ref
+
+        cached_commit: str | None = None
+        if self.fetched_this_run:
+            cached_commit = ctx.callback_downloaded.get(dep_key)
+            if (
+                not cached_commit
+                and resolved_ref
+                and resolved_ref.resolved_commit
+                and resolved_ref.resolved_commit != "cached"
+            ):
+                cached_commit = resolved_ref.resolved_commit
+        elif ctx.existing_lockfile:
+            locked_dep = ctx.existing_lockfile.get_dependency(dep_key)
+            if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+                cached_commit = locked_dep.resolved_commit
+        if not cached_commit:
+            cached_commit = dep_ref.reference
+        return cached_commit
+
     def acquire(self) -> Materialization | None:
         from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import InstalledPackage
@@ -386,22 +436,10 @@ class CachedDependencySource(DependencySource):
         resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
         _is_dev = node.is_dev if node else False
 
-        # Determine commit SHA: resolved > callback > existing lockfile > reference
-        cached_commit = None
-        if (
-            resolved_ref
-            and resolved_ref.resolved_commit
-            and resolved_ref.resolved_commit != "cached"
-        ):
-            cached_commit = resolved_ref.resolved_commit
-        if not cached_commit:
-            cached_commit = ctx.callback_downloaded.get(dep_key)
-        if not cached_commit and ctx.existing_lockfile:
-            locked_dep = ctx.existing_lockfile.get_dependency(dep_key)
-            if locked_dep:
-                cached_commit = locked_dep.resolved_commit
-        if not cached_commit:
-            cached_commit = dep_ref.reference
+        # Determine commit SHA for the cached path. See _resolve_cached_commit
+        # for the invariant ("recorded SHA must match disk identity") and the
+        # priority rules (PR #1158 -- branch-ref drift fix).
+        cached_commit = self._resolve_cached_commit()
 
         # Determine if cached package came from registry
         _cached_registry = None
@@ -582,8 +620,13 @@ class FreshDependencySource(DependencySource):
 
             # Supply-chain protection: verify content hash on fresh
             # downloads when the lockfile already records a hash.
+            # Skip when ``ctx.expected_hash_change_deps`` marks this dep
+            # (set by _resolve_download_strategy when branch-ref drift or
+            # the v<=0.12.2 self-heal forces a re-download whose hash is
+            # legitimately expected to differ from the lockfile record).
             if (
                 not ctx.update_refs
+                and dep_key not in ctx.expected_hash_change_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash
                 and dep_key in ctx.package_hashes

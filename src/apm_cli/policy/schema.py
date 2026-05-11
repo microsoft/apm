@@ -91,8 +91,13 @@ class ManifestPolicy:
 class UnmanagedFilesPolicy:
     """Rules for files not tracked in apm.lock."""
 
-    action: str = "ignore"  # ignore | warn | deny
+    action: str | None = None  # None = no opinion; "ignore" | "warn" | "deny"
     directories: tuple[str, ...] = ()
+
+    @property
+    def effective_action(self) -> str:
+        """Resolved action for runtime checks (None -> 'ignore')."""
+        return self.action if self.action is not None else "ignore"
 
 
 @dataclass(frozen=True)

@@ -993,7 +993,7 @@ Use type hints in Python code.
             result = runner.invoke(cli, ["compile", "--target", "invalid", "--dry-run"])
 
             assert result.exit_code != 0
-            assert "Invalid value for '--target'" in result.output
+            assert "Unknown target" in result.output or "Invalid value" in result.output
         finally:
             os.chdir(original_dir)
 

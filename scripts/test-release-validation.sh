@@ -219,9 +219,9 @@ test_hero_guardrailing() {
     log_test "HERO SCENARIO 2: 2-Minute Guardrailing (README lines 46-60)"
     
     # Step 1: apm init my-project
-    echo "Running: $BINARY_PATH init my-project --yes"
+    echo "Running: $BINARY_PATH init my-project --yes --target copilot"
     echo "--- Command Output Start ---"
-    "$BINARY_PATH" init my-project --yes 2>&1
+    "$BINARY_PATH" init my-project --yes --target copilot 2>&1
     local exit_code=$?
     echo "--- Command Output End ---"
     echo "Exit code: $exit_code"
@@ -377,6 +377,7 @@ test_ghaw_compat() {
         cat > apm.yml <<'APMYML'
 name: ghaw-compat-test
 version: 1.0.0
+target: copilot
 dependencies:
   apm:
     - microsoft/apm-sample-package

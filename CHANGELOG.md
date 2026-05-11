@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- The CLI self-updater moved from `apm update` to `apm self-update`. Inside an `apm.yml` project the bare `apm update` verb now refreshes project dependencies (matching `npm update`, `uv lock --upgrade`, `cargo update`); outside a project it forwards to `apm self-update` with a deprecation banner for one release. CI scripts that called `apm update` to refresh the binary should migrate now: `sed -i 's/apm update/apm self-update/g' your_scripts`. (#1244)
+
+### Added
+
+- `apm update` now does what every npm/pip/cargo user expects -- resolve latest refs, show a structured plan, and ask before touching anything. Refreshes APM dependencies in the current project: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged) with an inline legend, and prompts `[y/N]` before mutating anything (`--yes` skips the prompt; `--dry-run` previews). (#1244)
+- `apm self-update`: updates the APM CLI binary itself (or shows distributor guidance when self-update is disabled at build time). Replaces the former `apm update` self-update path; supports `--check` to only check for a newer version. (#1244)
+- `apm install --frozen` performs a CI-safe, read-only install that fails fast (exit 1) when `apm.lock.yaml` is missing or out of sync with `apm.yml`; mutually exclusive with `--update`. Structural presence check only; use `apm audit` for on-disk SHA integrity. (#1244)
+- `apm install` now emits a one-line "Run 'apm update' to check for newer versions." hint on the no-op path when a lockfile is already present, pointing users at the verb that actually checks for newer refs. (#1244)
+- Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
+- `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
+- **GitLab host support:** `gitlab.com` and self-managed instances (via `GITLAB_HOST` / `APM_GITLAB_HOSTS`) use GitLab REST **v4** for `marketplace.json` and install-time raw file reads; nested GitLab group paths are disambiguated in dependency references with object-form `git:` + `path:` where shorthand is ambiguous. GitHub, GHES, Azure DevOps, and registry-proxy behavior remain unchanged. (#1149)
+- **`git: parent` monorepo transitive dependency inheritance:** packages in a git monorepo can reference sibling paths via `{ git: parent, path: ... }` without repeating the full `git:` URL; the lockfile stores expanded host, repository, subdirectory path, and resolved ref/commit like other virtual git dependencies (no `parent` sentinel as durable identity). (#1149)
+- If you use the `gh` CLI, APM is now zero-config for private GitHub packages on github.com, `*.ghe.com`, and GHES: APM uses your active `gh auth login` token (`gh auth token --hostname <host>`) before falling back to `git credential fill`. Silently skipped when `gh` is not installed or not logged in for the host. (#630)
+
+### Changed
+
+- `apm install --force` help text now states explicitly that the flag does NOT refresh refs; users who want newer commits should run `apm update`. (#1244)
+- `apm update` now walks parent directories to find `apm.yml` (matching npm/cargo ergonomics), emits a one-time CI banner when invoked from a project root under `CI`/`GITHUB_ACTIONS` so pipelines see the dependency-refresh shift, and the no-op nudge copy now reads "Lockfile already satisfied -- run `apm update` to resolve latest refs." `apm install --frozen` adds a post-success "Run `apm audit` for on-disk content integrity." footer to set the right expectation, and FrozenInstallError now renders identically across `install` and `update`. (#1244)
+- `apm marketplace browse/search/add/update` route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub and GitLab host API fallbacks. (#1149)
+- Registry proxy now warns when `PROXY_REGISTRY_TOKEN` is set and `PROXY_REGISTRY_URL` uses `http://`, since the bearer token would be transmitted in plaintext; set `PROXY_REGISTRY_ALLOW_HTTP=1` to silence the warning for trusted internal proxies. (#1149)
+- Integration tests now use marker-driven discovery: 21 `pytestmark = pytest.mark.skipif(...)` chains across `tests/integration/` are replaced with declarative `requires_*` markers, with precondition logic centralized in `tests/integration/conftest.py` and auto-skipping at collection time. PR1 of #1166. (#1167)
+- Integration test apm-binary resolution now prefers the local build (`./dist/apm-<os>-<arch>/apm`) over a system-wide `apm` on `PATH`, so contributors validating the binary under test are not silently shadowed by a global install; the bearer-token marker (`requires_ado_bearer`) discards the captured JWT immediately and persists only the boolean outcome. (#1167)
+- `scripts/test-integration.sh` is now a thin orchestrator: it builds/locates the apm binary, sets up runtimes and tokens, then invokes `pytest tests/integration/` exactly once. The 28 per-file pytest enumerations were removed; the marker registry handles per-test gating, and new test files dropped into `tests/integration/` are picked up automatically. PR2 of #1166. (#1247)
+- Integration-test marker procedure codified as `.apm/instructions/tests.instructions.md` (wired into `test-coverage-expert` persona) and guarded by a regression-trap test that asserts `pyproject.toml`, `tests/integration/conftest.py::_MARKER_CHECKS`, the docs registry table, and the instructions rule stay in sync. (#1166)
+- Tier-2 smoke job runs `tests/integration/test_core_smoke.py` against the built apm binary, exercising `init` / `install` / `compile` / `audit` / `policy status` to fail fast on the README's three promises; replaces `test_runtime_smoke.py` (kept in heavy integration). (#1251)
+
+### Fixed
+
+- `test_find_server_by_reference_uuid_not_found` no longer leaks a live HTTP call to `api.mcp.github.com` (fixing Windows CI failures from `socket.gaierror`); the `search_servers` fallback is now mocked. (#1264)
+- ADO full HTTPS URLs with sub-path virtual packages (e.g. `https://dev.azure.com/org/proj/_git/repo/sub/path`) are now parsed correctly instead of being rejected. (#1254)
+- Fixed `apm install` crash (exit code 128) when a mono-repo package depends on a sibling pinned to a non-HEAD commit; installs now resolve with a single in-place fetch, and multiple SHA-pinned references to the same repository share a single cached clone. (#1258)
+- MCP server token injection now requires both an allowlisted server name and a verified HTTPS GitHub hostname, preventing PAT exfiltration via poisoned registry entries. (#1239)
+- `apm marketplace add` accepts GitLab-class hosts (`gitlab.com` and self-managed instances configured via `GITLAB_HOST` / `APM_GITLAB_HOSTS`); unsupported generic hosts now show separate recovery hints for GHES (`GITHUB_HOST`) and self-managed GitLab instead of only `GITHUB_HOST`. (#1149)
+- **GitLab monorepo marketplaces:** `apm install plugin@marketplace` now resolves plugins whose sources live in a subdirectory of the marketplace repository on GitLab-class hosts (`gitlab.com` and self-managed GitLab when classified as GitLab), matching explicit `git:` + `path:` semantics without requiring that hand-written object form. (#1149)
+- `apm install` now rejects unsupported flat-format `dependencies` (e.g. `dependencies: [owner/repo]`) with a clear error and structured-format hint instead of silently ignoring them; the resolver also surfaces `ValueError` from malformed transitive manifests as warnings instead of swallowing them. (#1189)
+- `apm install --target cursor` now emits Cursor-native MCP schema (`type: stdio` / `type: http`) instead of Copilot-only fields that Cursor silently discards; `.cursor/mcp.json` is gitignored to prevent accidental token commits. (#1240)
+- `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback. The defensive expression broke gh-aw's bare-expression substitution regex, causing consumer-supplied `target:` values to be silently dropped; the `import-schema` default already covers the omitted-input case. (#1185)
+- `apm install --target all` no longer enumerates the experimental `copilot-cowork` target, which was crashing project-scope installs with a "requires --global" error and made `gh aw` workflows that pin `target: all` unusable. (#1191)
+- Stabilized `test_install_over_defer_threshold_starts_live_once` on slow CI runners by joining the deferred-start timer thread instead of relying on a 100ms grace window. (#1191)
+- `triage-panel` scheduled sweep now paginates the candidate query oldest-first via the GitHub MCP `list_issues` tool instead of a single 200-issue page, so daily runs actually drain the untriaged backlog rather than processing one issue per cron tick. (#1193)
+- `triage-panel` scheduled sweep switches the candidate query from `list_issues`+prose-driven pagination to `search_issues` with `-label:status/triaged sort:created-asc`, so untriaged candidates are filtered server-side; the previous approach silently noop'd because the MCP gateway DIFC filter dropped non-collaborator issues mid-page and the agent inferred a false `hasNextPage:false`.
+- `apm install` now accepts the YAML list form under `target:` (e.g. `target: [copilot, claude]`); previously crashed with a garbled `Unknown target` error. (#1197)
+- `apm install --update` now falls back from a stale `ADO_APM_PAT` to an `az login` AAD bearer in the preflight auth probe, matching the behavior of `apm install` and every other ADO call site. Previously the preflight raised `AuthenticationError` on 401/403 even when `az login` would have succeeded. The bearer env also pops any pre-existing `GIT_TOKEN` so the JWT flows only via `GIT_CONFIG_VALUE_0`, and the per-host stale-PAT warning dedup is lock-guarded so parallel installs against the same ADO host emit one warning instead of one-per-thread. (#1212)
+- `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
+- `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
+- Multi-account Git Credential Manager users: APM now selects the right GitHub account automatically per repository (no account-picker prompt) when `credential.useHttpPath = true` is set. Existing single-account setups are unaffected. (#1226)
+- Policy inheritance now fails closed: child policies that omit `unmanaged_files` inherit the parent's action instead of silently defaulting to `ignore`. (#1253)
+- Protocol-fallback port warnings are now deduplicated across parallel download workers via a threading lock, so each (host, repo, port) triple warns exactly once. (#1238)
+- `apm install --global <abs-local-path>` no longer rejects absolute local paths at user scope (regression introduced by #1149); restores the post-#937 contract that only relative local paths are ambiguous at user scope. (#1247)
+- Realigned the failing integration suite with current product contracts: copilot-target detection requires `.github/copilot-instructions.md` (post-#1154), `apm marketplace build` is removed in favor of `apm pack`, ADO virtual collections use the SUBDIRECTORY layout (post-#1094), and the `repo:` apm.yml key is replaced by `git:`. (#1247)
+
+## [0.12.4] - 2026-05-07
+
+### Fixed
+
+- `apm install` now removes deployed files when a package is removed from `apm.yml`. Three sequential early-returns previously short-circuited the cleanup phase when the manifest was emptied; the orphan-cleanup logic itself was correct. (#1173)
+- `apm audit --ci` no longer reports false drift on self-package primitives that link to repo-root files (`[..](../../FILE.md)`). The replay's in-package asset rewriter now re-anchors `target_location` onto `package_root` when the candidate sits outside the scratch tree, mirroring real-install output. (#1182)
+
+## [0.12.3] - 2026-05-06
+
+### Security
+
+- `apm install --target copilot` no longer bakes secret values into `~/.copilot/mcp-config.json`: env-var placeholders (`${env:VAR}`, `${VAR}`, legacy `<VAR>`) are translated to Copilot's native `${VAR}` runtime form so secrets never touch disk. Rotate any previously-baked secrets and re-run install. (#1169, closes #1152)
+
+### Changed
+
+- Explicit, auditable target resolution: `apm install` / `apm compile` follow a strict `--target` > `apm.yml target:` > auto-detect chain, print a `[i] Targets: ... (source: ...)` provenance line, and exit 2 on empty repos instead of silently defaulting to `copilot`. Adds `apm targets` discovery command and `apm compile --all` (deprecates `--target all`). (#1165, closes #1154, #1122, #1130, #518, #888, #891, #650, #1056)
+- `apm init` opens an interactive numbered-toggle target checklist pre-seeded from filesystem signals so users land in Tier 2 (`apm.yml target:`) by default; adds `--target` for scripted use. (#1165)
+- `apm install` honours `policy.fetch_failure_default: block` for `no_git_remote` / `absent` / `empty`, matching the audit behaviour. (#1164)
+
+### Fixed
+
+- `apm audit --ci` no longer silently passes when no org policy is resolved: auto-discovery warns on stderr and honours `policy.fetch_failure_default: block` to fail closed (exit 1); JSON/SARIF on stdout stays clean. (#1164, closes #1159)
+- SCP-shorthand SSH URLs from non-`git` users -- `<user>@github.com:owner/repo` (EMU) and `<user>@ssh.dev.azure.com:v3/<org>/<project>/<repo>` (ADO) -- now parse correctly in dependency parsing and policy auto-discovery. (#1164)
+- `apm install` against a branch ref re-downloads when upstream advances past the lockfile-recorded SHA, and self-heals lockfiles produced by APM <= 0.12.2 on next install. (#1158)
+- In-package relative markdown links are rewritten to their `apm_modules/` location at install time so sibling references survive the `.agents/.github` deploy split. (#1160, closes #1147)
+- `.apm-pin` cache marker no longer leaks into skill deploy targets on subsequent installs. (#1153)
+
 ## [0.12.2] - 2026-05-05
 
 ### Added

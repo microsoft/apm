@@ -129,6 +129,8 @@ Virtual packages reference a subset of a repository.
 
 Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.
 
+**Gitea and Gogs (self-hosted or vendor-hosted):** virtual packages resolve via the host's `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab nested-group repos (`group/subgroup/repo`) require the object form (`git: <full-url>`, `path: <virtual>`) -- shorthand is ambiguous on >2-segment paths.
+
 > **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any `.collection.yml` to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
 ## Canonical storage rules
@@ -167,11 +169,13 @@ dependencies:
       headers:
         X-Custom: "value"
         # Env-var placeholders in headers/env values:
-        #   ${VAR} or ${env:VAR}  -> resolved from host env at install time
-        #                            by Copilot (VS Code resolves at runtime;
-        #                            Codex passes ${...} through unchanged)
+        #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
+        #                            from host env at server-start (no plaintext on disk).
+        #                            VS Code: rewritten to ${env:VAR} and resolved at runtime.
+        #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
+        #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
-        #   <VAR>                 -> legacy Copilot syntax (still supported)
+        #   <VAR>                 -> deprecated; auto-translated, emits a warning
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 

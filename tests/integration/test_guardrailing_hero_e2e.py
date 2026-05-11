@@ -29,9 +29,7 @@ GITHUB_APM_PAT = os.environ.get("GITHUB_APM_PAT")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 PRIMARY_TOKEN = GITHUB_APM_PAT or GITHUB_TOKEN
 
-pytestmark = pytest.mark.skipif(
-    not E2E_MODE, reason="E2E tests only run when APM_E2E_TESTS=1 is set"
-)
+pytestmark = pytest.mark.requires_e2e_mode
 
 
 def run_command(
@@ -127,7 +125,9 @@ class TestGuardrailingHeroScenario:
             # Step 1: apm init my-project
             print("\n=== Step 1: apm init my-project ===")
             result = run_command(
-                f"{apm_binary} init my-project --yes", cwd=workspace, show_output=True
+                f"{apm_binary} init my-project --yes --target copilot",
+                cwd=workspace,
+                show_output=True,
             )
             assert result.returncode == 0, f"Project init failed: {result.stderr}"
 

@@ -31,6 +31,8 @@ from apm_cli.deps.apm_resolver import APMDependencyResolver  # noqa: F401
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 
+pytestmark = pytest.mark.requires_github_token
+
 
 class TestAPMDependenciesIntegration:
     """Integration tests for APM Dependencies using real GitHub repositories."""
@@ -525,8 +527,11 @@ class TestAPMDependenciesCI:
             "Downloader should have a GitHub token for modules access"
         )
         assert downloader.github_token is not None, "GitHub token should be available"
-        assert downloader.github_token.startswith("github_pat_"), (
-            "Token should be a valid GitHub PAT"
+        # Accept any valid GitHub token prefix: github_pat_ (fine-grained PAT),
+        # ghp_ (classic PAT), gho_ (OAuth via gh CLI), ghs_/ghu_ (app tokens).
+        valid_prefixes = ("github_pat_", "ghp_", "gho_", "ghs_", "ghu_")
+        assert downloader.github_token.startswith(valid_prefixes), (
+            f"Token should be a valid GitHub token (one of {valid_prefixes})"
         )
 
         # Verify that environment variables are properly set for Git operations
@@ -542,8 +547,8 @@ class TestAPMDependenciesCI:
         assert token_for_modules is not None, (
             "Token manager should provide a token for modules access"
         )
-        assert token_for_modules.startswith("github_pat_"), (
-            "Modules token should be a valid GitHub PAT"
+        assert token_for_modules.startswith(valid_prefixes), (
+            f"Modules token should be a valid GitHub token (one of {valid_prefixes})"
         )
 
         # This validates the authentication setup works with real tokens

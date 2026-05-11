@@ -122,8 +122,13 @@ Controls which output targets are generated during compilation and installation.
 # Single target
 target: copilot
 
-# Multiple targets
+# Multiple targets -- flow-list form
 target: [claude, copilot]
+
+# Multiple targets -- block-list form (equivalent)
+target:
+  - claude
+  - copilot
 ```
 
 When a list is specified, only those targets are compiled, installed, and packed -- no output is generated for unlisted targets. `all` cannot be combined with other values.
@@ -219,7 +224,7 @@ policy:
 
 | Sub-key | Type | Default | Allowed values | Semantic |
 |---|---|---|---|---|
-| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no policy is reachable AND none is cached. `warn` keeps installs unblocked when GitHub is unreachable; `block` opts into fail-closed semantics. See [Network failure semantics](../../enterprise/policy-reference/#95-network-failure-semantics). |
+| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no enforceable policy is available -- covers fetch failures (`malformed`, `cache_miss_fetch_fail`, `garbage_response`) AND no-policy outcomes (`no_git_remote`, `absent`, `empty`). `warn` keeps installs unblocked when GitHub is unreachable or no org policy is published; `block` opts into fail-closed semantics for both `apm install` and `apm audit --ci`. See [Network failure semantics](../../enterprise/policy-reference/#95-network-failure-semantics). |
 | `hash` | `string` | unset | `<algo>:<hex-digest>` (e.g. `sha256:6a8c...e2f1`) | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. See [Hash pin: `policy.hash`](../../enterprise/policy-reference/#96-hash-pin-policyhash-consumer-side-verification). |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present; this field is the explicit override. MD5 and SHA-1 are rejected at parse time. |
 
@@ -323,6 +328,16 @@ Local path dependency (development only):
 ```yaml
 - path: ./packages/my-shared-skills
 ```
+
+Monorepo sibling reference (`git: parent`):
+
+```yaml
+# In agents/pkg-a/apm.yml inside org/monorepo
+- git: parent
+  path: skills/shared
+```
+
+The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates -- `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. `ref` and `alias` overrides are accepted; when `ref` is omitted the parent's resolved ref is inherited.
 
 #### 4.1.3. Virtual Packages
 
