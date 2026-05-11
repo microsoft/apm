@@ -70,6 +70,7 @@ def temp_workspace(tmp_path):
     )
     # Create .github directory for instructions deployment
     (consumer / ".github").mkdir()
+    (consumer / ".github" / "copilot-instructions.md").write_text("# test\n")
 
     # Local skills package
     skills_pkg = workspace / "packages" / "local-skills"

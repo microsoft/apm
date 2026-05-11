@@ -51,6 +51,10 @@ def fake_home(tmp_path):
     """
     home_dir = tmp_path / "fakehome"
     home_dir.mkdir()
+    # Mark the home dir as a copilot harness so install --global passes
+    # target detection (post-#1154 the bare directory is no longer a signal).
+    (home_dir / ".github").mkdir()
+    (home_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
     return home_dir
 
 

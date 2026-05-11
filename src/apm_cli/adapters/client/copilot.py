@@ -1208,8 +1208,10 @@ class CopilotClientAdapter(MCPClientAdapter):
     def _is_github_server(self, server_name, url):
         """Securely determine if a server is a GitHub MCP server.
 
-        This method uses proper URL parsing and hostname validation to prevent
-        security vulnerabilities from substring-based checks.
+        Uses proper URL parsing and hostname validation to prevent token
+        injection via poisoned registry entries. Both the server name and
+        the URL hostname must match the GitHub allowlists before a GitHub
+        token is injected.
 
         Args:
             server_name (str): Name of the MCP server.
@@ -1220,7 +1222,6 @@ class CopilotClientAdapter(MCPClientAdapter):
         """
         from urllib.parse import urlparse
 
-        # Check server name against an allowlist of known GitHub MCP servers
         github_server_names = [
             "github-mcp-server",
             "github",
@@ -1228,23 +1229,33 @@ class CopilotClientAdapter(MCPClientAdapter):
             "github-copilot-mcp-server",
         ]
 
-        # Exact match check for server names (case-insensitive)
-        if server_name and server_name.lower() in [name.lower() for name in github_server_names]:
-            return True
+        def _is_github_mcp_hostname(hostname: str) -> bool:
+            """Check if *hostname* belongs to GitHub (cloud, enterprise, or Copilot API)."""
+            if is_github_hostname(hostname):
+                return True
+            h = hostname.lower()
+            # Subdomains of github.com (e.g. api.github.com)
+            if h.endswith(".github.com"):
+                return True
+            # Copilot API hosts (e.g. api.githubcopilot.com, api.business.githubcopilot.com)
+            return h == "githubcopilot.com" or h.endswith(".githubcopilot.com")
 
-        # If URL is provided, validate the hostname
+        name_matches = bool(
+            server_name and server_name.lower() in [n.lower() for n in github_server_names]
+        )
+
+        # Parse and validate hostname from URL
+        hostname = None
         if url:
             try:
                 parsed_url = urlparse(url)
+                # Reject non-HTTPS URLs to prevent cleartext token leakage
+                if parsed_url.scheme and parsed_url.scheme.lower() != "https":
+                    return False
                 hostname = parsed_url.hostname
-
-                if hostname:
-                    # Use helper to determine whether hostname is a GitHub host (cloud or enterprise)
-                    if is_github_hostname(hostname):
-                        return True
-
             except Exception:
-                # If URL parsing fails, assume it's not a GitHub server
                 return False
 
-        return False
+        host_matches = bool(hostname and _is_github_mcp_hostname(hostname))
+
+        return name_matches and host_matches

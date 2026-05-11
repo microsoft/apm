@@ -38,9 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` no longer silently overwrites pre-existing governance files; `check_collision()` now treats `managed_files=None` (first install, no lockfile yet) as an empty set so hand-rolled files in `.github/instructions/` and other governance directories are correctly detected and protected from silent overwrite. (#1256)
+- MCP server token injection now requires both an allowlisted server name and a verified HTTPS GitHub hostname, preventing PAT exfiltration via poisoned registry entries. (#1239)
 - `apm marketplace add` accepts GitLab-class hosts (`gitlab.com` and self-managed instances configured via `GITLAB_HOST` / `APM_GITLAB_HOSTS`); unsupported generic hosts now show separate recovery hints for GHES (`GITHUB_HOST`) and self-managed GitLab instead of only `GITHUB_HOST`. (#1149)
 - **GitLab monorepo marketplaces:** `apm install plugin@marketplace` now resolves plugins whose sources live in a subdirectory of the marketplace repository on GitLab-class hosts (`gitlab.com` and self-managed GitLab when classified as GitLab), matching explicit `git:` + `path:` semantics without requiring that hand-written object form. (#1149)
 - `apm install` now rejects unsupported flat-format `dependencies` (e.g. `dependencies: [owner/repo]`) with a clear error and structured-format hint instead of silently ignoring them; the resolver also surfaces `ValueError` from malformed transitive manifests as warnings instead of swallowing them. (#1189)
+- `apm install --target cursor` now emits Cursor-native MCP schema (`type: stdio` / `type: http`) instead of Copilot-only fields that Cursor silently discards; `.cursor/mcp.json` is gitignored to prevent accidental token commits. (#1240)
 - `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback. The defensive expression broke gh-aw's bare-expression substitution regex, causing consumer-supplied `target:` values to be silently dropped; the `import-schema` default already covers the omitted-input case. (#1185)
 - `apm install --target all` no longer enumerates the experimental `copilot-cowork` target, which was crashing project-scope installs with a "requires --global" error and made `gh aw` workflows that pin `target: all` unusable. (#1191)
 - Stabilized `test_install_over_defer_threshold_starts_live_once` on slow CI runners by joining the deferred-start timer thread instead of relying on a 100ms grace window. (#1191)
@@ -51,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
 - `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
 - Multi-account Git Credential Manager users: APM now selects the right GitHub account automatically per repository (no account-picker prompt) when `credential.useHttpPath = true` is set. Existing single-account setups are unaffected. (#1226)
+- Protocol-fallback port warnings are now deduplicated across parallel download workers via a threading lock, so each (host, repo, port) triple warns exactly once. (#1238)
+- `apm install --global <abs-local-path>` no longer rejects absolute local paths at user scope (regression introduced by #1149); restores the post-#937 contract that only relative local paths are ambiguous at user scope. (#1247)
+- Realigned the failing integration suite with current product contracts: copilot-target detection requires `.github/copilot-instructions.md` (post-#1154), `apm marketplace build` is removed in favor of `apm pack`, ADO virtual collections use the SUBDIRECTORY layout (post-#1094), and the `repo:` apm.yml key is replaced by `git:`. (#1247)
 
 ## [0.12.4] - 2026-05-07
 

@@ -36,6 +36,7 @@ def temp_project(tmp_path):
     project_dir = tmp_path / "intra-package-cleanup-test"
     project_dir.mkdir()
     (project_dir / ".github").mkdir()
+    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
     return project_dir
 
 
