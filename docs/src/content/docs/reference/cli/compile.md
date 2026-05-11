@@ -5,9 +5,9 @@ sidebar:
   order: 11
 ---
 
-Compile the primitives in `.apm/` and `apm_modules/` into the files each
-agent harness reads at runtime (AGENTS.md, CLAUDE.md, `.github/`,
-`.claude/`, etc.).
+Compile your **instructions** primitives into the AGENTS.md / CLAUDE.md
+/ GEMINI.md root context files (and per-harness rules trees) that each
+agent harness reads at startup.
 
 ## Synopsis
 
@@ -17,9 +17,18 @@ apm compile [OPTIONS]
 
 ## Description
 
-`apm compile` reads instructions, chatmodes, prompts, and skills from
-`.apm/` (your project) and `apm_modules/` (installed dependencies), then
-writes one set of deployment files per resolved target.
+`apm compile` reads `instructions/*.instructions.md` from `.apm/`
+(your project) and `apm_modules/` (installed dependencies), then
+writes one set of root context files plus per-harness rules per
+resolved target.
+
+Compile only handles **instructions** (and optionally a single
+chatmode to prepend via `--chatmode`). Other primitive types --
+prompts, skills, agents, hooks, commands, MCP -- are deployed by
+`apm install` directly into the harness directories that consume them
+and are not touched by `apm compile`. See
+[Primitives and targets](../../../concepts/primitives-and-targets/)
+for the full reach map.
 
 Resolution order for which targets to compile:
 
