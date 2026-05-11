@@ -327,7 +327,11 @@ class MCPClientAdapter(ABC):
         """
         # ---- translate mode, dict shape (self-defined stdio in apm.yml) ----
         if isinstance(env_vars, dict) and self._supports_runtime_env_substitution:
-            translated: dict[str, str] = {}
+            # Value type is intentionally untyped: most entries are translated
+            # placeholder strings, but non-string values (e.g. an int/bool
+            # YAML scalar) are passed through verbatim and serialised by the
+            # adapter's config writer (JSON/TOML).
+            translated: dict = {}
             placeholder_keys: list[str] = []
             for name, raw_value in env_vars.items():
                 if not name:

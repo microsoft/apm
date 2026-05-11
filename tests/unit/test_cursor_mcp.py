@@ -342,10 +342,6 @@ class TestCursorTokenInjection(unittest.TestCase):
         self.assertIn("No supported package type", str(ctx.exception))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestCursorSelfDefinedStdioEnvResolution(unittest.TestCase):
     """Regression coverage for a latent partner-bug of issue #1266.
 
@@ -401,3 +397,7 @@ class TestCursorSelfDefinedStdioEnvResolution(unittest.TestCase):
         self.assertEqual(env_block["TOKEN_ENVPREFIX"], "real-secret-xyz123")
         self.assertEqual(env_block["TOKEN_ANGLE"], "real-secret-xyz123")
         self.assertEqual(env_block["LITERAL_EMAIL"], "user@example.com")
+
+
+if __name__ == "__main__":
+    unittest.main()
