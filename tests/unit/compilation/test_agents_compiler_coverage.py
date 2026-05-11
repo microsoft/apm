@@ -776,7 +776,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         config = CompilationConfig(target="claude", dry_run=True)
         result = compiler.compile(config)
         assert result.success
-        assert "Would generate 1 files" in result.content
+        assert "Would generate 1 file" in result.content
         assert "CLAUDE.md" in result.content
 
     def test_skip_instructions_stats_reflect_emitted_files(self):

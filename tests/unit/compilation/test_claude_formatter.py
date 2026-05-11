@@ -625,67 +625,24 @@ class TestSkipInstructions:
         assert "# Project Standards" in content
         assert "Use type hints and follow PEP 8." in content
 
-    def test_skip_instructions_oserror_fallback_identifies_root(
-        self, temp_project, sample_primitives
-    ):
-        """When Path.resolve() raises OSError, the .absolute() fallback correctly
-        identifies root vs non-root placements."""
-        from unittest.mock import patch
-
-        formatter = ClaudeFormatter(str(temp_project))
-
+    def test_is_root_flag_used_for_skip_filtering(self, temp_project, sample_primitives):
+        """The is_root flag on ClaudePlacement drives skip filtering, not path comparison."""
         # Create a dependency so root CLAUDE.md is emitted even with skip
         dep_dir = temp_project / "apm_modules" / "owner" / "package"
         dep_dir.mkdir(parents=True)
         (dep_dir / "CLAUDE.md").write_text("# dep")
 
+        formatter = ClaudeFormatter(str(temp_project))
         placement_map = {temp_project: list(sample_primitives.instructions)}
         config = {"skip_instructions": True}
 
-        # Build a placement with a mock parent that raises on resolve()
-        # but returns the correct base_dir on absolute().
-        class RaisingParent:
-            """Mimics a Path parent that fails resolve() but works with absolute()."""
-
-            def resolve(self):
-                raise OSError("simulated resolve failure")
-
-            def absolute(self):
-                return formatter.base_dir
-
-            def __eq__(self, other):
-                return other == formatter.base_dir
-
-            def __hash__(self):
-                return hash(formatter.base_dir)
-
-        class MockClaudePath:
-            """A path-like object whose .parent raises on resolve()."""
-
-            def __init__(self, real_path):
-                self._real_path = real_path
-                self.parent = RaisingParent()
-
-            def __hash__(self):
-                return hash(self._real_path)
-
-            def __eq__(self, other):
-                return self._real_path == other
-
-        # Patch _generate_placements to inject our mock path
-        real_placements_fn = formatter._generate_placements
-
-        def patched_generate(*args, **kwargs):
-            placements = real_placements_fn(*args, **kwargs)
-            for p in placements:
-                p.claude_path = MockClaudePath(p.claude_path)
-            return placements
-
-        with patch.object(formatter, "_generate_placements", patched_generate):
-            result = formatter.format_distributed(sample_primitives, placement_map, config)
+        result = formatter.format_distributed(sample_primitives, placement_map, config)
 
         assert result.success
         assert len(result.content_map) == 1
+        # Root placement was emitted (has dependencies)
+        assert len(result.placements) == 1
+        assert result.placements[0].is_root is True
         content = next(iter(result.content_map.values()))
         assert "# Dependencies" in content
         assert "# Project Standards" not in content

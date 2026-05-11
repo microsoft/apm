@@ -598,8 +598,9 @@ class AgentsCompiler:
         # Handle dry-run mode
         if config.dry_run:
             # Generate preview summary
+            count = len(claude_result.placements)
             preview_lines = [
-                f"CLAUDE.md Preview: Would generate {len(claude_result.placements)} files"
+                f"CLAUDE.md Preview: Would generate {count} {'file' if count == 1 else 'files'}"
             ]
             for claude_path in claude_result.content_map.keys():  # noqa: SIM118
                 rel_path = portable_relpath(claude_path, self.base_dir)
