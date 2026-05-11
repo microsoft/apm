@@ -1206,6 +1206,10 @@ class TestFetchShaIntoBare:
         assert "--depth=1" in call_args
         assert sha in call_args
         assert "https://github.com/owner/repo.git" in call_args
+        # P8: verify pin ref uses the correct ref name
+        pin_argv = mock_run.call_args_list[-1][0][0]
+        assert "update-ref" in pin_argv
+        assert f"refs/heads/apm-pin-{sha[:12]}" in pin_argv
 
     def test_short_sha_skips_shallow_fetch_goes_to_broad(self, tmp_path: Path) -> None:
         """Short 7-char SHA: skip shallow fetch, go directly to broad fetch."""
@@ -1227,10 +1231,10 @@ class TestFetchShaIntoBare:
         with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
             # First rev-parse returns 1 (SHA not present)
             # Second rev-parse (after broad fetch) returns 0
+            # NOTE: update-ref is skipped for non-40-char SHAs (hex validation guard)
             mock_run.side_effect = [
                 MagicMock(returncode=1),  # SHA not present
                 MagicMock(returncode=0),  # SHA present after broad fetch
-                MagicMock(returncode=0),  # update-ref pin (apm-pin-<sha12>)
             ]
 
             result = fetch_sha_into_bare(
@@ -1258,6 +1262,8 @@ class TestFetchShaIntoBare:
         # Should NOT have the SHA in a broad fetch (only the URL)
         assert sha not in call_args
         assert "https://github.com/owner/repo.git" in call_args
+        # Non-40-char SHA: pin ref is intentionally skipped (hex validation guard)
+        assert mock_run.call_count == 2
 
     def test_all_steps_fail_returns_false(self, tmp_path: Path) -> None:
         """All fetch attempts fail: return False."""

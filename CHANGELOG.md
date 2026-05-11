@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now works on macOS git 2.53.0 (Homebrew): bare-cache commands switch to `--git-dir` to satisfy the `safe.bareRepository=explicit` default; fetched SHAs are pinned as synthetic refs so `git clone --local --shared` no longer silently omits them. (#1267)
 - `apm install` no longer silently overwrites pre-existing governance files; `check_collision()` now treats `managed_files=None` (first install, no lockfile) as an empty set so hand-rolled files in `.github/instructions/` are detected and protected. (#1256)
 - Policy inheritance now fails closed: child policies that omit `unmanaged_files` inherit the parent's action instead of silently defaulting to `ignore`. (#1253)
 - MCP server token injection now requires both an allowlisted server name and a verified HTTPS GitHub hostname, preventing PAT exfiltration via poisoned registry entries. (#1239)

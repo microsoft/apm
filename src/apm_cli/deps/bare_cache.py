@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -351,6 +352,7 @@ def fetch_sha_into_bare(
     def _rev_parse_present() -> bool:
         """Return True if sha is already reachable in the bare."""
         try:
+            # no env= needed -- purely local git plumbing, no network access
             result = subprocess.run(
                 [
                     git_exe,
@@ -368,7 +370,7 @@ def fetch_sha_into_bare(
             return False
 
     def _pin_sha_as_head_ref() -> None:
-        """Add refs/heads/apm-pin-<sha12> so the SHA is reachable via git-clone.
+        """Add refs/heads/apm-pin-<sha-prefix> so the SHA is reachable via git-clone.
 
         ``git clone --local --shared`` from a *shallow* bare ignores
         ``--shared`` and falls back to the upload-pack protocol, which
@@ -383,19 +385,34 @@ def fetch_sha_into_bare(
         at DEBUG level and does not abort the install (the fallback is
         a fresh bare clone for the pinned package).
         """
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            _log.debug(
+                "fetch_sha_into_bare: sha %r is not a valid 40-char hex SHA, skipping pin ref",
+                sha,
+            )
+            return
         ref_name = f"refs/heads/apm-pin-{sha[:12]}"
         try:
-            subprocess.run(
+            # no env= needed -- purely local git plumbing, no network access
+            result = subprocess.run(
                 [git_exe, "--git-dir", str(bare_path), "update-ref", ref_name, sha],
                 capture_output=True,
                 timeout=10,
             )
-            _log.debug(
-                "fetch_sha_into_bare: pinned %s as %s in %s",
-                sha[:12],
-                ref_name,
-                bare_path,
-            )
+            if result.returncode == 0:
+                _log.debug(
+                    "fetch_sha_into_bare: pinned %s as %s in %s",
+                    sha[:12],
+                    ref_name,
+                    bare_path,
+                )
+            else:
+                _log.debug(
+                    "fetch_sha_into_bare: update-ref exited %d for %s in %s",
+                    result.returncode,
+                    sha[:12],
+                    bare_path,
+                )
         except Exception as exc:
             _log.debug(
                 "fetch_sha_into_bare: could not create pin ref for %s in %s: %s",
@@ -433,7 +450,7 @@ def fetch_sha_into_bare(
 
         def _fetch_action_sha(url: str, env: dict[str, str], target: Path) -> None:
             subprocess.run(
-                [git_exe, "--git-dir", str(bare_path), "fetch", "--depth=1", url, sha],
+                [git_exe, "--git-dir", str(target), "fetch", "--depth=1", url, sha],
                 env=env,
                 check=True,
                 capture_output=True,
@@ -476,7 +493,7 @@ def fetch_sha_into_bare(
 
     def _fetch_action_broad(url: str, env: dict[str, str], target: Path) -> None:
         subprocess.run(
-            [git_exe, "--git-dir", str(bare_path), "fetch", f"--depth={broad_depth}", url],
+            [git_exe, "--git-dir", str(target), "fetch", f"--depth={broad_depth}", url],
             env=env,
             check=True,
             capture_output=True,
