@@ -318,6 +318,13 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.version, "1.0")
         self.assertEqual(policy.enforcement, "off")
 
+    def test_omitted_unmanaged_files_yields_none_action(self):
+        """Absent unmanaged_files block -> action is None (no opinion)."""
+        policy, _ = load_policy("name: test\nenforcement: warn\n")
+        self.assertIsNone(policy.unmanaged_files.action)
+        self.assertEqual(policy.unmanaged_files.effective_action, "ignore")
+        self.assertEqual(policy.unmanaged_files.directories, ())
+
 
 class TestLoadPolicyFromFile(unittest.TestCase):
     """Test load_policy from a file path."""

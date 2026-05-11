@@ -152,10 +152,21 @@ def _looks_like_legacy_apm_bundle(path: Path) -> bool:
             for member in tar.getmembers():
                 if member.issym() or member.islnk():
                     return False
+                name = member.name
+                if (
+                    name.startswith("/")
+                    or PureWindowsPath(name).drive
+                    or PureWindowsPath(name).is_absolute()
+                ):
+                    return False
+                try:
+                    validate_path_segments(name, context="tar member")
+                except PathTraversalError:
+                    return False
             if sys.version_info >= (3, 12):
                 tar.extractall(tmp, filter="data")
             else:
-                tar.extractall(tmp)  # noqa: S202
+                tar.extractall(tmp)  # noqa: S202 -- validated above
         # Locate the inner directory (apm pack uses arcname=<bundle-name>)
         root = tmp
         children = [p for p in tmp.iterdir() if p.is_dir()]

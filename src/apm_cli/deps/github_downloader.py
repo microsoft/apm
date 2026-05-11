@@ -7,6 +7,7 @@ import stat  # noqa: F401
 import subprocess
 import sys
 import tempfile
+import threading
 import time  # noqa: F401
 from collections.abc import Callable
 from datetime import datetime
@@ -40,6 +41,7 @@ from ..utils.yaml_io import yaml_to_str
 from .bare_cache import (
     bare_clone_with_fallback,
     clone_with_fallback,
+    fetch_sha_into_bare,
     materialize_from_bare,
 )
 from .download_strategies import DownloadDelegate
@@ -190,6 +192,7 @@ class GitHubPackageDownloader:
         # clone, then the actual dep clone). We want the warning exactly once
         # per (host, repo, port) identity across all those calls.
         self._fallback_port_warned: set = set()
+        self._fallback_port_warned_lock = threading.Lock()
 
         # Delegate backend-specific download logic to the download delegate.
         self._strategies = DownloadDelegate(host=self)
@@ -577,6 +580,22 @@ class GitHubPackageDownloader:
     ) -> str:
         """Thin delegate to :func:`bare_cache.materialize_from_bare` (kept on the class so test patches still work)."""
         return materialize_from_bare(bare_path, consumer_dir, ref=ref, env=env, known_sha=known_sha)
+
+    def _fetch_sha_into_bare(
+        self,
+        bare_path: Path,
+        sha: str,
+        *,
+        dep_ref: "DependencyReference",
+    ) -> bool:
+        """Thin delegate to :func:`bare_cache.fetch_sha_into_bare` (kept on the class so test patches still work)."""
+        return fetch_sha_into_bare(
+            self._execute_transport_plan,
+            dep_ref.repo_url,
+            bare_path,
+            sha,
+            dep_ref=dep_ref,
+        )
 
     @staticmethod
     def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
@@ -1091,9 +1110,22 @@ class GitHubPackageDownloader:
                         is_commit_sha=bool(is_commit_sha),
                     )
 
+                def _shared_bare_fetch_fn(existing_bare: Path, ref_or_sha: str) -> bool:
+                    # get_or_clone passes `ref` here; for SHA pins it is the SHA.
+                    return self._fetch_sha_into_bare(
+                        existing_bare,
+                        ref_or_sha,
+                        dep_ref=dep_ref,
+                    )
+
                 try:
                     shared_bare_path = shared_cache.get_or_clone(
-                        cache_host, cache_owner, cache_repo, ref, _shared_bare_clone_fn
+                        cache_host,
+                        cache_owner,
+                        cache_repo,
+                        ref,
+                        _shared_bare_clone_fn,
+                        fetch_fn=_shared_bare_fetch_fn if is_commit_sha else None,
                     )
                 except Exception as e:
                     raise RuntimeError(f"Failed to clone repository: {e}") from e

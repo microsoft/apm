@@ -194,8 +194,14 @@ def _merge_manifest(parent: ManifestPolicy, child: ManifestPolicy) -> ManifestPo
 def _merge_unmanaged_files(
     parent: UnmanagedFilesPolicy, child: UnmanagedFilesPolicy
 ) -> UnmanagedFilesPolicy:
+    if child.action is None:
+        merged_action = parent.action
+    elif parent.action is None:
+        merged_action = child.action
+    else:
+        merged_action = _escalate(_UNMANAGED_ACTION_LEVELS, parent.action, child.action)
     return UnmanagedFilesPolicy(
-        action=_escalate(_UNMANAGED_ACTION_LEVELS, parent.action, child.action),
+        action=merged_action,
         directories=_union(parent.directories, child.directories),
     )
 

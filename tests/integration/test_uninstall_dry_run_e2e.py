@@ -14,7 +14,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.requires_github_token
+pytestmark = [
+    pytest.mark.requires_github_token,
+    pytest.mark.requires_apm_binary,
+]
 
 
 @pytest.fixture
@@ -33,6 +36,7 @@ def temp_project(tmp_path):
     project_dir = tmp_path / "uninstall-dry-run-test"
     project_dir.mkdir()
     (project_dir / ".github").mkdir()
+    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
     return project_dir
 
 

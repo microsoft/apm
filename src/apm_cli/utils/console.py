@@ -56,6 +56,9 @@ STATUS_SYMBOLS = {
     "plugin": "[>]",  # Plugin-related operations
     "search": "[>]",  # Search operations
     "download": "[>]",  # Download operations
+    "update": "[~]",  # Plan diff: dep refreshed to a new ref/commit
+    "remove": "[-]",  # Plan diff: dep removed from manifest
+    "equal": "[=]",  # Plan diff: dep unchanged (verbose only)
 }
 
 

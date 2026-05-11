@@ -36,6 +36,8 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.requires_github_token
+
 # Two sibling subdirs under the same upstream repo+ref. Both are
 # present on github/awesome-copilot at the time of writing; if either
 # is removed upstream, swap with another pair from
