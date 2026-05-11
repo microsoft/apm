@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Pin `Path.home()` under unit tests via a session-scoped autouse conftest fixture, fixing 56 Windows runner failures on the new `windows-2025-vs2026` GitHub-hosted image where `USERPROFILE`/`HOMEDRIVE`+`HOMEPATH` are not seeded for pytest workers; also patch the `_check_and_notify_updates` import binding in the disabled-self-update test so it no longer races on the version-check cache. (#1270)
+
 ## [0.13.0] - 2026-05-11
 
 ### Breaking Changes
