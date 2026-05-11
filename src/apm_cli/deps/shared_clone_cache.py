@@ -51,6 +51,13 @@ class SharedCloneCache:
         # Maps cache_key -> _CacheEntry
         self._entries: dict[tuple[str, str, str, str | None], _CacheEntry] = {}
         self._temp_dirs: list[str] = []
+        # Maps (host, owner, repo) -> list of (ref, bare_path) tuples.
+        # Used to locate an existing bare for the same repo when a new ref
+        # (typically a SHA pin on a transitive dep) is requested.
+        self._repo_bares: dict[tuple[str, str, str], list[tuple[str | None, Path]]] = {}
+        # Per-bare-path locks to serialise concurrent Tier-0 fetches into the
+        # same bare (git concurrent pack-file writes are not safe).
+        self._bare_fetch_locks: dict[Path, threading.Lock] = {}
 
     def __enter__(self) -> "SharedCloneCache":
         return self
@@ -65,6 +72,7 @@ class SharedCloneCache:
         repo: str,
         ref: str | None,
         clone_fn: Callable[[Path], None],
+        fetch_fn: Callable[[Path, str], bool] | None = None,
     ) -> Path:
         """Return a path to a shared clone, cloning on first access.
 
@@ -76,6 +84,11 @@ class SharedCloneCache:
             clone_fn: Callable that performs the clone into the given
                 directory.  Called at most once per unique key.  Must
                 raise on failure so the entry is not cached.
+            fetch_fn: Optional callable ``(bare_path, sha) -> bool`` that
+                tries to fetch a missing SHA into an already-cloned bare
+                for the same repo (any ref).  When provided and a suitable
+                bare exists, it is tried before falling back to a fresh
+                clone.  Must not raise -- return False to signal failure.
 
         Returns:
             Path to the cloned repo directory.
@@ -93,6 +106,39 @@ class SharedCloneCache:
             if entry.error is not None:
                 # A previous attempt failed.  Clear error to allow retry.
                 entry.error = None
+
+            # Tier-0: try fetching the SHA into an existing bare for the
+            # same repo (different ref).  This avoids a fresh network clone
+            # when a transitive dep pins a SHA that is missing only because
+            # the initial shallow bare did not include that commit.
+            if ref and fetch_fn:
+                existing_bare = self._find_repo_bare(host, owner, repo)
+                if existing_bare is not None:
+                    # Acquire a per-bare lock so concurrent Tier-0 fetches
+                    # into the same bare are serialised (git pack-file writes
+                    # are not concurrent-safe).
+                    with self._lock:
+                        if existing_bare not in self._bare_fetch_locks:
+                            self._bare_fetch_locks[existing_bare] = threading.Lock()
+                        bare_lock = self._bare_fetch_locks[existing_bare]
+                    try:
+                        with bare_lock:
+                            if fetch_fn(existing_bare, ref):
+                                entry.path = existing_bare
+                                with self._lock:
+                                    repo_key = (host, owner, repo)
+                                    if repo_key not in self._repo_bares:
+                                        self._repo_bares[repo_key] = []
+                                    self._repo_bares[repo_key].append((ref, existing_bare))
+                                return existing_bare
+                    except Exception:
+                        _log.info(
+                            "Bare fetch miss for %s/%s/%s ref=%s, falling back to fresh clone",
+                            host,
+                            owner,
+                            repo,
+                            ref,
+                        )
 
             # First caller (or retry after failure): perform the clone.
             temp_dir = tempfile.mkdtemp(
@@ -121,10 +167,37 @@ class SharedCloneCache:
                             f".git/ present: {git_dir.exists()})"
                         )
                 entry.path = clone_path
+                with self._lock:
+                    repo_key = (host, owner, repo)
+                    if repo_key not in self._repo_bares:
+                        self._repo_bares[repo_key] = []
+                    self._repo_bares[repo_key].append((ref, clone_path))
                 return clone_path
             except Exception as exc:
                 entry.error = exc
                 raise
+
+    def _find_repo_bare(self, host: str, owner: str, repo: str) -> Path | None:
+        """Return an existing bare path for the same repo (any ref), or None.
+
+        Searches the reverse index populated after each successful clone.
+        Returns the path of the first registered bare for ``(host, owner,
+        repo)`` regardless of which ref it was originally cloned at.
+
+        Args:
+            host: Git host (e.g. "github.com").
+            owner: Repository owner.
+            repo: Repository name.
+
+        Returns:
+            A :class:`Path` to an existing bare, or ``None`` if none is
+            registered yet.
+        """
+        with self._lock:
+            entries = self._repo_bares.get((host, owner, repo))
+            if entries:
+                return entries[0][1]
+            return None
 
     def _get_or_create_entry(self, key: tuple) -> "_CacheEntry":
         """Retrieve or create a cache entry (thread-safe)."""
@@ -139,6 +212,8 @@ class SharedCloneCache:
             dirs_to_remove = list(self._temp_dirs)
             self._temp_dirs.clear()
             self._entries.clear()
+            self._repo_bares.clear()
+            self._bare_fetch_locks.clear()
         for d in dirs_to_remove:
             try:
                 shutil.rmtree(d, ignore_errors=True)

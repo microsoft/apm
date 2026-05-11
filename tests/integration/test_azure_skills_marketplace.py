@@ -20,7 +20,7 @@ from click.testing import CliRunner
 from apm_cli.commands.pack import pack_cmd
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "azure-skills"
-EXPECTED_SHA256 = "02f76bfc0e5bbf7fdf1de1dda1f84c4da6e986913b6647973c0ffe39c1d5003b"
+EXPECTED_SHA256 = "583399dd0eff5e4ed275c9c1e7bcd79b55c088c6468749a226311e6f1dddc4c2"
 
 
 @pytest.mark.integration

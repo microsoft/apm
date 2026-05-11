@@ -786,7 +786,7 @@ APM automatically retries failed HTTP requests with exponential backoff and jitt
 
 #### Parallel Downloads
 
-APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For sibling subdirectory packages from the same monorepo and ref (e.g. two skills under `skills/` in `github/awesome-copilot`), APM clones the repo bare exactly once into a shared cache and materializes each consumer's working tree from that cache via `git clone --local --shared --no-checkout`. This eliminates redundant network fetches and prevents the parallel races that affected earlier sparse-checkout based fetches.
+APM downloads packages in parallel using a thread pool, significantly reducing wall-clock time for large dependency trees. The concurrency level defaults to 4 and is configurable via `--parallel-downloads` (set to 0 to disable). For sibling subdirectory packages from the same monorepo and ref (e.g. two skills under `skills/` in `github/awesome-copilot`), APM clones the repo bare exactly once into a shared cache and materializes each consumer's working tree from that cache via `git clone --local --shared --no-checkout`. This eliminates redundant network fetches and prevents the parallel races that affected earlier sparse-checkout based fetches. When a transitive dependency pins a commit SHA that differs from the ref used for the initial clone, APM fetches that specific commit into the existing bare clone on demand rather than re-cloning.
 
 ### File Processing and Content Merging
 

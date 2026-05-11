@@ -696,8 +696,84 @@ class TestMaterializeFromBare:
         config_text = (consumer / ".git" / "config").read_text()
         assert "autocrlf = false" in config_text or "autocrlf=false" in config_text
 
+    def test_materialize_known_sha_checks_out_correct_commit(self, tmp_path: Path) -> None:
+        """materialize_from_bare checks out known_sha, not HEAD."""
+        import subprocess as sp
 
-class TestSharedCloneCacheBareInvariant:
+        from apm_cli.deps.bare_cache import materialize_from_bare
+
+        bare = tmp_path / "bare.git"
+        consumer = tmp_path / "consumer"
+
+        env = {k: v for k, v in __import__("os").environ.items()}
+
+        git_exe = "git"
+
+        # Create a normal repo with 2 commits, then clone as bare.
+        src = tmp_path / "src"
+        src.mkdir()
+        sp.run([git_exe, "init", "-b", "main", str(src)], env=env, check=True, capture_output=True)
+        sp.run(
+            [git_exe, "-C", str(src), "config", "user.email", "t@t"],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        sp.run(
+            [git_exe, "-C", str(src), "config", "user.name", "t"],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        (src / "a.txt").write_text("first")
+        sp.run([git_exe, "-C", str(src), "add", "."], env=env, check=True, capture_output=True)
+        sp.run(
+            [git_exe, "-C", str(src), "commit", "-m", "first"],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        first_sha = sp.run(
+            [git_exe, "-C", str(src), "rev-parse", "HEAD"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        (src / "b.txt").write_text("second")
+        sp.run([git_exe, "-C", str(src), "add", "."], env=env, check=True, capture_output=True)
+        sp.run(
+            [git_exe, "-C", str(src), "commit", "-m", "second"],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+
+        # Clone as bare
+        sp.run(
+            [git_exe, "clone", "--bare", str(src), str(bare)],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+
+        # Materialize with known_sha pointing to the FIRST commit
+        resolved = materialize_from_bare(bare, consumer, ref=None, env=env, known_sha=first_sha)
+
+        # Assert HEAD in consumer equals first_sha
+        consumer_head = sp.run(
+            [git_exe, "-C", str(consumer), "rev-parse", "HEAD"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert consumer_head == first_sha, f"Expected {first_sha}, got {consumer_head}"
+        assert resolved == first_sha
+        # First commit should have a.txt but NOT b.txt
+        assert (consumer / "a.txt").exists()
+        assert not (consumer / "b.txt").exists()
+
     """6.16: cache enforces bare-shape invariant in debug mode."""
 
     def test_apm_debug_rejects_non_bare_clone(self, tmp_path: Path, monkeypatch) -> None:
@@ -1032,3 +1108,544 @@ class TestAdoBareBearerRetry:
         assert bearer_idx > pat_idx, f"bearer retry must follow PAT failure, urls={urls_seen}"
         # Stale-PAT diagnostic must be emitted on bearer success.
         assert d.auth_resolver.emit_stale_pat_diagnostic.called
+
+
+# ---------------------------------------------------------------------------
+# #1258 fix: fetch_sha_into_bare() tests
+# ---------------------------------------------------------------------------
+
+
+class TestFetchShaIntoBare:
+    """Tests for the fetch_sha_into_bare() free function."""
+
+    def test_sha_already_present_returns_true_without_fetch(self, tmp_path: Path) -> None:
+        """SHA already present in bare: rev-parse succeeds, no network fetch."""
+        from apm_cli.deps.bare_cache import fetch_sha_into_bare
+        from apm_cli.models.apm_package import DependencyReference
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        sha = "a" * 40
+
+        dep_ref = DependencyReference.parse("owner/repo/sub#main")
+        mock_execute = MagicMock()
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            # rev-parse returns success (exit code 0)
+            mock_run.return_value = MagicMock(returncode=0)
+
+            result = fetch_sha_into_bare(
+                mock_execute,
+                "https://github.com/owner/repo.git",
+                bare_path,
+                sha,
+                dep_ref=dep_ref,
+            )
+
+        assert result is True
+        # execute_transport_plan should NOT be called
+        mock_execute.assert_not_called()
+        # Only one rev-parse call (the initial check)
+        assert mock_run.call_count == 1
+
+    def test_shallow_fetch_full_sha_succeeds(self, tmp_path: Path) -> None:
+        """Full 40-char SHA: shallow fetch via transport plan succeeds."""
+        from apm_cli.deps.bare_cache import fetch_sha_into_bare
+        from apm_cli.models.apm_package import DependencyReference
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        sha = "b" * 40
+
+        dep_ref = DependencyReference.parse("owner/repo/sub#main")
+
+        # Capture the clone_action passed to execute_transport_plan
+        captured_actions: list = []
+
+        def mock_execute(
+            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
+        ) -> None:
+            captured_actions.append(clone_action)
+            # Simulate successful fetch by setting returncode 0
+            # The clone_action will be called with url, env, target
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            # First rev-parse returns 1 (SHA not present)
+            # Second rev-parse (after fetch) returns 0 (SHA now present)
+            mock_run.side_effect = [
+                MagicMock(returncode=1),  # SHA not present initially
+                MagicMock(returncode=0),  # SHA present after fetch
+            ]
+
+            result = fetch_sha_into_bare(
+                mock_execute,
+                "https://github.com/owner/repo.git",
+                bare_path,
+                sha,
+                dep_ref=dep_ref,
+            )
+
+        assert result is True
+        assert len(captured_actions) == 1
+        # Invoke the captured clone_action to verify it runs the right command
+        captured_action = captured_actions[0]
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
+            mock_run_fetch.return_value = MagicMock(returncode=0)
+            captured_action(
+                url="https://github.com/owner/repo.git",
+                env={},
+                target=bare_path,
+            )
+        # Verify the fetch command uses the URL and SHA
+        call_args = mock_run_fetch.call_args[0][0]
+        assert "fetch" in call_args
+        assert "--depth=1" in call_args
+        assert sha in call_args
+        assert "https://github.com/owner/repo.git" in call_args
+
+    def test_short_sha_skips_shallow_fetch_goes_to_broad(self, tmp_path: Path) -> None:
+        """Short 7-char SHA: skip shallow fetch, go directly to broad fetch."""
+        from apm_cli.deps.bare_cache import fetch_sha_into_bare
+        from apm_cli.models.apm_package import DependencyReference
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        sha = "c" * 7  # Short SHA
+
+        dep_ref = DependencyReference.parse("owner/repo/sub#main")
+        captured_actions: list = []
+
+        def mock_execute(
+            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
+        ) -> None:
+            captured_actions.append(clone_action)
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            # First rev-parse returns 1 (SHA not present)
+            # Second rev-parse (after broad fetch) returns 0
+            mock_run.side_effect = [
+                MagicMock(returncode=1),  # SHA not present
+                MagicMock(returncode=0),  # SHA present after broad fetch
+            ]
+
+            result = fetch_sha_into_bare(
+                mock_execute,
+                "https://github.com/owner/repo.git",
+                bare_path,
+                sha,
+                dep_ref=dep_ref,
+            )
+
+        assert result is True
+        # Only one transport plan call (the broad fetch, not shallow)
+        assert len(captured_actions) == 1
+        # Verify the broad fetch action doesn't include the SHA
+        captured_action = captured_actions[0]
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
+            mock_run_fetch.return_value = MagicMock(returncode=0)
+            captured_action(
+                url="https://github.com/owner/repo.git",
+                env={},
+                target=bare_path,
+            )
+        call_args = mock_run_fetch.call_args[0][0]
+        assert "fetch" in call_args
+        # Should NOT have the SHA in a broad fetch (only the URL)
+        assert sha not in call_args
+        assert "https://github.com/owner/repo.git" in call_args
+
+    def test_all_steps_fail_returns_false(self, tmp_path: Path) -> None:
+        """All fetch attempts fail: return False."""
+        from apm_cli.deps.bare_cache import fetch_sha_into_bare
+        from apm_cli.models.apm_package import DependencyReference
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        sha = "d" * 40
+
+        dep_ref = DependencyReference.parse("owner/repo/sub#main")
+
+        def mock_execute_fail(
+            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
+        ) -> None:
+            # Simulate transport plan failure
+            raise Exception("Transport plan failed")
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            # rev-parse always returns 1 (SHA never present)
+            mock_run.return_value = MagicMock(returncode=1)
+
+            result = fetch_sha_into_bare(
+                mock_execute_fail,
+                "https://github.com/owner/repo.git",
+                bare_path,
+                sha,
+                dep_ref=dep_ref,
+            )
+
+        assert result is False
+
+    def test_fetch_action_uses_explicit_url_not_origin(self, tmp_path: Path) -> None:
+        """Fetch action uses the explicit URL from transport plan, not 'origin'."""
+        from apm_cli.deps.bare_cache import fetch_sha_into_bare
+        from apm_cli.models.apm_package import DependencyReference
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        sha = "e" * 40
+
+        dep_ref = DependencyReference.parse("owner/repo/sub#main")
+        captured_actions: list = []
+
+        def mock_execute(
+            repo_url_base: str, bare_target: Path, *, dep_ref, clone_action, **kwargs
+        ) -> None:
+            captured_actions.append(clone_action)
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1),  # SHA not present
+                MagicMock(returncode=0),  # SHA present after fetch
+            ]
+
+            fetch_sha_into_bare(
+                mock_execute,
+                "https://github.com/owner/repo.git",
+                bare_path,
+                sha,
+                dep_ref=dep_ref,
+            )
+
+        # Verify the action uses the explicit URL
+        captured_action = captured_actions[0]
+        explicit_url = "https://explicit.example.com/repo.git"
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run_fetch:
+            mock_run_fetch.return_value = MagicMock(returncode=0)
+            captured_action(url=explicit_url, env={}, target=bare_path)
+
+        call_args = mock_run_fetch.call_args[0][0]
+        assert explicit_url in call_args
+        # Verify "origin" is NOT used as a shorthand (remote URL is redacted)
+        assert "origin" not in call_args or call_args.index("origin") < call_args.index(
+            explicit_url
+        )
+        # Ensure 'origin' shorthand is never used (remote URL is redacted)
+        for call_args_item in mock_run_fetch.call_args_list:
+            argv = call_args_item[0][0] if call_args_item[0] else call_args_item[1].get("args", [])
+            assert "origin" not in argv, f"Found 'origin' in fetch argv: {argv}"
+
+
+# ---------------------------------------------------------------------------
+# #1258 fix: SharedCloneCache repo-level reuse tests
+# ---------------------------------------------------------------------------
+
+
+class TestSharedCloneCacheRepoReuse:
+    """Tests for SharedCloneCache repo-level bare reuse via fetch_fn."""
+
+    def test_fetch_fn_reuses_existing_bare_for_different_sha(self, tmp_path: Path) -> None:
+        """fetch_fn allows reusing an existing bare for a different SHA."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_count_1 = {"n": 0}
+        clone_count_2 = {"n": 0}
+
+        def clone_fn_1(target: Path) -> None:
+            clone_count_1["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        def clone_fn_2(target: Path) -> None:
+            clone_count_2["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fetch_fn_mock(bare_path: Path, sha: str) -> bool:
+            # Simulate successful fetch
+            return True
+
+        # First call: normal clone with "main"
+        path1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+
+        # Second call: fetch_fn should be tried for the SHA
+        sha = "a" * 40
+        path2 = cache.get_or_clone(
+            "github.com",
+            "owner",
+            "repo",
+            sha,
+            clone_fn_2,
+            fetch_fn=fetch_fn_mock,
+        )
+
+        # Both should return the same path (bare reuse)
+        assert path1 == path2
+        # clone_fn_1 called once, clone_fn_2 NOT called (fetch_fn succeeded)
+        assert clone_count_1["n"] == 1
+        assert clone_count_2["n"] == 0
+        cache.cleanup()
+
+    def test_fetch_fn_failure_falls_through_to_fresh_clone(self, tmp_path: Path) -> None:
+        """fetch_fn returns False: fall through to fresh clone."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_count_1 = {"n": 0}
+        clone_count_2 = {"n": 0}
+
+        def clone_fn_1(target: Path) -> None:
+            clone_count_1["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        def clone_fn_2(target: Path) -> None:
+            clone_count_2["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fetch_fn_fail(bare_path: Path, sha: str) -> bool:
+            # Simulate fetch failure
+            return False
+
+        # First call: normal clone
+        path1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+
+        # Second call: fetch_fn fails, should fall through to clone_fn_2
+        sha = "b" * 40
+        path2 = cache.get_or_clone(
+            "github.com",
+            "owner",
+            "repo",
+            sha,
+            clone_fn_2,
+            fetch_fn=fetch_fn_fail,
+        )
+
+        # Different paths (two separate bares)
+        assert path1 != path2
+        # Both clone functions called once
+        assert clone_count_1["n"] == 1
+        assert clone_count_2["n"] == 1
+        cache.cleanup()
+
+    def test_fetch_fn_exception_falls_through_to_fresh_clone(self, tmp_path: Path) -> None:
+        """fetch_fn raises: catch exception and fall through to fresh clone."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_count_1 = {"n": 0}
+        clone_count_2 = {"n": 0}
+
+        def clone_fn_1(target: Path) -> None:
+            clone_count_1["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        def clone_fn_2(target: Path) -> None:
+            clone_count_2["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fetch_fn_raises(bare_path: Path, sha: str) -> bool:
+            raise RuntimeError("Fetch failed unexpectedly")
+
+        # First call: normal clone
+        path1 = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+
+        # Second call: fetch_fn raises, should be caught and fall through
+        sha = "c" * 40
+        path2 = cache.get_or_clone(
+            "github.com",
+            "owner",
+            "repo",
+            sha,
+            clone_fn_2,
+            fetch_fn=fetch_fn_raises,
+        )
+
+        # Different paths (two separate bares)
+        assert path1 != path2
+        # Both clone functions called once
+        assert clone_count_1["n"] == 1
+        assert clone_count_2["n"] == 1
+        cache.cleanup()
+
+    def test_fetch_fn_called_for_non_sha_refs(self, tmp_path: Path) -> None:
+        """fetch_fn is called for any non-None ref (not just SHAs)."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_count_1 = {"n": 0}
+        clone_count_2 = {"n": 0}
+        fetch_call_count = {"n": 0}
+
+        def clone_fn_1(target: Path) -> None:
+            clone_count_1["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        def clone_fn_2(target: Path) -> None:
+            clone_count_2["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fetch_fn_track(bare_path: Path, ref: str) -> bool:
+            fetch_call_count["n"] += 1
+            return True
+
+        # First call: clone with "main"
+        _ = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+
+        # Second call: with "develop" ref, fetch_fn should be called
+        _ = cache.get_or_clone(
+            "github.com",
+            "owner",
+            "repo",
+            "develop",
+            clone_fn_2,
+            fetch_fn=fetch_fn_track,
+        )
+
+        # fetch_fn should have been called
+        assert fetch_call_count["n"] == 1
+        cache.cleanup()
+
+    def test_fetch_fn_not_called_when_ref_is_none(self, tmp_path: Path) -> None:
+        """fetch_fn is not called when ref is None."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_count_1 = {"n": 0}
+        clone_count_2 = {"n": 0}
+        fetch_call_count = {"n": 0}
+
+        def clone_fn_1(target: Path) -> None:
+            clone_count_1["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        def clone_fn_2(target: Path) -> None:
+            clone_count_2["n"] += 1
+            target.mkdir(parents=True, exist_ok=True)
+
+        def fetch_fn_track(bare_path: Path, ref: str) -> bool:
+            fetch_call_count["n"] += 1
+            return True
+
+        # First call: clone with "main"
+        _ = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn_1)
+
+        # Second call: with ref=None, fetch_fn should NOT be called
+        _ = cache.get_or_clone(
+            "github.com",
+            "owner",
+            "repo",
+            None,
+            clone_fn_2,
+            fetch_fn=fetch_fn_track,
+        )
+
+        # fetch_fn should NOT have been called (ref is None)
+        assert fetch_call_count["n"] == 0
+        # Both clones called (no fetch opportunity)
+        assert clone_count_1["n"] == 1
+        assert clone_count_2["n"] == 1
+        cache.cleanup()
+
+    def test_repo_bares_cleared_on_cleanup(self, tmp_path: Path) -> None:
+        """_find_repo_bare returns None after cleanup."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+
+        def clone_fn(target: Path) -> None:
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        # Clone to populate _repo_bares
+        path = cache.get_or_clone("github.com", "owner", "repo", "main", clone_fn)
+        assert path is not None
+
+        # Verify _find_repo_bare finds it
+        found = cache._find_repo_bare("github.com", "owner", "repo")
+        assert found is not None
+
+        # After cleanup, _find_repo_bare should return None
+        cache.cleanup()
+        found_after = cache._find_repo_bare("github.com", "owner", "repo")
+        assert found_after is None
+
+    def test_fetch_fn_none_skips_tier0(self, tmp_path: Path) -> None:
+        """When fetch_fn is None, Tier-0 is skipped even if repo_bares has entries."""
+        cache = SharedCloneCache(base_dir=tmp_path)
+        clone_called = threading.Event()
+
+        def clone_fn(target: Path) -> None:
+            clone_called.set()
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        # First clone populates _repo_bares
+        cache.get_or_clone("gh", "o", "r", "main", clone_fn)
+
+        # Second call with fetch_fn=None should NOT try Tier-0
+        clone2_called = threading.Event()
+
+        def clone_fn2(target: Path) -> None:
+            clone2_called.set()
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "HEAD").write_text("ref: refs/heads/main\n")
+
+        cache.get_or_clone("gh", "o", "r", "dev", clone_fn2, fetch_fn=None)
+        assert clone2_called.is_set(), "Should have cloned fresh when fetch_fn=None"
+        cache.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# #1258 fix: materialize_from_bare checkout target tests
+# ---------------------------------------------------------------------------
+
+
+class TestMaterializeCheckoutTarget:
+    """Tests for materialize_from_bare known_sha parameter."""
+
+    def test_checkout_uses_known_sha_when_provided(self, tmp_path: Path) -> None:
+        """materialize_from_bare uses known_sha for checkout when provided."""
+        from apm_cli.deps.bare_cache import materialize_from_bare
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        consumer_dir = tmp_path / "consumer"
+        known_sha = "f" * 40
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            # Mock all subprocess calls (clone, config, checkout)
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            materialize_from_bare(
+                bare_path,
+                consumer_dir,
+                ref=None,
+                env={},
+                known_sha=known_sha,
+            )
+
+        # Find the checkout call and verify it uses the known_sha
+        checkout_calls = [call for call in mock_run.call_args_list if call[0][0][-2] == "checkout"]
+        assert len(checkout_calls) > 0, "checkout command should have been called"
+
+        # The checkout command should use the known_sha as the target, not HEAD
+        checkout_args = checkout_calls[0][0][0]
+        assert known_sha in checkout_args
+
+    def test_checkout_uses_head_when_known_sha_is_none(self, tmp_path: Path) -> None:
+        """materialize_from_bare uses HEAD for checkout when known_sha is None."""
+        from apm_cli.deps.bare_cache import materialize_from_bare
+
+        bare_path = tmp_path / "bare"
+        bare_path.mkdir()
+        consumer_dir = tmp_path / "consumer"
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
+            # Mock all subprocess calls
+            mock_run.return_value = MagicMock(returncode=0, stdout="abc1234567890", stderr="")
+
+            materialize_from_bare(
+                bare_path,
+                consumer_dir,
+                ref=None,
+                env={},
+                known_sha=None,
+            )
+
+        # Find the checkout call and verify it uses HEAD
+        checkout_calls = [call for call in mock_run.call_args_list if call[0][0][-2] == "checkout"]
+        assert len(checkout_calls) > 0, "checkout command should have been called"
+
+        checkout_args = checkout_calls[0][0][0]
+        assert "HEAD" in checkout_args

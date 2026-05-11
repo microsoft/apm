@@ -33,10 +33,12 @@ def apm_command():
 
 @pytest.fixture
 def temp_project(tmp_path):
-    """Temp APM project with .github/ for VSCode target detection."""
+    """Temp APM project. Target is set explicitly in apm.yml so that target
+    detection does not depend on .github/copilot-instructions.md existing
+    (whose absence is asserted by _assert_no_install_artifacts after the
+    dry-run)."""
     project_dir = tmp_path / "dry-run-test"
     project_dir.mkdir()
-    (project_dir / ".github").mkdir()
     return project_dir
 
 
@@ -54,6 +56,7 @@ def _write_apm_yml(project_dir, apm_packages, mcp_packages=None):
     config = {
         "name": "dry-run-test",
         "version": "1.0.0",
+        "targets": ["copilot"],
         "dependencies": {
             "apm": apm_packages,
             "mcp": mcp_packages or [],

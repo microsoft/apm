@@ -400,6 +400,7 @@ def temp_project(tmp_path):
         "  apm: []\n"
     )
     (project_dir / ".github").mkdir()
+    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
     return project_dir
 
 

@@ -128,10 +128,19 @@ jobs:
           APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
         run: uv run pytest tests/integration/test_core_smoke.py -v
 
-  integration-tests:
-    name: Integration Tests (Linux)
+  integration-tests-shard:
+    name: Integration Tests Shard ${{ matrix.shard }} (Linux)
     needs: [build, smoke-test]
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 4-way sharding via pytest-split keeps wall-clock low. Each shard
+        # is an independent runner so HOME-mutating tests never race
+        # across shards. xdist within a shard gives an additional 2x; the
+        # 4 HOME-mutating files carry an xdist_group("home_env") marker
+        # so xdist serializes them on a single worker (race-safe).
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
 
@@ -164,19 +173,59 @@ jobs:
       - name: Install test dependencies
         run: uv sync --extra dev
 
-      - name: Run integration tests
+      # APM resolves its cache dir to ~/.cache/apm by default on Linux
+      # (XDG_CACHE_HOME unset -> $HOME/.cache/apm). actions/cache restores
+      # straight into that path, so the apm binary picks it up natively
+      # with no symlink or env override required.
+      - name: Compute cache week bucket
+        id: cache-bucket
+        run: echo "week=$(date -u +'%Y-%U')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache APM resolved git/HTTP fetches
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/apm
+          key: apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-
+            apm-cache-shard${{ matrix.shard }}-
+
+      - name: Run integration tests (sharded + parallelized)
         env:
           APM_E2E_TESTS: "1"
           APM_RUN_INTEGRATION_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
+          # Sharded + parallel pytest invocation passed through to
+          # scripts/test-integration.sh, which still owns runtime setup
+          # (apm runtime setup copilot/codex/llm) and token resolution.
+          # --dist loadgroup is required: it is the only xdist scheduler
+          # that honors pytest.mark.xdist_group, which we use to keep
+          # HOME-mutating tests serialized on a single worker.
+          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        # Bumped from 20 to 30 minutes when test discovery widened from
-        # the 28 enumerated files to the full tests/integration/ suite
-        # (PR2 of #1166).
-        timeout-minutes: 30
+        # Per-shard timeout is ~1/4 of the original 30 min budget plus
+        # headroom for the slowest shard (HOME-group tests).
+        timeout-minutes: 15
+
+  # Fan-in job that preserves the gate-required check name
+  # "Integration Tests (Linux)". Branch protection / merge-gate.yml
+  # require this exact name; shard jobs above are not required directly.
+  integration-tests:
+    name: Integration Tests (Linux)
+    needs: [integration-tests-shard]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate shard results
+        run: |
+          if [[ "${{ needs.integration-tests-shard.result }}" != "success" ]]; then
+            echo "One or more integration test shards failed: ${{ needs.integration-tests-shard.result }}"
+            exit 1
+          fi
+          echo "All integration test shards passed."
 
   release-validation:
     name: Release Validation (Linux)
