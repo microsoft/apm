@@ -13,6 +13,7 @@ from ...utils.github_host import (
     is_github_hostname,
     is_gitlab_hostname,
     is_supported_git_host,
+    is_visualstudio_legacy_hostname,
     maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
     unsupported_host_error,
@@ -816,7 +817,12 @@ class DependencyReference:
         is_artifactory = is_generic_host and is_artifactory_path(path_segments)
 
         if is_ado:
-            min_base_segments = 3
+            # *.visualstudio.com encodes org in the subdomain; path is proj/repo (2 parts).
+            # dev.azure.com encodes org as the first path segment; path is org/proj/repo (3 parts).
+            if validated_host and is_visualstudio_legacy_hostname(validated_host):
+                min_base_segments = 2
+            else:
+                min_base_segments = 3
         elif is_artifactory:
             # Artifactory: artifactory/{repo-key}/{owner}/{repo}
             min_base_segments = 4
@@ -971,11 +977,22 @@ class DependencyReference:
         if len(parts) >= 3 and is_supported_git_host(parts[0]):
             host = parts[0]
             if is_azure_devops_hostname(parts[0]):
-                if len(parts) < 5:
-                    raise ValueError(
-                        "Invalid Azure DevOps virtual package format: must be dev.azure.com/org/project/repo/path"
-                    )
-                repo_url = "/".join(parts[1:4])
+                if is_visualstudio_legacy_hostname(parts[0]):
+                    # myorg.visualstudio.com/proj/repo/path: org in subdomain,
+                    # need at least host + proj + repo + 1 virtual segment.
+                    if len(parts) < 4:
+                        raise ValueError(
+                            "Invalid Azure DevOps virtual package format: must be "
+                            "myorg.visualstudio.com/project/repo/path"
+                        )
+                    repo_url = "/".join(parts[1:3])
+                else:
+                    # dev.azure.com/org/proj/repo/path: org in path
+                    if len(parts) < 5:
+                        raise ValueError(
+                            "Invalid Azure DevOps virtual package format: must be dev.azure.com/org/project/repo/path"
+                        )
+                    repo_url = "/".join(parts[1:4])
             elif is_artifactory_path(parts[1:]):
                 art_result = parse_artifactory_path(parts[1:])
                 if art_result:
@@ -1022,7 +1039,11 @@ class DependencyReference:
 
         if len(parts) >= 3 and is_supported_git_host(parts[0]):
             host = parts[0]
-            if is_azure_devops_hostname(host) and len(parts) >= 4:
+            if is_visualstudio_legacy_hostname(host) and len(parts) >= 3:
+                # *.visualstudio.com/proj/repo: org is in the subdomain, path is proj/repo only
+                user_repo = "/".join(parts[1:3])
+            elif is_azure_devops_hostname(host) and len(parts) >= 4:
+                # dev.azure.com/org/proj/repo: org is the first path segment
                 user_repo = "/".join(parts[1:4])
             elif not is_github_hostname(host) and not is_azure_devops_hostname(host):
                 if is_artifactory_path(parts[1:]):
@@ -1058,7 +1079,10 @@ class DependencyReference:
         is_ado_host = host and is_azure_devops_hostname(host)
 
         if is_ado_host:
-            if len(uparts) < 3:
+            # *.visualstudio.com encodes org in subdomain -> proj/repo is sufficient (2 parts).
+            # dev.azure.com encodes org in path -> org/proj/repo required (3 parts).
+            min_ado_parts = 2 if is_visualstudio_legacy_hostname(host) else 3
+            if len(uparts) < min_ado_parts:
                 raise ValueError(
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
@@ -1078,16 +1102,24 @@ class DependencyReference:
         return parsed_url, host
 
     @classmethod
-    def _validate_url_repo_path(cls, parsed_url):
+    def _validate_url_repo_path(cls, parsed_url) -> tuple[str, str | None]:
         """Validate and normalise the repository path from a parsed URL.
 
         Checks host support, strips ``.git`` suffixes, removes ``_git``
         segments, and validates each path component against the allowed
         character set for the detected host type.
 
+        For Azure DevOps URLs with extra path segments beyond
+        ``org/project/repo`` (e.g.
+        ``https://dev.azure.com/org/proj/_git/repo/sub/path``), the extra
+        segments are extracted as a virtual package path and validated with
+        the same rules as the shorthand virtual-path detector.
+
         Returns:
-            repo_url (str): Normalised repository path
-                (e.g. ``owner/repo`` or ``org/project/repo``).
+            ``(repo_url, virtual_path)`` where *repo_url* is the normalised
+            base repository path (e.g. ``owner/repo`` or
+            ``org/project/repo``) and *virtual_path* is ``None`` unless
+            extra ADO sub-path segments were detected.
         """
         hostname = parsed_url.hostname or ""
         if not is_supported_git_host(hostname):
@@ -1107,11 +1139,57 @@ class DependencyReference:
 
         is_ado_host = is_azure_devops_hostname(hostname)
 
+        url_virtual_path: str | None = None
+
         if is_ado_host:
-            if len(path_parts) != 3:
+            # *.visualstudio.com encodes org in the subdomain; URL path is proj/repo (2 parts).
+            # dev.azure.com encodes org as the first path segment; URL path is org/proj/repo (3 parts).
+            is_vs_legacy = is_visualstudio_legacy_hostname(hostname)
+            min_ado_parts = 2 if is_vs_legacy else 3
+            if len(path_parts) < min_ado_parts:
                 raise ValueError(
                     f"Invalid Azure DevOps repository path: expected 'org/project/repo', got '{path}'"
                 )
+            if len(path_parts) > min_ado_parts:
+                # Extra segments are a virtual sub-path (e.g. sub/path in
+                # https://dev.azure.com/org/proj/_git/repo/sub/path or
+                # https://myorg.visualstudio.com/proj/_git/repo/sub/path).
+                ado_virtual = "/".join(path_parts[min_ado_parts:])
+
+                # Security: reject path traversal in virtual path.
+                validate_path_segments(ado_virtual, context="virtual path")
+
+                # Reject removed .collection.yml extensions.
+                if any(ado_virtual.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+                    raise ValueError(
+                        f".collection.yml is no longer supported. "
+                        f"Convert '{ado_virtual}' to an apm.yml with a "
+                        f"'dependencies' section. "
+                        f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                    )
+
+                # Accept any recognised virtual file extension; reject other
+                # dotted final segments (mirrors shorthand virtual detection).
+                if any(ado_virtual.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+                    pass
+                else:
+                    last_segment = ado_virtual.split("/")[-1]
+                    if "." in last_segment:
+                        raise InvalidVirtualPackageExtensionError(
+                            f"Invalid virtual package path '{ado_virtual}'. "
+                            f"Individual files must end with one of: "
+                            f"{', '.join(cls.VIRTUAL_FILE_EXTENSIONS)}. "
+                            f"For subdirectory packages, the path should not have a file extension."
+                        )
+
+                url_virtual_path = ado_virtual
+                path_parts = path_parts[:min_ado_parts]
+
+            # For *.visualstudio.com, inject the org from the subdomain so that the
+            # normalised repo_url is always org/project/repo (matching dev.azure.com).
+            if is_vs_legacy:
+                vs_org = hostname.split(".")[0]
+                path_parts = [vs_org, *path_parts]
         else:
             if len(path_parts) < 2:
                 raise ValueError(
@@ -1134,19 +1212,25 @@ class DependencyReference:
             if not re.match(allowed_pattern, part):
                 raise ValueError(f"Invalid repository path component: {part}")
 
-        return "/".join(path_parts)
+        return "/".join(path_parts), url_virtual_path
 
     @classmethod
     def _parse_standard_url(
-        cls, dependency_str: str, is_virtual_package: bool, virtual_path, validated_host
-    ):
+        cls,
+        dependency_str: str,
+        is_virtual_package: bool,
+        virtual_path: str | None,
+        validated_host: str | None,
+    ) -> tuple[str, int | None, str, str | None, str | None, bool, str | None]:
         """Parse a non-SSH dependency string (HTTPS, FQDN, or shorthand).
 
         Detects scheme vs shorthand, delegates host-specific resolution to
         helpers, then validates the resulting URL path.
 
         Returns:
-            ``(host, port, repo_url, reference, alias)``
+            ``(host, port, repo_url, reference, alias, effective_is_virtual,
+            effective_virtual_path)`` -- the last two reflect any ADO sub-path
+            segments embedded in the URL itself (issue #1128).
         """
         host = None
         port = None
@@ -1185,12 +1269,21 @@ class DependencyReference:
         else:
             parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
 
-        repo_url = cls._validate_url_repo_path(parsed_url)
+        repo_url, url_virtual_path = cls._validate_url_repo_path(parsed_url)
+
+        # If URL contained extra ADO sub-path segments, they become the virtual
+        # path (overriding the _detect_virtual_package result which returns
+        # early for https:// URLs).
+        effective_is_virtual = is_virtual_package
+        effective_virtual_path = virtual_path
+        if url_virtual_path is not None:
+            effective_is_virtual = True
+            effective_virtual_path = url_virtual_path
 
         if not host:
             host = default_host()
 
-        return host, port, repo_url, reference, alias
+        return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
     @classmethod
     def _validate_final_repo_fields(cls, host, repo_url):
@@ -1333,8 +1426,10 @@ class DependencyReference:
                 host, port, repo_url, reference, alias = scp_result
                 explicit_scheme = "ssh"
             else:
-                host, port, repo_url, reference, alias = cls._parse_standard_url(
-                    dependency_str, is_virtual_package, virtual_path, validated_host
+                host, port, repo_url, reference, alias, is_virtual_package, virtual_path = (
+                    cls._parse_standard_url(
+                        dependency_str, is_virtual_package, virtual_path, validated_host
+                    )
                 )
                 _stripped = dependency_str.strip().lower()
                 if _stripped.startswith("https://"):
