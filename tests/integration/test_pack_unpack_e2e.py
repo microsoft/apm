@@ -1,6 +1,6 @@
 """End-to-end integration tests for ``apm pack`` and ``apm unpack``.
 
-Round-trip tests: install → pack → unpack → verify files match.
+Round-trip tests: install -> pack -> install bundle -> verify files match.
 
 Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
@@ -60,7 +60,14 @@ def _run_apm(apm_command, args, cwd, timeout=120):
 
 class TestPackUnpackE2E:
     def test_full_round_trip(self, apm_command, temp_project, tmp_path):
-        """Install → pack --archive → unpack in fresh dir → files match."""
+        """Install -> pack --archive -> install <bundle> in fresh dir -> files match.
+
+        Note: ``apm unpack`` was deprecated in favor of ``apm install <bundle-path>``
+        and its bundle verification step does not understand the plugin-format
+        layout (it compared lockfile ``.github/...`` paths against on-disk
+        ``agents/``, ``commands/``, ... paths and always failed). The
+        round-trip uses the supported ``apm install <archive>`` flow instead.
+        """
         # 1. Install
         result = _run_apm(apm_command, ["install"], cwd=temp_project)
         assert result.returncode == 0, f"install failed: {result.stderr}"
@@ -74,16 +81,21 @@ class TestPackUnpackE2E:
         archives = list(build_dir.glob("*.tar.gz"))
         assert len(archives) == 1, f"Expected 1 archive, found {archives}"
 
-        # 3. Unpack in a clean directory
+        # 3. Install the bundle in a clean directory. Seed the copilot
+        # detection signal so target resolution succeeds in the consumer.
         consumer = tmp_path / "consumer"
         consumer.mkdir()
+        (consumer / ".github").mkdir()
+        (consumer / ".github" / "copilot-instructions.md").write_text("# test\n")
         archive = archives[0]
 
-        result = _run_apm(apm_command, ["unpack", str(archive)], cwd=consumer)
-        assert result.returncode == 0, f"unpack failed: {result.stderr}"
+        result = _run_apm(apm_command, ["install", str(archive)], cwd=consumer)
+        assert result.returncode == 0, (
+            f"bundle install failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
 
         # 4. Verify .github/ files are present
-        assert (consumer / ".github").exists(), ".github/ missing after unpack"
+        assert (consumer / ".github").exists(), ".github/ missing after bundle install"
 
     def test_pack_dry_run_no_side_effects(self, apm_command, temp_project):
         """Dry run should not create any files."""

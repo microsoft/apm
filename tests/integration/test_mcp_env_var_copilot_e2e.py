@@ -28,6 +28,11 @@ import yaml
 pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_runtime_copilot,
+    # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
+    # Requires --dist loadgroup in the xdist invocation (the only
+    # scheduler that honors xdist_group); without it the marker is
+    # silently ignored and tests would race on global env state.
+    pytest.mark.xdist_group(name="home_env"),
 ]
 
 

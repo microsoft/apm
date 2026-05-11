@@ -132,6 +132,10 @@ class CloneEngine:
     def _fallback_port_warned(self) -> set[tuple]:
         return self._host._fallback_port_warned
 
+    @property
+    def _fallback_port_warned_lock(self):
+        return self._host._fallback_port_warned_lock
+
     def execute(
         self,
         repo_url_base: str,
@@ -201,8 +205,15 @@ class CloneEngine:
                 repo_url_base,
                 dep_port,
             )
-            if warn_key not in self._fallback_port_warned:
-                self._fallback_port_warned.add(warn_key)
+            # Guard the check-then-add under the lock so two threads
+            # racing on the same warn_key cannot both pass the
+            # membership check before either calls add().
+            _should_warn = False
+            with self._fallback_port_warned_lock:
+                if warn_key not in self._fallback_port_warned:
+                    self._fallback_port_warned.add(warn_key)
+                    _should_warn = True
+            if _should_warn:
                 initial_scheme = plan.attempts[0].scheme.upper()
                 fallback_scheme = next(
                     a.scheme.upper() for a in plan.attempts if a.scheme != plan.attempts[0].scheme

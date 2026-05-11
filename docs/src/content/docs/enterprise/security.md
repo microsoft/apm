@@ -285,7 +285,7 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 
 - **Never stored in files.** Tokens are read from the environment at runtime. They are never written to `apm.yml`, `apm.lock.yaml`, or any generated file.
 - **Never logged.** Token values are not included in console output, error messages, or debug logs.
-- **Scoped to their git host.** A GitHub token is only sent to GitHub. An Azure DevOps token is only sent to Azure DevOps. Tokens are never transmitted to any other endpoint.
+- **Scoped to their git host and server identity.** A GitHub token is only sent when both the server name is on the GitHub allowlist and the remote URL hostname is a verified GitHub/Copilot host (`github.com`, `*.ghe.com`, `*.github.com`, `githubcopilot.com`, `*.githubcopilot.com`). HTTPS is required -- `http://` URLs are rejected even when the hostname matches. An Azure DevOps token is only sent to Azure DevOps. Tokens are never transmitted to any other endpoint.
 - **Injected via transient git config.** APM passes credentials with `http.extraheader` for the duration of a single git invocation; tokens are never embedded in URLs and are not visible in `ps` or process listings.
 
 For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
