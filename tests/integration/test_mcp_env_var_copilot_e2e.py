@@ -28,6 +28,9 @@ import yaml
 pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_runtime_copilot,
+    # Mutates os.environ["HOME"]; must be serialized on a single xdist
+    # worker so parallel tests do not race on global env state.
+    pytest.mark.xdist_group(name="home_env"),
 ]
 
 

@@ -23,7 +23,12 @@ import pytest
 # Skip all tests in this module if not in E2E mode
 E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 
-pytestmark = pytest.mark.requires_e2e_mode
+pytestmark = [
+    pytest.mark.requires_e2e_mode,
+    # Mutates os.environ["HOME"]; must be serialized on a single xdist
+    # worker so parallel tests do not race on global env state.
+    pytest.mark.xdist_group(name="home_env"),
+]
 
 
 @pytest.fixture(scope="module")

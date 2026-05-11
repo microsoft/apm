@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.requires_e2e_mode
+pytestmark = [
+    pytest.mark.requires_e2e_mode,
+    # Mutates os.environ["HOME"]; must be serialized on a single xdist
+    # worker so parallel tests do not race on global env state.
+    pytest.mark.xdist_group(name="home_env"),
+]
 
 
 # Test fixtures and utilities

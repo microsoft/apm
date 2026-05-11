@@ -128,10 +128,19 @@ jobs:
           APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
         run: uv run pytest tests/integration/test_core_smoke.py -v
 
-  integration-tests:
-    name: Integration Tests (Linux)
+  integration-tests-shard:
+    name: Integration Tests Shard ${{ matrix.shard }} (Linux)
     needs: [build, smoke-test]
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 4-way sharding via pytest-split keeps wall-clock low. Each shard
+        # is an independent runner so HOME-mutating tests never race
+        # across shards. xdist within a shard gives an additional 2x; the
+        # 4 HOME-mutating files carry an xdist_group("home_env") marker
+        # so xdist serializes them on a single worker (race-safe).
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
 
@@ -164,19 +173,71 @@ jobs:
       - name: Install test dependencies
         run: uv sync --extra dev
 
-      - name: Run integration tests
+      # Cache APM's git/HTTP cache across runs. Most integration tests
+      # re-clone microsoft/apm-sample-package, github/awesome-copilot,
+      # and anthropics/skills repeatedly. Caching the resolved cache dir
+      # cuts the network jitter and PAT rate-limit risk on every run.
+      # Key includes a weekly bucket so the cache refreshes regularly
+      # without becoming load-bearing for correctness.
+      - name: Compute cache week bucket
+        id: cache-bucket
+        run: echo "week=$(date -u +'%Y-%U')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache APM resolved git/HTTP fetches
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/apm
+          key: apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-
+            apm-cache-shard${{ matrix.shard }}-
+
+      - name: Run integration tests (sharded + parallelized)
         env:
           APM_E2E_TESTS: "1"
           APM_RUN_INTEGRATION_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
+          # Force the resolved-cache dir to a stable path so actions/cache
+          # captures the right directory regardless of XDG defaults.
+          XDG_CACHE_HOME: ${{ github.workspace }}/.xdg-cache
         run: |
-          chmod +x scripts/test-integration.sh
-          uv run ./scripts/test-integration.sh
-        # Bumped from 20 to 30 minutes when test discovery widened from
-        # the 28 enumerated files to the full tests/integration/ suite
-        # (PR2 of #1166).
-        timeout-minutes: 30
+          mkdir -p "$XDG_CACHE_HOME/apm"
+          # Symlink so actions/cache (which uses ~/.cache/apm) and the
+          # apm binary (which honours XDG_CACHE_HOME) point at the same
+          # directory. Avoids a copy step at the end.
+          rm -rf "$HOME/.cache/apm"
+          mkdir -p "$HOME/.cache"
+          ln -sfn "$XDG_CACHE_HOME/apm" "$HOME/.cache/apm"
+
+          # pytest-split partitions tests deterministically across shards.
+          # xdist with --dist worksteal balances within a shard and reaps
+          # the wait-on-subprocess time most integration tests spend.
+          uv run pytest tests/integration/ \
+            -v --tb=short \
+            --splits 4 --group ${{ matrix.shard }} \
+            -n 2 --dist worksteal \
+            --maxfail 10
+        # Per-shard timeout is ~1/4 of the original 30 min budget plus
+        # headroom for the slowest shard (HOME-group tests).
+        timeout-minutes: 15
+
+  # Fan-in job that preserves the gate-required check name
+  # "Integration Tests (Linux)". Branch protection / merge-gate.yml
+  # require this exact name; shard jobs above are not required directly.
+  integration-tests:
+    name: Integration Tests (Linux)
+    needs: [integration-tests-shard]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate shard results
+        run: |
+          if [[ "${{ needs.integration-tests-shard.result }}" != "success" ]]; then
+            echo "One or more integration test shards failed: ${{ needs.integration-tests-shard.result }}"
+            exit 1
+          fi
+          echo "All integration test shards passed."
 
   release-validation:
     name: Release Validation (Linux)
