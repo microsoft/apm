@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from apm_cli.deps.bare_cache import fetch_sha_into_bare
 from apm_cli.models.apm_package import DependencyReference
@@ -20,10 +22,17 @@ def _git(cwd: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _make_execute(src: Path):
+def _make_execute(src: Path) -> Callable[..., None]:
     """Return an execute_transport_plan that runs the clone_action locally."""
 
-    def execute_transport_plan(url: str, target: Path, *, dep_ref, clone_action, **kwargs) -> None:
+    def execute_transport_plan(
+        url: str,
+        target: Path,
+        *,
+        dep_ref: DependencyReference,
+        clone_action: Callable[..., None],
+        **kwargs: Any,
+    ) -> None:
         # Use the local src path as the URL so no network access is needed
         clone_action(url=str(src), env={}, target=target)
 
@@ -34,7 +43,7 @@ class TestFetchShaIntoBareIntegration:
     """Real-git integration tests for fetch_sha_into_bare."""
 
     def test_fetch_pins_ref_in_real_bare_repo(self, tmp_path: Path) -> None:
-        """fetch_sha_into_bare creates refs/heads/apm-pin-<sha12> in a real bare."""
+        """fetch_sha_into_bare creates refs/heads/apm-pin-<sha-prefix> in a real bare."""
         # 1. Create a source repo with 2 commits
         src = tmp_path / "source"
         src.mkdir()
@@ -54,7 +63,7 @@ class TestFetchShaIntoBareIntegration:
         # Use file:// URL to force smart-HTTP-like transport that actually respects
         # --depth (plain local paths use hardlink transport that copies all packs).
         bare = tmp_path / "bare"
-        file_url = f"file://{src}"
+        file_url = src.as_uri()
         subprocess.run(
             ["git", "clone", "--bare", "--depth=1", file_url, str(bare)],
             check=True,
@@ -68,7 +77,7 @@ class TestFetchShaIntoBareIntegration:
         )
         assert verify.returncode != 0, "first_sha should NOT be in depth=1 bare"
 
-        # 3. Call fetch_sha_into_bare — execute_transport_plan calls the fetch
+        # 3. Call fetch_sha_into_bare -- execute_transport_plan calls the fetch
         # action with the local src path so no actual network access is needed.
         dep_ref = DependencyReference.parse("owner/repo/sub#main")
         result = fetch_sha_into_bare(
@@ -137,7 +146,14 @@ class TestFetchShaIntoBareIntegration:
         dep_ref = DependencyReference.parse("owner/repo/sub#main")
         execute_calls: list[int] = []
 
-        def counting_execute(url, target, *, dep_ref, clone_action, **kwargs) -> None:
+        def counting_execute(
+            url: str,
+            target: Path,
+            *,
+            dep_ref: DependencyReference,
+            clone_action: Callable[..., None],
+            **kwargs: Any,
+        ) -> None:
             execute_calls.append(1)
 
         result = fetch_sha_into_bare(
