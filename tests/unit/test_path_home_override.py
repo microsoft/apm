@@ -31,3 +31,20 @@ def test_path_home_honors_per_test_home_setenv(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(target))
 
     assert Path.home() == target
+
+
+def test_path_expanduser_does_not_raise_with_cleared_env(monkeypatch):
+    """Path('~/pkg').expanduser() must not raise on the windows-2025-vs2026 runner.
+
+    ntpath.expanduser raises RuntimeError when USERPROFILE and HOMEPATH are
+    both absent. Production code in install.package_resolution depends on
+    expanduser to detect that `~/pkg` is absolute. The root conftest wraps
+    Path.expanduser so this case falls back to the hermetic tmp dir.
+    """
+    for key in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(key, raising=False)
+
+    expanded = Path("~/pkg").expanduser()
+
+    assert expanded.is_absolute()
+    assert expanded.name == "pkg"

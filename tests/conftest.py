@@ -70,6 +70,29 @@ def _hermetic_home(_cls=Path) -> Path:
 Path.home = classmethod(_hermetic_home)  # type: ignore[method-assign]
 
 
+# Same problem, different code path: Path("~/pkg").expanduser() goes through
+# ntpath.expanduser, which raises RuntimeError("Could not determine home
+# directory.") on the windows-2025-vs2026 runner when USERPROFILE and
+# HOMEPATH are both absent. Production code (e.g. install.package_resolution
+# user_scope_rejection_reason) relies on expanduser to detect that ~/pkg is
+# absolute. Wrap Path.expanduser so the RuntimeError can never surface.
+_ORIGINAL_EXPANDUSER = Path.expanduser
+
+
+def _hermetic_expanduser(self):
+    try:
+        return _ORIGINAL_EXPANDUSER(self)
+    except RuntimeError:
+        parts = self.parts
+        if not parts or not parts[0].startswith("~"):
+            return self
+        remainder = parts[1:]
+        return _TMP_HOME.joinpath(*remainder) if remainder else _TMP_HOME
+
+
+Path.expanduser = _hermetic_expanduser  # type: ignore[method-assign]
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _validate_primitive_coverage():
     """Fail fast if KNOWN_TARGETS has primitives without dispatch handlers."""

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Set the unit-test hermetic HOME at conftest import time so a single xdist worker on the `windows-2025-vs2026` runner can no longer race fixture setup and re-trigger the 53 `Path.home()` failures the session-scoped autouse fixture was supposed to prevent. (#1271)
 - Override `Path.home()` itself in the root test conftest so the 46 remaining Windows `RuntimeError: Could not determine home directory` failures on xdist worker `gw2` cannot recur regardless of which conftest the worker imports first; per-test `monkeypatch.setenv("HOME", ...)` continues to work because the override consults env vars before falling back to the hermetic tmp dir. (#1272)
 - Retry the `apm mcp search` and `apm mcp show` integration tests on the documented "Could not reach MCP registry" transient (with backoff and a final skip) so a brief `api.mcp.github.com` outage no longer red-marks the Windows integration job. (#1274)
+- Also wrap `Path.expanduser()` in the root test conftest so the `windows-2025-vs2026` runner cannot raise `RuntimeError("Could not determine home directory.")` from `ntpath.expanduser` when production code (e.g. `install.package_resolution.user_scope_rejection_reason`) calls `Path("~/pkg").expanduser()`. Falls back to the hermetic tmp dir; assertions about `~/pkg` being absolute still hold. (#1275)
 
 ## [0.13.0] - 2026-05-11
 
