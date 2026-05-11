@@ -1,94 +1,89 @@
 ---
 title: apm update
-description: Self-update the APM binary to the latest release
+description: Re-resolve dependencies in apm.yml against the latest matching Git refs, with a plan and consent gate before writing the lockfile.
 sidebar:
   order: 4
 ---
 
-Self-update the APM CLI binary to the latest GitHub release.
+Refresh the dependencies declared in `apm.yml` to the latest matching Git refs, after showing you the plan and asking for consent.
 
 ## Synopsis
 
 ```bash
-apm update [--check]
+apm update [OPTIONS]
 ```
 
 ## Description
 
-`apm update` upgrades the **APM CLI itself** to the latest version published on GitHub releases. It downloads the official platform installer (`install.sh` on macOS/Linux, `install.ps1` on Windows) and runs it in place.
+`apm update` re-resolves every dependency in your project's `apm.yml` against the newest Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Decline the prompt and APM exits cleanly: no lockfile writes, no filesystem changes.
 
-:::caution[Looking for dependency updates?]
-This command does **not** update the packages declared in your `apm.yml`. To refresh dependencies to the latest versions allowed by your manifest, run:
+This is the dependency-refresh command. To upgrade the APM CLI binary itself, see [`apm self-update`](../self-update/).
 
-```bash
-apm install --update
-```
-
-See [`apm install`](../install/) for the dependency update workflow.
+:::note[Consent gate]
+The interactive prompt defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to proceed; otherwise `apm update` aborts without modifying the lockfile.
 :::
 
-The command compares the installed version against the latest GitHub release and exits early if you are already current. With `--check`, it reports availability without installing.
-
-:::note
-Some package-manager distributions (for example, Homebrew) disable self-update at build time. In those builds, `apm update` prints a distributor-defined message (such as `brew upgrade apm`) and exits without running the installer. The startup update notification is also suppressed in those builds.
-:::
+For a read-only install that pins to whatever is already in `apm.lock.yaml` -- the right command for CI -- use [`apm install --frozen`](../install/).
 
 ## Options
 
-| Flag | Description |
-| --- | --- |
-| `--check` | Only check whether a newer release exists. Print the result and exit without installing. |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--yes`, `-y` | off | Skip the interactive prompt and accept the plan. Required for non-interactive use. |
+| `--dry-run` | off | Compute and print the plan without prompting and without writing the lockfile or filesystem. |
+| `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
 
 ## Examples
 
-Check for an available update:
+Preview what would change, without prompting or writing:
 
 ```bash
-apm update --check
+apm update --dry-run
 ```
 
-Install the latest release:
+Interactively review and accept the plan:
 
 ```bash
 apm update
+# prints plan, prompts: Apply these updates? [y/N]
+```
+
+Accept non-interactively (CI, scripts):
+
+```bash
+apm update --yes
+```
+
+Decline the prompt -- nothing is written:
+
+```bash
+apm update
+# Apply these updates? [y/N] n
+# Aborted. apm.lock.yaml unchanged.
 ```
 
 ## Behavior
 
-**Version check.** Fetches the latest release tag from GitHub and compares it to `apm --version`. If the installed version is current, the command exits with a success message and does nothing else.
+- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest ref allowed by the constraint (branch tip, latest matching tag, etc.). Local-path deps are skipped.
+- **Structured plan.** Output is grouped into four sections:
+  - **added** -- present in the new resolution but not in the previous lockfile.
+  - **updated** -- ref or version moved.
+  - **removed** -- previously locked, no longer required by `apm.yml`.
+  - **unchanged** -- already at the latest matching ref.
+- **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the lockfile and workspace are untouched.
+- **No partial writes.** The plan is applied atomically: either the new `apm.lock.yaml` is written and `apm install` is invoked to materialize the result, or nothing changes.
+- **`--dry-run` skips the prompt.** It only computes and prints the plan; it never writes and never asks.
 
-**Download.** When an update is available (and `--check` is not set), the platform installer is downloaded into APM's temp directory, made executable, and invoked as a subprocess. The installer's stdout and stderr stream directly to your terminal so it can prompt for elevation when needed.
+## Back-compat: `apm update` used to be the self-updater
 
-**Where the new binary lands.** The installer writes the binary to the same location the original install script used -- typically `~/.apm/bin/apm` on macOS/Linux and `%LOCALAPPDATA%\Programs\apm\apm.exe` on Windows. Existing configuration under `~/.apm/` and your project files are untouched.
+In earlier releases, `apm update` self-updated the **APM CLI binary**. That behavior moved to [`apm self-update`](../self-update/) and `apm update` was repurposed as the dependency updater described above.
 
-**After update.** Restart your terminal (or re-resolve `apm` on `PATH`) and run `apm --version` to confirm the new version is active.
-
-**Rollback.** APM does not keep previous binaries. To roll back, reinstall a specific version using the manual installer:
-
-```bash
-# macOS / Linux
-curl -sSL https://aka.ms/apm-unix | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -c "irm https://aka.ms/apm-windows | iex"
-```
-
-The installer scripts accept a version pin via environment variable -- see [Quickstart](../../../quickstart/).
-
-**Failure modes.** If GitHub is unreachable, the download fails, or the installer exits non-zero, `apm update` exits with code `1` and prints the manual update command. Your existing binary is unaffected.
-
-## Startup update notification
-
-APM checks for new releases at most once per day during normal command execution. When a newer version is available, you see:
-
-```
-A new version of APM is available: 0.7.0 (current: 0.6.3)
-Run apm update to upgrade
-```
-
-The check is cached and non-blocking. It is suppressed in distributions that disable self-update.
+For one release after the rename, running `apm update` from a directory **without an `apm.yml`** prints a deprecation banner and forwards to `apm self-update` so existing muscle memory and scripts keep working. This shim is removed in the next minor release -- update your scripts to call `apm self-update` directly.
 
 ## Related
 
-- [`apm install`](../install/) -- install dependencies; use `--update` to refresh them.
-- [Quickstart](../../../quickstart/) -- first-time install.
+- [`apm install --frozen`](../install/) -- read-only install pinned to `apm.lock.yaml`; fails on drift. Use this in CI.
+- [`apm self-update`](../self-update/) -- upgrade the APM CLI binary itself.
+- [`apm outdated`](../outdated/) -- report dependencies with newer refs available, without changing anything.
+- [Manage dependencies (consumer guide)](../../../consumer/manage-dependencies/) -- task-oriented walkthrough.
+- [Update and refresh](../../../consumer/update-and-refresh/) -- when to use `update`, `install --frozen`, and `self-update`.

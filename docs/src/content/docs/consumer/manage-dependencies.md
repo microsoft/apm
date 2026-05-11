@@ -125,7 +125,7 @@ dependencies:
 Branches move; tags and SHAs do not. For reproducibility, prefer tags or
 SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
-to a new SHA on the next `apm install --update`.
+to a new SHA on the next `apm update`.
 
 ## Remove a dependency
 
@@ -170,7 +170,9 @@ For the full lockfile schema, see
 [Package anatomy](../../concepts/package-anatomy/#anatomy-of-apmlockyaml).
 
 :::note[Coming from npm?]
-The split mirrors `package.json` + `package-lock.json`. APM differs in
-one place: `apm update` updates the CLI binary -- not your dependencies.
-Use `apm install --update` to pull new commits for floating refs.
+The split mirrors `package.json` + `package-lock.json`. The verbs match
+too: `apm update` refreshes dependencies to the latest matching refs
+(like `npm update`); `apm install --frozen` is the lockfile-only,
+fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
+binary itself, use `apm self-update`.
 :::

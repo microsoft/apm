@@ -127,8 +127,10 @@ downloads them into `apm_modules/`, runs the policy gate, scans for
 hidden Unicode, writes `apm.lock.yaml`, and compiles primitives into
 each declared harness directory.
 
-NOT npm-equivalent semantics for everything. Most verbs match npm
-deliberately, but `apm update` updates the CLI binary, not dependencies.
+All major verbs match npm semantics: `apm install` deploys, `apm update`
+refreshes dependencies, `apm install --frozen` is the lockfile-only CI
+install (mirrors `npm ci`). The CLI binary itself updates via
+`apm self-update`, not `apm update`.
 
 Source: `src/apm_cli/commands/install.py`.
 
@@ -284,3 +286,32 @@ the Promise 2 roadmap.
 
 Source: `src/apm_cli/install/mcp/`,
 `src/apm_cli/install/insecure_policy.py`.
+
+### self-update
+
+The `apm self-update` command. Downloads the latest release of the
+`apm` CLI from the official installer URL and replaces the binary in
+place. Supports `--check` to report availability without installing.
+Disabled in package-manager distributions (for example, Homebrew),
+which print a distributor-defined upgrade message instead.
+
+NOT a dependency refresh. `self-update` only touches the CLI binary;
+your project's `apm.yml`, lockfile, and `apm_modules/` are untouched.
+For dependency refresh, see [update](#update).
+
+Source: `src/apm_cli/commands/self_update.py`.
+
+### update
+
+The `apm update` command. Re-resolves every dependency in `apm.yml` to
+its latest matching Git ref, prints a structured plan
+(added / updated / removed / unchanged), and prompts for consent before
+rewriting `apm.lock.yaml`. Defaults to **No** on the prompt; declining
+exits cleanly with no writes. `--yes` skips the prompt for CI;
+`--dry-run` prints the plan without prompting or writing.
+
+Mirrors `npm update`. To pin to the existing lockfile in CI without
+refreshing, use `apm install --frozen` (mirrors `npm ci`). To upgrade
+the CLI binary itself, see [self-update](#self-update).
+
+Source: `src/apm_cli/commands/update.py`.

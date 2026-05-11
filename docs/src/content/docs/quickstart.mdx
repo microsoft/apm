@@ -132,15 +132,17 @@ and pinned its content hash in `apm.lock.yaml`. If your org ships an
 :::
 
 :::tip[Coming from npm?]
-APM borrows npm's verbs but the meanings shift in two places:
+APM's verbs match npm's semantics:
 
-- `apm install` -- installs and updates dependencies, like
-  `npm install`.
-- `apm update` -- updates the **APM CLI binary**, NOT your dependencies.
-  To refresh deps, re-run `apm install` (optionally with `--update` to
-  bump unpinned references).
-- `apm prune` -- removes packages from `apm_modules/` that are no
+- `apm install` -- install and deploy dependencies, like `npm install`.
+- `apm update` -- refresh dependencies to the latest matching refs,
+  with a consent prompt, like `npm update`.
+- `apm install --frozen` -- lockfile-only install for CI; fails on
+  drift, like `npm ci`.
+- `apm prune` -- remove packages from `apm_modules/` that are no
   longer in `apm.yml`, like `npm prune`.
+- `apm self-update` -- upgrade the `apm` CLI binary itself
+  (think `npm install -g npm`).
 
 For private packages, set `GITHUB_APM_PAT` -- see
 [private packages](/apm/consumer/private-and-org-packages/).

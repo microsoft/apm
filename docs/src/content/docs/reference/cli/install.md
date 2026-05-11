@@ -29,9 +29,10 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 | Flag | Default | Description |
 |---|---|---|
-| `--update` | off | Re-resolve dependencies to the latest Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. |
+| `--update` | off | Re-resolve dependencies to the latest Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutually exclusive with `--frozen`. Prefer the dedicated [`apm update`](../update/) command for the consent-gated workflow. |
+| `--frozen` | off | Lockfile-only install: refuse to resolve anything new and fail if `apm.yml` and `apm.lock.yaml` have drifted. Mirrors `npm ci`. Mutually exclusive with `--update`. |
 | `--dry-run` | off | Print the install plan without touching the filesystem. |
-| `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Use only after independent verification. |
+| `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** refresh remote refs -- use `apm update` for that. Use only after independent verification. |
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
 | `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. |
 
@@ -90,6 +91,8 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 
 - **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically; `--update` is only needed to pull a newer ref under a floating constraint. MCP servers with matching config are skipped (`already configured`); changed config is re-applied (`updated`).
+- **No-op nudge.** When the lockfile is already satisfied and nothing needs deploying, install prints `[i] Run 'apm update' to check for newer versions.` so you know the silent success was not a missed refresh.
+- **Frozen mode.** With `--frozen`, install resolves only what is in `apm.lock.yaml`. A direct dependency missing from the lockfile, or a missing lockfile entirely, exits `1`. Orphan lockfile entries (locked but no longer in `apm.yml`) are tolerated; local-path deps are skipped. This is a structural check, not a content check -- run `apm audit --ci` for hash verification.
 - **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped at `--global` and with `--only mcp`.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed from the workspace, gated by per-file content hashes recorded in the lockfile (user-edited files are kept with a warning).
 - **Security scan.** Source files are scanned for hidden Unicode and other tag-character / bidi-override patterns before deployment. Critical findings block the package; the install exits `1`. Use `--force` to deploy anyway, or run `apm audit --strip` first to remediate.
@@ -168,18 +171,19 @@ apm install owner/skill-bundle --skill '*'   # reset to all skills
 | Code | Meaning |
 |---|---|
 | `0` | Success. All requested dependencies and local content deployed. |
-| `1` | Install failure: security scan blocked a critical finding, auth error, manifest write error, dependency resolution error, or unhandled exception. The diagnostic summary names the cause. |
-| `2` | Usage error: no deployment target detectable (no `--target`, no `targets:` in `apm.yml`, no harness signal in the project), `--ssh` and `--https` both passed, or a Click flag conflict. |
+| `1` | Install failure: security scan blocked a critical finding, auth error, manifest write error, dependency resolution error, `--frozen` with a missing lockfile or a direct dependency absent from `apm.lock.yaml`, or unhandled exception. The diagnostic summary names the cause. |
+| `2` | Usage error: no deployment target detectable (no `--target`, no `targets:` in `apm.yml`, no harness signal in the project), `--ssh` and `--https` both passed, `--frozen` and `--update` both passed, or a Click flag conflict. |
 
 ## Notes
 
-- **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. For routine ref updates, prefer `--update`. To remediate findings, prefer `apm audit --strip`. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
+- **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate findings, prefer `apm audit --strip`. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
 - **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
 - **Copilot CLI env-var passthrough.** When deploying MCP entries to `~/.copilot/mcp-config.json`, `${env:VAR}` and `<VAR>` placeholders are translated to `${VAR}` so Copilot CLI resolves them at server-start. Plaintext secrets are never written to disk. Other targets currently resolve placeholders at install time.
 
 ## Related
 
-- [`apm update`](../update/) -- update the APM CLI binary itself (not deps).
+- [`apm update`](../update/) -- refresh dependencies in `apm.yml` to their latest matching refs, with a consent gate.
+- [`apm self-update`](../self-update/) -- upgrade the `apm` CLI binary itself.
 - [`apm prune`](../prune/) -- remove orphaned packages and stale files.
 - [`apm audit`](../audit/) -- explicit security reporting and remediation after install.
 - [`apm targets`](../targets/) -- print which harnesses APM detects in the current directory.

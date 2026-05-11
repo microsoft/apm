@@ -92,9 +92,9 @@ For the deeper view of how compile fits in, see
 :::note[Coming from npm?]
 `apm install` mirrors `npm install` deliberately. The big difference:
 APM also runs a security scan and, if present, an org policy gate
-before writing anything to disk. And `apm update` updates the CLI
-binary, not your dependencies -- use `apm install --update` to refresh
-deps.
+before writing anything to disk. To refresh dependencies to their
+latest matching refs, use `apm update` (mirrors `npm update`). To
+upgrade the `apm` CLI binary itself, use `apm self-update`.
 :::
 
 ## Where files land
@@ -156,7 +156,7 @@ apm install --dry-run                  # resolve and print the plan; no writes
 apm install --target claude,cursor     # only deploy to these harnesses
 apm install --exclude gemini           # deploy to all targets except gemini
 apm install --only apm                 # skip MCP server integration this run
-apm install --update                   # refresh deps to latest matching refs
+apm install --frozen                   # CI: lockfile-only; fail on drift
 apm install --refresh                  # bypass the cache; re-fetch everything
 apm install --dev                      # treat positional args as devDependencies
 apm install -g <package>               # install to user scope (~/.apm/)

@@ -140,9 +140,10 @@ scripts:
 
 :::note[Coming from npm?]
 The shape mirrors `package.json` on purpose: `name`, `version`,
-`dependencies`, `devDependencies`, `scripts`. Verbs like `apm install` and
-`apm list` mirror npm too. Semantics differ -- `apm update` updates the CLI
-binary, not your dependencies. Use `apm install` to refresh them.
+`dependencies`, `devDependencies`, `scripts`. The verbs match too:
+`apm install` deploys, `apm update` refreshes dependencies, and
+`apm install --frozen` is the lockfile-only CI install (mirrors
+`npm ci`). The CLI binary itself updates via `apm self-update`.
 :::
 
 ## Anatomy of `apm.lock.yaml`
