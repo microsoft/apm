@@ -131,8 +131,9 @@ jobs:
   #   - Gate A (consumer-side): `apm audit --ci --no-drift` -- lockfile /
   #     content-integrity check. setup-only: true keeps managed files
   #     untouched so the SHA-256 content-integrity check can detect tampered
-  #     files. The install-replay (--no-drift) is skipped because there is
-  #     no warm cache; content-integrity covers the same tamper signal.
+  #     files. The drift check (install-replay comparison) is skipped
+  #     via --no-drift because there is no warm cache in a setup-only
+  #     run; content-integrity covers the same tamper signal.
   # See microsoft/apm#883 for context. Tier 1 (no secrets needed).
   apm-self-check:
     name: APM Self-Check
