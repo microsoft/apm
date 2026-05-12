@@ -341,7 +341,9 @@ class TestLoadPolicyFromString(unittest.TestCase):
 
     def test_explicit_empty_deny_list_gives_empty_tuple(self):
         """Explicit 'deny: []' must give () (explicit empty override), not None."""
-        yaml_str = "name: p\nversion: '1'\nenforcement: warn\ndependencies:\n  deny: []\n  require: []\n"
+        yaml_str = (
+            "name: p\nversion: '1'\nenforcement: warn\ndependencies:\n  deny: []\n  require: []\n"
+        )
         policy, _ = load_policy(yaml_str)
         self.assertEqual(policy.dependencies.deny, (), "deny: [] must yield ()")
         self.assertEqual(policy.dependencies.require, (), "require: [] must yield ()")
