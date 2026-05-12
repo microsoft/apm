@@ -161,10 +161,11 @@ jobs:
         run: apm audit --ci --no-drift
 
       # Gate B: regeneration drift (producer-side) -- legacy bash fallback.
-      # With setup-only: true, apm install did not run and the working tree
-      # is unchanged, so this check trivially passes. It is kept so the
-      # pattern is visible; a full install+audit workflow would rely on this
-      # step to detect hand-edits to regenerated .github/ files.
+      # NOTE: With setup-only: true this step is a guaranteed no-op.
+      # apm install did not run and the working tree is unchanged, so the
+      # git status check always finds nothing. It is kept so the pattern is
+      # visible; a full install+audit workflow would rely on this step to
+      # detect hand-edits to regenerated .github/ files.
       - name: Check APM integration drift (legacy bash fallback, see #1071)
         run: |
           if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
