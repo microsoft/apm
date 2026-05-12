@@ -3,7 +3,7 @@
 # Usage:
 #   irm https://aka.ms/apm-windows | iex
 #
-# Pin a version (skips GitHub HTTP API — use for air-gapped / GHE):
+# Pin a version (skips GitHub HTTP API - use for air-gapped / GHE):
 #   $env:VERSION = 'v1.2.3'; irm https://aka.ms/apm-windows | iex
 #   .\install.ps1 v1.2.3
 #
@@ -29,7 +29,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ---------------------------------------------------------------------------
-# Configuration (overridable via environment variables — parity with install.sh)
+# Configuration (overridable via environment variables - parity with install.sh)
 # ---------------------------------------------------------------------------
 
 $githubUrl = if ($env:GITHUB_URL) {
@@ -165,7 +165,7 @@ function Test-PythonRequirement {
 function Install-ViaPip {
     $pythonCmd = Test-PythonRequirement
     if (-not $pythonCmd) {
-        Write-ErrorText "Python 3.9+ is not available — cannot fall back to pip."
+        Write-ErrorText "Python 3.9+ is not available - cannot fall back to pip."
         return $false
     }
     Write-Info "Attempting installation via pip ($pythonCmd)..."
@@ -239,7 +239,7 @@ $apiRoot = Get-GitHubApiRoot -Url $githubUrl
 $headers = @{}
 
 # ---------------------------------------------------------------------------
-# Stage 1 — Release metadata (skip GitHub API when VERSION is pinned)
+# Stage 1 - Release metadata (skip GitHub API when VERSION is pinned)
 # ---------------------------------------------------------------------------
 
 $release = $null
@@ -248,7 +248,7 @@ $tagName = $null
 
 if ($pinnedVersion) {
     $tagName = $pinnedVersion
-    Write-Success "Version: $tagName (pinned — skipping releases/latest API)"
+    Write-Success "Version: $tagName (pinned - skipping releases/latest API)"
     Write-Info "Download base: $githubUrl/$apmRepo/releases/download/$tagName/"
 } else {
     Write-Info "Fetching latest release information..."
@@ -302,7 +302,7 @@ New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
 
 try {
     # ------------------------------------------------------------------
-    # Stage 2 — Download binary
+    # Stage 2 - Download binary
     # ------------------------------------------------------------------
 
     Write-Info "Downloading $assetName ($tagName)..."
@@ -400,8 +400,24 @@ try {
         $fetched = $false
         try {
             if ($sha256Source) {
-                Invoke-WebRequest -Uri $sha256Source.browser_download_url -OutFile $sha256Path -UseBasicParsing
-                $fetched = $true
+                try {
+                    Invoke-WebRequest -Uri $sha256Source.browser_download_url -OutFile $sha256Path -UseBasicParsing
+                    $fetched = $true
+                } catch {
+                    Write-WarningText "Unauthenticated checksum download failed, retrying with authentication..."
+                    if ($headers.Count -eq 0) { $headers = Get-AuthHeader }
+                    if ($headers.Count -eq 0) { throw }
+                    try {
+                        Invoke-WebRequest -Uri $sha256Source.browser_download_url -Headers $headers -OutFile $sha256Path -UseBasicParsing
+                        $fetched = $true
+                    } catch {
+                        if (-not $sha256Source.url) { throw }
+                        $apiHeaders = @{} + $headers
+                        $apiHeaders["Accept"] = "application/octet-stream"
+                        Invoke-WebRequest -Uri $sha256Source.url -Headers $apiHeaders -OutFile $sha256Path -UseBasicParsing
+                        $fetched = $true
+                    }
+                }
             } else {
                 try {
                     Invoke-WebRequest -Uri $sha256Url -OutFile $sha256Path -UseBasicParsing
@@ -419,18 +435,22 @@ try {
         }
 
         if ($fetched -and (Test-Path $sha256Path)) {
-            $expectedHash = (Get-Content $sha256Path -Raw).Trim().Split(" ")[0]
-            $actualHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
-            if ($actualHash -ne $expectedHash) {
-                Write-ErrorText "Checksum verification FAILED."
-                Write-Host "  Expected: $expectedHash"
-                Write-Host "  Actual:   $actualHash"
-                Write-Info "Attempting automatic fallback to pip..."
-                if (Install-ViaPip) { exit 0 }
-                Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-                exit 1
+            try {
+                $expectedHash = (Get-Content $sha256Path -Raw).Trim().Split(" ")[0]
+                $actualHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
+                if ($actualHash -ne $expectedHash) {
+                    Write-ErrorText "Checksum verification FAILED."
+                    Write-Host "  Expected: $expectedHash"
+                    Write-Host "  Actual:   $actualHash"
+                    Write-Info "Attempting automatic fallback to pip..."
+                    if (Install-ViaPip) { exit 0 }
+                    Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+                    exit 1
+                }
+                Write-Success "Checksum verified"
+            } catch {
+                Write-WarningText "Could not verify checksum (non-fatal): $_"
             }
-            Write-Success "Checksum verified"
         }
     }
 

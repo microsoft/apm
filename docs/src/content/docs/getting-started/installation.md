@@ -45,7 +45,7 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 **Windows (`install.ps1` in PowerShell):**
 
 ```powershell
-# Pin a version (skips GitHub API — required for many air-gapped / GHES setups)
+# Pin a version (skips GitHub API - required for many air-gapped / GHES setups)
 $env:VERSION = "v1.2.3"; irm https://aka.ms/apm-windows | iex
 
 # Or pass a positional parameter when running a saved script:
@@ -69,9 +69,9 @@ irm https://aka.ms/apm-windows | iex
 | `APM_REPO` | `microsoft/apm` | GitHub repository (`owner/name`) |
 | `VERSION` | *(latest)* | Pin a specific release tag (skips the **releases/latest** HTTP API) |
 
-> **Note — Unix (`install.sh`):** Latest-release discovery still calls `https://api.github.com/repos/.../releases/latest` unless `VERSION` is set. For GHES or mirrors with no access to `api.github.com`, pin `VERSION` so the script never hits that endpoint.
+> **Note - Unix (`install.sh`):** Latest-release discovery still calls `https://api.github.com/repos/.../releases/latest` unless `VERSION` is set. For GHES or mirrors with no access to `api.github.com`, pin `VERSION` so the script never hits that endpoint.
 >
-> **Note — Windows (`install.ps1`):** The **releases/latest** URL is derived from `GITHUB_URL`: `https://api.github.com` for GitHub.com, or `{GITHUB_URL}/api/v3` for GitHub Enterprise Server. Air-gapped runners should still set `VERSION` so the installer does not need the API at all.
+> **Note - Windows (`install.ps1`):** The **releases/latest** URL is derived from `GITHUB_URL`: `https://api.github.com` for GitHub.com, or `{GITHUB_URL}/api/v3` for GitHub Enterprise Server. Air-gapped runners should still set `VERSION` so the installer does not need the API at all.
 
 ## Package managers
 

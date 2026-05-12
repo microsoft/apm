@@ -46,7 +46,7 @@ curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3
 # Custom install dir
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 
-# Air-gapped / GHE mirror — VERSION is required (skips GitHub API)
+# Air-gapped / GHE mirror - VERSION is required (skips GitHub API)
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
 
