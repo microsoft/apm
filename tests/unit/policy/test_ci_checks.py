@@ -1195,32 +1195,39 @@ class TestCheckDriftCacheMiss:
     def test_cache_miss_does_not_block_other_checks(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A cache miss on drift must leave the CIAuditResult passing when
-        the baseline checks all pass -- drift skip-with-info must not
-        propagate a failure to the aggregate result."""
+        """Adding the cache-miss drift result to a CIAuditResult must not
+        cause the aggregate to fail -- passed=True from the skip must
+        propagate correctly when combined with other passing checks."""
+        from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.drift import CacheMissError
+        from apm_cli.policy.ci_checks import _check_drift
 
-        _write_apm_yml(tmp_path, deps=["owner/repo#v1.0.0"])
         _write_lockfile(
             tmp_path,
-            textwrap.dedent("""\
-                lockfile_version: '1'
+            textwrap.dedent("""                lockfile_version: '1'
                 generated_at: '2025-01-01T00:00:00Z'
-                dependencies:
-                  - repo_url: owner/repo
-                    resolved_ref: v1.0.0
-                    deployed_files:
-                      - .github/prompts/test.md
+                dependencies: []
             """),
         )
-        (tmp_path / ".github" / "prompts").mkdir(parents=True, exist_ok=True)
-        (tmp_path / ".github" / "prompts" / "test.md").write_text("# ok\n", encoding="utf-8")
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
 
         def _raise_cache_miss(*_args: object, **_kwargs: object) -> None:
             raise CacheMissError("cold cache")
 
         monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_cache_miss)
 
-        result = run_baseline_checks(tmp_path)
-        # Baseline checks (no drift) must still pass.
-        assert result.passed
+        drift_result, findings = _check_drift(tmp_path, lockfile)
+
+        # Simulate a CIAuditResult that already has passing baseline checks
+        # plus the drift skip result; the aggregate must remain passing.
+        from apm_cli.policy.models import CIAuditResult
+
+        aggregate = CIAuditResult()
+        aggregate.checks.append(CheckResult(name="lockfile-exists", passed=True, message="ok"))
+        aggregate.checks.append(CheckResult(name="ref-consistency", passed=True, message="ok"))
+        aggregate.checks.append(drift_result)
+
+        assert drift_result.passed, "cache miss must produce a passing drift result"
+        assert findings == [], "cache miss must produce no findings"
+        assert aggregate.passed, "cache-miss skip must not fail the aggregate CIAuditResult"

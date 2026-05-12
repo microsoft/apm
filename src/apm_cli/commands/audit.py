@@ -695,7 +695,7 @@ def _audit_content_scan(
         and not package
         and (project_root / "apm.yml").exists()
     ):
-        from ..policy.ci_checks import _check_drift
+        from ..policy.ci_checks import DRIFT_SKIP_PREFIX, _check_drift
 
         lockfile_path = get_lockfile_path(project_root)
         if lockfile_path.exists():
@@ -723,7 +723,7 @@ def _audit_content_scan(
                 elif (
                     drift_check.passed
                     and not drift_findings
-                    and drift_check.message.startswith("drift skipped")
+                    and drift_check.message.startswith(DRIFT_SKIP_PREFIX)
                 ):
                     click.echo(
                         f"{STATUS_SYMBOLS['warning']} {drift_check.message}",

@@ -407,6 +407,12 @@ def _check_includes_consent(
     )
 
 
+#: Prefix used in the drift :class:`CheckResult` message when the check is
+#: skipped due to a cold cache.  ``audit.py`` imports this to detect the
+#: skip case without comparing against a raw string literal.
+DRIFT_SKIP_PREFIX = "drift skipped"
+
+
 def _check_drift(
     project_root: Path,
     lockfile: LockFile,
@@ -453,7 +459,7 @@ def _check_drift(
                 name="drift",
                 passed=True,
                 message=(
-                    "drift skipped: install cache not populated "
+                    f"{DRIFT_SKIP_PREFIX}: install cache not populated "
                     "(run 'apm install' first or pass --no-drift)"
                 ),
             ),
