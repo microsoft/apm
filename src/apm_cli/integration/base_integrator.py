@@ -68,10 +68,14 @@ class BaseIntegrator:
         """Return True if *target_path* is a user-authored collision.
 
         A collision exists when **all** of these are true:
-        1. ``managed_files`` is not ``None`` (manifest mode)
-        2. ``target_path`` already exists on disk
-        3. ``rel_path`` is **not** in the managed set (-> user-authored)
-        4. ``force`` is ``False``
+        1. ``target_path`` already exists on disk
+        2. ``rel_path`` is **not** in the managed set (-> user-authored)
+        3. ``force`` is ``False``
+
+        When ``managed_files`` is ``None`` it is treated as an empty set:
+        no files are managed, so any pre-existing file at the target path
+        is considered a user-authored collision and is protected from
+        silent overwrite.
 
         When *diagnostics* is provided the skip is recorded there;
         otherwise a warning is emitted via ``_rich_warning``.
@@ -80,7 +84,7 @@ class BaseIntegrator:
            forward-slash separators (see ``normalize_managed_files``).
         """
         if managed_files is None:
-            return False
+            managed_files = set()
         if not target_path.exists():
             return False
         # managed_files is pre-normalized at the call site  -- O(1) lookup

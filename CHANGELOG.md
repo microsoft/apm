@@ -10,20 +10,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `apm compile` scoped instructions can now opt into `placement:` frontmatter (`root`, `subdirectory`, or a project-relative directory) to override automatic instruction placement. (#1234)
-- Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
-- `shared/apm.md` gh-aw shared workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles instead of always packing every layout. (#1184)
 
 ### Fixed
 
-- `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback. The defensive expression broke gh-aw's bare-expression substitution regex, causing consumer-supplied `target:` values to be silently dropped; the `import-schema` default already covers the omitted-input case. (#1185)
-- `apm install --target all` no longer enumerates the experimental `copilot-cowork` target, which was crashing project-scope installs with a "requires --global" error and made `gh aw` workflows that pin `target: all` unusable. (#1191)
-- Stabilized `test_install_over_defer_threshold_starts_live_once` on slow CI runners by joining the deferred-start timer thread instead of relying on a 100ms grace window. (#1191)
-- `triage-panel` scheduled sweep now paginates the candidate query oldest-first via the GitHub MCP `list_issues` tool instead of a single 200-issue page, so daily runs actually drain the untriaged backlog rather than processing one issue per cron tick. (#1193)
-- `triage-panel` scheduled sweep switches the candidate query from `list_issues`+prose-driven pagination to `search_issues` with `-label:status/triaged sort:created-asc`, so untriaged candidates are filtered server-side; the previous approach silently noop'd because the MCP gateway DIFC filter dropped non-collaborator issues mid-page and the agent inferred a false `hasNextPage:false`.
-- `apm install` now accepts the YAML list form under `target:` (e.g. `target: [copilot, claude]`); previously crashed with a garbled `Unknown target` error. (#1197)
-- `apm install --update` now falls back from a stale `ADO_APM_PAT` to an `az login` AAD bearer in the preflight auth probe, matching the behavior of `apm install` and every other ADO call site. Previously the preflight raised `AuthenticationError` on 401/403 even when `az login` would have succeeded. The bearer env also pops any pre-existing `GIT_TOKEN` so the JWT flows only via `GIT_CONFIG_VALUE_0`, and the per-host stale-PAT warning dedup is lock-guarded so parallel installs against the same ADO host emit one warning instead of one-per-thread. (#1212)
-- `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target, which `apm targets` intentionally omits from its table. The canonical set still accepts `agent-skills` via `--target` and `apm.yml`, but the recovery path printed on errors now matches what the discovery command actually lists. (#1215)
-- `apm pack` no longer hardcodes `pack.target` into bundles; bundles are target-agnostic and `apm install <bundle>` resolves the consumer target from project context and wires bundle `.mcp.json` servers per target via `MCPIntegrator`. (#1217)
+- Pin `Path.home()` under unit tests via a session-scoped autouse conftest fixture, fixing 56 Windows runner failures on the new `windows-2025-vs2026` GitHub-hosted image where `USERPROFILE`/`HOMEDRIVE`+`HOMEPATH` are not seeded for pytest workers; also patch the `_check_and_notify_updates` import binding in the disabled-self-update test so it no longer races on the version-check cache. (#1270)
+- `apm install` now works on macOS git 2.53.0 (Homebrew): bare-cache commands switch to `--git-dir` to satisfy the `safe.bareRepository=explicit` default; fetched SHAs are pinned as synthetic refs so `git clone --local --shared` no longer silently omits them. (#1268)
+- Set the unit-test hermetic HOME at conftest import time so a single xdist worker on the `windows-2025-vs2026` runner can no longer race fixture setup and re-trigger the 53 `Path.home()` failures the session-scoped autouse fixture was supposed to prevent. (#1271)
+- Override `Path.home()` itself in the root test conftest so the 46 remaining Windows `RuntimeError: Could not determine home directory` failures on xdist worker `gw2` cannot recur regardless of which conftest the worker imports first; per-test `monkeypatch.setenv("HOME", ...)` continues to work because the override consults env vars before falling back to the hermetic tmp dir. (#1272)
+- Retry the `apm mcp search` and `apm mcp show` integration tests on the documented "Could not reach MCP registry" transient (with backoff and a final skip) so a brief `api.mcp.github.com` outage no longer red-marks the Windows integration job. (#1274)
+- Also wrap `Path.expanduser()` in the root test conftest so the `windows-2025-vs2026` runner cannot raise `RuntimeError("Could not determine home directory.")` from `ntpath.expanduser` when production code (e.g. `install.package_resolution.user_scope_rejection_reason`) calls `Path("~/pkg").expanduser()`. Falls back to the hermetic tmp dir; assertions about `~/pkg` being absolute still hold. (#1276)
+
+## [0.13.0] - 2026-05-11
+
+### Breaking Changes
+
+- The CLI self-updater moved from `apm update` to `apm self-update`. Inside an `apm.yml` project the bare `apm update` verb now refreshes project dependencies (matching `npm update`, `uv lock --upgrade`, `cargo update`); outside a project it forwards to `apm self-update` with a deprecation banner for one release. CI scripts that called `apm update` to refresh the binary should migrate now: `sed -i 's/apm update/apm self-update/g' your_scripts`. (#1244)
+
+### Added
+
+- `apm update` refreshes project dependencies the way npm/pip/cargo users expect: resolves `apm.yml` against latest refs, shows an added/updated/removed/unchanged plan, and prompts before mutating anything (`--yes` skips, `--dry-run` previews). (#1244)
+- `apm self-update` updates the APM CLI binary itself (or shows distributor guidance when self-update is disabled at build time); `--check` only checks for a newer version. (#1244)
+- `apm install --frozen` performs a CI-safe, read-only install that fails fast (exit 1) when `apm.lock.yaml` is missing or out of sync with `apm.yml`; mutually exclusive with `--update`. (#1244)
+- Zero-config private-package auth on github.com, `*.ghe.com`, and GHES when the `gh` CLI is logged in: APM uses `gh auth token --hostname <host>` before falling back to `git credential fill`. (#630)
+- GitLab marketplace and install support: `gitlab.com` and self-managed instances (via `GITLAB_HOST` / `APM_GITLAB_HOSTS`) use GitLab REST v4 for `marketplace.json` and raw file reads; nested group paths are disambiguated via object-form `git:` + `path:`. (#1149)
+- Virtual subdirectory and raw-file packages now resolve from self-hosted Git services (Gitea, Gogs) via raw URL with API v1/v3 fallback. (#587)
+- `git: parent` lets packages in a git monorepo reference sibling paths via `{ git: parent, path: ... }` without repeating the full `git:` URL; the lockfile stores expanded host, repo, and resolved ref like every other virtual git dependency. (#1149)
+- `shared/apm.md` gh-aw workflow exposes a `target:` import input (default `all`) so consumer workflows can ship slim, single-harness bundles. (#1184)
+
+### Changed
+
+- `apm marketplace browse/search/add/update` route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub and GitLab host fallbacks; a plaintext-bearer warning fires on `http://` proxies unless `PROXY_REGISTRY_ALLOW_HTTP=1` is set. (#1149)
+- `apm install --force` help text now states the flag does NOT refresh refs; the no-op nudge now reads "Lockfile already satisfied -- run `apm update` to resolve latest refs"; a one-time CI banner fires when `apm update` runs under `CI`/`GITHUB_ACTIONS` so pipelines see the dependency-refresh shift. (#1244)
+- Tier-2 smoke job runs `tests/integration/test_core_smoke.py` against the built binary, exercising `init` / `install` / `compile` / `audit` / `policy status` to fail fast on the README promises; replaces `test_runtime_smoke.py`. (#1251)
+- Integration tests now use marker-driven discovery: `requires_*` markers replace 21 `pytestmark = pytest.mark.skipif(...)` chains, `scripts/test-integration.sh` is a thin orchestrator, and new test files dropped into `tests/integration/` are picked up automatically. (#1167, #1247, #1249)
+- Integration test apm-binary resolution prefers the local build (`./dist/apm-<os>-<arch>/apm`) over a system-wide `apm` on `PATH`, so contributors validating the binary under test are not silently shadowed by a global install. (#1167)
+- Integration Tests merge-queue job is now sharded 4-way via pytest-split with `-n 2` xdist per shard, cutting wall-clock from ~30 min to ~6 min while keeping HOME-mutating tests race-safe. (#1263)
+
+### Fixed
+
+- `apm install` no longer silently overwrites pre-existing governance files; `check_collision()` now treats `managed_files=None` (first install, no lockfile) as an empty set so hand-rolled files in `.github/instructions/` are detected and protected. (#1256)
+- Policy inheritance now fails closed: child policies that omit `unmanaged_files` inherit the parent's action instead of silently defaulting to `ignore`. (#1253)
+- MCP server token injection now requires both an allowlisted server name and a verified HTTPS GitHub hostname, preventing PAT exfiltration via poisoned registry entries. (#1239)
+- `apm install --target cursor` now emits Cursor-native MCP schema (`type: stdio` / `type: http`) instead of Copilot-only fields that Cursor silently discards; `.cursor/mcp.json` is gitignored to prevent accidental token commits. (#1240)
+- `apm install` accepts full ADO HTTPS URLs with sub-path virtual packages (e.g. `https://dev.azure.com/org/proj/_git/repo/sub/path`) instead of rejecting them. (#1254)
+- `apm install` no longer crashes with exit 128 when a mono-repo package depends on a sibling pinned to a non-HEAD commit; multiple SHA-pinned refs to the same repository now share a single cached clone. (#1258, #1259)
+- `apm install --update` falls back from a stale `ADO_APM_PAT` to an `az login` AAD bearer in the preflight auth probe, matching the behavior of `apm install`; per-host stale-PAT warnings are lock-guarded so parallel installs emit one warning instead of one-per-thread. (#1212, #1214)
+- `apm install` rejects unsupported flat-format `dependencies` (e.g. `dependencies: [owner/repo]`) with a clear error and structured-format hint instead of silently ignoring them. (#1189)
+- `apm install` accepts the YAML list form under `target:` (e.g. `target: [copilot, claude]`); previously crashed with a garbled `Unknown target` error. (#1197)
+- `apm install --target all` no longer enumerates the experimental `copilot-cowork` target, which was crashing project-scope installs and making `gh aw` workflows that pin `target: all` unusable. (#1191)
+- `apm install --global <abs-local-path>` no longer rejects absolute local paths at user scope (regression from #1149); restores the post-#937 contract that only relative local paths are ambiguous at user scope. (#1247)
+- `apm install` against a `--global` scope now writes MCP entries to the scope-resolved lockfile path instead of the project lockfile. (#1236)
+- `apm install <git+https://...>` direct refs now apply the same manifest-driven credential validation as `apm.yml`-declared dependencies, closing a silent auth-fallback gap. (#1242)
+- Dependency references no longer treat `:443`/`:80`/`:22` as distinct from default-scheme ports, so two manifest entries that differ only by an explicit default port resolve to the same package. (#1237)
+- The experimental `cowork` config key is hidden from `apm config` output, and the verbose target-resolution log no longer leaks internal cowork plumbing. (#1241)
+- Multi-account Git Credential Manager users: APM selects the right GitHub account automatically per repository (no account-picker prompt) when `credential.useHttpPath = true` is set. (#1226)
+- `apm install` target-agnostic local bundles: `apm pack` no longer hardcodes `pack.target` into bundles; `apm install <bundle>` resolves the consumer target from project context and wires `.mcp.json` servers per target. (#1207, #1217)
+- `Unknown target` error suggestions no longer advertise the `agent-skills` meta-target (which `apm targets` intentionally omits); the canonical set still accepts `agent-skills` via `--target` and `apm.yml`. (#1208, #1215)
+- `apm outdated --help` now renders the missing one-line description. (#1216)
+- `shared/apm.md` no longer wraps the `target` input in a `|| 'all'` fallback that broke gh-aw's expression-substitution regex and silently dropped consumer-supplied `target:` values. (#1185, #1186)
+- GitLab monorepo marketplaces: `apm install plugin@marketplace` resolves plugins whose sources live in a subdirectory of the marketplace repository on GitLab-class hosts. (#1149)
+- Protocol-fallback port warnings are deduplicated across parallel download workers via a threading lock, so each (host, repo, port) triple warns exactly once. (#1238)
+- `apm marketplace add` accepts GitLab-class hosts; unsupported generic hosts now show separate recovery hints for GHES (`GITHUB_HOST`) and self-managed GitLab instead of only `GITHUB_HOST`. (#1149)
+- Realigned the integration suite with current product contracts: copilot-target detection requires `.github/copilot-instructions.md` (post-#1154), `apm marketplace build` is removed in favor of `apm pack`, ADO virtual collections use the SUBDIRECTORY layout (post-#1094), and the `repo:` apm.yml key is replaced by `git:`. (#1257, #1261, #1264)
+- `triage-panel` scheduled sweep now paginates oldest-first via GitHub MCP `search_issues` with `-label:status/triaged sort:created-asc`, so daily runs drain the untriaged backlog instead of processing one issue per cron tick. (#1193, #1194)
 
 ## [0.12.4] - 2026-05-07
 

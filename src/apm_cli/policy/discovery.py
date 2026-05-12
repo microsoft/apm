@@ -1114,7 +1114,7 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
         and not policy.manifest.required_fields
         and policy.manifest.scripts == "allow"
         and policy.manifest.content_types is None
-        and policy.unmanaged_files.action == "ignore"
+        and policy.unmanaged_files.effective_action == "ignore"
     )
 
 

@@ -63,10 +63,7 @@ if _AZ_AVAILABLE and os.getenv("APM_TEST_ADO_BEARER") == "1":
     except Exception:
         _BEARER_REACHABLE = False
 
-pytestmark = pytest.mark.skipif(
-    not (_AZ_AVAILABLE and _BEARER_REACHABLE and os.getenv("APM_TEST_ADO_BEARER") == "1"),
-    reason="Requires az CLI logged in + APM_TEST_ADO_BEARER=1",
-)
+pytestmark = pytest.mark.requires_ado_bearer
 
 
 def run_apm(

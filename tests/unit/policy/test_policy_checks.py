@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from apm_cli.models.apm_package import clear_apm_yml_cache
+from apm_cli.policy.inheritance import merge_policies
 from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.policy_checks import (
     _check_compilation_strategy,
@@ -652,6 +653,206 @@ class TestUnmanagedFiles:
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert result.passed
         assert "capped" in result.message.lower()
+
+    # -- Regression tests for #1199 ------------------------------------
+
+    def test_handrolled_instruction_flagged_as_unmanaged(self, tmp_path: Path) -> None:
+        """Hand-rolled files in .github/instructions/ are flagged as unmanaged.
+
+        Regression guard for #1199: a file that exists in the governance
+        directory but is absent from every dependency's deployed_files must
+        be reported as unmanaged when action='deny'.
+        """
+        instructions_dir = tmp_path / ".github" / "instructions"
+        instructions_dir.mkdir(parents=True)
+        # A file managed by a dependency.
+        (instructions_dir / "managed.instructions.md").write_text("managed", encoding="utf-8")
+        # A hand-rolled file not tracked by any dependency.
+        (instructions_dir / "handrolled.instructions.md").write_text(
+            "hand-rolled", encoding="utf-8"
+        )
+        lock = _make_lockfile(
+            [
+                {
+                    "repo_url": "org/pkg",
+                    "deployed_files": [".github/instructions/managed.instructions.md"],
+                }
+            ]
+        )
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert not result.passed
+        assert ".github/instructions/handrolled.instructions.md" in result.details
+
+    def test_handrolled_file_not_masked_by_deployed_deps(self, tmp_path: Path) -> None:
+        """A hand-rolled file is flagged even when sibling files are managed.
+
+        Regression guard for #1199: the presence of dependency-deployed files
+        in the same directory must not suppress the report for adjacent
+        hand-rolled files.
+        """
+        instructions_dir = tmp_path / ".github" / "instructions"
+        instructions_dir.mkdir(parents=True)
+        # Two managed files deployed by the dependency.
+        (instructions_dir / "a.instructions.md").write_text("a", encoding="utf-8")
+        (instructions_dir / "b.instructions.md").write_text("b", encoding="utf-8")
+        # One hand-rolled file alongside the managed ones.
+        (instructions_dir / "rogue.instructions.md").write_text("rogue", encoding="utf-8")
+        lock = _make_lockfile(
+            [
+                {
+                    "repo_url": "org/team-pkg",
+                    "deployed_files": [
+                        ".github/instructions/a.instructions.md",
+                        ".github/instructions/b.instructions.md",
+                    ],
+                }
+            ]
+        )
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert not result.passed
+        assert ".github/instructions/rogue.instructions.md" in result.details
+        # Managed files must NOT appear in the unmanaged details list.
+        assert ".github/instructions/a.instructions.md" not in result.details
+        assert ".github/instructions/b.instructions.md" not in result.details
+
+    def test_handrolled_file_across_governance_dirs(self, tmp_path: Path) -> None:
+        """Hand-rolled files in instructions/, hooks/, and agents/ are all flagged.
+
+        Regression guard for #1199: the audit must behave consistently across
+        every governance directory, not just .github/agents/.
+        """
+        for subdir in ("instructions", "hooks", "agents"):
+            target = tmp_path / ".github" / subdir
+            target.mkdir(parents=True)
+            (target / f"handrolled.{subdir}.md").write_text("hand-rolled", encoding="utf-8")
+        # No dependency deploys any of these files.
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(
+            action="deny",
+            directories=[
+                ".github/instructions",
+                ".github/hooks",
+                ".github/agents",
+            ],
+        )
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert not result.passed
+        assert ".github/instructions/handrolled.instructions.md" in result.details
+        assert ".github/hooks/handrolled.hooks.md" in result.details
+        assert ".github/agents/handrolled.agents.md" in result.details
+
+    def test_local_deployed_files_not_flagged(self, tmp_path: Path) -> None:
+        """Files in local_deployed_files are treated as managed and not flagged.
+
+        Regression guard for #1199: the virtual _SELF_KEY dependency that APM
+        synthesises from local_deployed_files must exempt those paths from the
+        unmanaged-files check.
+        """
+        from apm_cli.deps.lockfile import LockFile
+
+        instructions_dir = tmp_path / ".github" / "instructions"
+        instructions_dir.mkdir(parents=True)
+        managed_path = ".github/instructions/managed.instructions.md"
+        (tmp_path / managed_path).write_text("managed locally", encoding="utf-8")
+
+        # Build a LockFile with local_deployed_files then round-trip through
+        # YAML so the _SELF_KEY virtual entry is synthesised.
+        lock = LockFile()
+        lock.local_deployed_files = [managed_path]
+        lock_file = tmp_path / "apm.lock.yaml"
+        lock.write(lock_file)
+        lock = LockFile.read(lock_file)
+
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert result.passed
+        assert managed_path not in result.details
+
+    def test_dir_prefix_does_not_mask_instructions(self, tmp_path: Path) -> None:
+        """A trailing-slash directory entry only covers its own subtree.
+
+        Regression guard for #1199: a deployed directory prefix such as
+        '.github/skills/my-skill/' must not suppress unmanaged-file detection
+        in a different governance directory (.github/instructions/).
+        """
+        skills_dir = tmp_path / ".github" / "skills" / "my-skill"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "SKILL.md").write_text("skill content", encoding="utf-8")
+
+        instructions_dir = tmp_path / ".github" / "instructions"
+        instructions_dir.mkdir(parents=True)
+        (instructions_dir / "handrolled.instructions.md").write_text(
+            "hand-rolled", encoding="utf-8"
+        )
+
+        lock = _make_lockfile(
+            [
+                {
+                    "repo_url": "org/skills-pkg",
+                    # Trailing slash marks an entire directory as managed.
+                    "deployed_files": [".github/skills/my-skill/"],
+                }
+            ]
+        )
+        policy = UnmanagedFilesPolicy(
+            action="deny",
+            directories=[".github/skills", ".github/instructions"],
+        )
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert not result.passed
+        # The hand-rolled instruction file must be flagged...
+        assert ".github/instructions/handrolled.instructions.md" in result.details
+        # ...while files under the managed skill directory must NOT be flagged.
+        assert ".github/skills/my-skill/SKILL.md" not in result.details
+
+    def test_action_none_resolves_to_ignore(self, tmp_path):
+        """action=None standalone: effective_action resolves to 'ignore', check passes."""
+        policy = UnmanagedFilesPolicy(action=None)
+        result = _check_unmanaged_files(tmp_path, None, policy)
+        assert result.passed
+
+    def test_action_none_inherits_parent_deny(self, tmp_path):
+        """action=None + parent deny: merge propagates deny to child."""
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        )
+        child = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action=None))
+        merged = merge_policies(parent, child)
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
+        assert not result.passed
+
+    def test_rogue_file_caught_parent_deny_child_omits_block(self, tmp_path):
+        """Rogue file is caught when parent says deny but child omits unmanaged_files block."""
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        )
+        child = ApmPolicy()  # child omits unmanaged_files entirely (defaults to action=None)
+        merged = merge_policies(parent, child)
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
+        assert not result.passed
+        assert ".github/agents/rogue.md" in result.details
+
+    def test_integration_chain_deny_propagates(self, tmp_path):
+        """Integration chain: parent deny + child omits block -> merge -> check catches rogue file."""
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
+        parent_policy = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        )
+        child_policy = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action=None))
+        merged = merge_policies(parent_policy, child_policy)
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
+        assert not result.passed
+        assert ".github/agents/rogue.md" in result.details
 
 
 # -- Integration: run_policy_checks ---------------------------------

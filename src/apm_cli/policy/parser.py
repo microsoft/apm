@@ -210,7 +210,7 @@ def _build_policy(data: dict) -> ApmPolicy:
 
     uf_data = data.get("unmanaged_files") or {}
     unmanaged_files = UnmanagedFilesPolicy(
-        action=uf_data.get("action", UnmanagedFilesPolicy.action),
+        action=uf_data.get("action"),  # None when absent -> "no opinion"
         directories=_parse_tuple(uf_data.get("directories")),
     )
 

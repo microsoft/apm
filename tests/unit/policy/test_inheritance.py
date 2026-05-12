@@ -425,6 +425,73 @@ class TestUnmanagedFilesMerge(unittest.TestCase):
         self.assertEqual(result.unmanaged_files.directories, (".prompts",))
 
 
+class TestUnmanagedFilesTransparency(unittest.TestCase):
+    """Child omitting unmanaged_files is transparent (fixes #1198)."""
+
+    def test_parent_deny_child_omits_block(self):
+        """Parent deny + child omits -> merged deny."""
+        result = merge_policies(
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
+            ApmPolicy(),  # child omits unmanaged_files entirely -> action=None
+        )
+        self.assertEqual(result.unmanaged_files.action, "deny")
+
+    def test_parent_deny_child_explicit_ignore(self):
+        """Parent deny + child explicitly sets ignore -> merged deny (escalation)."""
+        result = merge_policies(
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="ignore")),
+        )
+        self.assertEqual(result.unmanaged_files.action, "deny")
+
+    def test_parent_warn_child_explicit_deny(self):
+        """Parent warn + child explicitly sets deny -> merged deny (child tightens)."""
+        result = merge_policies(
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="warn")),
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
+        )
+        self.assertEqual(result.unmanaged_files.action, "deny")
+
+    def test_parent_ignore_child_omits(self):
+        """Parent ignore + child omits -> merged ignore."""
+        result = merge_policies(
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="ignore")),
+            ApmPolicy(),
+        )
+        self.assertEqual(result.unmanaged_files.action, "ignore")
+
+    def test_parent_none_child_omits(self):
+        """Both omit -> merged None (no opinion)."""
+        result = merge_policies(
+            ApmPolicy(),
+            ApmPolicy(),
+        )
+        self.assertIsNone(result.unmanaged_files.action)
+        self.assertEqual(result.unmanaged_files.effective_action, "ignore")
+
+    def test_directories_inherited_when_child_omits(self):
+        """Parent directories preserved when child omits the block."""
+        result = merge_policies(
+            ApmPolicy(
+                unmanaged_files=UnmanagedFilesPolicy(action="deny", directories=(".github", "docs"))
+            ),
+            ApmPolicy(),  # child omits
+        )
+        self.assertEqual(result.unmanaged_files.action, "deny")
+        self.assertEqual(sorted(result.unmanaged_files.directories), [".github", "docs"])
+
+    def test_three_level_chain_transparency(self):
+        """Enterprise deny -> org omits -> repo omits -> deny preserved."""
+        result = resolve_policy_chain(
+            [
+                ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
+                ApmPolicy(),  # org omits
+                ApmPolicy(),  # repo omits
+            ]
+        )
+        self.assertEqual(result.unmanaged_files.action, "deny")
+
+
 class TestResolvePolicyChain(unittest.TestCase):
     """Full chain resolution with three levels."""
 

@@ -18,7 +18,6 @@ Network-dependent. Skipped unless ``APM_RUN_INTEGRATION_TESTS=1``.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -36,10 +35,7 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("APM_RUN_INTEGRATION_TESTS") != "1",
-    reason="Set APM_RUN_INTEGRATION_TESTS=1 to run network-dependent tests",
-)
+pytestmark = pytest.mark.requires_network_integration
 
 
 _OWNER = "github"

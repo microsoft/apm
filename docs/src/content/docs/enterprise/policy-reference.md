@@ -345,8 +345,10 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | `ref-consistency` | Every dependency's manifest ref matches the lockfile's resolved ref |
 | `deployed-files-present` | All files listed in lockfile `deployed_files` exist on disk |
 | `no-orphaned-packages` | No lockfile packages are absent from the manifest |
+| `skill-subset-consistency` | `skills:` selections in `apm.yml` match `skill_subset` in the lockfile |
 | `config-consistency` | MCP server configs match lockfile baseline |
-| `content-integrity` | Deployed files contain no critical hidden Unicode characters |
+| `content-integrity` | Deployed files contain no critical hidden Unicode characters and their SHA-256 hashes match the lockfile |
+| `includes-consent` | Advisory check that `includes:` selections in the manifest match what was deployed |
 
 ### Policy checks (run with `--ci --policy`)
 
@@ -524,7 +526,7 @@ dependencies:
 ## Install-time enforcement
 
 :::note[Non-goal: structured output]
-Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli-commands/#apm-audit---scan-for-hidden-unicode-characters) in the CLI reference.
+Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli/install/) in the CLI reference.
 :::
 
 ### 1. What APM policy is
@@ -764,6 +766,16 @@ A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at pa
 Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "sha256:" $1}'`.
 
 ### 9.7. `apm policy status`: diagnostic snapshot
+
+:::caution[Always exits 0 by default]
+`apm policy status` ALWAYS exits 0 in its default mode, even when
+policy discovery fails or the resolved policy reports violations. It
+is a diagnostic surface, not a CI gate. To make CI fail when policy
+is unreachable or misconfigured, pass `--check` (exits 1 unless
+`outcome=found`). To gate on rule violations, use
+`apm audit --ci --policy <source>` -- baseline + policy checks
+contribute to its non-zero exit.
+:::
 
 Inspect the current policy posture without running an install or audit. The default exit code is always 0, so it is safe for human and SIEM use:
 

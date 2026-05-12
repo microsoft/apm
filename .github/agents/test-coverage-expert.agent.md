@@ -148,7 +148,12 @@ it via tool calls before emitting it as a finding. The procedure:
 5. **Probe the test tree** with `view` / `grep` / `glob`:
    - Look in `tests/unit/<area>/` for unit tests on the touched module.
    - Look in `tests/integration/` for integration tests on the touched
-     command or flow.
+     command or flow. New integration tests must follow the marker
+     placement contract in
+     [`.apm/instructions/tests.instructions.md`](../../.apm/instructions/tests.instructions.md);
+     flag ungated live-network or runtime-binary calls in
+     `tests/integration/` as `recommended` regardless of whether the
+     test self-skips at runtime.
    - Search for the specific symbol, error string, or flag name being
      changed. Absence of ANY hit on the changed symbol is a strong
      signal of a coverage gap.

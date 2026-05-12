@@ -28,18 +28,7 @@ class PromptIntegrator(BaseIntegrator):
         Returns:
             List[Path]: List of absolute paths to .prompt.md files
         """
-        prompt_files = []
-
-        # Search in package root
-        if package_path.exists():
-            prompt_files.extend(package_path.glob("*.prompt.md"))
-
-        # Search in .apm/prompts/
-        apm_prompts = package_path / ".apm" / "prompts"
-        if apm_prompts.exists():
-            prompt_files.extend(apm_prompts.glob("*.prompt.md"))
-
-        return prompt_files
+        return self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"])
 
     def copy_prompt(self, source: Path, target: Path) -> int:
         """Copy prompt file verbatim with link resolution.
@@ -51,6 +40,8 @@ class PromptIntegrator(BaseIntegrator):
         Returns:
             int: Number of links resolved
         """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
         target.write_text(content, encoding="utf-8")

@@ -7,18 +7,17 @@ and that compile does not modify skill files.
 These tests require network access to GitHub.
 """
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-# Skip all tests if GITHUB_APM_PAT is not set
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+# Skip all tests if GITHUB_APM_PAT is not set or apm binary missing
+pytestmark = [
+    pytest.mark.requires_github_token,
+    pytest.mark.requires_apm_binary,
+]
 
 
 @pytest.fixture

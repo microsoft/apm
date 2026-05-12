@@ -371,10 +371,7 @@ class TestPluginHeroScenarios:
 # Class 2 — NETWORK E2E tests (real CLI, requires GitHub token)
 # ===========================================================================
 
-pytestmark_network = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark_network = pytest.mark.requires_github_token
 
 
 @pytest.fixture
@@ -403,6 +400,7 @@ def temp_project(tmp_path):
         "  apm: []\n"
     )
     (project_dir / ".github").mkdir()
+    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
     return project_dir
 
 

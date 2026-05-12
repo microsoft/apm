@@ -91,7 +91,7 @@ The scope matrix below is the contract. Every row maps a security or operational
 | Transitive MCP trust (policy field) | `mcp.trust_transitive` | -- | `[!] parsed but not enforced` (gate is the `--trust-transitive-mcp` CLI flag) | -- |
 | Manifest content types | `manifest.content_types` | -- | `[!] parsed but not enforced` | -- |
 
-The full schema and the canonical 7+17 check enumeration live in the [Policy Reference](../policy-reference/). The 7 baseline lockfile checks (lockfile presence, ref consistency, deployed files present, no orphaned packages, MCP config consistency, content integrity, includes consent) run on every `apm audit --ci` regardless of policy and are non-bypassable -- they are covered in section 7.
+The full schema and the canonical 8+17 check enumeration live in the [Policy Reference](../policy-reference/). The 8 baseline lockfile checks (lockfile presence, ref consistency, deployed files present, no orphaned packages, skill-subset consistency, MCP config consistency, content integrity, includes consent) run on every `apm audit --ci` regardless of policy and are non-bypassable -- they are covered in section 7.
 
 `manifest.require_explicit_includes` (`bool`, default `false`) deserves a callout: when set to `true`, the `explicit-includes` check rejects any `apm.yml` that omits `includes:` or sets `includes: auto`. Use this when every published local file must be enumerated in the manifest and reviewable in PR diffs. See the [`includes` field](../../reference/manifest-schema/#39-includes) for the three accepted forms.
 
@@ -136,7 +136,7 @@ graph TD
 
     DryRun["apm install --dry-run"] --> DryPre["[*] Preview only<br/>install_preflight dry_run=True<br/>'Would be blocked' lines, no raise"]
 
-    Audit["apm audit --ci<br/>--policy &lt;scope&gt;"] --> AuditRun["[*] Enforcement point 4<br/>7 baseline + 17 policy checks<br/>(only enforcer of audit-only fields)"]
+    Audit["apm audit --ci<br/>--policy &lt;scope&gt;"] --> AuditRun["[*] Enforcement point 4<br/>8 baseline + 17 policy checks<br/>(only enforcer of audit-only fields)"]
 
     style Start fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
     style Gate fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px,color:#000
@@ -165,7 +165,7 @@ When you install an APM package that itself declares MCP dependencies, those MCP
 
 ### 5d. `apm audit --ci --policy <scope>`
 
-The only enforcer of the audit-only checks (`compilation-strategy`, `source-attribution`, `required-manifest-fields`, `scripts-policy`, `unmanaged-files`). Runs the 7 baseline lockfile checks unconditionally, then -- if a policy is discovered or supplied -- runs the 17 policy checks. This is the check you wire into branch protection.
+The only enforcer of the audit-only checks (`compilation-strategy`, `source-attribution`, `required-manifest-fields`, `scripts-policy`, `unmanaged-files`). Runs the 8 baseline lockfile checks unconditionally, then -- if a policy is discovered or supplied -- runs the 17 policy checks. This is the check you wire into branch protection.
 
 ---
 
@@ -274,8 +274,8 @@ This is the certitude section. Read it twice if you are deciding whether `apm au
 
 | Surface | What it bypasses LOCALLY | What it CANNOT bypass | Reviewable in |
 |---|---|---|---|
-| `apm install --no-policy` | All 17 policy checks at install (incl. transitive MCP, hash pin) | The 7 baseline checks plus integration drift detection in `apm audit --ci` | git diff of `apm.lock.yaml` in PR |
-| `APM_POLICY_DISABLE=1` env | Same as `--no-policy` plus the 17 audit policy checks | The 7 baseline checks plus integration drift detection in `apm audit --ci` | PR diff; CI env vars in Actions logs |
+| `apm install --no-policy` | All 17 policy checks at install (incl. transitive MCP, hash pin) | The 8 baseline checks plus integration drift detection in `apm audit --ci` | git diff of `apm.lock.yaml` in PR |
+| `APM_POLICY_DISABLE=1` env | Same as `--no-policy` plus the 17 audit policy checks | The 8 baseline checks plus integration drift detection in `apm audit --ci` | PR diff; CI env vars in Actions logs |
 | Manual edit to `apm.lock.yaml` | Nothing; install regenerates the file each run | Audit baseline `ref-consistency` and `deployed-files-present` | git diff |
 | Manual edit to deployed file post-install | Local file content until next audit | Audit baseline `content-integrity` (re-hashes deployed files); hidden-Unicode scan in `apm audit` content mode | git diff of the deployed file in PR |
 | Direct `git clone` of an APM package, bypassing install | Everything; nothing detects out-of-band file drops | Audit baseline `no-orphaned-packages` and audit-only `unmanaged-files` | git diff |
@@ -287,12 +287,12 @@ This is the certitude section. Read it twice if you are deciding whether `apm au
 Notes on specific rows:
 
 - **`apm install --no-policy`** also bypasses the `apm install --mcp` preflight, the transitive-MCP preflight, and any project-side `policy.hash` pin.
-- **`APM_POLICY_DISABLE=1`** short-circuits discovery to `outcome="disabled"` everywhere -- including `apm audit --ci`, where the 17 policy checks are skipped (the 7 baseline checks and integration drift detection still run).
+- **`APM_POLICY_DISABLE=1`** short-circuits discovery to `outcome="disabled"` everywhere -- including `apm audit --ci`, where the 17 policy checks are skipped (the 8 baseline checks and integration drift detection still run).
 - **Manual lockfile edits**: `content_hash` mismatch on registry-proxy deps is caught at the next install when downloads resume.
 - **Direct `git clone`**: `unmanaged-files` only flags governed dirs and only when configured to `warn` / `deny`.
 - **Fork-to-personal-org**: discovery resolves via `git remote get-url origin`; branch protection on the upstream repo is the trust boundary.
 
-**The non-bypass contract.** The 7 baseline lockfile checks (run by `apm audit --ci` *without* `--no-policy` or `APM_POLICY_DISABLE=1`) are unconditional. They do not consult the policy file, do not depend on org discovery, and are not affected by either escape hatch. Combined with branch protection that requires `apm audit --ci` to pass, no developer override is invisible: a `--no-policy` install leaves a lockfile that audit will reject if the result is inconsistent, and an `APM_POLICY_DISABLE=1` audit run cannot itself bypass the baseline checks. Every override appears in the PR diff, in the workflow file, or in the Actions environment configuration -- all of which are reviewable in code review.
+**The non-bypass contract.** The 8 baseline lockfile checks (run by `apm audit --ci` *without* `--no-policy` or `APM_POLICY_DISABLE=1`) are unconditional. They do not consult the policy file, do not depend on org discovery, and are not affected by either escape hatch. Combined with branch protection that requires `apm audit --ci` to pass, no developer override is invisible: a `--no-policy` install leaves a lockfile that audit will reject if the result is inconsistent, and an `APM_POLICY_DISABLE=1` audit run cannot itself bypass the baseline checks. Every override appears in the PR diff, in the workflow file, or in the Actions environment configuration -- all of which are reviewable in code review.
 
 **Workstation blast radius.** Because "file presence is execution" for agent files (an instruction or chat-mode file on disk is consumed by the agent runtime as soon as it is opened), the fork-to-personal-org bypass mitigates the *org's* trust gate but not the *individual workstation's*: between fork-clone-install and PR creation, the developer's machine already has the tainted files. Compensating control: an MDM-deployed mirror of `<org>/.github/apm-policy.yml` consulted by a wrapper script around `apm install`, or a workstation-level allowlist of permitted git remotes for APM-managed repos.
 
@@ -368,6 +368,11 @@ Hash-mismatch is the one outcome that can never be overridden. If your `apm.yml`
 - `cache_miss_fetch_fail` outcome -> network; check egress to api.github.com; verify cache dir writable.
 - `hash_mismatch` outcome -> SUSPECTED TAMPER; do not override; investigate org policy commit history.
 - `cached_stale` outcome -> normal if recently degraded network; force refresh with `apm policy status --no-cache`.
+
+> Reminder: `apm policy status` ALWAYS exits 0 by default -- it is a
+> diagnostic, not a gate. Use `apm policy status --check` to make CI
+> fail when no usable policy is found, and `apm audit --ci` to gate
+> on rule violations.
 - `extends rejected` outcome -> cross-host extends; remove non-canonical host from `apm-policy.yml` extends chain.
 
 ---
@@ -456,7 +461,7 @@ When a reviewer asks "who approved this policy change and why?", the forensic an
 git -C <org>/.github log --follow --patch -- apm-policy.yml
 ```
 
-For lockfile-side forensic recipes (`git log apm.lock.yaml`, `git show <sha>:apm.lock.yaml`, etc.), see the companion [Governance & Compliance](../governance/) page.
+For lockfile-side forensic recipes (`git log apm.lock.yaml`, `git show <sha>:apm.lock.yaml`, etc.), see the [Lockfile Spec](../../reference/lockfile-spec/).
 
 ---
 
@@ -501,7 +506,7 @@ These are the sharp edges. Plan around them; do not assume they are solved.
 - **Non-GitHub remotes are not auto-discovered.** If your project's `git remote get-url origin` points to ADO, GitLab, or a plain git host, policy auto-discovery falls through with no policy applied. Operational mitigation: pass `apm audit --ci --policy <path-or-url>` explicitly in those CI environments.
 - **Trust anchor is `git remote get-url origin`.** A developer who pushes the project to a personal org will have policy discovery resolve `<their-org>/.github/apm-policy.yml` -- which they control. Operational mitigation: branch protection on the canonical repo is the trust boundary; nothing about a personal fork can bypass what your CI requires before merge.
 - **`apm install --dry-run` silently downgrades hash-mismatch.** In dry-run, `raise_blocking_errors=False` (outcome_routing.py:104-119) causes the mismatch to surface as `discovery_miss` with no "Would be blocked" line and exit 0. Operational mitigation: rely on `apm audit --ci` in CI for hash-pin verification, not on `apm install --dry-run`.
-- **`apm install --no-policy` help text is misleading.** It claims "Does NOT bypass apm audit --ci" -- this is only true for the 7 baseline lockfile checks; the 17 policy checks ARE bypassed in audit when this flag (or `APM_POLICY_DISABLE=1`) is set. Operational mitigation: do not rely on the help text; the bypass contract in section 7 is authoritative.
+- **`apm install --no-policy` help text is misleading.** It claims "Does NOT bypass apm audit --ci" -- this is only true for the 8 baseline lockfile checks; the 17 policy checks ARE bypassed in audit when this flag (or `APM_POLICY_DISABLE=1`) is set. Operational mitigation: do not rely on the help text; the bypass contract in section 7 is authoritative.
 - **Gate + transitive-MCP preflight may double-emit the same MCP violation.** A single bad transitive MCP can produce two SARIF alerts with the same rule and different code paths. Operational mitigation: dedupe by `(rule_id, server_name)` when aggregating alerts in your SIEM or dashboard.
 - **No signed attestation that the gate ran.** APM does not currently produce a signed (e.g. SLSA / sigstore) attestation for the install gate or the audit run. Non-repudiation depends on the GitHub Actions audit log plus branch-protection enforcement of the required check. Operational mitigation: pair APM with branch protection requiring `apm audit --ci` as a status check; rely on GitHub's audit log for auditor evidence.
 
@@ -606,4 +611,4 @@ policy:
 - [Adoption Playbook](../adoption-playbook/) -- broader APM rollout (governance is one phase).
 - [Lockfile Spec](../../reference/lockfile-spec/) -- lockfile schema for forensic queries.
 - [GitHub Rulesets](../../integrations/github-rulesets/) -- enforcing audit as a required check.
-- [Governance & Compliance](../governance/) -- companion page covering the lockfile audit trail and SOC 2 / change-management scenarios.
+- [Lockfile Spec](../../reference/lockfile-spec/) -- companion reference covering the lockfile audit trail and forensic recipes.

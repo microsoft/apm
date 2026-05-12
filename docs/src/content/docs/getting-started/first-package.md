@@ -15,7 +15,7 @@ Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](/apm/getting-started/installation/).
+- APM installed -- see [Installation](/apm/quickstart/).
 - A GitHub account and an empty repo for publishing (step 5).
 - A runtime where you can try the result: GitHub Copilot, Claude Code, or
   Cursor.
@@ -114,7 +114,7 @@ the skill fires.
 > [`.apm/skills/python-architecture/SKILL.md`](https://github.com/microsoft/apm/blob/main/.apm/skills/python-architecture/SKILL.md)
 > in this repo. Same shape, different concern.
 
-See the [Skills guide](/apm/guides/skills/) for the full schema.
+See the [Skills guide](/apm/producer/author-primitives/skills/) for the full schema.
 
 ## 3. Add a custom agent
 
@@ -161,7 +161,7 @@ Do not rewrite the code yourself. Point and explain.
 > A real example: this repo's documentation agent lives at
 > [`.apm/agents/doc-writer.agent.md`](https://github.com/microsoft/apm/blob/main/.apm/agents/doc-writer.agent.md).
 
-See the [Agent Workflows guide](/apm/guides/agent-workflows/) for more.
+See the [Agent Workflows guide](/apm/producer/author-primitives/instructions-and-agents/) for more.
 
 ## 4. Deploy and use
 
@@ -217,7 +217,7 @@ code 2 and a teaching message instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
 `targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects
 in the current directory. To target explicitly, see the
-[Compilation guide](/apm/guides/compilation/).
+[Compilation guide](/apm/producer/compile/).
 
 > **What about `apm compile`?** Compile is a different concern: it
 > generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools
@@ -289,8 +289,8 @@ If you know up front that you want to ship a plugin, you can scaffold with
 from day one. APM still gives you dependency management, the lockfile, and
 audit while you author; pack produces the plugin bundle when you ship.
 
-For the full reference, see the [Pack & Distribute guide](/apm/guides/pack-distribute/)
-and the [Plugin authoring guide](/apm/guides/plugins/).
+For the full reference, see the [Pack & Distribute guide](/apm/producer/)
+and the [Plugin authoring guide](/apm/producer/author-primitives/).
 
 ## Choosing a package layout
 
@@ -313,13 +313,13 @@ For the full comparison and metadata precedence rules, see
 
 ## Next steps
 
-- [Anatomy of an APM Package](/apm/introduction/anatomy-of-an-apm-package/)
+- [Anatomy of an APM Package](/apm/concepts/package-anatomy/)
   -- the full mental model: `.apm/` vs `apm_modules/` vs `.github/`.
-- [Skills guide](/apm/guides/skills/) -- bundled resources, sub-skills,
+- [Skills guide](/apm/producer/author-primitives/skills/) -- bundled resources, sub-skills,
   activation tuning.
-- [Agent Workflows guide](/apm/guides/agent-workflows/) -- chaining agents,
+- [Agent Workflows guide](/apm/producer/author-primitives/instructions-and-agents/) -- chaining agents,
   GitHub Agentic Workflows integration.
-- [Dependencies guide](/apm/guides/dependencies/) -- depend on other APM
+- [Dependencies guide](/apm/consumer/manage-dependencies/) -- depend on other APM
   packages, file-level imports, version pinning.
-- [`apm audit`](/apm/reference/cli-commands/) -- scan dependencies for
+- [`apm audit`](/apm/reference/cli/install/) -- scan dependencies for
   policy violations before they ship.

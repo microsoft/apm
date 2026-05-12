@@ -99,3 +99,8 @@ def build_mcp_entry(
     # Bare string registry shorthand -- no overlays at all.
     MCPDependency.from_string(name)
     return name, False
+
+
+# Backward-compatibility alias for tests and legacy callers that imported
+# the underscore-prefixed name from apm_cli.commands.install.
+_build_mcp_entry = build_mcp_entry

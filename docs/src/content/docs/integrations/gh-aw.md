@@ -144,5 +144,5 @@ For details on what APM detects, see [Content scanning](../../enterprise/securit
 - [gh-aw Documentation](https://github.github.com/gh-aw/)
 - [gh-aw Frontmatter Reference](https://github.github.com/gh-aw/reference/frontmatter/)
 - [APM Compilation Guide](../../guides/compilation/)
-- [APM CLI Reference](../../reference/cli-commands/)
+- [APM CLI Reference](../../reference/cli/install/)
 - [CI/CD Integration](../ci-cd/)

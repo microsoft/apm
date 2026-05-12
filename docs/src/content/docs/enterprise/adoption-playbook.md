@@ -1,270 +1,212 @@
 ---
 title: "Adoption Playbook"
-description: "A phased guide to rolling out APM from a pilot team to organization-wide adoption."
+description: "A sequenced rollout plan for a platform team adopting APM across an organization, with phase gates, owners, and pitfalls."
 sidebar:
-  order: 3
+  order: 8
 ---
 
-APM adoption follows a proven pattern: start small, prove value, expand.
-This playbook walks platform teams through each phase with concrete
-milestones, success metrics, and rollback options so you can move quickly
-without betting the farm.
+This is the order to roll APM out. Five phases, each with a single owner,
+a deliverable, and a gate to clear before moving on. Read the
+[Governance overview](../governance-overview/) page first if you have not -- it is the
+contract this playbook operationalizes.
 
-## Before You Begin
+| Phase | Duration | Owner | Gate to advance |
+|---|---|---|---|
+| 1. Discover | 1-2 weeks | Platform team | Shadow install report reviewed |
+| 2. Pilot | ~1 month | One product team + platform | Pilot CI green for 2 weeks in `warn` mode |
+| 3. Harden | ~1 month | Security + Platform | Policy in `block`; proxy live if required |
+| 4. Scale | Ongoing | Platform + DevRel | 3+ teams onboarded; KPIs reported |
+| 5. Sustain | Steady state | Platform | Monthly drift sweep + lockfile review |
 
-Confirm these prerequisites before kicking off Phase 1:
+Do not skip phases. Each one buys evidence the next one needs.
 
-- APM is [installed](../../getting-started/installation/) and available in
-  your terminal.
-- You have identified a pilot team willing to try a new workflow for two
-  weeks.
-- You have a Git-hosted repository where the pilot team can work.
-- You have read access to at least one APM package registry (public or
-  private).
+---
 
-## Phase 1 -- Pilot (Week 1-2)
+## Phase 1 -- Discover (1-2 weeks)
 
-**Goal:** One team, one project, one command to a working environment.
+A small group runs `apm install` against existing repos in shadow mode to
+see what would land and what would break. No commits, no policy, no CI
+yet.
 
-### Steps
+**Owner:** Platform team (2-3 engineers).
 
-1. Choose a single project and a pilot team of 3-5 engineers.
-2. Pick 2-3 APM packages that cover the team's most common configuration
-   (for example, a linter ruleset, a set of agent instructions, and a
-   shared prompt library).
-3. Run `apm init` in the project root to scaffold `apm.yml`.
-4. Add the selected packages as dependencies:
+**Deliverables:**
 
-   ```bash
-   apm add org/lint-standards org/agent-instructions org/prompt-library
-   ```
+- A list of 5-10 representative repos covered.
+- A spreadsheet of what `apm install` would deploy in each repo and which
+  files it would conflict with.
+- A first-pass inventory of MCP servers in scope.
+- Rough sizing: how many repos, how many primitives, how many distinct
+  agent harnesses across the org. Use the
+  [primitives and targets](../../concepts/primitives-and-targets/) model
+  as the vocabulary.
 
-5. Run `apm install` to deploy files.
-6. Commit `apm.yml` and `apm.lock.yaml` to the repository.
-
-### Verification
-
-Every team member should be able to run:
+**How to run it:**
 
 ```bash
-git clone <repo> && cd <repo> && apm install
+apm install --dry-run
+apm audit
 ```
 
-and arrive at an identical, ready-to-work environment with no additional
-manual steps.
+`--dry-run` reports what would change without writing. `apm audit` runs
+the [drift detection](../drift-detection/) and content scans
+that are on by default.
 
-### Success Metric
+**Gate to advance:** the platform team can answer, in one slide: "what
+breaks if we turn this on tomorrow, and for whom?"
 
-Onboarding time drops from "read the README and manually copy files" to a
-single command.
-
-### What to Watch
-
-- Installation friction (missing runtimes, network issues).
-- Unexpected file placement -- review `apm.lock.yaml` to confirm paths.
-- Authentication errors when pulling private packages.
+**Common pitfalls:** picking only greenfield repos (include at least one
+with hand-edited `.github/`, `.cursor/`, or `.claude/` content -- that is
+where drift findings appear); treating the shadow run as a buy decision
+when it is a sizing exercise.
 
 ---
 
-## Phase 2 -- Shared Package (Week 3-4)
+## Phase 2 -- Pilot (~1 month)
 
-**Goal:** Centralize standards in a reusable package that the pilot team
-consumes.
+One production team adopts APM end to end: manifest, lockfile, CI audit,
+and policy in `warn` mode. The platform team rides along.
 
-### Steps
+**Owners:** Pilot team tech lead (workflow), platform team (policy + CI).
 
-1. Create your first organization package (for example,
-   `myorg/apm-standards`).
-2. Include baseline content:
-   - Coding standards instructions for agents.
-   - Security baseline configurations.
-   - Common prompts the team uses daily.
-3. Publish the package to your registry.
-4. Add it to the pilot project:
+**Deliverables:**
 
-   ```bash
-   apm add myorg/apm-standards
-   apm install
-   ```
+- `apm.yml` and `apm.lock.yaml` committed in the pilot repo.
+- An org policy file at `<org>/.github/apm-policy.yml` with
+  `enforcement: warn`. See [Get started with apm-policy.yml](../apm-policy-getting-started/) for the mental
+  model and [Policy Reference](../policy-reference/) for fields.
+- `apm audit --ci` wired into the pilot repo's required checks. See the
+  [CI Policy Enforcement](../enforce-in-ci/) guide.
+- A weekly review of warnings the policy would have blocked.
 
-5. Verify that the pilot team receives the new files on their next
-   `apm install`.
+**Why `warn` first:** it lets you tune the allow-lists against real
+traffic without ever red-marking a PR. The
+[Governance overview](../governance-overview/) page documents the bypass surface so
+you know exactly what `warn` mode does and does not promise.
 
-### Success Metric
+**Gate to advance:** two consecutive weeks where every pilot PR passes
+`apm audit --ci` cleanly, and every policy warning has been triaged
+(allow-listed, fixed, or accepted).
 
-When you update the shared package and the pilot team runs
-`apm deps update`, the latest standards land in their project
-automatically.
-
-### What to Watch
-
-- Version pinning: confirm that `apm.lock.yaml` captures the exact version
-  installed.
-- File collisions: if the shared package deploys a file that already exists,
-  decide whether to force-overwrite or skip.
+**Common pitfalls:** enforcing on day one (you will block legitimate
+work and lose the team -- stay in `warn` until the warning rate is near
+zero); skipping the lockfile commit (reproducibility is the whole point
+of the pilot); letting the pilot team author org policy (policy belongs
+in the `.github` repo behind branch protection; the pilot only
+consumes it).
 
 ---
 
-## Phase 3 -- CI Integration (Month 2)
+## Phase 3 -- Harden (~1 month)
 
-**Goal:** Enforce content safety in the pipeline so compromised packages
-cannot reach production.
+Tighten policy from `warn` to `block`, add a registry proxy if your org
+requires one, and stand up internal marketplaces so the next teams have
+something curated to install from.
 
-### Steps
+**Owners:** Security (policy contents, proxy contract), Platform
+(rollout, marketplace), Pilot team (regression watch).
 
-1. Add APM to your CI pipeline. `apm install` blocks deployment if any
-   package contains critical hidden-character findings — no additional
-   configuration needed:
+**Deliverables:**
 
-   ```yaml
-   - uses: microsoft/apm-action@v1
-     with:
-       audit-report: true   # Generate SARIF report for Code Scanning
-   ```
+- `enforcement: block` set on the org policy. The pilot repo is the
+  canary -- if its CI stays green for a week, the gate is real.
+- If your org standardizes on Artifactory or an equivalent: registry
+  proxy live, with the bypass-prevention contract in
+  [Registry Proxy & Air-gapped](../registry-proxy/) verified.
+- One or more org marketplaces published, replacing ad-hoc package
+  references. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/) for
+  the authoring side.
+- A short internal page documenting which packages are blessed and how
+  to request a new one.
 
-   For SARIF upload to GitHub Code Scanning, add:
+**Gate to advance:** a fresh repo, owned by neither platform nor the
+pilot team, can run `apm install` against the org policy and the proxy
+end-to-end with no manual intervention.
 
-   ```yaml
-   - uses: github/codeql-action/upload-sarif@v3
-     if: always() && steps.apm.outputs.audit-report-path
-     with:
-       sarif_file: ${{ steps.apm.outputs.audit-report-path }}
-       category: apm-audit
-   ```
-
-2. Ensure `apm.lock.yaml` is committed so installs are reproducible.
-
-### Success Metric
-
-Pull requests are blocked when packages contain critical hidden-character
-findings. No unsafe content reaches the default branch.
-
-### What to Watch
-
-- Build time impact. APM operations are fast, but confirm they add
-  acceptable overhead.
-- Lock file conflicts when multiple PRs update dependencies concurrently.
-  Resolve the same way you handle lock file conflicts in npm or pip.
+**Common pitfalls:** flipping `block` org-wide before the pilot has run
+a week on the new setting (always canary); building the marketplace
+before you know what teams want (the Discover inventory is the input);
+treating the proxy as optional when your security org mandates
+Artifactory for npm and PyPI (APM is the same conversation -- do not
+ship on direct GitHub fetches).
 
 ---
 
-## Phase 4 -- Second Team (Month 2-3)
+## Phase 4 -- Scale
 
-**Goal:** Validate that the pattern transfers to a different team and
-project.
+Roll out to more teams. Move from "the platform team helps you adopt"
+to "self-service onboarding."
 
-### Steps
+**Owners:** Platform team (enablement), DevRel or internal champions
+(per-team pull), team tech leads (per-repo work).
 
-1. Onboard a second team using the same shared package from Phase 2.
-2. The second team runs `apm init`, adds the shared package, and runs
-   `apm install` -- the same workflow the pilot team followed.
-3. Gather structured feedback:
-   - Did the shared package cover their needs, or are additions required?
-   - Were there file conflicts specific to their project layout?
-   - How long did onboarding take compared to their previous process?
-4. Iterate on the shared package based on feedback.
+**Deliverables:**
 
-### Success Metric
+- An onboarding doc that points new teams at the
+  [consumer ramp](../../consumer/install-packages/) for daily flow and
+  this playbook's Phase 2 checklist for setup.
+- Adoption KPIs reported monthly:
+  - Repos with `apm.yml` committed.
+  - `apm audit --ci` pass rate per week.
+  - Number of distinct packages installed from org marketplaces.
+  - Drift findings closed vs opened (trend, not absolute).
+- A backlog of policy refinements driven by incoming team feedback.
 
-A different project, with a different codebase, arrives at the same
-standards and the same workflow through the same shared package.
+**Gate to "done with rollout":** the platform team is no longer in the
+critical path for a new team to adopt APM. New teams onboard without
+filing a ticket.
 
-### What to Watch
-
-- Edge cases in project structure that the shared package did not
-  anticipate.
-- Requests for team-specific overrides. APM supports layered
-  configuration, so teams can extend the shared package without forking it.
-
----
-
-## Phase 5 -- Org-Wide Rollout (Month 3+)
-
-**Goal:** Establish APM as the standard mechanism for managing agent and
-tool configuration across the organization.
-
-### Steps
-
-1. Document the pattern in an internal guide. Include:
-   - How to add APM to an existing project.
-   - How to create and publish shared packages.
-   - How to handle common issues (file conflicts, version pinning,
-     registry authentication).
-2. Mandate `apm.yml` for new projects. For existing projects, adoption can
-   be voluntary initially.
-3. Enable content scanning across repositories using CI audit steps.
-4. Assign package ownership. Each shared package should have a
-   maintainer or a maintaining team.
-
-### Success Metric
-
-80% or more of active repositories contain an `apm.yml` and pass
-`apm install` content scanning in CI.
-
-### What to Watch
-
-- Stale packages. Set a review cadence for shared packages.
-- Permission sprawl. Limit who can publish packages to the organization
-  registry.
-- Adoption gaps. Track which teams have not yet onboarded and offer
-  hands-on support.
+**Common pitfalls:** mandating adoption without offering a marketplace
+worth installing from (carrot before stick); measuring `apm.yml` count
+and nothing else (audit pass rate and drift trend are the leading
+indicators -- manifest count is vanity); letting policy ossify
+(schedule a quarterly review).
 
 ---
 
-## Common Objections
+## Phase 5 -- Sustain
 
-Adoption conversations surface the same questions repeatedly. Here are
-direct answers.
+Steady-state operations.
 
-### "We already have tool plugins configured."
+**Owner:** Platform team (rotating on-call).
 
-APM does not replace your existing configuration. It wraps and manages the
-files your tools already read. You gain a lock file, version pinning, and
-cross-project consistency on top of what you already have.
+**Cadence:**
 
-### "This is another tool to maintain."
+- **Weekly:** triage `apm audit --ci` failures across the org. Most are
+  drift; the [Drift Detection](../drift-detection/) guide is
+  the runbook.
+- **Monthly:** lockfile review on long-lived repos. Bump pinned
+  versions of org-required packages; close drift findings older than
+  one cycle.
+- **Quarterly:** marketplace refresh. Retire unused packages. Promote
+  internal tools that have proven themselves into the org marketplace.
+  Re-read the [Governance overview](../governance-overview/) known-gaps section
+  against the current APM version.
 
-APM has zero runtime footprint. It generates files and exits. There is no
-daemon, no background process, and no runtime dependency in your
-application. Maintenance cost is limited to updating package versions in
-`apm.yml`.
+**Health signals to watch:**
 
-### "What if we stop using it?"
+- Audit pass rate trending down -> drift is accumulating; investigate
+  before it becomes a release blocker.
+- Policy warning rate climbing -> teams are reaching for packages the
+  marketplace does not cover; consider adding them.
+- Time-to-onboard a new team creeping up -> the onboarding doc has
+  drifted from reality; refresh it.
 
-Delete `apm.yml` and `apm.lock.yaml`. The native configuration files APM
-deployed remain in place and continue to work exactly as they did before.
-There is no lock-in.
-
-### "Our developers will not adopt this."
-
-One command replaces multiple manual setup steps. Teams that adopt APM
-report that the workflow is self-reinforcing: once a developer sees
-`apm install` reproduce a working environment in seconds, they do not
-go back to manual configuration.
-
----
-
-## Rollback Plan
-
-At any phase, you can reverse course:
-
-1. Remove `apm.yml` and `apm.lock.yaml` from the repository.
-2. The configuration files APM deployed remain on disk and continue to
-   function. Your tools read native files, not APM-specific formats.
-3. Optionally, remove APM from CI steps.
-
-APM is designed for zero lock-in. Removing it leaves your project in a
-working state with standard configuration files.
+**Common pitfalls:** no named owner ("the platform team" is not an
+owner; a named on-call is); treating policy as set-and-forget (the
+threat model and the agent ecosystem move; the policy must too).
 
 ---
 
-## Related Resources
+## Related
 
-- [Getting Started](../../getting-started/installation/) -- Install APM
-  and create your first project.
-- [Org-Wide Packages](../../guides/org-packages/) -- Create and manage
-  shared packages for your organization.
-- [CI/CD Pipelines](../../integrations/ci-cd/) -- Add APM
-  to your continuous integration pipeline.
-- [Governance](../governance/) -- Enforce standards and
-  audit compliance across repositories.
+- [Making the Case](../making-the-case/) -- the pitch deck inputs for
+  Phase 1 stakeholder buy-in.
+- [Governance overview](../governance-overview/) -- the trust contract this playbook
+  operationalizes.
+- [Security and supply chain](../security-and-supply-chain/) -- the procurement-grade answer for
+  Phase 1 review.
+- [Get started with apm-policy.yml](../apm-policy-getting-started/) and [Policy Reference](../policy-reference/)
+  -- what to put in `apm-policy.yml` for Phase 2 and Phase 3.
+- [Registry Proxy & Air-gapped](../registry-proxy/) -- Phase 3 proxy
+  rollout.

@@ -10,7 +10,6 @@ Uses two real public APM packages from GitHub:
   - github/awesome-copilot/skills/aspire
 """
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -18,10 +17,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark = [
+    pytest.mark.requires_github_token,
+    pytest.mark.requires_apm_binary,
+]
 
 
 PKG_A = "microsoft/apm-sample-package"
@@ -44,6 +43,7 @@ def temp_project(tmp_path):
     project_dir = tmp_path / "uninstall-multi-test"
     project_dir.mkdir()
     (project_dir / ".github").mkdir()
+    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
     return project_dir
 
 

@@ -20,6 +20,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.requires_apm_binary
+
 CANARY = "github_pat_BOGUS_REDACTION_CANARY_DO_NOT_LEAK"
 CANARY_CORE = "BOGUS_REDACTION_CANARY_DO_NOT_LEAK"
 
