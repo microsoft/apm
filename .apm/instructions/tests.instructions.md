@@ -107,3 +107,68 @@ production code must follow (see
 - **Targeted runs during iteration.** Run the specific test file first
   (`uv run pytest tests/unit/install/test_X.py -x`) before running the
   full suite (`uv run pytest tests/unit tests/test_console.py`).
+
+## Integration tests: placement and markers
+
+The integration suite uses **declarative gating** via pytest markers,
+not per-file orchestrator enumeration. Adding a new integration test
+is two steps.
+
+### Procedure
+
+1. Drop the file under `tests/integration/test_<feature>.py`.
+2. At the top of the module, declare the runtime / network / E2E
+   prerequisites as a single `pytestmark`:
+
+   ```python
+   import pytest
+
+   pytestmark = pytest.mark.requires_network_integration
+   # OR for multiple prerequisites:
+   pytestmark = [
+       pytest.mark.requires_e2e_mode,
+       pytest.mark.requires_runtime_codex,
+   ]
+   ```
+
+That is it. The orchestrator (`scripts/test-integration.sh`) and the
+CI integration job collect everything under `tests/integration/` in
+a single `pytest` invocation; markers are honored automatically.
+
+### Marker selection
+
+Pick the marker that matches the **strongest** prerequisite the test
+has. The full registry lives in `pyproject.toml` under
+`[tool.pytest.ini_options].markers` and is documented (with the
+opt-in commands) in
+[`docs/src/content/docs/contributing/integration-testing.md`](../../docs/src/content/docs/contributing/integration-testing.md).
+Quick map for the common cases:
+
+| Test prerequisite                            | Marker                          |
+|----------------------------------------------|---------------------------------|
+| Real HTTP to APM-owned services              | `requires_network_integration`  |
+| Real codex / copilot / llm runtime binary    | `requires_runtime_<name>`       |
+| Downloads runtimes; full E2E flow            | `requires_e2e_mode`             |
+| GitHub / ADO token required                  | `requires_github_token` / `requires_ado_pat` |
+| Paid or third-party external service         | `live` (deselected by default)  |
+| Performance measurement                      | `benchmark` (deselected by default) |
+| Hermetic (mocks all I/O)                     | *no marker required*            |
+
+Need a marker that does not exist yet? Register it in
+`pyproject.toml` AND add a row to the docs registry table in the
+same PR. Both must stay in sync.
+
+### Anti-patterns (will land as `recommended` findings on review)
+
+- **Editing `scripts/test-integration.sh` per file.** The orchestrator
+  enumerates the directory, not the files. Per-file blocks are drift
+  by construction.
+- **Runtime self-skips inside the test body.** A bare
+  `if not os.getenv("APM_E2E_TESTS"): pytest.skip(...)` runs before
+  collection-time gating and weakens the contract. Use
+  module-level `pytestmark` instead -- declarative gating is the
+  single source of truth.
+- **Reading the gate env var inside test logic.** If your test
+  reads `APM_RUN_INTEGRATION_TESTS` to branch behaviour, the marker
+  is wrong (or missing). The marker is the gate; the test body
+  should assume the gate already passed.

@@ -210,11 +210,22 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertEqual(result, server_data)
         mock_get_server_info.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
 
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
-    def test_find_server_by_reference_uuid_not_found(self, mock_get_server_info):
-        """Test finding a server by UUID that doesn't exist."""
-        # Mock get_server_info to raise ValueError
+    def test_find_server_by_reference_uuid_not_found(
+        self, mock_get_server_info, mock_search_servers
+    ):
+        """Test finding a server by UUID that doesn't exist.
+
+        When the UUID lookup raises ValueError, ``find_server_by_reference`` falls
+        through to ``search_servers``; that fallback must be mocked so the test
+        never hits the real registry (the Windows CI runner cannot resolve
+        ``api.mcp.github.com`` and the call would raise ``socket.gaierror``).
+        """
+        # Mock get_server_info to raise ValueError so the UUID branch fails.
         mock_get_server_info.side_effect = ValueError("Server not found")
+        # Mock the fallback search to return no hits (the "not found" case).
+        mock_search_servers.return_value = []
 
         # Call the method with UUID
         result = self.client.find_server_by_reference("123e4567-e89b-12d3-a456-426614174000")
@@ -222,6 +233,7 @@ class TestSimpleRegistryClient(unittest.TestCase):
         # Should return None when server not found
         self.assertIsNone(result)
         mock_get_server_info.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
+        mock_search_servers.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")

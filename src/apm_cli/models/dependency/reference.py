@@ -4,7 +4,6 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
@@ -12,17 +11,26 @@ from ...utils.github_host import (
     is_artifactory_path,
     is_azure_devops_hostname,
     is_github_hostname,
+    is_gitlab_hostname,
     is_supported_git_host,
+    is_visualstudio_legacy_hostname,
+    maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
     unsupported_host_error,
 )
 from ...utils.path_security import (
-    PathTraversalError,  # noqa: F401
+    PathTraversalError,
     ensure_path_within,
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
 from .types import VirtualPackageType
+
+# Default ports per URI scheme -- used to normalise away redundant
+# explicit ports (e.g. https://host:443/...) so that lockfile keys
+# and error messages stay consistent regardless of how the user
+# spelled the URL.
+_DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 
 
 @dataclass
@@ -49,6 +57,9 @@ class DependencyReference:
     is_local: bool = False  # True if this is a local filesystem dependency
     local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
 
+    # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
+    is_parent_repo_inheritance: bool = False
+
     artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
 
     # HTTP (insecure) dependency fields
@@ -74,6 +85,9 @@ class DependencyReference:
         ".collection.yml",
         ".collection.yaml",
     )
+
+    # First path segment after host that often starts in-repo virtual layout (GitLab heuristic).
+    _GITLAB_VIRTUAL_ROOT_SEGMENTS = frozenset({"prompts", "instructions", "collections"})
 
     def is_artifactory(self) -> bool:
         """Check if this reference points to a JFrog Artifactory VCS repository."""
@@ -161,14 +175,12 @@ class DependencyReference:
             return True
         # Windows absolute paths: drive letter + colon + separator (C:\ or C:/).
         # Only ASCII letters A-Z/a-z are valid drive letters.
-        if (  # noqa: SIM103
+        return bool(
             len(s) >= 3
-            and (("A" <= s[0] <= "Z") or ("a" <= s[0] <= "z"))
+            and ("A" <= s[0] <= "Z" or "a" <= s[0] <= "z")
             and s[1] == ":"
             and s[2] in ("\\", "/")
-        ):
-            return True
-        return False
+        )
 
     def get_unique_key(self) -> str:
         """Get a unique key for this dependency for deduplication.
@@ -360,14 +372,13 @@ class DependencyReference:
                 elif len(repo_parts) >= 2:
                     # owner/virtual-pkg-name (use first segment as namespace)
                     result = apm_modules_dir / repo_parts[0] / package_name
-        else:  # noqa: PLR5501
-            # Regular package: use full repo path
-            if self.is_azure_devops() and len(repo_parts) >= 3:
-                # ADO: org/project/repo
-                result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2]
-            elif len(repo_parts) >= 2:
-                # owner/repo or group/subgroup/repo (generic hosts)
-                result = apm_modules_dir.joinpath(*repo_parts)
+        # Regular package: use full repo path
+        elif self.is_azure_devops() and len(repo_parts) >= 3:
+            # ADO: org/project/repo
+            result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2]
+        elif len(repo_parts) >= 2:
+            # owner/repo or group/subgroup/repo (generic hosts)
+            result = apm_modules_dir.joinpath(*repo_parts)
 
         if result is None:
             # Fallback: join all parts
@@ -403,6 +414,9 @@ class DependencyReference:
         parsed = urllib.parse.urlparse(url)
         host = parsed.hostname or ""
         port = parsed.port  # int or None
+        # Normalise default SSH port so ssh://host:22/... matches ssh://host/...
+        if port == _DEFAULT_SCHEME_PORTS.get("ssh"):
+            port = None
         path = parsed.path.lstrip("/")
         fragment = parsed.fragment
 
@@ -432,6 +446,18 @@ class DependencyReference:
         validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
         return host, port, repo_url, reference, alias
+
+    @staticmethod
+    def _normalize_parent_repo_decl_path(raw: str) -> str:
+        """Normalize ``path`` for ``git: parent`` to a single canonical relative path."""
+        s = raw.strip().replace("\\", "/").strip()
+        s = s.strip("/")
+        segments = [seg for seg in s.split("/") if seg]
+        if not segments:
+            raise ValueError("'path' field must be a non-empty string")
+        normalized = "/".join(segments)
+        validate_path_segments(normalized, context="path")
+        return normalized
 
     @classmethod
     def parse_from_dict(cls, entry: dict) -> "DependencyReference":
@@ -467,9 +493,9 @@ class DependencyReference:
             local = local.strip()
             if not cls.is_local_path(local):
                 raise ValueError(
-                    f"Object-style dependency must have a 'git' field, "  # noqa: F541
-                    f"or 'path' must be a local filesystem path "  # noqa: F541
-                    f"(starting with './', '../', '/', or '~')"  # noqa: F541
+                    "Object-style dependency must have a 'git' field, "
+                    "or 'path' must be a local filesystem path "
+                    "(starting with './', '../', '/', or '~')"
                 )
             return cls.parse(local)
 
@@ -479,6 +505,46 @@ class DependencyReference:
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
+
+        # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
+        if git_url == "parent":
+            path_raw = entry.get("path")
+            if path_raw is None:
+                raise ValueError(
+                    "Object-style dependency with git: 'parent' requires a 'path' field"
+                )
+            if not isinstance(path_raw, str) or not path_raw.strip():
+                raise ValueError("'path' field must be a non-empty string")
+            normalized_path = cls._normalize_parent_repo_decl_path(path_raw)
+
+            ref_override = entry.get("ref")
+            alias_override = entry.get("alias")
+            reference: str | None = None
+            if ref_override is not None:
+                if not isinstance(ref_override, str) or not ref_override.strip():
+                    raise ValueError("'ref' field must be a non-empty string")
+                reference = ref_override.strip()
+
+            alias_val: str | None = None
+            if alias_override is not None:
+                if not isinstance(alias_override, str) or not alias_override.strip():
+                    raise ValueError("'alias' field must be a non-empty string")
+                alias_override = alias_override.strip()
+                if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
+                    raise ValueError(
+                        f"Invalid alias: {alias_override}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
+                    )
+                alias_val = alias_override
+
+            return cls(
+                repo_url="_parent",
+                host=None,
+                reference=reference,
+                alias=alias_val,
+                virtual_path=normalized_path,
+                is_virtual=True,
+                is_parent_repo_inheritance=True,
+            )
 
         sub_path = entry.get("path")
         ref_override = entry.get("ref")
@@ -548,6 +614,148 @@ class DependencyReference:
         return dep
 
     @classmethod
+    def virtual_suffix_is_installable_shape(cls, virtual_path: str) -> bool:
+        """Return whether *virtual_path* matches APM virtual package shape rules.
+
+        Used for GitLab direct host/path shorthand: a repo boundary is accepted
+        only when the remaining suffix would be a valid virtual path (file,
+        collection, or extension-less subdirectory), matching the rules applied
+        in :meth:`_detect_virtual_package` for the tail segments.
+        """
+        if not virtual_path or not virtual_path.strip():
+            return False
+        v = virtual_path.strip().strip("/")
+        try:
+            validate_path_segments(v, context="virtual path")
+        except PathTraversalError:
+            return False
+        if "/collections/" in v or v.startswith("collections/"):
+            return True
+        if any(v.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+            return True
+        last = v.split("/")[-1]
+        return "." not in last
+
+    @classmethod
+    def split_gitlab_direct_shorthand_parts(
+        cls, package: str
+    ) -> tuple[str, list[str], str | None] | None:
+        """If *package* is bare host/path shorthand, return (host, path_segments, ref_str).
+
+        Returns ``None`` for ``https://``, ``git@``, or non–GitLab-class hosts.
+        """
+        s = package.strip()
+        ref_out: str | None = None
+        if "#" in s:
+            s, r = s.rsplit("#", 1)
+            s = s.strip()
+            r = r.strip()
+            ref_out = r if r else None
+        maybe_raise_bare_fqdn_github_gitlab_conflict(package)
+        if s.startswith(("git@", "https://", "http://", "ssh://", "//")):
+            return None
+        if "/" not in s:
+            return None
+        parts = s.split("/")
+        host_cand = parts[0]
+        if "." not in host_cand:
+            return None
+        segs = [p for p in parts[1:] if p]
+        if len(segs) < 1:
+            return None
+        if not is_supported_git_host(host_cand) or not is_gitlab_hostname(host_cand):
+            return None
+        return (host_cand, segs, ref_out)
+
+    @classmethod
+    def needs_gitlab_direct_shorthand_probing(
+        cls, package: str, dep_ref: "DependencyReference"
+    ) -> bool:
+        """True when install should probe left-to-right repo boundaries (GitLab only)."""
+        if dep_ref.is_local:
+            return False
+        if dep_ref.is_virtual:
+            return False
+        sp = cls.split_gitlab_direct_shorthand_parts(package)
+        if not sp:
+            return False
+        _host, segs, _ref = sp
+        return len(segs) >= 3
+
+    @classmethod
+    def iter_gitlab_direct_shorthand_boundary_candidates(cls, path_segments: list[str]):
+        """Yield (repo_url, virtual_suffix) for k=2..n-1 (earliest k first)."""
+        n = len(path_segments)
+        if n < 3:
+            return
+        for k in range(2, n):
+            repo = "/".join(path_segments[:k])
+            suffix = "/".join(path_segments[k:])
+            if cls.virtual_suffix_is_installable_shape(suffix):
+                yield repo, suffix
+
+    @classmethod
+    def from_gitlab_shorthand_probe(
+        cls,
+        host: str,
+        repo_url: str,
+        virtual_path: str,
+        reference: str | None,
+    ) -> "DependencyReference":
+        """Build a virtual dependency ref for a resolved GitLab shorthand probe."""
+        return cls(
+            repo_url=repo_url,
+            host=host,
+            reference=reference,
+            virtual_path=virtual_path,
+            is_virtual=True,
+        )
+
+    @classmethod
+    def _gitlab_shorthand_repo_segment_count(
+        cls,
+        path_segments: list[str],
+        has_virtual_ext: bool,
+        has_collection: bool,
+    ) -> int:
+        """Return how many segments after the host belong to the GitLab project path.
+
+        GitLab allows nested groups; unlike GitHub's fixed ``owner/repo``, the
+        project slug may span 3+ segments. Virtual package shorthand must not
+        chop a nested group path after two segments.
+
+        Shorthand cannot disambiguate every deep namespace; ambiguous cases use
+        object form with ``git:`` + ``path:`` in ``apm.yml``.
+
+        This does **not** split extension-less paths (e.g. ``.../registry/pkg``)
+        into repo + virtual: that would mis-parse valid 5+ segment project
+        paths; use ``parse_from_dict`` with an explicit ``path`` for those.
+        """
+        n = len(path_segments)
+        if n < 2:
+            return n
+
+        if has_collection and "collections" in path_segments:
+            coll_idx = path_segments.index("collections")
+            if coll_idx >= 2:
+                return coll_idx
+            return n
+
+        if has_virtual_ext:
+            for idx, seg in enumerate(path_segments):
+                if idx >= 2 and seg in cls._GITLAB_VIRTUAL_ROOT_SEGMENTS:
+                    return idx
+            if n == 3:
+                return 2
+            if n == 4:
+                return 3
+            if n >= 5:
+                return 3
+            return 2
+
+        return n
+
+    @classmethod
     def _detect_virtual_package(cls, dependency_str: str):
         """Detect whether *dependency_str* refers to a virtual package.
 
@@ -587,7 +795,7 @@ class DependencyReference:
                 except (ValueError, AttributeError) as e:
                     if isinstance(e, ValueError) and "Invalid Git host" in str(e):
                         raise
-                    raise ValueError(unsupported_host_error(first_segment))  # noqa: B904
+                    raise ValueError(unsupported_host_error(first_segment)) from e
             elif check_str.startswith("gh/"):
                 check_str = "/".join(check_str.split("/")[1:])
 
@@ -599,6 +807,7 @@ class DependencyReference:
             and not is_github_hostname(validated_host)
             and not is_azure_devops_hostname(validated_host)
         )
+        is_gitlab_host = validated_host is not None and is_gitlab_hostname(validated_host)
 
         if is_ado and "_git" in path_segments:
             git_idx = path_segments.index("_git")
@@ -608,7 +817,12 @@ class DependencyReference:
         is_artifactory = is_generic_host and is_artifactory_path(path_segments)
 
         if is_ado:
-            min_base_segments = 3
+            # *.visualstudio.com encodes org in the subdomain; path is proj/repo (2 parts).
+            # dev.azure.com encodes org as the first path segment; path is org/proj/repo (3 parts).
+            if validated_host and is_visualstudio_legacy_hostname(validated_host):
+                min_base_segments = 2
+            else:
+                min_base_segments = 3
         elif is_artifactory:
             # Artifactory: artifactory/{repo-key}/{owner}/{repo}
             min_base_segments = 4
@@ -618,7 +832,11 @@ class DependencyReference:
                 for seg in path_segments
             )
             has_collection = "collections" in path_segments
-            if has_virtual_ext or has_collection:  # noqa: SIM108
+            if is_gitlab_host:
+                min_base_segments = cls._gitlab_shorthand_repo_segment_count(
+                    path_segments, has_virtual_ext, has_collection
+                )
+            elif has_virtual_ext or has_collection:
                 min_base_segments = 2
             else:
                 min_base_segments = len(path_segments)
@@ -738,7 +956,7 @@ class DependencyReference:
         return host, None, repo_url, reference, alias
 
     @classmethod
-    def _resolve_virtual_shorthand_repo(cls, repo_url, validated_host):
+    def _resolve_virtual_shorthand_repo(cls, repo_url, validated_host, virtual_path=None):
         """Narrow a virtual-package shorthand to just the base repo path.
 
         When a virtual package is given without a URL scheme
@@ -759,15 +977,33 @@ class DependencyReference:
         if len(parts) >= 3 and is_supported_git_host(parts[0]):
             host = parts[0]
             if is_azure_devops_hostname(parts[0]):
-                if len(parts) < 5:
-                    raise ValueError(
-                        "Invalid Azure DevOps virtual package format: must be dev.azure.com/org/project/repo/path"
-                    )
-                repo_url = "/".join(parts[1:4])
+                if is_visualstudio_legacy_hostname(parts[0]):
+                    # myorg.visualstudio.com/proj/repo/path: org in subdomain,
+                    # need at least host + proj + repo + 1 virtual segment.
+                    if len(parts) < 4:
+                        raise ValueError(
+                            "Invalid Azure DevOps virtual package format: must be "
+                            "myorg.visualstudio.com/project/repo/path"
+                        )
+                    repo_url = "/".join(parts[1:3])
+                else:
+                    # dev.azure.com/org/proj/repo/path: org in path
+                    if len(parts) < 5:
+                        raise ValueError(
+                            "Invalid Azure DevOps virtual package format: must be dev.azure.com/org/project/repo/path"
+                        )
+                    repo_url = "/".join(parts[1:4])
             elif is_artifactory_path(parts[1:]):
                 art_result = parse_artifactory_path(parts[1:])
                 if art_result:
                     repo_url = f"{art_result[1]}/{art_result[2]}"
+            elif is_gitlab_hostname(parts[0]) and virtual_path:
+                vparts = [p for p in virtual_path.split("/") if p]
+                tail = len(vparts)
+                if tail > 0 and len(parts) > 1 + tail:
+                    repo_url = "/".join(parts[1 : len(parts) - tail])
+                else:
+                    repo_url = "/".join(parts[1:])
             else:
                 repo_url = "/".join(parts[1:3])
         elif len(parts) >= 2:
@@ -803,7 +1039,11 @@ class DependencyReference:
 
         if len(parts) >= 3 and is_supported_git_host(parts[0]):
             host = parts[0]
-            if is_azure_devops_hostname(host) and len(parts) >= 4:
+            if is_visualstudio_legacy_hostname(host) and len(parts) >= 3:
+                # *.visualstudio.com/proj/repo: org is in the subdomain, path is proj/repo only
+                user_repo = "/".join(parts[1:3])
+            elif is_azure_devops_hostname(host) and len(parts) >= 4:
+                # dev.azure.com/org/proj/repo: org is the first path segment
                 user_repo = "/".join(parts[1:4])
             elif not is_github_hostname(host) and not is_azure_devops_hostname(host):
                 if is_artifactory_path(parts[1:]):
@@ -815,7 +1055,7 @@ class DependencyReference:
                 else:
                     user_repo = "/".join(parts[1:])
             else:
-                user_repo = "/".join(parts[1:3])
+                user_repo = "/".join(parts[1:])
         elif len(parts) >= 2 and "." not in parts[0]:
             if not host:
                 host = default_host()
@@ -827,7 +1067,7 @@ class DependencyReference:
                 user_repo = "/".join(parts[:2])
         else:
             raise ValueError(
-                f"Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"  # noqa: F541
+                "Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"
             )
 
         if not user_repo or "/" not in user_repo:
@@ -839,13 +1079,15 @@ class DependencyReference:
         is_ado_host = host and is_azure_devops_hostname(host)
 
         if is_ado_host:
-            if len(uparts) < 3:
+            # *.visualstudio.com encodes org in subdomain -> proj/repo is sufficient (2 parts).
+            # dev.azure.com encodes org in path -> org/proj/repo required (3 parts).
+            min_ado_parts = 2 if is_visualstudio_legacy_hostname(host) else 3
+            if len(uparts) < min_ado_parts:
                 raise ValueError(
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
-        else:  # noqa: PLR5501
-            if len(uparts) < 2:
-                raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
+        elif len(uparts) < 2:
+            raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
 
         allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
         validate_path_segments("/".join(uparts), context="repository path")
@@ -860,16 +1102,24 @@ class DependencyReference:
         return parsed_url, host
 
     @classmethod
-    def _validate_url_repo_path(cls, parsed_url):
+    def _validate_url_repo_path(cls, parsed_url) -> tuple[str, str | None]:
         """Validate and normalise the repository path from a parsed URL.
 
         Checks host support, strips ``.git`` suffixes, removes ``_git``
         segments, and validates each path component against the allowed
         character set for the detected host type.
 
+        For Azure DevOps URLs with extra path segments beyond
+        ``org/project/repo`` (e.g.
+        ``https://dev.azure.com/org/proj/_git/repo/sub/path``), the extra
+        segments are extracted as a virtual package path and validated with
+        the same rules as the shorthand virtual-path detector.
+
         Returns:
-            repo_url (str): Normalised repository path
-                (e.g. ``owner/repo`` or ``org/project/repo``).
+            ``(repo_url, virtual_path)`` where *repo_url* is the normalised
+            base repository path (e.g. ``owner/repo`` or
+            ``org/project/repo``) and *virtual_path* is ``None`` unless
+            extra ADO sub-path segments were detected.
         """
         hostname = parsed_url.hostname or ""
         if not is_supported_git_host(hostname):
@@ -889,11 +1139,57 @@ class DependencyReference:
 
         is_ado_host = is_azure_devops_hostname(hostname)
 
+        url_virtual_path: str | None = None
+
         if is_ado_host:
-            if len(path_parts) != 3:
+            # *.visualstudio.com encodes org in the subdomain; URL path is proj/repo (2 parts).
+            # dev.azure.com encodes org as the first path segment; URL path is org/proj/repo (3 parts).
+            is_vs_legacy = is_visualstudio_legacy_hostname(hostname)
+            min_ado_parts = 2 if is_vs_legacy else 3
+            if len(path_parts) < min_ado_parts:
                 raise ValueError(
                     f"Invalid Azure DevOps repository path: expected 'org/project/repo', got '{path}'"
                 )
+            if len(path_parts) > min_ado_parts:
+                # Extra segments are a virtual sub-path (e.g. sub/path in
+                # https://dev.azure.com/org/proj/_git/repo/sub/path or
+                # https://myorg.visualstudio.com/proj/_git/repo/sub/path).
+                ado_virtual = "/".join(path_parts[min_ado_parts:])
+
+                # Security: reject path traversal in virtual path.
+                validate_path_segments(ado_virtual, context="virtual path")
+
+                # Reject removed .collection.yml extensions.
+                if any(ado_virtual.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+                    raise ValueError(
+                        f".collection.yml is no longer supported. "
+                        f"Convert '{ado_virtual}' to an apm.yml with a "
+                        f"'dependencies' section. "
+                        f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                    )
+
+                # Accept any recognised virtual file extension; reject other
+                # dotted final segments (mirrors shorthand virtual detection).
+                if any(ado_virtual.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+                    pass
+                else:
+                    last_segment = ado_virtual.split("/")[-1]
+                    if "." in last_segment:
+                        raise InvalidVirtualPackageExtensionError(
+                            f"Invalid virtual package path '{ado_virtual}'. "
+                            f"Individual files must end with one of: "
+                            f"{', '.join(cls.VIRTUAL_FILE_EXTENSIONS)}. "
+                            f"For subdirectory packages, the path should not have a file extension."
+                        )
+
+                url_virtual_path = ado_virtual
+                path_parts = path_parts[:min_ado_parts]
+
+            # For *.visualstudio.com, inject the org from the subdomain so that the
+            # normalised repo_url is always org/project/repo (matching dev.azure.com).
+            if is_vs_legacy:
+                vs_org = hostname.split(".")[0]
+                path_parts = [vs_org, *path_parts]
         else:
             if len(path_parts) < 2:
                 raise ValueError(
@@ -916,19 +1212,25 @@ class DependencyReference:
             if not re.match(allowed_pattern, part):
                 raise ValueError(f"Invalid repository path component: {part}")
 
-        return "/".join(path_parts)
+        return "/".join(path_parts), url_virtual_path
 
     @classmethod
     def _parse_standard_url(
-        cls, dependency_str: str, is_virtual_package: bool, virtual_path, validated_host
-    ):
+        cls,
+        dependency_str: str,
+        is_virtual_package: bool,
+        virtual_path: str | None,
+        validated_host: str | None,
+    ) -> tuple[str, int | None, str, str | None, str | None, bool, str | None]:
         """Parse a non-SSH dependency string (HTTPS, FQDN, or shorthand).
 
         Detects scheme vs shorthand, delegates host-specific resolution to
         helpers, then validates the resulting URL path.
 
         Returns:
-            ``(host, port, repo_url, reference, alias)``
+            ``(host, port, repo_url, reference, alias, effective_is_virtual,
+            effective_virtual_path)`` -- the last two reflect any ADO sub-path
+            segments embedded in the URL itself (issue #1128).
         """
         host = None
         port = None
@@ -950,22 +1252,38 @@ class DependencyReference:
 
         # For virtual packages without a URL scheme, narrow to just owner/repo
         if is_virtual_package and not repo_url_lower.startswith(("https://", "http://")):
-            host, repo_url = cls._resolve_virtual_shorthand_repo(repo_url, validated_host)
+            host, repo_url = cls._resolve_virtual_shorthand_repo(
+                repo_url, validated_host, virtual_path
+            )
 
         # Normalize to URL format for secure parsing
         if repo_url_lower.startswith(("https://", "http://")):
             parsed_url = urllib.parse.urlparse(repo_url)
             host = parsed_url.hostname or ""
             port = parsed_url.port  # capture :PORT from https://host:8443/...
+            # Normalise default-scheme ports (443 for HTTPS, 80 for HTTP)
+            # so lockfile keys are consistent regardless of URL spelling.
+            scheme = (parsed_url.scheme or "").lower()
+            if port == _DEFAULT_SCHEME_PORTS.get(scheme):
+                port = None
         else:
             parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
 
-        repo_url = cls._validate_url_repo_path(parsed_url)
+        repo_url, url_virtual_path = cls._validate_url_repo_path(parsed_url)
+
+        # If URL contained extra ADO sub-path segments, they become the virtual
+        # path (overriding the _detect_virtual_package result which returns
+        # early for https:// URLs).
+        effective_is_virtual = is_virtual_package
+        effective_virtual_path = virtual_path
+        if url_virtual_path is not None:
+            effective_is_virtual = True
+            effective_virtual_path = url_virtual_path
 
         if not host:
             host = default_host()
 
-        return host, port, repo_url, reference, alias
+        return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
     @classmethod
     def _validate_final_repo_fields(cls, host, repo_url):
@@ -1039,6 +1357,10 @@ class DependencyReference:
         - git@gitlab.com:owner/repo.git (SSH git URL)
         - ssh://git@gitlab.com/owner/repo.git (SSH protocol URL)
 
+        Ambiguous GitLab nested-group shorthand cannot cover every depth; use
+        object form (``git:`` + ``path:`` in ``apm.yml``) as the supported
+        escape hatch.
+
         - ./local/path (local filesystem path)
         - /absolute/path (local filesystem path)
         - ../relative/path (local filesystem path)
@@ -1084,6 +1406,8 @@ class DependencyReference:
                 unsupported_host_error("//...", context="Protocol-relative URLs are not supported")
             )
 
+        maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
+
         # Phase 1: detect virtual packages
         is_virtual_package, virtual_path, validated_host = cls._detect_virtual_package(
             dependency_str
@@ -1102,8 +1426,10 @@ class DependencyReference:
                 host, port, repo_url, reference, alias = scp_result
                 explicit_scheme = "ssh"
             else:
-                host, port, repo_url, reference, alias = cls._parse_standard_url(
-                    dependency_str, is_virtual_package, virtual_path, validated_host
+                host, port, repo_url, reference, alias, is_virtual_package, virtual_path = (
+                    cls._parse_standard_url(
+                        dependency_str, is_virtual_package, virtual_path, validated_host
+                    )
                 )
                 _stripped = dependency_str.strip().lower()
                 if _stripped.startswith("https://"):

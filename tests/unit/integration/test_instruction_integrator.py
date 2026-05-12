@@ -168,8 +168,8 @@ class TestInstructionIntegrator:
         assert target.exists()
         assert target.read_text() == "# Python rules"
 
-    def test_integrate_overwrites_when_no_manifest(self):
-        """Without managed_files (no manifest), overwrites existing files."""
+    def test_integrate_blocks_when_no_manifest(self):
+        """Without managed_files (no manifest), a pre-existing file is treated as a collision."""
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
@@ -182,8 +182,10 @@ class TestInstructionIntegrator:
         pkg_info = self._make_package_info(pkg)
         result = self.integrator.integrate_package_instructions(pkg_info, self.project_root)
 
-        assert result.files_integrated == 1
-        assert (target_dir / "python.instructions.md").read_text() == "# New version"
+        # managed_files=None is now treated as empty set -> collision -> file protected
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert (target_dir / "python.instructions.md").read_text() == "# Old version"
 
     def test_integrate_skips_user_file_collision(self):
         """Skips user-authored file when managed_files says it's not APM-owned."""
@@ -474,11 +476,11 @@ class TestInstructionNameCollision:
         assert (target_dir / "python.instructions.md").read_text() == "# APM Python standards"
 
     def test_two_packages_same_instruction_name_last_wins(self):
-        """When two packages deploy the same filename, last-installed wins."""
+        """When two packages deploy the same filename, last-installed wins (managed file update)."""
         target_dir = self.project_root / ".github" / "instructions"
         target_dir.mkdir(parents=True)
 
-        # Package A installs first
+        # Package A installs first (no pre-existing file)
         pkg_a = self.project_root / "pkg-a"
         inst_a = pkg_a / ".apm" / "instructions"
         inst_a.mkdir(parents=True)
@@ -486,15 +488,20 @@ class TestInstructionNameCollision:
         info_a = self._make_package_info(pkg_a, "pkg-a")
         self.integrator.integrate_package_instructions(info_a, self.project_root)
 
-        # Package B installs second — same filename
+        # Package B installs second — same filename.
+        # The file from pkg-A is in managed_files (recorded by the lockfile on first install),
+        # so pkg-B is allowed to overwrite it.
         pkg_b = self.project_root / "pkg-b"
         inst_b = pkg_b / ".apm" / "instructions"
         inst_b.mkdir(parents=True)
         (inst_b / "python.instructions.md").write_text("# Package B rules")
         info_b = self._make_package_info(pkg_b, "pkg-b")
-        self.integrator.integrate_package_instructions(info_b, self.project_root)
+        managed = {".github/instructions/python.instructions.md"}
+        self.integrator.integrate_package_instructions(
+            info_b, self.project_root, managed_files=managed
+        )
 
-        # Last write wins
+        # Last write wins when the file is in managed_files
         assert (target_dir / "python.instructions.md").read_text() == "# Package B rules"
 
 

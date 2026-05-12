@@ -1,0 +1,186 @@
+---
+title: "Quickstart"
+description: "Install APM, install your first package, and run an agent in 5 minutes."
+sidebar:
+  order: 1
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+You will install APM, scaffold a project, install a package, and run an
+agent script. Five minutes, four commands. This is the consumer path --
+you are running someone else's package, not authoring one.
+
+If you want to publish a package, jump to the
+[pack and distribute guide](/apm/producer/). If you are
+rolling APM out across an org, start with the
+[governance guide](/apm/enterprise/governance-guide/).
+
+## 1. Install APM
+
+**macOS / Linux:**
+
+```bash
+curl -sSL https://aka.ms/apm-unix | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://aka.ms/apm-windows | iex
+```
+
+Verify:
+
+```bash
+apm --version
+```
+
+For Homebrew, Scoop, pip, air-gapped mirrors, or signed-archive install,
+see [Installation](/apm/quickstart/).
+
+## 2. Initialize a project
+
+```bash
+apm init my-agent
+cd my-agent
+```
+
+`apm init` writes one file -- the manifest:
+
+```
+my-agent/
++-- apm.yml
+```
+
+Open `apm.yml`. It looks like this:
+
+```yaml
+name: my-agent
+version: 1.0.0
+description: APM project for my-agent
+author: your-handle
+# Which agent platforms to deploy to (uncomment to pin):
+# targets:
+#   - copilot
+#   - claude
+
+dependencies:
+  apm: []
+  mcp: []
+includes: auto
+scripts: {}
+```
+
+Three fields matter day one:
+
+- `dependencies.apm` -- the packages you install. Empty until step 3.
+- `dependencies.mcp` -- MCP servers, wired into every detected harness.
+- `scripts` -- optional named shell commands you run with the
+  experimental `apm run` (see [Run scripts](/apm/consumer/run-scripts/)).
+
+`includes: auto` ships any local `.apm/` content you author. The
+`targets:` block is commented out so APM auto-detects the harnesses
+present in your repo (`.github/`, `.claude/`, `.cursor/`, etc.). For the
+full schema, see [Package anatomy](/apm/concepts/package-anatomy/).
+
+## 3. Install a package
+
+```bash
+apm install microsoft/apm-sample-package#v1.0.0 --target copilot
+```
+
+`--target copilot` is shown explicitly because a fresh project has no
+harness markers yet. Once any `.github/` content exists, APM detects it
+and the flag becomes optional.
+
+Output (abridged):
+
+```
+[+] microsoft/apm-sample-package #v1.0.0 @fb285168
+|-- 2 prompts integrated -> .github/prompts/
+|-- 1 agents integrated -> .github/agents/
+|-- 1 instruction(s) integrated -> .github/instructions/
+|-- 1 skill(s) integrated -> .agents/skills/
+[+] github.com/github/awesome-copilot/skills/review-and-refactor
+|-- Skill integrated -> .agents/skills/
+[*] Installed 2 APM dependencies in 1.4s.
+```
+
+Three things were written:
+
+```
+my-agent/
++-- apm.yml              # updated: package added under dependencies.apm
++-- apm.lock.yaml        # NEW: pins resolved sources + content hashes
++-- apm_modules/         # NEW: package cache (gitignored automatically)
++-- .agents/skills/      # NEW: harness-neutral skills
++-- .github/             # NEW: prompts, agents, instructions for Copilot
+```
+
+The package's transitive dependency (`review-and-refactor`) was
+resolved and installed in the same pass. `apm.lock.yaml` records the
+exact commit and content hash for both, so every teammate who runs
+`apm install` after cloning gets the identical tree.
+
+:::note[What just happened under the hood]
+APM scanned the package for hidden Unicode before any agent could read
+it (Promise 2: see [Security](/apm/enterprise/security/))
+and pinned its content hash in `apm.lock.yaml`. If your org ships an
+`apm-policy.yml`, those rules ran first (Promise 3: see
+[Governance guide](/apm/enterprise/governance-guide/)).
+:::
+
+:::tip[Coming from npm?]
+APM's verbs match npm's semantics:
+
+- `apm install` -- install and deploy dependencies, like `npm install`.
+- `apm update` -- refresh dependencies to the latest matching refs,
+  with a consent prompt, like `npm update`.
+- `apm install --frozen` -- lockfile-only install for CI; fails on
+  drift, like `npm ci`.
+- `apm prune` -- remove packages from `apm_modules/` that are no
+  longer in `apm.yml`, like `npm prune`.
+- `apm self-update` -- upgrade the `apm` CLI binary itself
+  (think `npm install -g npm`).
+
+For private packages, set `GITHUB_APM_PAT` -- see
+[private packages](/apm/consumer/private-and-org-packages/).
+:::
+
+## What next
+
+Your project is ready: dependencies pinned, primitives deployed, every
+detected harness configured. The package's prompts and skills are
+already discoverable from your AI tool of choice -- start a Copilot
+chat, open Claude Code, or invoke the agent from any harness that
+read its instructions on disk.
+
+:::note[Looking for `apm run`?]
+APM also ships an experimental script runner -- think `npx` for AI
+runtime CLIs. Declare a `scripts:` entry in `apm.yml` and execute it
+with `apm run <name>`. It is optional, off the critical path, and
+not required to use any installed package. See
+[Run scripts](/apm/consumer/run-scripts/) if you want to wire one up.
+:::
+
+<CardGrid>
+  <Card title="Use more packages" icon="open-book">
+    Browse the consumer guide: search marketplaces, pin versions, manage
+    transitive dependencies, and wire MCP servers into every harness.
+    [Dependencies](/apm/consumer/manage-dependencies/)
+  </Card>
+  <Card title="Author your own" icon="rocket">
+    Build a primitive others can install -- skills, prompts, agents,
+    plugins -- and pack it for distribution.
+    [Pack and distribute](/apm/producer/)
+  </Card>
+  <Card title="Govern installs at scale" icon="setting">
+    Ship `apm-policy.yml`, gate CI with `apm audit --ci`, and pin a
+    private registry for your org.
+    [Governance guide](/apm/enterprise/governance-guide/)
+  </Card>
+</CardGrid>
+
+If something failed along the way, check
+[Troubleshooting](/apm/troubleshooting/ssl-issues/).

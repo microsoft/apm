@@ -5,10 +5,11 @@ import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Dict, List  # noqa: F401, UP035
 
 from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
+from ..utils.path_security import PathTraversalError, validate_path_segments
 
 
 @dataclass
@@ -64,10 +65,21 @@ def unpack_bundle(
             with tarfile.open(bundle_path, "r:gz") as tar:
                 # Security: prevent path traversal and special entries
                 for member in tar.getmembers():
-                    if member.name.startswith("/") or ".." in member.name:
-                        raise ValueError(f"Refusing to extract path-traversal entry: {member.name}")
+                    name = member.name
+                    if (
+                        name.startswith("/")
+                        or PureWindowsPath(name).drive
+                        or PureWindowsPath(name).is_absolute()
+                    ):
+                        raise ValueError(f"Refusing to extract path-traversal entry: {name}")
+                    try:
+                        validate_path_segments(name, context="tar member")
+                    except PathTraversalError:
+                        raise ValueError(
+                            f"Refusing to extract path-traversal entry: {name}"
+                        ) from None
                     if member.issym() or member.islnk():
-                        raise ValueError(f"Refusing to extract symlink/hardlink: {member.name}")
+                        raise ValueError(f"Refusing to extract symlink/hardlink: {name}")
                 # filter="data" was added in Python 3.12; use it when available
                 if sys.version_info >= (3, 12):
                     tar.extractall(temp_dir, filter="data")

@@ -994,6 +994,82 @@ class TestRegistryConfig:
         assert any("ARTIFACTORY_BASE_URL" in str(warning.message) for warning in w)
         assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
 
+    def test_http_url_with_token_warns(self):
+        """PROXY_REGISTRY_TOKEN over http://  emits a UserWarning."""
+        import warnings
+
+        from apm_cli.deps.registry_proxy import RegistryConfig
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
+                    "PROXY_REGISTRY_TOKEN": "secret",
+                },
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as w,
+        ):
+            warnings.simplefilter("always")
+            cfg = RegistryConfig.from_env()
+        assert cfg is not None
+        assert cfg.scheme == "http"
+        assert cfg.token == "secret"
+        assert any(
+            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
+            for warning in w
+        )
+
+    def test_http_url_with_token_silenced_by_allow_http(self):
+        """PROXY_REGISTRY_ALLOW_HTTP=1 silences the plaintext-token warning."""
+        import warnings
+
+        from apm_cli.deps.registry_proxy import RegistryConfig
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github",
+                    "PROXY_REGISTRY_TOKEN": "secret",
+                    "PROXY_REGISTRY_ALLOW_HTTP": "1",
+                },
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as w,
+        ):
+            warnings.simplefilter("always")
+            cfg = RegistryConfig.from_env()
+        assert cfg is not None
+        assert not any(
+            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
+            for warning in w
+        )
+
+    def test_http_url_without_token_does_not_warn(self):
+        """No warning when PROXY_REGISTRY_TOKEN is unset, even on http://."""
+        import warnings
+
+        from apm_cli.deps.registry_proxy import RegistryConfig
+
+        with (
+            patch.dict(
+                os.environ,
+                {"PROXY_REGISTRY_URL": "http://art.example.com/artifactory/github"},
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as w,
+        ):
+            warnings.simplefilter("always")
+            cfg = RegistryConfig.from_env()
+        assert cfg is not None
+        assert cfg.token is None
+        assert not any(
+            issubclass(warning.category, UserWarning) and "plaintext" in str(warning.message)
+            for warning in w
+        )
+
     def test_registry_config_lockfile_round_trip(self):
         """host and registry_prefix survive YAML write -> read round trip."""
         from apm_cli.deps.lockfile import LockedDependency, LockFile

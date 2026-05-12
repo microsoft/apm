@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "docs-sync panelist return",
+  "description": "Common shape for all panelist returns (doc-writer, python-architect verifier, editorial-owner, oss-growth-hacker).",
+  "type": "object",
+  "required": ["persona", "page"],
+  "properties": {
+    "persona": {
+      "type": "string",
+      "enum": ["doc-writer", "python-architect", "editorial-owner", "oss-growth-hacker"]
+    },
+    "page": {
+      "type": ["string", "null"],
+      "description": "Path of the page this return covers. Null for editorial-owner/growth-hacker which return cross-page."
+    },
+    "drafts": {
+      "type": "array",
+      "description": "doc-writer only: per-section before/after pairs.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {"type": "string"},
+          "line_range": {"type": "array", "items": {"type": "integer"}},
+          "before": {"type": "string"},
+          "after": {"type": "string"}
+        }
+      }
+    },
+    "verifications": {
+      "type": "array",
+      "description": "python-architect only: claim verification results from S7 tool calls.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {"type": "string"},
+          "command_run": {"type": "string"},
+          "result": {"type": "string", "enum": ["verified", "refuted", "inconclusive"]},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "tone_fixes": {
+      "type": "array",
+      "description": "editorial-owner only: prose edits with before/after.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {"type": "string"},
+          "before": {"type": "string"},
+          "after": {"type": "string"},
+          "rationale": {"type": "string"}
+        }
+      }
+    },
+    "ramp_notes": {
+      "type": "array",
+      "description": "oss-growth-hacker only: cold-reader observations.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {"type": "string"},
+          "concern": {"type": "string"},
+          "fix": {"type": "string"}
+        }
+      }
+    }
+  }
+}

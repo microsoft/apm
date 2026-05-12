@@ -214,6 +214,35 @@ pip install -e .[dev]
 pytest tests/unit tests/test_console.py -x
 ```
 
+### Running integration tests
+
+Integration tests under `tests/integration/` use a marker-driven
+discovery system: each test declares the precondition it needs
+(token, runtime, opt-in flag, ...) as a `pytest.mark.requires_*`
+marker, and `tests/integration/conftest.py` auto-skips at collection
+time when the precondition is missing. Without any setup,
+`uv run pytest tests/integration` is silent rather than red -- every
+test reports as `SKIPPED` with a one-line reason, so you can see
+exactly what is missing.
+
+The full marker reference (one row per `_MARKER_CHECKS` entry, with
+the env-var or `apm runtime setup` command that satisfies it) lives
+in
+[Integration Testing](docs/src/content/docs/contributing/integration-testing.md#the-marker-registry).
+A typical local run looks like:
+
+```bash
+# Run only what your current env satisfies
+uv run pytest tests/integration -v
+
+# Run only one marker family (e.g. tests that need a GitHub token)
+uv run pytest tests/integration -m requires_github_token -v
+```
+
+When adding a new precondition, add an entry to `_MARKER_CHECKS` and
+declare the marker in `pyproject.toml`; that is the only place the
+precondition needs to live.
+
 ## Coding Style
 
 This project follows:

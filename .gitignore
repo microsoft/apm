@@ -72,5 +72,8 @@ apm_modules/
 build/tmp/
 scout-pipeline-result.png
 .copilot/
+# Cursor MCP config (may contain auth tokens)
+.cursor/mcp.json
 .playwright-mcp/
 server.pid
+.docs-rewrite-plan/

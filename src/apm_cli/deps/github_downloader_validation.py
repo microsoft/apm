@@ -316,6 +316,9 @@ def _build_validation_attempts(
         ``Bearer <PAT>`` is rejected with 401.
       * ADO + ``auth_scheme == "bearer"`` (AAD JWT): ``Authorization:
         Bearer <token>``.
+      * GitLab: ``Authorization: Basic base64("oauth2:" + PAT)`` to match
+        the GitLab HTTPS clone credential shape without putting the PAT in
+        the URL.
       * Non-ADO with ``auth_scheme == "bearer"``: ``Authorization: Bearer
         <token>`` (matches GitHub recommendation for OAuth/App tokens).
       * Non-ADO with ``auth_scheme == "basic"`` (legacy classic PAT):
@@ -330,6 +333,12 @@ def _build_validation_attempts(
     dep_auth_scheme: str = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
     is_insecure: bool = bool(getattr(dep_ref, "is_insecure", False))
     is_ado: bool = dep_ref.is_azure_devops()
+    host_info = (
+        downloader.auth_resolver.classify_host(dep_ref.host, port=dep_ref.port)
+        if getattr(dep_ref, "host", None)
+        else None
+    )
+    is_gitlab = host_info is not None and host_info.kind == "gitlab"
 
     attempts: list[AttemptSpec] = []
 
@@ -344,6 +353,10 @@ def _build_validation_attempts(
         elif is_ado:  # bearer (AAD JWT)
             auth_env = build_authorization_header_git_env("Bearer", dep_token)
             label = "ADO authenticated HTTPS (bearer header)"
+        elif is_gitlab:
+            encoded = base64.b64encode(f"oauth2:{dep_token}".encode()).decode("ascii")
+            auth_env = build_authorization_header_git_env("Basic", encoded)
+            label = "GitLab authenticated HTTPS (basic header)"
         else:
             # Non-ADO: header injection rather than URL embedding so the
             # token never appears in argv or temp .git/config.

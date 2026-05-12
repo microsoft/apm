@@ -615,3 +615,210 @@ class TestADOPruneCommand:
         ado_parts = ["org", "project", "repo"]
         ado_path = base.joinpath(*ado_parts)
         assert ado_path.as_posix().endswith("/tmp/apm_modules/org/project/repo")
+
+
+class TestADOFullURLSubPath:
+    """Test 8-shape matrix for ADO URL parsing (issue #1128)."""
+
+    @pytest.mark.parametrize(
+        "input_str,expected_virtual,expected_virtual_path,expected_ref,expected_host,expected_org,expected_project,expected_repo",
+        [
+            # Case 1: shorthand base
+            (
+                "dev.azure.com/org/proj/_git/repo",
+                False,
+                None,
+                None,
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 2: shorthand + virtual
+            (
+                "dev.azure.com/org/proj/_git/repo/sub/path",
+                True,
+                "sub/path",
+                None,
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 3: shorthand + ref
+            (
+                "dev.azure.com/org/proj/_git/repo#main",
+                False,
+                None,
+                "main",
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 4: shorthand + virtual + ref
+            (
+                "dev.azure.com/org/proj/_git/repo/sub/path#main",
+                True,
+                "sub/path",
+                "main",
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 5: full URL base
+            (
+                "https://dev.azure.com/org/proj/_git/repo",
+                False,
+                None,
+                None,
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 6: full URL + ref
+            (
+                "https://dev.azure.com/org/proj/_git/repo#main",
+                False,
+                None,
+                "main",
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 7: full URL + virtual (THE BUG)
+            (
+                "https://dev.azure.com/org/proj/_git/repo/sub/path",
+                True,
+                "sub/path",
+                None,
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 8: full URL + virtual + ref (THE BUG)
+            (
+                "https://dev.azure.com/org/proj/_git/repo/sub/path#main",
+                True,
+                "sub/path",
+                "main",
+                "dev.azure.com",
+                "org",
+                "proj",
+                "repo",
+            ),
+            # Case 9: VS shorthand base
+            (
+                "myorg.visualstudio.com/proj/_git/repo",
+                False,
+                None,
+                None,
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+            # Case 10: VS shorthand + virtual
+            (
+                "myorg.visualstudio.com/proj/_git/repo/sub/path",
+                True,
+                "sub/path",
+                None,
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+            # Case 11: VS shorthand + ref
+            (
+                "myorg.visualstudio.com/proj/_git/repo#main",
+                False,
+                None,
+                "main",
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+            # Case 12: VS shorthand + virtual + ref
+            (
+                "myorg.visualstudio.com/proj/_git/repo/sub/path#main",
+                True,
+                "sub/path",
+                "main",
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+            # Case 13: VS full URL base
+            (
+                "https://myorg.visualstudio.com/proj/_git/repo",
+                False,
+                None,
+                None,
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+            # Case 14: VS full URL + ref
+            (
+                "https://myorg.visualstudio.com/proj/_git/repo#main",
+                False,
+                None,
+                "main",
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+            # Case 15: VS full URL + virtual
+            (
+                "https://myorg.visualstudio.com/proj/_git/repo/sub/path",
+                True,
+                "sub/path",
+                None,
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+            # Case 16: VS full URL + virtual + ref
+            (
+                "https://myorg.visualstudio.com/proj/_git/repo/sub/path#main",
+                True,
+                "sub/path",
+                "main",
+                "myorg.visualstudio.com",
+                "myorg",
+                "proj",
+                "repo",
+            ),
+        ],
+    )
+    def test_ado_url_matrix(
+        self,
+        input_str: str,
+        expected_virtual: bool,
+        expected_virtual_path: str | None,
+        expected_ref: str | None,
+        expected_host: str,
+        expected_org: str,
+        expected_project: str,
+        expected_repo: str,
+    ) -> None:
+        """All ADO URL forms parse correctly (issue #1128)."""
+        dep = DependencyReference.parse(input_str)
+
+        assert dep.host == expected_host
+        assert dep.ado_organization == expected_org
+        assert dep.ado_project == expected_project
+        assert dep.ado_repo == expected_repo
+        assert dep.is_virtual == expected_virtual
+        assert dep.virtual_path == expected_virtual_path
+        assert dep.reference == expected_ref
