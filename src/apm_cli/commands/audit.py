@@ -710,15 +710,23 @@ def _audit_content_scan(
                 drift_failed = not drift_check.passed
                 # Bare `apm audit` is advisory: drift_failed does not gate
                 # the exit code (that lives in --ci). But silence on a
-                # cache-pin / cache-miss failure is a UX trap: the user
-                # cannot tell whether drift was clean or whether it was
-                # never attempted. Surface the failure reason on stderr
-                # whenever the drift check failed without producing
-                # findings (CacheMissError, CachePinError, missing lockfile).
+                # cache-pin / cache-miss skip or failure is a UX trap: the
+                # user cannot tell whether drift was clean or whether it was
+                # never attempted. Surface the reason on stderr whenever the
+                # drift check produced no findings.
                 if drift_failed and not drift_findings:
                     click.echo(
                         f"{STATUS_SYMBOLS['warning']} drift check could not run: "
                         f"{drift_check.message}",
+                        err=True,
+                    )
+                elif (
+                    drift_check.passed
+                    and not drift_findings
+                    and drift_check.message.startswith("drift skipped")
+                ):
+                    click.echo(
+                        f"{STATUS_SYMBOLS['warning']} {drift_check.message}",
                         err=True,
                     )
     elif no_drift and cfg.output_format == "text":

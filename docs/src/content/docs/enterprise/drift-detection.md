@@ -42,9 +42,12 @@ lockfile-exists -> ref-consistency -> deployed-files-present
 After the baseline passes, it replays the install in a scratch directory
 from the cache and diffs against the working tree to surface
 `unintegrated`, `modified`, and `orphaned` files. Pass `--no-drift` to
-skip the replay. With `--policy <source>` it also evaluates the
-discovered policy against the lockfile. Source:
-`src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
+skip the replay. When the install cache has not been warmed yet (fresh
+checkout before the first `apm install`), the drift check is skipped
+with an informational message rather than failing; run `apm install` to
+warm the cache and enable the check on the next run. With `--policy
+<source>` it also evaluates the discovered policy against the lockfile.
+Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 
 ### `apm audit` (default)
 

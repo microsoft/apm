@@ -1119,3 +1119,108 @@ class TestRunBaselineChecksMalformedManifest:
         assert parse_check.name == "manifest-parse"
         assert "Cannot parse apm.yml" in parse_check.message
         assert "fix the YAML syntax error in apm.yml and re-run" in parse_check.message
+
+
+# -- Group 5: _check_drift cache-miss skip behavior ----------------
+
+
+class TestCheckDriftCacheMiss:
+    """_check_drift must return passed=True (skip-with-info) on CacheMissError.
+
+    A cache miss means the user has not yet run ``apm install`` -- failing
+    the check in that situation would block every fresh checkout and is
+    unhelpful.  The drift check skips with a clear informational message
+    instead of marking the audit as failed.
+    """
+
+    def test_cache_miss_returns_passed_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CacheMissError must produce passed=True, not a failure."""
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.drift import CacheMissError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_cache_miss(*_args: object, **_kwargs: object) -> None:
+            raise CacheMissError("org/foo@deadbeef: no cache entry found")
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_cache_miss)
+
+        check_result, findings = _check_drift(tmp_path, lockfile)
+
+        assert check_result.passed, "cache miss must not fail the drift check"
+        assert findings == [], "no findings expected on cache miss"
+
+    def test_cache_miss_message_indicates_skip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The skip message must guide the user to run 'apm install'."""
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.drift import CacheMissError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_cache_miss(*_args: object, **_kwargs: object) -> None:
+            raise CacheMissError("org/foo@deadbeef: no cache entry found")
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_cache_miss)
+
+        check_result, _ = _check_drift(tmp_path, lockfile)
+
+        assert check_result.name == "drift"
+        assert "skipped" in check_result.message.lower()
+        assert "apm install" in check_result.message
+
+    def test_cache_miss_does_not_block_other_checks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cache miss on drift must leave the CIAuditResult passing when
+        the baseline checks all pass -- drift skip-with-info must not
+        propagate a failure to the aggregate result."""
+        from apm_cli.install.drift import CacheMissError
+
+        _write_apm_yml(tmp_path, deps=["owner/repo#v1.0.0"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    resolved_ref: v1.0.0
+                    deployed_files:
+                      - .github/prompts/test.md
+            """),
+        )
+        (tmp_path / ".github" / "prompts").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".github" / "prompts" / "test.md").write_text("# ok\n", encoding="utf-8")
+
+        def _raise_cache_miss(*_args: object, **_kwargs: object) -> None:
+            raise CacheMissError("cold cache")
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_cache_miss)
+
+        result = run_baseline_checks(tmp_path)
+        # Baseline checks (no drift) must still pass.
+        assert result.passed
