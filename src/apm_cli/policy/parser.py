@@ -168,9 +168,11 @@ def _build_policy(data: dict) -> ApmPolicy:
     _deps_absent = _raw_deps is None
     dependencies = DependencyPolicy(
         allow=_parse_allow(deps_data.get("allow")),
-        deny=None if (_deps_absent or "deny" not in deps_data) else _parse_tuple(deps_data["deny"]),
+        deny=None
+        if (_deps_absent or "deny" not in deps_data or deps_data["deny"] is None)
+        else _parse_tuple(deps_data["deny"]),
         require=None
-        if (_deps_absent or "require" not in deps_data)
+        if (_deps_absent or "require" not in deps_data or deps_data["require"] is None)
         else _parse_tuple(deps_data["require"]),
         require_resolution=deps_data.get("require_resolution", DependencyPolicy.require_resolution),
         max_depth=deps_data.get("max_depth", DependencyPolicy.max_depth),

@@ -326,6 +326,26 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.unmanaged_files.effective_action, "ignore")
         self.assertEqual(policy.unmanaged_files.directories, ())
 
+    def test_absent_dependencies_block_gives_none_deny_and_require(self):
+        """Entirely absent dependencies: block -> deny=None, require=None (Fix 2)."""
+        policy, _ = load_policy("name: p\nversion: '1'\nenforcement: warn\n")
+        self.assertIsNone(policy.dependencies.deny, "absent block must yield deny=None")
+        self.assertIsNone(policy.dependencies.require, "absent block must yield require=None")
+
+    def test_yaml_null_deny_gives_none(self):
+        """YAML 'deny: null' (or bare 'deny:') must be treated as no opinion, not empty list (Fix 2)."""
+        yaml_str = "name: p\nversion: '1'\nenforcement: warn\ndependencies:\n  deny:\n  require:\n"
+        policy, _ = load_policy(yaml_str)
+        self.assertIsNone(policy.dependencies.deny, "deny: null must yield None, not ()")
+        self.assertIsNone(policy.dependencies.require, "require: null must yield None, not ()")
+
+    def test_explicit_empty_deny_list_gives_empty_tuple(self):
+        """Explicit 'deny: []' must give () (explicit empty override), not None."""
+        yaml_str = "name: p\nversion: '1'\nenforcement: warn\ndependencies:\n  deny: []\n  require: []\n"
+        policy, _ = load_policy(yaml_str)
+        self.assertEqual(policy.dependencies.deny, (), "deny: [] must yield ()")
+        self.assertEqual(policy.dependencies.require, (), "require: [] must yield ()")
+
 
 class TestLoadPolicyFromFile(unittest.TestCase):
     """Test load_policy from a file path."""

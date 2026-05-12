@@ -1049,8 +1049,8 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
         "cache": {"ttl": policy.cache.ttl},
         "dependencies": {
             "allow": _opt_list(policy.dependencies.allow),
-            "deny": list(policy.dependencies.effective_deny),
-            "require": list(policy.dependencies.effective_require),
+            "deny": _opt_list(policy.dependencies.deny),
+            "require": _opt_list(policy.dependencies.require),
             "require_resolution": policy.dependencies.require_resolution,
             "max_depth": policy.dependencies.max_depth,
         },

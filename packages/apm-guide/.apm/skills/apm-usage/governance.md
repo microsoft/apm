@@ -85,8 +85,8 @@ Child policies can only tighten parent policies, never relax them:
 |-------|-----------|
 | `enforcement` | Escalates: `off` < `warn` < `block` |
 | Allow lists | Intersection (child narrows parent) |
-| Deny lists | Union (child adds to parent) |
-| `require` | Union (combines required packages) |
+| Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
+| `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `max_depth` | `min(parent, child)` |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `source_attribution` | `parent OR child` (either enables) |

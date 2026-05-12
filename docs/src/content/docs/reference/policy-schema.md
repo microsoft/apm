@@ -67,8 +67,8 @@ Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` 
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
 | `allow`              | list of patterns or null | `null`        | `null` = no opinion. `[]` = nothing allowed. `[...]` = only these.                          |
-| `deny`               | list of patterns      | `[]`             | Always wins over `allow`.                                                                   |
-| `require`            | list of refs          | `[]`             | Packages every consumer manifest must include.                                              |
+| `deny`               | list of patterns or null | `null`        | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Always wins over `allow`. |
+| `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
 
@@ -135,7 +135,7 @@ The child can tighten the parent but never relax it:
 | `fetch_failure`             | Child overrides if set.                                                          |
 | `cache.ttl`                 | `min(parent, child)`.                                                            |
 | `*.allow` lists             | Set intersection. `null` is transparent (no opinion).                            |
-| `*.deny` / `require` lists  | Union, deduplicated, parent order preserved.                                     |
+| `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent — the parent value passes through unchanged. `[]` is an explicit empty override. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
 | `mcp.self_defined`          | Stricter wins (`deny` > `warn` > `allow`).                                       |
@@ -157,7 +157,13 @@ For every `allow:` field, the three states are distinct:
 | `[]`     | "explicitly nothing"                         | Intersects to nothing downstream. |
 | `[...]`  | "only these patterns"                        | Intersected with child list.    |
 
-`deny` and `require` lists are always tuples (omitted = empty); they accumulate by union during merge.
+`deny` and `require` lists support the same three-state semantics as `allow`:
+
+| Value    | Meaning                    | Inheritance behavior                                     |
+|----------|----------------------------|----------------------------------------------------------|
+| omitted / `null` | "no opinion"     | Transparent during merge — parent value passes through. |
+| `[]`     | "explicitly empty"         | Overrides parent; no entries accumulate.                |
+| `[...]`  | "these entries"            | Unioned with parent list (parent order preserved).      |
 
 ## Complete example
 
