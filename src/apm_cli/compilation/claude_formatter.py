@@ -167,17 +167,17 @@ class ClaudeFormatter:
         """
         placements = []
 
-        # Handle empty placement map with constitution
+        # Handle empty placement map with constitution or dependencies
         if not placement_map:
             constitution = read_constitution(self.base_dir)
-            if constitution:
-                # Create root placement for constitution-only projects
+            dependencies = self._collect_dependencies()
+            if constitution or dependencies:
                 root_path = self.base_dir / "CLAUDE.md"
                 placement = ClaudePlacement(
                     claude_path=root_path,
                     instructions=[],
                     agents=list(primitives.chatmodes),
-                    dependencies=self._collect_dependencies(),
+                    dependencies=dependencies,
                     coverage_patterns=set(),
                     source_attribution={},
                     is_root=True,

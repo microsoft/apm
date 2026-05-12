@@ -705,10 +705,10 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=False)
         result = compiler.compile(config)
-        assert result.success
+        self.assertTrue(result.success)
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        assert claude_md.exists()
-        assert "# Project Standards" in claude_md.read_text()
+        self.assertTrue(claude_md.exists())
+        self.assertIn("# Project Standards", claude_md.read_text())
 
     def test_instructions_skipped_with_populated_rules_dir(self):
         """With .claude/rules/ containing .md files, instructions are skipped."""
@@ -719,11 +719,11 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=False)
         result = compiler.compile(config)
-        assert result.success
+        self.assertTrue(result.success)
 
         # No constitution or dependencies, so CLAUDE.md should not be generated
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        assert not claude_md.exists()
+        self.assertFalse(claude_md.exists())
 
     def test_instructions_not_skipped_with_empty_rules_dir(self):
         """An empty .claude/rules/ does not trigger instruction skipping."""
@@ -733,12 +733,12 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=False)
         result = compiler.compile(config)
-        assert result.success
+        self.assertTrue(result.success)
 
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        assert claude_md.exists()
+        self.assertTrue(claude_md.exists())
         content = claude_md.read_text()
-        assert "# Project Standards" in content
+        self.assertIn("# Project Standards", content)
 
     def test_instructions_not_skipped_with_non_md_files_in_rules_dir(self):
         """Non-.md files in .claude/rules/ do not trigger instruction skipping."""
@@ -750,12 +750,12 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=False)
         result = compiler.compile(config)
-        assert result.success
+        self.assertTrue(result.success)
 
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        assert claude_md.exists()
+        self.assertTrue(claude_md.exists())
         content = claude_md.read_text()
-        assert "# Project Standards" in content
+        self.assertIn("# Project Standards", content)
 
     def test_skip_instructions_dry_run(self):
         """Dry-run respects skip_instructions when .claude/rules/ is populated."""
@@ -766,18 +766,18 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=True)
         result = compiler.compile(config)
-        assert result.success
-        assert result.stats.get("claude_files_generated", 0) == 0
-        assert "Would generate 0 files" in result.content
+        self.assertTrue(result.success)
+        self.assertEqual(result.stats.get("claude_files_generated", 0), 0)
+        self.assertIn("Would generate 0 files", result.content)
 
     def test_dry_run_reports_file_without_skip(self):
         """Dry-run without .claude/rules/ reports CLAUDE.md would be generated."""
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=True)
         result = compiler.compile(config)
-        assert result.success
-        assert "Would generate 1 file" in result.content
-        assert "CLAUDE.md" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("Would generate 1 file", result.content)
+        self.assertIn("CLAUDE.md", result.content)
 
     def test_skip_instructions_stats_reflect_emitted_files(self):
         """Stats report zero files generated when all placements are skipped."""
@@ -788,8 +788,8 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=True)
         result = compiler.compile(config)
-        assert result.success
-        assert result.stats.get("claude_files_generated", 0) == 0
+        self.assertTrue(result.success)
+        self.assertEqual(result.stats.get("claude_files_generated", 0), 0)
 
     def test_skip_instructions_emits_log_messages(self):
         """When instructions are skipped, informational log messages are emitted."""
@@ -802,15 +802,15 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
 
         mock_logger = MagicMock()
         result = compiler.compile(config, logger=mock_logger)
-        assert result.success
+        self.assertTrue(result.success)
 
         # Collect all progress messages
         progress_calls = [
             str(call) for call in mock_logger.progress.call_args_list
         ]
         joined = " ".join(progress_calls)
-        assert "Instructions already in .claude/rules/" in joined
-        assert "CLAUDE.md not generated" in joined
+        self.assertIn("Instructions already in .claude/rules/", joined)
+        self.assertIn("CLAUDE.md not generated", joined)
 
 
     def test_skip_instructions_ignores_symlink_outside_project(self):
@@ -836,12 +836,12 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
             compiler = AgentsCompiler(self.tmp_resolved)
             config = CompilationConfig(target="claude", dry_run=False)
             result = compiler.compile(config)
-            assert result.success
+            self.assertTrue(result.success)
 
             # Instructions should NOT be skipped (symlink escapes project root)
             claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-            assert claude_md.exists()
-            assert "# Project Standards" in claude_md.read_text()
+            self.assertTrue(claude_md.exists())
+            self.assertIn("# Project Standards", claude_md.read_text())
         finally:
             shutil.rmtree(external_dir, ignore_errors=True)
 

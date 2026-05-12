@@ -670,13 +670,15 @@ class AgentsCompiler:
 
         # Display CLAUDE.md compilation output using standard formatter
         # Get proper compilation results from distributed compiler (has optimization decisions)
+        # Skip formatter output when deduplication filtered out all placements to
+        # avoid contradicting the "not generated" log message above.
         from ..output.formatters import CompilationFormatter
         from ..output.models import CompilationResults
 
         compilation_results = distributed_compiler.get_compilation_results_for_display(
             is_dry_run=config.dry_run
         )
-        if compilation_results:
+        if compilation_results and not (skip_instructions and files_written == 0):
             # Update target name for CLAUDE.md output
             formatter_results = CompilationResults(
                 project_analysis=compilation_results.project_analysis,
