@@ -950,6 +950,57 @@ class TestResolveMarketplacePluginGHECloud:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_url_form_repo_not_prefixed(self, mock_get, mock_fetch, ghe_marketplace_source):
+        """Dict source whose ``repo`` is a full ``https://`` URL must not be host-prefixed.
+
+        ``_resolve_github_source`` only validates ``/`` in ``repo`` so a full URL slips
+        through and produces a canonical that already carries a scheme + host. Prefixing
+        again would yield a malformed ``corp.ghe.com/https://...`` string that
+        ``DependencyReference.parse`` rejects with ValueError.
+        """
+        plugin = MarketplacePlugin(
+            name="url-form",
+            source={
+                "type": "github",
+                "repo": "https://corp.ghe.com/myorg/my-marketplace",
+                "path": "plugins/url-form",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("url-form", "my-marketplace")
+        assert result.canonical == "https://corp.ghe.com/myorg/my-marketplace/plugins/url-form"
+        # Downstream parse still recovers the GHE host from the URL form natively.
+        dep = DependencyReference.parse(result.canonical)
+        assert dep.host == "corp.ghe.com"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_ssh_form_repo_not_prefixed(self, mock_get, mock_fetch, ghe_marketplace_source):
+        """Dict source whose ``repo`` is an SSH SCP shorthand must not be host-prefixed.
+
+        Same class as the URL-form regression: ``git@host:owner/repo`` carries its own
+        host and an SCP-style ``:`` path separator that breaks a naive ``/`` split.
+        """
+        plugin = MarketplacePlugin(
+            name="ssh-form",
+            source={
+                "type": "github",
+                "repo": "git@corp.ghe.com:myorg/my-marketplace",
+                "path": "plugins/ssh-form",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("ssh-form", "my-marketplace")
+        assert result.canonical == "git@corp.ghe.com:myorg/my-marketplace/plugins/ssh-form"
+        dep = DependencyReference.parse(result.canonical)
+        assert dep.host == "corp.ghe.com"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
     def test_github_com_canonical_remains_bare(self, mock_get, mock_fetch):
         """Regression: github.com marketplace canonical stays bare (parse default applies)."""
         gh_source = MarketplaceSource(

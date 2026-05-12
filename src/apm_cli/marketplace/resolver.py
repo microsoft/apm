@@ -197,11 +197,20 @@ def _needs_canonical_host_prefix(canonical: str, host: str) -> bool:
     canonical already starts with ``host`` (case-insensitive) -- as happens when the
     manifest's dict source carries a host-qualified ``repo`` -- this returns False
     so the prefix is not duplicated.
+
+    Also returns False when ``canonical`` is in URL form (``https://...``) or SSH
+    SCP shorthand (``git@host:owner/repo``). Manifests that put a full URL in the
+    ``repo`` field reach this point via ``_resolve_github_source`` (which only
+    requires a ``/``); detecting those by ``":"`` in the first slash-split segment
+    avoids producing malformed ``host/https://...`` canonicals. Those forms already
+    carry a host and ``DependencyReference.parse`` resolves them natively.
     """
     h = (host or "").strip()
     if not h or not is_github_hostname(h) or h.lower() == "github.com":
         return False
     first_segment = canonical.split("/", 1)[0]
+    if ":" in first_segment:
+        return False
     return first_segment.lower() != h.lower()
 
 
