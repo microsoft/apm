@@ -40,7 +40,8 @@ def run_mcp_install(
         exclude: Exclude specific runtime from installation.
         verbose: Show detailed installation information.
         apm_config: The parsed apm.yml configuration dict (optional).
-            When not provided, the method loads it from disk.
+            When not provided, this function loads ``apm.yml`` from the project
+            root if it exists.
         stored_mcp_configs: Previously stored MCP configs from lockfile
             for diff-aware installation.  When provided, servers whose
             manifest config has changed are re-applied automatically.
