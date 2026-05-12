@@ -115,7 +115,7 @@ Per target, with the rules shape on disk after compile:
 | Target | Root context file | Per-rule output | Compile required? |
 |---|---|---|---|
 | `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively |
-| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- `CLAUDE.md` is the entry point (omitted when `.claude/rules/` already has instructions; see [deduplication note](#claude-code-deduplication) below) |
+| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Conditional -- needed for constitution/dependency imports; skipped when `.claude/rules/` already has instructions (see [deduplication note](#claude-code-deduplication)) |
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
