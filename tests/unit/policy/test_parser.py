@@ -274,7 +274,8 @@ class TestLoadPolicyFromString(unittest.TestCase):
         """)
         policy, warnings = load_policy(yaml_str)  # noqa: RUF059
         self.assertEqual(policy.dependencies.allow, ("org/*",))
-        self.assertEqual(policy.dependencies.deny, ())
+        self.assertIsNone(policy.dependencies.deny)
+        self.assertEqual(policy.dependencies.effective_deny, ())
         self.assertEqual(policy.dependencies.max_depth, 50)
         self.assertEqual(policy.mcp.self_defined, "warn")
 

@@ -111,7 +111,7 @@ def _check_dependency_denylist(
     """Check 2: no dependency matches policy deny list."""
     from .matcher import check_dependency_allowed
 
-    if not policy.deny:
+    if not policy.effective_deny:
         return CheckResult(
             name="dependency-denylist",
             passed=True,
@@ -144,7 +144,7 @@ def _check_required_packages(
     policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 3: every required package is in manifest deps."""
-    if not policy.require:
+    if not policy.effective_require:
         return CheckResult(
             name="required-packages",
             passed=True,
@@ -153,7 +153,7 @@ def _check_required_packages(
 
     dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
     missing: list[str] = []
-    for req in policy.require:
+    for req in policy.effective_require:
         pkg_name = req.split("#")[0]
         if pkg_name not in dep_names:
             missing.append(pkg_name)
@@ -178,7 +178,7 @@ def _check_required_packages_deployed(
     policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 4: required packages appear in lockfile with deployed files."""
-    if not policy.require or lock is None:
+    if not policy.effective_require or lock is None:
         return CheckResult(
             name="required-packages-deployed",
             passed=True,
@@ -188,7 +188,7 @@ def _check_required_packages_deployed(
     dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
     not_deployed: list[str] = []
-    for req in policy.require:
+    for req in policy.effective_require:
         pkg_name = req.split("#")[0]
         if pkg_name not in dep_names:
             continue  # not in manifest -- check 3 handles this
@@ -218,7 +218,7 @@ def _check_required_package_version(
     policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 5: required packages with version pins match per resolution strategy."""
-    pinned = [(r, r.split("#", 1)) for r in policy.require if "#" in r]
+    pinned = [(r, r.split("#", 1)) for r in policy.effective_require if "#" in r]
     if not pinned or lock is None:
         return CheckResult(
             name="required-package-version",
