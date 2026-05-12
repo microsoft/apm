@@ -1,4 +1,4 @@
-"""Tests for apm_cli.policy.discovery — policy auto-discovery engine."""
+"""Tests for apm_cli.policy.discovery  --  policy auto-discovery engine."""
 
 from __future__ import annotations
 
@@ -262,7 +262,7 @@ class TestCacheReadWrite(unittest.TestCase):
         self.assertEqual(_get_cache_dir(root), expected)
 
     def test_round_trip_preserves_none_deny_and_require(self):
-        """Cache write→read must preserve deny=None/require=None (tri-state Fix 1).
+        """Cache write->read must preserve deny=None/require=None (tri-state Fix 1).
 
         A policy with no dependencies: block must survive a cache round-trip
         as None, not collapse to () which would prevent parent inheritance.
@@ -271,7 +271,7 @@ class TestCacheReadWrite(unittest.TestCase):
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
 
-            # Policy with no dependencies: block → deny=None, require=None
+            # Policy with no dependencies: block -> deny=None, require=None
             policy, _ = load_policy("name: p\nversion: '1'\nenforcement: warn\n")
             self.assertIsNone(policy.dependencies.deny)
             self.assertIsNone(policy.dependencies.require)
