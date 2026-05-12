@@ -92,7 +92,7 @@ class UnmanagedFilesPolicy:
     """Rules for files not tracked in apm.lock.
 
     ``action=None`` and ``directories=None`` together mean the policy file
-    expressed no ``unmanaged_files:`` section (or an empty mapping) — during
+    expressed no ``unmanaged_files:`` section (or an empty mapping); during
     :func:`~apm_cli.policy.inheritance.merge_policies` the child is transparent
     and the parent block is inherited unchanged.
 

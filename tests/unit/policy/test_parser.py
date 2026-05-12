@@ -73,6 +73,12 @@ class TestValidatePolicy(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("unmanaged_files.action", errors[0])
 
+    def test_unmanaged_files_must_be_mapping(self):
+        for bad in ([], ["x"], "warn", 1):
+            errors, warnings = validate_policy({"unmanaged_files": bad})  # noqa: RUF059
+            self.assertEqual(len(errors), 1, repr(bad))
+            self.assertIn("unmanaged_files must be a YAML mapping", errors[0])
+
     def test_negative_cache_ttl(self):
         errors, warnings = validate_policy({"cache": {"ttl": -1}})  # noqa: RUF059
         self.assertEqual(len(errors), 1)

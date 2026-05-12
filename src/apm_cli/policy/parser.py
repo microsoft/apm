@@ -140,9 +140,11 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
         if rei is not None and not isinstance(rei, bool):
             errors.append(f"manifest.require_explicit_includes must be a boolean, got '{rei}'")
 
-    # unmanaged_files.action
+    # unmanaged_files
     uf = data.get("unmanaged_files")
-    if isinstance(uf, dict):
+    if uf is not None and not isinstance(uf, dict):
+        errors.append("unmanaged_files must be a YAML mapping")
+    elif isinstance(uf, dict):
         action = uf.get("action")
         if action is not None and action not in _VALID_UNMANAGED_ACTION:
             errors.append(
@@ -212,7 +214,7 @@ def _build_policy(data: dict) -> ApmPolicy:
     if raw_uf is None:
         unmanaged_files = UnmanagedFilesPolicy(action=None, directories=None)
     else:
-        uf_data = {} if not isinstance(raw_uf, dict) else raw_uf
+        uf_data = raw_uf
         action = uf_data.get("action")
         directories = (
             _parse_tuple(uf_data.get("directories"))
