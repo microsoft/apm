@@ -198,6 +198,13 @@ def _needs_canonical_host_prefix(canonical: str, host: str) -> bool:
     manifest's dict source carries a host-qualified ``repo`` -- this returns False
     so the prefix is not duplicated.
 
+    GHES (GitHub Enterprise Server, configured via ``GITHUB_HOST``) is not handled
+    here. Those hosts return True from ``_marketplace_host_needs_explicit_git_path``
+    (neither GitHub-family nor ADO) so ``resolve_marketplace_plugin`` builds a
+    structured ``dep_ref`` upstream and this helper is never reached. The
+    ``is_github_hostname`` check below is defense-in-depth that would also reject
+    them if a future change ever bypassed the upstream guard.
+
     Also returns False when ``canonical`` is in URL form (``https://...``) or SSH
     SCP shorthand (``git@host:owner/repo``). Manifests that put a full URL in the
     ``repo`` field reach this point via ``_resolve_github_source`` (which only
@@ -593,6 +600,12 @@ def resolve_marketplace_plugin(
         and _needs_canonical_host_prefix(canonical, source.host)
     ):
         canonical = f"{source.host}/{canonical}"
+        logger.debug(
+            "Backfilled marketplace host '%s' onto canonical for %s@%s (auth routing #1285)",
+            source.host,
+            plugin_name,
+            marketplace_name,
+        )
 
     # ---- Raw ref override ----
     # When version_spec is provided it is treated as a raw git ref that
