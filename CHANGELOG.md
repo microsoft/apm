@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- Reject string-form `@alias` dependency shorthand at parse time with a migration error; use object form with `alias:` instead -- by @prateek (#1301)
+
 ## [0.17.0] - 2026-06-03
 
 ### Added
