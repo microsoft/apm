@@ -20,6 +20,8 @@ _CONFIG_KEY_DISPLAY_NAMES = {
     "auto_integrate": "auto-integrate",
     "temp_dir": "temp-dir",
     "copilot_cowork_skills_dir": "copilot-cowork-skills-dir",
+    "allow_protocol_fallback": "allow-protocol-fallback",
+    "ssh": "ssh",
 }
 
 
@@ -35,19 +37,23 @@ def _parse_bool_value(value: str) -> bool:
 
 def _get_config_setters():
     """Return config setters keyed by CLI option name."""
-    from ..config import set_auto_integrate
+    from ..config import set_allow_protocol_fallback, set_auto_integrate, set_ssh
 
     return {
         "auto-integrate": (set_auto_integrate, "Auto-integration"),
+        "allow-protocol-fallback": (set_allow_protocol_fallback, "Protocol fallback"),
+        "ssh": (set_ssh, "SSH transport preference"),
     }
 
 
 def _get_config_getters():
     """Return config getters keyed by CLI option name."""
-    from ..config import get_auto_integrate
+    from ..config import get_allow_protocol_fallback, get_auto_integrate, get_ssh
 
     return {
         "auto-integrate": get_auto_integrate,
+        "allow-protocol-fallback": get_allow_protocol_fallback,
+        "ssh": get_ssh,
     }
 
 
@@ -55,7 +61,7 @@ def _valid_config_keys() -> str:
     """Return valid config keys for messages."""
     from ..core.experimental import is_enabled
 
-    keys = ["auto-integrate", "temp-dir"]
+    keys = ["auto-integrate", "temp-dir", "allow-protocol-fallback", "ssh"]
     if is_enabled("copilot_cowork"):
         keys.append("copilot-cowork-skills-dir")
     return ", ".join(keys)
@@ -120,11 +126,16 @@ def config(ctx):
 
             config_table.add_row("Global", "APM CLI Version", get_version())
 
+            from ..config import get_allow_protocol_fallback as _get_apf
+            from ..config import get_ssh as _get_ssh_cfg
             from ..config import get_temp_dir as _get_temp_dir
 
             _temp_dir_val = _get_temp_dir()
             if _temp_dir_val:
                 config_table.add_row("", "Temp Directory", _temp_dir_val)
+
+            config_table.add_row("", "Allow Protocol Fallback", str(_get_apf()))
+            config_table.add_row("", "SSH Transport Preferred", str(_get_ssh_cfg()))
 
             from ..core.experimental import is_enabled as _is_enabled
 
@@ -159,11 +170,16 @@ def config(ctx):
             click.echo(f"\n{HIGHLIGHT}Global:{RESET}")
             click.echo(f"  APM CLI Version: {get_version()}")
 
+            from ..config import get_allow_protocol_fallback as _get_apf_fb
+            from ..config import get_ssh as _get_ssh_fb
             from ..config import get_temp_dir as _get_temp_dir_fb
 
             _temp_dir_fb = _get_temp_dir_fb()
             if _temp_dir_fb:
                 click.echo(f"  Temp Directory: {_temp_dir_fb}")
+
+            click.echo(f"  allow-protocol-fallback: {_get_apf_fb()}")
+            click.echo(f"  ssh: {_get_ssh_fb()}")
 
             from ..core.experimental import is_enabled as _is_enabled_fb
 
@@ -288,12 +304,16 @@ def get(key):
         # Show all user-settable keys with their effective values (including
         # defaults).  Iterating raw config keys would hide settings that
         # have not been written yet (e.g. auto_integrate on a fresh install).
+        from ..config import get_allow_protocol_fallback, get_ssh
+
         logger.progress("APM Configuration:")
         click.echo(f"  auto-integrate: {get_auto_integrate()}")
         temp_dir = get_temp_dir()
         click.echo(
             f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
         )
+        click.echo(f"  allow-protocol-fallback: {get_allow_protocol_fallback()}")
+        click.echo(f"  ssh: {get_ssh()}")
 
         from ..core.experimental import is_enabled as _is_enabled_get
 

@@ -31,6 +31,15 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
 
+## Transport and protocol
+
+Controls how APM clones packages from Git hosts. These settings can also be persisted via [`apm config set`](./cli/config/) to avoid repeating flags or environment-variable exports.
+
+| Variable | Purpose | Default | Notes |
+|---|---|---|---|
+| `APM_GIT_PROTOCOL` | Preferred clone protocol for shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
+| `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
+
 ## Registry (MCP and proxy)
 
 | Variable | Purpose | Default | Notes |

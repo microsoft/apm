@@ -53,6 +53,8 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Only `temp-
 | --- | --- | --- | --- |
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
+| `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH→HTTPS or HTTPS→SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
+| `ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
 | `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. Requires the `copilot-cowork` experimental flag for `set`. |
 
 ### Resolution order
@@ -62,6 +64,13 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Only `temp-
 1. Environment variable (`APM_TEMP_DIR`, `APM_COPILOT_COWORK_SKILLS_DIR`)
 2. Value in `~/.apm/config.json`
 3. Built-in default (system temp / platform auto-detection)
+
+`allow-protocol-fallback` and `ssh` follow the layered transport precedence:
+
+1. CLI flag (`--allow-protocol-fallback`, `--ssh`) — highest priority
+2. Environment variable (`APM_ALLOW_PROTOCOL_FALLBACK=1`, `APM_GIT_PROTOCOL=ssh`)
+3. Value in `~/.apm/config.json` (`apm config set …`)
+4. Built-in default (`false` / no preference)
 
 ## Examples
 
@@ -76,6 +85,22 @@ Read and write `auto-integrate`:
 ```bash
 apm config get auto-integrate
 apm config set auto-integrate false
+```
+
+Persist SSH transport preference (no more `--ssh` on every install):
+
+```bash
+apm config set ssh true
+apm config get ssh
+# Reset to default:
+apm config set ssh false
+```
+
+Persist cross-protocol fallback (useful when migrating from SSH to HTTPS or vice versa):
+
+```bash
+apm config set allow-protocol-fallback true
+apm config get allow-protocol-fallback
 ```
 
 Pin a writable temp directory on Windows:
@@ -106,10 +131,11 @@ apm config unset copilot-cowork-skills-dir
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
-Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `copilot_cowork_skills_dir`); CLI keys use kebab-case. The CLI translates between the two.
+Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `allow_protocol_fallback`, `ssh`, `copilot_cowork_skills_dir`); CLI keys use kebab-case. The CLI translates between the two.
 
 ## Related
 
-- [`apm install`](../install/) -- consumes `temp-dir` for clone/download work.
+- [`apm install`](../install/) -- consumes `temp-dir` for clone/download work and `allow-protocol-fallback` / `ssh` for transport selection.
 - [`apm compile`](../compile/) -- affected by `auto-integrate`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir`.
+- [Environment variables](../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK`, `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys.

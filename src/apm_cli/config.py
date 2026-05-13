@@ -4,6 +4,13 @@ import json
 import os
 from typing import Optional  # noqa: F401
 
+# ---------------------------------------------------------------------------
+# Public env-var names (re-declared here to avoid a circular import with the
+# transport_selection module which also defines them).
+# ---------------------------------------------------------------------------
+_ENV_ALLOW_PROTOCOL_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
+_ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
+
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
@@ -138,6 +145,83 @@ def unset_temp_dir() -> None:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
     _invalidate_config_cache()
+
+
+# ---------------------------------------------------------------------------
+# Protocol transport preferences (issue #1243)
+# ---------------------------------------------------------------------------
+
+
+def get_allow_protocol_fallback() -> bool:
+    """Get the allow-protocol-fallback setting.
+
+    Returns:
+        bool: Whether cross-protocol fallback is enabled (default: False).
+    """
+    return get_config().get("allow_protocol_fallback", False)
+
+
+def set_allow_protocol_fallback(enabled: bool) -> None:
+    """Set the allow-protocol-fallback setting.
+
+    Args:
+        enabled: Whether to enable cross-protocol fallback.
+    """
+    update_config({"allow_protocol_fallback": enabled})
+
+
+def get_ssh() -> bool:
+    """Get the ssh transport preference setting.
+
+    Returns:
+        bool: Whether SSH is preferred for shorthand dependencies (default: False).
+    """
+    return get_config().get("ssh", False)
+
+
+def set_ssh(enabled: bool) -> None:
+    """Set the ssh transport preference setting.
+
+    Args:
+        enabled: Whether to prefer SSH for shorthand (owner/repo) dependencies.
+    """
+    update_config({"ssh": enabled})
+
+
+def get_apm_allow_protocol_fallback() -> bool:
+    """Return the effective allow-protocol-fallback flag.
+
+    Resolution order:
+      1. ``APM_ALLOW_PROTOCOL_FALLBACK`` environment variable ("1"/"true"/"yes"/"on")
+      2. ``allow_protocol_fallback`` value from ``~/.apm/config.json``
+      3. ``False`` (default)
+
+    Returns:
+        True when cross-protocol fallback is enabled by any source.
+    """
+    raw = os.environ.get(_ENV_ALLOW_PROTOCOL_FALLBACK, "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return get_allow_protocol_fallback()
+
+
+def get_apm_protocol_pref() -> str | None:
+    """Return the effective protocol preference string.
+
+    Resolution order:
+      1. ``APM_GIT_PROTOCOL`` environment variable ("ssh" / "https")
+      2. ``ssh`` boolean in ``~/.apm/config.json`` (maps to "ssh" when True)
+      3. ``None`` (let the transport selector use git insteadOf rules)
+
+    Returns:
+        ``"ssh"``, ``"https"``, or ``None``.
+    """
+    env_val = os.environ.get(_ENV_GIT_PROTOCOL, "").strip().lower()
+    if env_val in ("ssh", "https", "http"):
+        return env_val
+    if get_ssh():
+        return "ssh"
+    return None
 
 
 # ---------------------------------------------------------------------------
