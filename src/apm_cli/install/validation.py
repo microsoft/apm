@@ -333,9 +333,9 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # failure (auth/redirect/etc.) behind a 30s SSH timeout. The
             # ``APM_ALLOW_PROTOCOL_FALLBACK=1`` env var (the same escape-hatch
             # the clone path honors) restores the legacy permissive chain.
-            from apm_cli.deps.transport_selection import is_fallback_allowed
+            from apm_cli.config import get_apm_allow_protocol_fallback
 
-            allow_fallback_env = is_fallback_allowed()
+            allow_fallback_env = get_apm_allow_protocol_fallback()
 
             # For generic hosts (not GitHub, not ADO), relax the env so native
             # credential helpers (macOS Keychain, credential-store,

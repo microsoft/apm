@@ -188,6 +188,39 @@ def set_ssh(enabled: bool) -> None:
     update_config({"ssh": enabled})
 
 
+def unset_allow_protocol_fallback() -> None:
+    """Remove the ``allow_protocol_fallback`` key from the config file.
+
+    No-op if the key is not present.  After this call
+    :func:`get_apm_allow_protocol_fallback` will fall through to
+    ``APM_ALLOW_PROTOCOL_FALLBACK`` env var and then the built-in
+    default (``False``).
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if "allow_protocol_fallback" in config:
+        del config["allow_protocol_fallback"]
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
+def unset_ssh() -> None:
+    """Remove the ``ssh`` key from the config file.
+
+    No-op if the key is not present.  After this call
+    :func:`get_apm_protocol_pref` will fall through to the
+    ``APM_GIT_PROTOCOL`` env var and then the built-in default (``None``).
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if "ssh" in config:
+        del config["ssh"]
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
 def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
     """Parse ``APM_ALLOW_PROTOCOL_FALLBACK`` as a tri-state value.
 
@@ -224,9 +257,7 @@ def get_apm_allow_protocol_fallback() -> bool:
     Returns:
         ``True`` when cross-protocol fallback is enabled, otherwise ``False``.
     """
-    env_value = _parse_allow_protocol_fallback_env(
-        os.environ.get(_ENV_ALLOW_PROTOCOL_FALLBACK)
-    )
+    env_value = _parse_allow_protocol_fallback_env(os.environ.get(_ENV_ALLOW_PROTOCOL_FALLBACK))
     if env_value is not None:
         return env_value
     return get_allow_protocol_fallback()

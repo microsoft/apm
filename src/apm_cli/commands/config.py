@@ -334,6 +334,8 @@ def unset(key):
 
     Examples:
         apm config unset temp-dir
+        apm config unset allow-protocol-fallback
+        apm config unset ssh
         apm config unset copilot-cowork-skills-dir
     """
     logger = CommandLogger("config unset")
@@ -343,6 +345,20 @@ def unset(key):
 
         unset_temp_dir()
         logger.success("Temporary directory configuration removed")
+        return
+
+    if key == "allow-protocol-fallback":
+        from ..config import unset_allow_protocol_fallback
+
+        unset_allow_protocol_fallback()
+        logger.success("Protocol fallback preference removed (will use env var or default)")
+        return
+
+    if key == "ssh":
+        from ..config import unset_ssh
+
+        unset_ssh()
+        logger.success("SSH transport preference removed (will use env var or default)")
         return
 
     if key == "copilot-cowork-skills-dir":

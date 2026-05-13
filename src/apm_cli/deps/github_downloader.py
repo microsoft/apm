@@ -53,8 +53,6 @@ from .git_remote_ops import (
 from .transport_selection import (
     ProtocolPreference,
     TransportSelector,
-    is_fallback_allowed,
-    protocol_pref_from_env,
 )
 
 # Public docs anchor for the cross-protocol fallback caveat surfaced by the
@@ -206,12 +204,24 @@ class GitHubPackageDownloader:
         self.token_manager = self.auth_resolver._token_manager  # Backward compat
         self.git_env = self._setup_git_environment()
         self._transport_selector = transport_selector or TransportSelector()
-        self._protocol_pref = (
-            protocol_pref if protocol_pref is not None else protocol_pref_from_env()
-        )
-        self._allow_fallback = (
-            allow_fallback if allow_fallback is not None else is_fallback_allowed()
-        )
+        if protocol_pref is not None:
+            self._protocol_pref = protocol_pref
+        else:
+            # Use the config-aware helper (env > apm config > None) so that
+            # ``apm config set ssh true`` is honoured even when the downloader
+            # is constructed without explicit args (e.g. in validation.py).
+            from ..config import get_apm_protocol_pref as _get_pref
+            from .transport_selection import ProtocolPreference
+
+            _pref_str = _get_pref()
+            self._protocol_pref = ProtocolPreference.from_str(_pref_str)
+        if allow_fallback is not None:
+            self._allow_fallback = allow_fallback
+        else:
+            # Config-aware helper (env > apm config > False).
+            from ..config import get_apm_allow_protocol_fallback as _get_fallback
+
+            self._allow_fallback = _get_fallback()
         # Dedup set for the issue #786 cross-protocol port warning: one install
         # run calls _clone_with_fallback multiple times per dep (ref-resolution
         # clone, then the actual dep clone). We want the warning exactly once
