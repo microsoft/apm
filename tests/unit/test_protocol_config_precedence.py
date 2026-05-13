@@ -94,16 +94,26 @@ class TestAllowProtocolFallbackPrecedence:
         ):
             assert cfg_module.get_apm_allow_protocol_fallback() is True
 
-    @pytest.mark.parametrize("env_val", ["0", "false", "no", "off", ""])
-    def test_env_var_falsy_values_fall_through_to_config(self, env_val):
-        """Falsy/empty env values fall through to config."""
+    @pytest.mark.parametrize("env_val", ["0", "false", "no", "off"])
+    def test_env_var_explicit_falsy_overrides_config_true(self, env_val):
+        """Explicit falsy env values return False even when config=True (env wins)."""
         import apm_cli.config as cfg_module
 
         with (
             patch.object(cfg_module, "get_allow_protocol_fallback", return_value=True),
             patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": env_val}),
         ):
-            # env val is falsy → config (True) wins
+            # Explicit falsy env var overrides persisted config=True
+            assert cfg_module.get_apm_allow_protocol_fallback() is False
+
+    def test_env_var_empty_falls_through_to_config(self):
+        """Empty APM_ALLOW_PROTOCOL_FALLBACK (unset semantics) falls through to config."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=True),
+            patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": ""}),
+        ):
             assert cfg_module.get_apm_allow_protocol_fallback() is True
 
 

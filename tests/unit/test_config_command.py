@@ -1052,8 +1052,18 @@ class TestGetApmAllowProtocolFallback:
             os.environ.pop("APM_ALLOW_PROTOCOL_FALLBACK", None)
             assert cfg_module.get_apm_allow_protocol_fallback() is False
 
-    def test_empty_env_var_is_ignored(self):
-        """Empty APM_ALLOW_PROTOCOL_FALLBACK falls back to config."""
+    def test_env_var_explicit_zero_overrides_config_true(self):
+        """APM_ALLOW_PROTOCOL_FALLBACK=0 overrides a persisted config value of True."""
+        import apm_cli.config as cfg_module
+
+        with (
+            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=True),
+            patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": "0"}),
+        ):
+            assert cfg_module.get_apm_allow_protocol_fallback() is False
+
+    def test_empty_env_var_falls_through_to_config(self):
+        """Empty APM_ALLOW_PROTOCOL_FALLBACK (unset/empty) falls back to config."""
         import apm_cli.config as cfg_module
 
         with (

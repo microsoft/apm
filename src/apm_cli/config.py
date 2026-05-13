@@ -188,20 +188,47 @@ def set_ssh(enabled: bool) -> None:
     update_config({"ssh": enabled})
 
 
+def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
+    """Parse ``APM_ALLOW_PROTOCOL_FALLBACK`` as a tri-state value.
+
+    Args:
+        raw: Raw environment variable value, or ``None`` when unset.
+
+    Returns:
+        ``True`` for explicit truthy values (``1``, ``true``, ``yes``, ``on``),
+        ``False`` for explicit falsy values (``0``, ``false``, ``no``, ``off``),
+        or ``None`` when the variable is unset, empty, or unrecognised.
+    """
+    if raw is None:
+        return None
+    normalized = raw.strip().lower()
+    if normalized == "":
+        return None
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
 def get_apm_allow_protocol_fallback() -> bool:
     """Return the effective allow-protocol-fallback flag.
 
     Resolution order:
-      1. ``APM_ALLOW_PROTOCOL_FALLBACK`` environment variable ("1"/"true"/"yes"/"on")
+      1. ``APM_ALLOW_PROTOCOL_FALLBACK`` environment variable
+         (``"1"``/``"true"``/``"yes"``/``"on"`` => True;
+          ``"0"``/``"false"``/``"no"``/``"off"`` => False)
       2. ``allow_protocol_fallback`` value from ``~/.apm/config.json``
       3. ``False`` (default)
 
     Returns:
-        True when cross-protocol fallback is enabled by any source.
+        ``True`` when cross-protocol fallback is enabled, otherwise ``False``.
     """
-    raw = os.environ.get(_ENV_ALLOW_PROTOCOL_FALLBACK, "").strip().lower()
-    if raw in ("1", "true", "yes", "on"):
-        return True
+    env_value = _parse_allow_protocol_fallback_env(
+        os.environ.get(_ENV_ALLOW_PROTOCOL_FALLBACK)
+    )
+    if env_value is not None:
+        return env_value
     return get_allow_protocol_fallback()
 
 
@@ -209,12 +236,14 @@ def get_apm_protocol_pref() -> str | None:
     """Return the effective protocol preference string.
 
     Resolution order:
-      1. ``APM_GIT_PROTOCOL`` environment variable ("ssh" / "https")
-      2. ``ssh`` boolean in ``~/.apm/config.json`` (maps to "ssh" when True)
+      1. ``APM_GIT_PROTOCOL`` environment variable
+         (``"ssh"``, ``"https"``, or ``"http"`` — ``"http"`` is treated
+         as an alias for ``"https"`` by the transport selector)
+      2. ``ssh`` boolean in ``~/.apm/config.json`` (maps to ``"ssh"`` when True)
       3. ``None`` (let the transport selector use git insteadOf rules)
 
     Returns:
-        ``"ssh"``, ``"https"``, or ``None``.
+        ``"ssh"``, ``"https"``, ``"http"``, or ``None``.
     """
     env_val = os.environ.get(_ENV_GIT_PROTOCOL, "").strip().lower()
     if env_val in ("ssh", "https", "http"):
