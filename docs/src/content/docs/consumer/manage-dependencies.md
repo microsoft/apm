@@ -54,8 +54,6 @@ parser. The supported forms:
 |---|---|---|
 | GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. |
 | Pinned ref | `owner/repo#v1.0.0` | Pin to a tag, branch, or full commit SHA. |
-| Aliased | `owner/repo@my-alias` | Install under a custom directory name. |
-| Pinned + aliased | `owner/repo#v1.0.0@my-alias` | Combine the two. |
 | FQDN shorthand | `gitlab.com/acme/repo#v2.0` | Any git host, not just github.com. |
 | Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. |
 | Virtual file | `owner/repo/prompts/review.prompt.md` | Install a single primitive file. |
@@ -63,7 +61,7 @@ parser. The supported forms:
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
-| Object form | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Object form | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name> }` | Custom directory name (`alias`), nested groups, monorepo subpaths, or anything the string forms cannot express. |
 
 Object form in YAML:
 
