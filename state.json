@@ -1,53 +1,54 @@
 {
-  "last_updated": "2026-05-12T06:47:00Z",
+  "last_updated": "2026-05-13T06:51:00Z",
   "last_run_tasks": ["task3", "task4", "task7"],
   "validated_commands": {
     "test": ".venv/bin/pytest tests/unit/ -q",
     "format": ".venv/bin/ruff check src/ tests/ --fix && .venv/bin/ruff format src/ tests/",
     "lint_check": ".venv/bin/ruff check src/ tests/ && .venv/bin/ruff format --check src/ tests/",
     "install_dev": "pip install uv && python -m uv sync --extra dev --python /usr/bin/python3.12",
-    "notes": "Use pip install uv (not curl install). Use python -m uv with --python /usr/bin/python3.12 to avoid PyPy. Baseline 2026-05-12: 7 failed (policy_status ANSI only), 8287 passed."
+    "notes": "Use pip install uv (not curl install). Use python -m uv with --python /usr/bin/python3.12 to avoid PyPy. Baseline 2026-05-13: 7 failed (policy_status ANSI only), 8287 passed."
   },
   "coverage_baseline": {
     "total": "8287 passing, 7 failing",
-    "run_date": "2026-05-12",
-    "notes": "7 pre-existing failures: policy_status ANSI issue only. Runtime factory failures resolved in main."
+    "run_date": "2026-05-13",
+    "notes": "7 pre-existing failures: policy_status ANSI issue only."
   },
   "monthly_activity_issue": {"number": 1101, "month": "2026-05"},
   "ansi_note": "Rich outputs ANSI codes (italic, bold) even with NO_COLOR=1. Use regex to strip before text assertions.",
   "lockfile_format_note": "Lockfile is apm.lock.yaml (LOCKFILE_NAME constant).",
   "maintainer_preferences": "PRs #1029 (ANSI fix) and #1059 (uninstall engine tests) were closed without merging on 2026-05-03. Be more selective about submitting PRs. PR #1155 was merged on 2026-05-08.",
   "testing_backlog": [
-    {"id": "install-template", "file": "src/apm_cli/install/template.py", "priority": "done", "notes": "13 tests added in run 2026-05-12. Branch: test-assist/install-template-tests. PR pending."},
-    {"id": "compile-cli-full", "file": "src/apm_cli/commands/compile/cli.py", "priority": "medium", "notes": "Helper functions covered (PR #1206). Early-exit paths covered (PR #1233). Full compilation flow (after line 461) still largely untested - complex, requires filesystem and compiler setup."},
-    {"id": "deps-cli-update", "file": "src/apm_cli/commands/deps/cli.py", "priority": "medium", "notes": "18 tests exist in test_deps_update_command.py (passing). Check what update() orchestration still uncovered."},
-    {"id": "integration-test-markers", "priority": "medium", "notes": "8 network-gated integration test files need pytestmark annotations before pytest-discovery swap (#1168 gate 1). Offered to help on 2026-05-09. Await maintainer confirmation. No new comments as of 2026-05-12."},
+    {"id": "cache-integrity", "file": "src/apm_cli/cache/integrity.py", "priority": "done", "notes": "20 tests added 2026-05-13. PR pending (branch: test-assist/cache-integrity-tests)."},
+    {"id": "install-template", "file": "src/apm_cli/install/template.py", "priority": "done", "notes": "13 tests added 2026-05-12. PR #1287 pending review."},
+    {"id": "compile-cli-full", "file": "src/apm_cli/commands/compile/cli.py", "priority": "medium", "notes": "Helper functions covered (PR #1206). Early-exit paths covered (PR #1233). Full compilation flow still largely untested."},
+    {"id": "deps-cli-update", "file": "src/apm_cli/commands/deps/cli.py", "priority": "medium", "notes": "18 tests exist in test_deps_update_command.py (passing). Orchestration still partially uncovered."},
+    {"id": "integration-test-markers", "priority": "medium", "notes": "8 network-gated integration test files need pytestmark annotations. Offered help 2026-05-09; no maintainer response."},
     {"id": "compile-watcher", "file": "src/apm_cli/commands/compile/watcher.py", "coverage": "5%", "priority": "low", "notes": "File-watching component. Hard to test."},
-    {"id": "policy-status-ascii", "priority": "low", "notes": "7 tests failing: policy_status uses Rich unicode but test expects ASCII. PR #1029 closed by maintainer - do not retry."}
+    {"id": "policy-status-ascii", "priority": "low", "notes": "7 tests failing: policy_status uses Rich unicode. PR #1029 closed by maintainer - do not retry."}
   ],
   "backlog_cursor": "compile-cli-full",
   "open_prs": [
     {"number": 1139, "title": "Skip runtime factory tests when LLM not installed", "ci": "dirty-conflict", "notes": "Superseded - runtime_factory fix already in main. Commented suggesting closure."},
     {"number": 1206, "title": "tests(compile): add unit tests for compile/cli.py helper functions", "ci": "green"},
     {"number": 1233, "title": "tests(compile): add unit tests for compile() command early-exit paths", "ci": "gate-passed", "draft": true},
-    {"title": "tests(install): add unit tests for integration template module", "branch": "test-assist/install-template-tests", "notes": "PR created 2026-05-12, number unknown yet"}
+    {"number": 1287, "title": "tests(install): add unit tests for integration template module", "ci": "pending", "draft": true},
+    {"title": "tests(cache): add unit tests for cache.integrity SHA verification", "branch": "test-assist/cache-integrity-tests", "notes": "PR created 2026-05-13, number unknown yet"}
   ],
   "completed_work": [
     {
+      "run": "2026-05-13T06:51:00Z",
+      "tasks": ["task3", "task4", "task7"],
+      "description": "Task3: 20 new tests for cache/integrity.py (SHA verification, all git layouts). Task4: PRs #1206, #1233, #1287 in good shape, no conflicts. #1139 still dirty/superseded. Task7: Updated monthly issue #1101."
+    },
+    {
       "run": "2026-05-12T06:47:00Z",
       "tasks": ["task3", "task4", "task7"],
-      "description": "Task3: 13 new tests for install/template.py (run_integration_template + _integrate_materialization). Task4: Noted PR #1139 superseded by main. Task7: Updated monthly issue #1101."
+      "description": "Task3: 13 new tests for install/template.py (PR #1287). Task4: Noted PR #1139 superseded. Task7: Updated monthly issue #1101."
     },
     {
       "run": "2026-05-11T06:57:21Z",
       "tasks": ["task4", "task7"],
-      "description": "Task4: PR #1155 merged by danielmeppiel on 2026-05-08. PRs #1139, #1206, #1233 CI-green. Task7: Updated monthly issue #1101."
-    },
-    {
-      "run": "2026-05-10T06:44:48Z",
-      "tasks": ["task3", "task7"],
-      "pr": "#1233",
-      "description": "Task3: 13 new tests for compile() command early-exit paths. Task7: Updated monthly issue #1101."
+      "description": "Task4: PR #1155 merged. PRs #1139, #1206, #1233 CI-green. Task7: Updated monthly issue."
     }
   ]
 }
