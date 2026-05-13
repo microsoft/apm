@@ -126,7 +126,12 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
                 "_raw_stdio": {
                     "command": "npx",
                     "args": ["-y", "example-mcp"],
-                    "env": {"DEMO_ENV": "demo-value", "PORT": 3000},
+                    "env": {
+                        "DEMO_ENV": "demo-value",
+                        "PORT": 3000,
+                        "DEBUG": False,
+                        "RATE": 0.5,
+                    },
                 },
             }
 
@@ -136,7 +141,12 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
         self.assertEqual(
             data["mcpServers"]["env-demo"]["env"],
-            {"DEMO_ENV": "demo-value", "PORT": "3000"},
+            {
+                "DEMO_ENV": "demo-value",
+                "PORT": "3000",
+                "DEBUG": "false",
+                "RATE": "0.5",
+            },
         )
 
 
