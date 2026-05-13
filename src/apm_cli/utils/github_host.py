@@ -482,6 +482,22 @@ _ADO_AUTH_FAILURE_SIGNALS = (
     "could not read username",
 )
 
+# SSH-specific auth/connectivity failure signals from OpenSSH stderr.
+# Covers: missing key, agent has no identities, host key mismatch, and
+# explicit server rejection ("no more authentication methods to try" is the
+# final line OpenSSH emits after exhausting all auth methods).
+_SSH_AUTH_FAILURE_SIGNALS = (
+    "permission denied",
+    "publickey",
+    "no more authentication methods",
+    "host key verification failed",
+    "could not resolve hostname",
+    "connection refused",
+    "no supported authentication methods",
+    "too many authentication failures",
+    "agent refused operation",
+)
+
 
 def is_ado_auth_failure_signal(text: str | None) -> bool:
     """Return True if ``text`` matches an ADO auth-failure signal.
@@ -498,6 +514,24 @@ def is_ado_auth_failure_signal(text: str | None) -> bool:
         return False
     lowered = text.lower()
     return any(signal in lowered for signal in _ADO_AUTH_FAILURE_SIGNALS)
+
+
+def is_ssh_auth_failure_signal(text: str | None) -> bool:
+    """Return True if ``text`` matches an SSH auth/connectivity failure signal.
+
+    Accepts raw stderr from ``subprocess.run`` (git ls-remote over SSH).
+    Matches case-insensitively.
+
+    Covers OpenSSH error messages for: missing or rejected public key,
+    exhausted authentication methods, host key mismatch, unreachable host,
+    and refused connections.  Does NOT cover transient network errors that
+    are not auth-related (e.g. packet loss) -- those are left to the real
+    download phase to surface.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(signal in lowered for signal in _SSH_AUTH_FAILURE_SIGNALS)
 
 
 def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.azure.com") -> str:

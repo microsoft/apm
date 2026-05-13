@@ -88,6 +88,12 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     ``apm install -g --update`` would fail on the same machine with the
     same creds. See #1212.
 
+    For generic hosts, the probe uses the same transport the real clone
+    would use: SSH when the dep carries an explicit ``ssh://`` scheme or
+    has no token (ssh-agent auth), HTTPS otherwise (token-authenticated).
+    SSH failures are detected via :func:`is_ssh_auth_failure_signal`;
+    HTTPS failures via :func:`is_ado_auth_failure_signal`.
+
     Raises :class:`AuthenticationError` (with ``build_error_context``
     payload) on the first auth failure that survives the fallback.
     """
@@ -98,6 +104,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         is_ado_auth_failure_signal,
         is_azure_devops_hostname,
         is_github_hostname,
+        is_ssh_auth_failure_signal,
     )
 
     logger = getattr(ctx, "logger", None)
@@ -127,16 +134,27 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
 
         _dl = GitHubPackageDownloader(auth_resolver=auth_resolver)
         _dl.github_host = host
+        is_generic = not is_github_hostname(host) and not is_azure_devops_hostname(host)
+
+        # For generic hosts, determine whether the actual clone transport is SSH.
+        # A dep uses SSH when it carries an explicit ssh:// scheme OR when no
+        # auth token is available (in which case TransportSelector defaults to
+        # SSH for generic hosts).  In both cases the probe must use the SSH URL
+        # so we validate the right transport; an HTTPS probe against an SSH-only
+        # server would either produce a false auth-failure or silently succeed
+        # against a different auth surface.
+        _explicit_scheme = (getattr(dep, "explicit_scheme", None) or "").lower()
+        _use_ssh = is_generic and (_explicit_scheme == "ssh" or not dep_ctx.token)
+
         probe_url = _dl._build_repo_url(
             dep.repo_url,
-            use_ssh=False,
+            use_ssh=_use_ssh,
             dep_ref=dep,
             token=dep_ctx.token,
             auth_scheme=_auth_scheme,
         )
         _ctx_env = getattr(dep_ctx, "git_env", {}) or {}
         probe_env = {**os.environ, **_dl.git_env, **_ctx_env}
-        is_generic = not is_github_hostname(host) and not is_azure_devops_hostname(host)
         if is_generic:
             for _key in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ASKPASS"):
                 probe_env.pop(_key, None)
@@ -222,24 +240,43 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             continue  # timeout fallthrough -- handled by the real phase
 
         if result.returncode != 0:
-            if not is_ado_auth_failure_signal(result.stderr or ""):
-                continue  # non-auth git failure (network, ref-not-found) -- defer
-            _trace(f"Preflight: {host_display} -- auth rejected")
-            _diag = auth_resolver.build_error_context(
-                host,
-                "install --update",
-                org=org,
-                dep_url=dep.repo_url,
-                bearer_also_failed=bearer_also_failed,
-            )
-            raise AuthenticationError(
-                f"Authentication failed for {host}",
-                diagnostic_context=(
-                    _diag
-                    + "\n\n    No files were modified."
-                    + "\n    apm.yml, apm.lock.yaml, and apm_modules/ are unchanged."
-                ),
-            )
+            stderr_text = result.stderr or ""
+            if _use_ssh:
+                # Generic SSH transport: check SSH-specific failure signals.
+                if not is_ssh_auth_failure_signal(stderr_text):
+                    continue  # non-auth SSH failure (network, unknown host key) -- defer
+                _trace(f"Preflight: {host_display} -- SSH auth rejected")
+                raise AuthenticationError(
+                    f"SSH authentication failed for {host}",
+                    diagnostic_context=(
+                        f"    SSH authentication was rejected by {host_display}.\n"
+                        f"    Ensure your SSH key is loaded in ssh-agent "
+                        f"(ssh-add -l) and that the\n"
+                        f"    public key is authorised on the server.\n\n"
+                        f"    git output: {stderr_text.strip()}\n\n"
+                        f"    No files were modified.\n"
+                        f"    apm.yml, apm.lock.yaml, and apm_modules/ are unchanged."
+                    ),
+                )
+            else:
+                if not is_ado_auth_failure_signal(stderr_text):
+                    continue  # non-auth git failure (network, ref-not-found) -- defer
+                _trace(f"Preflight: {host_display} -- auth rejected")
+                _diag = auth_resolver.build_error_context(
+                    host,
+                    "install --update",
+                    org=org,
+                    dep_url=dep.repo_url,
+                    bearer_also_failed=bearer_also_failed,
+                )
+                raise AuthenticationError(
+                    f"Authentication failed for {host}",
+                    diagnostic_context=(
+                        _diag
+                        + "\n\n    No files were modified."
+                        + "\n    apm.yml, apm.lock.yaml, and apm_modules/ are unchanged."
+                    ),
+                )
         else:
             _trace(f"Preflight: {host_display} -- accepted")
 
