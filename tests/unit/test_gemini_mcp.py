@@ -168,8 +168,10 @@ class TestGeminiUserScope(unittest.TestCase):
     def test_user_scope_configure_mcp_server_does_not_short_circuit(self):
         """``configure_mcp_server`` must not early-return in user scope just
         because ``~/.gemini/`` is missing -- user scope is not opt-in."""
-        with patch("apm_cli.adapters.client.copilot.SimpleRegistryClient") as registry_cls, \
-             patch("apm_cli.adapters.client.copilot.RegistryIntegration"):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient") as registry_cls,
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
             registry = MagicMock()
             registry.find_server_by_reference.return_value = {
                 "packages": [{"name": "pkg", "registry_name": "npm", "runtime_hint": "npx"}]
