@@ -161,9 +161,7 @@ class TestGeminiMCPIntegration:
     def teardown_method(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_adds_server_preserving_existing_keys(self, monkeypatch):
-        monkeypatch.chdir(self.root)
-
+    def test_adds_server_preserving_existing_keys(self):
         settings = self.gemini_dir / "settings.json"
         settings.write_text(
             json.dumps(
@@ -175,7 +173,7 @@ class TestGeminiMCPIntegration:
             )
         )
 
-        adapter = GeminiClientAdapter.__new__(GeminiClientAdapter)
+        adapter = GeminiClientAdapter(project_root=self.root)
         adapter.update_config(
             {
                 "my-server": {
@@ -192,13 +190,11 @@ class TestGeminiMCPIntegration:
         assert result["theme"] == "dark"
         assert result["tools"] == {"enabled": True}
 
-    def test_creates_mcp_servers_key_if_missing(self, monkeypatch):
-        monkeypatch.chdir(self.root)
-
+    def test_creates_mcp_servers_key_if_missing(self):
         settings = self.gemini_dir / "settings.json"
         settings.write_text(json.dumps({"theme": "light"}))
 
-        adapter = GeminiClientAdapter.__new__(GeminiClientAdapter)
+        adapter = GeminiClientAdapter(project_root=self.root)
         adapter.update_config({"srv": {"command": "echo"}})
 
         result = json.loads(settings.read_text())
@@ -248,10 +244,8 @@ class TestGeminiOptInBehavior:
         assert result.files_integrated == 0
         assert not (self.root / ".gemini").exists()
 
-    def test_mcp_update_noop_without_gemini_dir(self, monkeypatch):
-        monkeypatch.chdir(self.root)
-
-        adapter = GeminiClientAdapter.__new__(GeminiClientAdapter)
+    def test_mcp_update_noop_without_gemini_dir(self):
+        adapter = GeminiClientAdapter(project_root=self.root)
         adapter.update_config({"srv": {"command": "echo"}})
 
         assert not (self.root / ".gemini").exists()

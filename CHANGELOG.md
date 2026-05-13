@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Gemini CLI: `apm install -g --mcp NAME` now correctly writes to `~/.gemini/settings.json` (user scope) and `apm install` from outside the target project writes to `<project_root>/.gemini/settings.json` instead of `cwd`. Previously `--global` had no effect on Gemini and project-scope writes silently landed in the wrong directory. The matching opt-in gate and cleanup paths in `MCPIntegrator` are aligned in the same change. (#1299)
 - `apm install --target claude` now preserves self-defined stdio MCP `env` values from `apm.yml` and writes non-string values such as `PORT: 3000` and `DEBUG: false` as MCP-compatible strings. (#1222)
 - Non-skill integrators (agent, instruction, prompt, command, hook script-copy) silently adopt byte-identical pre-existing files so a degraded `deployed_files=[]` lockfile no longer permanently blocks installs gated by `required-packages-deployed`. (#1313)
 - `apm audit` drift check now returns skip-with-info (`passed=True`) when the install cache is cold, instead of failing the audit; bare `apm audit` surfaces the skip reason on stderr so CI pipelines that have not yet run `apm install` are not incorrectly red-marked. (#1289)
