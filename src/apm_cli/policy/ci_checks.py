@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence  # noqa: F401, UP035
 
-from ..deps.lockfile import _SELF_KEY
+from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
@@ -513,11 +513,14 @@ def run_baseline_checks(
     project_root: Path,
     *,
     fail_fast: bool = True,
+    ci_mode: bool = False,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
     When *fail_fast* is ``True`` (default), stops after the first
     failing check to skip expensive I/O (e.g. content integrity scan).
+    When *ci_mode* is ``True``, the ``manifest-missing`` check is a hard
+    failure (``passed=False``); otherwise it is an advisory warning only.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
@@ -555,8 +558,25 @@ def run_baseline_checks(
     lockfile_path = get_lockfile_path(project_root)
 
     # If there's no apm.yml or no lockfile, the first check already passed
-    # (no deps needed).  Skip remaining checks.
+    # (no deps needed).  Skip remaining checks -- but warn if APM artifacts
+    # exist without a manifest (evidence of a deleted apm.yml).
     if not apm_yml_path.exists() or not lockfile_path.exists():
+        if not apm_yml_path.exists():
+            apm_dir = project_root / ".apm"
+            lock_file = project_root / LOCKFILE_NAME
+            legacy_lock_file = project_root / LEGACY_LOCKFILE_NAME
+            if apm_dir.is_dir() or lock_file.exists() or legacy_lock_file.exists():
+                result.checks.append(
+                    CheckResult(
+                        name="manifest-missing",
+                        passed=not ci_mode,
+                        message=(
+                            "apm.yml is missing but APM artifacts"
+                            " (.apm/ or apm.lock.yaml or apm.lock) were found"
+                            " -- this may indicate a deleted manifest"
+                        ),
+                    )
+                )
         return result
 
     lock = LockFile.read(lockfile_path)

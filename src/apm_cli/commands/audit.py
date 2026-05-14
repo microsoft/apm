@@ -436,7 +436,7 @@ def _audit_ci_gate(
     fail_fast = not no_fail_fast
 
     # Always run baseline checks
-    ci_result = run_baseline_checks(cfg.project_root, fail_fast=fail_fast)
+    ci_result = run_baseline_checks(cfg.project_root, fail_fast=fail_fast, ci_mode=True)
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
