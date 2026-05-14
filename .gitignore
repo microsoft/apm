@@ -77,3 +77,4 @@ scout-pipeline-result.png
 .playwright-mcp/
 server.pid
 .docs-rewrite-plan/
+build/apm-*/
