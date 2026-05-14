@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
@@ -119,6 +120,7 @@ class AgentIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
 
@@ -129,7 +131,35 @@ class AgentIntegrator(BaseIntegrator):
                 target,
             )
             target_path = agents_dir / target_filename
+            # Defense-in-depth: target_filename comes from
+            # get_target_filename_for_target which strips path separators,
+            # but assert containment under agents_dir so a future
+            # regression cannot smuggle a traversal sequence past the
+            # adopt branch (which fires *before* check_collision and
+            # would otherwise blindly trust the computed path). Mirrors
+            # the guard already in command_integrator and
+            # instruction_integrator.
+            try:
+                ensure_path_within(target_path, agents_dir)
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected agent target path: {exc}",
+                        package=package_info.package.name,
+                    )
+                files_skipped += 1
+                continue
+
             rel_path = portable_relpath(target_path, project_root)
+
+            if self.is_content_identical_to_source(target_path, source_file):
+                # Pre-existing file is byte-identical to source -- silently
+                # adopt so deployed_files reflects reality. See
+                # BaseIntegrator.is_content_identical_to_source for the
+                # full rationale (catch-22 fix).
+                target_paths.append(target_path)
+                files_adopted += 1
+                continue
 
             if self.check_collision(
                 target_path,
@@ -160,6 +190,7 @@ class AgentIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     def sync_for_target(
@@ -383,6 +414,7 @@ class AgentIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
 
@@ -393,18 +425,31 @@ class AgentIntegrator(BaseIntegrator):
                 copilot,
             )
             target_path = agents_dir / target_filename
-            rel_path = portable_relpath(target_path, project_root)
-
-            if self.check_collision(
-                target_path, rel_path, managed_files, force, diagnostics=diagnostics
-            ):
+            try:
+                ensure_path_within(target_path, agents_dir)
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected agent target path: {exc}",
+                        package=package_info.package.name,
+                    )
                 files_skipped += 1
                 continue
+            rel_path = portable_relpath(target_path, project_root)
 
-            links_resolved = self.copy_agent(source_file, target_path)
-            total_links_resolved += links_resolved
-            files_integrated += 1
-            target_paths.append(target_path)
+            if self.is_content_identical_to_source(target_path, source_file):
+                target_paths.append(target_path)
+                files_adopted += 1
+            else:
+                if self.check_collision(
+                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
+                ):
+                    files_skipped += 1
+                    continue
+                links_resolved = self.copy_agent(source_file, target_path)
+                total_links_resolved += links_resolved
+                files_integrated += 1
+                target_paths.append(target_path)
 
             if claude_agents_dir:
                 claude_target = KNOWN_TARGETS["claude"]
@@ -414,8 +459,20 @@ class AgentIntegrator(BaseIntegrator):
                     claude_target,
                 )
                 claude_path = claude_agents_dir / claude_filename
+                try:
+                    ensure_path_within(claude_path, claude_agents_dir)
+                except PathTraversalError as exc:
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=f"Rejected claude agent target path: {exc}",
+                            package=package_info.package.name,
+                        )
+                    continue
                 claude_rel = portable_relpath(claude_path, project_root)
-                if not self.check_collision(
+                if self.is_content_identical_to_source(claude_path, source_file):
+                    target_paths.append(claude_path)
+                    files_adopted += 1
+                elif not self.check_collision(
                     claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
                 ):
                     self.copy_agent(source_file, claude_path)
@@ -429,8 +486,20 @@ class AgentIntegrator(BaseIntegrator):
                     cursor_target,
                 )
                 cursor_path = cursor_agents_dir / cursor_filename
+                try:
+                    ensure_path_within(cursor_path, cursor_agents_dir)
+                except PathTraversalError as exc:
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=f"Rejected cursor agent target path: {exc}",
+                            package=package_info.package.name,
+                        )
+                    continue
                 cursor_rel = portable_relpath(cursor_path, project_root)
-                if not self.check_collision(
+                if self.is_content_identical_to_source(cursor_path, source_file):
+                    target_paths.append(cursor_path)
+                    files_adopted += 1
+                elif not self.check_collision(
                     cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics
                 ):
                     self.copy_agent(source_file, cursor_path)
@@ -442,6 +511,7 @@ class AgentIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     # DEPRECATED: use get_target_filename_for_target(KNOWN_TARGETS["claude"], ...) instead.

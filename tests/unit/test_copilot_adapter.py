@@ -557,6 +557,18 @@ class TestCopilotEnvVarTranslationInStdioEnvBlock(unittest.TestCase):
         )
         self.assertEqual(set(result.keys()), {"FOO", "BAR"})
 
+    def test_dict_shaped_env_block_stringifies_literals_and_omits_none(self):
+        adapter = CopilotClientAdapter()
+        result = adapter._resolve_environment_variables(
+            {"PORT": 3000, "DEBUG": False, "RATE": 0.5, "OPTIONAL": None},
+            env_overrides=None,
+        )
+
+        self.assertEqual(
+            result,
+            {"PORT": "3000", "DEBUG": "false", "RATE": "0.5"},
+        )
+
 
 class TestCopilotInstallRunSummary(unittest.TestCase):
     """Issue #1152: aggregated post-install diagnostics.
