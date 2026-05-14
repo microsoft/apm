@@ -317,7 +317,7 @@ def run_mcp_install(  # noqa: PLR0915
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: copilot, codex)"
+                "No runtimes support user-scope MCP installation (supported: copilot, codex, gemini)"
             )
             return 0
 

@@ -82,6 +82,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         """
         gemini_dir = self._get_gemini_dir()
         if not self.user_scope and not gemini_dir.is_dir():
+            logger.debug("Skipping Gemini project-scope write -- %s does not exist (opt-in)", gemini_dir)
             return
 
         config_path = Path(self.get_config_path())
@@ -92,6 +93,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
         for name, entry in config_updates.items():
             current_config["mcpServers"][name] = entry
 
+        if not config_path.parent.is_dir():
+            logger.debug("Creating %s for Gemini CLI user configuration", config_path.parent)
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
@@ -104,7 +107,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
         try:
             with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read %s: %s", config_path, exc)
             return {}
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -245,6 +249,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
             return False
 
         if not self.user_scope and not self._get_gemini_dir().is_dir():
+            logger.debug("Gemini opt-in gate: %s absent, skipping configure_mcp_server", self._get_gemini_dir())
             return True
 
         try:

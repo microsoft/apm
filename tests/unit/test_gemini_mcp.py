@@ -51,6 +51,12 @@ class TestGeminiClientAdapter(unittest.TestCase):
         config = self.adapter.get_current_config()
         self.assertEqual(config, {})
 
+    def test_get_current_config_returns_empty_dict_when_no_dir(self):
+        """get_current_config returns {} when the .gemini directory does not exist."""
+        adapter = GeminiClientAdapter(project_root=Path(tempfile.mkdtemp()))
+        config = adapter.get_current_config()
+        self.assertEqual(config, {})
+
     def test_update_config_creates_file(self):
         self.adapter.update_config({"my-server": {"command": "npx", "args": ["-y", "pkg"]}})
         data = json.loads(self.settings_json.read_text())

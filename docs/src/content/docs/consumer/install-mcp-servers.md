@@ -97,7 +97,7 @@ Gemini's user-scope path (`~/.gemini/settings.json`, selected with
 user-scope MCP config when that runtime supports user scope -- for
 example Copilot CLI writes to `~/.copilot/mcp-config.json`, Codex
 CLI to `~/.codex/config.toml`, and Gemini CLI to
-`~/.gemini/settings.json`. Workspace-only runtimes (e.g. Cursor,
+`~/.gemini/settings.json`. Workspace-only runtimes (VS Code, Cursor,
 OpenCode) are skipped at user scope.
 
 ## stdio vs HTTP servers

@@ -515,3 +515,42 @@ class TestGeminiUninstallCleanup:
 
         assert stats["files_removed"] == 1
         assert not skill_dir.exists()
+
+
+@pytest.mark.integration
+class TestRemoveStaleGeminiUsesProjectRoot:
+    """Verify remove_stale reads .gemini/settings.json from project_root, not cwd."""
+
+    def setup_method(self):
+        self.tmp = tempfile.mkdtemp()
+        self.root = Path(self.tmp)
+        self.gemini_dir = self.root / ".gemini"
+        self.gemini_dir.mkdir()
+        self.settings_json = self.gemini_dir / "settings.json"
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_remove_stale_gemini_uses_project_root_not_cwd(self, monkeypatch):
+        """remove_stale must resolve .gemini/settings.json via project_root,
+        not Path.cwd(), so stale cleanup works when cwd != project_root."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        self.settings_json.write_text(
+            json.dumps({"mcpServers": {"stale-srv": {"command": "echo"}, "keep-srv": {"command": "cat"}}})
+        )
+
+        other_cwd = tempfile.mkdtemp(prefix="apm-not-project-")
+        try:
+            monkeypatch.chdir(other_cwd)
+            MCPIntegrator.remove_stale(
+                {"stale-srv"},
+                runtime="gemini",
+                project_root=self.root,
+            )
+        finally:
+            shutil.rmtree(other_cwd, ignore_errors=True)
+
+        data = json.loads(self.settings_json.read_text())
+        assert "stale-srv" not in data.get("mcpServers", {})
+        assert "keep-srv" in data.get("mcpServers", {})
