@@ -119,6 +119,13 @@ class InstructionIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
+            if self.is_content_identical_to_source(target_path, source_file):
+                # Pre-existing file is byte-identical to source -- silently
+                # adopt so deployed_files reflects reality. See
+                # BaseIntegrator.is_content_identical_to_source for rationale.
+                target_paths.append(target_path)
+                continue
+
             if self.check_collision(
                 target_path,
                 rel_path,

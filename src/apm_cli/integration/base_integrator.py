@@ -109,6 +109,52 @@ class BaseIntegrator:
             return None
         return {p.replace("\\", "/") for p in managed_files}
 
+    @staticmethod
+    def is_content_identical_to_source(target_path: Path, source_path: Path) -> bool:
+        """Return True if *target_path* is byte-identical to *source_path*.
+
+        Used by non-skill integrators to silently *adopt* a pre-existing
+        on-disk file that already matches what APM would deploy.
+
+        Why this exists
+        ---------------
+        Without this short-circuit, the per-file loops in
+        ``agent_integrator``, ``instruction_integrator``, ``prompt_integrator``
+        and ``command_integrator`` would route the file straight into
+        :meth:`check_collision`. When the path is missing from
+        ``managed_files`` (e.g. lockfile was wiped, hand-edited, regenerated
+        by an older APM build, or the user's previous install crashed before
+        ``deployed_files`` was persisted) the file is treated as
+        "user-authored", *skipped*, and never appended to ``target_paths``.
+
+        That in turn leaves ``deployed_files`` empty in the new lockfile,
+        which trips the ``required-packages-deployed`` policy check at the
+        next install. Because ``policy_gate`` runs *before* ``integrate``
+        in ``pipeline.py``, the install can never self-heal -- a permanent
+        catch-22 lockout.
+
+        ``skill_integrator`` already has an equivalent content-identity
+        adopt at ``_promote_sub_skills`` (target.exists() +
+        ``_dirs_equal``). This helper restores symmetry for non-skill
+        primitives.
+
+        Conservative by design
+        ----------------------
+        Only fires for *byte-identical* matches. Format-transforming
+        targets (``codex_agent``, ``cursor_rules``, ``claude_rules``,
+        ``windsurf_rules``, ``gemini_command``, ...) won't match -- they
+        keep the existing skip behavior. This means we never silently
+        adopt content that *might* have come from somewhere else; we only
+        adopt files that are demonstrably the package's own bytes already
+        on disk.
+        """
+        try:
+            if not target_path.exists() or not source_path.exists():
+                return False
+            return target_path.read_bytes() == source_path.read_bytes()
+        except OSError:
+            return False
+
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
     @staticmethod

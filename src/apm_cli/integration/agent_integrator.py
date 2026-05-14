@@ -131,6 +131,14 @@ class AgentIntegrator(BaseIntegrator):
             target_path = agents_dir / target_filename
             rel_path = portable_relpath(target_path, project_root)
 
+            if self.is_content_identical_to_source(target_path, source_file):
+                # Pre-existing file is byte-identical to source -- silently
+                # adopt so deployed_files reflects reality. See
+                # BaseIntegrator.is_content_identical_to_source for the
+                # full rationale (catch-22 fix).
+                target_paths.append(target_path)
+                continue
+
             if self.check_collision(
                 target_path,
                 rel_path,
@@ -395,16 +403,18 @@ class AgentIntegrator(BaseIntegrator):
             target_path = agents_dir / target_filename
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.check_collision(
+            if self.is_content_identical_to_source(target_path, source_file):
+                target_paths.append(target_path)
+            elif self.check_collision(
                 target_path, rel_path, managed_files, force, diagnostics=diagnostics
             ):
                 files_skipped += 1
                 continue
-
-            links_resolved = self.copy_agent(source_file, target_path)
-            total_links_resolved += links_resolved
-            files_integrated += 1
-            target_paths.append(target_path)
+            else:
+                links_resolved = self.copy_agent(source_file, target_path)
+                total_links_resolved += links_resolved
+                files_integrated += 1
+                target_paths.append(target_path)
 
             if claude_agents_dir:
                 claude_target = KNOWN_TARGETS["claude"]
@@ -415,7 +425,9 @@ class AgentIntegrator(BaseIntegrator):
                 )
                 claude_path = claude_agents_dir / claude_filename
                 claude_rel = portable_relpath(claude_path, project_root)
-                if not self.check_collision(
+                if self.is_content_identical_to_source(claude_path, source_file):
+                    target_paths.append(claude_path)
+                elif not self.check_collision(
                     claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
                 ):
                     self.copy_agent(source_file, claude_path)
@@ -430,7 +442,9 @@ class AgentIntegrator(BaseIntegrator):
                 )
                 cursor_path = cursor_agents_dir / cursor_filename
                 cursor_rel = portable_relpath(cursor_path, project_root)
-                if not self.check_collision(
+                if self.is_content_identical_to_source(cursor_path, source_file):
+                    target_paths.append(cursor_path)
+                elif not self.check_collision(
                     cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics
                 ):
                     self.copy_agent(source_file, cursor_path)

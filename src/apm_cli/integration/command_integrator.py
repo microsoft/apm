@@ -549,6 +549,12 @@ class CommandIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
+            if self.is_content_identical_to_source(target_path, prompt_file):
+                # Pre-existing file is byte-identical to source -- silently
+                # adopt. See BaseIntegrator.is_content_identical_to_source.
+                target_paths.append(target_path)
+                continue
+
             if self.check_collision(
                 target_path,
                 rel_path,
