@@ -1,5 +1,6 @@
 """Click commands for ``apm pack`` and ``apm unpack``."""
 
+import json as json_mod
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from ..core.build_orchestrator import (
 )
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
+from ..utils.console import set_console_stderr
 
 _PACK_HELP = """\
 Pack distributable artifacts from your APM project.
@@ -50,6 +52,21 @@ Exit codes:
   1  Build or runtime error
   2  Manifest schema validation error
 """
+
+
+def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
+    """Emit a JSON error envelope to stdout or raise ClickException."""
+    if json_output:
+        from ..marketplace.builder import BuildReport
+
+        click.echo(
+            json_mod.dumps(
+                BuildReport.failure_to_json_dict(errors=[{"code": code, "message": message}])
+            )
+        )
+        ctx.exit(1)
+    else:
+        raise click.ClickException(message)
 
 
 @click.command(name="pack", help=_PACK_HELP)
@@ -166,49 +183,36 @@ def pack_cmd(
     legacy_skill_paths,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
-    import json as json_mod
-    import logging as _logging
-
     from ..marketplace.output_profiles import known_output_names
+    from ..utils.path_security import validate_path_segments
+
+    # -- Stream discipline: under --json, route ALL output to stderr --
+    if json_output:
+        set_console_stderr(True)
 
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
 
-    # -- Stream discipline: under --json, route logs to stderr --
-    if json_output:
-        _logging.basicConfig(stream=sys.stderr, force=True)
-
     # -- Deprecation: --marketplace-output → --marketplace-path claude=PATH --
     if marketplace_output is not None:
-        logger.warning(
-            "--marketplace-output is deprecated and will be removed in v0.15. "
-            "Use --marketplace-path claude=PATH instead."
+        translated = f"--marketplace-path claude={marketplace_output}"
+        click.echo(
+            f"Warning: --marketplace-output is deprecated and will be removed in v0.15. "
+            f"Use {translated} instead.",
+            err=True,
         )
-        # Auto-translate to the new form
         marketplace_path_overrides = (
             *marketplace_path_overrides,
             f"claude={marketplace_output}",
         )
-        marketplace_output = None  # prevent double-pass to BuildOptions
+        marketplace_output = None
 
     # -- Parse --marketplace-path overrides --
     path_overrides: dict[str, str] = {}
     for override in marketplace_path_overrides:
         if "=" not in override:
             msg = f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
-            if json_output:
-                from ..marketplace.builder import BuildReport
-
-                click.echo(
-                    json_mod.dumps(
-                        BuildReport.failure_to_json_dict(
-                            errors=[{"code": "cli_error", "message": msg}]
-                        )
-                    ),
-                    file=sys.stdout,
-                )
-                ctx.exit(1)
-                return
-            raise click.ClickException(msg)
+            _emit_json_error_or_raise(ctx, json_output, "cli_error", msg)
+            return
         fmt_name, path_val = override.split("=", 1)
         fmt_name = fmt_name.strip()
         path_val = path_val.strip()
@@ -217,20 +221,14 @@ def pack_cmd(
                 f"Unknown marketplace format '{fmt_name}' in --marketplace-path. "
                 f"Known formats: {', '.join(sorted(known_output_names()))}"
             )
-            if json_output:
-                from ..marketplace.builder import BuildReport
-
-                click.echo(
-                    json_mod.dumps(
-                        BuildReport.failure_to_json_dict(
-                            errors=[{"code": "unknown_format", "message": msg}]
-                        )
-                    ),
-                    file=sys.stdout,
-                )
-                ctx.exit(1)
-                return
-            raise click.ClickException(msg)
+            _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
+            return
+        # Security: validate path to prevent traversal attacks
+        try:
+            validate_path_segments(path_val, context="--marketplace-path", allow_current_dir=True)
+        except Exception as exc:
+            _emit_json_error_or_raise(ctx, json_output, "path_error", str(exc))
+            return
         path_overrides[fmt_name] = path_val
 
     # -- Parse --marketplace filter --
@@ -249,21 +247,9 @@ def pack_cmd(
                         f"Unknown marketplace format '{r}' in --marketplace. "
                         f"Known formats: {', '.join(sorted(known))}"
                     )
-                    if json_output:
-                        from ..marketplace.builder import BuildReport
-
-                        click.echo(
-                            json_mod.dumps(
-                                BuildReport.failure_to_json_dict(
-                                    errors=[{"code": "unknown_format", "message": msg}]
-                                )
-                            ),
-                            file=sys.stdout,
-                        )
-                        ctx.exit(1)
-                        return
-                    raise click.ClickException(msg)
-            marketplace_formats = tuple(requested)  # noqa: F841 — wired in orchestrator integration
+                    _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
+                    return
+            marketplace_formats = tuple(requested)
     project_root = Path(".").resolve()
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
@@ -297,6 +283,8 @@ def pack_cmd(
         marketplace_offline=offline,
         marketplace_include_prerelease=include_prerelease,
         marketplace_output=None,
+        marketplace_formats=marketplace_formats,
+        marketplace_path_overrides=path_overrides if path_overrides else None,
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -304,48 +292,26 @@ def pack_cmd(
     try:
         result = BuildOrchestrator().run(options, logger=logger)
     except BuildError as exc:
-        if json_output:
-            from ..marketplace.builder import BuildReport
+        _emit_json_error_or_raise(ctx, json_output, "build_error", str(exc))
+        return
 
-            click.echo(
-                json_mod.dumps(
-                    BuildReport.failure_to_json_dict(
-                        errors=[{"code": "build_error", "message": str(exc)}]
-                    )
-                ),
-                file=sys.stdout,
-            )
-            ctx.exit(1)
-            return
-        raise click.ClickException(str(exc))  # noqa: B904
-
-    # -- JSON output mode --
+    # -- JSON output mode: consistent envelope --
     if json_output:
-        # Find the marketplace sub-result and emit JSON
+        envelope = {
+            "ok": True,
+            "dry_run": dry_run,
+            "warnings": [],
+            "errors": [],
+            "marketplace": {"outputs": []},
+            "bundle": None,
+        }
         for sub in result.producer_results:
             if sub.kind is OutputKind.MARKETPLACE and sub.payload is not None:
-                click.echo(
-                    json_mod.dumps(sub.payload.to_json_dict(), indent=2),
-                    file=sys.stdout,
-                )
+                payload = sub.payload.to_json_dict()
+                envelope["warnings"] = payload.get("warnings", [])
+                envelope["marketplace"] = payload.get("marketplace", {"outputs": []})
                 break
-        else:
-            # No marketplace result; emit minimal success JSON
-            from ..marketplace.builder import BuildReport
-
-            click.echo(
-                json_mod.dumps(
-                    {
-                        "ok": True,
-                        "dry_run": dry_run,
-                        "warnings": [],
-                        "errors": [],
-                        "marketplace": {"outputs": []},
-                        "bundle": None,
-                    }
-                ),
-                file=sys.stdout,
-            )
+        click.echo(json_mod.dumps(envelope, indent=2))
         return
 
     for sub in result.producer_results:

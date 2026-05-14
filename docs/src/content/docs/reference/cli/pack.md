@@ -35,7 +35,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--verbose`, `-v` | off | Show per-file paths and detailed packer output. |
 | `--offline` | off | Marketplace: resolve version ranges from cached refs only; skip `git ls-remote`. |
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
-| `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Repeatable. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
+| `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
 | `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
 | `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
 | `--marketplace-output PATH` | _(hidden)_ | **Deprecated.** Translates to `--marketplace-path claude=PATH` with a stderr warning. Will be removed in v0.15 (see #1318). |

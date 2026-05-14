@@ -65,6 +65,7 @@ STATUS_SYMBOLS = {
 # Thread-safe console singleton ------------------------------------------------
 _console_instance: Any | None = None
 _console_lock = threading.Lock()
+_console_stderr: bool = False
 
 
 def _get_console() -> Any | None:
@@ -78,17 +79,31 @@ def _get_console() -> Any | None:
         if _console_instance is not None:
             return _console_instance
         try:  # noqa: SIM105
-            _console_instance = Console()
+            _console_instance = Console(stderr=_console_stderr)
         except Exception:
             pass
     return _console_instance
 
 
+def set_console_stderr(enabled: bool = True) -> None:
+    """Route all console output to stderr.
+
+    Call BEFORE any output is emitted (e.g. at CLI entry under --json).
+    Resets the console singleton so the next _get_console() call picks
+    up the new stream.
+    """
+    global _console_stderr, _console_instance
+    with _console_lock:
+        _console_stderr = enabled
+        _console_instance = None
+
+
 def _reset_console() -> None:
     """Reset the console singleton. For testing only."""
-    global _console_instance
+    global _console_instance, _console_stderr
     with _console_lock:
         _console_instance = None
+        _console_stderr = False
 
 
 def _rich_echo(
@@ -133,9 +148,9 @@ def _rich_echo(
         }
         color_code = color_map.get(color, Fore.WHITE)
         style_code = Style.BRIGHT if bold else ""
-        click.echo(f"{color_code}{style_code}{message}{Style.RESET_ALL}")
+        click.echo(f"{color_code}{style_code}{message}{Style.RESET_ALL}", err=_console_stderr)
     else:
-        click.echo(message)
+        click.echo(message, err=_console_stderr)
 
 
 def _rich_success(message: str, symbol: str = None):  # noqa: RUF013

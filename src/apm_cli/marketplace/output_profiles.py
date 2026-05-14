@@ -32,7 +32,12 @@ class MarketplaceOutputProfile:
     """Mapper identifier used by ``MarketplaceBuilder`` to build the JSON."""
 
     path_env_var: str
-    """Environment variable that overrides the output path for this profile."""
+    """Environment variable that overrides the output path for this profile.
+
+    Declared for schema validation at registration time. Env-var consumption
+    is NOT yet implemented — planned for v0.15. The field is validated against
+    ``_ENV_VAR_PATTERN`` to prevent collisions with sensitive variables.
+    """
 
     required_package_fields: tuple[str, ...] = ()
     """PackageEntry fields required when this output is selected."""
