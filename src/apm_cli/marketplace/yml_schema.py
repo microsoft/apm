@@ -49,6 +49,7 @@ __all__ = [
     "MarketplaceClaudeConfig",
     "MarketplaceCodexConfig",
     "MarketplaceConfig",
+    "MarketplaceOutputSpec",
     "MarketplaceOwner",
     "MarketplaceYml",  # backwards-compat alias
     "MarketplaceYmlError",
@@ -264,6 +265,25 @@ class PackageEntry:
 
 
 @dataclass(frozen=True)
+class MarketplaceOutputSpec:
+    """Resolved specification for one marketplace output format.
+
+    Produced by the map-form ``outputs:`` parser. When ``path_explicit``
+    is True, the manifest set an explicit ``path:`` value (vs. the
+    profile default).
+    """
+
+    name: str
+    """Format name (matches a key in ``MARKETPLACE_OUTPUTS``)."""
+
+    path: str
+    """Resolved output path (explicit or profile default)."""
+
+    path_explicit: bool = False
+    """True if the user set an explicit ``path:`` in the outputs map."""
+
+
+@dataclass(frozen=True)
 class MarketplaceConfig:
     """Parsed marketplace configuration.
 
@@ -292,6 +312,8 @@ class MarketplaceConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
     packages: tuple[PackageEntry, ...] = ()
+    output_specs: tuple[MarketplaceOutputSpec, ...] = ()
+    warnings: tuple[str, ...] = ()
     # Origin tracking + override-detection metadata
     source_path: Path | None = None
     is_legacy: bool = False
@@ -453,24 +475,92 @@ def _parse_codex(raw: Any) -> MarketplaceCodexConfig:
     return MarketplaceCodexConfig(output=output)
 
 
-def _parse_outputs(raw: Any) -> tuple[str, ...]:
-    """Parse the marketplace output selector list.
+def _parse_outputs(
+    raw: Any,
+    warnings_sink: list[str] | None = None,
+) -> tuple[tuple[str, ...], tuple[MarketplaceOutputSpec, ...]]:
+    """Parse the marketplace output selector.
 
-    ``outputs`` mirrors the repo's top-level target-selection pattern:
-    omit it for the backwards-compatible Claude output, or provide one
-    or more named marketplace artifacts to write.
+    Accepts:
+    - ``None`` → default (claude only).
+    - A list of strings → back-compat list form (emits deprecation warning).
+    - A string → single-element back-compat list form.
+    - A dict → new map form with optional per-format ``path:``.
+
+    Returns ``(outputs_tuple, output_specs_tuple)``.
     """
     if raw is None:
-        return ("claude",)
+        default_spec = MarketplaceOutputSpec(
+            name="claude",
+            path=MARKETPLACE_OUTPUTS["claude"].default_output,
+            path_explicit=False,
+        )
+        return ("claude",), (default_spec,)
+
+    # --- Map form (new) ---
+    if isinstance(raw, dict):
+        outputs: list[str] = []
+        specs: list[MarketplaceOutputSpec] = []
+        seen: set[str] = set()
+        known = known_output_names()
+
+        for key, value in raw.items():
+            if not isinstance(key, str) or not key.strip():
+                raise MarketplaceYmlError("'outputs' map keys must be non-empty strings")
+            name = key.strip()
+            if name not in known:
+                raise MarketplaceYmlError(
+                    f"Unknown marketplace output '{name}'. "
+                    f"Permitted outputs: {', '.join(sorted(known))}"
+                )
+            if name in seen:
+                raise MarketplaceYmlError(f"Duplicate marketplace output '{name}'")
+            seen.add(name)
+
+            # Value can be null/{}/mapping with optional path
+            path_explicit = False
+            path = MARKETPLACE_OUTPUTS[name].default_output
+            if value is not None:
+                if not isinstance(value, dict):
+                    raise MarketplaceYmlError(f"'outputs.{name}' must be a mapping or null")
+                raw_path = value.get("path")
+                if raw_path is not None:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        raise MarketplaceYmlError(
+                            f"'outputs.{name}.path' must be a non-empty string"
+                        )
+                    path = raw_path.strip()
+                    path_explicit = True
+                    try:
+                        validate_path_segments(path, context=f"outputs.{name}.path")
+                    except PathTraversalError as exc:
+                        raise MarketplaceYmlError(str(exc)) from exc
+                # Check for unknown keys inside the format entry
+                _valid_output_entry_keys = {"path"}
+                unknown = set(value.keys()) - _valid_output_entry_keys
+                if unknown:
+                    raise MarketplaceYmlError(
+                        f"Unknown key(s) in 'outputs.{name}': {', '.join(sorted(unknown))}"
+                    )
+
+            outputs.append(name)
+            specs.append(MarketplaceOutputSpec(name=name, path=path, path_explicit=path_explicit))
+
+        if not outputs:
+            raise MarketplaceYmlError("'outputs' must contain at least one marketplace output")
+        return tuple(outputs), tuple(specs)
+
+    # --- List / string form (deprecated back-compat) ---
     if isinstance(raw, str):
         raw_items = [raw]
     elif isinstance(raw, list):
         raw_items = raw
     else:
-        raise MarketplaceYmlError("'outputs' must be a string or list of strings")
+        raise MarketplaceYmlError("'outputs' must be a string, list, or mapping")
 
-    outputs: list[str] = []
-    seen: set[str] = set()
+    outputs_list: list[str] = []
+    specs_list: list[MarketplaceOutputSpec] = []
+    seen_set: set[str] = set()
     for index, item in enumerate(raw_items):
         if not isinstance(item, str) or not item.strip():
             raise MarketplaceYmlError(f"'outputs[{index}]' must be a non-empty string")
@@ -481,14 +571,33 @@ def _parse_outputs(raw: Any) -> tuple[str, ...]:
                 f"Unknown marketplace output '{output}'. "
                 f"Permitted outputs: {', '.join(sorted(known_outputs))}"
             )
-        if output in seen:
+        if output in seen_set:
             raise MarketplaceYmlError(f"Duplicate marketplace output '{output}'")
-        seen.add(output)
-        outputs.append(output)
+        seen_set.add(output)
+        outputs_list.append(output)
+        specs_list.append(
+            MarketplaceOutputSpec(
+                name=output,
+                path=MARKETPLACE_OUTPUTS[output].default_output,
+                path_explicit=False,
+            )
+        )
 
-    if not outputs:
+    if not outputs_list:
         raise MarketplaceYmlError("'outputs' must contain at least one marketplace output")
-    return tuple(outputs)
+
+    # Emit deprecation warning for list/string form
+    names_str = ", ".join(outputs_list)
+    map_lines = "\n".join(f"        {n}: {{}}" for n in outputs_list)
+    deprecation_msg = (
+        f"outputs: [{names_str}] is deprecated; use the map form:\n\n"
+        f"      outputs:\n{map_lines}\n\n"
+        f"    The list form will be removed in v0.15."
+    )
+    if warnings_sink is not None:
+        warnings_sink.append(deprecation_msg)
+
+    return tuple(outputs_list), tuple(specs_list)
 
 
 def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
@@ -853,6 +962,8 @@ def _build_config(
     """Shared parser for the marketplace fields once name/desc/version
     have been resolved (either inherited or read directly).
     """
+    warnings_sink: list[str] = []
+
     # -- owner --
     raw_owner = marketplace_dict.get("owner")
     if raw_owner is None:
@@ -860,7 +971,9 @@ def _build_config(
     owner = _parse_owner(raw_owner)
 
     # -- output selection --
-    outputs = _parse_outputs(marketplace_dict.get("outputs"))
+    outputs, output_specs = _parse_outputs(
+        marketplace_dict.get("outputs"), warnings_sink=warnings_sink
+    )
 
     # -- Claude output (default differs between legacy and new layouts) --
     # ``output`` remains as a backwards-compatible shorthand for
@@ -906,6 +1019,44 @@ def _build_config(
     # -- codex output --
     codex = _parse_codex(marketplace_dict.get("codex"))
 
+    # -- Sibling-vs-map conflict detection (A1: sibling wins) --
+    # Only fire when the user EXPLICITLY set a sibling block AND the map
+    # also has an explicit path. Default/absent sibling is not a conflict.
+    has_explicit_claude = marketplace_dict.get("claude") is not None
+    has_explicit_codex = marketplace_dict.get("codex") is not None
+
+    final_specs_list = list(output_specs)
+    for i, spec in enumerate(final_specs_list):
+        if spec.path_explicit:
+            sibling_path: str | None = None
+            if spec.name == "claude" and has_explicit_claude and claude.output != spec.path:
+                sibling_path = claude.output
+            elif spec.name == "codex" and has_explicit_codex and codex.output != spec.path:
+                sibling_path = codex.output
+            if sibling_path is not None:
+                warnings_sink.append(
+                    f"marketplace.outputs.{spec.name}.path ('{spec.path}') "
+                    f"conflicts with marketplace.{spec.name}.output "
+                    f"('{sibling_path}').\n"
+                    f"    Using marketplace.{spec.name}.output for backwards "
+                    f"compatibility.\n\n"
+                    f"    To resolve: pick one source and remove the other.\n"
+                    f"      Keep map form (recommended):\n"
+                    f"        outputs:\n"
+                    f"          {spec.name}:\n"
+                    f"            path: {sibling_path}\n"
+                    f"        # remove the marketplace.{spec.name}: block\n\n"
+                    f"    The marketplace.{spec.name} sibling block becomes a "
+                    f"schema error in v0.15."
+                )
+                # Sibling wins: override the spec's path
+                final_specs_list[i] = MarketplaceOutputSpec(
+                    name=spec.name,
+                    path=sibling_path,
+                    path_explicit=True,
+                )
+    output_specs = tuple(final_specs_list)
+
     # -- packages --
     raw_packages = marketplace_dict.get("packages")
     if raw_packages is None:
@@ -949,6 +1100,8 @@ def _build_config(
         metadata=metadata,
         build=build,
         packages=tuple(entries),
+        output_specs=output_specs,
+        warnings=tuple(warnings_sink),
         source_path=source_path,
         is_legacy=is_legacy,
         name_overridden=name_overridden,

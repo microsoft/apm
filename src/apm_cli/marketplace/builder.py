@@ -181,6 +181,67 @@ class BuildReport:
     def dry_run(self) -> bool:
         return any(output.dry_run for output in self.outputs)
 
+    def to_json_dict(self) -> dict[str, Any]:
+        """Serialize build report as the §4 JSON contract.
+
+        Shape: {ok, dry_run, warnings[], errors[],
+                marketplace: {outputs: [{format, path, added, updated,
+                unchanged, skipped}]}, bundle: null}
+        """
+        all_warnings = list(self.warnings)
+        all_errors: list[dict[str, str]] = []
+        output_entries: list[dict[str, Any]] = []
+
+        for out in self.outputs:
+            output_entries.append(
+                {
+                    "format": out.profile,
+                    "path": str(out.output_path),
+                    "added": out.added_count,
+                    "updated": out.updated_count,
+                    "unchanged": out.unchanged_count,
+                    "skipped": out.removed_count,
+                }
+            )
+            for pkg_name, err_msg in out.errors:
+                all_errors.append({"code": "build_error", "message": f"{pkg_name}: {err_msg}"})
+
+        ok = len(all_errors) == 0
+        return {
+            "ok": ok,
+            "dry_run": self.dry_run,
+            "warnings": all_warnings,
+            "errors": all_errors,
+            "marketplace": {
+                "outputs": output_entries,
+            },
+            "bundle": None,
+        }
+
+    @classmethod
+    def failure_to_json_dict(
+        cls,
+        *,
+        errors: list[dict[str, str]],
+        warnings: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Produce the §4 JSON shape for a pre-build failure.
+
+        Used when the build cannot even start (e.g., config parse error,
+        unknown format filter).
+        """
+        return {
+            "ok": False,
+            "dry_run": dry_run,
+            "warnings": warnings or [],
+            "errors": errors,
+            "marketplace": {
+                "outputs": [],
+            },
+            "bundle": None,
+        }
+
 
 @dataclass
 class BuildOptions:

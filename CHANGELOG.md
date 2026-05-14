@@ -9,8 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --target claude` now preserves self-defined stdio MCP `env` values from `apm.yml` and writes non-string values such as `PORT: 3000` and `DEBUG: false` as MCP-compatible strings. (#1222)
 - Non-skill integrators (agent, instruction, prompt, command, hook script-copy) silently adopt byte-identical pre-existing files so a degraded `deployed_files=[]` lockfile no longer permanently blocks installs gated by `required-packages-deployed`. (#1313)
 - `apm audit` drift check now returns skip-with-info (`passed=True`) when the install cache is cold, instead of failing the audit; bare `apm audit` surfaces the skip reason on stderr so CI pipelines that have not yet run `apm install` are not incorrectly red-marked. (#1289)
+
+### Added
+
+- `apm pack --marketplace=FORMATS` filters which marketplace formats are built in a single run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
+- `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. Env var overrides (`APM_MARKETPLACE_<FORMAT>_PATH`) are planned for v0.15. (#1317)
+- `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [{format, path, ...}]}}`); all logs move to stderr so downstream tooling can `jq` the output safely. (#1317)
+- `marketplace.outputs` in `apm.yml` now accepts a map form keyed by format name (`outputs: {claude: {}, codex: {path: ...}}`), replacing the deprecated list form; the list form still parses with a one-cycle deprecation warning. (#1317)
+- `apm marketplace init` now scaffolds the explicit map-form `outputs: {claude: {}}` so the default state is observable in the manifest. (#1317)
+
+### Changed
+
+- `--marketplace-output PATH` is now hidden from `--help` and emits a stderr deprecation warning; it auto-translates to `--marketplace-path claude=PATH`. Removal tracked in #1318. (#1317)
 - `extends: org` now correctly layers `dependencies.require` and `dependencies.deny` from the parent policy when the child omits the `dependencies:` block entirely; `None` signals "no opinion" (transparent) while `[]` signals explicit override. (#1290)
 - CI self-check job now uses `setup-only: true` + `apm audit --ci --no-drift` so managed files are not overwritten by `apm install` before `content-integrity` runs; documented the audit-only CI pattern and the install-before-audit blind spot in the enterprise and CI/CD guides. (#1291)
 - Pin `Path.home()` under unit tests via a session-scoped autouse conftest fixture, fixing 56 Windows runner failures on the new `windows-2025-vs2026` GitHub-hosted image where `USERPROFILE`/`HOMEDRIVE`+`HOMEPATH` are not seeded for pytest workers; also patch the `_check_and_notify_updates` import binding in the disabled-self-update test so it no longer races on the version-check cache. (#1270)

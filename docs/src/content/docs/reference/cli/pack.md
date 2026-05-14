@@ -35,7 +35,10 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--verbose`, `-v` | off | Show per-file paths and detailed packer output. |
 | `--offline` | off | Marketplace: resolve version ranges from cached refs only; skip `git ls-remote`. |
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
-| `--marketplace-output PATH` | `.claude-plugin/marketplace.json` | Marketplace legacy compatibility: override only the Claude/Anthropic output path. Prefer `marketplace.claude.output` in `apm.yml`. |
+| `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
+| `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
+| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
+| `--marketplace-output PATH` | _(hidden)_ | **Deprecated.** Translates to `--marketplace-path claude=PATH` with a stderr warning. Will be removed in v0.15 (see #1318). |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
@@ -54,6 +57,15 @@ apm pack --format apm -o ./dist       # legacy APM bundle layout
 ```bash
 apm pack
 apm pack --offline --dry-run
+
+# Build only Claude format, output as JSON for CI:
+apm pack --marketplace=claude --json
+
+# Override codex output path:
+apm pack --marketplace-path codex=./dist/codex-marketplace.json
+
+# Build all formats, preview paths:
+apm pack --marketplace=all --json | jq -r '.marketplace.outputs[].path'
 ```
 
 ### Both artifacts in one run
@@ -67,11 +79,10 @@ apm pack --archive --offline
 
 ```yaml
 marketplace:
-  outputs: [claude, codex]
-  claude:
-    output: ./build/claude-marketplace.json
-  codex:
-    output: ./build/codex-marketplace.json
+  outputs:
+    claude: {}
+    codex:
+      path: ./build/codex-marketplace.json
 ```
 
 ### Preview without writing
@@ -124,7 +135,8 @@ Configure marketplace artifact paths in `apm.yml`: `marketplace.claude.output` c
 - **Empty bundle warning.** If no files match (e.g. nothing was installed yet), `apm pack` emits a warning and exits `0` with an empty bundle. Verbose mode prints a hint to run `apm install` first.
 - **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.
 - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
-- **Marketplace outputs.** `marketplace.outputs` defaults to `[claude]`. Add `codex` to also write `.agents/plugins/marketplace.json`; when selected, each package must define `category`.
+- **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses with a deprecation warning. Use `--marketplace=` to filter which formats are built in a given invocation.
+- **JSON mode.** `--json` makes `apm pack` machine-friendly: stdout is a single JSON object, all human-readable logs move to stderr. Combine with `--marketplace=` for selective CI matrix builds.
 
 ## Exit codes
 

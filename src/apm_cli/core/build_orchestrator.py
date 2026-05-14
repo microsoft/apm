@@ -46,6 +46,8 @@ class BuildOptions:
     marketplace_offline: bool = False
     marketplace_include_prerelease: bool = False
     marketplace_output: Path | None = None
+    marketplace_formats: tuple[str, ...] | None = None
+    marketplace_path_overrides: dict[str, str] | None = None
     # Common options
     dry_run: bool = False
     verbose: bool = False
@@ -182,7 +184,13 @@ class MarketplaceProducer:
         resolve_result = None
         output_reports = []
         outputs: list[Path] = []
-        for output_name in config.outputs:
+
+        # Apply --marketplace filter: skip outputs not in the requested set
+        active_outputs = list(config.outputs)
+        if options.marketplace_formats is not None:
+            active_outputs = [o for o in active_outputs if o in options.marketplace_formats]
+
+        for output_name in active_outputs:
             profile = MARKETPLACE_OUTPUTS.get(output_name)
             if profile is None:
                 valid_targets = ", ".join(sorted(MARKETPLACE_OUTPUTS))
@@ -198,7 +206,16 @@ class MarketplaceProducer:
                 configured_output_value = getattr(config, profile.config_attr).output
                 configured_output = Path(configured_output_value)
                 output_path = project_root / configured_output
-                if profile.supports_cli_output_override and options.marketplace_output is not None:
+
+                # Apply --marketplace-path override
+                if (
+                    options.marketplace_path_overrides
+                    and output_name in options.marketplace_path_overrides
+                ):
+                    output_path = project_root / options.marketplace_path_overrides[output_name]
+                elif (
+                    profile.supports_cli_output_override and options.marketplace_output is not None
+                ):
                     output_path = options.marketplace_output
 
                 output_report = builder.write_output(

@@ -93,6 +93,13 @@ def _has_env_placeholder(value):
     return bool(_COPILOT_ENV_RE.search(value))
 
 
+def _stringify_env_literal(value):
+    """Return MCP env literal values in the manifest ``map<string, string>`` shape."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
 class CopilotClientAdapter(MCPClientAdapter):
     """Copilot CLI implementation of MCP client adapter.
 
@@ -745,8 +752,10 @@ class CopilotClientAdapter(MCPClientAdapter):
             for name, raw_value in env_vars.items():
                 if not name:
                     continue
+                if raw_value is None:
+                    continue
                 if not isinstance(raw_value, str):
-                    translated[name] = raw_value
+                    translated[name] = _stringify_env_literal(raw_value)
                     continue
                 if _has_env_placeholder(raw_value):
                     self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(raw_value))
@@ -786,6 +795,19 @@ class CopilotClientAdapter(MCPClientAdapter):
             # Record for the post-install summary line and the
             # security-improvement notice.
             self._last_env_placeholder_keys = set(placeholder_keys)
+            return resolved
+
+        if isinstance(env_vars, dict):
+            resolved = {}
+            for name, value in env_vars.items():
+                if not name:
+                    continue
+                if isinstance(value, str):
+                    resolved[name] = self._resolve_env_variable(
+                        name, value, env_overrides=env_overrides
+                    )
+                elif value is not None:
+                    resolved[name] = _stringify_env_literal(value)
             return resolved
 
         import os

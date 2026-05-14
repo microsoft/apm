@@ -71,7 +71,8 @@ marketplace:
     name: acme-org
     url: https://github.com/acme-org
 
-  outputs: [claude]                  # default; add codex for Codex repo output
+  outputs:                             # map form (recommended)
+    claude: {}                         # default; add codex for Codex repo output
 
   claude:
     output: .claude-plugin/marketplace.json
@@ -108,12 +109,18 @@ For the full field reference (every key on every entry, including
 `pluginRoot`, `outputs`, `claude`, `codex`, and pass-through fields
 like `tags`, `author`, `license`), see the reference below.
 
-Marketplace output targets use a selector-list pattern:
+Marketplace output targets use a map-form pattern:
 
 ```yaml
 marketplace:
-  outputs: [claude, codex]
+  outputs:
+    claude: {}
+    codex:
+      path: .agents/plugins/marketplace.json
 ```
+
+The legacy list form (`outputs: [claude, codex]`) still parses with a
+deprecation warning but new projects should use the map form above.
 
 Claude output is selected by default for backwards compatibility. The
 legacy `marketplace.output` field remains supported as shorthand for
@@ -143,6 +150,7 @@ apm pack --dry-run              # resolve and print; do not write
 apm pack --offline              # cached refs only
 apm pack --include-prerelease   # allow pre-release tags
 apm pack -v                     # per-entry resolution detail
+apm pack --marketplace=claude --json   # JSON output for CI pipelines
 ```
 
 Exit codes: `0` build succeeded, `1` build error (network, missing
