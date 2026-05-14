@@ -1050,9 +1050,7 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_bare_attaches_risk(
-        self, mock_get, mock_fetch, ghe_marketplace_source
-    ):
+    def test_cross_repo_bare_attaches_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """Textbook #1305: ``type: github`` + bare cross-repo ``repo`` on ``*.ghe.com``."""
         plugin = MarketplacePlugin(
             name="shared-tool",
@@ -1070,10 +1068,7 @@ class TestCrossRepoMisconfigRisk:
         assert risk is not None
         assert risk.marketplace_host == "corp.ghe.com"
         assert risk.bare_repo_field == "platform-team/shared-tool"
-        assert (
-            risk.suggested_qualified_repo
-            == "corp.ghe.com/platform-team/shared-tool"
-        )
+        assert risk.suggested_qualified_repo == "corp.ghe.com/platform-team/shared-tool"
         # Resolver leaves canonical bare -- behavior contract unchanged
         assert result.canonical == "platform-team/shared-tool/plugins/shared"
         assert result.dependency_reference is None
@@ -1139,9 +1134,7 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_host_qualified_no_risk(
-        self, mock_get, mock_fetch, ghe_marketplace_source
-    ):
+    def test_cross_repo_host_qualified_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """``repo: corp.ghe.com/owner/repo`` already routes; no hint needed."""
         plugin = MarketplacePlugin(
             name="qualified",
@@ -1159,9 +1152,7 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_url_form_no_risk(
-        self, mock_get, mock_fetch, ghe_marketplace_source
-    ):
+    def test_cross_repo_url_form_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """Full ``https://`` URL carries its own host; hint inapplicable."""
         plugin = MarketplacePlugin(
             name="url",
@@ -1179,9 +1170,7 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_ssh_form_no_risk(
-        self, mock_get, mock_fetch, ghe_marketplace_source
-    ):
+    def test_cross_repo_ssh_form_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """SSH SCP shorthand carries its own host; hint inapplicable."""
         plugin = MarketplacePlugin(
             name="ssh",
@@ -1199,9 +1188,7 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_gitlab_type_no_risk(
-        self, mock_get, mock_fetch, ghe_marketplace_source
-    ):
+    def test_cross_repo_gitlab_type_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """``type: gitlab`` cross-repo hits the same routing bug but the
         "host-qualify with marketplace host" remediation does not match the
         operator's intent (they meant gitlab.com, not corp.ghe.com)."""
@@ -1221,9 +1208,7 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_git_subdir_type_no_risk(
-        self, mock_get, mock_fetch, ghe_marketplace_source
-    ):
+    def test_cross_repo_git_subdir_type_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """``type: git-subdir`` cross-repo: same wording mismatch as gitlab."""
         plugin = MarketplacePlugin(
             name="gs",
@@ -1241,9 +1226,7 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_in_marketplace_dict_source_no_risk(
-        self, mock_get, mock_fetch, ghe_marketplace_source
-    ):
+    def test_in_marketplace_dict_source_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """In-marketplace dict source (PR #1292's domain) does not get a risk flag."""
         plugin = MarketplacePlugin(
             name="in-mkt",

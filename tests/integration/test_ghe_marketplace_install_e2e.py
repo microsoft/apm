@@ -257,10 +257,7 @@ class TestGHEMarketplaceInstallAuthRouting:
         assert risk is not None
         assert risk.marketplace_host == _GHE_HOST
         assert risk.bare_repo_field == "anotherorg/anothertool"
-        assert (
-            risk.suggested_qualified_repo
-            == f"{_GHE_HOST}/anotherorg/anothertool"
-        )
+        assert risk.suggested_qualified_repo == f"{_GHE_HOST}/anotherorg/anothertool"
 
 
 @pytest.mark.integration

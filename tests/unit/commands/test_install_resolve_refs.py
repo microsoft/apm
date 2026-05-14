@@ -316,9 +316,7 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             cross_repo_misconfig_risk=CrossRepoMisconfigRisk(
                 marketplace_host="corp.ghe.com",
                 bare_repo_field="platform-team/shared-tool",
-                suggested_qualified_repo=(
-                    "corp.ghe.com/platform-team/shared-tool"
-                ),
+                suggested_qualified_repo=("corp.ghe.com/platform-team/shared-tool"),
             ),
         )
 
@@ -385,9 +383,7 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
         assert "'shared-tool@my-marketplace'" in emitted
         assert "registered on 'corp.ghe.com'" in emitted
         assert "`repo: platform-team/shared-tool`" in emitted
-        assert (
-            "'corp.ghe.com/platform-team/shared-tool'" in emitted
-        )
+        assert "'corp.ghe.com/platform-team/shared-tool'" in emitted
         # Second clause acknowledges the legitimate-cross-host path so a
         # transient-failure on a real github.com dep is not misdirected.
         assert "intentionally a github.com dependency" in emitted
