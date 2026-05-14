@@ -51,6 +51,8 @@ from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
+import yaml
+
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -583,16 +585,117 @@ class HookIntegrator(BaseIntegrator):
 
         return rewritten, unique_scripts
 
-    def _get_package_name(self, package_info) -> str:
+    @staticmethod
+    def _is_root_local_package(package_info, project_root: Path | None) -> bool:
+        """Return True when *package_info* represents the project's own .apm content."""
+        if project_root is None:
+            return False
+        try:
+            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+        except (OSError, RuntimeError):
+            return False
+
+    @staticmethod
+    def _safe_source_name(value: str | None, fallback: str = "_local") -> str:
+        """Return a stable source marker that is also safe for hook script paths."""
+        if not isinstance(value, str) or not value:
+            return fallback
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip(".-_")
+        if not safe or safe in {".", ".."}:
+            return fallback
+        return safe
+
+    def _get_root_local_package_name(self, package_info, project_root: Path) -> str:
+        """Get the stable source marker for root .apm content."""
+        apm_yml = Path(project_root) / "apm.yml"
+        if apm_yml.exists():
+            try:
+                from apm_cli.utils.yaml_io import load_yaml
+
+                data = load_yaml(apm_yml)
+                if isinstance(data, dict):
+                    manifest_name = self._safe_source_name(data.get("name"))
+                    if manifest_name != "_local":
+                        return manifest_name
+            except (OSError, ValueError, yaml.YAMLError):
+                pass
+
+        package = getattr(package_info, "package", None)
+        package_name = self._safe_source_name(getattr(package, "name", None))
+        if package_name != "_local":
+            return package_name
+        return "_local"
+
+    def _get_package_name(self, package_info, project_root: Path | None = None) -> str:
         """Get a short package name for use in file/directory naming.
 
         Args:
             package_info: PackageInfo object
 
         Returns:
-            str: Package name derived from install path
+            str: Package name used as hook source marker and script namespace
         """
+        if self._is_root_local_package(package_info, project_root):
+            return self._get_root_local_package_name(package_info, Path(project_root))
         return package_info.install_path.name
+
+    def _get_hook_source_marker(
+        self,
+        package_info,
+        project_root: Path,
+        package_name: str,
+    ) -> str:
+        """Get the marker stored in merged hook JSON for ownership cleanup."""
+        if self._is_root_local_package(package_info, project_root):
+            if package_name == "_local":
+                return "_local"
+            return f"_local/{package_name}"
+        return package_name
+
+    @staticmethod
+    def _hook_entry_content_key(entry: dict) -> str:
+        """Build a stable comparison key excluding APM ownership metadata."""
+        comparable = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
+        return json.dumps(comparable, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _dependency_hook_sources(project_root: Path) -> set[str]:
+        """Return source markers that correspond to installed dependency dirs."""
+        apm_modules = project_root / "apm_modules"
+        if not apm_modules.is_dir():
+            return set()
+        sources: set[str] = set()
+        for path in apm_modules.rglob("*"):
+            if not path.is_dir():
+                continue
+            if (
+                (path / "hooks").is_dir()
+                or (path / ".apm" / "hooks").is_dir()
+                or (path / "apm.yml").is_file()
+                or (path / "SKILL.md").is_file()
+            ):
+                sources.add(path.name)
+        return sources
+
+    def _should_remove_prior_merged_entry(
+        self,
+        entry,
+        *,
+        source_marker: str,
+        fresh_content_keys: set[str],
+        heal_stale_root_source: bool,
+        dependency_sources: set[str],
+        remove_current_source: bool,
+    ) -> bool:
+        """Return True when an existing merged-hook entry should be replaced."""
+        if not isinstance(entry, dict):
+            return False
+        source = entry.get("_apm_source")
+        if remove_current_source and source == source_marker:
+            return True
+        if not heal_stale_root_source or not source or source in dependency_sources:
+            return False
+        return self._hook_entry_content_key(entry) in fresh_content_keys
 
     def integrate_package_hooks(
         self,
@@ -633,7 +736,7 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
-        package_name = self._get_package_name(package_info)
+        package_name = self._get_package_name(package_info, project_root)
         hooks_integrated = 0
         scripts_copied = 0
         scripts_adopted = 0
@@ -739,7 +842,12 @@ class HookIntegrator(BaseIntegrator):
         if not hook_files:
             return _empty
 
-        package_name = self._get_package_name(package_info)
+        package_name = self._get_package_name(package_info, project_root)
+        source_marker = self._get_hook_source_marker(package_info, project_root, package_name)
+        heal_stale_root_source = self._is_root_local_package(package_info, project_root)
+        dependency_sources = (
+            self._dependency_hook_sources(project_root) if heal_stale_root_source else set()
+        )
         hooks_integrated = 0
         scripts_copied = 0
         scripts_adopted = 0
@@ -825,7 +933,12 @@ class HookIntegrator(BaseIntegrator):
                 # Mark each entry with APM source for sync/cleanup
                 for entry in entries:
                     if isinstance(entry, dict):
-                        entry["_apm_source"] = package_name
+                        entry["_apm_source"] = source_marker
+                fresh_content_keys = {
+                    self._hook_entry_content_key(entry)
+                    for entry in entries
+                    if isinstance(entry, dict)
+                }
 
                 # Idempotent upsert: drop any prior entries owned by this
                 # package before appending fresh ones. Without this, every
@@ -835,12 +948,20 @@ class HookIntegrator(BaseIntegrator):
                 # with multiple hook files targeting the same event
                 # contributes each file's entries in turn, and stripping
                 # on every iteration would erase earlier files' work.
-                if event_name not in cleared_events:
+                remove_current_source = event_name not in cleared_events
+                if remove_current_source or heal_stale_root_source:
                     # Clear from the normalised event
                     json_config["hooks"][event_name] = [
                         e
                         for e in json_config["hooks"][event_name]
-                        if not (isinstance(e, dict) and e.get("_apm_source") == package_name)
+                        if not self._should_remove_prior_merged_entry(
+                            e,
+                            source_marker=source_marker,
+                            fresh_content_keys=fresh_content_keys,
+                            heal_stale_root_source=heal_stale_root_source,
+                            dependency_sources=dependency_sources,
+                            remove_current_source=remove_current_source,
+                        )
                     ]
                     # Also clear from any alias events that map to
                     # this normalised name (handles migration from
@@ -850,8 +971,13 @@ class HookIntegrator(BaseIntegrator):
                             json_config["hooks"][alias] = [
                                 e
                                 for e in json_config["hooks"][alias]
-                                if not (
-                                    isinstance(e, dict) and e.get("_apm_source") == package_name
+                                if not self._should_remove_prior_merged_entry(
+                                    e,
+                                    source_marker=source_marker,
+                                    fresh_content_keys=fresh_content_keys,
+                                    heal_stale_root_source=heal_stale_root_source,
+                                    dependency_sources=dependency_sources,
+                                    remove_current_source=remove_current_source,
                                 )
                             ]
                             # Remove the alias key entirely if now empty
