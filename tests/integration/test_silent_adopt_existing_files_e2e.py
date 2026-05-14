@@ -36,21 +36,25 @@ def apm_command():
 
     The repo binary (homebrew/system ``apm``) may be a stable release that
     predates the fix under test, which would silently make this regression
-    test pass against unfixed code. Prefer a venv-installed editable
-    binary so the test exercises the in-repo apm_cli source.
+    test pass against unfixed code. Prefer the CI-built artifact or a
+    venv-installed editable binary so the test exercises the in-repo
+    apm_cli source.
 
     Resolution order:
-      1. ``APM_TEST_BINARY`` env override (CI / explicit pin).
-      2. Repo-local ``.venv/bin/apm`` (this worktree).
-      3. Sibling ``../awd-cli/.venv/bin/apm`` (shared dev venv pointing
+      1. ``APM_TEST_BINARY`` env override (explicit per-test pin).
+      2. ``APM_BINARY_PATH`` env (CI sets this after the build step;
+         shared with ``apm_binary_path`` fixture in ``conftest.py``).
+      3. Repo-local ``.venv/bin/apm`` (this worktree).
+      4. Sibling ``../awd-cli/.venv/bin/apm`` (shared dev venv pointing
          at this worktree via ``pip install -e .``).
-      4. ``apm`` on PATH (last resort; may be stale).
+      5. ``apm`` on PATH (last resort; may be stale).
     """
     import os
 
-    override = os.environ.get("APM_TEST_BINARY")
-    if override and Path(override).exists():
-        return override
+    for env_var in ("APM_TEST_BINARY", "APM_BINARY_PATH"):
+        override = os.environ.get(env_var)
+        if override and Path(override).exists():
+            return override
 
     repo_root = Path(__file__).parent.parent.parent
     candidates = [

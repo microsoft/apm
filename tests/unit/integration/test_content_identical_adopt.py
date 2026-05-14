@@ -30,7 +30,12 @@ from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.models.apm_package import (
+    APMPackage,
+    GitReferenceType,
+    PackageInfo,
+    ResolvedReference,
+)
 
 
 def _make_package_info(package_dir: Path, name: str = "test-pkg") -> PackageInfo:
