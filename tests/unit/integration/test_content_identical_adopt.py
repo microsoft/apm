@@ -108,9 +108,7 @@ class TestInstructionIntegratorAdopt:
 
         return source, target, _make_package_info(pkg_dir)
 
-    def test_identical_pre_existing_file_is_adopted_when_managed_none(
-        self, tmp_path: Path
-    ) -> None:
+    def test_identical_pre_existing_file_is_adopted_when_managed_none(self, tmp_path: Path) -> None:
         """Lockfile lost deployed_files -> next install must adopt, not skip.
 
         This is the exact catch-22: file already on disk, byte-identical
@@ -158,9 +156,7 @@ class TestInstructionIntegratorAdopt:
 
         assert target not in result.target_paths
         assert result.files_skipped >= 1
-        assert target.read_bytes() == user_body, (
-            "User-authored content must not be overwritten."
-        )
+        assert target.read_bytes() == user_body, "User-authored content must not be overwritten."
 
 
 # ---------------------------------------------------------------------------

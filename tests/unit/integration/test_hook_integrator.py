@@ -3307,17 +3307,14 @@ class TestHookScriptAdopt:
         pkg_info = self._setup_hookify_with_preexisting_scripts(temp_project)
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks(
-            pkg_info, temp_project, managed_files=None
-        )
+        result = integrator.integrate_package_hooks(pkg_info, temp_project, managed_files=None)
 
         # All four scripts must land in target_paths so deployed_files
         # repopulates and the catch-22 self-heals.
         scripts_dir = temp_project / ".github" / "hooks" / "scripts" / "hookify" / "hooks"
         for script in ["pretooluse.py", "posttooluse.py", "stop.py", "userpromptsubmit.py"]:
             assert (scripts_dir / script) in result.target_paths, (
-                f"{script} missing from target_paths -- "
-                "catch-22 reproduces for hook scripts"
+                f"{script} missing from target_paths -- catch-22 reproduces for hook scripts"
             )
 
     def test_vscode_does_not_adopt_modified_scripts(self, temp_project):
@@ -3328,9 +3325,7 @@ class TestHookScriptAdopt:
         (scripts_dir_target / "pretooluse.py").write_text("#!/usr/bin/env python3\n# user edited")
 
         integrator = HookIntegrator()
-        result = integrator.integrate_package_hooks(
-            pkg_info, temp_project, managed_files=None
-        )
+        result = integrator.integrate_package_hooks(pkg_info, temp_project, managed_files=None)
 
         # Adopt fires for the three identical scripts; the modified one is skipped.
         for script in ["posttooluse.py", "stop.py", "userpromptsubmit.py"]:

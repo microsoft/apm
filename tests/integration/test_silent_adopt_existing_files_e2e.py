@@ -85,7 +85,7 @@ def temp_project(tmp_path):
 
 
 def _run_apm(apm_command, args, cwd, timeout=120):
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(
         [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
@@ -132,27 +132,21 @@ class TestSilentAdoptOfExistingFiles:
         deployed_files, which would then trip
         ``required-packages-deployed`` policy.
         """
-        result1 = _run_apm(
-            apm_command, ["install", "microsoft/apm-sample-package"], temp_project
-        )
+        result1 = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
         assert result1.returncode == 0, (
             f"First install failed:\nstderr={result1.stderr}\nstdout={result1.stdout}"
         )
 
         lock1 = _read_lockfile(temp_project)
         files_before = sorted(_all_deployed_files(lock1))
-        assert files_before, (
-            "Test precondition: first install must populate deployed_files"
-        )
+        assert files_before, "Test precondition: first install must populate deployed_files"
 
         # Snapshot disk state for byte-comparison after the re-install.
         # deployed_files entries can be either files (agents, instructions,
         # prompts, commands, hooks) or directories (skills) -- only snapshot
         # plain files for byte-equality.
         disk_before = {
-            f: (temp_project / f).read_bytes()
-            for f in files_before
-            if (temp_project / f).is_file()
+            f: (temp_project / f).read_bytes() for f in files_before if (temp_project / f).is_file()
         }
         assert disk_before, "Test precondition: at least one deployed file on disk"
 
@@ -182,9 +176,7 @@ class TestSilentAdoptOfExistingFiles:
                 f"Adopt path must not modify on-disk bytes: {f} changed."
             )
 
-    def test_required_packages_deployed_passes_after_lockfile_wipe(
-        self, temp_project, apm_command
-    ):
+    def test_required_packages_deployed_passes_after_lockfile_wipe(self, temp_project, apm_command):
         """End-to-end: with adopt in place, ``apm audit`` (which runs the
         same ``required-packages-deployed`` check the policy gate uses)
         passes after a lockfile wipe + re-install -- proving the catch-22
@@ -197,9 +189,7 @@ class TestSilentAdoptOfExistingFiles:
         full pipeline now self-heals.
         """
         # Initial install
-        r1 = _run_apm(
-            apm_command, ["install", "microsoft/apm-sample-package"], temp_project
-        )
+        r1 = _run_apm(apm_command, ["install", "microsoft/apm-sample-package"], temp_project)
         assert r1.returncode == 0, f"first install: {r1.stderr}\n{r1.stdout}"
 
         # Wipe lockfile -- degraded state
