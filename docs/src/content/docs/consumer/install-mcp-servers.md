@@ -94,11 +94,11 @@ Gemini's user-scope path (`~/.gemini/settings.json`, selected with
 `-g`) is unconditional and creates `~/.gemini/` if needed.
 
 `apm install -g --mcp NAME` routes the write to each runtime's
-user-scope MCP config when that runtime supports user scope: Copilot
-CLI writes to `~/.copilot/mcp-config.json`, Codex CLI to
-`~/.codex/config.toml`, and Gemini CLI to `~/.gemini/settings.json`.
-Workspace-only runtimes (e.g. Cursor, OpenCode) are skipped at user
-scope.
+user-scope MCP config when that runtime supports user scope -- for
+example Copilot CLI writes to `~/.copilot/mcp-config.json`, Codex
+CLI to `~/.codex/config.toml`, and Gemini CLI to
+`~/.gemini/settings.json`. Workspace-only runtimes (e.g. Cursor,
+OpenCode) are skipped at user scope.
 
 ## stdio vs HTTP servers
 
