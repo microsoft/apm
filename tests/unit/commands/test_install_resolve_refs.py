@@ -370,17 +370,30 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             logger=logger,
         )
 
-        # The hint must be emitted exactly once and include the
-        # actionable host-qualified suggestion.
-        info_calls = [c for c in logger.info.call_args_list]
-        assert len(info_calls) == 1
-        emitted = info_calls[0].args[0]
-        assert "shared-tool@my-marketplace" in emitted
-        assert "corp.ghe.com" in emitted
-        assert "platform-team/shared-tool" in emitted
+        # The hint must be emitted exactly once via ``logger.warning``
+        # (PR #1292 panel review's explicit guidance for this follow-up).
+        # Assertions are anchored to the surrounding prose so a CodeQL
+        # "incomplete URL substring sanitization" pattern recognizer does
+        # not flag a bare hostname substring check in this test file.
+        warn_calls = list(logger.warning.call_args_list)
+        assert len(warn_calls) == 1
+        # ``info`` must NOT be used for the hint (the original PR shipped
+        # ``logger.info`` and was caught by the 3-persona panel convergence).
+        assert logger.info.call_args_list == []
+        emitted = warn_calls[0].args[0]
+        # Hint identifies the plugin@marketplace and both intent branches.
+        assert "'shared-tool@my-marketplace'" in emitted
+        assert "registered on 'corp.ghe.com'" in emitted
+        assert "`repo: platform-team/shared-tool`" in emitted
         assert (
-            "corp.ghe.com/platform-team/shared-tool" in emitted
+            "'corp.ghe.com/platform-team/shared-tool'" in emitted
         )
+        # Second clause acknowledges the legitimate-cross-host path so a
+        # transient-failure on a real github.com dep is not misdirected.
+        assert "intentionally a github.com dependency" in emitted
+        # Stale ``Hint:`` prefix from the original PR must not return; the
+        # warning symbol carries the advisory signal on its own.
+        assert "Hint:" not in emitted
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
@@ -416,7 +429,7 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             logger=logger,
         )
 
-        assert logger.info.call_args_list == []
+        assert logger.warning.call_args_list == []
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
@@ -451,7 +464,7 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             logger=logger,
         )
 
-        assert logger.info.call_args_list == []
+        assert logger.warning.call_args_list == []
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     @patch("apm_cli.commands.install.DependencyReference")
@@ -481,4 +494,4 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             logger=logger,
         )
 
-        assert logger.info.call_args_list == []
+        assert logger.warning.call_args_list == []

@@ -540,18 +540,28 @@ def _resolve_package_references(
             # likely the silent auth mis-route (bare canonical fell back to
             # ``github.com``). Surface the host-qualify hint inline so the
             # operator can correct ``marketplace.json`` without rerunning
-            # under ``--verbose`` to decode the auth trace. The legitimate
-            # cross-host case validates successfully and never reaches here.
+            # under ``--verbose`` to decode the auth trace. ``logger.warning``
+            # is used (not ``info``) per the PR #1292 panel review's explicit
+            # guidance for this exact follow-up: a misconfiguration that
+            # voids ``apm install`` should be at warning level, not buried
+            # in info-level ambient output. The second clause acknowledges
+            # the legitimate cross-host alternative so operators whose
+            # github.com dep failed for a transient reason (rate limit,
+            # network, expired PAT) are not misdirected into adding an
+            # enterprise host prefix that would break a working config.
             _risk_entry = _misconfig_risks.get(package)
             if _risk_entry is not None and logger:
                 _mp_name, _plugin_name, _risk = _risk_entry
-                logger.info(
-                    f"Hint: '{_plugin_name}@{_mp_name}' is registered on "
-                    f"'{_risk.marketplace_host}', but the plugin's bare "
+                logger.warning(
+                    f"'{_plugin_name}@{_mp_name}' is registered on "
+                    f"'{_risk.marketplace_host}' but the plugin's bare "
                     f"`repo: {_risk.bare_repo_field}` resolved to "
                     "'github.com'. If you meant the enterprise host, set "
                     "the plugin's `repo` field to "
-                    f"'{_risk.suggested_qualified_repo}' in marketplace.json."
+                    f"'{_risk.suggested_qualified_repo}' in marketplace.json. "
+                    "If this is intentionally a github.com dependency, "
+                    "verify your github.com credentials and that the "
+                    "repository is accessible."
                 )
 
     return (
