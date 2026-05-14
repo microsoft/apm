@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence  # noqa: F401, UP035
 
-from ..deps.lockfile import _SELF_KEY
+from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
@@ -407,6 +407,12 @@ def _check_includes_consent(
     )
 
 
+#: Prefix used in the drift :class:`CheckResult` message when the check is
+#: skipped due to a cold cache.  ``audit.py`` imports this to detect the
+#: skip case without comparing against a raw string literal.
+DRIFT_SKIP_PREFIX = "drift skipped"
+
+
 def _check_drift(
     project_root: Path,
     lockfile: LockFile,
@@ -421,8 +427,11 @@ def _check_drift(
     output format of their choice (text/json/sarif) without re-running
     the replay.
 
-    Cache-only by default: a missing cache entry produces a check
-    failure rather than a network fetch (audit must be deterministic).
+    Cache-only by default: a missing cache entry skips the check with
+    an informational message rather than failing it.  Drift can only
+    run once the local cache has been warmed by ``apm install``; until
+    then the audit remains non-blocking so CI does not red-mark a
+    fresh checkout that has never installed.
     """
     from ..deps.lockfile import get_lockfile_path
     from ..install.drift import (
@@ -444,13 +453,14 @@ def _check_drift(
 
     try:
         scratch = run_replay(config, logger)
-    except CacheMissError as exc:
+    except CacheMissError:
         return (
             CheckResult(
                 name="drift",
-                passed=False,
+                passed=True,
                 message=(
-                    f"drift replay aborted: {exc}; run 'apm install' to refresh apm_modules cache"
+                    f"{DRIFT_SKIP_PREFIX}: install cache not populated "
+                    "(run 'apm install' first or pass --no-drift)"
                 ),
             ),
             [],
@@ -503,11 +513,14 @@ def run_baseline_checks(
     project_root: Path,
     *,
     fail_fast: bool = True,
+    ci_mode: bool = False,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
     When *fail_fast* is ``True`` (default), stops after the first
     failing check to skip expensive I/O (e.g. content integrity scan).
+    When *ci_mode* is ``True``, the ``manifest-missing`` check is a hard
+    failure (``passed=False``); otherwise it is an advisory warning only.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
@@ -545,8 +558,25 @@ def run_baseline_checks(
     lockfile_path = get_lockfile_path(project_root)
 
     # If there's no apm.yml or no lockfile, the first check already passed
-    # (no deps needed).  Skip remaining checks.
+    # (no deps needed).  Skip remaining checks -- but warn if APM artifacts
+    # exist without a manifest (evidence of a deleted apm.yml).
     if not apm_yml_path.exists() or not lockfile_path.exists():
+        if not apm_yml_path.exists():
+            apm_dir = project_root / ".apm"
+            lock_file = project_root / LOCKFILE_NAME
+            legacy_lock_file = project_root / LEGACY_LOCKFILE_NAME
+            if apm_dir.is_dir() or lock_file.exists() or legacy_lock_file.exists():
+                result.checks.append(
+                    CheckResult(
+                        name="manifest-missing",
+                        passed=not ci_mode,
+                        message=(
+                            "apm.yml is missing but APM artifacts"
+                            " (.apm/ or apm.lock.yaml or apm.lock) were found"
+                            " -- this may indicate a deleted manifest"
+                        ),
+                    )
+                )
         return result
 
     lock = LockFile.read(lockfile_path)
