@@ -603,6 +603,16 @@ class AgentsCompiler:
             preview_lines = [
                 f"CLAUDE.md Preview: Would generate {count} {'file' if count == 1 else 'files'}"
             ]
+            # Surface the deduplication skip so dry-run is self-explanatory
+            # for scripted consumers (otherwise "Would generate 0 files"
+            # looks like a no-op or a bug). The same skip appears in the
+            # non-dry-run path via the dedicated INFO log line.
+            if skip_instructions:
+                preview_lines.append(
+                    "  (instructions section skipped: .claude/rules/ already "
+                    "populated -- avoids duplicate content in Claude Code's "
+                    "context window)"
+                )
             for claude_path in claude_result.content_map.keys():  # noqa: SIM118
                 rel_path = portable_relpath(claude_path, self.base_dir)
                 preview_lines.append(f"  {rel_path}")

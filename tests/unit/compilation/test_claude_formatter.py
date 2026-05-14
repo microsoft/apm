@@ -609,9 +609,7 @@ class TestSkipInstructions:
         assert result.success
         assert len(result.content_map) == 0
 
-    def test_no_skip_instructions_includes_project_standards(
-        self, temp_project, sample_primitives
-    ):
+    def test_no_skip_instructions_includes_project_standards(self, temp_project, sample_primitives):
         """When skip_instructions is False (default), instructions are included."""
         formatter = ClaudeFormatter(str(temp_project))
         placement_map = {temp_project: list(sample_primitives.instructions)}

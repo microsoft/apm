@@ -769,6 +769,10 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.stats.get("claude_files_generated", 0), 0)
         self.assertIn("Would generate 0 files", result.content)
+        # Dry-run UX (panel follow-up #4): "0 files" must be accompanied
+        # by a why so scripted consumers do not read it as a no-op.
+        self.assertIn("instructions section skipped", result.content)
+        self.assertIn(".claude/rules/", result.content)
 
     def test_dry_run_reports_file_without_skip(self):
         """Dry-run without .claude/rules/ reports CLAUDE.md would be generated."""
@@ -805,13 +809,10 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         self.assertTrue(result.success)
 
         # Collect all progress messages
-        progress_calls = [
-            str(call) for call in mock_logger.progress.call_args_list
-        ]
+        progress_calls = [str(call) for call in mock_logger.progress.call_args_list]
         joined = " ".join(progress_calls)
         self.assertIn("Instructions already in .claude/rules/", joined)
         self.assertIn("CLAUDE.md not generated", joined)
-
 
     def test_skip_instructions_ignores_symlink_outside_project(self):
         """A .claude/rules/ symlinked outside the project does not trigger skip."""
@@ -820,9 +821,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         # Create a rules directory in a separate unique temp directory
         external_dir = Path(tempfile.mkdtemp())
         try:
-            (external_dir / "style.md").write_text(
-                "---\npaths:\n  - '**/*.py'\n---\nHacked.\n"
-            )
+            (external_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nHacked.\n")
 
             # Symlink .claude/rules/ to the external directory
             claude_dir = Path(self.tmp_resolved) / ".claude"

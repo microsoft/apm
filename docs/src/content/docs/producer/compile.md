@@ -140,13 +140,17 @@ correct AGENTS.md / CLAUDE.md / GEMINI.md output. Reach for
 do not want install's side effects.
 
 :::note[Claude Code deduplication]
-When `apm install` has already deployed instructions to
-`.claude/rules/`, `apm compile --target claude` automatically omits
-the instructions section from `CLAUDE.md` to avoid duplicate content
-in Claude Code's context window. `CLAUDE.md` is still generated when
-it carries a constitution or dependency `@import` paths. If
-`.claude/rules/` is later removed, re-running `apm compile` restores
-the instructions section to `CLAUDE.md`.
+<a id="claude-code-deduplication"></a>
+When `.claude/rules/` is already populated with instructions,
+`apm compile --target claude` automatically omits the instructions
+section from `CLAUDE.md` to avoid duplicate content in Claude Code's
+context window. The directory can be populated by either
+`apm install --target claude` or by an earlier `apm compile --target claude`
+run -- both write per-file instruction rules into `.claude/rules/`.
+`CLAUDE.md` is still generated when it carries a constitution or
+dependency `@import` paths. If `.claude/rules/` is later removed,
+re-running `apm compile` restores the instructions section to
+`CLAUDE.md`.
 :::
 
 ## Pitfalls
