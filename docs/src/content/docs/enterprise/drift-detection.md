@@ -92,6 +92,40 @@ as either eviction-and-refetch (silent self-heal) or a hard failure
 when the cache cannot be repopulated -- never as wrong content under
 the right name.
 
+## Install before audit and tamper detection
+
+Running `apm install` before `apm audit --ci` is the correct pattern when
+the goal is detecting a developer who forgot to run `apm install` after
+editing `apm.yml`. The install step regenerates deployed files so the
+subsequent audit can compare them against the lockfile.
+
+That sequence has a blind spot: `apm install` overwrites every managed file
+with a clean copy before the audit runs. If a deployed file was modified on
+disk after the last install -- for example a hand-edit to
+`.github/instructions/` -- the install step restores the original bytes.
+The `content-integrity` check then compares the restored file against a
+matching hash and reports no finding.
+
+To detect post-install modification, use `setup-only: true` on the action
+so it only provides the CLI without running `apm install`, then audit with
+`--no-drift`:
+
+```yaml
+- uses: microsoft/apm-action@v1
+  with:
+    setup-only: true
+- run: apm audit --ci --no-drift
+```
+
+`--no-drift` skips the install-replay (which requires a warm cache that
+`setup-only` does not populate). The `content-integrity` check verifies
+SHA-256 hashes of every deployed file against `deployed_file_hashes` in
+`apm.lock.yaml` without needing to replay the install. Any byte-level
+change to a deployed file since the last install is caught by this check.
+
+See [Enforce in CI](../enforce-in-ci/#audit-only-ci-pattern) for the full
+recipe and a comparison table of the two patterns.
+
 ## Org-wide sweeps
 
 APM runs per repository. There is no built-in fleet console. The

@@ -127,10 +127,13 @@ jobs:
         retention-days: 30
         if-no-files-found: error
 
-  # Dogfood the two CI gates we ship and document to users:
-  #   - Gate A (consumer-side): `apm audit --ci` -- lockfile / install fidelity.
-  #   - Gate B (producer-side): regeneration drift -- did someone hand-edit
-  #     a regenerated file under .github/ without updating canonical .apm/?
+  # Dogfood the audit-only CI gate we ship and document to users:
+  #   - Gate A (consumer-side): `apm audit --ci --no-drift` -- lockfile /
+  #     content-integrity check. setup-only: true keeps managed files
+  #     untouched so the SHA-256 content-integrity check can detect tampered
+  #     files. The drift check (install-replay comparison) is skipped
+  #     via --no-drift because there is no warm cache in a setup-only
+  #     run; content-integrity covers the same tamper signal.
   # See microsoft/apm#883 for context. Tier 1 (no secrets needed).
   apm-self-check:
     name: APM Self-Check
@@ -140,32 +143,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Installs the APM CLI (latest stable) and runs `apm install` against
-      # this repo's apm.yml. Auto-detects target from the existing .github/
-      # directory and re-integrates local .apm/ content, regenerating
-      # .github/instructions/, .github/agents/, .github/skills/, etc.
-      # Adds `apm` to PATH for subsequent steps.
+      # Installs the APM CLI (latest stable) and adds `apm` to PATH.
+      # setup-only: true skips `apm install` so managed files on disk are
+      # not overwritten before the audit runs. This preserves the committed
+      # state so content-integrity can detect any tampered file hashes.
       - uses: microsoft/apm-action@v1
+        with:
+          setup-only: true
 
       # Gate A: lockfile / install fidelity (consumer-side).
       # Verifies every file in lockfile.deployed_files exists, ref consistency
       # between apm.yml and apm.lock.yaml, no orphan packages, and
-      # content-integrity (hidden Unicode) on deployed package content.
-      # Does NOT verify deployed-file content vs lockfile (see #684).
-      - name: apm audit --ci
-        run: apm audit --ci
+      # content-integrity (SHA-256 hashes against deployed_file_hashes in the
+      # lockfile) on deployed package content. --no-drift skips the
+      # install-replay because there is no warm cache (setup-only did not
+      # run apm install); content-integrity still catches tampered files.
+      - name: apm audit --ci --no-drift
+        run: apm audit --ci --no-drift
 
-      # Gate B: regeneration drift (producer-side).
-      # NOTE: Once `apm-action` ships a CLI version that includes the
-      # default-on `apm audit` drift detection (issue #1071), this entire
-      # step becomes redundant -- Gate A above already catches the same
-      # divergence via install-replay. Keep this bash check until then as
-      # a defense-in-depth fallback.
-      #
-      # The action's `apm install` step re-integrated local .apm/ into
-      # .github/ via target auto-detection. If anything in the governed
-      # integration directories changed, someone edited the regenerated
-      # output without updating the canonical .apm/ source.
+      # Gate B: regeneration drift (producer-side) -- legacy bash fallback.
+      # NOTE: With setup-only: true this step is a guaranteed no-op.
+      # apm install did not run and the working tree is unchanged, so the
+      # git status check always finds nothing. It is kept so the pattern is
+      # visible; a full install+audit workflow would rely on this step to
+      # detect hand-edits to regenerated .github/ files.
       - name: Check APM integration drift (legacy bash fallback, see #1071)
         run: |
           if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then

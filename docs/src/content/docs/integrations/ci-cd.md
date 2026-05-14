@@ -75,8 +75,27 @@ runs, hand-edited deployed files, and orphaned files. See the
 [Drift Detection guide](../../guides/drift-detection/) for details and
 opt-out (`--no-drift`).
 
+For tamper detection -- catching deployed files modified after the last
+install -- use the audit-only pattern instead. `apm install` overwrites
+managed files before audit runs, which erases any tampered bytes before
+`content-integrity` can see them. Pass `setup-only: true` to the action so
+it only provides the CLI, then audit with `--no-drift`:
+
+```yaml
+      - uses: microsoft/apm-action@v1
+        with:
+          setup-only: true
+      - name: Audit (audit-only, tamper detection)
+        run: apm audit --ci --no-drift
+```
+
+`content-integrity` verifies the SHA-256 hash of every deployed file
+against `deployed_file_hashes` in `apm.lock.yaml` without replaying the
+install. See [Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
+for the full recipe and when to use each approach.
+
 :::tip[We dogfood this]
-APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM and running `apm audit --ci`. Use it as a practical example when wiring these checks into your own workflow.
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation of the audit-only CI pattern: `setup-only: true` keeps deployed files untouched so `content-integrity` can detect tampered bytes, and `--no-drift` skips the replay that requires a warm cache. Use it as a practical example when wiring the audit-only check into your own workflow.
 :::
 
 ## Azure Pipelines
