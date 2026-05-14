@@ -3076,7 +3076,7 @@ class TestIssue1007Fixes:
         self,
         project: Path,
         *,
-        manifest_name: str = "hibi",
+        manifest_name: str = "sample-project",
         hook_data: dict | None = None,
     ) -> PackageInfo:
         """Create root .apm hook content plus apm.yml metadata."""
@@ -3590,20 +3590,20 @@ class TestIssue1007Fixes:
 
     def test_root_local_source_uses_manifest_name(self, temp_project: Path) -> None:
         """Root .apm hooks use stable apm.yml metadata, not checkout basename."""
-        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="hibi")
+        manifest_name = f"{temp_project.name}-manifest"
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name=manifest_name)
 
         HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
 
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
-        assert temp_project.name != "hibi"
-        assert entries[0]["_apm_source"] == "_local/hibi"
+        assert entries[0]["_apm_source"] == f"_local/{manifest_name}"
 
     def test_root_local_heals_stale_source_in_claude_settings(
         self,
         temp_project: Path,
     ) -> None:
         """Root .apm reinstall removes same-content entries from old checkout sources."""
-        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="hibi")
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
         settings_path = temp_project / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
@@ -3637,7 +3637,7 @@ class TestIssue1007Fixes:
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
         managed = [e for e in entries if isinstance(e, dict) and "_apm_source" in e]
         user_owned = [e for e in entries if isinstance(e, dict) and "_apm_source" not in e]
-        assert [e["_apm_source"] for e in managed] == ["_local/hibi"]
+        assert [e["_apm_source"] for e in managed] == ["_local/sample-project"]
         assert len(user_owned) == 1
         assert user_owned[0]["hooks"][0]["command"] == "echo user-owned"
 
@@ -3647,7 +3647,7 @@ class TestIssue1007Fixes:
     ) -> None:
         """Codex merged hooks get the same stale root-source healing."""
         (temp_project / ".codex").mkdir()
-        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="hibi")
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
         hooks_path = temp_project / ".codex" / "hooks.json"
         hooks_path.write_text(
             json.dumps(
@@ -3675,7 +3675,7 @@ class TestIssue1007Fixes:
 
         entries = self._read_codex_hooks(temp_project)["hooks"]["PreToolUse"]
         assert len(entries) == 1
-        assert entries[0]["_apm_source"] == "_local/hibi"
+        assert entries[0]["_apm_source"] == "_local/sample-project"
 
     def test_root_local_healer_preserves_dependency_source_entries(
         self,
@@ -3699,7 +3699,7 @@ class TestIssue1007Fixes:
         }
         root_info = self._make_root_local_pkg(
             temp_project,
-            manifest_name="hibi",
+            manifest_name="sample-project",
             hook_data=hook_data,
         )
         dep_info = self._make_pkg(temp_project, "dep-hooks", {"hooks.json": hook_data})
@@ -3726,7 +3726,7 @@ class TestIssue1007Fixes:
 
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
         sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
-        assert sources == ["dep-hooks", "_local/hibi"]
+        assert sources == ["dep-hooks", "_local/sample-project"]
 
     def test_root_local_source_marker_does_not_collide_with_dependency_name(
         self,
@@ -3745,10 +3745,10 @@ class TestIssue1007Fixes:
         }
         root_info = self._make_root_local_pkg(
             temp_project,
-            manifest_name="hibi",
+            manifest_name="matching-dep",
             hook_data=hook_data,
         )
-        dep_info = self._make_pkg(temp_project, "hibi", {"hooks.json": hook_data})
+        dep_info = self._make_pkg(temp_project, "matching-dep", {"hooks.json": hook_data})
 
         integrator = HookIntegrator()
         integrator.integrate_package_hooks_claude(dep_info, temp_project)
@@ -3756,7 +3756,7 @@ class TestIssue1007Fixes:
 
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
         sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
-        assert sources == ["hibi", "_local/hibi"]
+        assert sources == ["matching-dep", "_local/matching-dep"]
 
     def test_root_local_heals_stale_source_for_multiple_hook_files_same_event(
         self,
@@ -3785,7 +3785,7 @@ class TestIssue1007Fixes:
         }
         root_info = self._make_root_local_pkg(
             temp_project,
-            manifest_name="hibi",
+            manifest_name="sample-project",
             hook_data=first,
         )
         (temp_project / ".apm" / "hooks" / "z-second.json").write_text(
@@ -3817,7 +3817,7 @@ class TestIssue1007Fixes:
         commands = [e["hooks"][0]["command"] for e in entries if isinstance(e, dict)]
         sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
         assert commands == ["echo first", "echo second"]
-        assert sources == ["_local/hibi", "_local/hibi"]
+        assert sources == ["_local/sample-project", "_local/sample-project"]
 
     def test_reinstall_clears_aliased_events(self, temp_project: Path) -> None:
         """Re-integration removes stale postToolUse (camelCase) aliases.
