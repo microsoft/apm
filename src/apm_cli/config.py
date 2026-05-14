@@ -170,22 +170,22 @@ def set_allow_protocol_fallback(enabled: bool) -> None:
     update_config({"allow_protocol_fallback": enabled})
 
 
-def get_ssh() -> bool:
-    """Get the ssh transport preference setting.
+def get_prefer_ssh() -> bool:
+    """Get the prefer-ssh transport preference setting.
 
     Returns:
         bool: Whether SSH is preferred for shorthand dependencies (default: False).
     """
-    return get_config().get("ssh", False)
+    return get_config().get("prefer_ssh", False)
 
 
-def set_ssh(enabled: bool) -> None:
-    """Set the ssh transport preference setting.
+def set_prefer_ssh(enabled: bool) -> None:
+    """Set the prefer-ssh transport preference setting.
 
     Args:
         enabled: Whether to prefer SSH for shorthand (owner/repo) dependencies.
     """
-    update_config({"ssh": enabled})
+    update_config({"prefer_ssh": enabled})
 
 
 def unset_allow_protocol_fallback() -> None:
@@ -205,8 +205,8 @@ def unset_allow_protocol_fallback() -> None:
     _invalidate_config_cache()
 
 
-def unset_ssh() -> None:
-    """Remove the ``ssh`` key from the config file.
+def unset_prefer_ssh() -> None:
+    """Remove the ``prefer_ssh`` key from the config file.
 
     No-op if the key is not present.  After this call
     :func:`get_apm_protocol_pref` will fall through to the
@@ -214,8 +214,8 @@ def unset_ssh() -> None:
     """
     _invalidate_config_cache()
     config = get_config()
-    if "ssh" in config:
-        del config["ssh"]
+    if "prefer_ssh" in config:
+        del config["prefer_ssh"]
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
     _invalidate_config_cache()
@@ -270,7 +270,7 @@ def get_apm_protocol_pref() -> str | None:
       1. ``APM_GIT_PROTOCOL`` environment variable
          (``"ssh"``, ``"https"``, or ``"http"`` — ``"http"`` is treated
          as an alias for ``"https"`` by the transport selector)
-      2. ``ssh`` boolean in ``~/.apm/config.json`` (maps to ``"ssh"`` when True)
+      2. ``prefer_ssh`` boolean in ``~/.apm/config.json`` (maps to ``"ssh"`` when True)
       3. ``None`` (let the transport selector use git insteadOf rules)
 
     Returns:
@@ -279,7 +279,7 @@ def get_apm_protocol_pref() -> str | None:
     env_val = os.environ.get(_ENV_GIT_PROTOCOL, "").strip().lower()
     if env_val in ("ssh", "https", "http"):
         return env_val
-    if get_ssh():
+    if get_prefer_ssh():
         return "ssh"
     return None
 

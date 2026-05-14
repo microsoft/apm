@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm config set ssh true` / `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users no longer need to re-pass `--ssh` / `--allow-protocol-fallback` (or export env vars in shell profiles) on every `apm install`. Resolution order: CLI flag > `APM_GIT_PROTOCOL` / `APM_ALLOW_PROTOCOL_FALLBACK` env var > `apm config` > built-in default. `apm config unset ssh` and `apm config unset allow-protocol-fallback` remove the persisted value. (#1243)
+- `apm config set prefer-ssh true` / `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users no longer need to re-pass `--ssh` / `--allow-protocol-fallback` (or export env vars in shell profiles) on every `apm install`. Resolution order: CLI flag > `APM_GIT_PROTOCOL` / `APM_ALLOW_PROTOCOL_FALLBACK` env var > `apm config` > built-in default. `apm config unset prefer-ssh` and `apm config unset allow-protocol-fallback` remove the persisted value. (#1243)
 
 ### Fixed
 

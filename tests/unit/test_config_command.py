@@ -964,42 +964,42 @@ class TestAllowProtocolFallbackFunctions:
 
 
 # ---------------------------------------------------------------------------
-# Storage layer -- ssh
+# Storage layer -- prefer-ssh
 # ---------------------------------------------------------------------------
 
 
-class TestSshFunctions:
-    """Tests for get_ssh and set_ssh in apm_cli.config."""
+class TestPreferSshFunctions:
+    """Tests for get_prefer_ssh and set_prefer_ssh in apm_cli.config."""
 
-    def test_get_ssh_default_is_false(self):
+    def test_get_prefer_ssh_default_is_false(self):
         """Default value is False when not set."""
         import apm_cli.config as cfg_module
 
         with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_ssh() is False
+            assert cfg_module.get_prefer_ssh() is False
 
-    def test_get_ssh_true(self):
+    def test_get_prefer_ssh_true(self):
         """Returns True when set to True."""
         import apm_cli.config as cfg_module
 
-        with patch.object(cfg_module, "get_config", return_value={"ssh": True}):
-            assert cfg_module.get_ssh() is True
+        with patch.object(cfg_module, "get_config", return_value={"prefer_ssh": True}):
+            assert cfg_module.get_prefer_ssh() is True
 
-    def test_set_ssh_calls_update_config(self):
-        """set_ssh delegates to update_config."""
+    def test_set_prefer_ssh_calls_update_config(self):
+        """set_prefer_ssh delegates to update_config."""
         import apm_cli.config as cfg_module
 
         with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_ssh(True)
-            mock_update.assert_called_once_with({"ssh": True})
+            cfg_module.set_prefer_ssh(True)
+            mock_update.assert_called_once_with({"prefer_ssh": True})
 
-    def test_set_ssh_false_calls_update_config(self):
-        """set_ssh(False) passes False to update_config."""
+    def test_set_prefer_ssh_false_calls_update_config(self):
+        """set_prefer_ssh(False) passes False to update_config."""
         import apm_cli.config as cfg_module
 
         with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_ssh(False)
-            mock_update.assert_called_once_with({"ssh": False})
+            cfg_module.set_prefer_ssh(False)
+            mock_update.assert_called_once_with({"prefer_ssh": False})
 
 
 # ---------------------------------------------------------------------------
@@ -1077,11 +1077,11 @@ class TestGetApmProtocolPref:
     """Tests for get_apm_protocol_pref resolution chain."""
 
     def test_env_var_ssh_wins_over_config(self):
-        """APM_GIT_PROTOCOL=ssh wins even when config ssh is False."""
+        """APM_GIT_PROTOCOL=ssh wins even when config prefer_ssh is False."""
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=False),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=False),
             patch.dict(os.environ, {"APM_GIT_PROTOCOL": "ssh"}),
         ):
             assert cfg_module.get_apm_protocol_pref() == "ssh"
@@ -1091,17 +1091,17 @@ class TestGetApmProtocolPref:
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=True),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
             patch.dict(os.environ, {"APM_GIT_PROTOCOL": "https"}),
         ):
             assert cfg_module.get_apm_protocol_pref() == "https"
 
-    def test_config_ssh_used_when_env_unset(self):
-        """Config ssh=True maps to 'ssh' when APM_GIT_PROTOCOL is unset."""
+    def test_config_prefer_ssh_used_when_env_unset(self):
+        """Config prefer_ssh=True maps to 'ssh' when APM_GIT_PROTOCOL is unset."""
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=True),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
             patch.dict(os.environ, {}, clear=False),
         ):
             os.environ.pop("APM_GIT_PROTOCOL", None)
@@ -1112,7 +1112,7 @@ class TestGetApmProtocolPref:
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=False),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=False),
             patch.dict(os.environ, {}, clear=False),
         ):
             os.environ.pop("APM_GIT_PROTOCOL", None)
@@ -1123,7 +1123,7 @@ class TestGetApmProtocolPref:
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=True),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
             patch.dict(os.environ, {"APM_GIT_PROTOCOL": "git"}),
         ):
             assert cfg_module.get_apm_protocol_pref() == "ssh"
@@ -1217,7 +1217,7 @@ class TestConfigGetAllowProtocolFallback:
         with (
             patch("apm_cli.config.get_auto_integrate", return_value=True),
             patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_ssh", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
             patch("apm_cli.config.get_temp_dir", return_value=None),
             patch("apm_cli.core.experimental.is_enabled", return_value=False),
         ):
@@ -1233,105 +1233,105 @@ class TestConfigGetAllowProtocolFallback:
 
 
 # ---------------------------------------------------------------------------
-# CLI -- apm config set ssh
+# CLI -- apm config set prefer-ssh
 # ---------------------------------------------------------------------------
 
 
-class TestConfigSetSsh:
-    """Tests for `apm config set ssh <value>`."""
+class TestConfigSetPreferSsh:
+    """Tests for `apm config set prefer-ssh <value>`."""
 
     def setup_method(self):
         self.runner = CliRunner()
 
-    def test_set_ssh_true(self):
-        """Set ssh to true."""
-        with patch("apm_cli.config.set_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "ssh", "true"])
+    def test_set_prefer_ssh_true(self):
+        """Set prefer-ssh to true."""
+        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
+            result = self.runner.invoke(config, ["set", "prefer-ssh", "true"])
         assert result.exit_code == 0
         mock_set.assert_called_once_with(True)
 
-    def test_set_ssh_false(self):
-        """Set ssh to false."""
-        with patch("apm_cli.config.set_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "ssh", "false"])
+    def test_set_prefer_ssh_false(self):
+        """Set prefer-ssh to false."""
+        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
+            result = self.runner.invoke(config, ["set", "prefer-ssh", "false"])
         assert result.exit_code == 0
         mock_set.assert_called_once_with(False)
 
-    def test_set_ssh_one(self):
+    def test_set_prefer_ssh_one(self):
         """'1' is accepted as a truthy value."""
-        with patch("apm_cli.config.set_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "ssh", "1"])
+        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
+            result = self.runner.invoke(config, ["set", "prefer-ssh", "1"])
         assert result.exit_code == 0
         mock_set.assert_called_once_with(True)
 
-    def test_set_ssh_no(self):
+    def test_set_prefer_ssh_no(self):
         """'no' is accepted as a falsy value."""
-        with patch("apm_cli.config.set_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "ssh", "no"])
+        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
+            result = self.runner.invoke(config, ["set", "prefer-ssh", "no"])
         assert result.exit_code == 0
         mock_set.assert_called_once_with(False)
 
-    def test_set_ssh_invalid_value(self):
+    def test_set_prefer_ssh_invalid_value(self):
         """Reject an invalid value."""
-        result = self.runner.invoke(config, ["set", "ssh", "enabled"])
+        result = self.runner.invoke(config, ["set", "prefer-ssh", "enabled"])
         assert result.exit_code == 1
 
-    def test_set_ssh_not_gated(self):
-        """ssh does not require any experimental flag."""
-        with patch("apm_cli.config.set_ssh"):
-            result = self.runner.invoke(config, ["set", "ssh", "true"])
+    def test_set_prefer_ssh_not_gated(self):
+        """prefer-ssh does not require any experimental flag."""
+        with patch("apm_cli.config.set_prefer_ssh"):
+            result = self.runner.invoke(config, ["set", "prefer-ssh", "true"])
         assert result.exit_code == 0
 
-    def test_set_ssh_unknown_key_lists_ssh_as_valid(self):
-        """Error listing includes 'ssh' as a valid key."""
+    def test_set_prefer_ssh_unknown_key_lists_prefer_ssh_as_valid(self):
+        """Error listing includes 'prefer-ssh' as a valid key."""
         result = self.runner.invoke(config, ["set", "nonexistent", "true"])
         assert result.exit_code == 1
-        assert "ssh" in result.output
+        assert "prefer-ssh" in result.output
 
 
 # ---------------------------------------------------------------------------
-# CLI -- apm config get ssh
+# CLI -- apm config get prefer-ssh
 # ---------------------------------------------------------------------------
 
 
-class TestConfigGetSsh:
-    """Tests for `apm config get ssh`."""
+class TestConfigGetPreferSsh:
+    """Tests for `apm config get prefer-ssh`."""
 
     def setup_method(self):
         self.runner = CliRunner()
 
-    def test_get_ssh_when_true(self):
-        """Display the configured ssh preference when True."""
-        with patch("apm_cli.config.get_ssh", return_value=True):
-            result = self.runner.invoke(config, ["get", "ssh"])
+    def test_get_prefer_ssh_when_true(self):
+        """Display the configured prefer-ssh preference when True."""
+        with patch("apm_cli.config.get_prefer_ssh", return_value=True):
+            result = self.runner.invoke(config, ["get", "prefer-ssh"])
         assert result.exit_code == 0
-        assert "ssh: True" in result.output
+        assert "prefer-ssh: True" in result.output
 
-    def test_get_ssh_when_false(self):
-        """Display the configured ssh preference when False."""
-        with patch("apm_cli.config.get_ssh", return_value=False):
-            result = self.runner.invoke(config, ["get", "ssh"])
+    def test_get_prefer_ssh_when_false(self):
+        """Display the configured prefer-ssh preference when False."""
+        with patch("apm_cli.config.get_prefer_ssh", return_value=False):
+            result = self.runner.invoke(config, ["get", "prefer-ssh"])
         assert result.exit_code == 0
-        assert "ssh: False" in result.output
+        assert "prefer-ssh: False" in result.output
 
-    def test_get_all_config_includes_ssh(self):
-        """apm config get (no key) lists ssh."""
+    def test_get_all_config_includes_prefer_ssh(self):
+        """apm config get (no key) lists prefer-ssh."""
         with (
             patch("apm_cli.config.get_auto_integrate", return_value=True),
             patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_ssh", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
             patch("apm_cli.config.get_temp_dir", return_value=None),
             patch("apm_cli.core.experimental.is_enabled", return_value=False),
         ):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "ssh" in result.output
+        assert "prefer-ssh" in result.output
 
-    def test_unknown_key_error_lists_ssh_as_valid(self):
-        """Error message for unknown keys lists ssh as valid."""
+    def test_unknown_key_error_lists_prefer_ssh_as_valid(self):
+        """Error message for unknown keys lists prefer-ssh as valid."""
         result = self.runner.invoke(config, ["get", "nonexistent"])
         assert result.exit_code == 1
-        assert "ssh" in result.output
+        assert "prefer-ssh" in result.output
 
 
 class TestConfigShowTempDir:
@@ -1341,7 +1341,7 @@ class TestConfigShowTempDir:
         self.runner = CliRunner()
 
     def test_show_with_temp_dir_set(self):
-        """Line 127: temp_dir is set → shown in config table."""
+        """Line 127: temp_dir is set -- shown in config table."""
         with (
             patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
             patch("apm_cli.config.get_temp_dir", return_value="/tmp/apm-temp"),
@@ -1352,7 +1352,7 @@ class TestConfigShowTempDir:
         assert "/tmp/apm-temp" in result.output or "Temp Directory" in result.output
 
     def test_show_with_copilot_cowork_dir_set(self):
-        """Lines 132-135: copilot_cowork enabled + dir set → shown."""
+        """Lines 132-135: copilot_cowork enabled + dir set -- shown."""
         with (
             patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
             patch("apm_cli.config.get_temp_dir", return_value=None),
@@ -1364,7 +1364,7 @@ class TestConfigShowTempDir:
         assert "/some/skills" in result.output or "Cowork Skills Dir" in result.output
 
     def test_show_with_copilot_cowork_dir_not_set(self):
-        """Lines 132-138: copilot_cowork enabled + dir NOT set → auto-detection msg."""
+        """Lines 132-138: copilot_cowork enabled + dir NOT set -- auto-detection msg."""
         with (
             patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
             patch("apm_cli.config.get_temp_dir", return_value=None),

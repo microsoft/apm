@@ -123,7 +123,7 @@ class TestAllowProtocolFallbackPrecedence:
 
 
 class TestProtocolPrefPrecedence:
-    """CLI flag > APM_GIT_PROTOCOL env > apm config ssh > None (git insteadOf)."""
+    """CLI flag > APM_GIT_PROTOCOL env > apm config prefer-ssh > None (git insteadOf)."""
 
     def test_cli_flag_ssh_wins_over_env_and_config(self):
         """CLI --ssh flag (use_ssh=True) bypasses env/config entirely in install.py."""
@@ -132,7 +132,7 @@ class TestProtocolPrefPrecedence:
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=False),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=False),
             patch.dict(os.environ, {}, clear=False),
         ):
             os.environ.pop("APM_GIT_PROTOCOL", None)
@@ -141,31 +141,31 @@ class TestProtocolPrefPrecedence:
             assert cfg_module.get_apm_protocol_pref() is None
 
     def test_env_var_ssh_wins_over_config_false(self):
-        """APM_GIT_PROTOCOL=ssh overrides config ssh=False."""
+        """APM_GIT_PROTOCOL=ssh overrides config prefer_ssh=False."""
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=False),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=False),
             patch.dict(os.environ, {"APM_GIT_PROTOCOL": "ssh"}),
         ):
             assert cfg_module.get_apm_protocol_pref() == "ssh"
 
     def test_env_var_https_wins_over_config_ssh_true(self):
-        """APM_GIT_PROTOCOL=https wins even if config ssh=True."""
+        """APM_GIT_PROTOCOL=https wins even if config prefer_ssh=True."""
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=True),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
             patch.dict(os.environ, {"APM_GIT_PROTOCOL": "https"}),
         ):
             assert cfg_module.get_apm_protocol_pref() == "https"
 
-    def test_config_ssh_true_used_when_env_absent(self):
-        """Config ssh=True maps to 'ssh' when APM_GIT_PROTOCOL is unset."""
+    def test_config_prefer_ssh_true_used_when_env_absent(self):
+        """Config prefer_ssh=True maps to 'ssh' when APM_GIT_PROTOCOL is unset."""
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=True),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
             patch.dict(os.environ, {}, clear=False),
         ):
             os.environ.pop("APM_GIT_PROTOCOL", None)
@@ -176,7 +176,7 @@ class TestProtocolPrefPrecedence:
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=False),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=False),
             patch.dict(os.environ, {}, clear=False),
         ):
             os.environ.pop("APM_GIT_PROTOCOL", None)
@@ -187,10 +187,10 @@ class TestProtocolPrefPrecedence:
         import apm_cli.config as cfg_module
 
         with (
-            patch.object(cfg_module, "get_ssh", return_value=True),
+            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
             patch.dict(os.environ, {"APM_GIT_PROTOCOL": "git"}),
         ):
-            # 'git' is not in (ssh, https, http) → fallthrough to config (ssh=True)
+            # 'git' is not in (ssh, https, http) → fallthrough to config (prefer_ssh=True)
             assert cfg_module.get_apm_protocol_pref() == "ssh"
 
 
@@ -235,20 +235,20 @@ class TestProtocolPreferenceFromStr:
 class TestConfigRoundTrip:
     """Verify that set_* followed by get_apm_* helpers honour the stored value."""
 
-    def test_set_ssh_true_reflected_in_get_apm_protocol_pref(self, isolated_config):
-        """After set_ssh(True), get_apm_protocol_pref returns 'ssh' when env is absent."""
+    def test_set_prefer_ssh_true_reflected_in_get_apm_protocol_pref(self, isolated_config):
+        """After set_prefer_ssh(True), get_apm_protocol_pref returns 'ssh' when env is absent."""
         import apm_cli.config as cfg_module
 
-        cfg_module.set_ssh(True)
+        cfg_module.set_prefer_ssh(True)
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("APM_GIT_PROTOCOL", None)
             assert cfg_module.get_apm_protocol_pref() == "ssh"
 
-    def test_set_ssh_false_reflected_in_get_apm_protocol_pref(self, isolated_config):
-        """After set_ssh(False), get_apm_protocol_pref returns None when env is absent."""
+    def test_set_prefer_ssh_false_reflected_in_get_apm_protocol_pref(self, isolated_config):
+        """After set_prefer_ssh(False), get_apm_protocol_pref returns None when env is absent."""
         import apm_cli.config as cfg_module
 
-        cfg_module.set_ssh(False)
+        cfg_module.set_prefer_ssh(False)
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("APM_GIT_PROTOCOL", None)
             assert cfg_module.get_apm_protocol_pref() is None

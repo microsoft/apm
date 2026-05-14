@@ -37,23 +37,23 @@ def _parse_bool_value(value: str) -> bool:
 
 def _get_config_setters():
     """Return config setters keyed by CLI option name."""
-    from ..config import set_allow_protocol_fallback, set_auto_integrate, set_ssh
+    from ..config import set_allow_protocol_fallback, set_auto_integrate, set_prefer_ssh
 
     return {
         "auto-integrate": (set_auto_integrate, "Auto-integration"),
         "allow-protocol-fallback": (set_allow_protocol_fallback, "Protocol fallback"),
-        "ssh": (set_ssh, "SSH transport preference"),
+        "prefer-ssh": (set_prefer_ssh, "SSH transport preference"),
     }
 
 
 def _get_config_getters():
     """Return config getters keyed by CLI option name."""
-    from ..config import get_allow_protocol_fallback, get_auto_integrate, get_ssh
+    from ..config import get_allow_protocol_fallback, get_auto_integrate, get_prefer_ssh
 
     return {
         "auto-integrate": get_auto_integrate,
         "allow-protocol-fallback": get_allow_protocol_fallback,
-        "ssh": get_ssh,
+        "prefer-ssh": get_prefer_ssh,
     }
 
 
@@ -61,7 +61,7 @@ def _valid_config_keys() -> str:
     """Return valid config keys for messages."""
     from ..core.experimental import is_enabled
 
-    keys = ["auto-integrate", "temp-dir", "allow-protocol-fallback", "ssh"]
+    keys = ["auto-integrate", "temp-dir", "allow-protocol-fallback", "prefer-ssh"]
     if is_enabled("copilot_cowork"):
         keys.append("copilot-cowork-skills-dir")
     return ", ".join(keys)
@@ -127,7 +127,7 @@ def config(ctx):
             config_table.add_row("Global", "APM CLI Version", get_version())
 
             from ..config import get_allow_protocol_fallback as _get_apf
-            from ..config import get_ssh as _get_ssh_cfg
+            from ..config import get_prefer_ssh as _get_prefer_ssh_cfg
             from ..config import get_temp_dir as _get_temp_dir
 
             _temp_dir_val = _get_temp_dir()
@@ -135,7 +135,7 @@ def config(ctx):
                 config_table.add_row("", "Temp Directory", _temp_dir_val)
 
             config_table.add_row("", "Allow Protocol Fallback", str(_get_apf()))
-            config_table.add_row("", "SSH Transport Preferred", str(_get_ssh_cfg()))
+            config_table.add_row("", "Prefer SSH Transport", str(_get_prefer_ssh_cfg()))
 
             from ..core.experimental import is_enabled as _is_enabled
 
@@ -171,7 +171,7 @@ def config(ctx):
             click.echo(f"  APM CLI Version: {get_version()}")
 
             from ..config import get_allow_protocol_fallback as _get_apf_fb
-            from ..config import get_ssh as _get_ssh_fb
+            from ..config import get_prefer_ssh as _get_prefer_ssh_fb
             from ..config import get_temp_dir as _get_temp_dir_fb
 
             _temp_dir_fb = _get_temp_dir_fb()
@@ -179,7 +179,7 @@ def config(ctx):
                 click.echo(f"  Temp Directory: {_temp_dir_fb}")
 
             click.echo(f"  allow-protocol-fallback: {_get_apf_fb()}")
-            click.echo(f"  ssh: {_get_ssh_fb()}")
+            click.echo(f"  prefer-ssh: {_get_prefer_ssh_fb()}")
 
             from ..core.experimental import is_enabled as _is_enabled_fb
 
@@ -304,7 +304,7 @@ def get(key):
         # Show all user-settable keys with their effective values (including
         # defaults).  Iterating raw config keys would hide settings that
         # have not been written yet (e.g. auto_integrate on a fresh install).
-        from ..config import get_allow_protocol_fallback, get_ssh
+        from ..config import get_allow_protocol_fallback, get_prefer_ssh
 
         logger.progress("APM Configuration:")
         click.echo(f"  auto-integrate: {get_auto_integrate()}")
@@ -313,7 +313,7 @@ def get(key):
             f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
         )
         click.echo(f"  allow-protocol-fallback: {get_allow_protocol_fallback()}")
-        click.echo(f"  ssh: {get_ssh()}")
+        click.echo(f"  prefer-ssh: {get_prefer_ssh()}")
 
         from ..core.experimental import is_enabled as _is_enabled_get
 
@@ -335,7 +335,7 @@ def unset(key):
     Examples:
         apm config unset temp-dir
         apm config unset allow-protocol-fallback
-        apm config unset ssh
+        apm config unset prefer-ssh
         apm config unset copilot-cowork-skills-dir
     """
     logger = CommandLogger("config unset")
@@ -354,10 +354,10 @@ def unset(key):
         logger.success("Protocol fallback preference removed (will use env var or default)")
         return
 
-    if key == "ssh":
-        from ..config import unset_ssh
+    if key == "prefer-ssh":
+        from ..config import unset_prefer_ssh
 
-        unset_ssh()
+        unset_prefer_ssh()
         logger.success("SSH transport preference removed (will use env var or default)")
         return
 
