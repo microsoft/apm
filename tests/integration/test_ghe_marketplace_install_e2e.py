@@ -85,29 +85,25 @@ class TestGHEMarketplaceInstallAuthRouting:
             yield
 
     @pytest.mark.parametrize(
-        "label,plugin_source,expected_virtual_path",
+        "label,plugin_source",
         [
-            ("relative-source", "./plugins/my-plugin", "plugins/my-plugin"),
+            ("relative-source", "./plugins/my-plugin"),
             (
                 "dict-bare-repo",
                 {"type": "github", "repo": f"{_OWNER}/{_REPO}", "path": "plugins/my-plugin"},
-                "plugins/my-plugin",
-            ),
-            (
-                "dict-host-qualified-repo",
-                {
-                    "type": "github",
-                    "repo": f"{_GHE_HOST}/{_OWNER}/{_REPO}",
-                    "path": "plugins/my-plugin",
-                },
-                "plugins/my-plugin",
             ),
         ],
     )
-    def test_ghe_marketplace_routes_auth_at_enterprise_host(
-        self, label, plugin_source, expected_virtual_path
-    ):
-        """Full chain: resolver -> canonical -> parse -> AuthContext bound to enterprise host."""
+    def test_ghe_marketplace_backfills_host_on_bare_canonical(self, label, plugin_source):
+        """#1285 regression trap: cases where ``resolve_plugin_source`` emits a bare canonical.
+
+        These are the cases the fix actually mutates -- without the host-prefix backfill
+        the canonical lacks ``corp.ghe.com/`` and ``DependencyReference.parse`` falls back
+        to ``github.com``. Verified locally: reverting ``_needs_canonical_host_prefix``
+        to ``return False`` makes both parametrized cases fail at all three layers
+        (canonical, parse host, ``AuthContext.host_info.host``) -- a defense-in-depth
+        trap rather than a single boundary check.
+        """
         plugin = MarketplacePlugin(name="my-plugin", source=plugin_source)
         with (
             patch(
@@ -121,27 +117,65 @@ class TestGHEMarketplaceInstallAuthRouting:
         ):
             result = resolve_marketplace_plugin("my-plugin", _REPO)
 
-        # Resolver-layer contract: canonical carries the enterprise host.
+        # Layer 1: canonical carries the enterprise host
         expected_canonical = f"{_GHE_HOST}/{_OWNER}/{_REPO}/plugins/my-plugin"
         assert result.canonical == expected_canonical, f"[{label}] canonical mismatch"
 
-        # Parse boundary: re-parsing the canonical recovers the GHE host.
-        # This is the boundary the install pipeline crosses at
+        # Layer 2: re-parsing the canonical recovers the GHE host -- this is the
+        # boundary the install pipeline crosses at
         # apm_cli.install.package_resolution.resolve_parsed_dependency_reference
         # when marketplace_dep_ref is None (the GitHub-family path).
         dep_ref = DependencyReference.parse(result.canonical)
         assert dep_ref.host == _GHE_HOST
         assert dep_ref.repo_url == f"{_OWNER}/{_REPO}"
-        assert dep_ref.virtual_path == expected_virtual_path
+        assert dep_ref.virtual_path == "plugins/my-plugin"
 
-        # Auth-routing contract: AuthResolver targets the enterprise host
-        # (not github.com fallback). This is the exact bug #1285 reported.
+        # Layer 3: AuthResolver targets the enterprise host, not github.com fallback
         auth = AuthResolver()
         ctx = auth.resolve_for_dep(dep_ref)
         assert ctx.host_info.host == _GHE_HOST, (
             f"[{label}] auth resolved at {ctx.host_info.host!r}, not the GHE host -- "
             "this is the silent github.com fallback that #1285 fixed"
         )
+        assert ctx.host_info.kind == "ghe_cloud"
+
+    def test_ghe_marketplace_host_qualified_dict_source_routes_idempotently(self):
+        """Idempotency lock (NOT a #1285 regression trap).
+
+        When the manifest dict source carries a host-qualified ``repo`` (e.g.
+        ``corp.ghe.com/myorg/my-marketplace``), ``_resolve_github_source`` already
+        emits the host on the canonical -- the prefix step is a no-op here. The
+        contract this case locks is "the idempotent guard does not double-prefix
+        and the install still routes correctly", not the regression trap (the case
+        passes regardless of whether the fix is enabled, verified locally).
+        """
+        plugin = MarketplacePlugin(
+            name="my-plugin",
+            source={
+                "type": "github",
+                "repo": f"{_GHE_HOST}/{_OWNER}/{_REPO}",
+                "path": "plugins/my-plugin",
+            },
+        )
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=_make_source(_GHE_HOST),
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=_make_manifest(plugin),
+            ),
+        ):
+            result = resolve_marketplace_plugin("my-plugin", _REPO)
+
+        # Single (not double) host prefix
+        assert result.canonical == f"{_GHE_HOST}/{_OWNER}/{_REPO}/plugins/my-plugin"
+
+        dep_ref = DependencyReference.parse(result.canonical)
+        auth = AuthResolver()
+        ctx = auth.resolve_for_dep(dep_ref)
+        assert ctx.host_info.host == _GHE_HOST
         assert ctx.host_info.kind == "ghe_cloud"
 
     def test_github_com_marketplace_keeps_github_default(self):
