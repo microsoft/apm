@@ -25,6 +25,29 @@ from pathlib import Path
 
 import pytest
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _integration_process_cwd_guard():
+    """Keep process cwd valid across integration tests on POSIX workers.
+
+    If a test changes the working directory into a directory that is later
+    deleted without leaving first, the kernel leaves the process parked on a
+    detached inode and :func:`os.getcwd` raises :exc:`FileNotFoundError`.
+    That poisons the rest of an xdist worker (merge-queue CI runs
+    ``-n 2 --dist loadgroup``).
+    """
+    try:
+        os.getcwd()
+    except (FileNotFoundError, OSError):
+        os.chdir(_REPO_ROOT)
+    yield
+    try:
+        os.getcwd()
+    except (FileNotFoundError, OSError):
+        os.chdir(_REPO_ROOT)
+
 
 def make_copilot_project(tmp_path: Path, name: str = "test-project") -> Path:
     """Create a temp project with a valid copilot signal.

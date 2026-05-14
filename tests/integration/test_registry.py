@@ -59,6 +59,14 @@ class TestMCPRegistry:
         if sys.platform == "win32":
             time.sleep(0.1)
 
+        # Leave the temp tree before unlinking it.  Otherwise cwd can still
+        # reference the directory inode and os.getcwd() raises FileNotFoundError
+        # on POSIX — breaking later tests on the same xdist worker.
+        try:
+            os.chdir(tempfile.gettempdir())
+        except (FileNotFoundError, OSError):
+            pass
+
         # First, try the standard cleanup
         try:
             self.test_dir.cleanup()
