@@ -205,14 +205,20 @@ class TestGHEMarketplaceInstallAuthRouting:
         assert ctx.host_info.kind == "github"
 
     def test_cross_repo_locks_known_silent_misroute(self):
-        """Regression trap for the cross-repo bug class tracked separately in #1305.
+        """Regression trap for the cross-repo routing semantics + #1305 sentinel.
 
-        A ``*.ghe.com`` marketplace with a cross-repo dict source bears the same
-        symptoms as #1285 -- canonical emerges bare, parse defaults to ``github.com``.
-        This is intentionally out of scope of PR #1292; #1305 tracks the fix
-        (which belongs in the install-time error handler, not the resolver).
-        The test locks the current behaviour so the future #1305 fix has an
-        explicit before/after diff to assert against.
+        A ``*.ghe.com`` marketplace with a cross-repo dict source bears the
+        same superficial symptoms as #1285 -- canonical emerges bare, parse
+        defaults to ``github.com``. The #1305 fix deliberately preserves
+        that resolver-level routing (a bare cross-repo ``repo`` also
+        legitimately means "a github.com open-source dep from this enterprise
+        marketplace") and instead attaches a
+        :class:`~apm_cli.marketplace.resolver.CrossRepoMisconfigRisk` sentinel
+        that the install command consults at the validation-failure boundary
+        to emit an actionable host-qualify hint. This test locks both halves:
+        the routing preservation (so the legitimate path is not regressed)
+        and the sentinel attachment (so the hint emission has the metadata
+        it needs).
         """
         plugin = MarketplacePlugin(
             name="cross-repo",
@@ -234,12 +240,143 @@ class TestGHEMarketplaceInstallAuthRouting:
         ):
             result = resolve_marketplace_plugin("cross-repo", _REPO)
 
-        # Pre-existing behaviour: no host prefix for cross-repo (#1305 to fix).
+        # Routing preservation: cross-repo canonical stays bare; parse still
+        # falls back to ``github.com``. This is intentional -- the legitimate
+        # cross-host path validates successfully and never needs to recover
+        # the enterprise host. #1305 surfaces the diagnostic at install time
+        # when the misconfigured path subsequently fails validation.
         assert result.canonical == "anotherorg/anothertool/plugins/x"
         dep_ref = DependencyReference.parse(result.canonical)
         auth = AuthResolver()
         ctx = auth.resolve_for_dep(dep_ref)
-        assert ctx.host_info.host == "github.com", (
-            "If this assertion fails, the cross-repo silent mis-route bug from "
-            "#1305 has been fixed -- update this test to reflect the new behaviour."
+        assert ctx.host_info.host == "github.com"
+
+        # #1305: sentinel must attach so the install command's
+        # validation-fail branch has the metadata to emit the hint.
+        risk = result.cross_repo_misconfig_risk
+        assert risk is not None
+        assert risk.marketplace_host == _GHE_HOST
+        assert risk.bare_repo_field == "anotherorg/anothertool"
+        assert risk.suggested_qualified_repo == f"{_GHE_HOST}/anotherorg/anothertool"
+
+
+@pytest.mark.integration
+class TestCrossRepoMisconfigHintIntegration:
+    """End-to-end: the #1305 hint surfaces when a cross-repo bare entry on
+    a ``*.ghe.com`` marketplace fails validation.
+
+    Unit tests in ``tests/unit/commands/`` mock ``DependencyReference`` and
+    ``resolve_marketplace_plugin``; this integration trap walks the real
+    ``_resolve_package_references`` + real ``InstallLogger`` and asserts on
+    the actual stdout the operator would see. Required by the PR review
+    panel (test-coverage-expert: ``outcome: missing`` on a secure-by-default
+    surface) and matches the e2e-integration convention PR #1292 established
+    with ``test_ghe_marketplace_backfills_host_on_bare_canonical`` above.
+
+    Stubs at one seam only:
+
+    - ``_validate_package_exists``: forces the failure outcome that triggers
+      the hint. The real validate path makes outbound HTTP calls; this stub
+      keeps the test deterministic. Everything between the resolver sentinel
+      and the logger render is the real code path.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_github_host_env(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+
+    def test_cross_repo_hint_emitted_on_validation_failure(self, capsys):
+        """The canonical misconfiguration scenario from #1305 surfaces a
+        warning-level hint identifying the marketplace host and the exact
+        host-qualified ``repo`` value to use as a fix."""
+        from apm_cli.commands.install import _resolve_package_references
+        from apm_cli.core.command_logger import InstallLogger
+
+        plugin = MarketplacePlugin(
+            name="shared-tool",
+            source={
+                "type": "github",
+                "repo": "platform-team/shared-tool",
+                "path": "plugins/shared",
+            },
         )
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=_make_source(_GHE_HOST),
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=_make_manifest(plugin),
+            ),
+            patch(
+                "apm_cli.commands.install._validate_package_exists",
+                return_value=False,
+            ),
+        ):
+            _resolve_package_references(
+                ["shared-tool@my-marketplace"],
+                [],
+                set(),
+                logger=InstallLogger(verbose=False),
+            )
+
+        captured = capsys.readouterr()
+        emitted = captured.out
+        # Hint identifies the plugin@marketplace
+        assert "'shared-tool@my-marketplace'" in emitted
+        # Marketplace host is named in the "registered on" clause
+        # (anchored substring sidesteps CodeQL bare-host pattern recognizers)
+        assert f"registered on '{_GHE_HOST}'" in emitted
+        # The bare repo from marketplace.json is echoed back
+        assert "`repo: platform-team/shared-tool`" in emitted
+        # Concrete remediation value the operator can copy-paste
+        assert f"'{_GHE_HOST}/platform-team/shared-tool'" in emitted
+        # Auth-expert clause acknowledges the legitimate-cross-host
+        # alternative so transient failures of real github.com deps are
+        # not misdirected into adding an enterprise host prefix.
+        assert "intentionally a github.com dependency" in emitted
+
+    def test_legitimate_cross_host_validation_passes_no_hint(self, capsys):
+        """The legitimate cross-host case (validation passes) emits no hint.
+
+        This is the entire reason the diagnostic lives at the
+        validation-failure boundary instead of resolver time."""
+        from apm_cli.commands.install import _resolve_package_references
+        from apm_cli.core.command_logger import InstallLogger
+
+        plugin = MarketplacePlugin(
+            name="shared-tool",
+            source={
+                "type": "github",
+                "repo": "platform-team/shared-tool",
+                "path": "plugins/shared",
+            },
+        )
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=_make_source(_GHE_HOST),
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=_make_manifest(plugin),
+            ),
+            patch(
+                "apm_cli.commands.install._validate_package_exists",
+                return_value=True,
+            ),
+        ):
+            _resolve_package_references(
+                ["shared-tool@my-marketplace"],
+                [],
+                set(),
+                logger=InstallLogger(verbose=False),
+            )
+
+        emitted = capsys.readouterr().out
+        # No hint substrings on the successful path.
+        assert "intentionally a github.com dependency" not in emitted
+        assert "If you meant the enterprise host" not in emitted
