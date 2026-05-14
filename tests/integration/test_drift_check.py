@@ -725,8 +725,8 @@ class TestSectionENoDriftFlag:
     def test_e10_bare_audit_surfaces_cache_miss_on_stderr(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When drift fails (CacheMissError, CachePinError) and produces no
-        findings, bare ``apm audit`` MUST tell the user on stderr -- silence
+        """When drift encounters a CacheMissError it skips with an informational
+        message and bare ``apm audit`` MUST tell the user on stderr -- silence
         is a UX trap (user cannot tell "drift was clean" from "drift never
         ran"). Per dev-ux + cli-logging-ux panel feedback (PR #1137)."""
         from apm_cli.install.drift import CacheMissError
@@ -744,8 +744,9 @@ class TestSectionENoDriftFlag:
         monkeypatch.setattr("apm_cli.install.drift.run_replay", _boom)
 
         result = _audit(project, monkeypatch)
-        # Bare audit is advisory: exit code is not gated on drift failure.
+        # Bare audit is advisory: exit code is not gated on drift skip.
         assert result.exit_code in {0, 2}
-        # The stderr-warning contract.
-        assert "drift check could not run" in result.stderr.lower()
-        assert "cache miss" in result.stderr.lower()
+        # The stderr-warning contract: user must see that drift was skipped
+        # and why (cache not yet populated).
+        assert "drift skipped" in result.stderr.lower()
+        assert "cache not populated" in result.stderr.lower()
