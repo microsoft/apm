@@ -202,6 +202,59 @@ class TestGeminiMCPIntegration:
         assert "srv" in result["mcpServers"]
         assert result["theme"] == "light"
 
+    def test_install_via_mcp_integrator_uses_project_root_not_cwd(self, monkeypatch):
+        """Regression for #1299: when ``MCPIntegrator.install`` is called
+        with ``project_root`` distinct from the current process cwd, the
+        Gemini opt-in detection gate must check ``project_root/.gemini/``
+        (not ``cwd/.gemini/``), and the MCP write must land at
+        ``project_root/.gemini/settings.json``.
+
+        Pre-fix: the detection gate at ``mcp_integrator.py`` read
+        ``Path.cwd() / .gemini`` for Gemini only (every other opt-in
+        runtime used ``project_root_path``), so when cwd lacked
+        ``.gemini/`` Gemini was excluded from ``installed_runtimes`` and
+        no write occurred even though ``project_root/.gemini/`` existed.
+        """
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        # cwd is a fresh tmp dir with NO .gemini/ -- mirrors the issue's
+        # "checkout that is not the target project" premise.
+        other_cwd = tempfile.mkdtemp(prefix="apm-not-project-")
+        try:
+            monkeypatch.chdir(other_cwd)
+
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "regression-1299-srv",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "echo",
+                    "args": ["regression-1299"],
+                }
+            )
+
+            # Intentionally do NOT pass runtime= so the auto-detection
+            # block at mcp_integrator.py exercises the opt-in gate that
+            # was the bug site (Path.cwd() vs project_root_path).
+            MCPIntegrator.install(
+                [dep],
+                project_root=self.root,
+            )
+
+            settings = self.gemini_dir / "settings.json"
+            assert settings.exists(), (
+                "MCPIntegrator.install must write Gemini config at project_root/.gemini/, "
+                "not silently drop it because the cwd-based opt-in gate misclassified "
+                "Gemini as unavailable."
+            )
+            data = json.loads(settings.read_text())
+            assert "regression-1299-srv" in data.get("mcpServers", {}), (
+                "Self-defined MCP server should be written to project_root/.gemini/settings.json"
+            )
+        finally:
+            shutil.rmtree(other_cwd, ignore_errors=True)
+
 
 @pytest.mark.integration
 class TestGeminiOptInBehavior:
