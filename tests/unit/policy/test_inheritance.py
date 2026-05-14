@@ -156,6 +156,72 @@ class TestDependencyRequireMerge(unittest.TestCase):
         self.assertEqual(result.dependencies.require, ("contoso/hooks",))
 
 
+class TestDependencyTransparency(unittest.TestCase):
+    """Child omitting dependencies block is transparent for deny/require (fixes #1201)."""
+
+    def test_parent_require_child_omits_deps_block(self):
+        """Parent require + child omits dependencies entirely -> require flows through."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(require=("contoso/hooks",))),
+            ApmPolicy(),  # child omits dependencies -> require=None
+        )
+        self.assertEqual(result.dependencies.require, ("contoso/hooks",))
+
+    def test_parent_deny_child_omits_deps_block(self):
+        """Parent deny + child omits dependencies entirely -> deny flows through."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(deny=("evil/*",))),
+            ApmPolicy(),  # child omits dependencies -> deny=None
+        )
+        self.assertEqual(result.dependencies.deny, ("evil/*",))
+
+    def test_parent_require_child_explicit_empty_require(self):
+        """Child explicit empty require=() overrides parent (AC#2)."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(require=("contoso/hooks",))),
+            ApmPolicy(dependencies=DependencyPolicy(require=())),
+        )
+        self.assertEqual(result.dependencies.require, ())
+
+    def test_parent_deny_child_explicit_empty_deny(self):
+        """Child explicit empty deny=() overrides parent."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(deny=("evil/*",))),
+            ApmPolicy(dependencies=DependencyPolicy(deny=())),
+        )
+        self.assertEqual(result.dependencies.deny, ())
+
+    def test_three_level_chain_require_transparency(self):
+        """Enterprise require -> org omits -> repo omits -> require preserved."""
+        result = resolve_policy_chain(
+            [
+                ApmPolicy(dependencies=DependencyPolicy(require=("contoso/core",))),
+                ApmPolicy(),  # org omits
+                ApmPolicy(),  # repo omits
+            ]
+        )
+        self.assertEqual(result.dependencies.require, ("contoso/core",))
+
+    def test_three_level_chain_deny_transparency(self):
+        """Enterprise deny -> org omits -> repo omits -> deny preserved."""
+        result = resolve_policy_chain(
+            [
+                ApmPolicy(dependencies=DependencyPolicy(deny=("banned/*",))),
+                ApmPolicy(),  # org omits
+                ApmPolicy(),  # repo omits
+            ]
+        )
+        self.assertEqual(result.dependencies.deny, ("banned/*",))
+
+    def test_both_none_merged_none(self):
+        """Both parent and child omit dependencies -> None (no opinion)."""
+        result = merge_policies(ApmPolicy(), ApmPolicy())
+        self.assertIsNone(result.dependencies.deny)
+        self.assertIsNone(result.dependencies.require)
+        self.assertEqual(result.dependencies.effective_deny, ())
+        self.assertEqual(result.dependencies.effective_require, ())
+
+
 class TestRequireResolutionEscalation(unittest.TestCase):
     """require_resolution: project-wins < policy-wins < block."""
 
@@ -601,7 +667,8 @@ class TestEdgeCases(unittest.TestCase):
         result = merge_policies(ApmPolicy(), ApmPolicy())
         self.assertEqual(result.enforcement, "warn")
         self.assertEqual(result.cache.ttl, 3600)
-        self.assertEqual(result.dependencies.deny, ())
+        self.assertIsNone(result.dependencies.deny)  # None = no opinion from either side
+        self.assertEqual(result.dependencies.effective_deny, ())
         self.assertIsNone(result.dependencies.allow)
 
     def test_extends_cleared_after_merge(self):

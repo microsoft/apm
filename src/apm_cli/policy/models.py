@@ -34,6 +34,7 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "scripts-policy": "apm.yml",
     "unmanaged-files": "apm.yml",
     "manifest-parse": "apm.yml",
+    "manifest-missing": "apm.yml",
 }
 
 

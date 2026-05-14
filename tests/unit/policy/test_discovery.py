@@ -1,4 +1,4 @@
-"""Tests for apm_cli.policy.discovery — policy auto-discovery engine."""
+"""Tests for apm_cli.policy.discovery  --  policy auto-discovery engine."""
 
 from __future__ import annotations
 
@@ -260,6 +260,54 @@ class TestCacheReadWrite(unittest.TestCase):
         # against the resolved form
         expected = root.resolve() / "apm_modules" / ".policy-cache"
         self.assertEqual(_get_cache_dir(root), expected)
+
+    def test_round_trip_preserves_none_deny_and_require(self):
+        """Cache write->read must preserve deny=None/require=None (tri-state Fix 1).
+
+        A policy with no dependencies: block must survive a cache round-trip
+        as None, not collapse to () which would prevent parent inheritance.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+
+            # Policy with no dependencies: block -> deny=None, require=None
+            policy, _ = load_policy("name: p\nversion: '1'\nenforcement: warn\n")
+            self.assertIsNone(policy.dependencies.deny)
+            self.assertIsNone(policy.dependencies.require)
+
+            _write_cache(repo_ref, policy, root)
+            result = _read_cache(repo_ref, root)
+
+            self.assertIsNotNone(result)
+            self.assertIsNone(
+                result.policy.dependencies.deny,
+                "deny must survive cache round-trip as None, not collapse to ()",
+            )
+            self.assertIsNone(
+                result.policy.dependencies.require,
+                "require must survive cache round-trip as None, not collapse to ()",
+            )
+
+    def test_round_trip_preserves_explicit_empty_deny(self):
+        """Cache round-trip must preserve deny=() (explicit empty override)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+
+            yaml_str = "name: p\nversion: '1'\nenforcement: warn\ndependencies:\n  deny: []\n"
+            policy, _ = load_policy(yaml_str)
+            self.assertEqual(policy.dependencies.deny, ())
+
+            _write_cache(repo_ref, policy, root)
+            result = _read_cache(repo_ref, root)
+
+            self.assertIsNotNone(result)
+            self.assertEqual(
+                result.policy.dependencies.deny,
+                (),
+                "deny=[] must survive cache round-trip as () (explicit empty)",
+            )
 
 
 class TestFetchGithubContents(unittest.TestCase):
