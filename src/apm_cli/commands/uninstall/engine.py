@@ -4,9 +4,10 @@ import builtins
 from pathlib import Path
 
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
-from ...core.command_logger import CommandLogger  # noqa: F401
-from ...deps.lockfile import LockFile  # noqa: F401
+from ...core.command_logger import CommandLogger
+from ...deps.lockfile import LockFile
 from ...integration.mcp_integrator import MCPIntegrator
+from ...marketplace.resolver import _MARKETPLACE_RE
 from ...models.apm_package import APMPackage, DependencyReference  # noqa: F401
 from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
@@ -39,22 +40,136 @@ def _parse_dependency_entry(dep_entry):
     raise ValueError(f"Unsupported dependency entry type: {type(dep_entry).__name__}")
 
 
-def _validate_uninstall_packages(packages, current_deps, logger):
-    """Validate which packages can be removed and return matched/unmatched lists."""
+def _resolve_marketplace_packages(
+    packages: list[str],
+    lockfile: "LockFile | None",
+    logger: "CommandLogger",
+) -> dict[str, str | None]:
+    """Resolve marketplace refs (NAME@MARKETPLACE[#REF]) to canonical owner/repo strings.
+
+    Resolution proceeds in two stages for each marketplace-formatted package:
+
+    1. **Lockfile lookup (offline)**: scan ``lockfile.dependencies`` for entries
+       where ``discovered_via == marketplace_name`` and
+       ``marketplace_plugin_name == plugin_name``.  When found, use the
+       dependency's unique key as the canonical identity.
+    2. **Registry fallback (silent)**: call :func:`parse_marketplace_ref` then
+       :func:`resolve_marketplace_plugin` to obtain the canonical ``owner/repo``
+       from the marketplace registry.  Network errors fail only the affected
+       package; remaining packages in the batch continue.
+
+    When both stages fail, an error is logged with marketplace-specific wording
+    and the package maps to ``None`` in the returned dict.
+
+    Args:
+        packages: List of marketplace-formatted package strings to resolve.
+        lockfile: Current :class:`~apm_cli.deps.lockfile.LockFile` object, or
+            ``None`` when no lockfile exists.
+        logger: :class:`~apm_cli.core.command_logger.CommandLogger` for output.
+
+    Returns:
+        A dict mapping each original marketplace ref to its resolved canonical
+        string, or ``None`` when resolution failed.
+    """
+    from ...marketplace.resolver import parse_marketplace_ref, resolve_marketplace_plugin
+
+    resolved: dict[str, str | None] = {}
+
+    for package in packages:
+        parsed = parse_marketplace_ref(package)
+        if parsed is None:
+            continue  # Not a marketplace ref; skipped silently
+
+        plugin_name, marketplace_name, _ref = parsed
+        canonical: str | None = None
+
+        # Stage 1: Lockfile-first lookup (offline, zero network calls)
+        if lockfile is not None:
+            for dep in lockfile.dependencies.values():
+                if (
+                    dep.discovered_via == marketplace_name
+                    and dep.marketplace_plugin_name == plugin_name
+                ):
+                    canonical = dep.get_unique_key()
+                    break
+
+        # Stage 2: Registry fallback (silent, mirrors install behaviour)
+        if canonical is None:
+            try:
+                resolution = resolve_marketplace_plugin(plugin_name, marketplace_name)
+                canonical = resolution.canonical
+            except Exception:
+                pass  # Network error or plugin not found; handled below
+
+        # Stage 3: Not found in either source -- surface a clear error
+        if canonical is None:
+            logger.error(
+                f"'{plugin_name}@{marketplace_name}' could not be resolved. "
+                "Use 'owner/repo' format to uninstall directly."
+            )
+
+        resolved[package] = canonical
+
+    return resolved
+
+
+def _validate_uninstall_packages(
+    packages: list[str],
+    current_deps: list,
+    logger: "CommandLogger",
+    lockfile: "LockFile | None" = None,
+) -> tuple[list, list]:
+    """Validate which packages can be removed and return matched/unmatched lists.
+
+    Accepts both canonical ``owner/repo`` strings and marketplace refs of the
+    form ``NAME@MARKETPLACE[#REF]``.  Marketplace refs are resolved to their
+    canonical form before being matched against the ``current_deps`` list from
+    ``apm.yml``.
+
+    Args:
+        packages: Package identifiers supplied by the user.
+        current_deps: Current dependency list read from ``apm.yml``.
+        logger: :class:`~apm_cli.core.command_logger.CommandLogger` for output.
+        lockfile: Optional :class:`~apm_cli.deps.lockfile.LockFile` used for
+            offline marketplace resolution.  When ``None`` the registry fallback
+            is attempted instead.
+
+    Returns:
+        A two-tuple ``(packages_to_remove, packages_not_found)`` where
+        *packages_to_remove* contains matched dep entries and
+        *packages_not_found* contains unresolved or unmatched package strings.
+    """
+    # Pre-resolve any marketplace refs before the main validation loop
+    mkt_refs = [p for p in packages if _MARKETPLACE_RE.match(p)]
+    mkt_resolved: dict[str, str | None] = {}
+    if mkt_refs:
+        mkt_resolved = _resolve_marketplace_packages(mkt_refs, lockfile, logger)
+
     packages_to_remove = []
     packages_not_found = []
 
     for package in packages:
         if "/" not in package:
-            logger.error(f"Invalid package format: {package}. Use 'owner/repo' format.")
-            continue
+            if _MARKETPLACE_RE.match(package):
+                canonical = mkt_resolved.get(package)
+                if canonical is None:
+                    # Error already logged by _resolve_marketplace_packages
+                    continue
+                canonical_for_match = canonical
+                display_label = package
+            else:
+                logger.error(f"Invalid package format: {package}. Use 'owner/repo' format.")
+                continue
+        else:
+            canonical_for_match = package
+            display_label = package
 
         matched_dep = None
         try:
-            pkg_ref = DependencyReference.parse(package)
+            pkg_ref = DependencyReference.parse(canonical_for_match)
             pkg_identity = pkg_ref.get_identity()
         except Exception:
-            pkg_identity = package
+            pkg_identity = canonical_for_match
 
         for dep_entry in current_deps:
             try:
@@ -64,16 +179,27 @@ def _validate_uninstall_packages(packages, current_deps, logger):
                     break
             except (ValueError, TypeError, AttributeError, KeyError):
                 dep_str = dep_entry if isinstance(dep_entry, str) else str(dep_entry)
-                if dep_str == package:
+                if dep_str == canonical_for_match:
                     matched_dep = dep_entry
                     break
 
         if matched_dep is not None:
             packages_to_remove.append(matched_dep)
-            logger.progress(f"{package} - found in apm.yml", symbol="check")
+            if canonical_for_match != display_label:
+                logger.progress(
+                    f"{display_label} - found in apm.yml (as {canonical_for_match})",
+                    symbol="check",
+                )
+            else:
+                logger.progress(f"{display_label} - found in apm.yml", symbol="check")
         else:
             packages_not_found.append(package)
-            logger.warning(f"{package} - not found in apm.yml")
+            if canonical_for_match != display_label:
+                logger.warning(
+                    f"'{display_label}' is not installed (resolved to {canonical_for_match})"
+                )
+            else:
+                logger.warning(f"{display_label} - not found in apm.yml")
 
     return packages_to_remove, packages_not_found
 
@@ -92,7 +218,7 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         if apm_modules_dir.exists() and package_path.exists():
             logger.progress(f"  - {pkg} from apm_modules/")
 
-    from ...deps.lockfile import LockFile, get_lockfile_path  # noqa: F811
+    from ...deps.lockfile import LockFile, get_lockfile_path
 
     lockfile_path = get_lockfile_path(Path("."))
     lockfile = LockFile.read(lockfile_path)

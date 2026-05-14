@@ -44,6 +44,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         apm uninstall org/pkg1 org/pkg2              # Remove multiple packages
         apm uninstall acme/my-package --dry-run      # Show what would be removed
         apm uninstall -g acme/my-package             # Remove from user scope
+        apm uninstall my-plugin@official             # Remove by marketplace name
     """
     from ...core.scope import (
         InstallScope,
@@ -99,9 +100,16 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         current_deps = data["dependencies"]["apm"] or []
 
+        # Load lockfile early: used for marketplace ref resolution in Step 1
+        # and reused for MCP state capture and transitive orphan cleanup below.
+        from ...deps.lockfile import LockFile, get_lockfile_path
+
+        lockfile_path = get_lockfile_path(apm_dir)
+        lockfile = LockFile.read(lockfile_path)
+
         # Step 1: Validate packages
         packages_to_remove, packages_not_found = _validate_uninstall_packages(
-            packages, current_deps, logger
+            packages, current_deps, logger, lockfile
         )
         if not packages_to_remove:
             logger.warning("No packages found in apm.yml to remove")
@@ -125,11 +133,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger.error(f"Failed to write {apm_yml_path}: {e}")
             sys.exit(1)
 
-        # Step 4: Load lockfile and capture pre-uninstall MCP state
-        from ...deps.lockfile import LockFile, get_lockfile_path
-
-        lockfile_path = get_lockfile_path(apm_dir)
-        lockfile = LockFile.read(lockfile_path)
+        # Step 4: Capture pre-uninstall MCP state (lockfile already read above)
         _pre_uninstall_mcp_servers = (
             builtins.set(lockfile.mcp_servers) if lockfile else builtins.set()
         )
