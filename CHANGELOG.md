@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit` drift check now returns skip-with-info (`passed=True`) when the install cache is cold, instead of failing the audit; bare `apm audit` surfaces the skip reason on stderr so CI pipelines that have not yet run `apm install` are not incorrectly red-marked. (#1289)
+- `extends: org` now correctly layers `dependencies.require` and `dependencies.deny` from the parent policy when the child omits the `dependencies:` block entirely; `None` signals "no opinion" (transparent) while `[]` signals explicit override. (#1290)
+- CI self-check job now uses `setup-only: true` + `apm audit --ci --no-drift` so managed files are not overwritten by `apm install` before `content-integrity` runs; documented the audit-only CI pattern and the install-before-audit blind spot in the enterprise and CI/CD guides. (#1291)
 - Pin `Path.home()` under unit tests via a session-scoped autouse conftest fixture, fixing 56 Windows runner failures on the new `windows-2025-vs2026` GitHub-hosted image where `USERPROFILE`/`HOMEDRIVE`+`HOMEPATH` are not seeded for pytest workers; also patch the `_check_and_notify_updates` import binding in the disabled-self-update test so it no longer races on the version-check cache. (#1270)
 - `apm install` now works on macOS git 2.53.0 (Homebrew): bare-cache commands switch to `--git-dir` to satisfy the `safe.bareRepository=explicit` default; fetched SHAs are pinned as synthetic refs so `git clone --local --shared` no longer silently omits them. (#1268)
 - Set the unit-test hermetic HOME at conftest import time so a single xdist worker on the `windows-2025-vs2026` runner can no longer race fixture setup and re-trigger the 53 `Path.home()` failures the session-scoped autouse fixture was supposed to prevent. (#1271)
@@ -16,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retry the `apm mcp search` and `apm mcp show` integration tests on the documented "Could not reach MCP registry" transient (with backoff and a final skip) so a brief `api.mcp.github.com` outage no longer red-marks the Windows integration job. (#1274)
 - Also wrap `Path.expanduser()` in the root test conftest so the `windows-2025-vs2026` runner cannot raise `RuntimeError("Could not determine home directory.")` from `ntpath.expanduser` when production code (e.g. `install.package_resolution.user_scope_rejection_reason`) calls `Path("~/pkg").expanduser()`. Falls back to the hermetic tmp dir; assertions about `~/pkg` being absolute still hold. (#1276)
 - `apm install` from marketplaces registered on `*.ghe.com` (GHE Cloud) hosts now routes auth at the registered enterprise host instead of silently defaulting to `github.com` and failing with 401; the marketplace resolver backfills the enterprise host onto the canonical so downstream `DependencyReference.parse` recovers it, and the resulting `apm.yml` entry records the correct enterprise `git:` URL instead of `https://github.com/...`. (#1292)
+- `apm view --help` and the `view` row in `apm --help` now render in release binaries; PyInstaller's `optimize=2` was stripping `__doc__` from every Click command, and `view` was the only command that relied on its docstring instead of the explicit `help=` kwarg every other command defensively sets. Lowered the spec to `optimize=1` so asserts are still removed but docstrings survive, restoring Click's documented help-from-docstring fallback for all current and future commands. (#1298)
 
 ## [0.13.0] - 2026-05-11
 
