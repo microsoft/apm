@@ -157,8 +157,8 @@ class TestAgentIntegrator:
         assert result.files_integrated == 1
         assert (self.project_root / ".github" / "agents").exists()
 
-    def test_integrate_package_agents_always_overwrites(self):
-        """Test that integration always overwrites existing files."""
+    def test_integrate_package_agents_force_overwrites(self):
+        """Test that force=True overwrites existing files even with no manifest."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
         (package_dir / "security.agent.md").write_text("# Security Agent")
@@ -188,7 +188,9 @@ class TestAgentIntegrator:
             installed_at="2024-01-01T00:00:00",
         )
 
-        result = self.integrator.integrate_package_agents(package_info, self.project_root)
+        result = self.integrator.integrate_package_agents(
+            package_info, self.project_root, force=True
+        )
 
         assert result.files_integrated == 1
         assert result.files_updated == 0
@@ -257,7 +259,7 @@ tools: []
         assert "apm:" not in content
 
     def test_integrate_overwrites_existing_file(self):
-        """Test that integration always overwrites existing files."""
+        """Test that force=True overwrites existing files on update."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
         (package_dir / "security.agent.md").write_text("# Updated Agent Content")
@@ -287,7 +289,9 @@ tools: []
             installed_at="2024-11-13T11:00:00",
         )
 
-        result = self.integrator.integrate_package_agents(package_info, self.project_root)
+        result = self.integrator.integrate_package_agents(
+            package_info, self.project_root, force=True
+        )
 
         assert result.files_integrated == 1
         assert result.files_updated == 0
@@ -299,7 +303,7 @@ tools: []
         assert content == "# Updated Agent Content"
 
     def test_integrate_all_files_always_copied(self):
-        """Test integration copies all agent files regardless of existing state."""
+        """Test force=True copies all agent files regardless of existing state."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
 
@@ -334,9 +338,11 @@ tools: []
             installed_at="2024-11-13T11:00:00",
         )
 
-        result = self.integrator.integrate_package_agents(package_info, self.project_root)
+        result = self.integrator.integrate_package_agents(
+            package_info, self.project_root, force=True
+        )
 
-        assert result.files_integrated == 3  # All files always copied
+        assert result.files_integrated == 3  # All files copied when force=True
         assert result.files_updated == 0
         assert result.files_skipped == 0
 
@@ -719,8 +725,8 @@ class TestClaudeAgentIntegration:
         assert result.files_integrated == 0
         assert not (self.project_root / ".claude" / "agents").exists()
 
-    def test_integrate_always_overwrites(self):
-        """Test that integration always overwrites existing files."""
+    def test_integrate_force_overwrites(self):
+        """Test that force=True overwrites existing files."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
         (package_dir / "security.agent.md").write_text("# Updated Content")
@@ -731,7 +737,9 @@ class TestClaudeAgentIntegration:
         (agents_dir / "security.md").write_text("# Old Content")
 
         package_info = self._create_package_info(package_dir)
-        result = self.integrator.integrate_package_agents_claude(package_info, self.project_root)
+        result = self.integrator.integrate_package_agents_claude(
+            package_info, self.project_root, force=True
+        )
 
         assert result.files_integrated == 1
         content = (agents_dir / "security.md").read_text()

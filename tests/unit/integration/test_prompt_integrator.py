@@ -138,8 +138,8 @@ Some prompt content."""
         assert result.files_integrated == 1
         assert (self.project_root / ".github" / "prompts").exists()
 
-    def test_integrate_always_overwrites_existing_files(self):
-        """Test that integration always overwrites existing files."""
+    def test_integrate_skips_existing_file_no_managed_files(self):
+        """Without managed_files (no manifest), a pre-existing file is treated as a collision."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
         (package_dir / "test.prompt.md").write_text("# New Content")
@@ -171,15 +171,13 @@ Some prompt content."""
 
         result = self.integrator.integrate_package_prompts(package_info, self.project_root)
 
-        # Always counts as integrated (overwrite)
-        assert result.files_integrated == 1
-        assert result.files_updated == 0
-        assert result.files_skipped == 0
+        # managed_files=None treated as empty set: pre-existing file is a collision -> skipped
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
 
-        # Verify content was overwritten
+        # Original user content must be preserved on disk
         content = (github_prompts / "test.prompt.md").read_text()
-        assert "# New Content" in content
-        assert "# Old Content" not in content
+        assert content == "# Old Content"
 
     def test_integrate_copies_verbatim_no_metadata(self):
         """Test that integration copies files verbatim without metadata."""
@@ -224,7 +222,7 @@ Some prompt content."""
         assert "---" not in content
 
     def test_integrate_multiple_files(self):
-        """Test integration with multiple prompt files."""
+        """Test integration with multiple prompt files; pre-existing files are skipped."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
 
@@ -235,7 +233,7 @@ Some prompt content."""
         github_prompts = self.project_root / ".github" / "prompts"
         github_prompts.mkdir(parents=True)
 
-        # Pre-create one existing file to test overwrite
+        # Pre-create one existing file to test collision detection
         (github_prompts / "file2.prompt.md").write_text("# Old File 2")
 
         package = APMPackage(
@@ -259,15 +257,15 @@ Some prompt content."""
 
         result = self.integrator.integrate_package_prompts(package_info, self.project_root)
 
-        # All 3 files are integrated (always overwrite)
-        assert result.files_integrated == 3
-        assert result.files_updated == 0
-        assert result.files_skipped == 0
+        # file2 pre-exists and managed_files=None -> treated as collision -> skipped
+        assert result.files_integrated == 2
+        assert result.files_skipped == 1
 
-        # Verify all files exist with correct content
+        # Verify new files were deployed
         assert (github_prompts / "file1.prompt.md").exists()
-        assert (github_prompts / "file2.prompt.md").read_text() == "# File 2"
         assert (github_prompts / "file3.prompt.md").exists()
+        # Pre-existing user file is preserved
+        assert (github_prompts / "file2.prompt.md").read_text() == "# Old File 2"
 
     # ========== Sync Integration Tests (Nuke-and-Regenerate) ==========
 

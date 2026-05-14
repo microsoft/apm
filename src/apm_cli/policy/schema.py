@@ -7,8 +7,10 @@ Allow-list semantics:
   * ``()``    -- "explicitly empty" (after merge: nothing is allowed).
   * ``(...)`` -- "allow only matching patterns".
 
-Deny/require lists use ``Tuple[str, ...]`` (never ``None``) because
-they accumulate via union -- an absent key simply means "nothing to add".
+Deny/require list semantics:
+  * ``None``  -- "no opinion" (transparent during inheritance merge).
+  * ``()``    -- "explicitly empty" (overrides parent in merge).
+  * ``(...)`` -- union-merged with parent during inheritance.
 """
 
 from __future__ import annotations
@@ -29,10 +31,20 @@ class DependencyPolicy:
     """Rules governing which APM dependencies are permitted."""
 
     allow: tuple[str, ...] | None = None
-    deny: tuple[str, ...] = ()
-    require: tuple[str, ...] = ()
+    deny: tuple[str, ...] | None = None  # None = no opinion; () = explicit empty
+    require: tuple[str, ...] | None = None  # None = no opinion; () = explicit empty
     require_resolution: str = "project-wins"  # project-wins | policy-wins | block
     max_depth: int = 50
+
+    @property
+    def effective_deny(self) -> tuple[str, ...]:
+        """Resolved deny list for runtime checks (None -> ())."""
+        return self.deny if self.deny is not None else ()
+
+    @property
+    def effective_require(self) -> tuple[str, ...]:
+        """Resolved require list for runtime checks (None -> ())."""
+        return self.require if self.require is not None else ()
 
 
 @dataclass(frozen=True)
@@ -91,8 +103,13 @@ class ManifestPolicy:
 class UnmanagedFilesPolicy:
     """Rules for files not tracked in apm.lock."""
 
-    action: str = "ignore"  # ignore | warn | deny
+    action: str | None = None  # None = no opinion; "ignore" | "warn" | "deny"
     directories: tuple[str, ...] = ()
+
+    @property
+    def effective_action(self) -> str:
+        """Resolved action for runtime checks (None -> 'ignore')."""
+        return self.action if self.action is not None else "ignore"
 
 
 @dataclass(frozen=True)

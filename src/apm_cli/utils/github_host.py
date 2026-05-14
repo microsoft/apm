@@ -26,6 +26,19 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
     return bool(h.endswith(".visualstudio.com"))
 
 
+def is_visualstudio_legacy_hostname(hostname: str | None) -> bool:
+    """Return True if hostname is a legacy ``*.visualstudio.com`` ADO host.
+
+    For these hosts the Azure DevOps organisation is encoded in the subdomain
+    (e.g. ``myorg.visualstudio.com``) rather than as the first path segment.
+    This is in contrast to ``dev.azure.com`` where the org is the first path
+    segment (``dev.azure.com/org/project/repo``).
+    """
+    if not hostname:
+        return False
+    return hostname.lower().endswith(".visualstudio.com")
+
+
 def is_gitlab_hostname(hostname: str | None) -> bool:
     """Return True if *hostname* is GitLab SaaS or a GitLab host from env configuration.
 

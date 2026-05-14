@@ -39,8 +39,10 @@ class TestDependencyPolicyDefaults(unittest.TestCase):
     def test_defaults(self):
         dep = DependencyPolicy()
         self.assertIsNone(dep.allow)
-        self.assertEqual(dep.deny, ())
-        self.assertEqual(dep.require, ())
+        self.assertIsNone(dep.deny)
+        self.assertIsNone(dep.require)
+        self.assertEqual(dep.effective_deny, ())
+        self.assertEqual(dep.effective_require, ())
         self.assertEqual(dep.require_resolution, "project-wins")
         self.assertEqual(dep.max_depth, 50)
 
@@ -96,7 +98,8 @@ class TestUnmanagedFilesPolicyDefaults(unittest.TestCase):
 
     def test_defaults(self):
         uf = UnmanagedFilesPolicy()
-        self.assertEqual(uf.action, "ignore")
+        self.assertIsNone(uf.action)
+        self.assertEqual(uf.effective_action, "ignore")
         self.assertEqual(uf.directories, ())
 
 

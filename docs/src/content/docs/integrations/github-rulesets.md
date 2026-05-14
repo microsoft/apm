@@ -7,6 +7,11 @@ sidebar:
 
 GitHub Rulesets and branch protection rules can require status checks before merging. APM commands like `apm install`, `apm compile`, and `apm unpack` already block critical hidden-character findings automatically. `apm audit` adds structured reporting (SARIF, JSON, markdown) and exit codes (**0** = clean, **1** = critical, **2** = warnings) for CI integration. `apm audit --ci` verifies lockfile consistency, and `--policy org` enforces organizational rules.
 
+> Note: `apm unpack` is DEPRECATED and scheduled for removal in v0.14.
+> New pipelines should use `apm install <bundle-path>` instead -- it
+> applies the same content scanning and integrates with the project
+> lockfile. See [Pack and distribute](../../guides/pack-distribute/).
+
 ## How It Works
 
 The workflow is straightforward:

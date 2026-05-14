@@ -75,11 +75,16 @@ class TestCheckCollision:
     def teardown_method(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_no_collision_managed_files_none(self):
-        """When managed_files is None, no collision possible."""
+    def test_collision_managed_files_none_file_exists(self):
+        """managed_files=None with existing file -> collision (None treated as empty set)."""
         target = self.root / "file.md"
         target.write_text("content")
-        assert BaseIntegrator.check_collision(target, "file.md", None, False) is False
+        assert BaseIntegrator.check_collision(target, "file.md", None, False) is True
+
+    def test_no_collision_managed_files_none_file_absent(self):
+        """managed_files=None with no existing file -> no collision."""
+        target = self.root / "nonexistent.md"
+        assert BaseIntegrator.check_collision(target, "nonexistent.md", None, False) is False
 
     def test_no_collision_file_does_not_exist(self):
         """File doesn't exist -> no collision."""

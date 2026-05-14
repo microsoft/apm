@@ -123,7 +123,7 @@ Content scanning extends beyond install:
 
 - **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
 - **`apm pack`** scans files before bundling. This catches hidden characters before a package is published, preventing authors from accidentally distributing tainted content.
-- **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used.
+- **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED and scheduled for removal in v0.14; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../../guides/pack-distribute/).)
 
 ### On-demand scanning
 
@@ -146,7 +146,7 @@ apm audit -f json -o report.json       # Machine-readable
 apm audit -f markdown -o report.md     # Step summaries
 ```
 
-See [Content scanning with `apm audit`](../governance/#content-scanning-with-apm-audit) for usage details and exit codes.
+See [Content scanning with `apm audit`](../../reference/cli/install/) for usage details and exit codes.
 
 ### Limitations
 
@@ -285,7 +285,7 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 
 - **Never stored in files.** Tokens are read from the environment at runtime. They are never written to `apm.yml`, `apm.lock.yaml`, or any generated file.
 - **Never logged.** Token values are not included in console output, error messages, or debug logs.
-- **Scoped to their git host.** A GitHub token is only sent to GitHub. An Azure DevOps token is only sent to Azure DevOps. Tokens are never transmitted to any other endpoint.
+- **Scoped to their git host and server identity.** A GitHub token is only sent when both the server name is on the GitHub allowlist and the remote URL hostname is a verified GitHub/Copilot host (`github.com`, `*.ghe.com`, `*.github.com`, `githubcopilot.com`, `*.githubcopilot.com`). HTTPS is required -- `http://` URLs are rejected even when the hostname matches. An Azure DevOps token is only sent to Azure DevOps. Tokens are never transmitted to any other endpoint.
 - **Injected via transient git config.** APM passes credentials with `http.extraheader` for the duration of a single git invocation; tokens are never embedded in URLs and are not visible in `ps` or process listings.
 
 For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
@@ -299,7 +299,7 @@ When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps with a Microso
 - **Compatible with managed-identity / service-account-only orgs.** Works in environments where PAT creation is disabled, including WIF-backed pipelines.
 - **Same transport rules as PATs.** Bearer values are injected via `http.extraheader`, scoped to ADO hosts only, and never logged.
 
-See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for the resolution precedence and CI patterns.
+See [Azure DevOps AAD bearer tokens](#azure-devops-aad-bearer-tokens) above for the resolution precedence and CI patterns.
 
 ## Attack surface comparison
 
@@ -321,7 +321,7 @@ Not without detection. APM scans all package source files before deployment. Cri
 
 ### How do I audit what APM installed?
 
-The `apm.lock.yaml` file records every dependency (with exact commit SHA) and every file deployed. It is a plain YAML file suitable for automated policy checks, diff review, and compliance tooling. See [Governance & Compliance](../governance/) for audit workflows.
+The `apm.lock.yaml` file records every dependency (with exact commit SHA) and every file deployed. It is a plain YAML file suitable for automated policy checks, diff review, and compliance tooling. See the [Governance Guide](../governance-guide/) for audit workflows.
 
 ### Is the APM binary signed?
 

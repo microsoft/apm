@@ -14,7 +14,10 @@ plugin sources under a subdirectory of the marketplace repository are resolved t
 :class:`~apm_cli.models.dependency.reference.DependencyReference` built like explicit
 ``git:`` + ``path:``; clone target
 is only the registered marketplace project; the plugin directory is ``virtual_path``.
-``github.com`` / ``*.ghe.com`` keep shorthand (no structured ref). :func:`resolve_marketplace_plugin` returns
+``github.com`` and ``*.ghe.com`` keep shorthand (no structured ref); ``*.ghe.com``
+canonicals additionally carry a host prefix so downstream auth resolves at the
+enterprise host instead of falling back to ``github.com`` (#1285).
+:func:`resolve_marketplace_plugin` returns
 :class:`MarketplacePluginResolution`, which iterates as ``(canonical, plugin)`` so
 existing ``canonical, plugin = resolve_marketplace_plugin(...)`` call sites keep
 working; consumers that need the structured ref use ``result.dependency_reference``.
@@ -178,6 +181,44 @@ def _marketplace_host_needs_explicit_git_path(host: str) -> bool:
     if is_azure_devops_hostname(h):
         return False
     return not is_github_hostname(h)
+
+
+def _needs_canonical_host_prefix(canonical: str, host: str) -> bool:
+    """True when a GitHub-family enterprise host must be prefixed to ``canonical``.
+
+    GitHub-family hosts (``github.com`` + ``*.ghe.com``) keep virtual shorthand --
+    ``resolve_plugin_source`` emits a bare ``owner/repo[/path]`` canonical because
+    there is no nested-group ambiguity to disambiguate. ``DependencyReference.parse``
+    defaults missing hosts to ``github.com``, which is correct for ``github.com`` but
+    silently mis-routes auth for every ``*.ghe.com`` marketplace.
+
+    Returns True only for enterprise GitHub hosts (``*.ghe.com``) so the caller can
+    backfill the host while preserving shorthand semantics. Idempotent: when the
+    canonical already starts with ``host`` (case-insensitive) -- as happens when the
+    manifest's dict source carries a host-qualified ``repo`` -- this returns False
+    so the prefix is not duplicated.
+
+    GHES (GitHub Enterprise Server, configured via ``GITHUB_HOST``) is not handled
+    here. Those hosts return True from ``_marketplace_host_needs_explicit_git_path``
+    (neither GitHub-family nor ADO) so ``resolve_marketplace_plugin`` builds a
+    structured ``dep_ref`` upstream and this helper is never reached. The
+    ``is_github_hostname`` check below is defense-in-depth that would also reject
+    them if a future change ever bypassed the upstream guard.
+
+    Also returns False when ``canonical`` is in URL form (``https://...``) or SSH
+    SCP shorthand (``git@host:owner/repo``). Manifests that put a full URL in the
+    ``repo`` field reach this point via ``_resolve_github_source`` (which only
+    requires a ``/``); detecting those by ``":"`` in the first slash-split segment
+    avoids producing malformed ``host/https://...`` canonicals. Those forms already
+    carry a host and ``DependencyReference.parse`` resolves them natively.
+    """
+    h = (host or "").strip()
+    if not h or not is_github_hostname(h) or h.lower() == "github.com":
+        return False
+    first_segment = canonical.split("/", 1)[0]
+    if ":" in first_segment:
+        return False
+    return first_segment.lower() != h.lower()
 
 
 def _marketplace_https_git_url(source: MarketplaceSource) -> str:
@@ -545,6 +586,26 @@ def resolve_marketplace_plugin(
                 source, in_repo_path, version_spec or path_ref
             )
             canonical = dep_ref.to_canonical()
+
+    # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
+    # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)
+    # because there is no nested-group ambiguity to disambiguate, but the bare
+    # canonical drops the host that ``DependencyReference.parse`` needs to route auth
+    # at the enterprise host instead of falling back to ``github.com``. Backfill the
+    # host so the canonical self-routes, scoped to in-marketplace sources where the
+    # host is unambiguously the registered marketplace host (#1285).
+    if (
+        dep_ref is None
+        and _is_in_marketplace_source(plugin, source)
+        and _needs_canonical_host_prefix(canonical, source.host)
+    ):
+        canonical = f"{source.host}/{canonical}"
+        logger.debug(
+            "Backfilled marketplace host '%s' onto canonical for %s@%s (auth routing #1285)",
+            source.host,
+            plugin_name,
+            marketplace_name,
+        )
 
     # ---- Raw ref override ----
     # When version_spec is provided it is treated as a raw git ref that

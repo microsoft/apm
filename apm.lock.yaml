@@ -8,6 +8,10 @@ local_deployed_files:
 - .agents/skills/auth
 - .agents/skills/cli-logging-ux
 - .agents/skills/devx-ux
+- .agents/skills/docs-impact-architect
+- .agents/skills/docs-impact-classifier
+- .agents/skills/docs-impact-localizer
+- .agents/skills/docs-sync
 - .agents/skills/oss-growth
 - .agents/skills/pr-description-skill
 - .agents/skills/python-architecture
@@ -16,10 +20,12 @@ local_deployed_files:
 - .github/agents/apm-ceo.agent.md
 - .github/agents/apm-primitives-architect.agent.md
 - .github/agents/auth-expert.agent.md
+- .github/agents/cdo.agent.md
 - .github/agents/cli-logging-expert.agent.md
 - .github/agents/devx-ux-expert.agent.md
 - .github/agents/doc-analyser.agent.md
 - .github/agents/doc-writer.agent.md
+- .github/agents/editorial-owner.agent.md
 - .github/agents/oss-growth-hacker.agent.md
 - .github/agents/python-architect.agent.md
 - .github/agents/supply-chain-security-expert.agent.md
@@ -38,10 +44,12 @@ local_deployed_file_hashes:
   .github/agents/apm-ceo.agent.md: sha256:484da64428ea46a6183dffd3f30c9fc5fc5c747639c0c79e55be69dba0899323
   .github/agents/apm-primitives-architect.agent.md: sha256:6c01eab74ba18d70f21d45010d636cc6535d63cee81da12e61898d8036e0b028
   .github/agents/auth-expert.agent.md: sha256:18264a933cba432b77d133e6ae11eee294c92ed245629af8c9b7a5bb7a9a300c
+  .github/agents/cdo.agent.md: sha256:71e7684942679f86199b6720fc69d52ef796a0ec28981250b9ad275a1ed41d31
   .github/agents/cli-logging-expert.agent.md: sha256:3ed7fe1a2e28e03a40311d4999ef54330908920d6515205708dd3f037abfcf0f
   .github/agents/devx-ux-expert.agent.md: sha256:8310d130cca5bc548baf4a2a84e3c9680c9dc5d83a2718150636896ab2aa1f30
   .github/agents/doc-analyser.agent.md: sha256:47b1d0204904b786c19d4fe84343e86cdab6f92f862f676ba741ffe6e1385679
   .github/agents/doc-writer.agent.md: sha256:328a5b9ea079869b8ccd914a6e2135c204225a5eedb42f59a1ec73058f7f0b47
+  .github/agents/editorial-owner.agent.md: sha256:9dd101a9476dd93b67da1b823cc3b649f1227168fd809b108c74f9304262d860
   .github/agents/oss-growth-hacker.agent.md: sha256:1cd56bb78ab37d52c50e45ab69d759f775cd49cdf35981b3dc6c4004315c6b83
   .github/agents/python-architect.agent.md: sha256:7587ee7c684c61046a83dfa1b7e39d1345f2f119c3395478e3ca2dbbaaaff0e9
   .github/agents/supply-chain-security-expert.agent.md: sha256:8fb8cc426d6af17ba084a28b3f026c2b475b62e3ca63ed2f88b83bd823f877af

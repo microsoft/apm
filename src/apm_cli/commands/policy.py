@@ -86,9 +86,9 @@ def _count_rules(policy: ApmPolicy | None) -> dict[str, int]:
         return -1 if value is None else len(value)
 
     return {
-        "dependencies_deny": len(policy.dependencies.deny),
+        "dependencies_deny": len(policy.dependencies.effective_deny),
         "dependencies_allow": _allow_count(policy.dependencies.allow),
-        "dependencies_require": len(policy.dependencies.require),
+        "dependencies_require": len(policy.dependencies.effective_require),
         "mcp_deny": len(policy.mcp.deny),
         "mcp_allow": _allow_count(policy.mcp.allow),
         "mcp_transports_allowed": _allow_count(policy.mcp.transport.allow),

@@ -33,7 +33,7 @@ jobs:
 
 ### Private Dependencies
 
-For private repositories, pass a token via the workflow `env:` block. See the [Authentication guide](../../getting-started/authentication/) for all supported tokens and priority rules.
+For private repositories, pass a token via the workflow `env:` block. See the [Authentication guide](../../consumer/authentication/) for all supported tokens and priority rules.
 
 ```yaml
       - name: Install APM packages
@@ -68,15 +68,34 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
         run: apm audit --ci
 ```
 
-This single command runs the seven baseline lockfile checks PLUS integration
+This single command runs the eight baseline lockfile checks PLUS integration
 drift detection (default-on) AND replays
 the install pipeline into a scratch tree to detect missed `apm install`
 runs, hand-edited deployed files, and orphaned files. See the
 [Drift Detection guide](../../guides/drift-detection/) for details and
 opt-out (`--no-drift`).
 
+For tamper detection -- catching deployed files modified after the last
+install -- use the audit-only pattern instead. `apm install` overwrites
+managed files before audit runs, which erases any tampered bytes before
+`content-integrity` can see them. Pass `setup-only: true` to the action so
+it only provides the CLI, then audit with `--no-drift`:
+
+```yaml
+      - uses: microsoft/apm-action@v1
+        with:
+          setup-only: true
+      - name: Audit (audit-only, tamper detection)
+        run: apm audit --ci --no-drift
+```
+
+`content-integrity` verifies the SHA-256 hash of every deployed file
+against `deployed_file_hashes` in `apm.lock.yaml` without replaying the
+install. See [Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
+for the full recipe and when to use each approach.
+
 :::tip[We dogfood this]
-APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM and running `apm audit --ci`. Use it as a practical example when wiring these checks into your own workflow.
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation of the audit-only CI pattern: `setup-only: true` keeps deployed files untouched so `content-integrity` can detect tampered bytes, and `--no-drift` skips the replay that requires a warm cache. Use it as a practical example when wiring the audit-only check into your own workflow.
 :::
 
 ## Azure Pipelines
@@ -133,7 +152,7 @@ jobs:
         # Do not set ADO_APM_PAT -- APM picks up the az session.
 ```
 
-See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for resolution precedence and verbose output.
+See [Azure DevOps AAD bearer tokens](../../enterprise/security/#azure-devops-aad-bearer-tokens) for resolution precedence and verbose output.
 
 ## General CI
 
@@ -148,7 +167,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (7 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+`apm audit --ci` verifies lockfile consistency in CI (8 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 

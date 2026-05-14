@@ -28,7 +28,7 @@ class AgentIntegrator(BaseIntegrator):
 
         Searches in:
         - Package root directory (.agent.md and .chatmode.md)
-        - .apm/agents/ subdirectory (new standard)
+        - .apm/agents/ subdirectory (new standard, recursive)
         - .apm/chatmodes/ subdirectory (legacy)
 
         Args:
@@ -37,31 +37,23 @@ class AgentIntegrator(BaseIntegrator):
         Returns:
             List[Path]: List of absolute paths to agent files
         """
-        agent_files = []
-
-        # Search in package root
-        if package_path.exists():
-            agent_files.extend(package_path.glob("*.agent.md"))
-            agent_files.extend(package_path.glob("*.chatmode.md"))  # Legacy
-
-        # Search in .apm/agents/ (new standard)
-        # Use rglob so agents in subdirectories (e.g. from plugin mapping) are
-        # still discovered.
+        files: list[Path] = []
+        # Flat search in package root
+        files += self.find_files_by_glob(package_path, "*.agent.md")
+        files += self.find_files_by_glob(package_path, "*.chatmode.md")
+        # Recursive search in .apm/agents/ (use ** glob for subdirectories)
         apm_agents = package_path / ".apm" / "agents"
         if apm_agents.exists():
-            agent_files.extend(apm_agents.rglob("*.agent.md"))
-            # Also pick up plain .md files in agents/; plugins may not use
-            # the .agent.md convention  -- the directory name already implies type
-            for md_file in apm_agents.rglob("*.md"):
-                if not md_file.name.endswith(".agent.md") and md_file not in agent_files:
-                    agent_files.append(md_file)
-
-        # Search in .apm/chatmodes/ (legacy)
+            files += self.find_files_by_glob(apm_agents, "**/*.agent.md")
+            # Also pick up plain .md files; the directory name implies type
+            for f in self.find_files_by_glob(apm_agents, "**/*.md"):
+                if not f.name.endswith(".agent.md") and f not in files:
+                    files.append(f)
+        # Flat search in .apm/chatmodes/ (legacy)
         apm_chatmodes = package_path / ".apm" / "chatmodes"
         if apm_chatmodes.exists():
-            agent_files.extend(apm_chatmodes.glob("*.chatmode.md"))
-
-        return agent_files
+            files += self.find_files_by_glob(apm_chatmodes, "*.chatmode.md")
+        return files
 
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
     # have been REMOVED as part of T5 (skill-strategy.md).
@@ -227,6 +219,8 @@ class AgentIntegrator(BaseIntegrator):
         Returns:
             int: Number of links resolved
         """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
         target.write_text(content, encoding="utf-8")
@@ -248,6 +242,8 @@ class AgentIntegrator(BaseIntegrator):
         Parses YAML frontmatter for ``name`` and ``description``, uses
         the markdown body as ``developer_instructions``.
         """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
         import toml as _toml
 
         content = source.read_text(encoding="utf-8")
@@ -295,6 +291,8 @@ class AgentIntegrator(BaseIntegrator):
           diagnostic warning when those fields are dropped.
         - Preserves the markdown body verbatim.
         """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
 
         stem = source.name
