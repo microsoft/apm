@@ -21,7 +21,7 @@ apm marketplace init                          # 1. add the block to apm.yml
 $EDITOR apm.yml                               # 2. describe each package
 apm marketplace check                         # 3. validate refs resolve
 apm pack                                      # 4. compile marketplace artifacts
-git add apm.yml .claude-plugin/marketplace.json
+git add apm.yml .claude-plugin/marketplace.json .agents/plugins/marketplace.json
 git commit -m "Release v1.0.0" && git push    # 5. ship
 ```
 
@@ -46,8 +46,9 @@ APM uses a single source-of-truth model:
 - `.agents/plugins/marketplace.json` -- optional Codex repo marketplace
   output. Enable it by adding `codex` to `marketplace.outputs`.
 
-Both files are committed. The legacy standalone `marketplace.yml` is
-deprecated; if you still have one, run `apm marketplace migrate`.
+Commit every generated file matching your enabled `marketplace.outputs`.
+The legacy standalone `marketplace.yml` is deprecated; if you still
+have one, run `apm marketplace migrate`.
 
 ## Author the registry
 
@@ -117,9 +118,11 @@ marketplace:
 Claude output is selected by default for backwards compatibility. The
 legacy `marketplace.output` field remains supported as shorthand for
 `marketplace.claude.output`; when both are set, the explicit
-`claude.output` value wins. The `--marketplace-output` flag overrides
-only the Claude/Anthropic output path. Codex output always uses
-`marketplace.codex.output` or its default.
+`claude.output` value wins. Configure output paths in `apm.yml`:
+`marketplace.claude.output` controls the Claude/Anthropic artifact,
+and `marketplace.codex.output` controls the Codex artifact. The legacy
+`--marketplace-output` flag remains for compatibility, but overrides
+only the Claude/Anthropic output path.
 
 When `codex` is selected, every package must define `category`. Codex
 output maps local entries to `source: local`, remote entries to

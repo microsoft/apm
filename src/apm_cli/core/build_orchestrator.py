@@ -183,7 +183,13 @@ class MarketplaceProducer:
         output_reports = []
         outputs: list[Path] = []
         for output_name in config.outputs:
-            profile = MARKETPLACE_OUTPUTS[output_name]
+            profile = MARKETPLACE_OUTPUTS.get(output_name)
+            if profile is None:
+                valid_targets = ", ".join(sorted(MARKETPLACE_OUTPUTS))
+                raise BuildError(
+                    f"Unknown marketplace output target: {output_name!r}. "
+                    f"Valid targets: {valid_targets}"
+                )
             try:
                 if resolve_result is None:
                     resolve_result = builder.resolve()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -292,6 +293,72 @@ class TestMarketplaceProducer:
         assert override.exists()
         assert codex_output.exists()
         assert not (tmp_path / "build" / "claude-config.json").exists()
+
+    def test_manifest_config_controls_each_marketplace_output_path(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  outputs: [claude, codex]\n"
+            "  claude:\n"
+            "    output: dist/claude-marketplace.json\n"
+            "  codex:\n"
+            "    output: dist/codex-marketplace.json\n"
+            "  packages:\n"
+            "    - name: local-tool\n"
+            "      source: ./plugins/local-tool\n"
+            "      category: Productivity\n",
+        )
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            marketplace_offline=True,
+        )
+
+        result = MarketplaceProducer().produce(opts, logger=None)
+
+        claude_output = tmp_path / "dist" / "claude-marketplace.json"
+        codex_output = tmp_path / "dist" / "codex-marketplace.json"
+        assert result.outputs == [claude_output, codex_output]
+        assert claude_output.exists()
+        assert codex_output.exists()
+
+    def test_unknown_marketplace_output_target_raises_build_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  packages: []\n",
+        )
+        monkeypatch.setattr(
+            "apm_cli.marketplace.migration.load_marketplace_config",
+            lambda *args, **kwargs: SimpleNamespace(
+                outputs=("cursor",),
+                source_path=apm,
+            ),
+        )
+
+        with pytest.raises(BuildError, match="Unknown marketplace output target: 'cursor'"):
+            MarketplaceProducer().produce(
+                BuildOptions(
+                    project_root=tmp_path,
+                    apm_yml_path=apm,
+                    marketplace_offline=True,
+                ),
+                logger=None,
+            )
 
     def test_build_warnings_are_exposed_on_producer_result(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

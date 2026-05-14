@@ -136,6 +136,98 @@ class TestPackUnified:
             "path": "./.github/plugins/azure",
         }
 
+    def test_pack_marketplace_uses_configured_output_paths(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [claude, codex]\n"
+                "  claude:\n"
+                "    output: dist/claude-marketplace.json\n"
+                "  codex:\n"
+                "    output: dist/codex-marketplace.json\n"
+                "  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "dist" / "claude-marketplace.json").exists()
+        assert (tmp_path / "dist" / "codex-marketplace.json").exists()
+        assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+        assert not (tmp_path / ".agents" / "plugins" / "marketplace.json").exists()
+
+    def test_pack_marketplace_output_override_only_affects_claude_in_dual_output_config(
+        self, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [claude, codex]\n"
+                "  codex:\n"
+                "    output: dist/codex-marketplace.json\n"
+                "  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        claude_override = tmp_path / "dist" / "legacy-override.json"
+
+        result = runner.invoke(pack_cmd, ["--marketplace-output", str(claude_override)])
+
+        assert result.exit_code == 0, result.output
+        assert claude_override.exists()
+        assert (tmp_path / "dist" / "codex-marketplace.json").exists()
+        assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+
+    def test_pack_rejects_codex_output_traversal(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [codex]\n"
+                "  codex:\n"
+                "    output: ../../outside-marketplace.json\n"
+                "  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 1
+        assert "traversal" in result.output.lower()
+        assert not (tmp_path.parent.parent / "outside-marketplace.json").exists()
+
     def test_pack_both(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         # Add both blocks

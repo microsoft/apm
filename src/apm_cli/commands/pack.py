@@ -42,8 +42,8 @@ Examples:
   apm pack
   apm pack --archive --offline
 
-  # Override Claude marketplace.json location:
-  apm pack --marketplace-output ./build/marketplace.json
+  # Marketplace output paths are normally configured in apm.yml:
+  # marketplace.claude.output / marketplace.codex.output
 
 Exit codes:
   0  Success
@@ -105,8 +105,8 @@ Exit codes:
     type=click.Path(),
     default=None,
     help=(
-        "Marketplace: override Claude/Anthropic output path "
-        "(default: .claude-plugin/marketplace.json)."
+        "Marketplace legacy compatibility: override only the Claude/Anthropic "
+        "output path. Prefer marketplace.claude.output in apm.yml."
     ),
 )
 @click.option(
@@ -237,18 +237,29 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
     """Render the marketplace producer's report (one-liner summary)."""
+    seen_warnings = set()
     for warn_msg in extra_warnings or []:
+        seen_warnings.add(warn_msg)
         logger.warning(warn_msg)
+    for warn_msg in getattr(report, "warnings", ()) or ():
+        if warn_msg in seen_warnings:
+            continue
+        seen_warnings.add(warn_msg)
+        logger.warning(warn_msg)
+
     output_reports = tuple(getattr(report, "outputs", ()) or ())
     if not output_reports:
+        package_count = len(getattr(report, "resolved", ()) or ()) if report is not None else None
         for output in outputs or []:
+            message = f"marketplace.json -> {output}"
+            if package_count is not None:
+                message = f"marketplace.json ({package_count} package(s)) -> {output}"
             if dry_run:
-                logger.dry_run_notice(f"Would write marketplace.json -> {output}")
+                logger.dry_run_notice(f"Would write {message}")
             else:
-                logger.success(f"Built marketplace.json -> {output}")
+                logger.success(f"Built {message}")
         return
-    for warn_msg in report.warnings:
-        logger.warning(warn_msg)
+
     for output_report in output_reports:
         message = (
             f"marketplace.json [{output_report.profile}] "

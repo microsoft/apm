@@ -1289,6 +1289,22 @@ class TestDuplicateNameWarnings:
         assert isinstance(report.warnings, tuple)
         assert len(report.warnings) == 0
 
+    def test_empty_build_report_primary_output_is_safe(self) -> None:
+        report = BuildReport(outputs=())
+
+        primary = report.primary_output
+
+        assert primary.profile == ""
+        assert primary.resolved == ()
+        assert primary.errors == ()
+        assert primary.warnings == ()
+        assert primary.diagnostics == ()
+        assert primary.output_path == Path(".")
+        assert primary.unchanged_count == 0
+        assert primary.added_count == 0
+        assert primary.updated_count == 0
+        assert primary.removed_count == 0
+
 
 # ---------------------------------------------------------------------------
 # _fetch_remote_metadata tests

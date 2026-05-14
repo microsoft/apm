@@ -35,7 +35,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--verbose`, `-v` | off | Show per-file paths and detailed packer output. |
 | `--offline` | off | Marketplace: resolve version ranges from cached refs only; skip `git ls-remote`. |
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
-| `--marketplace-output PATH` | `.claude-plugin/marketplace.json` | Marketplace: override the Claude/Anthropic output path. |
+| `--marketplace-output PATH` | `.claude-plugin/marketplace.json` | Marketplace legacy compatibility: override only the Claude/Anthropic output path. Prefer `marketplace.claude.output` in `apm.yml`. |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
@@ -63,10 +63,15 @@ apm pack
 apm pack --archive --offline
 ```
 
-### Override Claude marketplace output path
+### Configure marketplace output paths
 
-```bash
-apm pack --marketplace-output ./build/marketplace.json
+```yaml
+marketplace:
+  outputs: [claude, codex]
+  claude:
+    output: ./build/claude-marketplace.json
+  codex:
+    output: ./build/codex-marketplace.json
 ```
 
 ### Preview without writing
@@ -110,7 +115,7 @@ dependencies:
 
 `.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
 
-`--marketplace-output PATH` is a Claude/Anthropic compatibility flag. It overrides only the Claude artifact path; Codex output uses `marketplace.codex.output` or its default.
+Configure marketplace artifact paths in `apm.yml`: `marketplace.claude.output` controls the Claude/Anthropic artifact, and `marketplace.codex.output` controls the Codex artifact. `--marketplace-output PATH` remains as a legacy Claude-only compatibility override; prefer manifest config for new projects and CI.
 
 ## Behavior
 
