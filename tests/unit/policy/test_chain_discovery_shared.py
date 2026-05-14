@@ -34,7 +34,7 @@ _PATCH_WRITE_CACHE = "apm_cli.policy.discovery._write_cache"
 # -- Helpers ---------------------------------------------------------------
 
 
-def _make_policy(*, enforcement="warn", extends=None, deny=()):
+def _make_policy(*, enforcement="warn", extends=None, deny=None):
     """Build a minimal ApmPolicy for testing."""
     return ApmPolicy(
         enforcement=enforcement,

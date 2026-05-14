@@ -42,9 +42,12 @@ lockfile-exists -> ref-consistency -> deployed-files-present
 After the baseline passes, it replays the install in a scratch directory
 from the cache and diffs against the working tree to surface
 `unintegrated`, `modified`, and `orphaned` files. Pass `--no-drift` to
-skip the replay. With `--policy <source>` it also evaluates the
-discovered policy against the lockfile. Source:
-`src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
+skip the replay. When the install cache has not been warmed yet (fresh
+checkout before the first `apm install`), the drift check is skipped
+with an informational message rather than failing; run `apm install` to
+warm the cache and enable the check on the next run. With `--policy
+<source>` it also evaluates the discovered policy against the lockfile.
+Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
 
 ### `apm audit` (default)
 
@@ -91,6 +94,40 @@ inside `apm_modules/`, or a bumped pin without a re-install all surface
 as either eviction-and-refetch (silent self-heal) or a hard failure
 when the cache cannot be repopulated -- never as wrong content under
 the right name.
+
+## Install before audit and tamper detection
+
+Running `apm install` before `apm audit --ci` is the correct pattern when
+the goal is detecting a developer who forgot to run `apm install` after
+editing `apm.yml`. The install step regenerates deployed files so the
+subsequent audit can compare them against the lockfile.
+
+That sequence has a blind spot: `apm install` overwrites every managed file
+with a clean copy before the audit runs. If a deployed file was modified on
+disk after the last install -- for example a hand-edit to
+`.github/instructions/` -- the install step restores the original bytes.
+The `content-integrity` check then compares the restored file against a
+matching hash and reports no finding.
+
+To detect post-install modification, use `setup-only: true` on the action
+so it only provides the CLI without running `apm install`, then audit with
+`--no-drift`:
+
+```yaml
+- uses: microsoft/apm-action@v1
+  with:
+    setup-only: true
+- run: apm audit --ci --no-drift
+```
+
+`--no-drift` skips the install-replay (which requires a warm cache that
+`setup-only` does not populate). The `content-integrity` check verifies
+SHA-256 hashes of every deployed file against `deployed_file_hashes` in
+`apm.lock.yaml` without needing to replay the install. Any byte-level
+change to a deployed file since the last install is caught by this check.
+
+See [Enforce in CI](../enforce-in-ci/#audit-only-ci-pattern) for the full
+recipe and a comparison table of the two patterns.
 
 ## Org-wide sweeps
 

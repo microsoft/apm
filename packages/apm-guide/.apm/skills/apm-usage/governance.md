@@ -77,16 +77,18 @@ undeclared local content at install / audit time.
 | `warn` | Violations reported but do not fail |
 | `block` | Violations abort `apm install` (exit 1) AND fail `apm audit --ci` |
 
-## Inheritance rules (tighten-only)
+## Inheritance rules
 
-Child policies can only tighten parent policies, never relax them:
+Most fields tighten as the policy chain descends. The exception is `deny` and
+`require` lists: a child policy may use `[]` to explicitly clear an inherited
+list (removing entries the parent set). All other fields obey the rules below:
 
 | Field | Merge rule |
 |-------|-----------|
 | `enforcement` | Escalates: `off` < `warn` < `block` |
 | Allow lists | Intersection (child narrows parent) |
-| Deny lists | Union (child adds to parent) |
-| `require` | Union (combines required packages) |
+| Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
+| `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `max_depth` | `min(parent, child)` |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `source_attribution` | `parent OR child` (either enables) |
@@ -138,7 +140,7 @@ apm audit --ci --policy https://...         # remote policy URL
 
 **Note:** Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the shipping design.
 
-**Non-goal — structured output:** install-time enforcement does NOT emit JSON or SARIF. Output is human-readable terminal text only. For machine-readable policy reports use `apm audit --ci --format json` or `apm audit --ci --format sarif`.
+**Non-goal  --  structured output:** install-time enforcement does NOT emit JSON or SARIF. Output is human-readable terminal text only. For machine-readable policy reports use `apm audit --ci --format json` or `apm audit --ci --format sarif`.
 
 ### 1. What APM policy is
 
@@ -149,18 +151,18 @@ may use. This section covers how that contract is enforced at `apm install` time
 ### 2. Discovery and applicability
 
 APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub
-remote — both `github.com` and GitHub Enterprise (GHE). Non-GitHub remotes (ADO,
+remote  --  both `github.com` and GitHub Enterprise (GHE). Non-GitHub remotes (ADO,
 GitLab, plain git) currently fall through with no policy applied; tracked as a
 follow-up. Repositories with no detectable git remote (unpacked bundles, temp
 dirs) emit an explicit "could not determine org" line and skip discovery.
 
-The `--policy <override>` flag is **audit-only today** — it works on
+The `--policy <override>` flag is **audit-only today**  --  it works on
 `apm audit --ci` but is not yet wired through `apm install`.
 
 ### 3. Inheritance and composition
 
 Policy resolves through the chain: enterprise hub -> org -> repo override.
-The merge is **tighten-only** (see "Inheritance rules" above).
+The merge follows "Inheritance rules" above (most fields tighten; deny/require lists support explicit `[]` override).
 
 **Multi-level extends:** install-time enforcement and `apm audit --ci` both
 resolve the full `extends:` chain up to `MAX_CHAIN_DEPTH = 5`. Cycles are
@@ -179,12 +181,12 @@ merges what it resolved and emits a `Policy chain incomplete` warning.
 
 | Command | Behaviour |
 |---------|-----------|
-| `apm install` | NEW — gate runs after resolve, before integration / target writes |
-| `apm install <pkg>` | NEW — snapshot apm.yml, run gate, rollback on block |
-| `apm install --mcp` | NEW — dedicated MCP preflight |
-| `apm deps update` | NEW — runs the install pipeline, so the same gate applies |
-| `apm install --dry-run` | NEW — read-only preflight; renders "would be blocked" |
-| `apm audit --ci` | Existing — same checks against on-disk manifest + lockfile |
+| `apm install` | NEW  --  gate runs after resolve, before integration / target writes |
+| `apm install <pkg>` | NEW  --  snapshot apm.yml, run gate, rollback on block |
+| `apm install --mcp` | NEW  --  dedicated MCP preflight |
+| `apm deps update` | NEW  --  runs the install pipeline, so the same gate applies |
+| `apm install --dry-run` | NEW  --  read-only preflight; renders "would be blocked" |
+| `apm audit --ci` | Existing  --  same checks against on-disk manifest + lockfile |
 
 `pack` and `bundle` are out of scope (author-side, not dependency consumers).
 
@@ -194,9 +196,9 @@ merges what it resolved and emits a `Policy chain incomplete` warning.
 `require_resolution: project-wins` has a narrow semantic:
 
 - Downgrades **version-pin mismatches** on required packages to warnings only.
-- Does **NOT** downgrade missing required packages — those still block under
+- Does **NOT** downgrade missing required packages  --  those still block under
   `enforcement: block`.
-- Does **NOT** override an inherited org `deny` — parent deny always wins.
+- Does **NOT** override an inherited org `deny`  --  parent deny always wins.
 
 ### 7. CLI examples
 
@@ -385,7 +387,7 @@ Violation classes:
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |
 
 Full message text per outcome and per class lives in
-`docs/src/content/docs/enterprise/policy-reference.md` §10. Violation messages
+`docs/src/content/docs/enterprise/policy-reference.md` section10. Violation messages
 flow through `InstallLogger.policy_violation`; under `block` they print inline
 as `[x]` errors and exit `1`.
 
@@ -399,7 +401,7 @@ Checklist to publish a policy:
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming
    repos for one cycle without breaking installs.
 4. When the warn-cycle is clean, switch to `enforcement: block`. Communicate
-   the change — `apm install` will start failing for non-compliant repos.
+   the change  --  `apm install` will start failing for non-compliant repos.
 5. Use `extends:` for team-specific overrides on top of the org baseline
    rather than forking the file.
 

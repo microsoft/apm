@@ -137,9 +137,9 @@ def _merge_cache(parent: PolicyCache, child: PolicyCache) -> PolicyCache:
 
 def _merge_dependencies(parent: DependencyPolicy, child: DependencyPolicy) -> DependencyPolicy:
     return DependencyPolicy(
-        deny=_union(parent.deny, child.deny),
+        deny=_merge_list_field(parent.deny, child.deny),
         allow=_intersect_allow(parent.allow, child.allow),
-        require=_union(parent.require, child.require),
+        require=_merge_list_field(parent.require, child.require),
         require_resolution=_escalate(
             _RESOLUTION_LEVELS, parent.require_resolution, child.require_resolution
         ),
@@ -209,6 +209,33 @@ def _merge_unmanaged_files(
 # ---------------------------------------------------------------------------
 # List helpers
 # ---------------------------------------------------------------------------
+
+
+def _merge_list_field(
+    parent: tuple[str, ...] | None,
+    child: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
+    """Merge a deny/require list field with None-transparency and union.
+
+    * ``child is None``  -- no opinion; parent flows through (transparent).
+    * ``child`` is empty -- explicit empty override; clears parent entries,
+      returning ``()``.  Child can use ``[]`` in YAML to clear an inherited
+      deny/require list.
+    * both truthy        -- union; child entries are added to parent entries
+      (deduped, parent order preserved).
+
+    Always returns a ``tuple`` or ``None``; never a bare list.
+    """
+    if child is None:
+        # Transparent: parent flows through.  Normalise to tuple if non-None
+        # so callers always receive a uniform type regardless of how parent
+        # was constructed in tests (list vs tuple).
+        return _union((), parent) if parent is not None else None
+    if not child:
+        return ()  # explicit empty: override parent
+    if parent is None or not parent:
+        return _union((), child)  # parent has nothing; child wins
+    return _union(parent, child)  # both have values: union
 
 
 def _union(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
