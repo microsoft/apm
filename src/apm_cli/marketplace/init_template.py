@@ -107,17 +107,17 @@ marketplace:
   build:
     tagPattern: "v{{version}}"
 
-  # Output targets. Claude output is the default for backwards compatibility.
-  # Add outputs: [claude, codex] to also write .agents/plugins/marketplace.json,
-  # or outputs: [codex] to build Codex only.
-  # outputs: [claude, codex]
-  #
-  # claude:
-  #   output: .claude-plugin/marketplace.json
-  #
-  # Optional Codex output overrides:
-  # codex:
-  #   output: .agents/plugins/marketplace.json
+  # Output targets (map form). Claude is enabled by default.
+  outputs:
+    claude: {{}}
+    # Uncomment to also build the Codex marketplace artifact:
+    # codex:
+    #   path: .agents/plugins/marketplace.json
+    # NOTE: codex output requires every package to declare 'category:'
+    # in apm.yml -- see the packages section below.
+
+  # CI tip: build one or all formats with a machine-readable manifest:
+  #   apm pack --marketplace=claude,codex --json | jq -r '.marketplace.outputs[].path'
 
   packages:
     - name: example-package
