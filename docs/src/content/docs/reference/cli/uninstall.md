@@ -23,7 +23,7 @@ The command only deletes files tracked in the lockfile's `deployed_files` manife
 
 | Argument | Description |
 |---|---|
-| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, or FQDN. APM resolves each to the canonical identity stored in `apm.yml`. Required. |
+| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, or marketplace notation (`name@marketplace`). APM resolves each to the canonical identity stored in `apm.yml`. Required. |
 
 ## Options
 
@@ -57,6 +57,12 @@ Remove from the user scope:
 
 ```bash
 apm uninstall -g acme/my-package
+```
+
+Remove by marketplace name (resolves to the canonical `owner/repo`):
+
+```bash
+apm uninstall my-plugin@official
 ```
 
 Resolve via URL (same identity as the shorthand):
