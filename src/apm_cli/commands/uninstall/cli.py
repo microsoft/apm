@@ -108,8 +108,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         lockfile = LockFile.read(lockfile_path)
 
         # Step 1: Validate packages
+        from ...core.auth import AuthResolver
+
+        auth_resolver = AuthResolver()
         packages_to_remove, packages_not_found = _validate_uninstall_packages(
-            packages, current_deps, logger, lockfile
+            packages, current_deps, logger, lockfile, auth_resolver=auth_resolver, dry_run=dry_run
         )
         if not packages_to_remove:
             logger.warning("No packages found in apm.yml to remove")

@@ -59,7 +59,7 @@ Remove from the user scope:
 apm uninstall -g acme/my-package
 ```
 
-Remove by marketplace name (resolves to the canonical `owner/repo`):
+Remove by marketplace name (resolved via lockfile, then registry):
 
 ```bash
 apm uninstall my-plugin@official
@@ -86,7 +86,9 @@ What gets removed, in order:
 
 If a name passed on the command line is not found in `apm.yml`, the command warns and continues with the rest. If none of the names match, it exits without changes.
 
-`--dry-run` runs steps 1-3 in memory and prints the plan; nothing is written.
+If a marketplace ref cannot be resolved (neither the lockfile nor the registry has a matching entry), APM logs an error and skips that package. Use `owner/repo` notation to uninstall directly, or run `apm list` to find the canonical name.
+
+`--dry-run` runs steps 1-3 in memory and prints the plan; nothing is written. Registry fallback is also skipped in dry-run mode.
 
 ## Related
 

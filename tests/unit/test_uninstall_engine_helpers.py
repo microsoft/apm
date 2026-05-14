@@ -575,7 +575,7 @@ class TestResolveMarketplacePackages:
         logger.error.assert_not_called()
 
     def test_lockfile_first_ignores_wrong_marketplace(self):
-        """Lockfile entry for a different marketplace does not match."""
+        """Provenance mismatch emits a warning and still resolves via the lockfile entry."""
         from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
 
         lockfile = LockFile()
@@ -588,28 +588,29 @@ class TestResolveMarketplacePackages:
         lockfile.add_dependency(dep)
         logger = _make_logger()
 
-        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
-            mock_resolve.return_value = MagicMock(canonical="acme/my-plugin")
-            result = _resolve_marketplace_packages(["my-plugin@official"], lockfile, logger)
+        result = _resolve_marketplace_packages(["my-plugin@official"], lockfile, logger)
 
-        # Falls through to registry; mock was called
-        mock_resolve.assert_called_once_with("my-plugin", "official")
+        # Provenance mismatch: warning emitted, registry NOT called, canonical still resolved
+        logger.warning.assert_called_once()
+        assert "installed via other-marketplace" in logger.warning.call_args[0][0]
         assert result["my-plugin@official"] == "acme/my-plugin"
 
     def test_registry_fallback_when_not_in_lockfile(self):
-        """When lockfile has no matching entry, the registry resolver is called."""
+        """Registry canonical not present in the lockfile is refused by the supply-chain guard."""
         from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
 
-        lockfile = LockFile()  # empty lockfile
+        lockfile = LockFile()  # empty lockfile — registry result won't be in it
         logger = _make_logger()
 
         with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
             mock_resolve.return_value = MagicMock(canonical="acme/resolved-plugin")
             result = _resolve_marketplace_packages(["resolved-plugin@official"], lockfile, logger)
 
-        mock_resolve.assert_called_once_with("resolved-plugin", "official")
-        assert result["resolved-plugin@official"] == "acme/resolved-plugin"
-        logger.error.assert_not_called()
+        # Registry was called, but supply-chain guard refused the result
+        mock_resolve.assert_called_once_with("resolved-plugin", "official", auth_resolver=None)
+        assert result["resolved-plugin@official"] is None
+        logger.error.assert_called_once()
+        assert "could not be resolved" in logger.error.call_args[0][0]
 
     def test_no_lockfile_goes_directly_to_registry(self):
         """When lockfile is None, resolution proceeds directly to registry."""
@@ -621,7 +622,7 @@ class TestResolveMarketplacePackages:
             mock_resolve.return_value = MagicMock(canonical="acme/my-plugin")
             result = _resolve_marketplace_packages(["my-plugin@official"], None, logger)
 
-        mock_resolve.assert_called_once_with("my-plugin", "official")
+        mock_resolve.assert_called_once_with("my-plugin", "official", auth_resolver=None)
         assert result["my-plugin@official"] == "acme/my-plugin"
 
     def test_network_error_logs_error_and_maps_to_none(self):
@@ -678,6 +679,61 @@ class TestResolveMarketplacePackages:
         assert result["ok-plugin@official"] == "acme/ok-plugin"
         # Error logged once for the failing package only
         logger.error.assert_called_once()
+
+    def test_dry_run_skips_registry(self):
+        """When dry_run=True, Stage 2 registry call is skipped entirely."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
+            result = _resolve_marketplace_packages(
+                ["my-plugin@official"], None, logger, dry_run=True
+            )
+
+        mock_resolve.assert_not_called()
+        assert result["my-plugin@official"] is None
+        # Error is logged (no lockfile, no registry)
+        logger.error.assert_called_once()
+
+    def test_supply_chain_guard_refuses_canonical_not_in_lockfile(self):
+        """Registry canonical absent from lockfile is refused; result is None."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()  # empty — registry result won't be present
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
+            mock_resolve.return_value = MagicMock(canonical="acme/injected-plugin")
+            result = _resolve_marketplace_packages(["injected-plugin@official"], lockfile, logger)
+
+        assert result["injected-plugin@official"] is None
+        # verbose_detail must mention the refused canonical
+        verbose_calls = [str(c) for c in logger.verbose_detail.call_args_list]
+        assert any("injected-plugin" in msg for msg in verbose_calls)
+        logger.error.assert_called_once()
+
+    def test_provenance_mismatch_warns_and_resolves(self):
+        """Lockfile entry via a different marketplace emits a warning but still resolves."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/cross-plugin",
+            resolved_commit="abc123",
+            discovered_via="other-marketplace",
+            marketplace_plugin_name="cross-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["cross-plugin@official"], lockfile, logger)
+
+        logger.warning.assert_called_once()
+        warn_msg = logger.warning.call_args[0][0]
+        assert "installed via other-marketplace" in warn_msg
+        assert result["cross-plugin@official"] == "acme/cross-plugin"
+        logger.error.assert_not_called()
 
 
 # ===========================================================================
@@ -807,4 +863,4 @@ class TestValidateUninstallPackagesMarketplace:
             )
 
         assert "acme/my-plugin" in to_remove
-        mock_resolve.assert_called_once_with("my-plugin", "official")
+        mock_resolve.assert_called_once_with("my-plugin", "official", auth_resolver=None)
