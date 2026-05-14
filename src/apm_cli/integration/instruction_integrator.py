@@ -98,6 +98,7 @@ class InstructionIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
 
@@ -124,6 +125,7 @@ class InstructionIntegrator(BaseIntegrator):
                 # adopt so deployed_files reflects reality. See
                 # BaseIntegrator.is_content_identical_to_source for rationale.
                 target_paths.append(target_path)
+                files_adopted += 1
                 continue
 
             if self.check_collision(
@@ -155,6 +157,7 @@ class InstructionIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     def sync_for_target(

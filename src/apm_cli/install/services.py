@@ -228,7 +228,7 @@ def integrate_package_primitives(
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
-    # Structure: { prim_name: {"files": int, "label": str, "paths": [str]} }
+    # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
     _per_kind: dict[str, dict[str, Any]] = {}
 
     for _prim_name, _entry in _dispatch.items():
@@ -236,6 +236,7 @@ def integrate_package_primitives(
             continue  # skills handled separately
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         _agg_files = 0
+        _agg_adopted = 0
         _agg_paths: list[str] = []
         _label = _prim_name
         for _target in targets:
@@ -253,9 +254,28 @@ def integrate_package_primitives(
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
-            if _int_result.files_integrated <= 0:
+            _adopted_attr = getattr(_int_result, "files_adopted", 0)
+            # Coerce defensively: subclasses (e.g. HookIntegrationResult)
+            # always set this, but tests use MagicMock results which
+            # auto-attribute to MagicMock objects whose ``__int__`` is 1.
+            # Treat anything that is not a real int as 0 so we never
+            # invent fake adopt counts.
+            _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
+            # Show the per-kind line whenever ANY work happened -- either
+            # a fresh integrate or a silent adopt of pre-existing
+            # byte-identical files. Adopt-only runs (e.g. re-install
+            # after lockfile wipe) used to print nothing here, which made
+            # the install summary look like a no-op even though the
+            # lockfile WAS being repopulated. Surfacing adopt counts
+            # restores operator trust in CI.
+            if _int_result.files_integrated <= 0 and _adopted <= 0:
                 continue
             _agg_files += _int_result.files_integrated
+            _agg_adopted += _adopted
+            # Only count fresh integrations against the package counter
+            # so totals like "3 prompts integrated" stay truthful;
+            # adopted files are surfaced separately in the per-kind
+            # line.
             result[_entry.counter_key] += _int_result.files_integrated
             _effective_root = _mapping.deploy_root or _target.root_dir
             _deploy_dir = (
@@ -278,9 +298,10 @@ def integrate_package_primitives(
                 _label = _prim_name
             _agg_paths.append(_deploy_dir)
 
-        if _agg_files > 0:
+        if _agg_files > 0 or _agg_adopted > 0:
             _per_kind[_prim_name] = {
                 "files": _agg_files,
+                "adopted": _agg_adopted,
                 "label": _label,
                 "paths": _agg_paths,
             }
@@ -291,12 +312,24 @@ def integrate_package_primitives(
             continue
         _info = _per_kind[_prim_name]
         _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
+        # Build the verb + count phrase. When at least one file was
+        # freshly integrated we lead with "N X integrated"; pure-adopt
+        # runs (no fresh writes) lead with "N X adopted" so the line
+        # still appears and the count is truthful.
+        _files = _info["files"]
+        _adopted = _info["adopted"]
+        if _files > 0:
+            _verb_phrase = f"{_files} {_info['label']} integrated"
+            if _adopted > 0:
+                _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
+        else:
+            _verb_phrase = f"{_adopted} {_info['label']} adopted"
         if _expansion:
-            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated:")
+            _log_integration(f"  |-- {_verb_phrase}:")
             for line in _expansion:
                 _log_integration(line)
         else:
-            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated -> {_suffix}")
+            _log_integration(f"  |-- {_verb_phrase} -> {_suffix}")
 
     skill_result = skill_integrator.integrate_package_skill(
         package_info,

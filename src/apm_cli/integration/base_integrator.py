@@ -1,5 +1,7 @@
 """Base integrator with shared collision detection and sync logic."""
 
+import errno
+import os
 import re
 from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
@@ -8,6 +10,11 @@ from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.console import _rich_warning
+
+
+class _SymlinkRaceError(OSError):
+    """Raised by ``_read_bytes_no_follow`` when the path becomes a symlink
+    between the pre-check and the open(). Caught locally; never bubbles."""
 
 
 @dataclass
@@ -32,6 +39,48 @@ class IntegrationResult:
     # Skill-specific (default 0/False when not applicable)
     sub_skills_promoted: int = 0
     skill_created: bool = False
+
+    # Number of pre-existing on-disk files that were silently *adopted*
+    # (byte-identical to source). Counted separately from
+    # ``files_integrated`` so the install summary can surface the work
+    # done in adopt-only runs instead of looking like a no-op.
+    files_adopted: int = 0
+
+
+def _read_bytes_no_follow(path: Path) -> bytes:
+    """Read *path* with ``O_NOFOLLOW`` semantics where supported.
+
+    On POSIX, opens the file with ``os.O_NOFOLLOW`` so the kernel
+    rejects the open atomically if the final path component is a
+    symlink. This closes the TOCTOU race between
+    ``Path.is_symlink()`` and ``Path.read_bytes()`` exploited by a
+    co-tenant who can swap files for symlinks.
+
+    On Windows (no ``O_NOFOLLOW``), falls back to a plain read; the
+    caller's upfront ``is_symlink()`` check plus ``ensure_path_within``
+    at the integrator call sites provide the containment guarantee.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    flags |= nofollow
+    try:
+        fd = os.open(str(path), flags)
+    except OSError as exc:
+        # ELOOP is the canonical errno for "O_NOFOLLOW refused to open
+        # a symlink"; some Linux kernels return EMLINK or ELOOP-equivalent.
+        if nofollow and exc.errno in (errno.ELOOP, getattr(errno, "EMLINK", -1)):
+            raise _SymlinkRaceError(exc.errno, f"Refused to follow symlink at {path}") from exc
+        raise
+    try:
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
 
 
 class BaseIntegrator:
@@ -147,20 +196,42 @@ class BaseIntegrator:
         adopt content that *might* have come from somewhere else; we only
         adopt files that are demonstrably the package's own bytes already
         on disk.
+
+        TOCTOU hardening
+        ----------------
+        The classic ``is_symlink()`` -> ``read_bytes()`` sequence has a
+        race window: a hostile co-tenant on the same machine could swap
+        a regular file for a symlink between the two calls and cause
+        ``read_bytes()`` to follow it to an attacker-controlled path,
+        whose bytes might match source by construction. We close the
+        race by reading through ``os.open(..., O_NOFOLLOW)`` so the
+        kernel rejects the open atomically if the final component is a
+        symlink. ``O_NOFOLLOW`` is a no-op constant on platforms that
+        lack it (Windows), where the upfront ``is_symlink()`` check
+        plus ``ensure_path_within`` at the call site provide adequate
+        coverage (Windows also lacks the cheap unprivileged-symlink
+        creation primitive that makes this race practical on POSIX).
         """
         try:
             if not target_path.exists() or not source_path.exists():
                 return False
-            # Reject symlinks: ``Path.read_bytes()`` follows them silently,
-            # which would let an attacker who can pre-place a symlink whose
-            # target byte-matches source slip an out-of-project file into
-            # ``deployed_files``. ``check_collision`` enforces containment
-            # via ``ensure_path_within``; the adopt branch fires *before*
-            # that guard, so we drop here instead. ``skill_integrator``'s
-            # ``_dirs_equal`` has the same latent gap (out of scope here).
+            # Cheap pre-check: reject obvious symlinks so we never even
+            # attempt the open. Race-free verification follows below via
+            # O_NOFOLLOW.
             if target_path.is_symlink() or source_path.is_symlink():
                 return False
-            return target_path.read_bytes() == source_path.read_bytes()
+            try:
+                target_bytes = _read_bytes_no_follow(target_path)
+                source_bytes = _read_bytes_no_follow(source_path)
+            except _SymlinkRaceError:
+                # The path turned into a symlink between the pre-check
+                # and the open() -- treat as non-identical so the caller
+                # falls through to ``check_collision`` and the file is
+                # NOT adopted. Silent (no diagnostic) because adopt is
+                # an optimisation; the user-authored skip path is the
+                # safe fallback.
+                return False
+            return target_bytes == source_bytes
         except OSError:
             return False
 

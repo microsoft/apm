@@ -234,13 +234,214 @@ class TestPromptIntegratorAdopt:
 
 
 # ---------------------------------------------------------------------------
-# Command integrator
+# Symlink-rejection guard (TOCTOU defense in is_content_identical_to_source)
 # ---------------------------------------------------------------------------
-#
-# Note: command_integrator's claude/cursor/gemini outputs go through a
-# format transformer (rename + frontmatter munging), so the deployed file
-# is NOT byte-identical to source. The conservative adopt check
-# correctly *does not* fire for these transformed paths -- they keep the
-# existing skip semantics. No regression test needed for that branch
-# beyond confirming the helper is in place; the wiring itself is covered
-# by the other three integrators above plus the helper unit tests.
+
+
+class TestIsContentIdenticalSymlinkGuard:
+    """The adopt branch fires *before* check_collision's containment
+    guard. Without symlink rejection, a co-tenant who pre-places a
+    symlink at the deploy path -- pointing to an out-of-project file
+    whose bytes match source -- could slip the symlink target into
+    ``deployed_files``. These tests lock in the guard.
+    """
+
+    def test_target_is_symlink_returns_false(self, tmp_path: Path) -> None:
+        body = b"identical bytes\n"
+        source = tmp_path / "source"
+        source.write_bytes(body)
+        # Pre-place a symlink at target whose link-target is byte-identical
+        decoy = tmp_path / "decoy_outside"
+        decoy.write_bytes(body)
+        target = tmp_path / "target"
+        target.symlink_to(decoy)
+
+        # Both files exist; both have identical bytes when followed.
+        # Guard MUST refuse to adopt the symlink.
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is False
+
+    def test_source_is_symlink_returns_false(self, tmp_path: Path) -> None:
+        body = b"identical bytes\n"
+        target = tmp_path / "target"
+        target.write_bytes(body)
+        decoy = tmp_path / "decoy_outside"
+        decoy.write_bytes(body)
+        source = tmp_path / "source"
+        source.symlink_to(decoy)
+
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is False
+
+    def test_identical_regular_files_still_adopt(self, tmp_path: Path) -> None:
+        """Regression trap: the symlink guard must not block the happy path."""
+        body = b"identical bytes\n"
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        source.write_bytes(body)
+        target.write_bytes(body)
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is True
+
+
+# ---------------------------------------------------------------------------
+# files_adopted counter -- visibility of silent-adopt work
+# ---------------------------------------------------------------------------
+
+
+class TestFilesAdoptedCounter:
+    """Pre-fix the adopt branch was invisible: target_paths grew but no
+    counter incremented and the install summary printed nothing in
+    adopt-only runs. These tests lock in the visibility contract.
+    """
+
+    def test_instruction_adopt_increments_files_adopted(self, tmp_path: Path) -> None:
+        body = b"---\napplyTo: '**/*.py'\n---\n# rule\n"
+        pkg_dir = tmp_path / "pkg"
+        inst_dir = pkg_dir / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "x.instructions.md").write_bytes(body)
+        deploy_dir = tmp_path / ".github" / "instructions"
+        deploy_dir.mkdir(parents=True)
+        (deploy_dir / "x.instructions.md").write_bytes(body)
+
+        result = InstructionIntegrator().integrate_instructions_for_target(
+            KNOWN_TARGETS["copilot"],
+            _make_package_info(pkg_dir),
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        assert result.files_adopted == 1
+        assert result.files_integrated == 0
+        assert result.files_skipped == 0
+
+    def test_prompt_adopt_increments_files_adopted(self, tmp_path: Path) -> None:
+        body = b"---\nmode: agent\n---\n# p\n"
+        pkg_dir = tmp_path / "pkg"
+        src = pkg_dir / ".apm" / "prompts"
+        src.mkdir(parents=True)
+        (src / "p.prompt.md").write_bytes(body)
+        deploy = tmp_path / ".github" / "prompts"
+        deploy.mkdir(parents=True)
+        (deploy / "p.prompt.md").write_bytes(body)
+
+        result = PromptIntegrator().integrate_prompts_for_target(
+            KNOWN_TARGETS["copilot"],
+            _make_package_info(pkg_dir),
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+        assert result.files_adopted == 1
+        assert result.files_integrated == 0
+
+    def test_agent_adopt_increments_files_adopted(self, tmp_path: Path) -> None:
+        body = b"---\nname: a\n---\n# a\n"
+        pkg_dir = tmp_path / "pkg"
+        src = pkg_dir / ".apm" / "agents"
+        src.mkdir(parents=True)
+        (src / "a.agent.md").write_bytes(body)
+        deploy = tmp_path / ".github" / "agents"
+        deploy.mkdir(parents=True)
+        (deploy / "a.agent.md").write_bytes(body)
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["copilot"],
+            _make_package_info(pkg_dir),
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+        assert result.files_adopted == 1
+        assert result.files_integrated == 0
+
+
+# ---------------------------------------------------------------------------
+# Legacy multi-target adopt: integrate_package_agents (cursor + claude)
+# ---------------------------------------------------------------------------
+
+
+class TestIntegratePackageAgentsAdopt:
+    """The legacy ``integrate_package_agents`` auto-fans agents to
+    .claude/agents/ and .cursor/agents/ when those dirs exist. Each fan
+    site has its own adopt branch; pre-fix none were tested. These
+    tests lock in the secondary adopt sites and the new
+    ``ensure_path_within`` containment guard added at each.
+    """
+
+    def _make_pkg(self, tmp_path: Path, body: bytes) -> tuple[Path, PackageInfo]:
+        pkg_dir = tmp_path / "pkg"
+        src = pkg_dir / ".apm" / "agents"
+        src.mkdir(parents=True)
+        (src / "sec.agent.md").write_bytes(body)
+        return pkg_dir, _make_package_info(pkg_dir)
+
+    def test_claude_secondary_adopt_fires_for_byte_identical(self, tmp_path: Path) -> None:
+        body = b"---\nname: sec\n---\n# sec\n"
+        _pkg_dir, pkg_info = self._make_pkg(tmp_path, body)
+
+        # Pre-create .claude/agents/ with byte-identical pre-existing file
+        claude_agents = tmp_path / ".claude" / "agents"
+        claude_agents.mkdir(parents=True)
+        claude_target = claude_agents / "sec.md"  # claude strips .agent.md
+        claude_target.write_bytes(body)
+
+        # Need the copilot deploy dir too (primary target)
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+
+        result = AgentIntegrator().integrate_package_agents(
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        assert claude_target in result.target_paths, (
+            "Claude secondary adopt branch must fire for byte-identical pre-existing file"
+        )
+        assert result.files_adopted >= 1
+
+    def test_cursor_secondary_adopt_fires_for_byte_identical(self, tmp_path: Path) -> None:
+        body = b"---\nname: sec\n---\n# sec\n"
+        _pkg_dir, pkg_info = self._make_pkg(tmp_path, body)
+
+        cursor_agents = tmp_path / ".cursor" / "agents"
+        cursor_agents.mkdir(parents=True)
+        cursor_target = cursor_agents / "sec.md"
+        cursor_target.write_bytes(body)
+
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+
+        result = AgentIntegrator().integrate_package_agents(
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        assert cursor_target in result.target_paths, (
+            "Cursor secondary adopt branch must fire for byte-identical pre-existing file"
+        )
+        assert result.files_adopted >= 1
+
+    def test_claude_secondary_skips_user_authored_divergent(self, tmp_path: Path) -> None:
+        body = b"---\nname: sec\n---\n# sec\n"
+        user_body = b"# user-authored claude agent\n"
+        _pkg_dir, pkg_info = self._make_pkg(tmp_path, body)
+
+        claude_agents = tmp_path / ".claude" / "agents"
+        claude_agents.mkdir(parents=True)
+        claude_target = claude_agents / "sec.md"
+        claude_target.write_bytes(user_body)
+
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+
+        AgentIntegrator().integrate_package_agents(
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        # User content preserved -- adopt didn't fire (divergent), and
+        # check_collision's force=False kept the file.
+        assert claude_target.read_bytes() == user_body
