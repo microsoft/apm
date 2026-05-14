@@ -405,12 +405,12 @@ class AgentIntegrator(BaseIntegrator):
 
             if self.is_content_identical_to_source(target_path, source_file):
                 target_paths.append(target_path)
-            elif self.check_collision(
-                target_path, rel_path, managed_files, force, diagnostics=diagnostics
-            ):
-                files_skipped += 1
-                continue
             else:
+                if self.check_collision(
+                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
+                ):
+                    files_skipped += 1
+                    continue
                 links_resolved = self.copy_agent(source_file, target_path)
                 total_links_resolved += links_resolved
                 files_integrated += 1

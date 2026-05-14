@@ -151,6 +151,15 @@ class BaseIntegrator:
         try:
             if not target_path.exists() or not source_path.exists():
                 return False
+            # Reject symlinks: ``Path.read_bytes()`` follows them silently,
+            # which would let an attacker who can pre-place a symlink whose
+            # target byte-matches source slip an out-of-project file into
+            # ``deployed_files``. ``check_collision`` enforces containment
+            # via ``ensure_path_within``; the adopt branch fires *before*
+            # that guard, so we drop here instead. ``skill_integrator``'s
+            # ``_dirs_equal`` has the same latent gap (out of scope here).
+            if target_path.is_symlink() or source_path.is_symlink():
+                return False
             return target_path.read_bytes() == source_path.read_bytes()
         except OSError:
             return False

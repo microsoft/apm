@@ -599,6 +599,9 @@ class HookIntegrator(BaseIntegrator):
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
                 ensure_path_within(target_script, project_root)
+                if self.is_content_identical_to_source(target_script, source_file):
+                    target_paths.append(target_script)
+                    continue
                 if self.check_collision(
                     target_script, target_rel, managed_files, force, diagnostics=diagnostics
                 ):
@@ -780,6 +783,9 @@ class HookIntegrator(BaseIntegrator):
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
                 ensure_path_within(target_script, project_root)
+                if self.is_content_identical_to_source(target_script, source_file):
+                    target_paths.append(target_script)
+                    continue
                 if self.check_collision(
                     target_script,
                     target_rel,
