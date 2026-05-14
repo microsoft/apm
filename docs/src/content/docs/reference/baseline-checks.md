@@ -112,9 +112,10 @@ the [policy schema](../policy-schema/).
 ### `drift`
 
 - **What it verifies.** That the working tree matches what an install from the current lockfile would produce. The check replays the install pipeline into a scratch tree and diffs the result against the project.
-- **Fails when.** Any deployed file differs from the replay output (hand-edits, missing integrations, orphaned files), or the cache is cold and `apm install` has not populated `apm_modules` (the replay is cache-only by design so audit stays deterministic).
+- **Fails when.** Any deployed file differs from the replay output (hand-edits, missing integrations, orphaned files).
+- **Skips when.** The install cache has not been warmed (the replay is cache-only by design so audit stays deterministic). The check returns a pass with an informational message advising the user to run `apm install` first.
 - **Skip with.** `apm audit --ci --no-drift` (reduces coverage; reserve for performance-constrained CI loops).
-- **Remediation.** Run `apm install` to restore the deployed state, or revert the hand-edit. For a cache-miss failure, the same `apm install` warms the cache.
+- **Remediation.** Run `apm install` to restore the deployed state, or revert the hand-edit. For a cache-miss skip, the same `apm install` warms the cache and enables the check on the next run.
 
 ## Run order and fail-fast
 

@@ -271,7 +271,7 @@ a = Analysis(
     win_private_assemblies=False,
     cipher=None,
     noarchive=False,
-    optimize=2,  # Python optimization level for smaller, faster binaries
+    optimize=1,  # -O: strip asserts; keep __doc__ so Click reads command help from docstrings (#1298)
 )
 
 # Exclude bundled OpenSSL shared libraries on Linux.

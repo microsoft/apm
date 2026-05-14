@@ -794,6 +794,231 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         assert dep.repo_url == "epm-ease/ai-apm-registry"
 
 
+class TestResolveMarketplacePluginGHECloud:
+    """GHE Cloud (``*.ghe.com``) marketplaces must carry host in canonical (issue #1285).
+
+    GitHub-family hosts keep virtual shorthand (no ``dependency_reference``) because
+    they have no GitLab-style nested-group ambiguity. ``github.com`` is the
+    ``DependencyReference.parse`` default so a bare ``owner/repo`` canonical
+    self-routes; ``*.ghe.com`` is not, so canonical must carry the host forward or
+    downstream auth lands on ``github.com`` with the wrong credentials.
+    """
+
+    @pytest.fixture
+    def ghe_marketplace_source(self) -> MarketplaceSource:
+        return MarketplaceSource(
+            name="my-marketplace",
+            owner="myorg",
+            repo="my-marketplace",
+            host="corp.ghe.com",
+            branch="main",
+        )
+
+    @staticmethod
+    def _manifest_with_plugin(plugin: MarketplacePlugin) -> MarketplaceManifest:
+        return MarketplaceManifest(
+            name="my-marketplace",
+            plugins=(plugin,),
+            plugin_root="",
+        )
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_relative_source_carries_host_in_canonical(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
+
+        assert result.canonical == "corp.ghe.com/myorg/my-marketplace/plugins/my-plugin"
+        # GHE keeps shorthand semantics -- no structured dep_ref, only canonical
+        assert result.dependency_reference is None
+        # The whole point: parse must recover the GHE host instead of defaulting to github.com
+        dep = DependencyReference.parse(result.canonical)
+        assert dep.host == "corp.ghe.com"
+        assert dep.repo_url == "myorg/my-marketplace"
+        assert dep.virtual_path == "plugins/my-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_dict_github_source_bare_repo_carries_host(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        """Dict ``github`` source whose bare ``repo`` matches the marketplace project."""
+        plugin = MarketplacePlugin(
+            name="dict-bare",
+            source={
+                "type": "github",
+                "repo": "myorg/my-marketplace",
+                "path": "plugins/my-plugin",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("dict-bare", "my-marketplace")
+        assert result.canonical == "corp.ghe.com/myorg/my-marketplace/plugins/my-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_dict_github_source_host_qualified_repo_not_double_prefixed(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        """Idempotent: dict source already carrying the host in ``repo`` keeps a single prefix."""
+        plugin = MarketplacePlugin(
+            name="dict-qualified",
+            source={
+                "type": "github",
+                "repo": "corp.ghe.com/myorg/my-marketplace",
+                "path": "plugins/my-plugin",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("dict-qualified", "my-marketplace")
+        assert result.canonical == "corp.ghe.com/myorg/my-marketplace/plugins/my-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_dict_github_source_mixed_case_host_qualified_not_double_prefixed(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        """Case-insensitive idempotent check: manifests may write host in any case."""
+        plugin = MarketplacePlugin(
+            name="dict-mixed",
+            source={
+                "type": "github",
+                "repo": "Corp.GHE.com/myorg/my-marketplace",
+                "path": "plugins/my-plugin",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("dict-mixed", "my-marketplace")
+        # Manifest-supplied case is preserved; no second prefix is added
+        assert result.canonical == "Corp.GHE.com/myorg/my-marketplace/plugins/my-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_cross_repo_source_not_prefixed(self, mock_get, mock_fetch, ghe_marketplace_source):
+        """Cross-repo dict source is out of scope; canonical is left to the existing parse default.
+
+        Bare unqualified ``repo`` pointing to a different project carries no signal that
+        it lives on the marketplace host; treating it as such would silently change the
+        host routing of every cross-repo plugin entry. Manifest authors must
+        host-qualify cross-host references explicitly.
+        """
+        plugin = MarketplacePlugin(
+            name="cross-repo",
+            source={
+                "type": "github",
+                "repo": "anotherorg/anothertool",
+                "path": "plugins/my-plugin",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("cross-repo", "my-marketplace")
+        assert result.canonical == "anotherorg/anothertool/plugins/my-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_version_spec_override_preserves_host_prefix(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        """``version_spec`` raw-ref override stacks correctly on a host-prefixed canonical."""
+        plugin = MarketplacePlugin(name="ref-overridden", source="./plugins/ref-overridden")
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin(
+            "ref-overridden", "my-marketplace", version_spec="release-2.0"
+        )
+        assert (
+            result.canonical
+            == "corp.ghe.com/myorg/my-marketplace/plugins/ref-overridden#release-2.0"
+        )
+        dep = DependencyReference.parse(result.canonical)
+        assert dep.host == "corp.ghe.com"
+        assert dep.reference == "release-2.0"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_url_form_repo_not_prefixed(self, mock_get, mock_fetch, ghe_marketplace_source):
+        """Dict source whose ``repo`` is a full ``https://`` URL must not be host-prefixed.
+
+        ``_resolve_github_source`` only validates ``/`` in ``repo`` so a full URL slips
+        through and produces a canonical that already carries a scheme + host. Prefixing
+        again would yield a malformed ``corp.ghe.com/https://...`` string that
+        ``DependencyReference.parse`` rejects with ValueError.
+        """
+        plugin = MarketplacePlugin(
+            name="url-form",
+            source={
+                "type": "github",
+                "repo": "https://corp.ghe.com/myorg/my-marketplace",
+                "path": "plugins/url-form",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("url-form", "my-marketplace")
+        assert result.canonical == "https://corp.ghe.com/myorg/my-marketplace/plugins/url-form"
+        # Downstream parse still recovers the GHE host from the URL form natively.
+        dep = DependencyReference.parse(result.canonical)
+        assert dep.host == "corp.ghe.com"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_ssh_form_repo_not_prefixed(self, mock_get, mock_fetch, ghe_marketplace_source):
+        """Dict source whose ``repo`` is an SSH SCP shorthand must not be host-prefixed.
+
+        Same class as the URL-form regression: ``git@host:owner/repo`` carries its own
+        host and an SCP-style ``:`` path separator that breaks a naive ``/`` split.
+        """
+        plugin = MarketplacePlugin(
+            name="ssh-form",
+            source={
+                "type": "github",
+                "repo": "git@corp.ghe.com:myorg/my-marketplace",
+                "path": "plugins/ssh-form",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("ssh-form", "my-marketplace")
+        assert result.canonical == "git@corp.ghe.com:myorg/my-marketplace/plugins/ssh-form"
+        dep = DependencyReference.parse(result.canonical)
+        assert dep.host == "corp.ghe.com"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_github_com_canonical_remains_bare(self, mock_get, mock_fetch):
+        """Regression: github.com marketplace canonical stays bare (parse default applies)."""
+        gh_source = MarketplaceSource(
+            name="my-marketplace",
+            owner="myorg",
+            repo="my-marketplace",
+            host="github.com",
+            branch="main",
+        )
+        plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
+        mock_get.return_value = gh_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace")
+        assert result.canonical == "myorg/my-marketplace/plugins/my-plugin"
+        assert result.dependency_reference is None
+
+
 class TestGitLabShorthandParseVsStructuredRef:
     """``DependencyReference.parse`` on a long FQDN does not split monorepo paths on GitLab hosts."""
 

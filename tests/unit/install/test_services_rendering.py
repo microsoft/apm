@@ -27,18 +27,27 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 # ---------------------------------------------------------------------------
 
 
-def _make_integrator_returning(files_per_target: list[int]) -> MagicMock:
+def _make_integrator_returning(
+    files_per_target: list[int],
+    adopted_per_target: list[int] | None = None,
+) -> MagicMock:
     """Return a MagicMock whose integrate method returns
     sequential ``IntegrationResult``-like objects.
 
     Each call returns one entry from ``files_per_target`` -- so the
     first target sees ``files_per_target[0]`` files, etc.
+
+    ``adopted_per_target`` mirrors ``files_per_target`` for the silent
+    adopt counter; defaults to all zeros.
     """
     integrator = MagicMock()
+    if adopted_per_target is None:
+        adopted_per_target = [0] * len(files_per_target)
     results = []
-    for n in files_per_target:
+    for n, a in zip(files_per_target, adopted_per_target, strict=False):
         r = MagicMock()
         r.files_integrated = n
+        r.files_adopted = a
         r.links_resolved = 0
         r.target_paths = []
         results.append(r)
@@ -202,6 +211,84 @@ class TestMultiTargetCollapseRule:
         # 5 files, single contributing target -- no commas, no "N targets".
         assert prompt_lines[0].startswith("  |-- 5 agents integrated -> ")
         assert "," not in prompt_lines[0]
+
+
+# ---------------------------------------------------------------------------
+# Adopted-file visibility -- the install summary must show silent adopts
+# ---------------------------------------------------------------------------
+
+
+class TestAdoptedFileVisibility:
+    """Pre-fix the adopt branch was invisible. In an adopt-only run the
+    install summary printed nothing and looked like a no-op even though
+    the lockfile WAS being repopulated. These tests lock in the new
+    visibility contract: adopt counts surface in the per-kind line.
+    """
+
+    def _run(
+        self,
+        tmp_path: Path,
+        files_per_target: list[int],
+        adopted_per_target: list[int],
+    ) -> list[str]:
+        from apm_cli.install.services import integrate_package_primitives
+
+        target_pool = ["copilot", "claude", "cursor", "codex"]
+        targets = [KNOWN_TARGETS[name] for name in target_pool[: len(files_per_target)]]
+        integrator = _make_integrator_returning(files_per_target, adopted_per_target)
+        kwargs = _integrator_kwargs(integrator)
+        pkg = _make_pkg_info(tmp_path)
+        logger = MagicMock()
+
+        with patch(
+            "apm_cli.integration.dispatch.get_dispatch_table",
+            return_value=_prompts_only_dispatch(),
+        ):
+            integrate_package_primitives(
+                pkg,
+                tmp_path,
+                targets=targets,
+                diagnostics=MagicMock(),
+                package_name="test-pkg",
+                logger=logger,
+                ctx=_ctx(),
+                force=False,
+                managed_files=None,
+                **kwargs,
+            )
+        return _logger_lines(logger)
+
+    def test_adopt_only_run_emits_summary_line(self, tmp_path: Path) -> None:
+        """The catch-22 reproducer: lockfile wiped, files still on disk
+        byte-identical to source. Pre-fix: zero summary lines for the
+        kind. Post-fix: ``N agents adopted -> <path>``.
+        """
+        lines = self._run(tmp_path, files_per_target=[0], adopted_per_target=[3])
+        prompt_lines = [ln for ln in lines if "agents adopted" in ln]
+        assert len(prompt_lines) == 1, (
+            "Adopt-only run must still emit a per-kind summary line; "
+            "previously the line was suppressed and the install looked like a no-op."
+        )
+        assert prompt_lines[0].startswith("  |-- 3 agents adopted -> ")
+
+    def test_mixed_integrate_and_adopt_emits_combined_line(self, tmp_path: Path) -> None:
+        """Half the files freshly written, half adopted. The line must
+        lead with the integrated count and append the adopt count in
+        parens so the two phases are individually visible.
+        """
+        lines = self._run(tmp_path, files_per_target=[2], adopted_per_target=[3])
+        prompt_lines = [ln for ln in lines if "agents integrated" in ln]
+        assert len(prompt_lines) == 1
+        assert "(3 adopted)" in prompt_lines[0]
+        assert prompt_lines[0].startswith("  |-- 2 agents integrated (3 adopted) -> ")
+
+    def test_no_work_emits_no_line(self, tmp_path: Path) -> None:
+        """Belt-and-braces: zero integrated AND zero adopted -> still
+        no line (warm-cache annotation is a separate concern handled
+        by TestWarmCacheAnnotation).
+        """
+        lines = self._run(tmp_path, files_per_target=[0], adopted_per_target=[0])
+        assert not [ln for ln in lines if "agents integrated" in ln or "agents adopted" in ln]
 
 
 # ---------------------------------------------------------------------------

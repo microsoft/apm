@@ -134,6 +134,7 @@ class MarketplaceProducer:
         from ..marketplace.builder import (
             BuildOptions as MktBuildOptions,
         )
+        from ..marketplace.builder import BuildReport as MarketplaceBuildReport
         from ..marketplace.builder import (
             MarketplaceBuilder,
         )
@@ -143,6 +144,7 @@ class MarketplaceProducer:
             detect_config_source,
             load_marketplace_config,
         )
+        from ..marketplace.output_profiles import MARKETPLACE_OUTPUTS
         from ..marketplace.yml_schema import MarketplaceYmlError
 
         warnings: list[str] = []
@@ -164,19 +166,11 @@ class MarketplaceProducer:
         else:
             yml_for_builder = project_root / "apm.yml"
 
-        # Determine the output override: explicit flag wins; otherwise
-        # legacy marketplace.yml keeps writing to ./marketplace.json (the
-        # value baked into the legacy config), and apm.yml keeps writing
-        # to .claude-plugin/marketplace.json (also the config default).
-        output_override: Path | None = None
-        if options.marketplace_output is not None:
-            output_override = options.marketplace_output
-
         mkt_opts = MktBuildOptions(
             dry_run=options.dry_run,
             offline=options.marketplace_offline,
             include_prerelease=options.marketplace_include_prerelease,
-            output_override=output_override,
+            marketplace_output=None,
         )
         builder = MarketplaceBuilder.from_config(
             config, project_root=project_root, options=mkt_opts
@@ -185,20 +179,50 @@ class MarketplaceProducer:
         # exists so any downstream diagnostics report a real location.
         builder._yml_path = yml_for_builder
 
-        try:
-            report = builder.build()
-        except MktBuildError as exc:
-            raise BuildError(str(exc)) from exc
-
+        resolve_result = None
+        output_reports = []
         outputs: list[Path] = []
-        if report.output_path is not None:
-            outputs.append(Path(report.output_path))
-        warnings.extend(report.warnings)
+        for output_name in config.outputs:
+            profile = MARKETPLACE_OUTPUTS.get(output_name)
+            if profile is None:
+                valid_targets = ", ".join(sorted(MARKETPLACE_OUTPUTS))
+                raise BuildError(
+                    f"Unknown marketplace output target: {output_name!r}. "
+                    f"Valid targets: {valid_targets}"
+                )
+            try:
+                if resolve_result is None:
+                    resolve_result = builder.resolve()
+                resolved = resolve_result.entries
+
+                configured_output_value = getattr(config, profile.config_attr).output
+                configured_output = Path(configured_output_value)
+                output_path = project_root / configured_output
+                if profile.supports_cli_output_override and options.marketplace_output is not None:
+                    output_path = options.marketplace_output
+
+                output_report = builder.write_output(
+                    profile,
+                    resolved,
+                    output_path,
+                    include_diff=True,
+                    remote_metadata=builder.remote_metadata_for_profile(profile, resolved),
+                    errors=resolve_result.errors,
+                )
+                output_reports.extend(output_report.outputs)
+                if output_report.output_path is not None:
+                    outputs.append(Path(output_report.output_path))
+            except MktBuildError as exc:
+                raise BuildError(str(exc)) from exc
+
+        marketplace_report = MarketplaceBuildReport(outputs=tuple(output_reports))
+        warnings.extend(marketplace_report.warnings)
+
         return ProducerResult(
             kind=OutputKind.MARKETPLACE,
             outputs=outputs,
             warnings=warnings,
-            payload=report,
+            payload=marketplace_report,
         )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,10 +14,12 @@ from apm_cli.core.build_orchestrator import (
     BuildOptions,
     BuildOrchestrator,
     BuildResult,  # noqa: F401
+    MarketplaceProducer,
     OutputKind,
     ProducerResult,
     detect_outputs,
 )
+from apm_cli.marketplace.builder import BuildReport, MarketplaceOutputReport
 
 
 def _write(path: Path, text: str) -> None:
@@ -186,3 +189,220 @@ class TestBuildOrchestrator:
         kinds = [p.kind for p in orch._producers]
         assert OutputKind.BUNDLE in kinds
         assert OutputKind.MARKETPLACE in kinds
+
+
+class TestMarketplaceProducer:
+    def test_writes_claude_and_codex_outputs_when_requested(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  outputs: [claude, codex]\n"
+            "  packages:\n"
+            "    - name: local-tool\n"
+            "      source: ./plugins/local-tool\n"
+            "      category: Productivity\n",
+        )
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            marketplace_offline=True,
+        )
+
+        result = MarketplaceProducer().produce(opts, logger=None)
+
+        claude_output = tmp_path / ".claude-plugin" / "marketplace.json"
+        codex_output = tmp_path / ".agents" / "plugins" / "marketplace.json"
+        assert claude_output in result.outputs
+        assert codex_output in result.outputs
+        assert claude_output.exists()
+        assert codex_output.exists()
+
+    def test_writes_only_codex_when_requested(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  outputs: [codex]\n"
+            "  packages:\n"
+            "    - name: local-tool\n"
+            "      source: ./plugins/local-tool\n"
+            "      category: Productivity\n",
+        )
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            marketplace_offline=True,
+        )
+
+        result = MarketplaceProducer().produce(opts, logger=None)
+
+        claude_output = tmp_path / ".claude-plugin" / "marketplace.json"
+        codex_output = tmp_path / ".agents" / "plugins" / "marketplace.json"
+        assert result.payload is not None
+        assert [output.profile for output in result.payload.outputs] == ["codex"]
+        assert result.outputs == [codex_output]
+        assert not claude_output.exists()
+        assert codex_output.exists()
+
+    def test_marketplace_output_override_applies_only_to_claude_profile(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  outputs: [claude, codex]\n"
+            "  claude:\n"
+            "    output: build/claude-config.json\n"
+            "  codex:\n"
+            "    output: build/codex-config.json\n"
+            "  packages:\n"
+            "    - name: local-tool\n"
+            "      source: ./plugins/local-tool\n"
+            "      category: Productivity\n",
+        )
+        override = tmp_path / "override" / "claude.json"
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            marketplace_offline=True,
+            marketplace_output=override,
+        )
+
+        result = MarketplaceProducer().produce(opts, logger=None)
+
+        codex_output = tmp_path / "build" / "codex-config.json"
+        assert result.payload is not None
+        assert [output.profile for output in result.payload.outputs] == ["claude", "codex"]
+        assert override in result.outputs
+        assert codex_output in result.outputs
+        assert override.exists()
+        assert codex_output.exists()
+        assert not (tmp_path / "build" / "claude-config.json").exists()
+
+    def test_manifest_config_controls_each_marketplace_output_path(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  outputs: [claude, codex]\n"
+            "  claude:\n"
+            "    output: dist/claude-marketplace.json\n"
+            "  codex:\n"
+            "    output: dist/codex-marketplace.json\n"
+            "  packages:\n"
+            "    - name: local-tool\n"
+            "      source: ./plugins/local-tool\n"
+            "      category: Productivity\n",
+        )
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            marketplace_offline=True,
+        )
+
+        result = MarketplaceProducer().produce(opts, logger=None)
+
+        claude_output = tmp_path / "dist" / "claude-marketplace.json"
+        codex_output = tmp_path / "dist" / "codex-marketplace.json"
+        assert result.outputs == [claude_output, codex_output]
+        assert claude_output.exists()
+        assert codex_output.exists()
+
+    def test_unknown_marketplace_output_target_raises_build_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  packages: []\n",
+        )
+        monkeypatch.setattr(
+            "apm_cli.marketplace.migration.load_marketplace_config",
+            lambda *args, **kwargs: SimpleNamespace(
+                outputs=("cursor",),
+                source_path=apm,
+            ),
+        )
+
+        with pytest.raises(BuildError, match="Unknown marketplace output target: 'cursor'"):
+            MarketplaceProducer().produce(
+                BuildOptions(
+                    project_root=tmp_path,
+                    apm_yml_path=apm,
+                    marketplace_offline=True,
+                ),
+                logger=None,
+            )
+
+    def test_build_warnings_are_exposed_on_producer_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\n"
+            "version: 0.1.0\n"
+            "description: y\n"
+            "marketplace:\n"
+            "  owner:\n"
+            "    name: o\n"
+            "  packages: []\n",
+        )
+        output_path = tmp_path / ".claude-plugin" / "marketplace.json"
+
+        def fake_write_output(self, *args, **kwargs):
+            return BuildReport(
+                outputs=(
+                    MarketplaceOutputReport(
+                        profile="claude",
+                        resolved=(),
+                        errors=(),
+                        warnings=("duplicate package warning",),
+                        output_path=output_path,
+                    ),
+                )
+            )
+
+        monkeypatch.setattr(
+            "apm_cli.marketplace.builder.MarketplaceBuilder.write_output",
+            fake_write_output,
+        )
+
+        result = MarketplaceProducer().produce(
+            BuildOptions(
+                project_root=tmp_path,
+                apm_yml_path=apm,
+                marketplace_offline=True,
+            ),
+            logger=None,
+        )
+
+        assert result.payload is not None
+        assert result.payload.warnings == ("duplicate package warning",)
+        assert result.warnings == ["duplicate package warning"]

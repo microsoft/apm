@@ -59,6 +59,14 @@ class TestInitHappyPath:
         assert "owner" in block
         assert "packages" in block
 
+    def test_template_mentions_optional_codex_output(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(marketplace, ["init"])
+        assert result.exit_code == 0, result.output
+        text = (tmp_path / "apm.yml").read_text(encoding="utf-8")
+        assert "codex:" in text
+        assert ".agents/plugins/marketplace.json" in text
+
     def test_success_message(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(marketplace, ["init"])
@@ -71,6 +79,7 @@ class TestInitHappyPath:
         result = runner.invoke(marketplace, ["init"])
         assert result.exit_code == 0
         assert "apm pack" in result.output
+        assert ".agents/plugins/marketplace.json" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +120,12 @@ class TestInitExistsGuard:
 class TestInitGitignoreCheck:
     @pytest.mark.parametrize(
         "pattern",
-        ["marketplace.json\n", "**/marketplace.json\n", "/marketplace.json\n"],
+        [
+            "marketplace.json\n",
+            "**/marketplace.json\n",
+            "/marketplace.json\n",
+            ".agents/plugins/marketplace.json\n",
+        ],
     )
     def test_warns_when_gitignore_ignores_marketplace_json(
         self,

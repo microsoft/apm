@@ -211,7 +211,7 @@ marketplace.add_command(package)
 
 
 def _check_gitignore_for_marketplace_json(logger):
-    """Warn if .gitignore contains a rule that would ignore marketplace.json."""
+    """Warn if .gitignore contains a rule that would ignore marketplace outputs."""
     gitignore_path = Path.cwd() / ".gitignore"
     if not gitignore_path.exists():
         return
@@ -221,7 +221,14 @@ def _check_gitignore_for_marketplace_json(logger):
     except OSError:
         return
 
-    patterns = {"marketplace.json", "**/marketplace.json", "/marketplace.json", "*.json"}
+    patterns = {
+        "marketplace.json",
+        "**/marketplace.json",
+        "/marketplace.json",
+        ".claude-plugin/marketplace.json",
+        ".agents/plugins/marketplace.json",
+        "*.json",
+    }
     for line in lines:
         stripped = line.strip()
         # Skip blank and commented lines
@@ -230,8 +237,9 @@ def _check_gitignore_for_marketplace_json(logger):
         if stripped in patterns:
             logger.warning(
                 "Your .gitignore ignores marketplace.json. "
-                "Both apm.yml and the generated marketplace.json must be "
-                "tracked in git. Remove the .gitignore rule.",
+                "Track apm.yml plus generated marketplace files such as "
+                ".claude-plugin/marketplace.json and .agents/plugins/marketplace.json. "
+                "Remove the .gitignore rule or add explicit unignore entries.",
                 symbol="warning",
             )
             return

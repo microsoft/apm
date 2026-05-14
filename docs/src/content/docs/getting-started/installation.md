@@ -11,6 +11,8 @@ sidebar:
 - [git](https://git-scm.com/) for dependency management
 - Python 3.10+ (only for pip or from-source installs)
 
+On **Windows ARM64**, the one-line installer currently downloads the **x86_64** ZIP (same as the GitHub Release asset); it runs via emulation. Native ARM64 Windows binaries are not selected yet.
+
 ## Quick install (recommended)
 
 **macOS / Linux:**
@@ -29,7 +31,7 @@ The installer automatically detects your platform (macOS/Linux/Windows, Intel/AR
 
 ### Installer options
 
-The Unix installer supports environment variables for custom environments:
+**macOS / Linux (`install.sh`):**
 
 ```bash
 # Install a specific version
@@ -42,15 +44,60 @@ curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
 
+**Windows (`install.ps1` in PowerShell):**
+
+Air-gapped hosts should **save `install.ps1` locally** (the `irm` one-liner needs reachability to the script URL).
+
+```powershell
+# Pin a version (skips GitHub API - required for many air-gapped / GHES setups)
+# Pinned installs verify SHA256 from the matching .sha256 unless you set:
+#   $env:APM_SKIP_CHECKSUM = "1"   # emergency only
+$env:VERSION = "v1.2.3"; irm https://aka.ms/apm-windows | iex
+
+# Saved script: pass -SkipChecksum only when the release has no .sha256 sidecar (not recommended).
+# .\install.ps1 v1.2.3 -SkipChecksum
+
+# Custom directory for apm.cmd (default: %LOCALAPPDATA%\Programs\apm\bin)
+$env:APM_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\apm\bin"; irm https://aka.ms/apm-windows | iex
+
+# Fork, enterprise host, or internal mirror (GITHUB_URL must be https://)
+$env:GITHUB_URL = "https://github.corp.com"
+$env:APM_REPO = "my-org/apm"
+$env:VERSION = "v1.2.3"
+irm https://aka.ms/apm-windows | iex
+```
+
+**GitHub Actions (`windows-latest`):**
+
+```yaml
+jobs:
+  install-apm:
+    runs-on: windows-latest
+    steps:
+      - name: Install APM (pinned, CI-safe)
+        shell: pwsh
+        env:
+          VERSION: v0.13.0
+          # For GHES or a mirror, set GITHUB_URL (https only) and APM_REPO as needed.
+        run: |
+          irm https://aka.ms/apm-windows | iex
+          apm --version
+      - uses: actions/checkout@v4
+      - run: apm install --frozen
+```
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APM_INSTALL_DIR` | `/usr/local/bin` | Directory for the `apm` symlink |
-| `APM_LIB_DIR` | `$(dirname APM_INSTALL_DIR)/lib/apm` | Directory for the full binary bundle |
-| `GITHUB_URL` | `https://github.com` | Base URL for downloads (mirrors, GHE) |
-| `APM_REPO` | `microsoft/apm` | GitHub repository |
-| `VERSION` | *(latest)* | Pin a specific release (skips GitHub API) |
+| `APM_INSTALL_DIR` | `/usr/local/bin` (Unix) / `%LOCALAPPDATA%\Programs\apm\bin` (Windows) | Directory for the `apm` symlink / `apm.cmd` shim |
+| `APM_LIB_DIR` | `$(dirname APM_INSTALL_DIR)/lib/apm` | *(Unix only)* Directory for the full binary bundle |
+| `GITHUB_URL` | `https://github.com` | Base GitHub URL (asset downloads **and** API host: `api.github.com` on github.com, `{GITHUB_URL}/api/v3` on GHES). Must be `https://`. |
+| `APM_REPO` | `microsoft/apm` | Repository as `owner/name` |
+| `VERSION` | *(latest)* | Pin a release tag (skips the **releases/latest** HTTP API). Must look like `v1.2.3` or `1.2.3`. |
+| `APM_SKIP_CHECKSUM` | *(unset)* | Windows only: set to `1` to skip `.sha256` verification on **pinned** installs (emergency only). |
 
-> **Note:** When using `GITHUB_URL` for a GitHub Enterprise or air-gapped mirror, set `VERSION` as well. The GitHub API call for latest-release discovery still targets `api.github.com`; `VERSION` bypasses it entirely.
+> **Note - Unix (`install.sh`):** Latest-release discovery still calls `https://api.github.com/repos/.../releases/latest` unless `VERSION` is set. For GHES or mirrors with no access to `api.github.com`, pin `VERSION` so the script never hits that endpoint.
+>
+> **Note - Windows (`install.ps1`):** The **releases/latest** URL is derived from `GITHUB_URL`: `https://api.github.com` for GitHub.com, or `{GITHUB_URL}/api/v3` for GitHub Enterprise Server. Air-gapped runners should still set `VERSION` so the installer does not need the API at all. When `VERSION` is pinned, the release **`.sha256`** file is required unless you set **`APM_SKIP_CHECKSUM=1`** (emergency only).
 
 ## Package managers
 

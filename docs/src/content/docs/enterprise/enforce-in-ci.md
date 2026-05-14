@@ -77,6 +77,54 @@ jobs:
 Make this job a required status check via
 [GitHub Rulesets](../github-rulesets/) and a violating PR cannot merge.
 
+## Audit-only CI pattern
+
+The default `microsoft/apm-action@v1` runs `apm install` before any
+subsequent steps. That is the right default for most workflows: it ensures
+the lockfile and deployed files are present before the audit reads them.
+
+However, `apm install` overwrites every managed file with a fresh copy
+before `apm audit --ci` runs. If a managed file was modified on disk after
+the last install -- its bytes changed without updating the lockfile hash --
+the install step silently restores the clean copy. The `content-integrity`
+check then compares the freshly restored file against a hash that matches,
+and the tampering goes undetected.
+
+To detect post-install file modification, run the action in setup-only mode
+so it only adds the CLI to `PATH` without touching deployed files:
+
+```yaml
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/apm-action@v1
+        with:
+          setup-only: true     # CLI only; does not run apm install
+      - run: apm audit --ci --no-drift
+        env:
+          GITHUB_APM_PAT: ${{ secrets.APM_PAT }}
+```
+
+`setup-only: true` leaves every deployed file exactly as checked out.
+`--no-drift` skips the install-replay check because no warm cache exists;
+the `content-integrity` check still verifies that every deployed file's
+SHA-256 hash matches the `deployed_file_hashes` recorded in `apm.lock.yaml`.
+Any file whose bytes were changed after the last install fails this check.
+
+The two patterns serve different goals:
+
+| Pattern | Use when |
+|---|---|
+| Full install then audit | Catching developers who skipped `apm install` after editing `apm.yml`; ensuring deployed files are present on a fresh runner |
+| Audit-only (`setup-only: true`) | Detecting modification of deployed files after install; committed files and lockfile are the ground truth |
+
+Both patterns enforce policy and the eight baseline lockfile checks. The
+difference is only in whether content-integrity can see tampered bytes.
+
 ## Recipe: SARIF for GitHub Code Scanning
 
 Emit SARIF and upload it so each violation appears inline on the PR
