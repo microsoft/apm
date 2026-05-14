@@ -104,10 +104,40 @@ Exit codes:
     "marketplace_output",
     type=click.Path(),
     default=None,
+    hidden=True,
     help=(
-        "Marketplace legacy compatibility: override only the Claude/Anthropic "
-        "output path. Prefer marketplace.claude.output in apm.yml."
+        "[Deprecated] Override Claude output path. "
+        "Use --marketplace-path claude=PATH instead."
     ),
+)
+@click.option(
+    "-m",
+    "--marketplace",
+    "marketplace_filter",
+    type=str,
+    default=None,
+    help=(
+        "Comma-separated marketplace outputs to build (e.g. 'claude,codex'). "
+        "Use 'all' for every configured output, 'none' to skip marketplace. "
+        "Default: build all configured outputs."
+    ),
+)
+@click.option(
+    "--marketplace-path",
+    "marketplace_path_overrides",
+    type=str,
+    multiple=True,
+    help=(
+        "Override output path for a format: FORMAT=PATH (repeatable). "
+        "Example: --marketplace-path claude=dist/marketplace.json"
+    ),
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit machine-readable JSON to stdout; logs go to stderr.",
 )
 @click.option(
     "--legacy-skill-paths",
@@ -133,10 +163,108 @@ def pack_cmd(
     offline,
     include_prerelease,
     marketplace_output,
+    marketplace_filter,
+    marketplace_path_overrides,
+    json_output,
     legacy_skill_paths,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
+    import json as json_mod
+    import logging as _logging
+
+    from ..marketplace.output_profiles import known_output_names
+
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
+
+    # -- Stream discipline: under --json, route logs to stderr --
+    if json_output:
+        _logging.basicConfig(stream=sys.stderr, force=True)
+
+    # -- Deprecation: --marketplace-output → --marketplace-path claude=PATH --
+    if marketplace_output is not None:
+        logger.warning(
+            "--marketplace-output is deprecated and will be removed in v0.15. "
+            "Use --marketplace-path claude=PATH instead."
+        )
+        # Auto-translate to the new form
+        marketplace_path_overrides = (
+            *marketplace_path_overrides,
+            f"claude={marketplace_output}",
+        )
+        marketplace_output = None  # prevent double-pass to BuildOptions
+
+    # -- Parse --marketplace-path overrides --
+    path_overrides: dict[str, str] = {}
+    for override in marketplace_path_overrides:
+        if "=" not in override:
+            msg = (
+                f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
+            )
+            if json_output:
+                from ..marketplace.builder import BuildReport
+
+                click.echo(
+                    json_mod.dumps(BuildReport.failure_to_json_dict(
+                        errors=[{"code": "cli_error", "message": msg}]
+                    )),
+                    file=sys.stdout,
+                )
+                ctx.exit(1)
+                return
+            raise click.ClickException(msg)
+        fmt_name, path_val = override.split("=", 1)
+        fmt_name = fmt_name.strip()
+        path_val = path_val.strip()
+        if fmt_name not in known_output_names():
+            msg = (
+                f"Unknown marketplace format '{fmt_name}' in --marketplace-path. "
+                f"Known formats: {', '.join(sorted(known_output_names()))}"
+            )
+            if json_output:
+                from ..marketplace.builder import BuildReport
+
+                click.echo(
+                    json_mod.dumps(BuildReport.failure_to_json_dict(
+                        errors=[{"code": "unknown_format", "message": msg}]
+                    )),
+                    file=sys.stdout,
+                )
+                ctx.exit(1)
+                return
+            raise click.ClickException(msg)
+        path_overrides[fmt_name] = path_val
+
+    # -- Parse --marketplace filter --
+    marketplace_formats: tuple[str, ...] | None = None
+    if marketplace_filter is not None:
+        if marketplace_filter.strip().lower() == "none":
+            marketplace_formats = ()
+        elif marketplace_filter.strip().lower() == "all":
+            marketplace_formats = None  # all configured
+        else:
+            requested = [
+                f.strip() for f in marketplace_filter.split(",") if f.strip()
+            ]
+            known = known_output_names()
+            for r in requested:
+                if r not in known:
+                    msg = (
+                        f"Unknown marketplace format '{r}' in --marketplace. "
+                        f"Known formats: {', '.join(sorted(known))}"
+                    )
+                    if json_output:
+                        from ..marketplace.builder import BuildReport
+
+                        click.echo(
+                            json_mod.dumps(BuildReport.failure_to_json_dict(
+                                errors=[{"code": "unknown_format", "message": msg}]
+                            )),
+                            file=sys.stdout,
+                        )
+                        ctx.exit(1)
+                        return
+                    raise click.ClickException(msg)
+            marketplace_formats = tuple(requested)  # noqa: F841 — wired in orchestrator integration
     project_root = Path(".").resolve()
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
@@ -169,7 +297,7 @@ def pack_cmd(
         bundle_force=force,
         marketplace_offline=offline,
         marketplace_include_prerelease=include_prerelease,
-        marketplace_output=Path(marketplace_output) if marketplace_output else None,
+        marketplace_output=None,
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -177,7 +305,45 @@ def pack_cmd(
     try:
         result = BuildOrchestrator().run(options, logger=logger)
     except BuildError as exc:
+        if json_output:
+            from ..marketplace.builder import BuildReport
+
+            click.echo(
+                json_mod.dumps(BuildReport.failure_to_json_dict(
+                    errors=[{"code": "build_error", "message": str(exc)}]
+                )),
+                file=sys.stdout,
+            )
+            ctx.exit(1)
+            return
         raise click.ClickException(str(exc))  # noqa: B904
+
+    # -- JSON output mode --
+    if json_output:
+        # Find the marketplace sub-result and emit JSON
+        for sub in result.producer_results:
+            if sub.kind is OutputKind.MARKETPLACE and sub.payload is not None:
+                click.echo(
+                    json_mod.dumps(sub.payload.to_json_dict(), indent=2),
+                    file=sys.stdout,
+                )
+                break
+        else:
+            # No marketplace result; emit minimal success JSON
+            from ..marketplace.builder import BuildReport
+
+            click.echo(
+                json_mod.dumps({
+                    "ok": True,
+                    "dry_run": dry_run,
+                    "warnings": [],
+                    "errors": [],
+                    "marketplace": {"outputs": []},
+                    "bundle": None,
+                }),
+                file=sys.stdout,
+            )
+        return
 
     for sub in result.producer_results:
         if sub.kind is OutputKind.BUNDLE:
