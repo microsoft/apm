@@ -3267,3 +3267,67 @@ class TestWindsurfPathTraversalGuard:
 
             target_script = project_root / ".." / ".." / "etc" / "passwd"
             ensure_path_within(target_script, project_root)
+
+
+class TestHookScriptAdopt:
+    """Regression: hook integrator silently adopts byte-identical pre-existing scripts.
+
+    Same catch-22 the non-skill integrators close: when ``apm.lock.yaml`` lost
+    ``deployed_files`` for a hook package and the referenced scripts are still
+    on disk byte-identical to source, the install must adopt them (append to
+    ``target_paths`` so they re-enter ``deployed_files``) instead of treating
+    them as user-authored collisions and skipping. Otherwise the next install
+    with ``required-packages-deployed`` enforced is permanently blocked.
+    """
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        project = Path(temp_dir)
+        (project / ".github").mkdir()
+        yield project
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _setup_hookify_with_preexisting_scripts(self, project: Path) -> PackageInfo:
+        """Hookify package + pre-place all scripts at their target paths byte-identical."""
+        pkg_dir = project / "apm_modules" / "anthropics" / "hookify"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps(HOOKIFY_HOOKS_JSON, indent=2))
+        scripts_dir_target = project / ".github" / "hooks" / "scripts" / "hookify" / "hooks"
+        scripts_dir_target.mkdir(parents=True, exist_ok=True)
+        for script in ["pretooluse.py", "posttooluse.py", "stop.py", "userpromptsubmit.py"]:
+            content = f"#!/usr/bin/env python3\n# {script}"
+            (hooks_dir / script).write_text(content)
+            (scripts_dir_target / script).write_text(content)
+        return _make_package_info(pkg_dir, "hookify")
+
+    def test_vscode_adopts_byte_identical_scripts_with_no_managed_files(self, temp_project):
+        """managed_files=None + on-disk scripts byte-identical to source -> silent adopt."""
+        pkg_info = self._setup_hookify_with_preexisting_scripts(temp_project)
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_package_hooks(pkg_info, temp_project, managed_files=None)
+
+        # All four scripts must land in target_paths so deployed_files
+        # repopulates and the catch-22 self-heals.
+        scripts_dir = temp_project / ".github" / "hooks" / "scripts" / "hookify" / "hooks"
+        for script in ["pretooluse.py", "posttooluse.py", "stop.py", "userpromptsubmit.py"]:
+            assert (scripts_dir / script) in result.target_paths, (
+                f"{script} missing from target_paths -- catch-22 reproduces for hook scripts"
+            )
+
+    def test_vscode_does_not_adopt_modified_scripts(self, temp_project):
+        """Pre-existing script with DIFFERENT content -> still treated as user-authored."""
+        pkg_info = self._setup_hookify_with_preexisting_scripts(temp_project)
+        # Mutate one target script so it diverges from source.
+        scripts_dir_target = temp_project / ".github" / "hooks" / "scripts" / "hookify" / "hooks"
+        (scripts_dir_target / "pretooluse.py").write_text("#!/usr/bin/env python3\n# user edited")
+
+        integrator = HookIntegrator()
+        result = integrator.integrate_package_hooks(pkg_info, temp_project, managed_files=None)
+
+        # Adopt fires for the three identical scripts; the modified one is skipped.
+        for script in ["posttooluse.py", "stop.py", "userpromptsubmit.py"]:
+            assert (scripts_dir_target / script) in result.target_paths
+        assert (scripts_dir_target / "pretooluse.py") not in result.target_paths

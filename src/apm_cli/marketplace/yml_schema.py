@@ -40,11 +40,14 @@ import yaml
 
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from .errors import MarketplaceYmlError
+from .output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 
 __all__ = [
     "LOCAL_SOURCE_RE",
     "SOURCE_RE",
     "MarketplaceBuild",
+    "MarketplaceClaudeConfig",
+    "MarketplaceCodexConfig",
     "MarketplaceConfig",
     "MarketplaceOwner",
     "MarketplaceYml",  # backwards-compat alias
@@ -100,6 +103,7 @@ _PACKAGE_ENTRY_KEYS = frozenset(
         "license",
         "repository",
         "keywords",
+        "category",
     }
 )
 
@@ -163,11 +167,27 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "version",  # optional override of top-level apm.yml version
         "owner",
         "output",
+        "outputs",
+        "claude",
         "metadata",
         "build",
+        "codex",
         "packages",
     }
 )
+
+_CLAUDE_KEYS = frozenset(
+    {
+        "output",
+    }
+)
+
+_CODEX_KEYS = frozenset(
+    {
+        "output",
+    }
+)
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -187,6 +207,20 @@ class MarketplaceBuild:
     """APM-only build configuration block."""
 
     tag_pattern: str = "v{version}"
+
+
+@dataclass(frozen=True)
+class MarketplaceClaudeConfig:
+    """Claude-specific marketplace output configuration."""
+
+    output: str = ".claude-plugin/marketplace.json"
+
+
+@dataclass(frozen=True)
+class MarketplaceCodexConfig:
+    """Codex-specific marketplace output configuration."""
+
+    output: str = MARKETPLACE_OUTPUTS["codex"].default_output
 
 
 @dataclass(frozen=True)
@@ -222,6 +256,9 @@ class PackageEntry:
     author: Mapping[str, str] | None = None
     license: str | None = None
     repository: str | None = None
+    # Marketplace category metadata. Emitted only by output formats that
+    # consume categories, currently Codex repo marketplace output.
+    category: str | None = None
     # Derived (set by loader, not by user)
     is_local: bool = False
 
@@ -249,6 +286,9 @@ class MarketplaceConfig:
     version: str
     owner: MarketplaceOwner
     output: str = ".claude-plugin/marketplace.json"
+    outputs: tuple[str, ...] = ("claude",)
+    claude: MarketplaceClaudeConfig = field(default_factory=MarketplaceClaudeConfig)
+    codex: MarketplaceCodexConfig = field(default_factory=MarketplaceCodexConfig)
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
     packages: tuple[PackageEntry, ...] = ()
@@ -371,6 +411,84 @@ def _parse_build(raw: Any) -> MarketplaceBuild:
     tag_pattern = tag_pattern.strip()
     _validate_tag_pattern(tag_pattern, context="build.tagPattern")
     return MarketplaceBuild(tag_pattern=tag_pattern)
+
+
+def _parse_claude(raw: Any, *, default_output: str) -> MarketplaceClaudeConfig:
+    """Parse and validate the optional ``marketplace.claude`` block."""
+    if raw is None:
+        return MarketplaceClaudeConfig(output=default_output)
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError("'claude' must be a mapping")
+    _check_unknown_keys(raw, _CLAUDE_KEYS, context="claude")
+
+    output = raw.get("output", default_output)
+    if not isinstance(output, str) or not output.strip():
+        raise MarketplaceYmlError("'claude.output' must be a non-empty string")
+    output = output.strip()
+    try:
+        validate_path_segments(output, context="claude.output")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+
+    return MarketplaceClaudeConfig(output=output)
+
+
+def _parse_codex(raw: Any) -> MarketplaceCodexConfig:
+    """Parse and validate the optional ``marketplace.codex`` block."""
+    if raw is None:
+        return MarketplaceCodexConfig()
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError("'codex' must be a mapping")
+    _check_unknown_keys(raw, _CODEX_KEYS, context="codex")
+
+    output = raw.get("output", MARKETPLACE_OUTPUTS["codex"].default_output)
+    if not isinstance(output, str) or not output.strip():
+        raise MarketplaceYmlError("'codex.output' must be a non-empty string")
+    output = output.strip()
+    try:
+        validate_path_segments(output, context="codex.output")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+
+    return MarketplaceCodexConfig(output=output)
+
+
+def _parse_outputs(raw: Any) -> tuple[str, ...]:
+    """Parse the marketplace output selector list.
+
+    ``outputs`` mirrors the repo's top-level target-selection pattern:
+    omit it for the backwards-compatible Claude output, or provide one
+    or more named marketplace artifacts to write.
+    """
+    if raw is None:
+        return ("claude",)
+    if isinstance(raw, str):
+        raw_items = [raw]
+    elif isinstance(raw, list):
+        raw_items = raw
+    else:
+        raise MarketplaceYmlError("'outputs' must be a string or list of strings")
+
+    outputs: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw_items):
+        if not isinstance(item, str) or not item.strip():
+            raise MarketplaceYmlError(f"'outputs[{index}]' must be a non-empty string")
+        output = item.strip()
+        known_outputs = known_output_names()
+        if output not in known_outputs:
+            raise MarketplaceYmlError(
+                f"Unknown marketplace output '{output}'. "
+                f"Permitted outputs: {', '.join(sorted(known_outputs))}"
+            )
+        if output in seen:
+            raise MarketplaceYmlError(f"Duplicate marketplace output '{output}'")
+        seen.add(output)
+        outputs.append(output)
+
+    if not outputs:
+        raise MarketplaceYmlError("'outputs' must contain at least one marketplace output")
+    return tuple(outputs)
 
 
 def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
@@ -512,6 +630,15 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
             raise MarketplaceYmlError(f"'packages[{index}].repository' must be a non-empty string")
         repository = repository.strip()
 
+    # Optional marketplace category. Claude output strips this; Codex output
+    # requires and emits it.
+    category: str | None = None
+    raw_category = raw.get("category")
+    if raw_category is not None:
+        if not isinstance(raw_category, str) or not raw_category.strip():
+            raise MarketplaceYmlError(f"'packages[{index}].category' must be a non-empty string")
+        category = raw_category.strip()
+
     return PackageEntry(
         name=name,
         source=source,
@@ -526,6 +653,7 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
         author=author,
         license=license_val,
         repository=repository,
+        category=category,
         is_local=is_local,
     )
 
@@ -731,10 +859,14 @@ def _build_config(
         raise MarketplaceYmlError("'owner' is required")
     owner = _parse_owner(raw_owner)
 
-    # -- output (default differs between legacy and new layouts) --
-    output = marketplace_dict.get("output")
-    if output is None:
-        output = default_output
+    # -- output selection --
+    outputs = _parse_outputs(marketplace_dict.get("outputs"))
+
+    # -- Claude output (default differs between legacy and new layouts) --
+    # ``output`` remains as a backwards-compatible shorthand for
+    # ``claude.output``. The explicit block wins when both are present.
+    legacy_output = marketplace_dict.get("output")
+    output = default_output if legacy_output is None else legacy_output
     if not isinstance(output, str) or not output.strip():
         raise MarketplaceYmlError("'output' must be a non-empty string")
     output = output.strip()
@@ -744,6 +876,9 @@ def _build_config(
         validate_path_segments(output, context="marketplace output")
     except PathTraversalError as exc:
         raise MarketplaceYmlError(str(exc)) from exc
+
+    claude = _parse_claude(marketplace_dict.get("claude"), default_output=output)
+    output = claude.output
 
     # -- metadata (Anthropic pass-through, preserve verbatim) --
     metadata: dict[str, Any] = {}
@@ -768,6 +903,9 @@ def _build_config(
     # -- build --
     build = _parse_build(marketplace_dict.get("build"))
 
+    # -- codex output --
+    codex = _parse_codex(marketplace_dict.get("codex"))
+
     # -- packages --
     raw_packages = marketplace_dict.get("packages")
     if raw_packages is None:
@@ -788,12 +926,26 @@ def _build_config(
         seen_names[lower_name] = idx
         entries.append(entry)
 
+    for output_name in outputs:
+        profile = MARKETPLACE_OUTPUTS[output_name]
+        for field_name in profile.required_package_fields:
+            missing = [entry.name for entry in entries if not getattr(entry, field_name)]
+            if missing:
+                names = ", ".join(missing)
+                raise MarketplaceYmlError(
+                    f"packages must define '{field_name}' when marketplace.outputs includes "
+                    f"'{output_name}' (missing: {names})"
+                )
+
     return MarketplaceConfig(
         name=name,
         description=description,
         version=version,
         owner=owner,
         output=output,
+        outputs=outputs,
+        claude=claude,
+        codex=codex,
         metadata=metadata,
         build=build,
         packages=tuple(entries),

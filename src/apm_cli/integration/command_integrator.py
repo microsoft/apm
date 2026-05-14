@@ -505,6 +505,7 @@ class CommandIntegrator(BaseIntegrator):
         commands_dir = target_root / mapping.subdir
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
         any_dropped_keys = False
@@ -548,6 +549,13 @@ class CommandIntegrator(BaseIntegrator):
                 continue
 
             rel_path = portable_relpath(target_path, project_root)
+
+            if self.is_content_identical_to_source(target_path, prompt_file):
+                # Pre-existing file is byte-identical to source -- silently
+                # adopt. See BaseIntegrator.is_content_identical_to_source.
+                target_paths.append(target_path)
+                files_adopted += 1
+                continue
 
             if self.check_collision(
                 target_path,
@@ -619,6 +627,7 @@ class CommandIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     def sync_for_target(

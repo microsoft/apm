@@ -1047,9 +1047,9 @@ class TestComposeMarketplaceJson:
 
 
 class TestOutputOverride:
-    """Tests for --output flag."""
+    """Tests for --marketplace-output flag plumbing."""
 
-    def test_custom_output_path(self, tmp_path: Path) -> None:
+    def test_custom_marketplace_output_path(self, tmp_path: Path) -> None:
         yml = """\
         name: test-mkt
         description: Test
@@ -1063,7 +1063,7 @@ class TestOutputOverride:
         """
         refs = {"acme/pkg1": _make_refs("v1.0.0")}
         custom_out = tmp_path / "custom" / "output.json"
-        opts = BuildOptions(output_override=custom_out)
+        opts = BuildOptions(marketplace_output=custom_out)
         report = _build_with_mock(tmp_path, yml, refs, options=opts)
         assert report.output_path == custom_out
         assert custom_out.exists()
@@ -1288,6 +1288,22 @@ class TestDuplicateNameWarnings:
         report = _build_with_mock(tmp_path, yml, refs)
         assert isinstance(report.warnings, tuple)
         assert len(report.warnings) == 0
+
+    def test_empty_build_report_primary_output_is_safe(self) -> None:
+        report = BuildReport(outputs=())
+
+        primary = report.primary_output
+
+        assert primary.profile == ""
+        assert primary.resolved == ()
+        assert primary.errors == ()
+        assert primary.warnings == ()
+        assert primary.diagnostics == ()
+        assert primary.output_path == Path(".")
+        assert primary.unchanged_count == 0
+        assert primary.added_count == 0
+        assert primary.updated_count == 0
+        assert primary.removed_count == 0
 
 
 # ---------------------------------------------------------------------------

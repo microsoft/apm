@@ -1,6 +1,6 @@
 ---
 title: apm pack
-description: Pack distributable artifacts (plugin bundle, APM bundle, or marketplace.json) from your APM project.
+description: Pack distributable artifacts (plugin bundle, APM bundle, or marketplace artifacts) from your APM project.
 sidebar:
   order: 17
 ---
@@ -16,8 +16,8 @@ apm pack [OPTIONS]
 `apm pack` produces distributable artifacts from the current APM project. It reads `apm.yml` to decide what to emit:
 
 - `dependencies:` block present -> a bundle (directory or `.tar.gz`).
-- `marketplace:` block present -> `.claude-plugin/marketplace.json`.
-- Both blocks present -> both artifacts in a single run.
+- `marketplace:` block present -> selected marketplace artifacts.
+- Both blocks present -> bundle plus selected marketplace artifacts in a single run.
 
 The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time.
 
@@ -35,7 +35,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--verbose`, `-v` | off | Show per-file paths and detailed packer output. |
 | `--offline` | off | Marketplace: resolve version ranges from cached refs only; skip `git ls-remote`. |
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
-| `--marketplace-output PATH` | `.claude-plugin/marketplace.json` | Marketplace: override the output path. |
+| `--marketplace-output PATH` | `.claude-plugin/marketplace.json` | Marketplace legacy compatibility: override only the Claude/Anthropic output path. Prefer `marketplace.claude.output` in `apm.yml`. |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
@@ -63,10 +63,15 @@ apm pack
 apm pack --archive --offline
 ```
 
-### Override marketplace output path
+### Configure marketplace output paths
 
-```bash
-apm pack --marketplace-output ./build/marketplace.json
+```yaml
+marketplace:
+  outputs: [claude, codex]
+  claude:
+    output: ./build/claude-marketplace.json
+  codex:
+    output: ./build/codex-marketplace.json
 ```
 
 ### Preview without writing
@@ -106,9 +111,11 @@ dependencies:
   - repo_url: owner/repo
 ```
 
-### Marketplace artifact
+### Marketplace artifacts
 
-`.claude-plugin/marketplace.json` (or `--marketplace-output PATH`). Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. The file is written atomically. `.claude-plugin/` is created if absent; nothing else is scaffolded there.
+`.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
+
+Configure marketplace artifact paths in `apm.yml`: `marketplace.claude.output` controls the Claude/Anthropic artifact, and `marketplace.codex.output` controls the Codex artifact. `--marketplace-output PATH` remains as a legacy Claude-only compatibility override; prefer manifest config for new projects and CI.
 
 ## Behavior
 
@@ -117,6 +124,7 @@ dependencies:
 - **Empty bundle warning.** If no files match (e.g. nothing was installed yet), `apm pack` emits a warning and exits `0` with an empty bundle. Verbose mode prints a hint to run `apm install` first.
 - **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.
 - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
+- **Marketplace outputs.** `marketplace.outputs` defaults to `[claude]`. Add `codex` to also write `.agents/plugins/marketplace.json`; when selected, each package must define `category`.
 
 ## Exit codes
 
