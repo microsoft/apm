@@ -36,8 +36,7 @@ class TestProfileFields:
         pattern = re.compile(r"^APM_MARKETPLACE_[A-Z0-9_]+_PATH$")
         for profile in MARKETPLACE_OUTPUTS.values():
             assert pattern.fullmatch(profile.path_env_var), (
-                f"Profile {profile.name!r} has invalid path_env_var: "
-                f"{profile.path_env_var!r}"
+                f"Profile {profile.name!r} has invalid path_env_var: {profile.path_env_var!r}"
             )
 
 

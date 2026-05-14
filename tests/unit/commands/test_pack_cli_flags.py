@@ -20,7 +20,9 @@ class TestMarketplaceFilterFlag:
     def test_unknown_format_raises(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--marketplace", "bogus"])
         assert result.exit_code != 0
-        assert "Unknown marketplace format" in (result.output + (result.exception.__str__() if result.exception else ""))
+        assert "Unknown marketplace format" in (
+            result.output + (result.exception.__str__() if result.exception else "")
+        )
 
     def test_unknown_format_json_mode(self) -> None:
         import json
@@ -39,12 +41,16 @@ class TestMarketplacePathFlag:
     def test_missing_equals_raises(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--marketplace-path", "noequalssign"])
         assert result.exit_code != 0
-        assert "FORMAT=PATH" in (result.output + (result.exception.__str__() if result.exception else ""))
+        assert "FORMAT=PATH" in (
+            result.output + (result.exception.__str__() if result.exception else "")
+        )
 
     def test_unknown_format_raises(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--marketplace-path", "bogus=path.json"])
         assert result.exit_code != 0
-        assert "Unknown marketplace format" in (result.output + (result.exception.__str__() if result.exception else ""))
+        assert "Unknown marketplace format" in (
+            result.output + (result.exception.__str__() if result.exception else "")
+        )
 
     def test_missing_equals_json_mode(self) -> None:
         import json
@@ -72,8 +78,6 @@ class TestDeprecationWarning:
         """The flag doesn't crash immediately (it will fail later
         because no apm.yml exists, but that's fine — we check the
         deprecation message is printed before the crash)."""
-        result = CliRunner().invoke(
-            pack_cmd, ["--marketplace-output", "test.json"]
-        )
+        result = CliRunner().invoke(pack_cmd, ["--marketplace-output", "test.json"])
         combined = result.output or ""
         assert "deprecated" in combined.lower() or result.exit_code != 0

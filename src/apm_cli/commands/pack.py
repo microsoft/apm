@@ -105,10 +105,7 @@ Exit codes:
     type=click.Path(),
     default=None,
     hidden=True,
-    help=(
-        "[Deprecated] Override Claude output path. "
-        "Use --marketplace-path claude=PATH instead."
-    ),
+    help=("[Deprecated] Override Claude output path. Use --marketplace-path claude=PATH instead."),
 )
 @click.option(
     "-m",
@@ -197,16 +194,16 @@ def pack_cmd(
     path_overrides: dict[str, str] = {}
     for override in marketplace_path_overrides:
         if "=" not in override:
-            msg = (
-                f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
-            )
+            msg = f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
             if json_output:
                 from ..marketplace.builder import BuildReport
 
                 click.echo(
-                    json_mod.dumps(BuildReport.failure_to_json_dict(
-                        errors=[{"code": "cli_error", "message": msg}]
-                    )),
+                    json_mod.dumps(
+                        BuildReport.failure_to_json_dict(
+                            errors=[{"code": "cli_error", "message": msg}]
+                        )
+                    ),
                     file=sys.stdout,
                 )
                 ctx.exit(1)
@@ -224,9 +221,11 @@ def pack_cmd(
                 from ..marketplace.builder import BuildReport
 
                 click.echo(
-                    json_mod.dumps(BuildReport.failure_to_json_dict(
-                        errors=[{"code": "unknown_format", "message": msg}]
-                    )),
+                    json_mod.dumps(
+                        BuildReport.failure_to_json_dict(
+                            errors=[{"code": "unknown_format", "message": msg}]
+                        )
+                    ),
                     file=sys.stdout,
                 )
                 ctx.exit(1)
@@ -242,9 +241,7 @@ def pack_cmd(
         elif marketplace_filter.strip().lower() == "all":
             marketplace_formats = None  # all configured
         else:
-            requested = [
-                f.strip() for f in marketplace_filter.split(",") if f.strip()
-            ]
+            requested = [f.strip() for f in marketplace_filter.split(",") if f.strip()]
             known = known_output_names()
             for r in requested:
                 if r not in known:
@@ -256,9 +253,11 @@ def pack_cmd(
                         from ..marketplace.builder import BuildReport
 
                         click.echo(
-                            json_mod.dumps(BuildReport.failure_to_json_dict(
-                                errors=[{"code": "unknown_format", "message": msg}]
-                            )),
+                            json_mod.dumps(
+                                BuildReport.failure_to_json_dict(
+                                    errors=[{"code": "unknown_format", "message": msg}]
+                                )
+                            ),
                             file=sys.stdout,
                         )
                         ctx.exit(1)
@@ -309,9 +308,11 @@ def pack_cmd(
             from ..marketplace.builder import BuildReport
 
             click.echo(
-                json_mod.dumps(BuildReport.failure_to_json_dict(
-                    errors=[{"code": "build_error", "message": str(exc)}]
-                )),
+                json_mod.dumps(
+                    BuildReport.failure_to_json_dict(
+                        errors=[{"code": "build_error", "message": str(exc)}]
+                    )
+                ),
                 file=sys.stdout,
             )
             ctx.exit(1)
@@ -333,14 +334,16 @@ def pack_cmd(
             from ..marketplace.builder import BuildReport
 
             click.echo(
-                json_mod.dumps({
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "warnings": [],
-                    "errors": [],
-                    "marketplace": {"outputs": []},
-                    "bundle": None,
-                }),
+                json_mod.dumps(
+                    {
+                        "ok": True,
+                        "dry_run": dry_run,
+                        "warnings": [],
+                        "errors": [],
+                        "marketplace": {"outputs": []},
+                        "bundle": None,
+                    }
+                ),
                 file=sys.stdout,
             )
         return

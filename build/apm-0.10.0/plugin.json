@@ -1,0 +1,9 @@
+{
+  "name": "apm",
+  "version": "0.10.0",
+  "description": "APM (Agent Package Manager) -- ship and govern AI agent context",
+  "author": {
+    "name": "Microsoft"
+  },
+  "license": "MIT"
+}

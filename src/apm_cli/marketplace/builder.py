@@ -193,14 +193,16 @@ class BuildReport:
         output_entries: list[dict[str, Any]] = []
 
         for out in self.outputs:
-            output_entries.append({
-                "format": out.profile,
-                "path": str(out.output_path),
-                "added": out.added_count,
-                "updated": out.updated_count,
-                "unchanged": out.unchanged_count,
-                "skipped": out.removed_count,
-            })
+            output_entries.append(
+                {
+                    "format": out.profile,
+                    "path": str(out.output_path),
+                    "added": out.added_count,
+                    "updated": out.updated_count,
+                    "unchanged": out.unchanged_count,
+                    "skipped": out.removed_count,
+                }
+            )
             for pkg_name, err_msg in out.errors:
                 all_errors.append({"code": "build_error", "message": f"{pkg_name}: {err_msg}"})
 

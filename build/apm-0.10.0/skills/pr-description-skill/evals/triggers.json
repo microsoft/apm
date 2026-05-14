@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "fire-01",
+      "query": "write a PR description for me",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Verbatim phrase from SKILL.md description."
+    },
+    {
+      "id": "fire-02",
+      "query": "draft the PR body",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Verbatim phrase from SKILL.md description."
+    },
+    {
+      "id": "fire-03",
+      "query": "open this PR -- can you fill in the template?",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Combined open-PR + fill-template trigger."
+    },
+    {
+      "id": "fire-04",
+      "query": "create the PR write-up please",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Verbatim phrase from SKILL.md trigger list."
+    },
+    {
+      "id": "fire-05",
+      "query": "summarize this branch as a PR",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Verbatim phrase from SKILL.md trigger list."
+    },
+    {
+      "id": "fire-06",
+      "query": "let's open the PR -- write the body",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Open-PR + body, near-domain paraphrase."
+    },
+    {
+      "id": "fire-07",
+      "query": "draft a pull request description for this branch",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Long form of 'PR description'."
+    },
+    {
+      "id": "fire-08",
+      "query": "pls write the pull request body",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Casual tone, long form."
+    },
+    {
+      "id": "fire-09",
+      "query": "fill in the PR template before we ship",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Verbatim phrase wrapped in a longer sentence."
+    },
+    {
+      "id": "no-fire-01",
+      "query": "write a commit message for these changes",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Adjacent intent (commit, not PR) -- common confusion."
+    },
+    {
+      "id": "no-fire-02",
+      "query": "summarize this branch as a release note",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Adjacent intent (release notes, not PR body)."
+    },
+    {
+      "id": "no-fire-03",
+      "query": "draft a CHANGELOG entry for this work",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Changelog work, not PR description."
+    },
+    {
+      "id": "no-fire-04",
+      "query": "open an issue describing this bug",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Issue, not PR."
+    },
+    {
+      "id": "no-fire-05",
+      "query": "review this PR for me",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Reviewing != describing."
+    },
+    {
+      "id": "no-fire-06",
+      "query": "summarize the diff for me",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Diff summary is an INPUT to PR description skill, not the same task."
+    },
+    {
+      "id": "no-fire-07",
+      "query": "draft a code review comment",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Review comment, not PR body."
+    },
+    {
+      "id": "no-fire-08",
+      "query": "write the design doc for this branch",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Design doc lives upstream of PR; different artifact."
+    },
+    {
+      "id": "no-fire-09",
+      "query": "give me release notes for this milestone",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Release notes, not PR body."
+    }
+  ]
+}

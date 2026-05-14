@@ -506,9 +506,7 @@ def _parse_outputs(
 
         for key, value in raw.items():
             if not isinstance(key, str) or not key.strip():
-                raise MarketplaceYmlError(
-                    "'outputs' map keys must be non-empty strings"
-                )
+                raise MarketplaceYmlError("'outputs' map keys must be non-empty strings")
             name = key.strip()
             if name not in known:
                 raise MarketplaceYmlError(
@@ -516,9 +514,7 @@ def _parse_outputs(
                     f"Permitted outputs: {', '.join(sorted(known))}"
                 )
             if name in seen:
-                raise MarketplaceYmlError(
-                    f"Duplicate marketplace output '{name}'"
-                )
+                raise MarketplaceYmlError(f"Duplicate marketplace output '{name}'")
             seen.add(name)
 
             # Value can be null/{}/mapping with optional path
@@ -526,9 +522,7 @@ def _parse_outputs(
             path = MARKETPLACE_OUTPUTS[name].default_output
             if value is not None:
                 if not isinstance(value, dict):
-                    raise MarketplaceYmlError(
-                        f"'outputs.{name}' must be a mapping or null"
-                    )
+                    raise MarketplaceYmlError(f"'outputs.{name}' must be a mapping or null")
                 raw_path = value.get("path")
                 if raw_path is not None:
                     if not isinstance(raw_path, str) or not raw_path.strip():
@@ -538,9 +532,7 @@ def _parse_outputs(
                     path = raw_path.strip()
                     path_explicit = True
                     try:
-                        validate_path_segments(
-                            path, context=f"outputs.{name}.path"
-                        )
+                        validate_path_segments(path, context=f"outputs.{name}.path")
                     except PathTraversalError as exc:
                         raise MarketplaceYmlError(str(exc)) from exc
                 # Check for unknown keys inside the format entry
@@ -548,19 +540,14 @@ def _parse_outputs(
                 unknown = set(value.keys()) - _valid_output_entry_keys
                 if unknown:
                     raise MarketplaceYmlError(
-                        f"Unknown key(s) in 'outputs.{name}': "
-                        f"{', '.join(sorted(unknown))}"
+                        f"Unknown key(s) in 'outputs.{name}': {', '.join(sorted(unknown))}"
                     )
 
             outputs.append(name)
-            specs.append(MarketplaceOutputSpec(
-                name=name, path=path, path_explicit=path_explicit
-            ))
+            specs.append(MarketplaceOutputSpec(name=name, path=path, path_explicit=path_explicit))
 
         if not outputs:
-            raise MarketplaceYmlError(
-                "'outputs' must contain at least one marketplace output"
-            )
+            raise MarketplaceYmlError("'outputs' must contain at least one marketplace output")
         return tuple(outputs), tuple(specs)
 
     # --- List / string form (deprecated back-compat) ---
@@ -569,18 +556,14 @@ def _parse_outputs(
     elif isinstance(raw, list):
         raw_items = raw
     else:
-        raise MarketplaceYmlError(
-            "'outputs' must be a string, list, or mapping"
-        )
+        raise MarketplaceYmlError("'outputs' must be a string, list, or mapping")
 
     outputs_list: list[str] = []
     specs_list: list[MarketplaceOutputSpec] = []
     seen_set: set[str] = set()
     for index, item in enumerate(raw_items):
         if not isinstance(item, str) or not item.strip():
-            raise MarketplaceYmlError(
-                f"'outputs[{index}]' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'outputs[{index}]' must be a non-empty string")
         output = item.strip()
         known_outputs = known_output_names()
         if output not in known_outputs:
@@ -592,22 +575,20 @@ def _parse_outputs(
             raise MarketplaceYmlError(f"Duplicate marketplace output '{output}'")
         seen_set.add(output)
         outputs_list.append(output)
-        specs_list.append(MarketplaceOutputSpec(
-            name=output,
-            path=MARKETPLACE_OUTPUTS[output].default_output,
-            path_explicit=False,
-        ))
+        specs_list.append(
+            MarketplaceOutputSpec(
+                name=output,
+                path=MARKETPLACE_OUTPUTS[output].default_output,
+                path_explicit=False,
+            )
+        )
 
     if not outputs_list:
-        raise MarketplaceYmlError(
-            "'outputs' must contain at least one marketplace output"
-        )
+        raise MarketplaceYmlError("'outputs' must contain at least one marketplace output")
 
     # Emit deprecation warning for list/string form
     names_str = ", ".join(outputs_list)
-    map_lines = "\n".join(
-        f"        {n}: {{}}" for n in outputs_list
-    )
+    map_lines = "\n".join(f"        {n}: {{}}" for n in outputs_list)
     deprecation_msg = (
         f"outputs: [{names_str}] is deprecated; use the map form:\n\n"
         f"      outputs:\n{map_lines}\n\n"

@@ -76,9 +76,7 @@ class TestMapFormParsing:
         assert len(config.output_specs) == 2
 
     def test_explicit_path(self, tmp_path: Path) -> None:
-        yml = _write_apm_yml(
-            tmp_path, {"outputs": {"claude": {"path": "custom/output.json"}}}
-        )
+        yml = _write_apm_yml(tmp_path, {"outputs": {"claude": {"path": "custom/output.json"}}})
         config = load_marketplace_from_apm_yml(yml)
         spec = config.output_specs[0]
         assert spec.path == "custom/output.json"
@@ -95,16 +93,12 @@ class TestMapFormParsing:
             load_marketplace_from_apm_yml(yml)
 
     def test_path_traversal_rejected(self, tmp_path: Path) -> None:
-        yml = _write_apm_yml(
-            tmp_path, {"outputs": {"claude": {"path": "../escape/file.json"}}}
-        )
+        yml = _write_apm_yml(tmp_path, {"outputs": {"claude": {"path": "../escape/file.json"}}})
         with pytest.raises(MarketplaceYmlError, match="path"):
             load_marketplace_from_apm_yml(yml)
 
     def test_unknown_key_in_format_entry(self, tmp_path: Path) -> None:
-        yml = _write_apm_yml(
-            tmp_path, {"outputs": {"claude": {"path": "x.json", "bogus": True}}}
-        )
+        yml = _write_apm_yml(tmp_path, {"outputs": {"claude": {"path": "x.json", "bogus": True}}})
         with pytest.raises(MarketplaceYmlError, match="Unknown key"):
             load_marketplace_from_apm_yml(yml)
 

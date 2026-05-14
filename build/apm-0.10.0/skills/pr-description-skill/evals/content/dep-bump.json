@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "dep-bump",
+  "summary": "Mechanical dependency upgrade: bump click from 8.1.7 to 8.2.1; lockfile-only changes plus a 1-line type annotation tweak. Tests Trade-offs may be 1-2 bullets and mermaid is optional.",
+  "scenario": {
+    "branch": "deps/click-8.2.1",
+    "base": "main",
+    "files_changed": [
+      "M pyproject.toml",
+      "M uv.lock",
+      "M src/apm_cli/cli.py"
+    ],
+    "commits": [
+      "chore(deps): bump click 8.1.7 -> 8.2.1",
+      "chore(cli): adjust type hint for new click.Context generic"
+    ],
+    "linked_issue": "(none)",
+    "validation_evidence": "uv sync --extra dev  ->  resolved in 2.1s\nuv run pytest tests/unit -x  ->  2418 passed in 38.7s"
+  },
+  "rubric": [
+    {"id": "tldr-present", "pattern": "(?im)^\\s*##?\\s*TL;DR\\b", "weight": 1, "description": "TL;DR present"},
+    {"id": "tldr-short", "pattern": "(?is)##?\\s*TL;DR.{1,500}?\\n##?\\s", "weight": 1, "description": "TL;DR very short on a mechanical PR"},
+    {"id": "problem-section", "pattern": "(?im)^\\s*##?\\s*Problem\\b", "weight": 1, "description": "Problem section present"},
+    {"id": "implementation-section", "pattern": "(?im)^\\s*##?\\s*Implementation\\b", "weight": 1, "description": "Implementation section present"},
+    {"id": "tradeoffs-section", "pattern": "(?im)^\\s*##?\\s*Trade-?offs?\\b", "weight": 1, "description": "Trade-offs section present (may be 1-2 bullets)"},
+    {"id": "validation-section", "pattern": "(?im)^\\s*##?\\s*Validation\\b", "weight": 1, "description": "Validation section present"},
+    {"id": "validation-real-output", "pattern": "(?im)pytest|uv sync|2418 passed", "weight": 1, "description": "Real validation output (pytest counts) shown"},
+    {"id": "how-to-test", "pattern": "(?im)^\\s*##?\\s*How to test\\b", "weight": 1, "description": "How to test section present"},
+    {"id": "trailer", "pattern": "Co-authored-by: Copilot <223556219", "weight": 1, "description": "Copilot co-author trailer present"},
+    {"id": "no-marketing-tone", "pattern": "(?i)significantly enhances|best-in-class|game-changing", "weight": -2, "description": "PENALTY: marketing tone detected"},
+    {"id": "no-diff-restate", "pattern": "(?im)^[+-]{3} ", "weight": -1, "description": "PENALTY: diff lines restated in body"}
+  ],
+  "fixtures": {
+    "with_skill": "../fixtures/dep-bump__with_skill.md",
+    "without_skill": "../fixtures/dep-bump__without_skill.md"
+  }
+}

@@ -48,14 +48,9 @@ def _validate_profile(profile: MarketplaceOutputProfile) -> None:
     and env-var names that could collide with sensitive variables.
     """
     if profile.name in _RESERVED_NAMES:
-        raise ValueError(
-            f"Profile name {profile.name!r} is reserved as a "
-            f"--marketplace sentinel."
-        )
+        raise ValueError(f"Profile name {profile.name!r} is reserved as a --marketplace sentinel.")
     if any(c in _INVALID_NAME_CHARS for c in profile.name) or profile.name.startswith("-"):
-        raise ValueError(
-            f"Profile name {profile.name!r} contains a CLI-reserved character."
-        )
+        raise ValueError(f"Profile name {profile.name!r} contains a CLI-reserved character.")
     if not _ENV_VAR_PATTERN.fullmatch(profile.path_env_var):
         raise ValueError(
             f"Profile {profile.name!r} declares path_env_var "
