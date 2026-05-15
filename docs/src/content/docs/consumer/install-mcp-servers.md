@@ -90,7 +90,7 @@ writes a runtime-specific MCP config file. The schemas differ; the
 
 MCP install honors the same target resolution chain as `apm install`
 for any other dependency: see
-[Where files land](/consumer/install-packages/#where-files-land).
+[Where files land](../install-packages/#where-files-land).
 In short: `--target` wins, then `apm.yml`'s `targets:`, then
 auto-detect from harness directories.
 

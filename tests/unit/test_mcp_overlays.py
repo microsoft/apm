@@ -810,7 +810,7 @@ class TestInstallMCPDepsWithOverlays:
             command="my-cmd",
         )
 
-        count = MCPIntegrator.install([dep], runtime="vscode")
+        count = MCPIntegrator.install([dep], runtime="vscode", explicit_target="vscode")
 
         # Self-defined deps should NOT go through registry validation
         # (MCPServerOperations is never instantiated for self-defined-only lists)
@@ -839,7 +839,7 @@ class TestInstallMCPDepsWithOverlays:
         mock_ops.collect_runtime_variables.return_value = {}
 
         dep = MCPDependency.from_string("io.github.github/github-mcp-server")
-        count = MCPIntegrator.install([dep], runtime="vscode")
+        count = MCPIntegrator.install([dep], runtime="vscode", explicit_target="vscode")
 
         mock_ops.validate_servers_exist.assert_called_once_with(
             ["io.github.github/github-mcp-server"]
@@ -867,7 +867,9 @@ class TestInstallMCPDepsWithOverlays:
             command="my-cmd",
         )
 
-        count = MCPIntegrator.install([registry_dep, self_defined_dep], runtime="vscode")
+        count = MCPIntegrator.install(
+            [registry_dep, self_defined_dep], runtime="vscode", explicit_target="vscode"
+        )
 
         # Registry dep goes through validation
         mock_ops.validate_servers_exist.assert_called_once_with(
