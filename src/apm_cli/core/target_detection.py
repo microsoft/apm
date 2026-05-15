@@ -53,6 +53,7 @@ def agents_alias_was_detected() -> bool:
 TargetType = Literal[
     "vscode",
     "claude",
+    "codebuddy",  # TNV downstream: Tencent CodeBuddy (Claude-compatible)
     "cursor",
     "opencode",
     "codex",
@@ -92,6 +93,7 @@ UserTargetType = Literal[
     "vscode",
     "agents",
     "claude",
+    "codebuddy",  # TNV downstream: Tencent CodeBuddy (Claude-compatible)
     "cursor",
     "opencode",
     "codex",
@@ -126,6 +128,8 @@ def detect_target(  # noqa: PLR0911
             return "vscode", "explicit --target flag"
         elif explicit_target == "claude":
             return "claude", "explicit --target flag"
+        elif explicit_target == "codebuddy":  # TNV downstream
+            return "codebuddy", "explicit --target flag"
         elif explicit_target == "cursor":
             return "cursor", "explicit --target flag"
         elif explicit_target == "opencode":
@@ -147,6 +151,8 @@ def detect_target(  # noqa: PLR0911
             return "vscode", "apm.yml target"
         elif config_target == "claude":
             return "claude", "apm.yml target"
+        elif config_target == "codebuddy":  # TNV downstream
+            return "codebuddy", "apm.yml target"
         elif config_target == "cursor":
             return "cursor", "apm.yml target"
         elif config_target == "opencode":
@@ -236,7 +242,8 @@ def should_compile_claude_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "claude" in target
-    return target in ("claude", "all")
+    # codebuddy shares the claude compile family (TNV downstream)
+    return target in ("claude", "codebuddy", "all")
 
 
 def should_compile_gemini_md(target: CompileTargetType) -> bool:
@@ -294,6 +301,7 @@ def get_target_description(target: UserTargetType) -> str:
     descriptions = {
         "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
         "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
+        "codebuddy": "CLAUDE.md + .codebuddy/commands/ + .codebuddy/agents/ + .codebuddy/skills/ (Claude-compatible)",
         "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
@@ -313,7 +321,7 @@ def get_target_description(target: UserTargetType) -> str:
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
 ALL_CANONICAL_TARGETS = frozenset(
-    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf"}
+    {"vscode", "claude", "codebuddy", "cursor", "opencode", "codex", "gemini", "windsurf"}
 )
 
 #: Targets that the parser must accept but that are gated at runtime by
@@ -620,6 +628,7 @@ class ResolvedTargets:
 SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("claude", "dir", ".claude"),
     ("claude", "file", "CLAUDE.md"),
+    ("codebuddy", "dir", ".codebuddy"),  # TNV downstream
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
@@ -633,6 +642,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
 # Ordered list of targets for display (excludes agent-skills meta-target).
 CANONICAL_TARGETS_ORDERED: list[str] = [
     "claude",
+    "codebuddy",  # TNV downstream
     "copilot",
     "cursor",
     "codex",
@@ -644,6 +654,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
 # Canonical deploy directories for each target.
 CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "claude": ".claude/",
+    "codebuddy": ".codebuddy/",  # TNV downstream
     "copilot": ".github/",
     "cursor": ".cursor/",
     "codex": ".codex/",
@@ -656,6 +667,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
 # "needs <path>" display for inactive targets.
 CANONICAL_SIGNAL: dict[str, str] = {
     "claude": "CLAUDE.md",
+    "codebuddy": ".codebuddy/",  # TNV downstream
     "copilot": ".github/copilot-instructions.md",
     "cursor": ".cursor/",
     "codex": ".codex/",

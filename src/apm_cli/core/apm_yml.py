@@ -32,6 +32,7 @@ CANONICAL_TARGETS: frozenset[str] = frozenset(
         "gemini",
         "windsurf",
         "agent-skills",
+        "codebuddy",  # TNV downstream: Tencent CodeBuddy (Claude-compatible IDE)
     }
 )
 
