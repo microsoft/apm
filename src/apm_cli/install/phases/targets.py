@@ -10,10 +10,13 @@ This is the second phase of the install pipeline, running after resolve.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.integration.targets import TargetProfile
 
 
 def _read_yaml_targets(ctx) -> list[str] | None:
@@ -44,12 +47,21 @@ def _read_yaml_targets(ctx) -> list[str] | None:
     return result if result else None
 
 
-def _create_target_dirs(targets, project_root, explicit, logger=None):
+def _create_target_dirs(
+    targets: Iterable[TargetProfile],
+    project_root: Path,
+    explicit: str | None,
+    logger: Any = None,
+) -> list[Path]:
     """Create root_dir for each target when auto_create=True or explicit is set.
+
+    Targets that resolve to an external deploy root (``resolved_deploy_root``)
+    are skipped: their directories live outside the project tree and are
+    created by the integrator's deploy logic, not here.
 
     Returns the list of directories actually created.
     """
-    created = []
+    created: list[Path] = []
     for _t in targets:
         if not _t.auto_create and not explicit:
             continue

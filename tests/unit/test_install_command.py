@@ -1166,7 +1166,7 @@ class TestContentHashFallback:
 
             assert verify_package_hash(pkg_dir, "sha256:badhash") is False
 
-    def test_integrate_skips_when_content_hash_matches(self, monkeypatch):
+    def test_integrate_skips_when_content_hash_matches(self):
         """Exercise the actual fallback guard shape from install/phases/integrate.py."""
         from apm_cli.utils import content_hash as ch_mod
 
