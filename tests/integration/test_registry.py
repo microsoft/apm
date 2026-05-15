@@ -37,11 +37,17 @@ def safe_rmdir(path):
 
 
 class TestMCPRegistry:
-    """Test the MCP registry client with the demo registry."""
+    """Test the MCP registry client end-to-end against the public GitHub MCP Registry.
+
+    Previously targeted the legacy ``demo.registry.azure-mcp.net`` host
+    which only served the non-spec ``/v0/`` API (issue #1210). Retargeted
+    to ``api.mcp.github.com`` which is MCP Registry v0.1 spec-compliant.
+    """
 
     def setup_method(self):
         """Set up test environment."""
-        self.registry_client = SimpleRegistryClient("https://demo.registry.azure-mcp.net")
+        self.registry_url = "https://api.mcp.github.com"
+        self.registry_client = SimpleRegistryClient(self.registry_url)
 
         # Create a temporary directory for tests
         self.test_dir = tempfile.TemporaryDirectory()
@@ -62,7 +68,7 @@ class TestMCPRegistry:
 
         # Leave the temp tree before unlinking it.  Otherwise cwd can still
         # reference the directory inode and os.getcwd() raises FileNotFoundError
-        # on POSIX — breaking later tests on the same xdist worker.
+        # on POSIX -- breaking later tests on the same xdist worker.
         with contextlib.suppress(FileNotFoundError, OSError):
             os.chdir(tempfile.gettempdir())
 
@@ -76,41 +82,69 @@ class TestMCPRegistry:
 
     def test_list_servers(self):
         """Test listing servers from the registry."""
-        servers, _ = self.registry_client.list_servers()
+        servers, _ = self.registry_client.list_servers(limit=5)
         assert isinstance(servers, list), "Server list should be a list"
-        assert len(servers) > 0, "Demo registry should have some servers"
+        assert len(servers) > 0, "Public registry should have some servers"
 
-    def test_get_server_info(self):
-        """Test getting server details for a specific server."""
-        # Get the first server from the list
-        servers, _ = self.registry_client.list_servers()
+    def test_get_server(self):
+        """Test getting server details for a specific server (v0.1: keyed by name)."""
+        servers, _ = self.registry_client.list_servers(limit=5)
         if not servers:
-            pytest.skip("No servers available in the demo registry")
+            pytest.skip("No servers available in the registry")
 
-        server_id = servers[0]["id"]
-        server_info = self.registry_client.get_server_info(server_id)
+        server_name = servers[0]["name"]
+        server_info = self.registry_client.get_server(server_name)
 
-        assert server_info is not None, f"Server info for {server_id} should be retrievable"
+        assert server_info is not None, f"Server info for {server_name} should be retrievable"
         assert "name" in server_info, "Server info should include name"
-        assert "id" in server_info, "Server info should include id"
+        assert server_info["name"] == server_name
 
     def test_vscode_adapter_with_registry(self):
         """Test VSCode adapter with registry integration."""
-        # Create a VSCode adapter
-        adapter = VSCodeClientAdapter("https://demo.registry.azure-mcp.net")
+        adapter = VSCodeClientAdapter(self.registry_url)
 
-        # Get a list of servers
-        servers, _ = self.registry_client.list_servers()
+        # Walk a small page to find a server whose packages map to a VSCode-supported
+        # transport (npm, pypi, docker). The first registry entry isn't guaranteed
+        # to be VSCode-compatible (e.g. uvx-only servers are skipped).
+        servers, _ = self.registry_client.list_servers(limit=20)
         if not servers:
-            pytest.skip("No servers available in the demo registry")
+            pytest.skip("No servers available in the registry")
 
-        # Configure the first server
-        server_id = servers[0]["id"]
-        result = adapter.configure_mcp_server(server_id)
+        configured = False
+        chosen_name = None
+        last_error: Exception | None = None
+        # Known unsupported-server failures: registry shapes the adapter
+        # actively skips (uvx-only, mcpb, etc.) raise ValueError or KeyError.
+        # Anything else is captured and re-raised at the end so a registry
+        # contract regression (e.g. v0.1 packages with `identifier` instead
+        # of `name`) cannot silently disguise itself as "no compatible
+        # server" -- which is the regression #1210 was filed against.
+        _expected_skip_errors = (ValueError, KeyError, TypeError)
+        for s in servers:
+            name = s.get("name")
+            if not name:
+                continue
+            try:
+                if adapter.configure_mcp_server(name) is True:
+                    configured = True
+                    chosen_name = name
+                    break
+            except _expected_skip_errors:
+                continue
+            except Exception as exc:
+                last_error = exc
+                continue
 
-        assert result is True, f"Should be able to configure server {server_id}"
+        if not configured:
+            if last_error is not None:
+                raise AssertionError(
+                    "VSCode adapter could not configure any of the first 20 registry "
+                    "servers and the last failure was an unexpected exception (likely a "
+                    "registry contract regression): "
+                    f"{type(last_error).__name__}: {last_error}"
+                ) from last_error
+            pytest.skip("No VSCode-compatible server found in the first 20 registry entries")
 
-        # Check the generated configuration file
         config_path = os.path.join(self.test_dir.name, ".vscode", "mcp.json")
         assert os.path.exists(config_path), "Configuration file should be created"
 
@@ -118,7 +152,5 @@ class TestMCPRegistry:
             config = json.load(f)
 
         assert "servers" in config, "Config should have servers section"
-
-        # The server name in the config will be the server_id unless a name was specified
-        assert server_id in config["servers"], f"Config should include {server_id}"
-        assert "type" in config["servers"][server_id], "Server config should have type"
+        assert chosen_name in config["servers"], f"Config should include {chosen_name}"
+        assert "type" in config["servers"][chosen_name], "Server config should have type"
