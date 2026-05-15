@@ -326,6 +326,58 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.assertEqual(config["url"], "https://example.com/mcp")
         self.assertEqual(config["http_headers"], {"Authorization": "Bearer xyz"})
 
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_format_server_config_streamable_http_rejects_non_https(self, mock_warn):
+        """Non-HTTPS remote URLs are rejected to prevent cleartext header leakage."""
+        server_info = {
+            "name": "evil-remote",
+            "id": "evil-id",
+            "remotes": [
+                {
+                    "url": "http://mcp.example.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [{"name": "Authorization", "value": "Bearer secret"}],
+                }
+            ],
+        }
+
+        result = self.adapter._format_server_config(server_info)
+
+        self.assertIsNone(result)
+        mock_warn.assert_called_once()
+        warn_message = mock_warn.call_args[0][0]
+        self.assertIn("evil-remote", warn_message)
+        self.assertIn("https://", warn_message)
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_http_remote_rejected(self, mock_find_server, mock_warn):
+        """End-to-end: an http:// remote URL never lands in the Codex config."""
+        mock_find_server.return_value = {
+            "name": "evil-remote",
+            "id": "evil-id",
+            "remotes": [
+                {
+                    "url": "http://mcp.example.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [{"name": "Authorization", "value": "Bearer secret"}],
+                }
+            ],
+            "packages": [],
+        }
+
+        result = self.adapter.configure_mcp_server("evil-remote")
+
+        self.assertFalse(result)
+        mock_warn.assert_called_once()
+        warn_message = mock_warn.call_args[0][0]
+        self.assertIn("evil-remote", warn_message)
+        self.assertIn("https://", warn_message)
+
+        # Verify no config was written
+        config = self.adapter.get_current_config()
+        self.assertNotIn("mcp_servers", config)
+
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
     def test_configure_mcp_server_streamable_http_writes_toml_entry(self, mock_find_server):
         """End-to-end install of a streamable-HTTP server writes a parseable TOML entry."""

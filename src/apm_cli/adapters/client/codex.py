@@ -3,6 +3,7 @@
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import toml
 
@@ -231,8 +232,19 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
+            remote_url = (remote.get("url") or "").strip()
+
+            scheme = urlparse(remote_url).scheme.lower()
+            if scheme != "https":
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
+                    f"must use https:// (got {scheme or 'no scheme'}).",
+                    symbol="warning",
+                )
+                return None
+
             remote_config = {
-                "url": (remote.get("url") or "").strip(),
+                "url": remote_url,
                 "id": server_info.get("id", ""),
             }
             http_headers: dict[str, str] = {}
