@@ -684,7 +684,13 @@ class TestInstallProjectRootDetection:
             MCPIntegrator.install(
                 mcp_deps=["test/server"],
                 project_root=nested,
-                apm_config={},
+                # Declare every target the multi-signal nested project
+                # supports. Without this, the strict resolver raises
+                # AmbiguousHarnessError on >=2 signals (cursor, opencode,
+                # copilot from .github/) and the gate fails closed -- which
+                # is correct UX in production but obscures what THIS test
+                # is asserting (workspace project_root resolution).
+                apm_config={"targets": ["copilot", "cursor", "opencode"]},
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
@@ -742,14 +748,14 @@ class TestCollectTransitive:
 
 
 class _FakeTarget:
-    """Minimal stand-in for TargetProfile."""
+    """Minimal stand-in for TargetProfile (legacy active_targets shape)."""
 
     def __init__(self, name: str):
         self.name = name
 
 
 def _fake_active_targets(names: list[str]):
-    """Return a mock for active_targets that yields *names*."""
+    """Return a mock for the legacy active_targets that yields *names*."""
 
     def _inner(_root, _explicit=None):
         return [_FakeTarget(n) for n in names]
@@ -757,8 +763,43 @@ def _fake_active_targets(names: list[str]):
     return _inner
 
 
+def _make_signal_dir(root: Path, target: str) -> None:
+    """Create a directory marker that detect_signals() recognises.
+
+    Lets us exercise the gate's third-priority signals path without
+    mocking resolve_targets. Maps the canonical target name to the
+    minimal on-disk artifact detect_signals scans for; mirrors the
+    fixture-style setup in tests/integration/conftest.py:make_copilot_project
+    rather than duplicating private detection rules in test code.
+    """
+    if target == "copilot":
+        gh = root / ".github"
+        gh.mkdir(parents=True, exist_ok=True)
+        (gh / "copilot-instructions.md").write_text("placeholder\n")
+    elif target == "claude":
+        (root / ".claude").mkdir(parents=True, exist_ok=True)
+        (root / "CLAUDE.md").write_text("placeholder\n")
+    elif target == "codex":
+        (root / ".codex").mkdir(parents=True, exist_ok=True)
+    elif target == "cursor":
+        (root / ".cursor").mkdir(parents=True, exist_ok=True)
+    elif target == "gemini":
+        (root / ".gemini").mkdir(parents=True, exist_ok=True)
+    else:
+        raise AssertionError(f"unknown target signal in test: {target}")
+
+
 class TestGateProjectScopedRuntimes:
-    """Tests for MCPIntegrator._gate_project_scoped_runtimes (issue #1335)."""
+    """Tests for MCPIntegrator._gate_project_scoped_runtimes (issue #1335).
+
+    Behavior model: the gate delegates to
+    :func:`apm_cli.core.target_detection.resolve_targets`, which enforces
+    the strict flag > yaml > signals chain (no permissive
+    "fallback to copilot" greenfield default). Tests that exercise the
+    signals path use real on-disk markers via :func:`_make_signal_dir`
+    rather than mocking the resolver -- it keeps test failures honest if
+    detect_signals' rules change.
+    """
 
     _gate = staticmethod(MCPIntegrator._gate_project_scoped_runtimes)
 
@@ -776,9 +817,7 @@ class TestGateProjectScopedRuntimes:
 
     # -- explicit targets: (plural) gates all runtimes ---------------------
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_targets_plural_filters_unlisted_runtimes(self, mock_at, tmp_path):
-        mock_at.side_effect = _fake_active_targets(["claude"])
+    def test_targets_plural_filters_unlisted_runtimes(self, tmp_path):
         result = self._gate(
             ["claude", "copilot", "vscode", "codex"],
             user_scope=False,
@@ -788,9 +827,7 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == ["claude"]
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_target_singular_filters_unlisted_runtimes(self, mock_at, tmp_path):
-        mock_at.side_effect = _fake_active_targets(["claude"])
+    def test_target_singular_filters_unlisted_runtimes(self, tmp_path):
         result = self._gate(
             ["claude", "copilot", "vscode"],
             user_scope=False,
@@ -800,11 +837,9 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == ["claude"]
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_targets_multiple_values_keeps_all_listed(self, mock_at, tmp_path):
+    def test_targets_multiple_values_keeps_all_listed(self, tmp_path):
         # `vscode` runtime canonicalizes to `copilot`, so when copilot is
         # in active targets both `copilot` and `vscode` runtime writes pass.
-        mock_at.side_effect = _fake_active_targets(["claude", "copilot"])
         result = self._gate(
             ["claude", "copilot", "vscode", "codex", "cursor"],
             user_scope=False,
@@ -816,12 +851,10 @@ class TestGateProjectScopedRuntimes:
 
     # -- no targets field: directory-detection acts as the whitelist ------
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_no_targets_uses_directory_detection_for_all_runtimes(self, mock_at, tmp_path):
-        # active_targets returns copilot only -- every other runtime gates,
-        # not just codex/claude. Mirrors `apm install` UX. Note: `vscode`
-        # canonicalizes to `copilot` so both pass when copilot is active.
-        mock_at.side_effect = _fake_active_targets(["copilot"])
+    def test_no_targets_uses_directory_detection_for_all_runtimes(self, tmp_path):
+        # Single signal: .github/copilot-instructions.md -> copilot only.
+        # Every other runtime gates, mirroring `apm install`.
+        _make_signal_dir(tmp_path, "copilot")
         result = self._gate(
             ["copilot", "vscode", "codex", "claude", "cursor"],
             user_scope=False,
@@ -831,25 +864,25 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == ["copilot", "vscode"]
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_no_targets_keeps_all_when_all_directories_present(self, mock_at, tmp_path):
-        mock_at.side_effect = _fake_active_targets(["copilot", "vscode", "cursor"])
+    def test_no_targets_with_ambiguous_signals_fails_closed(self, tmp_path):
+        # >=2 signals + no flag + no targets: -> AmbiguousHarnessError.
+        # Strict v2 contract: gate writes nothing, surfaces red [x].
+        _make_signal_dir(tmp_path, "copilot")
+        _make_signal_dir(tmp_path, "claude")
         result = self._gate(
-            ["copilot", "vscode", "cursor"],
+            ["copilot", "claude"],
             user_scope=False,
             project_root=tmp_path,
             apm_config={},
             explicit_target=None,
         )
-        assert result == ["copilot", "vscode", "cursor"]
+        assert result == []
 
     # -- explicit_target CLI flag overrides config -------------------------
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_explicit_target_overrides_config(self, mock_at, tmp_path):
-        # Real active_targets normalizes "vscode" -> "copilot"; mirror that
-        # in the fake so the gate's vscode->copilot alias check sees a hit.
-        mock_at.side_effect = _fake_active_targets(["copilot"])
+    def test_explicit_target_overrides_config(self, tmp_path):
+        # vscode runtime -> copilot canonical; gate keeps both vscode AND
+        # copilot when the flag resolves to copilot.
         result = self._gate(
             ["claude", "copilot", "vscode", "codex"],
             user_scope=False,
@@ -859,9 +892,7 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == ["copilot", "vscode"]
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_explicit_target_without_config(self, mock_at, tmp_path):
-        mock_at.side_effect = _fake_active_targets(["cursor"])
+    def test_explicit_target_without_config(self, tmp_path):
         result = self._gate(
             ["claude", "copilot", "cursor", "codex"],
             user_scope=False,
@@ -883,9 +914,8 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == []
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_apm_config_none_falls_through_to_auto_detect(self, mock_at, tmp_path):
-        mock_at.side_effect = _fake_active_targets(["copilot"])
+    def test_apm_config_none_with_signal_falls_through_to_auto_detect(self, tmp_path):
+        _make_signal_dir(tmp_path, "copilot")
         result = self._gate(
             ["copilot", "codex"],
             user_scope=False,
@@ -896,13 +926,35 @@ class TestGateProjectScopedRuntimes:
         assert "copilot" in result
         assert "codex" not in result
 
+    # -- strict-mode greenfield: no flag/yaml/signal -> NoHarnessError ----
+
+    def test_no_signal_no_targets_no_flag_fails_closed(self, tmp_path, capsys):
+        """Greenfield (no flag, no targets:, no harness dir) writes nothing.
+
+        Closes the asymmetry the panel surfaced: canonical `apm install`
+        raises NoHarnessError on this state (install/phases/targets.py),
+        but the MCP gate previously fell back to permissive [copilot]
+        via active_targets -- the same class of silent-write bug as
+        #1335, just gated by greenfield rather than explicit-target
+        mismatch.
+        """
+        result = self._gate(
+            ["copilot", "claude", "codex", "cursor"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target=None,
+        )
+        assert result == []
+        out = capsys.readouterr().out
+        # Canonical lead-with-outcome voice + structured error body.
+        assert "Skipping all MCP config writes" in out
+        assert "could not resolve active targets" in out
+
     # -- malformed targets field: fail-closed (issue #1335 follow-up) ------
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_conflicting_targets_field_fails_closed(self, mock_at, tmp_path):
+    def test_conflicting_targets_field_fails_closed(self, tmp_path):
         # Both `target` and `targets` set -> ConflictingTargetsError.
-        # Fail-closed contract: write nothing rather than widen via auto-detect.
-        mock_at.side_effect = _fake_active_targets(["copilot", "claude", "codex"])
         result = self._gate(
             ["claude", "copilot", "vscode", "codex"],
             user_scope=False,
@@ -912,10 +964,8 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == []
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_empty_targets_list_fails_closed(self, mock_at, tmp_path):
-        # `targets: []` -> EmptyTargetsListError. Same fail-closed contract.
-        mock_at.side_effect = _fake_active_targets(["copilot", "claude", "codex"])
+    def test_empty_targets_list_fails_closed(self, tmp_path):
+        # `targets: []` -> EmptyTargetsListError.
         result = self._gate(
             ["claude", "copilot", "codex"],
             user_scope=False,
@@ -925,24 +975,33 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == []
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_explicit_target_csv_string_normalized(self, mock_at, tmp_path):
-        # `_wire_bundle_mcp_servers` passes `target_csv = "claude,copilot"`.
-        # active_targets() does not split CSV; the gate must normalize first
-        # or active_targets sees one unknown token and returns []. Regression
-        # guard for the Copilot review on PR #1336.
-        seen_explicit: list = []
+    def test_unknown_target_in_yaml_fails_closed(self, tmp_path, capsys):
+        """Non-canonical token in `targets:` -> UnknownTargetError.
 
-        def _resolve(_root, explicit=None):
-            seen_explicit.append(explicit)
-            # Real active_targets returns profiles for each canonical name in
-            # the (now-list) explicit input.
-            tokens = (
-                [explicit] if isinstance(explicit, str) else (list(explicit) if explicit else [])
-            )
-            return [_FakeTarget(t) for t in tokens]
+        scsec R2: the previous catch only handled ConflictingTargets and
+        EmptyTargets; UnknownTargetError leaked uncaught past the gate
+        on entry paths that bypass the upstream manifest validator
+        (mcp_integrator_install.py, _wire_bundle_mcp_servers).
+        """
+        result = self._gate(
+            ["copilot", "claude"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"targets": ["copilot", "bogus"]},
+            explicit_target=None,
+        )
+        assert result == []
+        out = capsys.readouterr().out
+        assert "Skipping all MCP config writes" in out
+        assert "apm.yml 'targets' field is invalid" in out
 
-        mock_at.side_effect = _resolve
+    def test_explicit_target_csv_string_normalized(self, tmp_path):
+        """Legacy `_wire_bundle_mcp_servers` CSV input must normalize first.
+
+        The canonical-name validator inside resolve_targets would reject
+        the whole CSV "claude,copilot" as one unknown token -- the gate
+        normalizes to a list before the resolver sees it.
+        """
         result = self._gate(
             ["claude", "copilot", "codex"],
             user_scope=False,
@@ -950,8 +1009,6 @@ class TestGateProjectScopedRuntimes:
             apm_config=None,
             explicit_target="claude,copilot",
         )
-        # Gate must have normalized the CSV to a list before calling active_targets.
-        assert seen_explicit == [["claude", "copilot"]]
         assert "claude" in result
         assert "copilot" in result
         assert "codex" not in result
@@ -994,15 +1051,16 @@ class TestGateProjectScopedRuntimes:
         # The gate's parse_targets_field must now see the plural list.
         assert parse_targets_field(mcp_apm_config) == ["copilot", "claude"]
 
-    @patch("apm_cli.integration.targets.active_targets")
-    def test_dropped_runtime_message_includes_active_targets(self, mock_at, tmp_path, capsys):
+    def test_dropped_runtime_message_includes_active_targets(self, tmp_path, capsys):
         """Negative-case message must name the active set (cli-logging B3).
 
         Without "(active targets: ...)" the user has to grep apm.yml to
         confirm what the gate did. Mirrors the canonical provenance line
-        shape ``Targets: X  (source: Y)``.
+        shape ``Targets: X  (source: Y)`` -- including the double-space
+        separator before the parenthetical (tc N1 contract lock).
         """
-        mock_at.side_effect = _fake_active_targets(["copilot"])
+        import re
+
         self._gate(
             ["copilot", "claude", "codex"],
             user_scope=False,
@@ -1015,3 +1073,8 @@ class TestGateProjectScopedRuntimes:
         assert "active targets: copilot" in out
         # Symbol prefix asserts the gate honors the [+]/[!]/[i]/[x] contract.
         assert "[i]" in out
+        # Lock the double-space provenance separator that mirrors
+        # canonical `Targets: X  (source: Y)`. Without this, a future
+        # contributor collapsing to a single space would silently break
+        # provenance-line parity with the install phase.
+        assert re.search(r"Skipped MCP config for [^(]+  \(active targets:", out)

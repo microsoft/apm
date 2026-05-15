@@ -978,7 +978,12 @@ def _handle_mcp_install(
     "mcp_name",
     default=None,
     metavar="NAME",
-    help="Add an MCP server entry to apm.yml. Use with --transport, --url, --env, --header, --mcp-version, or post-- stdio command. Honors the same target resolution chain as 'apm install' (--target > apm.yml targets: > auto-detect); runtimes outside the active set are skipped with an [i] line.",
+    help=(
+        "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, "
+        "--header, --mcp-version, or a stdio command after `--`. Resolves active "
+        "targets the same way `apm install` does (--target > apm.yml targets: > "
+        "auto-detect); writes only for active targets, skips others with [i]."
+    ),
 )
 @click.option(
     "--transport",

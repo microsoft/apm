@@ -952,60 +952,80 @@ class MCPIntegrator:
     ) -> list[str]:
         """Filter *target_runtimes* against the project's active targets.
 
-        Mirrors the UX of ``apm install`` for apm dependencies: the active
-        target set (explicit ``--target`` / ``targets:`` field, else
-        directory detection, else fallback ``[copilot]``) is the whitelist
-        for MCP writes too. Runtimes outside that set are skipped with an
-        info line naming them, rather than leaking config files into
-        projects that are not configured for them (#1335).
+        UX parity with ``apm install`` for apm dependencies: the active
+        target set (explicit ``--target`` > ``targets:`` field >
+        directory-signal detection) is the whitelist for MCP writes. Any
+        runtime outside that set is skipped with an info line naming both
+        what was dropped and the active set, so users can audit the
+        decision input without re-reading apm.yml (#1335).
 
-        ``explicit_target`` accepts ``str`` (single token), ``list[str]``,
-        or a CSV string (``"claude,copilot"``) -- the latter is produced by
-        ``install/local_bundle_handler.py::_wire_bundle_mcp_servers`` when
-        wiring multi-target bundles. CSV strings are normalized to a list
-        before they reach :func:`active_targets`, which only understands
-        single tokens or list input.
+        Strict resolution model -- mirrors :func:`resolve_targets`,
+        the same call ``apm install`` uses
+        (``install/phases/targets.py:233``):
+
+          - flag > yaml-targets > directory signals (no permissive
+            "fallback to copilot" greenfield default);
+          - no flag, no ``targets:``, and no harness-signal directory ->
+            :class:`NoHarnessError` (red ``[x]``, write nothing);
+          - multiple ambiguous signals with no disambiguation ->
+            :class:`AmbiguousHarnessError` (same fail-closed shape).
+
+        ``explicit_target`` accepts ``str``, ``list[str]``, or a CSV
+        string (``"claude,copilot"``) -- the latter is produced by
+        legacy callers; it is normalized to a list before the resolver
+        is invoked so the canonical-name validator does not reject it as
+        one unknown token.
 
         A malformed ``targets:`` field (conflicting ``target:`` +
-        ``targets:``, or ``targets: []``) fails closed: nothing is written.
+        ``targets:``, ``targets: []``, or unknown canonical name) likewise
+        fails closed: nothing is written.
+
+        Exit semantics differ deliberately from ``install/phases/targets.py``:
+        the canonical install phase calls ``raise SystemExit(2)`` when
+        resolution fails; this gate may be invoked mid-bundle (see
+        ``install/local_bundle_handler``) where a hard exit would corrupt
+        partial state, so we render the same red ``[x]`` voice and return
+        an empty list (fail-closed-continue).
+
+        ``user_scope=True`` is a deliberate carve-out: user-scope writes
+        target ``~/.config`` paths the user owns globally, so the
+        project-level whitelist is irrelevant. Documented in the
+        consumer install-mcp-servers guide.
         """
-        # Security note: user-scope writes target ~/.config paths the user owns
-        # globally; gating only applies to project-scoped writes that could
-        # affect shared repos. See enterprise/security model.
         if user_scope:
             return target_runtimes
 
         from apm_cli.core.apm_yml import (
             ConflictingTargetsError,
             EmptyTargetsListError,
+            UnknownTargetError,
             parse_targets_field,
         )
-        from apm_cli.integration.targets import active_targets
+        from apm_cli.core.errors import (
+            AmbiguousHarnessError,
+            NoHarnessError,
+        )
+        from apm_cli.core.target_detection import resolve_targets
+        from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
-        # --- resolve explicit targets from config -------------------------
-        explicit_from_config: list[str] = []
+        # --- step 1: parse declared targets (fail-closed on any invalid form)
+        yaml_targets: list[str] | None = None
         if apm_config:
             try:
-                explicit_from_config = parse_targets_field(apm_config)
-            except (ConflictingTargetsError, EmptyTargetsListError) as exc:
-                # Manifest declared targets but the declaration is unparseable.
-                # Fail closed: write nothing rather than fall back to permissive
-                # auto-detect, which would widen the MCP write surface beyond
-                # the user's stated intent.
-                #
-                # Voice mirrors the canonical `apm install` skills phase, which
-                # surfaces the same exception as a red [x] error block via
-                # logger.error(..., symbol="") (install/phases/targets.py:213).
-                # We render the body with symbol="" because the exception text
-                # already begins with "[x] ..." (see core/errors.py and
-                # core/apm_yml.EmptyTargetsListError). symbol="" suppresses the
-                # auto-prefix so the renderer doesn't double-stamp the marker.
-                # Exit semantics differ deliberately: the gate may be invoked
-                # mid-bundle-install (local_bundle_handler) where SystemExit(2)
-                # would corrupt partial state, so we fail closed and continue.
+                parsed = parse_targets_field(apm_config)
+                yaml_targets = parsed if parsed else None
+            except (
+                ConflictingTargetsError,
+                EmptyTargetsListError,
+                UnknownTargetError,
+            ) as exc:
+                # Voice mirrors the canonical `apm install` skills phase
+                # (install/phases/targets.py:213): red [x] lead-with-outcome,
+                # then the structured error body. symbol="" suppresses the
+                # auto-prefix on the body because the exception text already
+                # begins with "[x] ..." (see core/errors.py).
                 _rich_error(
-                    "MCP install: apm.yml targets field is invalid. "
-                    "Skipping MCP config writes for all runtimes.",
+                    "Skipping all MCP config writes -- apm.yml 'targets' field is invalid.",
                     symbol="error",
                 )
                 _rich_error(str(exc), symbol="")
@@ -1015,43 +1035,66 @@ class MCPIntegrator:
                 )
                 return []
 
-        # Normalize CSV strings ("claude,copilot") to a list before active_targets,
-        # which treats a CSV string as a single unknown token (returns []).
-        normalized_explicit: str | list[str] | None
+        # --- step 2: normalize CSV explicit_target sugar to a list -----
+        # `_wire_bundle_mcp_servers` historically passes a CSV string; the
+        # canonical-name validator inside _resolve_targets_v2 would reject
+        # the whole CSV as one unknown token. Normalize first.
+        flag: str | list[str] | None
         if isinstance(explicit_target, str) and "," in explicit_target:
-            normalized_explicit = [t.strip() for t in explicit_target.split(",") if t.strip()]
+            flag = [t.strip() for t in explicit_target.split(",") if t.strip()]
         else:
-            normalized_explicit = explicit_target
+            flag = explicit_target
 
-        # `parse_targets_field` returns [] when neither key is present, so the
-        # falsy chain below correctly falls through to auto-detect in that case.
-        config_target = normalized_explicit or explicit_from_config or None
+        # Apply the runtime->canonical-target alias BEFORE passing the flag
+        # to resolve_targets. The canonical-name validator inside the
+        # resolver only knows about CANONICAL_TARGETS (claude/copilot/...);
+        # it rejects runtime aliases (vscode/agents) as unknown tokens.
+        # The MCP gate, however, must accept those aliases because users
+        # naturally type `--target vscode` for the VS Code Copilot runtime.
+        if flag is not None:
+            tokens = [flag] if isinstance(flag, str) else list(flag)
+            flag = [RUNTIME_TO_CANONICAL_TARGET.get(t, t) for t in tokens]
 
+        # --- step 3: delegate to the canonical v2 resolver -------------
+        # This is the same call the `apm install` skills phase makes at
+        # install/phases/targets.py:233. It enforces the strict
+        # flag > yaml > signals chain and raises NoHarnessError /
+        # AmbiguousHarnessError on greenfield / under-disambiguated
+        # projects -- the ASYMMETRY closed by this PR is that the gate
+        # used to silently fall back to [copilot] in those cases.
         root = project_root or Path.cwd()
-        active = {t.name for t in active_targets(root, config_target)}
+        try:
+            resolved = resolve_targets(root, flag=flag, yaml_targets=yaml_targets)
+        except (NoHarnessError, AmbiguousHarnessError) as exc:
+            _rich_error(
+                "Skipping all MCP config writes -- could not resolve active targets.",
+                symbol="error",
+            )
+            _rich_error(str(exc), symbol="")
+            _log.debug(
+                "resolve_targets failed; failing closed (no MCP writes)",
+                exc_info=True,
+            )
+            return []
 
-        # Runtime name "vscode" maps to canonical target "copilot" (the same
-        # alias active_targets honors for explicit_target). Without this map
-        # a project with `.github/` set but no `.copilot/` would correctly
-        # detect copilot but still gate the vscode runtime.
-        def _canonical(rt: str) -> str:
-            return "copilot" if rt in ("vscode", "agents") else rt
+        active = set(resolved.targets)
 
-        out = [rt for rt in target_runtimes if _canonical(rt) in active]
+        # Runtime name "vscode" maps to canonical target "copilot" (same
+        # alias active_targets honors); shared table prevents drift with
+        # the alias resolution in integration/targets.py.
+        out = [rt for rt in target_runtimes if RUNTIME_TO_CANONICAL_TARGET.get(rt, rt) in active]
         dropped = sorted(set(target_runtimes) - set(out))
         if dropped:
-            # Surface the consequence so users can confirm their targets
-            # whitelist (explicit or directory-detected) took effect. Mirror
-            # the shape of the canonical `Targets: X  (source: Y)` provenance
-            # line emitted by the skills phase (target_detection.format_provenance):
-            # name the dropped runtimes AND the active set on a single line so
-            # the user can audit the decision input without re-reading apm.yml.
-            # Double-space before "(active targets:" matches the canonical
-            # provenance line spacing (install/phases/targets.py:265 +
-            # core/target_detection.py:777).
+            # Mirror the canonical `Targets: X  (source: Y)` provenance shape
+            # (install/phases/targets.py:265, core/target_detection.py:777):
+            # double-space before the parenthetical. The "or '<none>'" guard is
+            # defensive -- an empty active set is unreachable when
+            # _resolve_targets_v2 succeeded, but if a future contract change
+            # widens that contract we surface "<none>" rather than render
+            # "(active targets: )" which reads as a renderer bug.
+            active_csv = ", ".join(sorted(active)) or "<none>"
             _rich_info(
-                f"Skipped MCP config for {', '.join(dropped)}  "
-                f"(active targets: {', '.join(sorted(active))})",
+                f"Skipped MCP config for {', '.join(dropped)}  (active targets: {active_csv})",
                 symbol="info",
             )
             _log.debug(
