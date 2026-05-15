@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- MCP registry client now targets the `/v0.1/` API per the MCP Registry spec (https://github.com/modelcontextprotocol/registry). Self-hosted registries serving only the legacy `/v0/` paths will return 404; upgrade your registry to a v0.1-compliant build. The public registry at `api.mcp.github.com` and the official `registry.modelcontextprotocol.io` are unaffected. `SimpleRegistryClient.get_server_info(server_id)` is renamed to `SimpleRegistryClient.get_server(server_name, version="latest")` to advertise the parameter-semantics flip from UUID to serverName; the old name remains for one minor as a `DeprecationWarning` shim. The legacy UUID strategy in `find_server_by_reference` is removed (the spec keys per-server lookup on serverName, not UUID). Conflict-detection-by-id silently degrades to the existing name-based dedupe path; tracking issue for keying conflict detection on name end-to-end will follow. (#1210)
+
 ### Fixed
 
 - Gemini CLI: `apm install -g --mcp NAME` now correctly writes to `~/.gemini/settings.json` (user scope) and `apm install` from outside the target project writes to `<project_root>/.gemini/settings.json` instead of `cwd`. Previously `--global` had no effect on Gemini and project-scope writes silently landed in the wrong directory. The matching opt-in gate and cleanup paths in `MCPIntegrator` are aligned in the same change. (#1299)
