@@ -85,7 +85,8 @@ APM has no secret store. The contract is:
   hold *references* (e.g. `GITHUB_TOKEN: ${GITHUB_TOKEN}`) that the
   harness resolves at agent runtime, not literal secrets. Source:
   `src/apm_cli/install/mcp/entry.py`,
-  `src/apm_cli/integration/mcp_integrator.py:205,219-221`.
+  `src/apm_cli/integration/mcp_integrator_install.py` (orchestration) and
+  `src/apm_cli/integration/mcp_integrator.py` (runtime wiring).
 - **`apm install` writes `apm_modules/` to `.gitignore` automatically**
   on first install. Source:
   `src/apm_cli/commands/_helpers.py:437` (`_update_gitignore_for_apm_modules`).

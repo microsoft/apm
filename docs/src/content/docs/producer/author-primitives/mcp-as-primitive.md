@@ -129,7 +129,8 @@ is trusted only when your package is a **direct** dependency of the
 consumer. If your package is pulled in transitively, APM warns and
 **skips** the MCP entry unless the consumer passes
 `--trust-transitive-mcp`. Source:
-`src/apm_cli/integration/mcp_integrator.py:124-145`.
+`src/apm_cli/integration/mcp_integrator_install.py` and
+`src/apm_cli/integration/mcp_integrator.py`.
 
 Implications for producers:
 

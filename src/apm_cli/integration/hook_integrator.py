@@ -559,6 +559,7 @@ class HookIntegrator(BaseIntegrator):
         package_name = self._get_package_name(package_info)
         hooks_integrated = 0
         scripts_copied = 0
+        scripts_adopted = 0
         target_paths: list[Path] = []
 
         for hook_file in hook_files:
@@ -599,6 +600,10 @@ class HookIntegrator(BaseIntegrator):
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
                 ensure_path_within(target_script, project_root)
+                if self.is_content_identical_to_source(target_script, source_file):
+                    target_paths.append(target_script)
+                    scripts_adopted += 1
+                    continue
                 if self.check_collision(
                     target_script, target_rel, managed_files, force, diagnostics=diagnostics
                 ):
@@ -614,6 +619,7 @@ class HookIntegrator(BaseIntegrator):
             files_skipped=0,
             target_paths=target_paths,
             scripts_copied=scripts_copied,
+            files_adopted=scripts_adopted,
         )
 
     # ------------------------------------------------------------------
@@ -659,6 +665,7 @@ class HookIntegrator(BaseIntegrator):
         package_name = self._get_package_name(package_info)
         hooks_integrated = 0
         scripts_copied = 0
+        scripts_adopted = 0
         target_paths: list[Path] = []
         # Events whose prior-owned entries have already been cleared on
         # this install run. Packages can contribute to the same event
@@ -780,6 +787,10 @@ class HookIntegrator(BaseIntegrator):
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
                 ensure_path_within(target_script, project_root)
+                if self.is_content_identical_to_source(target_script, source_file):
+                    target_paths.append(target_script)
+                    scripts_adopted += 1
+                    continue
                 if self.check_collision(
                     target_script,
                     target_rel,
@@ -807,6 +818,7 @@ class HookIntegrator(BaseIntegrator):
             files_skipped=0,
             target_paths=target_paths,
             scripts_copied=scripts_copied,
+            files_adopted=scripts_adopted,
         )
 
     # ------------------------------------------------------------------

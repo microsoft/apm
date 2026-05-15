@@ -47,6 +47,29 @@ _MARKETPLACE_RE = re.compile(r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)(?:#(.+))?$")
 _SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
 
 
+@dataclass(frozen=True)
+class CrossRepoMisconfigRisk:
+    """Signal that a cross-repo dict ``type: github`` source on an enterprise
+    GitHub-family marketplace resolved to a bare canonical (#1305).
+
+    Attached to :class:`MarketplacePluginResolution` when the marketplace is on
+    ``*.ghe.com`` and the plugin's dict source declares a bare ``owner/repo``
+    that does not match the marketplace project. The resolver deliberately
+    leaves these canonicals bare (PR #1292 scoped its host backfill to
+    in-marketplace sources), so ``DependencyReference.parse`` defaults the host
+    to ``github.com``. Two intents share this syntax -- a legitimate cross-host
+    ``github.com`` open-source dep, or a misconfigured same-host entry that
+    should have been ``corp.ghe.com/owner/repo`` -- and the resolver cannot
+    distinguish them. The install command consults this sentinel when the
+    package fails validation so an actionable hint surfaces only at the
+    failure boundary, never on the legitimate path.
+    """
+
+    marketplace_host: str
+    bare_repo_field: str
+    suggested_qualified_repo: str
+
+
 @dataclass
 class MarketplacePluginResolution:
     """Outcome of :func:`resolve_marketplace_plugin`.
@@ -57,11 +80,15 @@ class MarketplacePluginResolution:
     subdirectory plugins), install logic should prefer it over
     :meth:`~apm_cli.models.dependency.reference.DependencyReference.parse`
     on :attr:`canonical` to avoid mis-parsing nested paths as GitLab project segments.
+    :attr:`cross_repo_misconfig_risk` is non-``None`` only for the #1305
+    cross-repo bare-on-enterprise pattern; consumers emit it as a hint when the
+    package subsequently fails validation.
     """
 
     canonical: str
     plugin: MarketplacePlugin
     dependency_reference: DependencyReference | None = None
+    cross_repo_misconfig_risk: CrossRepoMisconfigRisk | None = None
 
     def __iter__(self) -> Iterator[str | MarketplacePlugin]:
         yield self.canonical
@@ -219,6 +246,55 @@ def _needs_canonical_host_prefix(canonical: str, host: str) -> bool:
     if ":" in first_segment:
         return False
     return first_segment.lower() != h.lower()
+
+
+def _compute_cross_repo_misconfig_risk(
+    plugin: MarketplacePlugin,
+    source: MarketplaceSource,
+    canonical: str,
+    dep_ref: DependencyReference | None,
+) -> CrossRepoMisconfigRisk | None:
+    """Identify the #1305 misconfiguration: cross-repo dict ``type: github``
+    source with bare ``repo`` on an enterprise GitHub-family marketplace.
+
+    Returns a :class:`CrossRepoMisconfigRisk` when **all** of:
+
+    - ``dep_ref`` is ``None`` (GitHub-family virtual-shorthand path; GitLab and
+      self-managed FQDNs build a structured ref upstream and sidestep the bug)
+    - ``plugin.source`` is a dict whose normalized type is ``github`` (other
+      dict types -- ``gitlab``, ``git-subdir`` -- hit the same auth-routing
+      bug but the "host-qualify with marketplace host" remediation only
+      matches operator intent for the GitHub family)
+    - the source is **not** an in-marketplace reference (PR #1292 already
+      backfills the host for those)
+    - ``_needs_canonical_host_prefix`` agrees the canonical is bare and the
+      host is GitHub-family enterprise (``*.ghe.com``; idempotent against
+      already host-qualified, URL, and SSH forms)
+    - the ``repo`` field is a non-empty ``owner/repo`` shorthand
+
+    Otherwise returns ``None``. Pure -- no logging, no side effects.
+    """
+    if dep_ref is not None:
+        return None
+    if not isinstance(plugin.source, dict):
+        return None
+    if _coerce_dict_plugin_type(plugin.source) != "github":
+        return None
+    if _is_in_marketplace_source(plugin, source):
+        return None
+    if not _needs_canonical_host_prefix(canonical, source.host):
+        return None
+    repo_field = plugin.source.get("repo", "")
+    if not isinstance(repo_field, str):
+        return None
+    bare = repo_field.strip().lstrip("/")
+    if "/" not in bare:
+        return None
+    return CrossRepoMisconfigRisk(
+        marketplace_host=source.host,
+        bare_repo_field=bare,
+        suggested_qualified_repo=f"{source.host}/{bare}",
+    )
 
 
 def _marketplace_https_git_url(source: MarketplaceSource) -> str:
@@ -607,6 +683,19 @@ def resolve_marketplace_plugin(
             marketplace_name,
         )
 
+    # ---- Cross-repo misconfig sentinel (#1305) ----
+    # PR #1292's host backfill only covers in-marketplace sources. A cross-repo
+    # dict ``type: github`` source with a bare ``repo`` on an enterprise
+    # marketplace cannot be safely backfilled here -- the bare syntax also
+    # legitimately means "a github.com open-source dep from this enterprise
+    # marketplace" -- so the canonical stays bare and downstream auth routes at
+    # github.com. Attach a sentinel so the install command can emit an
+    # actionable hint ONLY when the package subsequently fails validation; the
+    # legitimate cross-host path validates fine and never sees the hint.
+    cross_repo_misconfig_risk = _compute_cross_repo_misconfig_risk(
+        plugin, source, canonical, dep_ref
+    )
+
     # ---- Raw ref override ----
     # When version_spec is provided it is treated as a raw git ref that
     # overrides whatever ref came from the marketplace source field.
@@ -674,5 +763,8 @@ def resolve_marketplace_plugin(
         logger.debug("Shadow detection failed", exc_info=True)
 
     return MarketplacePluginResolution(
-        canonical=canonical, plugin=plugin, dependency_reference=dep_ref
+        canonical=canonical,
+        plugin=plugin,
+        dependency_reference=dep_ref,
+        cross_repo_misconfig_risk=cross_repo_misconfig_risk,
     )

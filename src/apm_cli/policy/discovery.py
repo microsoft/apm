@@ -1080,7 +1080,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
         },
         "unmanaged_files": {
             "action": policy.unmanaged_files.action,
-            "directories": list(policy.unmanaged_files.directories),
+            "directories": list(policy.unmanaged_files.directories or ()),
         },
     }
 

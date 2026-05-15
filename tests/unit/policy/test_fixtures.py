@@ -52,7 +52,8 @@ class TestPolicyFixtures(unittest.TestCase):
         self.assertEqual(policy.name, "minimal")
         self.assertEqual(policy.enforcement, "warn")
         self.assertEqual(policy.dependencies.require_resolution, "project-wins")
-        self.assertEqual(policy.unmanaged_files.action, None)
+        self.assertIsNone(policy.unmanaged_files.action)
+        self.assertIsNone(policy.unmanaged_files.directories)
         self.assertEqual(policy.unmanaged_files.effective_action, "ignore")
 
     def test_repo_override_has_extends(self):

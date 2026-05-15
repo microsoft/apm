@@ -191,19 +191,43 @@ def _merge_manifest(parent: ManifestPolicy, child: ManifestPolicy) -> ManifestPo
     )
 
 
+def _coerce_unmanaged_action_for_escalate(value: str | None) -> str:
+    """Treat ``None`` as the weakest rung when comparing two concrete opinions."""
+    return "ignore" if value is None else value
+
+
+def _coerce_unmanaged_directories_for_union(value: tuple[str, ...] | None) -> tuple[str, ...]:
+    return () if value is None else value
+
+
 def _merge_unmanaged_files(
     parent: UnmanagedFilesPolicy, child: UnmanagedFilesPolicy
 ) -> UnmanagedFilesPolicy:
+    """Merge unmanaged-files policy; omitted child block is transparent (#1198)."""
+    if child.action is None and child.directories is None:
+        return parent
+
     if child.action is None:
-        merged_action = parent.action
-    elif parent.action is None:
-        merged_action = child.action
+        eff_action_raw = parent.action
     else:
-        merged_action = _escalate(_UNMANAGED_ACTION_LEVELS, parent.action, child.action)
-    return UnmanagedFilesPolicy(
-        action=merged_action,
-        directories=_union(parent.directories, child.directories),
-    )
+        eff_action_raw = _escalate(
+            _UNMANAGED_ACTION_LEVELS,
+            _coerce_unmanaged_action_for_escalate(parent.action),
+            child.action,
+        )
+
+    if child.directories is None:
+        eff_dirs = parent.directories
+    else:
+        eff_dirs = _union(
+            _coerce_unmanaged_directories_for_union(parent.directories),
+            child.directories,
+        )
+
+    eff_action = eff_action_raw if eff_action_raw is not None else "ignore"
+    eff_dirs_out: tuple[str, ...] = () if eff_dirs is None else eff_dirs
+
+    return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out)
 
 
 # ---------------------------------------------------------------------------

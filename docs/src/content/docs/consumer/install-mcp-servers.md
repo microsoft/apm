@@ -82,18 +82,50 @@ writes a runtime-specific MCP config file. The schemas differ; the
 | Claude Code | `.mcp.json` (project) or `~/.claude.json` (`-g`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
 | Codex CLI | `~/.codex/config.toml` | global | TOML `[mcp_servers.*]` |
-| Gemini CLI | `.gemini/settings.json` | project (only if `.gemini/` exists) | JSON `mcpServers` |
+| Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 
-Cursor, Gemini, and OpenCode are opt-in by directory: APM only writes
-their config when the corresponding `.cursor/`, `.gemini/`, or
-`.opencode/` directory already exists in the project. This avoids
-creating runtime artifacts for tools you do not use.
+## How `targets:` gates which configs get written
 
-`apm install -g --mcp NAME` is restricted to the two harnesses with
-true global MCP support: Copilot CLI and Codex CLI. The other
-runtimes are project-scoped.
+MCP install honors the same target resolution chain as `apm install`
+for any other dependency: see
+[Where files land](../install-packages/#where-files-land).
+In short: `--target` wins, then `apm.yml`'s `targets:`, then
+auto-detect from harness directories.
+
+When a runtime is outside the active target set, APM does NOT write
+its MCP config -- and announces the drop on stdout so you can confirm
+the gate took effect:
+
+```text
+[i] Skipped MCP config for claude, codex  (active targets: copilot)
+```
+
+This single rule replaces two older ones that used to coexist:
+
+- A "directory opt-in" carve-out for Cursor / Gemini / OpenCode -- now
+  redundant, because `targets:` (or auto-detection) drives the gate
+  for those runtimes too.
+- The pre-#1335 silent skip path, which dropped non-listed runtimes
+  without telling you.
+
+A malformed `targets:` field (both `target:` and `targets:` set,
+`targets: []`, or an unknown target name) fails closed: no MCP files
+are written and an `[x]` error names the field to fix. A greenfield
+project with no `targets:`, no `--target` flag, AND no detected
+signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also
+fails closed with the same `[x]` voice -- consistent with how
+`apm install` treats the same input. Pin a target with `--target` or
+declare one in `apm.yml`. (#1335)
+
+`apm install -g --mcp NAME` is a deliberate carve-out: it routes the
+write to each runtime's user-scope MCP config (Copilot CLI to
+`~/.copilot/mcp-config.json`, Codex CLI to `~/.codex/config.toml`,
+Gemini CLI to `~/.gemini/settings.json`) and does not consult the
+project-scope `targets:` whitelist -- user-scope writes are by
+definition not project-bound. Workspace-only runtimes (VS Code,
+Cursor, OpenCode) are skipped at user scope.
 
 ## stdio vs HTTP servers
 

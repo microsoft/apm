@@ -73,6 +73,12 @@ class TestValidatePolicy(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("unmanaged_files.action", errors[0])
 
+    def test_unmanaged_files_must_be_mapping(self):
+        for bad in ([], ["x"], "warn", 1):
+            errors, warnings = validate_policy({"unmanaged_files": bad})  # noqa: RUF059
+            self.assertEqual(len(errors), 1, repr(bad))
+            self.assertIn("unmanaged_files must be a YAML mapping", errors[0])
+
     def test_negative_cache_ttl(self):
         errors, warnings = validate_policy({"cache": {"ttl": -1}})  # noqa: RUF059
         self.assertEqual(len(errors), 1)
@@ -218,6 +224,8 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertIsNone(policy.dependencies.allow)
         self.assertEqual(policy.dependencies.max_depth, 50)
         self.assertFalse(policy.manifest.require_explicit_includes)
+        self.assertIsNone(policy.unmanaged_files.action)
+        self.assertIsNone(policy.unmanaged_files.directories)
 
     def test_require_explicit_includes_true(self):
         yaml_str = textwrap.dedent("""
@@ -324,7 +332,7 @@ class TestLoadPolicyFromString(unittest.TestCase):
         policy, _ = load_policy("name: test\nenforcement: warn\n")
         self.assertIsNone(policy.unmanaged_files.action)
         self.assertEqual(policy.unmanaged_files.effective_action, "ignore")
-        self.assertEqual(policy.unmanaged_files.directories, ())
+        self.assertIsNone(policy.unmanaged_files.directories)
 
     def test_absent_dependencies_block_gives_none_deny_and_require(self):
         """Entirely absent dependencies: block -> deny=None, require=None (Fix 2)."""

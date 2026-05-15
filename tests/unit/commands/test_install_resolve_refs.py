@@ -280,3 +280,214 @@ class TestResolvePackageReferencesGitLabDirectShorthandPersistence:
         assert ref.repo_url == "epm-ease/apm-registry"
         assert ref.virtual_path == "agents/ai-run-ba-flow"
         assert ref.is_virtual is True
+
+
+# ---------------------------------------------------------------------------
+# #1305 -- cross-repo bare-on-enterprise hint surfaces on validation failure
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePackageReferencesCrossRepoMisconfigHint:
+    """When a marketplace resolution attaches a ``CrossRepoMisconfigRisk``
+    sentinel and the package later fails validation, an actionable hint must
+    be emitted via the logger. The legitimate cross-host path validates
+    successfully and never reaches the hint branch."""
+
+    @staticmethod
+    def _resolution_with_risk():
+        from apm_cli.marketplace.models import MarketplacePlugin
+        from apm_cli.marketplace.resolver import (
+            CrossRepoMisconfigRisk,
+            MarketplacePluginResolution,
+        )
+
+        plugin = MarketplacePlugin(
+            name="shared-tool",
+            source={
+                "type": "github",
+                "repo": "platform-team/shared-tool",
+                "path": "plugins/shared",
+            },
+        )
+        return MarketplacePluginResolution(
+            canonical="platform-team/shared-tool/plugins/shared",
+            plugin=plugin,
+            dependency_reference=None,
+            cross_repo_misconfig_risk=CrossRepoMisconfigRisk(
+                marketplace_host="corp.ghe.com",
+                bare_repo_field="platform-team/shared-tool",
+                suggested_qualified_repo=("corp.ghe.com/platform-team/shared-tool"),
+            ),
+        )
+
+    @staticmethod
+    def _resolution_without_risk():
+        from apm_cli.marketplace.models import MarketplacePlugin
+        from apm_cli.marketplace.resolver import MarketplacePluginResolution
+
+        plugin = MarketplacePlugin(
+            name="shared-tool",
+            source="./plugins/shared",
+        )
+        return MarketplacePluginResolution(
+            canonical="myorg/my-marketplace/plugins/shared",
+            plugin=plugin,
+            dependency_reference=None,
+            cross_repo_misconfig_risk=None,
+        )
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    @patch("apm_cli.marketplace.resolver.parse_marketplace_ref")
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_hint_emitted_on_validation_failure_with_risk(
+        self,
+        mock_dep_cls,
+        mock_parse_ref,
+        mock_resolve_mkt,
+        mock_validate,
+    ):
+        """Risk-bearing resolution that fails validation emits the hint."""
+        mock_parse_ref.return_value = ("shared-tool", "my-marketplace", None)
+        mock_resolve_mkt.return_value = self._resolution_with_risk()
+        ref = _make_dep_ref(
+            "platform-team/shared-tool/plugins/shared",
+            "github.com/platform-team/shared-tool/plugins/shared",
+        )
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        logger = MagicMock()
+        logger.verbose = False
+
+        _resolve_package_references(
+            ["shared-tool@my-marketplace"],
+            [],
+            set(),
+            logger=logger,
+        )
+
+        # The hint must be emitted exactly once via ``logger.warning``
+        # (PR #1292 panel review's explicit guidance for this follow-up).
+        # Assertions are anchored to the surrounding prose so a CodeQL
+        # "incomplete URL substring sanitization" pattern recognizer does
+        # not flag a bare hostname substring check in this test file.
+        warn_calls = list(logger.warning.call_args_list)
+        assert len(warn_calls) == 1
+        # ``info`` must NOT be used for the hint (the original PR shipped
+        # ``logger.info`` and was caught by the 3-persona panel convergence).
+        assert logger.info.call_args_list == []
+        emitted = warn_calls[0].args[0]
+        # Hint identifies the plugin@marketplace and both intent branches.
+        assert "'shared-tool@my-marketplace'" in emitted
+        assert "registered on 'corp.ghe.com'" in emitted
+        assert "`repo: platform-team/shared-tool`" in emitted
+        assert "'corp.ghe.com/platform-team/shared-tool'" in emitted
+        # Second clause acknowledges the legitimate-cross-host path so a
+        # transient-failure on a real github.com dep is not misdirected.
+        assert "intentionally a github.com dependency" in emitted
+        # Stale ``Hint:`` prefix from the original PR must not return; the
+        # warning symbol carries the advisory signal on its own.
+        assert "Hint:" not in emitted
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    @patch("apm_cli.marketplace.resolver.parse_marketplace_ref")
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_hint_not_emitted_when_validation_passes_even_with_risk(
+        self,
+        mock_dep_cls,
+        mock_parse_ref,
+        mock_resolve_mkt,
+        mock_validate,
+    ):
+        """The legitimate cross-host path (validation succeeds) must NOT
+        emit the hint -- this is the entire reason the hint lives at the
+        failure boundary instead of at resolver time."""
+        mock_parse_ref.return_value = ("shared-tool", "my-marketplace", None)
+        mock_resolve_mkt.return_value = self._resolution_with_risk()
+        ref = _make_dep_ref(
+            "platform-team/shared-tool/plugins/shared",
+            "github.com/platform-team/shared-tool/plugins/shared",
+        )
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        logger = MagicMock()
+        logger.verbose = False
+
+        _resolve_package_references(
+            ["shared-tool@my-marketplace"],
+            [],
+            set(),
+            logger=logger,
+        )
+
+        assert logger.warning.call_args_list == []
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    @patch("apm_cli.marketplace.resolver.parse_marketplace_ref")
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_no_hint_when_resolution_has_no_risk(
+        self,
+        mock_dep_cls,
+        mock_parse_ref,
+        mock_resolve_mkt,
+        mock_validate,
+    ):
+        """In-marketplace / non-enterprise resolutions carry no risk
+        sentinel; validation-fail must NOT print a hint."""
+        mock_parse_ref.return_value = ("shared-tool", "my-marketplace", None)
+        mock_resolve_mkt.return_value = self._resolution_without_risk()
+        ref = _make_dep_ref(
+            "myorg/my-marketplace/plugins/shared",
+            "github.com/myorg/my-marketplace/plugins/shared",
+        )
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        logger = MagicMock()
+        logger.verbose = False
+
+        _resolve_package_references(
+            ["shared-tool@my-marketplace"],
+            [],
+            set(),
+            logger=logger,
+        )
+
+        assert logger.warning.call_args_list == []
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_no_hint_for_plain_owner_repo_failure(
+        self,
+        mock_dep_cls,
+        mock_validate,
+    ):
+        """A bare ``owner/repo`` (no marketplace) that fails validation
+        must NOT trigger the hint -- the risk map is only populated by
+        marketplace resolutions."""
+        ref = _make_dep_ref(
+            "platform-team/shared-tool",
+            "github.com/platform-team/shared-tool",
+        )
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        logger = MagicMock()
+        logger.verbose = False
+
+        _resolve_package_references(
+            ["platform-team/shared-tool"],
+            [],
+            set(),
+            logger=logger,
+        )
+
+        assert logger.warning.call_args_list == []

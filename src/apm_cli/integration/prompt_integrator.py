@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
@@ -169,13 +170,35 @@ class PromptIntegrator(BaseIntegrator):
         # Process each prompt file
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths = []
         total_links_resolved = 0
 
         for source_file in prompt_files:
             target_filename = self.get_target_filename(source_file, package_info.package.name)
             target_path = prompts_dir / target_filename
+            # Defense-in-depth: target_filename is derived from source
+            # file name; assert containment under prompts_dir to mirror
+            # the guard already present in command/instruction
+            # integrators.
+            try:
+                ensure_path_within(target_path, prompts_dir)
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected prompt target path: {exc}",
+                        package=package_info.package.name,
+                    )
+                files_skipped += 1
+                continue
             rel_path = portable_relpath(target_path, project_root)
+
+            if self.is_content_identical_to_source(target_path, source_file):
+                # Pre-existing file is byte-identical to source -- silently
+                # adopt. See BaseIntegrator.is_content_identical_to_source.
+                target_paths.append(target_path)
+                files_adopted += 1
+                continue
 
             if self.check_collision(
                 target_path, rel_path, managed_files, force, diagnostics=diagnostics
@@ -194,6 +217,7 @@ class PromptIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     # DEPRECATED: use sync_for_target(...) instead.

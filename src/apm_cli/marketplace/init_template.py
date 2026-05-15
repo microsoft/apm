@@ -89,6 +89,7 @@ def render_marketplace_yml_template(
 _MARKETPLACE_BLOCK_TEMPLATE = """\
 # Marketplace authoring config (APM-only).
 # Run 'apm pack' to compile this block to .claude-plugin/marketplace.json.
+# Optionally enable Codex output below to also write .agents/plugins/marketplace.json.
 #
 # Top-level 'name', 'description', and 'version' are inherited from
 # the project (above) by default.  Override them inside this block when
@@ -106,11 +107,25 @@ marketplace:
   build:
     tagPattern: "v{{version}}"
 
+  # Output targets (map form). Claude is enabled by default.
+  outputs:
+    claude: {{}}
+    # Uncomment to also build the Codex marketplace artifact:
+    # codex:
+    #   path: .agents/plugins/marketplace.json
+    # NOTE: codex output requires every package to declare 'category:'
+    # in apm.yml -- see the packages section below.
+
+  # CI tip: build one or all formats with a machine-readable manifest:
+  #   apm pack --marketplace=claude,codex --json | jq -r '.marketplace.outputs[].path'
+
   packages:
     - name: example-package
       description: Human-readable description of the package
       source: {owner}/example-package
       version: "^1.0.0"
+      # Required when outputs includes codex:
+      # category: Productivity
       # Optional overrides:
       # subdir: path/inside/repo
       # tagPattern: "example-package-v{{version}}"

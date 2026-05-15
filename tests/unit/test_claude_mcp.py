@@ -119,6 +119,36 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
         self.assertIn("srv", data["mcpServers"])
 
+    def test_configure_self_defined_stdio_preserves_env(self):
+        with patch.object(self.adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = {
+                "name": "env-demo",
+                "_raw_stdio": {
+                    "command": "npx",
+                    "args": ["-y", "example-mcp"],
+                    "env": {
+                        "DEMO_ENV": "demo-value",
+                        "PORT": 3000,
+                        "DEBUG": False,
+                        "RATE": 0.5,
+                    },
+                },
+            }
+
+            ok = self.adapter.configure_mcp_server("env-demo")
+
+        self.assertTrue(ok)
+        data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            data["mcpServers"]["env-demo"]["env"],
+            {
+                "DEMO_ENV": "demo-value",
+                "PORT": "3000",
+                "DEBUG": "false",
+                "RATE": "0.5",
+            },
+        )
+
 
 class TestClaudeClientAdapterUser(unittest.TestCase):
     """User scope: ``~/.claude.json`` top-level ``mcpServers``."""

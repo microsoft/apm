@@ -140,9 +140,18 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
         if rei is not None and not isinstance(rei, bool):
             errors.append(f"manifest.require_explicit_includes must be a boolean, got '{rei}'")
 
-    # unmanaged_files.action
+    # unmanaged_files
     uf = data.get("unmanaged_files")
-    if isinstance(uf, dict):
+    if uf is not None and not isinstance(uf, dict):
+        errors.append(
+            "unmanaged_files must be a YAML mapping "
+            f"(got {type(uf).__name__} {uf!r}); use a block, for example:\n"
+            "  unmanaged_files:\n"
+            "    action: deny\n"
+            "    directories:\n"
+            "      - .github/instructions"
+        )
+    elif isinstance(uf, dict):
         action = uf.get("action")
         if action is not None and action not in _VALID_UNMANAGED_ACTION:
             errors.append(
@@ -214,11 +223,14 @@ def _build_policy(data: dict) -> ApmPolicy:
         require_explicit_includes=bool(manifest_data.get("require_explicit_includes", False)),
     )
 
-    uf_data = data.get("unmanaged_files") or {}
-    unmanaged_files = UnmanagedFilesPolicy(
-        action=uf_data.get("action"),  # None when absent -> "no opinion"
-        directories=_parse_tuple(uf_data.get("directories")),
-    )
+    raw_uf = data.get("unmanaged_files")
+    if raw_uf is None:
+        unmanaged_files = UnmanagedFilesPolicy(action=None, directories=None)
+    else:
+        uf_data = raw_uf
+        action = uf_data.get("action")
+        directories = _parse_tuple(uf_data.get("directories")) if "directories" in uf_data else None
+        unmanaged_files = UnmanagedFilesPolicy(action=action, directories=directories)
 
     return ApmPolicy(
         name=data.get("name", "") or "",

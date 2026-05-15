@@ -94,7 +94,7 @@ def _count_rules(policy: ApmPolicy | None) -> dict[str, int]:
         "mcp_transports_allowed": _allow_count(policy.mcp.transport.allow),
         "compilation_targets_allowed": _allow_count(policy.compilation.target.allow),
         "manifest_required_fields": len(policy.manifest.required_fields),
-        "unmanaged_files_directories": len(policy.unmanaged_files.directories),
+        "unmanaged_files_directories": len(policy.unmanaged_files.directories or ()),
     }
 
 

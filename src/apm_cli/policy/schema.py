@@ -101,10 +101,20 @@ class ManifestPolicy:
 
 @dataclass(frozen=True)
 class UnmanagedFilesPolicy:
-    """Rules for files not tracked in apm.lock."""
+    """Rules for files not tracked in apm.lock.
 
-    action: str | None = None  # None = no opinion; "ignore" | "warn" | "deny"
-    directories: tuple[str, ...] = ()
+    ``action=None`` and ``directories=None`` together mean the policy file
+    expressed no ``unmanaged_files:`` section (or an empty mapping); during
+    :func:`~apm_cli.policy.inheritance.merge_policies` the child is transparent
+    and the parent block is inherited unchanged.
+
+    When either field is set (including ``directories=()`` with a declared
+    ``directories`` key), the merge applies escalation / union rules.
+    ``action`` is then one of ``ignore`` | ``warn`` | ``deny``.
+    """
+
+    action: str | None = None  # None | ignore | warn | deny
+    directories: tuple[str, ...] | None = None  # None -> no opinion; () explicit
 
     @property
     def effective_action(self) -> str:
