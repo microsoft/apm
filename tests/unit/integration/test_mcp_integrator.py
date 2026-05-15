@@ -731,3 +731,163 @@ class TestCollectTransitive:
     def test_returns_empty_when_dir_empty(self, tmp_path):
         result = MCPIntegrator.collect_transitive(tmp_path)
         assert result == []
+
+
+# ===========================================================================
+# _gate_project_scoped_runtimes — issue #1335
+# ===========================================================================
+
+
+class _FakeTarget:
+    """Minimal stand-in for TargetProfile."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+
+def _fake_active_targets(names: list[str]):
+    """Return a mock for active_targets that yields *names*."""
+
+    def _inner(_root, _explicit=None):
+        return [_FakeTarget(n) for n in names]
+
+    return _inner
+
+
+class TestGateProjectScopedRuntimes:
+    """Tests for MCPIntegrator._gate_project_scoped_runtimes (issue #1335)."""
+
+    _gate = staticmethod(MCPIntegrator._gate_project_scoped_runtimes)
+
+    # -- user_scope bypass --------------------------------------------------
+
+    def test_user_scope_bypasses_all_gating(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude"]},
+            explicit_target=None,
+        )
+        assert result == ["claude", "copilot", "vscode", "codex"]
+
+    # -- explicit targets: (plural) gates all runtimes ---------------------
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_targets_plural_filters_unlisted_runtimes(self, mock_at, tmp_path):
+        mock_at.side_effect = _fake_active_targets(["claude"])
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude"]},
+            explicit_target=None,
+        )
+        assert result == ["claude"]
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_target_singular_filters_unlisted_runtimes(self, mock_at, tmp_path):
+        mock_at.side_effect = _fake_active_targets(["claude"])
+        result = self._gate(
+            ["claude", "copilot", "vscode"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"target": "claude"},
+            explicit_target=None,
+        )
+        assert result == ["claude"]
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_targets_multiple_values_keeps_all_listed(self, mock_at, tmp_path):
+        mock_at.side_effect = _fake_active_targets(["claude", "copilot"])
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex", "cursor"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude", "copilot"]},
+            explicit_target=None,
+        )
+        assert result == ["claude", "copilot"]
+
+    # -- no targets field: backward-compat (gate only project-scoped) ------
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_no_targets_gates_only_codex_claude(self, mock_at, tmp_path):
+        # active_targets returns copilot only — codex/claude should be gated
+        mock_at.side_effect = _fake_active_targets(["copilot"])
+        result = self._gate(
+            ["copilot", "vscode", "codex", "claude", "cursor"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target=None,
+        )
+        assert "copilot" in result
+        assert "vscode" in result
+        assert "cursor" in result
+        assert "codex" not in result
+        assert "claude" not in result
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_no_targets_no_project_scoped_returns_all(self, mock_at, tmp_path):
+        # No codex/claude in list → nothing to gate, return all
+        mock_at.side_effect = _fake_active_targets(["copilot"])
+        result = self._gate(
+            ["copilot", "vscode", "cursor"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target=None,
+        )
+        assert result == ["copilot", "vscode", "cursor"]
+
+    # -- explicit_target CLI flag overrides config -------------------------
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_explicit_target_overrides_config(self, mock_at, tmp_path):
+        mock_at.side_effect = _fake_active_targets(["vscode"])
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude", "copilot"]},
+            explicit_target="vscode",
+        )
+        assert result == ["vscode"]
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_explicit_target_without_config(self, mock_at, tmp_path):
+        mock_at.side_effect = _fake_active_targets(["cursor"])
+        result = self._gate(
+            ["claude", "copilot", "cursor", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target="cursor",
+        )
+        assert result == ["cursor"]
+
+    # -- edge cases --------------------------------------------------------
+
+    def test_empty_target_runtimes_returns_empty(self, tmp_path):
+        result = self._gate(
+            [],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude"]},
+            explicit_target=None,
+        )
+        assert result == []
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_apm_config_none_falls_through_to_auto_detect(self, mock_at, tmp_path):
+        mock_at.side_effect = _fake_active_targets(["copilot"])
+        result = self._gate(
+            ["copilot", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config=None,
+            explicit_target=None,
+        )
+        assert "copilot" in result
+        assert "codex" not in result

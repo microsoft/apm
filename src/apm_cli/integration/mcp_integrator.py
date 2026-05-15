@@ -953,25 +953,56 @@ class MCPIntegrator:
         apm_config: dict | None,
         explicit_target: str | None,
     ) -> list[str]:
-        """Drop project-scoped runtimes that are not active project targets.
+        """Filter *target_runtimes* against the project's active targets.
 
-        Codex and Claude Code both write project-scoped MCP config files
-        (``.codex/config.toml`` and ``.mcp.json``) whose creation should be
-        opt-in.  When auto-detection brought one of them in but the project's
-        own targets do not include it, we silently strip it -- mirroring the
-        Cursor/OpenCode/Gemini directory-presence convention.
+        Two gating modes:
+
+        1. **Explicit targets** (``targets:`` / ``target:`` in *apm.yml*, or
+           the ``--target`` CLI flag): ALL runtimes not in the whitelist are
+           dropped.  This is the contract users expect – see #1335.
+        2. **Auto-detect** (no ``targets`` field): only project-scoped
+           runtimes (Codex, Claude Code) are gated, preserving backward
+           compatibility for repos that rely on directory-presence discovery.
         """
         if user_scope:
             return target_runtimes
+
+        from apm_cli.core.apm_yml import parse_targets_field
+        from apm_cli.integration.targets import active_targets
+
+        # --- resolve explicit targets from config -------------------------
+        explicit_from_config: list[str] = []
+        if apm_config:
+            try:
+                explicit_from_config = parse_targets_field(apm_config)
+            except Exception:
+                # ConflictingTargetsError / EmptyTargetsListError — validation
+                # should have caught this earlier; fall through to auto-detect.
+                _log.debug("parse_targets_field failed; falling back to auto-detect")
+
+        config_target = explicit_target or explicit_from_config or None
+        has_explicit_targets = bool(explicit_target or explicit_from_config)
+
+        root = project_root or Path.cwd()
+        active = {t.name for t in active_targets(root, config_target)}
+
+        if has_explicit_targets:
+            # Explicit whitelist: gate every runtime not in the active set.
+            out = [rt for rt in target_runtimes if rt in active]
+            dropped = set(target_runtimes) - set(out)
+            if dropped:
+                _log.debug(
+                    "Targets whitelist gated out: %s (active=%s)",
+                    sorted(dropped),
+                    sorted(active),
+                )
+            return out
+
+        # No explicit targets — backward-compat: only gate project-scoped
+        # runtimes whose directory marker was auto-detected.
         gated = [rt for rt in MCPIntegrator._PROJECT_SCOPED_RUNTIMES if rt in target_runtimes]
         if not gated:
             return target_runtimes
-
-        from apm_cli.integration.targets import active_targets
-
-        root = project_root or Path.cwd()
-        config_target = explicit_target or (apm_config.get("target") if apm_config else None)
-        active = {t.name for t in active_targets(root, config_target)}
         out = list(target_runtimes)
         for rt in gated:
             if rt not in active:
