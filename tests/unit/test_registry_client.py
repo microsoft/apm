@@ -535,14 +535,20 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
         into terminal output and CI logs.
         """
         c = SimpleRegistryClient("https://token:x-oauth@registry.corp.example.com/")
+        parsed = urlparse(c.registry_url)
+        self.assertEqual(parsed.scheme, "https")
+        self.assertEqual(parsed.hostname, "registry.corp.example.com")
+        self.assertIsNone(parsed.username)
+        self.assertIsNone(parsed.password)
         self.assertEqual(c.registry_url, "https://registry.corp.example.com")
-        self.assertNotIn("token", c.registry_url)
-        self.assertNotIn("x-oauth", c.registry_url)
-        self.assertNotIn("@", c.registry_url)
 
     def test_userinfo_stripped_preserves_explicit_port(self):
         c = SimpleRegistryClient("https://user:pass@registry.corp.example.com:8443/")
-        self.assertEqual(c.registry_url, "https://registry.corp.example.com:8443")
+        parsed = urlparse(c.registry_url)
+        self.assertEqual(parsed.hostname, "registry.corp.example.com")
+        self.assertEqual(parsed.port, 8443)
+        self.assertIsNone(parsed.username)
+        self.assertIsNone(parsed.password)
 
 
 class TestNormalizeV01Package(unittest.TestCase):
