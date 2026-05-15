@@ -44,6 +44,36 @@ def _read_yaml_targets(ctx) -> list[str] | None:
     return result if result else None
 
 
+def _create_target_dirs(targets, project_root, explicit, logger=None):
+    """Create root_dir for each target when auto_create=True or explicit is set.
+
+    Returns the list of directories actually created.
+    """
+    created = []
+    for _t in targets:
+        if not _t.auto_create and not explicit:
+            continue
+        if _t.resolved_deploy_root is not None:
+            continue
+        _root = _t.root_dir
+        _target_dir = project_root / _root
+        if not _target_dir.exists():
+            try:
+                _target_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                if logger:
+                    _display_root = f"~/{_root}/"
+                    logger.error(
+                        f"Cannot create {_display_root} -- permission denied. "
+                        f"Check directory permissions or use a different --target."
+                    )
+                raise SystemExit(1) from None
+            created.append(_target_dir)
+            if logger:
+                logger.verbose_detail(f"Created {_root}/ ({_t.name} target)")
+    return created
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the targets phase.
 
@@ -322,26 +352,7 @@ def run(ctx: InstallContext) -> None:
                     "deployed. Check 'target:' in apm.yml or use --target."
                 )
 
-        for _t in _targets:
-            if not _t.auto_create and not _explicit:
-                continue
-            if _t.resolved_deploy_root is not None:
-                continue
-            _root = _t.root_dir
-            _target_dir = ctx.project_root / _root
-            if not _target_dir.exists():
-                try:
-                    _target_dir.mkdir(parents=True, exist_ok=True)
-                except PermissionError:
-                    if ctx.logger:
-                        _display_root = f"~/{_root}/"
-                        ctx.logger.error(
-                            f"Cannot create {_display_root} -- permission denied. "
-                            f"Check directory permissions or use a different --target."
-                        )
-                    raise SystemExit(1) from None
-                if ctx.logger:
-                    ctx.logger.verbose_detail(f"Created {_root}/ ({_t.name} target)")
+        _create_target_dirs(_targets, ctx.project_root, _explicit, ctx.logger)
 
     # Legacy detect_target call -- return values are not consumed by any
     # downstream code but the call is preserved for behaviour parity with
