@@ -84,6 +84,7 @@ class CodexClientAdapter(MCPClientAdapter):
 
         with open(config_path, "w", encoding="utf-8") as f:
             toml.dump(current_config, f)
+        os.chmod(config_path, 0o600)
         _log.debug("Codex config written to %s", config_path)
         return True
 

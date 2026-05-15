@@ -28,6 +28,7 @@ Ref: https://geminicli.com/docs/reference/configuration/
 
 import json
 import logging
+import os
 from pathlib import Path
 
 from ...core.docker_args import DockerArgsProcessor
@@ -100,6 +101,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
+        os.chmod(config_path, 0o600)
 
     def get_current_config(self):
         """Read the current ``settings.json`` contents for the active scope."""

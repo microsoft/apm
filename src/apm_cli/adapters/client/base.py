@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
 
+from ...utils.console import _rich_warning
+
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
 # Matches ${VAR} and ${env:VAR}, capturing VAR. Intentionally does NOT match
@@ -81,6 +83,13 @@ def _has_env_placeholder(value):
     if not isinstance(value, str):
         return False
     return bool(_ENV_PLACEHOLDER_RE.search(value))
+
+
+def _stringify_env_literal(value):
+    """Return MCP env literal values in the manifest ``map<string, string>`` shape."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
 
 
 class MCPClientAdapter(ABC):
@@ -263,8 +272,8 @@ class MCPClientAdapter(ABC):
                 if var_id in seen:
                     continue
                 seen.add(var_id)
-                print(
-                    f"[!]  Warning: ${{input:{var_id}}} in server "
+                _rich_warning(
+                    f"${{input:{var_id}}} in server "
                     f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
                 )
@@ -456,7 +465,9 @@ class MCPClientAdapter(ABC):
             env_overrides: Pre-collected overrides (ignored in translate mode).
         """
         if self._supports_runtime_env_substitution:
-            self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(value))
+            legacy_keys = _extract_legacy_angle_vars(value)
+            self._last_legacy_angle_vars.update(legacy_keys)
+            self._last_env_placeholder_keys.update(legacy_keys)
             for match in _ENV_VAR_RE.finditer(value):
                 self._last_env_placeholder_keys.add(match.group(1))
             return _translate_env_placeholder(value)
