@@ -1,7 +1,7 @@
 """APM compile command CLI."""
 
 import sys
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 
 import click
 
@@ -252,6 +252,64 @@ def _resolve_compile_target(target):
     return target  # single string pass-through
 
 
+def _resolve_effective_target(target):
+    """Resolve the CLI --target arg to the compiler-understood effective target.
+
+    Mirrors the resolution the one-shot compile path performs (load
+    apm.yml ``target:`` / ``targets:``, run :func:`_resolve_compile_target`
+    on both, fall back to :func:`detect_target` for the auto-detect case)
+    so the watch path can build ``CompilationConfig`` with the same
+    ``target=`` value the one-shot path uses (#1345).
+
+    Args:
+        target: The raw ``--target`` CLI argument (None, str, or list).
+
+    Returns:
+        Tuple ``(effective_target, detection_reason, config_target)`` where
+        ``effective_target`` is what to pass as ``target=`` to
+        :meth:`CompilationConfig.from_apm_yml`, ``detection_reason`` is the
+        provenance label, and ``config_target`` is the raw apm.yml value
+        (str | list | None) for user-facing label rendering.
+    """
+    from ...core.target_detection import detect_target
+    from ...models.apm_package import APMPackage
+
+    config_target = None
+    apm_yml_path = Path(APM_YML_FILENAME)
+    if apm_yml_path.exists():
+        apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
+        config_target = apm_pkg.target
+        if config_target is None:
+            try:
+                from ...core.apm_yml import parse_targets_field
+                from ...utils.yaml_io import load_yaml
+
+                _raw = load_yaml(apm_yml_path)
+                if isinstance(_raw, dict):
+                    _yaml_targets = parse_targets_field(_raw)
+                    if _yaml_targets:
+                        config_target = (
+                            _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
+                        )
+            except Exception:
+                pass
+
+    compile_target = _resolve_compile_target(target)
+    compile_config_target = _resolve_compile_target(config_target)
+
+    if isinstance(compile_target, frozenset):
+        return compile_target, "explicit --target flag", config_target
+    if isinstance(compile_config_target, frozenset) and compile_target is None:
+        return compile_config_target, "apm.yml target", config_target
+
+    detected_target, detection_reason = detect_target(
+        project_root=Path("."),
+        explicit_target=compile_target,
+        config_target=compile_config_target if isinstance(compile_config_target, str) else None,
+    )
+    return detected_target, detection_reason, config_target
+
+
 @click.command(help="Compile APM context into distributed AGENTS.md files")
 @click.option(
     "--output",
@@ -455,7 +513,20 @@ def compile(
 
         # Watch mode
         if watch:
-            _watch_mode(output, chatmode, no_links, dry_run, verbose=verbose)
+            # Resolve the same effective target the one-shot path uses so
+            # `targets: [claude, cursor]` does not silently regress to the
+            # all-families fanout on every recompile (#1345).
+            effective_target, _detection_reason, config_target = _resolve_effective_target(target)
+            _watch_mode(
+                output,
+                chatmode,
+                no_links,
+                dry_run,
+                verbose=verbose,
+                effective_target=effective_target,
+                target_label_user=target,
+                target_label_config=config_target,
+            )
             return
 
         logger.start("Starting context compilation...", symbol="cogs")
