@@ -24,9 +24,9 @@ from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401  -- module attribute; patched by tests and used via re-export
     _rich_error,  # noqa: F401
-    _rich_info,  # noqa: F401
+    _rich_info,
     _rich_success,
-    _rich_warning,  # noqa: F401
+    _rich_warning,
 )
 
 _log = logging.getLogger(__name__)
@@ -964,10 +964,17 @@ class MCPIntegrator:
            runtimes (Codex, Claude Code) are gated, preserving backward
            compatibility for repos that rely on directory-presence discovery.
         """
+        # Security note: user-scope writes target ~/.config paths the user owns
+        # globally; gating only applies to project-scoped writes that could
+        # affect shared repos. See enterprise/security model.
         if user_scope:
             return target_runtimes
 
-        from apm_cli.core.apm_yml import parse_targets_field
+        from apm_cli.core.apm_yml import (
+            ConflictingTargetsError,
+            EmptyTargetsListError,
+            parse_targets_field,
+        )
         from apm_cli.integration.targets import active_targets
 
         # --- resolve explicit targets from config -------------------------
@@ -975,11 +982,23 @@ class MCPIntegrator:
         if apm_config:
             try:
                 explicit_from_config = parse_targets_field(apm_config)
-            except Exception:
-                # ConflictingTargetsError / EmptyTargetsListError — validation
-                # should have caught this earlier; fall through to auto-detect.
-                _log.debug("parse_targets_field failed; falling back to auto-detect")
+            except (ConflictingTargetsError, EmptyTargetsListError) as exc:
+                # Manifest declared targets but the declaration is unparseable.
+                # Fail closed: write nothing rather than fall back to permissive
+                # auto-detect, which would widen the MCP write surface beyond
+                # the user's stated intent.
+                _rich_warning(
+                    f"apm.yml targets field is invalid: {exc}. Skipping MCP "
+                    "install for all runtimes. Fix the manifest and re-run."
+                )
+                _log.debug(
+                    "parse_targets_field failed; failing closed (no MCP writes)",
+                    exc_info=True,
+                )
+                return []
 
+        # `parse_targets_field` returns [] when neither key is present, so the
+        # falsy chain below correctly falls through to auto-detect in that case.
         config_target = explicit_target or explicit_from_config or None
         has_explicit_targets = bool(explicit_target or explicit_from_config)
 
@@ -991,6 +1010,12 @@ class MCPIntegrator:
             out = [rt for rt in target_runtimes if rt in active]
             dropped = set(target_runtimes) - set(out)
             if dropped:
+                # User declared a whitelist; surface the consequence so they
+                # can confirm their intent took effect (or correct it).
+                _rich_info(
+                    f"Targets whitelist active: skipped MCP config for "
+                    f"{', '.join(sorted(dropped))} (not in targets)."
+                )
                 _log.debug(
                     "Targets whitelist gated out: %s (active=%s)",
                     sorted(dropped),

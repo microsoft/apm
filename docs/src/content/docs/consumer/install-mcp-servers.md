@@ -93,6 +93,17 @@ This avoids creating runtime artifacts for tools you do not use.
 Gemini's user-scope path (`~/.gemini/settings.json`, selected with
 `-g`) is unconditional and creates `~/.gemini/` if needed.
 
+When `apm.yml` declares `targets:` (or `--target` is passed on the
+command line), MCP install treats that list as a hard whitelist --
+runtimes outside the list are skipped even if their harness
+directory is present, and APM emits an info line naming the skipped
+runtimes so you can confirm the whitelist took effect. With no
+`targets:` field, only project-scoped runtimes (Codex, Claude Code)
+are gated for backward compatibility (#1335). A malformed `targets:`
+field (e.g. both `target:` and `targets:` set, or `targets: []`)
+fails closed: no MCP files are written and a warning names the field
+to fix.
+
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config when that runtime supports user scope -- for
 example Copilot CLI writes to `~/.copilot/mcp-config.json`, Codex

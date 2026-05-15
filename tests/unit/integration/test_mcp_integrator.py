@@ -891,3 +891,32 @@ class TestGateProjectScopedRuntimes:
         )
         assert "copilot" in result
         assert "codex" not in result
+
+    # -- malformed targets field: fail-closed (issue #1335 follow-up) ------
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_conflicting_targets_field_fails_closed(self, mock_at, tmp_path):
+        # Both `target` and `targets` set -> ConflictingTargetsError.
+        # Fail-closed contract: write nothing rather than widen via auto-detect.
+        mock_at.side_effect = _fake_active_targets(["copilot", "claude", "codex"])
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"target": "claude", "targets": ["copilot"]},
+            explicit_target=None,
+        )
+        assert result == []
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_empty_targets_list_fails_closed(self, mock_at, tmp_path):
+        # `targets: []` -> EmptyTargetsListError. Same fail-closed contract.
+        mock_at.side_effect = _fake_active_targets(["copilot", "claude", "codex"])
+        result = self._gate(
+            ["claude", "copilot", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"targets": []},
+            explicit_target=None,
+        )
+        assert result == []
