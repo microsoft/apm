@@ -71,6 +71,14 @@ jobs:
           exit 1
         fi
 
+    - name: Code duplication guardrail (pylint R0801)
+      run: |
+        uv run --extra dev python -m pylint \
+          --disable=all --enable=R0801 \
+          --min-similarity-lines=50 \
+          --fail-on=R0801 \
+          src/apm_cli/
+
     - name: Lint - auth-protocol boundary (#1212 anti-regression)
       run: bash scripts/lint-auth-signals.sh
 
