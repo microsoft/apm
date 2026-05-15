@@ -95,14 +95,17 @@ Gemini's user-scope path (`~/.gemini/settings.json`, selected with
 
 When `apm.yml` declares `targets:` (or `--target` is passed on the
 command line), MCP install treats that list as a hard whitelist --
-runtimes outside the list are skipped even if their harness
-directory is present, and APM emits an info line naming the skipped
-runtimes so you can confirm the whitelist took effect. With no
-`targets:` field, only project-scoped runtimes (Codex, Claude Code)
-are gated for backward compatibility (#1335). A malformed `targets:`
-field (e.g. both `target:` and `targets:` set, or `targets: []`)
-fails closed: no MCP files are written and a warning names the field
-to fix.
+runtimes outside the list are skipped even if their harness directory
+is present. With no explicit targets, MCP install falls back to the
+same directory-detection rule `apm install` uses for skills and other
+APM dependencies: a runtime is configured only when its harness
+directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`,
+`.opencode/`, `.gemini/`) is present in the project, with greenfield
+projects defaulting to Copilot. Either way, APM emits an info line
+naming the skipped runtimes so you can confirm the gate took effect.
+A malformed `targets:` field (e.g. both `target:` and `targets:` set,
+or `targets: []`) fails closed: no MCP files are written and a
+warning names the field to fix. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config when that runtime supports user scope -- for

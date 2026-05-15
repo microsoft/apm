@@ -942,8 +942,6 @@ class MCPIntegrator:
     # Main orchestrator
     # ------------------------------------------------------------------
 
-    _PROJECT_SCOPED_RUNTIMES: tuple[str, ...] = ("codex", "claude")
-
     @staticmethod
     def _gate_project_scoped_runtimes(
         target_runtimes: list[str],
@@ -955,14 +953,12 @@ class MCPIntegrator:
     ) -> list[str]:
         """Filter *target_runtimes* against the project's active targets.
 
-        Two gating modes:
-
-        1. **Explicit targets** (``targets:`` / ``target:`` in *apm.yml*, or
-           the ``--target`` CLI flag): ALL runtimes not in the whitelist are
-           dropped.  This is the contract users expect -- see #1335.
-        2. **Auto-detect** (no ``targets`` field): only project-scoped
-           runtimes (Codex, Claude Code) are gated, preserving backward
-           compatibility for repos that rely on directory-presence discovery.
+        Mirrors the UX of ``apm install`` for apm dependencies: the active
+        target set (explicit ``--target`` / ``targets:`` field, else
+        directory detection, else fallback ``[copilot]``) is the whitelist
+        for MCP writes too. Runtimes outside that set are skipped with an
+        info line naming them, rather than leaking config files into
+        projects that are not configured for them (#1335).
 
         ``explicit_target`` accepts ``str`` (single token), ``list[str]``,
         or a CSV string (``"claude,copilot"``) -- the latter is produced by
@@ -970,6 +966,9 @@ class MCPIntegrator:
         wiring multi-target bundles. CSV strings are normalized to a list
         before they reach :func:`active_targets`, which only understands
         single tokens or list input.
+
+        A malformed ``targets:`` field (conflicting ``target:`` +
+        ``targets:``, or ``targets: []``) fails closed: nothing is written.
         """
         # Security note: user-scope writes target ~/.config paths the user owns
         # globally; gating only applies to project-scoped writes that could
@@ -1004,8 +1003,6 @@ class MCPIntegrator:
                 )
                 return []
 
-        # `parse_targets_field` returns [] when neither key is present, so the
-        # falsy chain below correctly falls through to auto-detect in that case.
         # Normalize CSV strings ("claude,copilot") to a list before active_targets,
         # which treats a CSV string as a single unknown token (returns []).
         normalized_explicit: str | list[str] | None
@@ -1014,40 +1011,31 @@ class MCPIntegrator:
         else:
             normalized_explicit = explicit_target
 
+        # `parse_targets_field` returns [] when neither key is present, so the
+        # falsy chain below correctly falls through to auto-detect in that case.
         config_target = normalized_explicit or explicit_from_config or None
-        has_explicit_targets = bool(normalized_explicit or explicit_from_config)
 
         root = project_root or Path.cwd()
         active = {t.name for t in active_targets(root, config_target)}
 
-        if has_explicit_targets:
-            # Explicit whitelist: gate every runtime not in the active set.
-            out = [rt for rt in target_runtimes if rt in active]
-            dropped = set(target_runtimes) - set(out)
-            if dropped:
-                # User declared a whitelist; surface the consequence so they
-                # can confirm their intent took effect (or correct it).
-                _rich_info(
-                    f"Targets whitelist active: skipped MCP config for "
-                    f"{', '.join(sorted(dropped))} (not in targets)."
-                )
-                _log.debug(
-                    "Targets whitelist gated out: %s (active=%s)",
-                    sorted(dropped),
-                    sorted(active),
-                )
-            return out
+        # Runtime name "vscode" maps to canonical target "copilot" (the same
+        # alias active_targets honors for explicit_target). Without this map
+        # a project with `.github/` set but no `.copilot/` would correctly
+        # detect copilot but still gate the vscode runtime.
+        def _canonical(rt: str) -> str:
+            return "copilot" if rt in ("vscode", "agents") else rt
 
-        # No explicit targets -- backward-compat: only gate project-scoped
-        # runtimes whose directory marker was auto-detected.
-        gated = [rt for rt in MCPIntegrator._PROJECT_SCOPED_RUNTIMES if rt in target_runtimes]
-        if not gated:
-            return target_runtimes
-        out = list(target_runtimes)
-        for rt in gated:
-            if rt not in active:
-                _log.debug("%s gated out: active_targets=%s", rt.capitalize(), sorted(active))
-                out = [r for r in out if r != rt]
+        out = [rt for rt in target_runtimes if _canonical(rt) in active]
+        dropped = sorted(set(target_runtimes) - set(out))
+        if dropped:
+            # Surface the consequence so users can confirm their targets
+            # whitelist (explicit or directory-detected) took effect.
+            _rich_info(f"Skipped MCP config for {', '.join(dropped)} (not in active targets).")
+            _log.debug(
+                "Active-targets gate dropped: %s (active=%s)",
+                dropped,
+                sorted(active),
+            )
         return out
 
     @staticmethod

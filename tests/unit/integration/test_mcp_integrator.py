@@ -665,6 +665,9 @@ class TestInstallProjectRootDetection:
         (nested / ".cursor").mkdir(parents=True)
         (nested / ".opencode").mkdir()
         (nested / ".vscode").mkdir()
+        # Copilot's project profile detects on `.github/` (targets.py:330);
+        # without it the active-targets gate would drop vscode here.
+        (nested / ".github").mkdir()
 
         mock_mgr = mock_mgr_cls.return_value
         mock_mgr.is_runtime_available.return_value = False
@@ -799,6 +802,8 @@ class TestGateProjectScopedRuntimes:
 
     @patch("apm_cli.integration.targets.active_targets")
     def test_targets_multiple_values_keeps_all_listed(self, mock_at, tmp_path):
+        # `vscode` runtime canonicalizes to `copilot`, so when copilot is
+        # in active targets both `copilot` and `vscode` runtime writes pass.
         mock_at.side_effect = _fake_active_targets(["claude", "copilot"])
         result = self._gate(
             ["claude", "copilot", "vscode", "codex", "cursor"],
@@ -807,13 +812,15 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude", "copilot"]},
             explicit_target=None,
         )
-        assert result == ["claude", "copilot"]
+        assert result == ["claude", "copilot", "vscode"]
 
-    # -- no targets field: backward-compat (gate only project-scoped) ------
+    # -- no targets field: directory-detection acts as the whitelist ------
 
     @patch("apm_cli.integration.targets.active_targets")
-    def test_no_targets_gates_only_codex_claude(self, mock_at, tmp_path):
-        # active_targets returns copilot only -- codex/claude should be gated
+    def test_no_targets_uses_directory_detection_for_all_runtimes(self, mock_at, tmp_path):
+        # active_targets returns copilot only -- every other runtime gates,
+        # not just codex/claude. Mirrors `apm install` UX. Note: `vscode`
+        # canonicalizes to `copilot` so both pass when copilot is active.
         mock_at.side_effect = _fake_active_targets(["copilot"])
         result = self._gate(
             ["copilot", "vscode", "codex", "claude", "cursor"],
@@ -822,16 +829,11 @@ class TestGateProjectScopedRuntimes:
             apm_config={},
             explicit_target=None,
         )
-        assert "copilot" in result
-        assert "vscode" in result
-        assert "cursor" in result
-        assert "codex" not in result
-        assert "claude" not in result
+        assert result == ["copilot", "vscode"]
 
     @patch("apm_cli.integration.targets.active_targets")
-    def test_no_targets_no_project_scoped_returns_all(self, mock_at, tmp_path):
-        # No codex/claude in list -> nothing to gate, return all
-        mock_at.side_effect = _fake_active_targets(["copilot"])
+    def test_no_targets_keeps_all_when_all_directories_present(self, mock_at, tmp_path):
+        mock_at.side_effect = _fake_active_targets(["copilot", "vscode", "cursor"])
         result = self._gate(
             ["copilot", "vscode", "cursor"],
             user_scope=False,
@@ -845,7 +847,9 @@ class TestGateProjectScopedRuntimes:
 
     @patch("apm_cli.integration.targets.active_targets")
     def test_explicit_target_overrides_config(self, mock_at, tmp_path):
-        mock_at.side_effect = _fake_active_targets(["vscode"])
+        # Real active_targets normalizes "vscode" -> "copilot"; mirror that
+        # in the fake so the gate's vscode->copilot alias check sees a hit.
+        mock_at.side_effect = _fake_active_targets(["copilot"])
         result = self._gate(
             ["claude", "copilot", "vscode", "codex"],
             user_scope=False,
@@ -853,7 +857,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude", "copilot"]},
             explicit_target="vscode",
         )
-        assert result == ["vscode"]
+        assert result == ["copilot", "vscode"]
 
     @patch("apm_cli.integration.targets.active_targets")
     def test_explicit_target_without_config(self, mock_at, tmp_path):
