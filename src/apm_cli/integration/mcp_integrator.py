@@ -951,7 +951,7 @@ class MCPIntegrator:
         user_scope: bool,
         project_root,
         apm_config: dict | None,
-        explicit_target: str | None,
+        explicit_target: str | list[str] | None,
     ) -> list[str]:
         """Filter *target_runtimes* against the project's active targets.
 
@@ -959,10 +959,17 @@ class MCPIntegrator:
 
         1. **Explicit targets** (``targets:`` / ``target:`` in *apm.yml*, or
            the ``--target`` CLI flag): ALL runtimes not in the whitelist are
-           dropped.  This is the contract users expect – see #1335.
+           dropped.  This is the contract users expect -- see #1335.
         2. **Auto-detect** (no ``targets`` field): only project-scoped
            runtimes (Codex, Claude Code) are gated, preserving backward
            compatibility for repos that rely on directory-presence discovery.
+
+        ``explicit_target`` accepts ``str`` (single token), ``list[str]``,
+        or a CSV string (``"claude,copilot"``) -- the latter is produced by
+        ``install/local_bundle_handler.py::_wire_bundle_mcp_servers`` when
+        wiring multi-target bundles. CSV strings are normalized to a list
+        before they reach :func:`active_targets`, which only understands
+        single tokens or list input.
         """
         # Security note: user-scope writes target ~/.config paths the user owns
         # globally; gating only applies to project-scoped writes that could
@@ -999,8 +1006,16 @@ class MCPIntegrator:
 
         # `parse_targets_field` returns [] when neither key is present, so the
         # falsy chain below correctly falls through to auto-detect in that case.
-        config_target = explicit_target or explicit_from_config or None
-        has_explicit_targets = bool(explicit_target or explicit_from_config)
+        # Normalize CSV strings ("claude,copilot") to a list before active_targets,
+        # which treats a CSV string as a single unknown token (returns []).
+        normalized_explicit: str | list[str] | None
+        if isinstance(explicit_target, str) and "," in explicit_target:
+            normalized_explicit = [t.strip() for t in explicit_target.split(",") if t.strip()]
+        else:
+            normalized_explicit = explicit_target
+
+        config_target = normalized_explicit or explicit_from_config or None
+        has_explicit_targets = bool(normalized_explicit or explicit_from_config)
 
         root = project_root or Path.cwd()
         active = {t.name for t in active_targets(root, config_target)}
@@ -1023,7 +1038,7 @@ class MCPIntegrator:
                 )
             return out
 
-        # No explicit targets — backward-compat: only gate project-scoped
+        # No explicit targets -- backward-compat: only gate project-scoped
         # runtimes whose directory marker was auto-detected.
         gated = [rt for rt in MCPIntegrator._PROJECT_SCOPED_RUNTIMES if rt in target_runtimes]
         if not gated:

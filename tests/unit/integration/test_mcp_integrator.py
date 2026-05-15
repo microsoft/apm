@@ -734,7 +734,7 @@ class TestCollectTransitive:
 
 
 # ===========================================================================
-# _gate_project_scoped_runtimes — issue #1335
+# _gate_project_scoped_runtimes -- issue #1335
 # ===========================================================================
 
 
@@ -813,7 +813,7 @@ class TestGateProjectScopedRuntimes:
 
     @patch("apm_cli.integration.targets.active_targets")
     def test_no_targets_gates_only_codex_claude(self, mock_at, tmp_path):
-        # active_targets returns copilot only — codex/claude should be gated
+        # active_targets returns copilot only -- codex/claude should be gated
         mock_at.side_effect = _fake_active_targets(["copilot"])
         result = self._gate(
             ["copilot", "vscode", "codex", "claude", "cursor"],
@@ -830,7 +830,7 @@ class TestGateProjectScopedRuntimes:
 
     @patch("apm_cli.integration.targets.active_targets")
     def test_no_targets_no_project_scoped_returns_all(self, mock_at, tmp_path):
-        # No codex/claude in list → nothing to gate, return all
+        # No codex/claude in list -> nothing to gate, return all
         mock_at.side_effect = _fake_active_targets(["copilot"])
         result = self._gate(
             ["copilot", "vscode", "cursor"],
@@ -920,3 +920,34 @@ class TestGateProjectScopedRuntimes:
             explicit_target=None,
         )
         assert result == []
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_explicit_target_csv_string_normalized(self, mock_at, tmp_path):
+        # `_wire_bundle_mcp_servers` passes `target_csv = "claude,copilot"`.
+        # active_targets() does not split CSV; the gate must normalize first
+        # or active_targets sees one unknown token and returns []. Regression
+        # guard for the Copilot review on PR #1336.
+        seen_explicit: list = []
+
+        def _resolve(_root, explicit=None):
+            seen_explicit.append(explicit)
+            # Real active_targets returns profiles for each canonical name in
+            # the (now-list) explicit input.
+            tokens = (
+                [explicit] if isinstance(explicit, str) else (list(explicit) if explicit else [])
+            )
+            return [_FakeTarget(t) for t in tokens]
+
+        mock_at.side_effect = _resolve
+        result = self._gate(
+            ["claude", "copilot", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config=None,
+            explicit_target="claude,copilot",
+        )
+        # Gate must have normalized the CSV to a list before calling active_targets.
+        assert seen_explicit == [["claude", "copilot"]]
+        assert "claude" in result
+        assert "copilot" in result
+        assert "codex" not in result
