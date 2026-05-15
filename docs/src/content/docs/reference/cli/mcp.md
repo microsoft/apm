@@ -145,6 +145,8 @@ export MCP_REGISTRY_URL=https://mcp.internal.example.com
 apm mcp list
 ```
 
+The registry must implement the [MCP Registry v0.1 spec](https://github.com/modelcontextprotocol/registry) (apm calls `/v0.1/servers/...`). Registries serving only the legacy `/v0/` paths will return 404.
+
 ## Related
 
 - [`apm install`](../install/) -- canonical MCP install path.

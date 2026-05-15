@@ -527,6 +527,128 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
             SimpleRegistryClient()
         self.assertIn("MCP_REGISTRY_URL", str(cm.exception))
 
+    def test_userinfo_stripped_from_registry_url(self):
+        """SimpleRegistryClient must strip user:pass@ from the stored URL.
+
+        Regression trap for the credential-leak path: if userinfo survives
+        into ``self.registry_url``, ``ServerNotFoundError`` interpolates it
+        into terminal output and CI logs.
+        """
+        c = SimpleRegistryClient("https://token:x-oauth@registry.corp.example.com/")
+        self.assertEqual(c.registry_url, "https://registry.corp.example.com")
+        self.assertNotIn("token", c.registry_url)
+        self.assertNotIn("x-oauth", c.registry_url)
+        self.assertNotIn("@", c.registry_url)
+
+    def test_userinfo_stripped_preserves_explicit_port(self):
+        c = SimpleRegistryClient("https://user:pass@registry.corp.example.com:8443/")
+        self.assertEqual(c.registry_url, "https://registry.corp.example.com:8443")
+
+
+class TestNormalizeV01Package(unittest.TestCase):
+    """Unit tests for the v0.1 -> snake_case package shape normalizer.
+
+    Regression trap for #1210: registry returns camelCase keys per the
+    v0.1 spec, but adapters in ``src/apm_cli/adapters/client/`` consume
+    snake_case keys (``name``, ``runtime_hint``, ``package_arguments``,
+    ...). Without the boundary normalizer, ``apm install`` produced
+    ``npx -y None`` because the resolved package dict had no ``name``.
+    """
+
+    def test_normalize_v0_1_package_backfills_all_aliases(self):
+        """Every v0.1 camelCase alias backfills its snake_case counterpart."""
+        v0_1_package = {
+            "identifier": "@modelcontextprotocol/server-fetch",
+            "registryType": "npm",
+            "registryBaseUrl": "https://registry.npmjs.org",
+            "runtimeHint": "npx",
+            "packageArguments": [{"value": "-y"}],
+            "runtimeArguments": [{"value": "--no-install"}],
+            "environmentVariables": [{"name": "DEBUG", "value": "1"}],
+            "version": "1.0.0",
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_package(v0_1_package)
+
+        self.assertEqual(normalized["name"], "@modelcontextprotocol/server-fetch")
+        self.assertEqual(normalized["registry_name"], "npm")
+        self.assertEqual(normalized["registry_base_url"], "https://registry.npmjs.org")
+        self.assertEqual(normalized["runtime_hint"], "npx")
+        self.assertEqual(normalized["package_arguments"], [{"value": "-y"}])
+        self.assertEqual(normalized["runtime_arguments"], [{"value": "--no-install"}])
+        self.assertEqual(normalized["environment_variables"], [{"name": "DEBUG", "value": "1"}])
+        self.assertEqual(normalized["version"], "1.0.0")
+
+        # camelCase keys are preserved (one-way bridge, not a rewrite).
+        self.assertEqual(normalized["identifier"], "@modelcontextprotocol/server-fetch")
+        self.assertEqual(normalized["runtimeHint"], "npx")
+
+    def test_normalize_v0_1_package_preserves_existing_legacy_keys(self):
+        """When both camelCase and snake_case are present, snake_case wins."""
+        package = {
+            "identifier": "v0.1-name",
+            "name": "legacy-name",
+            "runtimeHint": "v0.1-hint",
+            "runtime_hint": "legacy-hint",
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_package(package)
+        self.assertEqual(normalized["name"], "legacy-name")
+        self.assertEqual(normalized["runtime_hint"], "legacy-hint")
+
+    def test_normalize_v0_1_package_does_not_mutate_input(self):
+        """Normalizer returns a shallow copy; the input dict is unchanged."""
+        package = {"identifier": "foo", "runtimeHint": "npx"}
+        SimpleRegistryClient._normalize_v0_1_package(package)
+        self.assertNotIn("name", package)
+        self.assertNotIn("runtime_hint", package)
+
+    def test_normalize_v0_1_package_handles_partial_aliases(self):
+        """Aliases backfill independently; missing v0.1 keys are no-ops."""
+        package = {"identifier": "foo", "version": "1.0.0"}
+        normalized = SimpleRegistryClient._normalize_v0_1_package(package)
+        self.assertEqual(normalized["name"], "foo")
+        self.assertNotIn("runtime_hint", normalized)
+        self.assertNotIn("registry_name", normalized)
+
+    def test_normalize_v0_1_package_returns_non_dict_unchanged(self):
+        self.assertIsNone(SimpleRegistryClient._normalize_v0_1_package(None))
+        self.assertEqual(SimpleRegistryClient._normalize_v0_1_package("not-a-dict"), "not-a-dict")
+
+    def test_normalize_v0_1_server_normalizes_packages_list(self):
+        """Server-level normalizer applies package normalization to each entry."""
+        server = {
+            "name": "io.github.foo/bar",
+            "version": "1.0.0",
+            "packages": [
+                {"identifier": "pkg-a", "runtimeHint": "npx"},
+                {"identifier": "pkg-b", "registryType": "pypi"},
+            ],
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertEqual(normalized["packages"][0]["name"], "pkg-a")
+        self.assertEqual(normalized["packages"][0]["runtime_hint"], "npx")
+        self.assertEqual(normalized["packages"][1]["name"], "pkg-b")
+        self.assertEqual(normalized["packages"][1]["registry_name"], "pypi")
+
+    def test_normalize_v0_1_server_does_not_mutate_input(self):
+        """Server-level normalizer matches sibling copy semantics (no mutation)."""
+        server = {
+            "name": "io.github.foo/bar",
+            "packages": [{"identifier": "pkg-a", "runtimeHint": "npx"}],
+        }
+        SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertNotIn("name", server["packages"][0])
+        self.assertNotIn("runtime_hint", server["packages"][0])
+
+    def test_normalize_v0_1_server_handles_missing_packages(self):
+        """Server with no packages list passes through unchanged."""
+        server = {"name": "io.github.foo/bar", "version": "1.0.0"}
+        normalized = SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertEqual(normalized["name"], "io.github.foo/bar")
+        self.assertNotIn("packages", normalized)
+
+    def test_normalize_v0_1_server_returns_non_dict_unchanged(self):
+        self.assertIsNone(SimpleRegistryClient._normalize_v0_1_server(None))
+
 
 if __name__ == "__main__":
     unittest.main()

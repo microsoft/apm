@@ -132,6 +132,17 @@ class SimpleRegistryClient:
                 f"Check MCP_REGISTRY_URL if set."
             )
 
+        # Strip any embedded userinfo (``user:pass@``) before storing the URL so
+        # ``ServerNotFoundError`` and other diagnostics cannot leak credentials
+        # into terminal output or CI logs. Enterprise users sometimes set
+        # ``MCP_REGISTRY_URL=https://token:x-oauth@registry.corp/`` -- we still
+        # accept the URL (the credentials are passed via Authorization headers
+        # elsewhere), but we never echo them back.
+        if parsed.username or parsed.password:
+            host = parsed.hostname or ""
+            sanitized_netloc = host + (f":{parsed.port}" if parsed.port else "")
+            resolved = parsed._replace(netloc=sanitized_netloc).geturl().rstrip("/")
+
         self.registry_url = resolved
         # True when the URL came from an explicit caller arg or MCP_REGISTRY_URL env var.
         # Consumed by validate_servers_exist() to fail-closed on overrides.
@@ -370,13 +381,19 @@ class SimpleRegistryClient:
 
     @classmethod
     def _normalize_v0_1_server(cls, server: dict[str, Any]) -> dict[str, Any]:
-        """Apply package-shape normalization to a server detail dict in place-safe form."""
+        """Apply package-shape normalization to a server detail dict.
+
+        Returns a shallow copy with each entry of ``packages`` normalized
+        via :meth:`_normalize_v0_1_package`. The input dict is not mutated,
+        matching the copy semantics of the sibling normalizer.
+        """
         if not isinstance(server, dict):
             return server
-        packages = server.get("packages")
+        normalized = dict(server)
+        packages = normalized.get("packages")
         if isinstance(packages, list) and packages:
-            server["packages"] = [cls._normalize_v0_1_package(p) for p in packages]
-        return server
+            normalized["packages"] = [cls._normalize_v0_1_package(p) for p in packages]
+        return normalized
 
     def get_server(self, server_name: str, version: str = "latest") -> dict[str, Any]:
         """Get detailed information about a specific server version.
