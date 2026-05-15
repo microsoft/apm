@@ -82,7 +82,9 @@ class GeminiClientAdapter(CopilotClientAdapter):
         """
         gemini_dir = self._get_gemini_dir()
         if not self.user_scope and not gemini_dir.is_dir():
-            logger.debug("Skipping Gemini project-scope write -- %s does not exist (opt-in)", gemini_dir)
+            logger.debug(
+                "Skipping Gemini project-scope write -- %s does not exist (opt-in)", gemini_dir
+            )
             return
 
         config_path = Path(self.get_config_path())
@@ -249,7 +251,10 @@ class GeminiClientAdapter(CopilotClientAdapter):
             return False
 
         if not self.user_scope and not self._get_gemini_dir().is_dir():
-            logger.debug("Gemini opt-in gate: %s absent, skipping configure_mcp_server", self._get_gemini_dir())
+            logger.debug(
+                "Gemini opt-in gate: %s absent, skipping configure_mcp_server",
+                self._get_gemini_dir(),
+            )
             return True
 
         try:

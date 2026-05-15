@@ -537,7 +537,9 @@ class TestRemoveStaleGeminiUsesProjectRoot:
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         self.settings_json.write_text(
-            json.dumps({"mcpServers": {"stale-srv": {"command": "echo"}, "keep-srv": {"command": "cat"}}})
+            json.dumps(
+                {"mcpServers": {"stale-srv": {"command": "echo"}, "keep-srv": {"command": "cat"}}}
+            )
         )
 
         other_cwd = tempfile.mkdtemp(prefix="apm-not-project-")
