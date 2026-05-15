@@ -1,7 +1,6 @@
 """Tests for the Gemini CLI MCP client adapter."""
 
 import json
-import os  # noqa: F401
 import shutil
 import tempfile
 import unittest
@@ -21,23 +20,21 @@ class TestGeminiClientFactory:
 
 
 class TestGeminiClientAdapter(unittest.TestCase):
-    """Core config operations for GeminiClientAdapter."""
+    """Core config operations for GeminiClientAdapter under project scope."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.gemini_dir = Path(self.tmp.name) / ".gemini"
+        self.project_root = Path(self.tmp.name)
+        self.gemini_dir = self.project_root / ".gemini"
         self.gemini_dir.mkdir()
         self.settings_json = self.gemini_dir / "settings.json"
-        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
-        self._cwd_patcher.start()
-        self.adapter = GeminiClientAdapter()
+        self.adapter = GeminiClientAdapter(project_root=self.project_root)
 
     def tearDown(self):
-        self._cwd_patcher.stop()
         self.tmp.cleanup()
 
     def test_config_path(self):
-        expected = str(Path(self.tmp.name) / ".gemini" / "settings.json")
+        expected = str(self.project_root / ".gemini" / "settings.json")
         self.assertEqual(self.adapter.get_config_path(), expected)
 
     def test_get_current_config_empty(self):
@@ -52,6 +49,12 @@ class TestGeminiClientAdapter(unittest.TestCase):
     def test_get_current_config_invalid_json(self):
         self.settings_json.write_text("not json")
         config = self.adapter.get_current_config()
+        self.assertEqual(config, {})
+
+    def test_get_current_config_returns_empty_dict_when_no_dir(self):
+        """get_current_config returns {} when the .gemini directory does not exist."""
+        adapter = GeminiClientAdapter(project_root=Path(tempfile.mkdtemp()))
+        config = adapter.get_current_config()
         self.assertEqual(config, {})
 
     def test_update_config_creates_file(self):
@@ -89,16 +92,117 @@ class TestGeminiClientAdapter(unittest.TestCase):
         self.assertFalse(self.settings_json.exists())
 
 
+class TestGeminiProjectRootRouting(unittest.TestCase):
+    """Regression coverage for #1299: adapter must honour ``project_root`` and
+    never read or write through ``os.getcwd()``."""
+
+    def setUp(self):
+        self.project_tmp = tempfile.TemporaryDirectory()
+        self.cwd_tmp = tempfile.TemporaryDirectory()
+        self.project_root = Path(self.project_tmp.name)
+        self.cwd_root = Path(self.cwd_tmp.name)
+        (self.project_root / ".gemini").mkdir()
+
+    def tearDown(self):
+        self.project_tmp.cleanup()
+        self.cwd_tmp.cleanup()
+
+    def test_writes_to_project_root_when_cwd_lacks_gemini(self):
+        with patch("os.getcwd", return_value=str(self.cwd_root)):
+            adapter = GeminiClientAdapter(project_root=self.project_root)
+            adapter.update_config({"srv": {"command": "node"}})
+
+        project_settings = self.project_root / ".gemini" / "settings.json"
+        self.assertTrue(project_settings.exists())
+        data = json.loads(project_settings.read_text())
+        self.assertEqual(data["mcpServers"]["srv"]["command"], "node")
+
+    def test_does_not_pollute_cwd_when_cwd_also_has_gemini(self):
+        (self.cwd_root / ".gemini").mkdir()
+        with patch("os.getcwd", return_value=str(self.cwd_root)):
+            adapter = GeminiClientAdapter(project_root=self.project_root)
+            adapter.update_config({"srv": {"command": "node"}})
+
+        self.assertTrue((self.project_root / ".gemini" / "settings.json").exists())
+        self.assertFalse((self.cwd_root / ".gemini" / "settings.json").exists())
+
+    def test_falls_back_to_cwd_when_project_root_not_passed(self):
+        (self.cwd_root / ".gemini").mkdir()
+        with patch("os.getcwd", return_value=str(self.cwd_root)):
+            adapter = GeminiClientAdapter()
+            adapter.update_config({"srv": {"command": "node"}})
+
+        self.assertTrue((self.cwd_root / ".gemini" / "settings.json").exists())
+
+
+class TestGeminiUserScope(unittest.TestCase):
+    """Cover the user-scope path: ``~/.gemini/settings.json``."""
+
+    def setUp(self):
+        self.home_tmp = tempfile.TemporaryDirectory()
+        self.home_root = Path(self.home_tmp.name)
+        self._home_patcher = patch("pathlib.Path.home", return_value=self.home_root)
+        self._home_patcher.start()
+
+    def tearDown(self):
+        self._home_patcher.stop()
+        self.home_tmp.cleanup()
+
+    def test_user_scope_config_path_points_at_home(self):
+        adapter = GeminiClientAdapter(user_scope=True)
+        expected = str(self.home_root / ".gemini" / "settings.json")
+        self.assertEqual(adapter.get_config_path(), expected)
+
+    def test_user_scope_writes_without_requiring_existing_dir(self):
+        # ``~/.gemini/`` does not yet exist; user scope is not opt-in.
+        adapter = GeminiClientAdapter(user_scope=True)
+        adapter.update_config({"srv": {"command": "node"}})
+
+        home_settings = self.home_root / ".gemini" / "settings.json"
+        self.assertTrue(home_settings.exists())
+        data = json.loads(home_settings.read_text())
+        self.assertEqual(data["mcpServers"]["srv"]["command"], "node")
+
+    def test_user_scope_ignores_project_root(self):
+        project = self.home_root.parent / "elsewhere"
+        adapter = GeminiClientAdapter(project_root=project, user_scope=True)
+        self.assertEqual(
+            adapter.get_config_path(),
+            str(self.home_root / ".gemini" / "settings.json"),
+        )
+
+    def test_user_scope_configure_mcp_server_does_not_short_circuit(self):
+        """``configure_mcp_server`` must not early-return in user scope just
+        because ``~/.gemini/`` is missing -- user scope is not opt-in."""
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient") as registry_cls,
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            registry = MagicMock()
+            registry.find_server_by_reference.return_value = {
+                "packages": [{"name": "pkg", "registry_name": "npm", "runtime_hint": "npx"}]
+            }
+            registry_cls.return_value = registry
+
+            adapter = GeminiClientAdapter(user_scope=True)
+            result = adapter.configure_mcp_server("some/server", server_name="srv")
+
+            self.assertTrue(result)
+            home_settings = self.home_root / ".gemini" / "settings.json"
+            self.assertTrue(home_settings.exists())
+            data = json.loads(home_settings.read_text())
+            self.assertIn("srv", data["mcpServers"])
+
+
 class TestGeminiConfigureMCPServer(unittest.TestCase):
     """Test configure_mcp_server() for GeminiClientAdapter."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.gemini_dir = Path(self.tmp.name) / ".gemini"
+        self.project_root = Path(self.tmp.name)
+        self.gemini_dir = self.project_root / ".gemini"
         self.gemini_dir.mkdir()
         self.settings_json = self.gemini_dir / "settings.json"
-        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
-        self._cwd_patcher.start()
 
         self.mock_registry_patcher = patch("apm_cli.adapters.client.copilot.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
@@ -108,10 +212,9 @@ class TestGeminiConfigureMCPServer(unittest.TestCase):
         self.mock_integration_patcher = patch("apm_cli.adapters.client.copilot.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
 
-        self.adapter = GeminiClientAdapter()
+        self.adapter = GeminiClientAdapter(project_root=self.project_root)
 
     def tearDown(self):
-        self._cwd_patcher.stop()
         self.mock_registry_patcher.stop()
         self.mock_integration_patcher.stop()
         self.tmp.cleanup()
@@ -173,10 +276,9 @@ class TestGeminiFormatServerConfig(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.gemini_dir = Path(self.tmp.name) / ".gemini"
+        self.project_root = Path(self.tmp.name)
+        self.gemini_dir = self.project_root / ".gemini"
         self.gemini_dir.mkdir()
-        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
-        self._cwd_patcher.start()
 
         self.mock_registry_patcher = patch("apm_cli.adapters.client.copilot.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
@@ -184,10 +286,9 @@ class TestGeminiFormatServerConfig(unittest.TestCase):
         self.mock_integration_patcher = patch("apm_cli.adapters.client.copilot.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
 
-        self.adapter = GeminiClientAdapter()
+        self.adapter = GeminiClientAdapter(project_root=self.project_root)
 
     def tearDown(self):
-        self._cwd_patcher.stop()
         self.mock_registry_patcher.stop()
         self.mock_integration_patcher.stop()
         self.tmp.cleanup()

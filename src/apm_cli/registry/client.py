@@ -2,8 +2,10 @@
 
 import logging
 import os
+import re
+import warnings
 from typing import Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -19,6 +21,40 @@ def _safe_headers(response) -> dict[str, str]:
 
 
 _DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
+
+# MCP Registry API version path prefix. Bumping this here is the
+# single grep target the day v0.2 ships. See
+# https://github.com/modelcontextprotocol/registry for the spec.
+_V0_1_PREFIX = "/v0.1"
+
+# Allowlist for server names used as URL path segments. The MCP spec
+# constrains names to reverse-DNS-style identifiers, optionally with a
+# single ``/<repo>`` slug suffix. ``quote(name, safe='')`` already
+# neutralises traversal/SSRF; this allowlist makes the threat model
+# explicit at the call site so a future caller cannot bypass search
+# and feed attacker-controlled strings into the path.
+_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)?$")
+
+
+class ServerNotFoundError(ValueError):
+    """Raised when a server lookup against the registry returns 404.
+
+    Carries the registry URL so the CLI boundary can render an
+    actionable hint about MCP Registry v0.1 spec compliance for
+    self-hosted registries. Inherits from ``ValueError`` so existing
+    ``except ValueError`` callers (e.g. ``find_server_by_reference``)
+    keep treating 404s as "not found" without code changes.
+    """
+
+    def __init__(self, server_name: str, registry_url: str) -> None:
+        self.server_name = server_name
+        self.registry_url = registry_url
+        super().__init__(
+            f"Server '{server_name}' not found in registry {registry_url}. "
+            f"If this is a self-hosted registry, verify it implements the "
+            f"MCP Registry v0.1 API (apm uses /v0.1/servers/...)."
+        )
+
 
 # Network timeouts for registry HTTP calls. ``connect`` bounds the TCP
 # handshake (typo in --registry / unreachable host) so ``apm install``
@@ -95,6 +131,17 @@ class SimpleRegistryClient:
                 f"HTTP (not recommended for production). "
                 f"Check MCP_REGISTRY_URL if set."
             )
+
+        # Strip any embedded userinfo (``user:pass@``) before storing the URL so
+        # ``ServerNotFoundError`` and other diagnostics cannot leak credentials
+        # into terminal output or CI logs. Enterprise users sometimes set
+        # ``MCP_REGISTRY_URL=https://token:x-oauth@registry.corp/`` -- we still
+        # accept the URL (the credentials are passed via Authorization headers
+        # elsewhere), but we never echo them back.
+        if parsed.username or parsed.password:
+            host = parsed.hostname or ""
+            sanitized_netloc = host + (f":{parsed.port}" if parsed.port else "")
+            resolved = parsed._replace(netloc=sanitized_netloc).geturl().rstrip("/")
 
         self.registry_url = resolved
         # True when the URL came from an explicit caller arg or MCP_REGISTRY_URL env var.
@@ -217,17 +264,20 @@ class SimpleRegistryClient:
     ) -> tuple[list[dict[str, Any]], str | None]:
         """List all available servers in the registry.
 
+        Calls ``GET /v0.1/servers`` per the MCP Registry spec.
+
         Args:
             limit (int, optional): Maximum number of entries to return. Defaults to 100.
             cursor (str, optional): Pagination cursor for retrieving next set of results.
 
         Returns:
-            Tuple[List[Dict[str, Any]], Optional[str]]: List of server metadata dictionaries and the next cursor if available.
+            Tuple[List[Dict[str, Any]], Optional[str]]: List of server metadata
+            dictionaries and the next cursor if available.
 
         Raises:
             requests.RequestException: If the request fails.
         """
-        url = f"{self.registry_url}/v0/servers"
+        url = f"{self.registry_url}{_V0_1_PREFIX}/servers"
         params = {}
 
         if limit is not None:
@@ -238,25 +288,27 @@ class SimpleRegistryClient:
         data, _hdrs = self._cached_get_json(url, params=params)
         data = data or {}
 
-        # Extract servers - they're nested under "server" key in each item
-        raw_servers = data.get("servers", [])
-        servers = []
-        for item in raw_servers:
-            if "server" in item:
-                servers.append(item["server"])
-            else:
-                servers.append(item)  # Fallback for different structure
+        servers = self._unwrap_server_list(data)
 
         metadata = data.get("metadata", {})
-        next_cursor = metadata.get("next_cursor")
+        # Spec is camelCase ``nextCursor``; ``next_cursor`` accepted as a
+        # transitional kindness for in-tree mock fixtures only.
+        # TODO(v0.1): drop legacy snake_case once fixtures migrate.
+        next_cursor = metadata.get("nextCursor") or metadata.get("next_cursor")
 
         return servers, next_cursor
 
     def search_servers(self, query: str) -> list[dict[str, Any]]:
-        """Search for servers in the registry using the API search endpoint.
+        """Search for servers in the registry using the spec ``?search=`` query param.
+
+        Calls ``GET /v0.1/servers?search=<query>`` per the MCP Registry spec
+        (case-insensitive substring match on server names).
 
         Args:
-            query (str): Search query string.
+            query (str): Search query string. The full reference is passed
+                through to the registry; spec-compliant registries do
+                substring matching on names so ``io.github.foo/bar`` and
+                ``bar`` both match ``io.github.foo/bar``.
 
         Returns:
             List[Dict[str, Any]]: List of matching server metadata dictionaries.
@@ -264,62 +316,160 @@ class SimpleRegistryClient:
         Raises:
             requests.RequestException: If the request fails.
         """
-        # The MCP Registry API now only accepts repository names (e.g., "github-mcp-server")
-        # If the query looks like a full identifier (e.g., "io.github.github/github-mcp-server"),
-        # extract the repository name for the search
-        search_query = self._extract_repository_name(query)
-
-        url = f"{self.registry_url}/v0/servers/search"
-        params = {"q": search_query}
+        url = f"{self.registry_url}{_V0_1_PREFIX}/servers"
+        params = {"search": query}
 
         data, _hdrs = self._cached_get_json(url, params=params)
         data = data or {}
 
-        # Extract servers - they're nested under "server" key in each item
+        return self._unwrap_server_list(data)
+
+    @staticmethod
+    def _unwrap_server_list(data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Strict v0.1 unwrap of the ``servers`` array.
+
+        Each entry is expected to carry a nested ``server`` object per
+        the spec. We deliberately do NOT fall back to flat shapes -- a
+        non-conformant registry should fail loudly here, not silently
+        produce half-shaped dicts that explode three call frames away
+        in conflict detection.
+        """
         raw_servers = data.get("servers", [])
         servers = []
         for item in raw_servers:
-            if "server" in item:
-                servers.append(item["server"])
-            else:
-                servers.append(item)  # Fallback for different structure
-
+            if not isinstance(item, dict) or "server" not in item:
+                raise ValueError(
+                    "Registry returned a non-spec list entry (missing 'server' key); "
+                    "expected MCP Registry v0.1 response shape."
+                )
+            servers.append(item["server"])
         return servers
 
-    def get_server_info(self, server_id: str) -> dict[str, Any]:
-        """Get detailed information about a specific server.
+    # Map of v0.1 spec package field names (camelCase / renamed) to the
+    # legacy snake_case shape that adapters in src/apm_cli/adapters/client/
+    # consume (e.g. package.get("name"), package.get("runtime_hint")).
+    # The registry boundary normalizes inbound packages so adapters keep
+    # working without per-adapter rewrites. See #1210 review feedback:
+    # without this, registry-resolved installs produced "npx -y None".
+    _V0_1_PACKAGE_FIELD_ALIASES: tuple[tuple[str, str], ...] = (
+        ("identifier", "name"),
+        ("registryType", "registry_name"),
+        ("registryBaseUrl", "registry_base_url"),
+        ("runtimeHint", "runtime_hint"),
+        ("packageArguments", "package_arguments"),
+        ("runtimeArguments", "runtime_arguments"),
+        ("environmentVariables", "environment_variables"),
+    )
+
+    @classmethod
+    def _normalize_v0_1_package(cls, package: dict[str, Any]) -> dict[str, Any]:
+        """Backfill legacy snake_case keys from v0.1 camelCase aliases.
+
+        Only writes the legacy key when the package does not already
+        carry one, so registries that emit both shapes (or the legacy
+        shape only) are unaffected. This is a one-way bridge: the
+        camelCase key is preserved so callers that have already migrated
+        keep working.
+        """
+        if not isinstance(package, dict):
+            return package
+        normalized = dict(package)
+        for v01_key, legacy_key in cls._V0_1_PACKAGE_FIELD_ALIASES:
+            if legacy_key not in normalized and v01_key in normalized:
+                normalized[legacy_key] = normalized[v01_key]
+        return normalized
+
+    @classmethod
+    def _normalize_v0_1_server(cls, server: dict[str, Any]) -> dict[str, Any]:
+        """Apply package-shape normalization to a server detail dict.
+
+        Returns a shallow copy with each entry of ``packages`` normalized
+        via :meth:`_normalize_v0_1_package`. The input dict is not mutated,
+        matching the copy semantics of the sibling normalizer.
+        """
+        if not isinstance(server, dict):
+            return server
+        normalized = dict(server)
+        packages = normalized.get("packages")
+        if isinstance(packages, list) and packages:
+            normalized["packages"] = [cls._normalize_v0_1_package(p) for p in packages]
+        return normalized
+
+    def get_server(self, server_name: str, version: str = "latest") -> dict[str, Any]:
+        """Get detailed information about a specific server version.
+
+        Calls ``GET /v0.1/servers/{urlencoded-serverName}/versions/{version}``
+        per the MCP Registry spec. The default ``version="latest"`` covers
+        99% of callers; pin to a specific version string for reproducibility.
 
         Args:
-            server_id (str): ID of the server.
+            server_name (str): Full server name (e.g. ``io.github.foo/bar``).
+                Validated against the spec name shape and URL-encoded.
+            version (str, optional): Version string or ``"latest"``. Defaults
+                to ``"latest"``.
 
         Returns:
-            Dict[str, Any]: Server metadata dictionary.
+            Dict[str, Any]: Server metadata dictionary (the unwrapped
+            contents of the response's ``server`` field, with any
+            top-level siblings merged in).
 
         Raises:
-            requests.RequestException: If the request fails.
-            ValueError: If the server is not found.
+            ValueError: If the server name does not match the spec shape.
+            ServerNotFoundError: If the registry returns 404.
+            requests.RequestException: If the request fails for other reasons.
         """
-        url = f"{self.registry_url}/v0/servers/{server_id}"
-        data, _hdrs = self._cached_get_json(url)
+        if not _SERVER_NAME_RE.match(server_name or ""):
+            raise ValueError(
+                f"Invalid server name {server_name!r}: expected MCP spec shape "
+                f"(reverse-DNS identifier, optionally with a single '/<repo>' suffix)."
+            )
+
+        encoded_name = quote(server_name, safe="")
+        encoded_version = quote(version, safe="")
+        url = f"{self.registry_url}{_V0_1_PREFIX}/servers/{encoded_name}/versions/{encoded_version}"
+
+        try:
+            data, _hdrs = self._cached_get_json(url)
+        except requests.HTTPError as exc:
+            response = getattr(exc, "response", None)
+            if response is not None and response.status_code == 404:
+                raise ServerNotFoundError(server_name, self.registry_url) from exc
+            raise
+
         data = data or {}
 
-        # Return the complete response including x-github and other metadata
-        # but ensure the main server info is accessible at the top level
+        # Return the complete response including _meta and other top-level
+        # metadata, but ensure the main server info is accessible at the top level.
         if "server" in data:
-            # Merge server info to top level while preserving x-github and other sections
             result = data["server"].copy()
             for key, value in data.items():
                 if key != "server":
                     result[key] = value
-
             if not result:
-                raise ValueError(f"Server '{server_id}' not found in registry")
+                raise ServerNotFoundError(server_name, self.registry_url)
+            return self._normalize_v0_1_server(result)
 
-            return result
-        else:
-            if not data:
-                raise ValueError(f"Server '{server_id}' not found in registry")
-            return data
+        if not data:
+            raise ServerNotFoundError(server_name, self.registry_url)
+        return self._normalize_v0_1_server(data)
+
+    def get_server_info(self, server_name: str) -> dict[str, Any]:
+        """Deprecated alias for :meth:`get_server`.
+
+        Kept for one minor as a transitional shim; emits a
+        ``DeprecationWarning`` and forwards to ``get_server``. The
+        parameter is now interpreted as a server *name* (per the MCP
+        Registry v0.1 spec), not a UUID -- the legacy v0 ``/servers/{id}``
+        endpoint no longer exists on spec-compliant registries.
+        """
+        warnings.warn(
+            "SimpleRegistryClient.get_server_info(server_name) is deprecated; "
+            "use SimpleRegistryClient.get_server(server_name, version='latest'). "
+            "The parameter now means a server name per MCP Registry v0.1.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_server(server_name)
 
     def get_server_by_name(self, name: str) -> dict[str, Any] | None:
         """Find a server by its name using the search API.
@@ -340,21 +490,22 @@ class SimpleRegistryClient:
         for server in search_results:
             if server.get("name") == name:
                 try:
-                    return self.get_server_info(server["id"])
+                    return self.get_server(server["name"])
                 except ValueError:
                     continue
 
         return None
 
     def find_server_by_reference(self, reference: str) -> dict[str, Any] | None:
-        """Find a server by exact name match or server ID.
+        """Find a server by exact name match.
 
-        This is an efficient lookup that uses the search API:
-        1. Server ID (UUID format) - direct API call
-        2. Server name - search API for exact match (automatically handles identifier extraction)
+        The legacy UUID strategy was removed because the MCP Registry v0.1
+        spec keys per-server lookup on serverName, not UUID. Old UUID-style
+        references silently route through search and produce no match,
+        which is acceptable per design ratification.
 
         Args:
-            reference (str): Server reference (ID or exact name).
+            reference (str): Server reference (exact name or unqualified slug).
 
         Returns:
             Optional[Dict[str, Any]]: Server metadata dictionary or None if not found.
@@ -362,16 +513,7 @@ class SimpleRegistryClient:
         Raises:
             requests.RequestException: If the registry API request fails.
         """
-        # Strategy 1: Try as server ID first (direct lookup)
-        try:
-            # Check if it looks like a UUID (contains hyphens and is 36 chars)
-            if len(reference) == 36 and reference.count("-") == 4:
-                return self.get_server_info(reference)
-        except ValueError:
-            pass
-
-        # Strategy 2: Use search API to find by name
-        # search_servers now handles extracting repository names internally
+        # Use search API to find by name
         search_results = self.search_servers(reference)
 
         # Pass 1: exact full-name match (prevents slug collisions)
@@ -379,7 +521,7 @@ class SimpleRegistryClient:
             server_name = server.get("name", "")
             if server_name == reference:
                 try:
-                    return self.get_server_info(server["id"])
+                    return self.get_server(server_name)
                 except ValueError:
                     continue
 
@@ -388,11 +530,11 @@ class SimpleRegistryClient:
             server_name = server.get("name", "")
             if self._is_server_match(reference, server_name):
                 try:
-                    return self.get_server_info(server["id"])
+                    return self.get_server(server_name)
                 except ValueError:
                     continue
 
-        # If not found by ID or exact name, server is not in registry
+        # If not found by name, server is not in registry
         return None
 
     def _extract_repository_name(self, reference: str) -> str:

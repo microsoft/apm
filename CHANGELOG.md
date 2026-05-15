@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Gemini CLI: `apm install -g --mcp NAME` now correctly writes to `~/.gemini/settings.json` (user scope) and `apm install` from outside the target project writes to `<project_root>/.gemini/settings.json` instead of `cwd`. Previously `--global` had no effect on Gemini and project-scope writes silently landed in the wrong directory. The matching opt-in gate and cleanup paths in `MCPIntegrator` are aligned in the same change. (#1299)
 - `apm install --target claude` now preserves self-defined stdio MCP `env` values from `apm.yml` and writes non-string values such as `PORT: 3000` and `DEBUG: false` as MCP-compatible strings. (#1222)
 - Non-skill integrators (agent, instruction, prompt, command, hook script-copy) silently adopt byte-identical pre-existing files so a degraded `deployed_files=[]` lockfile no longer permanently blocks installs gated by `required-packages-deployed`. (#1313)
 - `apm audit` drift check now returns skip-with-info (`passed=True`) when the install cache is cold, instead of failing the audit; bare `apm audit` surfaces the skip reason on stderr so CI pipelines that have not yet run `apm install` are not incorrectly red-marked. (#1289)
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** MCP registry client now speaks the official MCP Registry v0.1 spec. **Self-hosted registries must serve `/v0.1/` paths -- registries serving only the legacy `/v0/` paths will return 404.** The public registry at `api.mcp.github.com` and the official `registry.modelcontextprotocol.io` are unaffected. Python API: `SimpleRegistryClient.get_server_info(server_id)` is renamed to `get_server(server_name, version="latest")` (the parameter is now a server *name* per the spec, not a UUID); the old name remains for one minor as a `DeprecationWarning` shim. The legacy UUID strategy in `find_server_by_reference` is removed -- the spec keys per-server lookup on serverName. v0.1 package fields (`identifier`, `registryType`, `runtimeHint`, `packageArguments`, `runtimeArguments`, `environmentVariables`) are normalized at the registry boundary to the snake_case shape adapters consume. Thanks @fassmus for the report. (#1337, closes #1210)
 - `--marketplace-output PATH` is now hidden from `--help` and emits a stderr deprecation warning; it auto-translates to `--marketplace-path claude=PATH`. Removal tracked in #1318. (#1317)
 - `extends: org` now correctly layers `dependencies.require` and `dependencies.deny` from the parent policy when the child omits the `dependencies:` block entirely; `None` signals "no opinion" (transparent) while `[]` signals explicit override. (#1290)
 - CI self-check job now uses `setup-only: true` + `apm audit --ci --no-drift` so managed files are not overwritten by `apm install` before `content-integrity` runs; documented the audit-only CI pattern and the install-before-audit blind spot in the enterprise and CI/CD guides. (#1291)

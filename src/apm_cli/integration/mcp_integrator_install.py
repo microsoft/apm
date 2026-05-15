@@ -172,7 +172,7 @@ def run_mcp_install(  # noqa: PLR0915
                             installed_runtimes.append(runtime_name)
                     elif runtime_name == "gemini":
                         # Gemini CLI is opt-in: only target when .gemini/ exists
-                        if (Path.cwd() / ".gemini").is_dir():
+                        if (project_root_path / ".gemini").is_dir():
                             ClientFactory.create_client(runtime_name)
                             installed_runtimes.append(runtime_name)
                     elif runtime_name == "windsurf":
@@ -210,7 +210,7 @@ def run_mcp_install(  # noqa: PLR0915
             if (project_root_path / ".opencode").is_dir():
                 installed_runtimes.append("opencode")
             # Gemini CLI is directory-presence based
-            if (Path.cwd() / ".gemini").is_dir():
+            if (project_root_path / ".gemini").is_dir():
                 installed_runtimes.append("gemini")
             # Windsurf is directory-presence based
             if (project_root_path / ".windsurf").is_dir():
@@ -317,7 +317,7 @@ def run_mcp_install(  # noqa: PLR0915
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: copilot, codex)"
+                "No runtimes support user-scope MCP installation (supported: copilot, codex, gemini)"
             )
             return 0
 

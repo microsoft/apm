@@ -82,18 +82,23 @@ writes a runtime-specific MCP config file. The schemas differ; the
 | Claude Code | `.mcp.json` (project) or `~/.claude.json` (`-g`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
 | Codex CLI | `~/.codex/config.toml` | global | TOML `[mcp_servers.*]` |
-| Gemini CLI | `.gemini/settings.json` | project (only if `.gemini/` exists) | JSON `mcpServers` |
+| Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 
-Cursor, Gemini, and OpenCode are opt-in by directory: APM only writes
-their config when the corresponding `.cursor/`, `.gemini/`, or
-`.opencode/` directory already exists in the project. This avoids
-creating runtime artifacts for tools you do not use.
+Cursor, Gemini, and OpenCode are opt-in by directory in project scope:
+APM only writes their config when the corresponding `.cursor/`,
+`.gemini/`, or `.opencode/` directory already exists in the project.
+This avoids creating runtime artifacts for tools you do not use.
+Gemini's user-scope path (`~/.gemini/settings.json`, selected with
+`-g`) is unconditional and creates `~/.gemini/` if needed.
 
-`apm install -g --mcp NAME` is restricted to the two harnesses with
-true global MCP support: Copilot CLI and Codex CLI. The other
-runtimes are project-scoped.
+`apm install -g --mcp NAME` routes the write to each runtime's
+user-scope MCP config when that runtime supports user scope -- for
+example Copilot CLI writes to `~/.copilot/mcp-config.json`, Codex
+CLI to `~/.codex/config.toml`, and Gemini CLI to
+`~/.gemini/settings.json`. Workspace-only runtimes (VS Code, Cursor,
+OpenCode) are skipped at user scope.
 
 ## stdio vs HTTP servers
 

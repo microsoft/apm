@@ -663,7 +663,7 @@ class MCPIntegrator:
 
         # Clean .gemini/settings.json (only if .gemini/ directory exists)
         if "gemini" in target_runtimes:
-            gemini_cfg = Path.cwd() / ".gemini" / "settings.json"
+            gemini_cfg = project_root_path / ".gemini" / "settings.json"
             if gemini_cfg.exists():
                 try:
                     import json as _json

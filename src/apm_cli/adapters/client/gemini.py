@@ -1,9 +1,9 @@
 """Gemini CLI implementation of MCP client adapter.
 
-Gemini CLI uses ``.gemini/settings.json`` at the project root with an
-``mcpServers`` key.  Unlike Copilot, Gemini infers transport from which
-key is present (``command`` for stdio, ``url`` for SSE, ``httpUrl`` for
-streamable HTTP) and does not use ``type``, ``tools``, or ``id`` fields.
+Gemini CLI reads ``.gemini/settings.json`` with an ``mcpServers`` key.
+Unlike Copilot, Gemini infers transport from which key is present
+(``command`` for stdio, ``url`` for SSE, ``httpUrl`` for streamable
+HTTP) and does not use ``type``, ``tools``, or ``id`` fields.
 
 .. code-block:: json
 
@@ -17,15 +17,17 @@ streamable HTTP) and does not use ``type``, ``tools``, or ``id`` fields.
      }
    }
 
-APM only writes to ``.gemini/settings.json`` when the ``.gemini/``
-directory already exists -- Gemini CLI support is opt-in.
+Scope resolution follows the shared adapter contract: project scope
+writes to ``<project_root>/.gemini/settings.json`` and is opt-in --
+the directory must already exist or the write is skipped silently.
+User scope writes to ``~/.gemini/settings.json`` unconditionally and
+creates the directory if needed.
 
 Ref: https://geminicli.com/docs/reference/configuration/
 """
 
 import json
 import logging
-import os
 from pathlib import Path
 
 from ...core.docker_args import DockerArgsProcessor
@@ -41,6 +43,11 @@ class GeminiClientAdapter(CopilotClientAdapter):
     Inherits Copilot's helper methods for package selection, env-var
     resolution, and argument processing but fully reimplements
     ``_format_server_config`` to emit Gemini-valid JSON.
+
+    Scope routing is governed by ``user_scope``/``project_root`` inherited
+    from :class:`MCPClientAdapter`: project scope reads/writes
+    ``<project_root>/.gemini/settings.json`` (opt-in -- the directory must
+    already exist), and user scope reads/writes ``~/.gemini/settings.json``.
     """
 
     supports_user_scope: bool = True
@@ -53,21 +60,31 @@ class GeminiClientAdapter(CopilotClientAdapter):
     # revisit in a follow-up.
     _supports_runtime_env_substitution: bool = False
 
+    def _get_gemini_dir(self) -> Path:
+        """Return the ``.gemini`` directory for the active scope."""
+        if self.user_scope:
+            return Path.home() / ".gemini"
+        return self.project_root / ".gemini"
+
     def get_config_path(self):
-        """Return the path to ``.gemini/settings.json`` in the repository root."""
-        return str(Path(os.getcwd()) / ".gemini" / "settings.json")
+        """Return the path to ``settings.json`` for the active scope."""
+        return str(self._get_gemini_dir() / "settings.json")
 
     def update_config(self, config_updates):
         """Merge *config_updates* into the ``mcpServers`` section of settings.json.
 
-        The ``.gemini/`` directory must already exist; if it does not, this
-        method returns silently (opt-in behaviour).
+        Project scope is opt-in: if ``<project_root>/.gemini/`` does not
+        exist, this method returns silently. User scope always writes,
+        creating ``~/.gemini/`` if needed.
 
         Preserves all other top-level keys in settings.json (theme, tools,
         hooks, etc.).
         """
-        gemini_dir = Path(os.getcwd()) / ".gemini"
-        if not gemini_dir.is_dir():
+        gemini_dir = self._get_gemini_dir()
+        if not self.user_scope and not gemini_dir.is_dir():
+            logger.debug(
+                "Skipping Gemini project-scope write -- %s does not exist (opt-in)", gemini_dir
+            )
             return
 
         config_path = Path(self.get_config_path())
@@ -78,19 +95,22 @@ class GeminiClientAdapter(CopilotClientAdapter):
         for name, entry in config_updates.items():
             current_config["mcpServers"][name] = entry
 
+        if not config_path.parent.is_dir():
+            logger.debug("Creating %s for Gemini CLI user configuration", config_path.parent)
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
 
     def get_current_config(self):
-        """Read the current ``.gemini/settings.json`` contents."""
-        config_path = self.get_config_path()
-        if not os.path.exists(config_path):
+        """Read the current ``settings.json`` contents for the active scope."""
+        config_path = Path(self.get_config_path())
+        if not config_path.exists():
             return {}
         try:
             with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read %s: %s", config_path, exc)
             return {}
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -230,8 +250,11 @@ class GeminiClientAdapter(CopilotClientAdapter):
             _rich_error("server_url cannot be empty", symbol="error")
             return False
 
-        gemini_dir = Path(os.getcwd()) / ".gemini"
-        if not gemini_dir.is_dir():
+        if not self.user_scope and not self._get_gemini_dir().is_dir():
+            logger.debug(
+                "Gemini opt-in gate: %s absent, skipping configure_mcp_server",
+                self._get_gemini_dir(),
+            )
             return True
 
         try:
