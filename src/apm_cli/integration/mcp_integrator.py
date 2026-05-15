@@ -23,10 +23,9 @@ from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401  -- module attribute; patched by tests and used via re-export
-    _rich_error,  # noqa: F401
+    _rich_error,
     _rich_info,
     _rich_success,
-    _rich_warning,
 )
 
 _log = logging.getLogger(__name__)
@@ -993,10 +992,23 @@ class MCPIntegrator:
                 # Fail closed: write nothing rather than fall back to permissive
                 # auto-detect, which would widen the MCP write surface beyond
                 # the user's stated intent.
-                _rich_warning(
-                    f"apm.yml targets field is invalid: {exc}. Skipping MCP "
-                    "install for all runtimes. Fix the manifest and re-run."
+                #
+                # Voice mirrors the canonical `apm install` skills phase, which
+                # surfaces the same exception as a red [x] error block via
+                # logger.error(..., symbol="") (install/phases/targets.py:213).
+                # We render the body with symbol="" because the exception text
+                # already begins with "[x] ..." (see core/errors.py and
+                # core/apm_yml.EmptyTargetsListError). symbol="" suppresses the
+                # auto-prefix so the renderer doesn't double-stamp the marker.
+                # Exit semantics differ deliberately: the gate may be invoked
+                # mid-bundle-install (local_bundle_handler) where SystemExit(2)
+                # would corrupt partial state, so we fail closed and continue.
+                _rich_error(
+                    "MCP install: apm.yml targets field is invalid. "
+                    "Skipping MCP config writes for all runtimes.",
+                    symbol="error",
                 )
+                _rich_error(str(exc), symbol="")
                 _log.debug(
                     "parse_targets_field failed; failing closed (no MCP writes)",
                     exc_info=True,
@@ -1029,8 +1041,19 @@ class MCPIntegrator:
         dropped = sorted(set(target_runtimes) - set(out))
         if dropped:
             # Surface the consequence so users can confirm their targets
-            # whitelist (explicit or directory-detected) took effect.
-            _rich_info(f"Skipped MCP config for {', '.join(dropped)} (not in active targets).")
+            # whitelist (explicit or directory-detected) took effect. Mirror
+            # the shape of the canonical `Targets: X  (source: Y)` provenance
+            # line emitted by the skills phase (target_detection.format_provenance):
+            # name the dropped runtimes AND the active set on a single line so
+            # the user can audit the decision input without re-reading apm.yml.
+            # Double-space before "(active targets:" matches the canonical
+            # provenance line spacing (install/phases/targets.py:265 +
+            # core/target_detection.py:777).
+            _rich_info(
+                f"Skipped MCP config for {', '.join(dropped)}  "
+                f"(active targets: {', '.join(sorted(active))})",
+                symbol="info",
+            )
             _log.debug(
                 "Active-targets gate dropped: %s (active=%s)",
                 dropped,

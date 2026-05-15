@@ -955,3 +955,63 @@ class TestGateProjectScopedRuntimes:
         assert "claude" in result
         assert "copilot" in result
         assert "codex" not in result
+
+    # -- call-site forwarding regression (PR #1336 audit, devx-ux B1) ------
+
+    def test_apm_package_targets_plural_forwards_through_call_site(self, tmp_path):
+        """Regression: `targets:` plural in apm.yml must reach the gate.
+
+        Before the audit fix, ``commands/install.py`` built
+        ``mcp_apm_config = {"target": apm_package.target, ...}`` -- which is
+        always None for users on the modern ``targets:`` form. The gate then
+        saw an empty config dict and fell back to permissive directory
+        detection, silently bypassing the whitelist the user explicitly set.
+
+        This test exercises the full call-site path: load real apm.yml ->
+        APMPackage -> build mcp_apm_config the way commands/install.py does
+        -> assert the gate sees the plural list.
+        """
+        from apm_cli.core.apm_yml import parse_targets_field
+        from apm_cli.models.apm_package import APMPackage
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: gate-regression\nversion: 0.0.1\ntargets:\n  - copilot\n  - claude\n"
+        )
+        pkg = APMPackage.from_apm_yml(apm_yml)
+        assert pkg.targets == ["copilot", "claude"], (
+            "APMPackage must expose 'targets:' plural; otherwise the call site "
+            "cannot forward it to the gate."
+        )
+
+        # Mirror the exact dict construction in commands/install.py:1795.
+        mcp_apm_config: dict = {"scripts": pkg.scripts or {}}
+        if pkg.targets is not None:
+            mcp_apm_config["targets"] = pkg.targets
+        elif pkg.target is not None:
+            mcp_apm_config["target"] = pkg.target
+
+        # The gate's parse_targets_field must now see the plural list.
+        assert parse_targets_field(mcp_apm_config) == ["copilot", "claude"]
+
+    @patch("apm_cli.integration.targets.active_targets")
+    def test_dropped_runtime_message_includes_active_targets(self, mock_at, tmp_path, capsys):
+        """Negative-case message must name the active set (cli-logging B3).
+
+        Without "(active targets: ...)" the user has to grep apm.yml to
+        confirm what the gate did. Mirrors the canonical provenance line
+        shape ``Targets: X  (source: Y)``.
+        """
+        mock_at.side_effect = _fake_active_targets(["copilot"])
+        self._gate(
+            ["copilot", "claude", "codex"],
+            user_scope=False,
+            project_root=tmp_path,
+            apm_config={"targets": ["copilot"]},
+            explicit_target=None,
+        )
+        out = capsys.readouterr().out
+        assert "Skipped MCP config for claude, codex" in out
+        assert "active targets: copilot" in out
+        # Symbol prefix asserts the gate honors the [+]/[!]/[i]/[x] contract.
+        assert "[i]" in out

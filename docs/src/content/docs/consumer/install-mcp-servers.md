@@ -93,19 +93,22 @@ This avoids creating runtime artifacts for tools you do not use.
 Gemini's user-scope path (`~/.gemini/settings.json`, selected with
 `-g`) is unconditional and creates `~/.gemini/` if needed.
 
-When `apm.yml` declares `targets:` (or `--target` is passed on the
-command line), MCP install treats that list as a hard whitelist --
-runtimes outside the list are skipped even if their harness directory
-is present. With no explicit targets, MCP install falls back to the
-same directory-detection rule `apm install` uses for skills and other
-APM dependencies: a runtime is configured only when its harness
-directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`,
-`.opencode/`, `.gemini/`) is present in the project, with greenfield
-projects defaulting to Copilot. Either way, APM emits an info line
-naming the skipped runtimes so you can confirm the gate took effect.
-A malformed `targets:` field (e.g. both `target:` and `targets:` set,
-or `targets: []`) fails closed: no MCP files are written and a
-warning names the field to fix. (#1335)
+MCP install honors the same target resolution chain as `apm install`
+for any other dependency: see [Where files land](/consumer/install-packages/#where-files-land).
+In short: `--target` wins, then `apm.yml`'s `targets:`, then
+auto-detect from harness directories. Runtimes outside the active
+set are skipped silently from a config-write perspective, but APM
+emits an `[i]` line naming what got skipped and which targets are
+active so you can confirm the gate took effect:
+
+```text
+[i] Skipped MCP config for claude, codex  (active targets: copilot)
+```
+
+A malformed `targets:` field (both `target:` and `targets:` set, or
+`targets: []`) fails closed: no MCP files are written and an `[x]`
+error names the field to fix. The voice and exit semantics mirror
+the canonical `apm install` skills phase. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config when that runtime supports user scope -- for

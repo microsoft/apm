@@ -92,7 +92,15 @@ class APMPackage:
     # project root.
     source_path: Path | None = None
     target: str | list[str] | None = (
-        None  # Target agent(s): single string or list (applies to compile and install)
+        None  # Singular 'target:' field (legacy/CSV form). May coexist with `targets`
+        # being None in apm.yml, but never both populated -- ConflictingTargetsError
+        # is raised at install time. Read by callers that only need a single value.
+    )
+    targets: list[str] | None = (
+        None  # Plural 'targets:' field (canonical YAML-list form, #1335). Stored raw
+        # so the install gate (mcp_integrator._gate_project_scoped_runtimes) can
+        # re-validate via parse_targets_field with the same dict shape it sees from
+        # raw apm.yml. None means the user did not declare 'targets:' at all.
     )
     type: PackageContentType | None = (
         None  # Package content type: instructions, skill, hybrid, or prompts
@@ -267,6 +275,21 @@ class APMPackage:
             source_path=apm_yml_path,
         )
 
+        # Plural 'targets:' field is stored raw (no canonical validation here)
+        # so the MCP install gate at mcp_integrator._gate_project_scoped_runtimes
+        # can re-run parse_targets_field on a dict that mirrors apm.yml shape
+        # and surface the same conflict / empty-list errors uniformly. Without
+        # this passthrough, the call site at commands/install.py would silently
+        # bypass the targets whitelist for any user on the modern plural form
+        # (#1335 regression caught in PR #1336 audit).
+        targets_value: list[str] | None = None
+        if "targets" in data and data["targets"] is not None:
+            raw_targets = data["targets"]
+            if isinstance(raw_targets, list):
+                targets_value = [str(t).strip() for t in raw_targets if str(t).strip()]
+            else:
+                targets_value = [str(raw_targets).strip()]
+
         result = cls(
             name=data["name"],
             version=data["version"],
@@ -279,6 +302,7 @@ class APMPackage:
             package_path=apm_yml_path.parent,
             source_path=resolved_source,
             target=target_value,
+            targets=targets_value,
             type=pkg_type,
             includes=includes,
         )
