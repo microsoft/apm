@@ -2,29 +2,66 @@
 
 import time
 
-from ...compilation import AgentsCompiler, CompilationConfig
-from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
+from ...constants import APM_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 
 
-def _watch_mode(output, chatmode, no_links, dry_run, verbose=False):
-    """Watch for changes in .apm/ directories and auto-recompile."""
+def _watch_mode(
+    *,
+    target,
+    output,
+    chatmode,
+    no_links,
+    dry_run,
+    single_agents=False,
+    verbose=False,
+    local_only=False,
+    with_constitution=True,
+):
+    """Watch for changes in .apm/ directories and auto-recompile.
+
+    Each compile pass is delegated to ``_run_compile_once`` (cli.py), which
+    is the same function the non-watch ``apm compile`` calls.  Sharing that
+    body is what prevents the watch path from re-introducing the target-
+    resolution drift fixed in #1019/#1074 (see #1345 for the regression).
+    """
+    # Lazy import: cli.py imports _watch_mode from here, so importing
+    # _run_compile_once at module load would create a cycle.
+    from .cli import _run_compile_once
+
     logger = CommandLogger("compile-watch", verbose=verbose, dry_run=dry_run)
 
+    def _do_compile():
+        """One compile pass; swallows exceptions so the watcher keeps running."""
+        try:
+            _run_compile_once(
+                target=target,
+                output=output,
+                chatmode=chatmode,
+                no_links=no_links,
+                dry_run=dry_run,
+                single_agents=single_agents,
+                verbose=verbose,
+                local_only=local_only,
+                # `--clean` removes orphaned outputs.  Running it on
+                # every recompile would surprise users mid-session;
+                # keep watcher recompiles non-destructive.
+                clean=False,
+                with_constitution=with_constitution,
+                logger=logger,
+            )
+        except Exception as e:
+            logger.error(f"Error during recompilation: {e}")
+
     try:
-        # Try to import watchdog for file system monitoring
         from pathlib import Path
 
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
 
         class APMFileHandler(FileSystemEventHandler):
-            def __init__(self, output, chatmode, no_links, dry_run, logger):
-                self.output = output
-                self.chatmode = chatmode
-                self.no_links = no_links
-                self.dry_run = dry_run
-                self.logger = logger
+            def __init__(self, on_change):
+                self._on_change = on_change
                 self.last_compile = 0
                 self.debounce_delay = 1.0  # 1 second debounce
 
@@ -42,45 +79,11 @@ def _watch_mode(output, chatmode, no_links, dry_run, verbose=False):
                     return
 
                 self.last_compile = current_time
-                self._recompile(event.src_path)
-
-            def _recompile(self, changed_file):
-                """Recompile after file change."""
-                try:
-                    self.logger.progress(f"File changed: {changed_file}", symbol="eyes")
-                    self.logger.progress("Recompiling...", symbol="gear")
-
-                    # Create configuration from apm.yml with overrides
-                    config = CompilationConfig.from_apm_yml(
-                        output_path=self.output if self.output != AGENTS_MD_FILENAME else None,
-                        chatmode=self.chatmode,
-                        resolve_links=not self.no_links if self.no_links else None,
-                        dry_run=self.dry_run,
-                    )
-
-                    # Create compiler and compile
-                    compiler = AgentsCompiler(".")
-                    result = compiler.compile(config, logger=self.logger)
-
-                    if result.success:
-                        if self.dry_run:
-                            self.logger.success(
-                                "Recompilation successful (dry run)", symbol="sparkles"
-                            )
-                        else:
-                            self.logger.success(
-                                f"Recompiled to {result.output_path}", symbol="sparkles"
-                            )
-                    else:
-                        self.logger.error("Recompilation failed")
-                        for error in result.errors:
-                            self.logger.error(f"  {error}")
-
-                except Exception as e:
-                    self.logger.error(f"Error during recompilation: {e}")
+                logger.progress(f"File changed: {event.src_path}", symbol="eyes")
+                self._on_change()
 
         # Set up file watching
-        event_handler = APMFileHandler(output, chatmode, no_links, dry_run, logger)
+        event_handler = APMFileHandler(_do_compile)
         observer = Observer()
 
         # Watch patterns for APM files
@@ -122,30 +125,7 @@ def _watch_mode(output, chatmode, no_links, dry_run, verbose=False):
         logger.progress("Press Ctrl+C to stop watching...", symbol="info")
 
         # Do initial compilation
-        logger.progress("Performing initial compilation...", symbol="gear")
-
-        config = CompilationConfig.from_apm_yml(
-            output_path=output if output != AGENTS_MD_FILENAME else None,
-            chatmode=chatmode,
-            resolve_links=not no_links if no_links else None,
-            dry_run=dry_run,
-        )
-
-        compiler = AgentsCompiler(".")
-        result = compiler.compile(config)
-
-        if result.success:
-            if dry_run:
-                logger.success("Initial compilation successful (dry run)", symbol="sparkles")
-            else:
-                logger.success(
-                    f"Initial compilation complete: {result.output_path}",
-                    symbol="sparkles",
-                )
-        else:
-            logger.error("Initial compilation failed")
-            for error in result.errors:
-                logger.error(f"  [x] {error}")
+        _do_compile()
 
         try:
             while True:
