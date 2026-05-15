@@ -46,7 +46,7 @@ class ServerNotFoundError(ValueError):
     keep treating 404s as "not found" without code changes.
     """
 
-    def __init__(self, server_name: str, registry_url: str):
+    def __init__(self, server_name: str, registry_url: str) -> None:
         self.server_name = server_name
         self.registry_url = registry_url
         super().__init__(
@@ -334,6 +334,50 @@ class SimpleRegistryClient:
             servers.append(item["server"])
         return servers
 
+    # Map of v0.1 spec package field names (camelCase / renamed) to the
+    # legacy snake_case shape that adapters in src/apm_cli/adapters/client/
+    # consume (e.g. package.get("name"), package.get("runtime_hint")).
+    # The registry boundary normalizes inbound packages so adapters keep
+    # working without per-adapter rewrites. See #1210 review feedback:
+    # without this, registry-resolved installs produced "npx -y None".
+    _V0_1_PACKAGE_FIELD_ALIASES: tuple[tuple[str, str], ...] = (
+        ("identifier", "name"),
+        ("registryType", "registry_name"),
+        ("registryBaseUrl", "registry_base_url"),
+        ("runtimeHint", "runtime_hint"),
+        ("packageArguments", "package_arguments"),
+        ("runtimeArguments", "runtime_arguments"),
+        ("environmentVariables", "environment_variables"),
+    )
+
+    @classmethod
+    def _normalize_v0_1_package(cls, package: dict[str, Any]) -> dict[str, Any]:
+        """Backfill legacy snake_case keys from v0.1 camelCase aliases.
+
+        Only writes the legacy key when the package does not already
+        carry one, so registries that emit both shapes (or the legacy
+        shape only) are unaffected. This is a one-way bridge: the
+        camelCase key is preserved so callers that have already migrated
+        keep working.
+        """
+        if not isinstance(package, dict):
+            return package
+        normalized = dict(package)
+        for v01_key, legacy_key in cls._V0_1_PACKAGE_FIELD_ALIASES:
+            if legacy_key not in normalized and v01_key in normalized:
+                normalized[legacy_key] = normalized[v01_key]
+        return normalized
+
+    @classmethod
+    def _normalize_v0_1_server(cls, server: dict[str, Any]) -> dict[str, Any]:
+        """Apply package-shape normalization to a server detail dict in place-safe form."""
+        if not isinstance(server, dict):
+            return server
+        packages = server.get("packages")
+        if isinstance(packages, list) and packages:
+            server["packages"] = [cls._normalize_v0_1_package(p) for p in packages]
+        return server
+
     def get_server(self, server_name: str, version: str = "latest") -> dict[str, Any]:
         """Get detailed information about a specific server version.
 
@@ -386,11 +430,11 @@ class SimpleRegistryClient:
                     result[key] = value
             if not result:
                 raise ServerNotFoundError(server_name, self.registry_url)
-            return result
+            return self._normalize_v0_1_server(result)
 
         if not data:
             raise ServerNotFoundError(server_name, self.registry_url)
-        return data
+        return self._normalize_v0_1_server(data)
 
     def get_server_info(self, server_name: str) -> dict[str, Any]:
         """Deprecated alias for :meth:`get_server`.

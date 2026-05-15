@@ -112,6 +112,14 @@ class TestMCPRegistry:
 
         configured = False
         chosen_name = None
+        last_error: Exception | None = None
+        # Known unsupported-server failures: registry shapes the adapter
+        # actively skips (uvx-only, mcpb, etc.) raise ValueError or KeyError.
+        # Anything else is captured and re-raised at the end so a registry
+        # contract regression (e.g. v0.1 packages with `identifier` instead
+        # of `name`) cannot silently disguise itself as "no compatible
+        # server" -- which is the regression #1210 was filed against.
+        _expected_skip_errors = (ValueError, KeyError, TypeError)
         for s in servers:
             name = s.get("name")
             if not name:
@@ -121,10 +129,20 @@ class TestMCPRegistry:
                     configured = True
                     chosen_name = name
                     break
-            except Exception:
+            except _expected_skip_errors:
+                continue
+            except Exception as exc:
+                last_error = exc
                 continue
 
         if not configured:
+            if last_error is not None:
+                raise AssertionError(
+                    "VSCode adapter could not configure any of the first 20 registry "
+                    "servers and the last failure was an unexpected exception (likely a "
+                    "registry contract regression): "
+                    f"{type(last_error).__name__}: {last_error}"
+                ) from last_error
             pytest.skip("No VSCode-compatible server found in the first 20 registry entries")
 
         config_path = os.path.join(self.test_dir.name, ".vscode", "mcp.json")

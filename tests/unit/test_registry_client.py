@@ -4,6 +4,7 @@ import os
 import unittest
 import warnings
 from unittest import mock
+from urllib.parse import urlparse
 
 import requests
 
@@ -84,8 +85,9 @@ class TestSimpleRegistryClient(unittest.TestCase):
 
         self.client.list_servers()
         called_url = mock_get.call_args[0][0]
-        self.assertIn("/v0.1/servers", called_url)
-        self.assertNotIn("/v0/servers", called_url)
+        parsed_path = urlparse(called_url).path
+        self.assertEqual(parsed_path, "/v0.1/servers")
+        self.assertNotEqual(parsed_path, "/v0/servers")
 
     @mock.patch("requests.Session.get")
     def test_search_servers(self, mock_get):
@@ -181,10 +183,13 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.client.get_server("io.github.github/github-mcp-server")
 
         called_url = mock_get.call_args[0][0]
-        self.assertIn("io.github.github%2Fgithub-mcp-server", called_url)
-        self.assertIn("/versions/latest", called_url)
-        # raw '/' inside the name must NOT appear as a path separator
-        self.assertNotIn("io.github.github/github-mcp-server/versions", called_url)
+        parsed_path = urlparse(called_url).path
+        # serverName slash must be encoded as %2F so the registry routes the
+        # name as a single path segment, not as nested servers/<owner>/<repo>.
+        self.assertEqual(
+            parsed_path,
+            "/v0.1/servers/io.github.github%2Fgithub-mcp-server/versions/latest",
+        )
 
     def test_get_server_rejects_invalid_name_shape(self):
         """get_server rejects names that don't match the MCP spec shape."""
@@ -207,8 +212,22 @@ class TestSimpleRegistryClient(unittest.TestCase):
 
         with self.assertRaises(ServerNotFoundError) as cm:
             self.client.get_server("io.github.foo/missing")
-        self.assertIn("io.github.foo/missing", str(cm.exception))
-        self.assertIn(self.client.registry_url, str(cm.exception))
+        msg = str(cm.exception)
+        self.assertIn("io.github.foo/missing", msg)
+        # Validate the registry URL appears in the error by parsing it out of
+        # the message rather than substring-matching the raw URL (CodeQL rule
+        # `py/incomplete-url-substring-sanitization`). Find the URL token that
+        # carries a scheme and assert hostname / scheme equality.
+        registry_parsed = urlparse(self.client.registry_url)
+        url_tokens = [tok.strip(".,;'\")(") for tok in msg.split() if "://" in tok]
+        parsed_tokens = [urlparse(tok) for tok in url_tokens]
+        self.assertTrue(
+            any(
+                p.scheme == registry_parsed.scheme and p.hostname == registry_parsed.hostname
+                for p in parsed_tokens
+            ),
+            f"Registry URL not present in error message: {msg!r}",
+        )
         # ServerNotFoundError must be a ValueError subclass for legacy callers
         self.assertIsInstance(cm.exception, ValueError)
 
