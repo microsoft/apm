@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `apm config set prefer-ssh true` / `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users no longer need to re-pass `--ssh` / `--allow-protocol-fallback` (or export env vars in shell profiles) on every `apm install`. Resolution order: CLI flag > `APM_GIT_PROTOCOL` / `APM_ALLOW_PROTOCOL_FALLBACK` env var > `apm config` > built-in default. `apm config unset prefer-ssh` and `apm config unset allow-protocol-fallback` remove the persisted value. (#1243)
+- `apm pack --marketplace=FORMATS` filters which marketplace formats are built in a single run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
+- `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. Env var overrides (`APM_MARKETPLACE_<FORMAT>_PATH`) are planned for v0.15. (#1317)
+- `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [{format, path, ...}]}}`); all logs move to stderr so downstream tooling can `jq` the output safely. (#1317)
+- `marketplace.outputs` in `apm.yml` now accepts a map form keyed by format name (`outputs: {claude: {}, codex: {path: ...}}`), replacing the deprecated list form; the list form still parses with a one-cycle deprecation warning. (#1317)
+- `apm marketplace init` now scaffolds the explicit map-form `outputs: {claude: {}}` so the default state is observable in the manifest. (#1317)
 
 ### Fixed
 

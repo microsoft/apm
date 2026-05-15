@@ -37,7 +37,7 @@ Controls how APM clones packages from Git hosts. These settings can also be pers
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `APM_GIT_PROTOCOL` | Preferred clone protocol for shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
+| `APM_GIT_PROTOCOL` | Preferred clone protocol for shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
 | `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
 
 ## Registry (MCP and proxy)

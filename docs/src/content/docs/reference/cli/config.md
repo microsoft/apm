@@ -45,7 +45,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Only `temp-dir` and `copilot-cowork-skills-dir` are unsettable; boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. All settable keys are unsettable: `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, and `allow-protocol-fallback`. After unsetting a key the effective value falls back to the environment variable, then the built-in default.
 
 ## Configuration keys
 

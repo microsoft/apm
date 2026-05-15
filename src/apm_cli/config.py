@@ -1,5 +1,6 @@
 """Configuration management for APM."""
 
+import contextlib
 import json
 import os
 from typing import Optional  # noqa: F401
@@ -18,13 +19,21 @@ _config_cache: dict | None = None
 
 
 def ensure_config_exists():
-    """Ensure the configuration directory and file exist."""
+    """Ensure the configuration directory and file exist.
+
+    The directory is created with mode ``0o700`` (owner-only) and the
+    initial config file with mode ``0o600`` to prevent other users on a
+    shared system from reading persisted tokens or transport preferences.
+    Both restrictions are silently ignored on Windows.
+    """
     if not os.path.exists(CONFIG_DIR):
-        os.makedirs(CONFIG_DIR)
+        os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
 
     if not os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump({"default_client": "vscode"}, f)
+        with contextlib.suppress(NotImplementedError):
+            os.chmod(CONFIG_FILE, 0o600)
 
 
 def get_config():
@@ -133,18 +142,30 @@ def set_temp_dir(path: str) -> None:
     update_config({"temp_dir": resolved})
 
 
+def _unset_config_key(key: str) -> None:
+    """Remove *key* from the config file atomically.
+
+    No-op when *key* is not present.  Invalidates the in-process cache
+    before and after the write so subsequent reads see the updated state.
+
+    Args:
+        key: The JSON key to remove from ``~/.apm/config.json``.
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if key in config:
+        del config[key]
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
 def unset_temp_dir() -> None:
     """Remove the ``temp_dir`` key from the config file.
 
     No-op if the key is not present.
     """
-    _invalidate_config_cache()
-    config = get_config()
-    if "temp_dir" in config:
-        del config["temp_dir"]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    _invalidate_config_cache()
+    _unset_config_key("temp_dir")
 
 
 # ---------------------------------------------------------------------------
@@ -196,13 +217,7 @@ def unset_allow_protocol_fallback() -> None:
     ``APM_ALLOW_PROTOCOL_FALLBACK`` env var and then the built-in
     default (``False``).
     """
-    _invalidate_config_cache()
-    config = get_config()
-    if "allow_protocol_fallback" in config:
-        del config["allow_protocol_fallback"]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    _invalidate_config_cache()
+    _unset_config_key("allow_protocol_fallback")
 
 
 def unset_prefer_ssh() -> None:
@@ -212,13 +227,7 @@ def unset_prefer_ssh() -> None:
     :func:`get_apm_protocol_pref` will fall through to the
     ``APM_GIT_PROTOCOL`` env var and then the built-in default (``None``).
     """
-    _invalidate_config_cache()
-    config = get_config()
-    if "prefer_ssh" in config:
-        del config["prefer_ssh"]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    _invalidate_config_cache()
+    _unset_config_key("prefer_ssh")
 
 
 def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
@@ -325,13 +334,7 @@ def unset_copilot_cowork_skills_dir() -> None:
 
     No-op if the key is not present.
     """
-    _invalidate_config_cache()
-    config = get_config()
-    if "copilot_cowork_skills_dir" in config:
-        del config["copilot_cowork_skills_dir"]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    _invalidate_config_cache()
+    _unset_config_key("copilot_cowork_skills_dir")
 
 
 def get_apm_temp_dir() -> str | None:

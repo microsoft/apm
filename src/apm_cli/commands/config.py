@@ -21,7 +21,7 @@ _CONFIG_KEY_DISPLAY_NAMES = {
     "temp_dir": "temp-dir",
     "copilot_cowork_skills_dir": "copilot-cowork-skills-dir",
     "allow_protocol_fallback": "allow-protocol-fallback",
-    "ssh": "ssh",
+    "prefer_ssh": "prefer-ssh",
 }
 
 
@@ -134,8 +134,14 @@ def config(ctx):
             if _temp_dir_val:
                 config_table.add_row("", "Temp Directory", _temp_dir_val)
 
-            config_table.add_row("", "Allow Protocol Fallback", str(_get_apf()))
-            config_table.add_row("", "Prefer SSH Transport", str(_get_prefer_ssh_cfg()))
+            # Only surface transport keys when they have been enabled -- the
+            # false-default rows add noise for users who never configured them.
+            _apf = _get_apf()
+            _prefer_ssh = _get_prefer_ssh_cfg()
+            if _apf:
+                config_table.add_row("", "Allow Protocol Fallback", "true")
+            if _prefer_ssh:
+                config_table.add_row("", "Prefer SSH Transport", "true")
 
             from ..core.experimental import is_enabled as _is_enabled
 
@@ -178,8 +184,8 @@ def config(ctx):
             if _temp_dir_fb:
                 click.echo(f"  Temp Directory: {_temp_dir_fb}")
 
-            click.echo(f"  allow-protocol-fallback: {_get_apf_fb()}")
-            click.echo(f"  prefer-ssh: {_get_prefer_ssh_fb()}")
+            click.echo(f"  allow-protocol-fallback: {str(_get_apf_fb()).lower()}")
+            click.echo(f"  prefer-ssh: {str(_get_prefer_ssh_fb()).lower()}")
 
             from ..core.experimental import is_enabled as _is_enabled_fb
 
@@ -252,10 +258,20 @@ def set(key, value):  # noqa: F811
 
     setter, label = config_entry
     setter(enabled)
-    if enabled:
-        logger.success(f"{label} enabled")
-    else:
-        logger.success(f"{label} disabled")
+    logger.success(f"{label} set to {'true' if enabled else 'false'}")
+
+    # Warn when persisting allow-protocol-fallback=true in a CI environment where
+    # $HOME is often shared across jobs -- the persisted value will affect all
+    # subsequent apm install runs on that host. The env var is safer for CI.
+    import os as _os
+
+    if key == "allow-protocol-fallback" and enabled and _os.environ.get("CI"):
+        logger.warning(
+            "allow-protocol-fallback is now persisted to ~/.apm/config.json. "
+            "In CI environments with a shared $HOME this will affect all subsequent "
+            "apm install runs on this host. "
+            "Prefer APM_ALLOW_PROTOCOL_FALLBACK=1 as an invocation-scoped alternative."
+        )
 
 
 @config.command(help="Get a configuration value")
@@ -299,7 +315,11 @@ def get(key):
             )
             sys.exit(1)
         value = getter()
-        click.echo(f"{key}: {value}")
+        # Render booleans as lowercase true/false (npm convention).
+        if isinstance(value, bool):
+            click.echo(f"{key}: {str(value).lower()}")
+        else:
+            click.echo(f"{key}: {value}")
     else:
         # Show all user-settable keys with their effective values (including
         # defaults).  Iterating raw config keys would hide settings that
@@ -307,13 +327,18 @@ def get(key):
         from ..config import get_allow_protocol_fallback, get_prefer_ssh
 
         logger.progress("APM Configuration:")
-        click.echo(f"  auto-integrate: {get_auto_integrate()}")
+        click.echo(f"  auto-integrate: {str(get_auto_integrate()).lower()}")
         temp_dir = get_temp_dir()
         click.echo(
             f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
         )
-        click.echo(f"  allow-protocol-fallback: {get_allow_protocol_fallback()}")
-        click.echo(f"  prefer-ssh: {get_prefer_ssh()}")
+        # Only show transport keys when non-default to reduce noise.
+        _apf_val = get_allow_protocol_fallback()
+        _ssh_val = get_prefer_ssh()
+        if _apf_val:
+            click.echo("  allow-protocol-fallback: true")
+        if _ssh_val:
+            click.echo("  prefer-ssh: true")
 
         from ..core.experimental import is_enabled as _is_enabled_get
 

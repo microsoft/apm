@@ -241,14 +241,14 @@ class TestConfigGet:
         with patch("apm_cli.config.get_auto_integrate", return_value=True):
             result = self.runner.invoke(config, ["get", "auto-integrate"])
         assert result.exit_code == 0
-        assert "auto-integrate: True" in result.output
+        assert "auto-integrate: true" in result.output
 
     def test_get_auto_integrate_disabled(self):
         """Get auto-integrate when disabled."""
         with patch("apm_cli.config.get_auto_integrate", return_value=False):
             result = self.runner.invoke(config, ["get", "auto-integrate"])
         assert result.exit_code == 0
-        assert "auto-integrate: False" in result.output
+        assert "auto-integrate: false" in result.output
 
     def test_get_unknown_key(self):
         """Reject an unknown key."""
@@ -260,7 +260,7 @@ class TestConfigGet:
         with patch("apm_cli.config.get_auto_integrate", return_value=True):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "auto-integrate: True" in result.output
+        assert "auto-integrate: true" in result.output
         # Internal keys must not appear - users cannot set them via apm config set
         assert "default_client" not in result.output
 
@@ -269,7 +269,7 @@ class TestConfigGet:
         with patch("apm_cli.config.get_auto_integrate", return_value=True):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "auto-integrate: True" in result.output
+        assert "auto-integrate: true" in result.output
 
 
 class TestAutoIntegrateFunctions:
@@ -1203,17 +1203,30 @@ class TestConfigGetAllowProtocolFallback:
         with patch("apm_cli.config.get_allow_protocol_fallback", return_value=True):
             result = self.runner.invoke(config, ["get", "allow-protocol-fallback"])
         assert result.exit_code == 0
-        assert "allow-protocol-fallback: True" in result.output
+        assert "allow-protocol-fallback: true" in result.output
 
     def test_get_allow_protocol_fallback_when_false(self):
         """Display the configured allow-protocol-fallback when False."""
         with patch("apm_cli.config.get_allow_protocol_fallback", return_value=False):
             result = self.runner.invoke(config, ["get", "allow-protocol-fallback"])
         assert result.exit_code == 0
-        assert "allow-protocol-fallback: False" in result.output
+        assert "allow-protocol-fallback: false" in result.output
 
     def test_get_all_config_includes_allow_protocol_fallback(self):
-        """apm config get (no key) lists allow-protocol-fallback."""
+        """apm config get (no key) shows allow-protocol-fallback only when true."""
+        with (
+            patch("apm_cli.config.get_auto_integrate", return_value=True),
+            patch("apm_cli.config.get_allow_protocol_fallback", return_value=True),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+        ):
+            result = self.runner.invoke(config, ["get"])
+        assert result.exit_code == 0
+        assert "allow-protocol-fallback" in result.output
+
+    def test_get_all_config_suppresses_allow_protocol_fallback_when_false(self):
+        """apm config get (no key) omits allow-protocol-fallback when false (noise reduction)."""
         with (
             patch("apm_cli.config.get_auto_integrate", return_value=True),
             patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
@@ -1223,7 +1236,7 @@ class TestConfigGetAllowProtocolFallback:
         ):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "allow-protocol-fallback" in result.output
+        assert "allow-protocol-fallback" not in result.output
 
     def test_unknown_key_error_lists_allow_protocol_fallback(self):
         """Error message for unknown keys lists allow-protocol-fallback as valid."""
@@ -1305,17 +1318,30 @@ class TestConfigGetPreferSsh:
         with patch("apm_cli.config.get_prefer_ssh", return_value=True):
             result = self.runner.invoke(config, ["get", "prefer-ssh"])
         assert result.exit_code == 0
-        assert "prefer-ssh: True" in result.output
+        assert "prefer-ssh: true" in result.output
 
     def test_get_prefer_ssh_when_false(self):
         """Display the configured prefer-ssh preference when False."""
         with patch("apm_cli.config.get_prefer_ssh", return_value=False):
             result = self.runner.invoke(config, ["get", "prefer-ssh"])
         assert result.exit_code == 0
-        assert "prefer-ssh: False" in result.output
+        assert "prefer-ssh: false" in result.output
 
     def test_get_all_config_includes_prefer_ssh(self):
-        """apm config get (no key) lists prefer-ssh."""
+        """apm config get (no key) shows prefer-ssh only when true."""
+        with (
+            patch("apm_cli.config.get_auto_integrate", return_value=True),
+            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=True),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+        ):
+            result = self.runner.invoke(config, ["get"])
+        assert result.exit_code == 0
+        assert "prefer-ssh" in result.output
+
+    def test_get_all_config_suppresses_prefer_ssh_when_false(self):
+        """apm config get (no key) omits prefer-ssh when false (noise reduction)."""
         with (
             patch("apm_cli.config.get_auto_integrate", return_value=True),
             patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
@@ -1325,7 +1351,7 @@ class TestConfigGetPreferSsh:
         ):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "prefer-ssh" in result.output
+        assert "prefer-ssh" not in result.output
 
     def test_unknown_key_error_lists_prefer_ssh_as_valid(self):
         """Error message for unknown keys lists prefer-ssh as valid."""

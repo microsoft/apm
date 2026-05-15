@@ -449,6 +449,16 @@ apm install --https
 export APM_GIT_PROTOCOL=https
 ```
 
+To persist the HTTPS preference across all future installs without re-exporting the variable:
+
+```bash
+apm config set prefer-ssh false   # explicit: never prefer SSH for shorthand deps
+# or, if you want APM to always try HTTPS for shorthand deps:
+# export APM_GIT_PROTOCOL=https   # process-scoped; add to shell profile for persistence
+```
+
+See [apm config](../../reference/cli/config/) for the full transport-preference config surface.
+
 ## Choosing transport (SSH vs HTTPS)
 
 Authentication and transport are independent decisions:

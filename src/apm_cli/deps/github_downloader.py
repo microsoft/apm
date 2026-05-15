@@ -195,10 +195,14 @@ class GitHubPackageDownloader:
             transport_selector: TransportSelector for protocol decisions.
                 Defaults to a new selector with GitConfigInsteadOfResolver.
             protocol_pref: User-stated transport preference for shorthand
-                deps. When None, reads APM_GIT_PROTOCOL env.
+                deps. When None, resolved from ``APM_GIT_PROTOCOL`` env var,
+                then ``prefer-ssh`` in ``~/.apm/config.json``, then ``None``
+                (let git insteadOf rules decide).
             allow_fallback: When True, permits cross-protocol fallback
-                (legacy behavior). When None, reads
-                APM_ALLOW_PROTOCOL_FALLBACK env.
+                (legacy behavior). When None, resolved from
+                ``APM_ALLOW_PROTOCOL_FALLBACK`` env var, then
+                ``allow-protocol-fallback`` in ``~/.apm/config.json``,
+                then ``False``.
         """
         self.auth_resolver = auth_resolver or AuthResolver()
         self.token_manager = self.auth_resolver._token_manager  # Backward compat
