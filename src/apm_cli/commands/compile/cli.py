@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from ...compilation import AgentsCompiler, CompilationConfig
+from ...compilation import AgentsCompiler, CompilationConfig, CompilationResult
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
@@ -254,19 +254,19 @@ def _resolve_compile_target(target):
 
 def _run_compile_once(
     *,
-    target,
-    output,
-    chatmode,
-    no_links,
-    dry_run,
-    single_agents,
-    verbose,
-    local_only,
-    clean,
-    with_constitution,
-    logger,
-):
-    """Run a single compile pass — shared body for one-shot and watch paths.
+    target: str | list[str] | None,
+    output: str,
+    chatmode: str | None,
+    no_links: bool,
+    dry_run: bool,
+    single_agents: bool,
+    verbose: bool,
+    local_only: bool,
+    clean: bool,
+    with_constitution: bool,
+    logger: CommandLogger,
+) -> CompilationResult:
+    """Run a single compile pass - shared body for one-shot and watch paths.
 
     Why: prior to #1345 the watch path reimplemented config-building
     without target resolution, so apm.yml `targets:` and CLI `--target`
