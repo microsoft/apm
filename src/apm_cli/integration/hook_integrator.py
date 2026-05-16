@@ -732,8 +732,17 @@ class HookIntegrator(BaseIntegrator):
         if config.schema_strict and sidecar_path.exists():
             try:
                 with open(sidecar_path, encoding="utf-8") as f:
-                    sidecar_data = json.load(f)
-            except (json.JSONDecodeError, OSError):
+                    _raw = json.load(f)
+                if isinstance(_raw, dict):
+                    sidecar_data = _raw
+                else:
+                    _log.warning(
+                        "Sidecar file %s contains non-dict JSON; treating as empty.",
+                        sidecar_path,
+                    )
+                    sidecar_data = {}
+            except (json.JSONDecodeError, OSError) as exc:
+                _log.warning("Failed to read sidecar %s: %s; treating as empty.", sidecar_path, exc)
                 sidecar_data = {}
 
             # Re-inject _apm_source from sidecar into matching in-memory entries
@@ -886,9 +895,12 @@ class HookIntegrator(BaseIntegrator):
             # Write sidecar
             sidecar_path = target_dir / _APM_HOOKS_SIDECAR
             if sidecar_out:
-                with open(sidecar_path, "w", encoding="utf-8") as f:
-                    json.dump(sidecar_out, f, indent=2)
-                    f.write("\n")
+                try:
+                    with open(sidecar_path, "w", encoding="utf-8") as f:
+                        json.dump(sidecar_out, f, indent=2)
+                        f.write("\n")
+                except OSError as exc:
+                    _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
             elif sidecar_path.exists():
                 sidecar_path.unlink()
 
@@ -1102,8 +1114,21 @@ class HookIntegrator(BaseIntegrator):
                             if sidecar_path.exists():
                                 try:
                                     with open(sidecar_path, encoding="utf-8") as sf:
-                                        sidecar_data = json.load(sf)
-                                except (json.JSONDecodeError, OSError):
+                                        _raw = json.load(sf)
+                                    if isinstance(_raw, dict):
+                                        sidecar_data = _raw
+                                    else:
+                                        _log.warning(
+                                            "Sidecar file %s contains non-dict JSON; treating as empty.",
+                                            sidecar_path,
+                                        )
+                                        sidecar_data = {}
+                                except (json.JSONDecodeError, OSError) as exc:
+                                    _log.warning(
+                                        "Failed to read sidecar %s: %s; treating as empty.",
+                                        sidecar_path,
+                                        exc,
+                                    )
                                     sidecar_data = {}
 
                             # Re-inject _apm_source from sidecar
