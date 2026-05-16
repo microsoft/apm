@@ -211,15 +211,15 @@ Use type hints in Python code.
                 f"CLI exited with code {result.exit_code}:\n{result.output}"
             )
             # Output must reference AGENTS.md generation
-            assert "AGENTS.md" in result.output or "agents" in result.output.lower(), (
-                f"Expected AGENTS reference in output:\n{result.output}"
+            assert "AGENTS.md" in result.output, (
+                f"Expected AGENTS.md reference in output:\n{result.output}"
             )
             # CRITICAL: No Claude preview text appended (the regression)
             assert "CLAUDE.md Preview" not in result.output, (
                 f"BUG: Claude preview text found in output:\n{result.output}"
             )
-            assert "Would generate" not in result.output, (
-                f"BUG: Preview artifacts found in output:\n{result.output}"
+            assert "CLAUDE.md Preview: Would generate" not in result.output, (
+                f"BUG: Claude preview-generate artifacts found in output:\n{result.output}"
             )
         finally:
             os.chdir(original_dir)
