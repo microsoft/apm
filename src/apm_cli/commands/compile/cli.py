@@ -703,6 +703,7 @@ def compile(
                     dry_run=True,  # force
                     with_constitution=config.with_constitution,
                     strategy="single-file",
+                    target=config.target,
                 )
                 intermediate_result = compiler.compile(intermediate_config)
 
