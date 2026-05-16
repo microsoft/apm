@@ -85,6 +85,7 @@ function Install-Codex {
         }
 
         Write-Info "Using Codex release: $latestTag"
+        $Version = $latestTag
         $downloadUrl = "https://github.com/$CodexRepo/releases/download/$latestTag/codex-$codexPlatform.exe.tar.gz"
     } else {
         $downloadUrl = "https://github.com/$CodexRepo/releases/download/$Version/codex-$codexPlatform.exe.tar.gz"
@@ -168,6 +169,21 @@ wire_api = "responses"
 
         Write-Success "Codex configuration created at $codexConfig"
         Write-Info "Using Codex $Version."
+
+        # Version compatibility check
+        if ($Version -match '^rust-v0\.(\d+)') {
+            $codexMinor = [int]$Matches[1]
+            if ($codexMinor -ge 116) {
+                Write-Host ""
+                Write-Host "[!] WARNING: Codex >= v0.116 requires the OpenAI Responses API (wire_api=responses)." -ForegroundColor Yellow
+                Write-Host "    GitHub Models does not expose the /responses endpoint and will return 404." -ForegroundColor Yellow
+                Write-Host "    If you are using GitHub Models as your provider, you have two options:" -ForegroundColor Yellow
+                Write-Host "      1. Use an OpenAI API key instead of GitHub Models" -ForegroundColor Yellow
+                Write-Host "      2. Install a compatible older version: apm runtime setup codex --version rust-v0.115.0" -ForegroundColor Yellow
+                Write-Host ""
+            }
+        }
+
         Write-Info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
     } else {
         Write-Info "Vanilla mode: Skipping APM configuration"

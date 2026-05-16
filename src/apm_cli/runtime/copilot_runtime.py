@@ -2,12 +2,12 @@
 
 import json
 import os  # noqa: F401
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional  # noqa: F401, UP035
 
 from .base import RuntimeAdapter, _stream_subprocess_output
+from .utils import find_runtime_binary
 
 
 class CopilotRuntime(RuntimeAdapter):
@@ -149,7 +149,7 @@ class CopilotRuntime(RuntimeAdapter):
         Returns:
             bool: True if runtime is available, False otherwise
         """
-        return shutil.which("copilot") is not None
+        return find_runtime_binary("copilot") is not None
 
     @staticmethod
     def get_runtime_name() -> str:
