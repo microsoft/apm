@@ -722,9 +722,12 @@ class TestClaudeIntegration:
             assert all(e["_apm_source"] == "multi-stop-pkg" for e in stop)
             return {h["command"] for entry in stop for h in entry["hooks"]}
 
+        # Commands are now absolute paths (deploy_root=project_root is threaded
+        # through _integrate_merged_hooks so Claude Code never sees an unexpanded
+        # ${CLAUDE_PLUGIN_ROOT} variable).  Assert on the absolute form.
         assert extract_commands(first) == {
-            ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh",
-            ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh",
+            str((temp_project / ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh").resolve()),
+            str((temp_project / ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh").resolve()),
         }
 
         # Re-run twice more — both entries must survive and the file must
@@ -2949,6 +2952,128 @@ class TestIssue1007Fixes:
 
         assert cmd == original, "Unknown variable must not be modified"
         assert scripts == [], "No scripts should be scheduled for copy"
+
+    def test_rewrite_command_deploy_root_produces_absolute_path(self, tmp_path: Path) -> None:
+        """deploy_root parameter makes _rewrite_command_for_target produce absolute paths."""
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "hooks" / "run.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho run", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        deploy_root = Path("/fake/home")
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=deploy_root,
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
+        assert len(scripts) == 1, "Script copy entry must be produced"
+        assert cmd.startswith("/fake/home/"), (
+            f"Command must be absolute path under deploy_root; got {cmd}"
+        )
+        assert cmd.endswith(".claude/hooks/my-pkg/hooks/run.sh"), (
+            f"Command must end with .claude/hooks/my-pkg/hooks/run.sh; got {cmd}"
+        )
+
+    def test_rewrite_command_deploy_root_absent_script_resolves_to_source(
+        self, tmp_path: Path
+    ) -> None:
+        """When script is absent and deploy_root is set, use source file absolute path."""
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        # Note: NOT creating the script file
+
+        integrator = HookIntegrator()
+        deploy_root = Path("/fake/home")
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=deploy_root,
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
+        assert len(scripts) == 0, "No script copy entry when source is absent"
+        assert cmd.startswith("/"), "Command must be absolute path"
+        assert "run.sh" in cmd, "Command must contain the script name"
+        # Command should resolve to the source path (even if file doesn't exist)
+
+    def test_rewrite_command_no_deploy_root_stays_relative(self, tmp_path: Path) -> None:
+        """Without deploy_root, command must stay relative (backward compatibility)."""
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "hooks" / "run.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho run", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=None,  # Explicit None for clarity
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
+        assert len(scripts) == 1, "Script copy entry must be produced"
+        assert cmd.startswith(".claude/hooks/my-pkg/"), (
+            f"Command must be relative (start with .claude/); got {cmd}"
+        )
+        assert not cmd.startswith("/"), "Command must not be absolute without deploy_root"
+
+    def test_rewrite_command_deploy_root_relative_path_handler(self, tmp_path: Path) -> None:
+        """deploy_root makes ./path references produce absolute paths too."""
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "hooks" / "run.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho run", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        deploy_root = Path("/fake/home")
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "./hooks/run.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            hook_file_dir=pkg_dir,  # ./hooks resolves relative to pkg_dir
+            deploy_root=deploy_root,
+        )
+
+        assert "./" not in cmd, "Relative ./ reference must be replaced"
+        assert len(scripts) == 1, "Script copy entry must be produced"
+        assert cmd.startswith("/fake/home/"), (
+            f"Command must be absolute path under deploy_root; got {cmd}"
+        )
+        assert not cmd.startswith("./"), "Command must not be relative"
+
+    def test_rewrite_command_nonexistent_script_with_deploy_root(self, tmp_path: Path) -> None:
+        """When deploy_root is set and script is absent, variable is still resolved (not left expanded)."""
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        # NOT creating the script file
+
+        integrator = HookIntegrator()
+        deploy_root = Path("/some/root")
+        cmd, _ = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=deploy_root,
+        )
+
+        # With deploy_root, the variable IS resolved to the source file path
+        # (even though file doesn't exist), so the caller sees a clear "not found"
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, (
+            "Variable must be resolved to source path when deploy_root is set"
+        )
+        assert "missing.sh" in cmd, "Command must contain the script name"
+        assert cmd.startswith("/"), "Command must be an absolute path (the source file)"
 
     # ------------------------------------------------------------------
     # Group C: Event normalisation for Claude

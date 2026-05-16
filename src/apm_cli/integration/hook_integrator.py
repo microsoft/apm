@@ -328,6 +328,7 @@ class HookIntegrator(BaseIntegrator):
         target: str,
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
+        deploy_root: Path | None = None,
     ) -> tuple[str, list[tuple[Path, str]]]:
         """Rewrite a hook command to use installed script paths.
 
@@ -385,7 +386,16 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                new_command = new_command.replace(full_var, target_rel)
+                resolved_cmd = (
+                    str((deploy_root / target_rel).resolve())
+                    if deploy_root is not None
+                    else target_rel
+                )
+                new_command = new_command.replace(full_var, resolved_cmd)
+            elif deploy_root is not None:
+                # File absent: resolve to absolute source path so Claude Code
+                # gets a clear "file not found" rather than an unexpanded variable.
+                new_command = new_command.replace(full_var, str(source_file))
 
         # Handle relative ./path and .\path references (safe to run after
         # ${CLAUDE_PLUGIN_ROOT} substitution since replacements produce paths
@@ -407,7 +417,16 @@ class HookIntegrator(BaseIntegrator):
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                new_command = new_command.replace(rel_ref, target_rel)
+                resolved_cmd = (
+                    str((deploy_root / target_rel).resolve())
+                    if deploy_root is not None
+                    else target_rel
+                )
+                new_command = new_command.replace(rel_ref, resolved_cmd)
+            elif deploy_root is not None:
+                # File absent: resolve to absolute source path so the target
+                # gets a clear "file not found" rather than a bare relative ref.
+                new_command = new_command.replace(rel_ref, str(source_file))
 
         return new_command, scripts_to_copy
 
@@ -419,6 +438,7 @@ class HookIntegrator(BaseIntegrator):
         target: str,
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
+        deploy_root: Path | None = None,
     ) -> tuple[dict, list[tuple[Path, str]]]:
         """Rewrite all command paths in a hooks JSON structure.
 
@@ -458,6 +478,7 @@ class HookIntegrator(BaseIntegrator):
                             target,
                             hook_file_dir=hook_file_dir,
                             root_dir=root_dir,
+                            deploy_root=deploy_root,
                         )
                         if scripts:
                             _log.debug(
@@ -484,6 +505,7 @@ class HookIntegrator(BaseIntegrator):
                                 target,
                                 hook_file_dir=hook_file_dir,
                                 root_dir=root_dir,
+                                deploy_root=deploy_root,
                             )
                             if scripts:
                                 _log.debug(
@@ -699,6 +721,7 @@ class HookIntegrator(BaseIntegrator):
                 config.target_key,
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
+                deploy_root=project_root,
             )
 
             # Merge hooks into config (additive)
