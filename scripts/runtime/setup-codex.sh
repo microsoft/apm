@@ -27,6 +27,8 @@ CODEX_REPO="openai/codex"
 # Users can override with: apm runtime setup codex --version <version> (e.g. 'latest')
 CODEX_VERSION="rust-v0.118.0"
 VANILLA_MODE=false
+# Last Codex minor version that works with GitHub Models without wire_api=chat (#605)
+LAST_COMPAT_VERSION_MINOR=115
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -215,13 +217,13 @@ EOF
 
         # Version compatibility check
         codex_minor=$(echo "$CODEX_VERSION" | sed -n 's/^rust-v0\.\([0-9]*\).*/\1/p')
-        if [ -n "$codex_minor" ] && [ "$codex_minor" -ge 116 ] 2>/dev/null; then
+        if [ -n "$codex_minor" ] && [ "$codex_minor" -gt "$LAST_COMPAT_VERSION_MINOR" ] 2>/dev/null; then
             echo ""
-            echo "[!] WARNING: Codex >= v0.116 requires the OpenAI Responses API (wire_api=responses)."
-            echo "    GitHub Models does not expose the /responses endpoint and will return 404."
-            echo "    If you are using GitHub Models as your provider, you have two options:"
-            echo "      1. Use an OpenAI API key instead of GitHub Models"
-            echo "      2. Install a compatible older version: apm runtime setup codex --version rust-v0.115.0"
+            log_warning "codex >= v0.116 requires wire_api=chat configuration for GitHub Models compatibility."
+            log_warning "The generated config uses wire_api=responses, which returns 404 with GitHub Models."
+            log_warning "To fix, update wire_api in $codex_config:"
+            log_warning "  wire_api = \"chat\""
+            log_warning "Or install an older compatible version: apm runtime setup codex --version rust-v0.115.0"
             echo ""
         fi
 

@@ -214,3 +214,72 @@ class TestFindRuntimeBinary:
 
         assert isinstance(result, str)
         assert result == str(apm_binary)
+
+
+class TestFindRuntimeBinaryPathSecurity:
+    """Tests for path-traversal security in find_runtime_binary."""
+
+    def test_rejects_dotdot_traversal(self, fake_home):
+        """Names with ``..`` segments must raise PathTraversalError."""
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            find_runtime_binary("../../etc/passwd")
+
+    def test_rejects_name_with_forward_slash(self, fake_home):
+        """Names containing '/' must raise PathTraversalError."""
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            find_runtime_binary("some/path")
+
+    def test_rejects_name_with_backslash(self, fake_home):
+        """Names containing '\\' must raise PathTraversalError."""
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            find_runtime_binary("some\\path")
+
+    def test_rejects_absolute_path_as_name(self, fake_home):
+        """Absolute paths passed as a name must raise PathTraversalError."""
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            find_runtime_binary("/usr/bin/codex")
+
+    def test_rejects_dotdot_url_encoded(self, fake_home):
+        """URL-encoded traversal sequences must also be rejected."""
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            find_runtime_binary("%2e%2e/etc/passwd")
+
+    def test_valid_simple_name_does_not_raise(self, fake_home):
+        """A plain binary name (no separators) must not raise any exception."""
+        with patch("apm_cli.runtime.utils.shutil.which", return_value=None):
+            # Should not raise; result is None because binary is absent
+            result = find_runtime_binary("codex")
+        assert result is None
+
+    def test_symlink_outside_runtimes_dir_is_rejected(self, fake_home):
+        """An APM binary that is a symlink pointing outside runtimes must be skipped."""
+        import os
+
+        runtime_dir = fake_home / ".apm" / "runtimes"
+        runtime_dir.mkdir(parents=True)
+
+        # Create a real executable outside the runtimes dir
+        outside_binary = fake_home / "evil_codex"
+        outside_binary.write_text("#!/bin/sh\n")
+        outside_binary.chmod(0o755)
+
+        # Symlink inside runtimes pointing outside
+        apm_link = runtime_dir / "codex"
+        os.symlink(outside_binary, apm_link)
+
+        path_binary = "/usr/bin/codex"
+        with patch("apm_cli.runtime.utils.shutil.which", return_value=path_binary):
+            result = find_runtime_binary("codex")
+
+        # The symlink escapes runtimes dir, so must fall back to PATH
+        assert result == path_binary

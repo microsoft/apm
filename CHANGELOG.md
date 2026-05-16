@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added APM-managed runtime binary resolution before PATH lookup; `find_runtime_binary()` now includes path-traversal security guards via `validate_path_segments` and `ensure_path_within`. (#605)
+- Added codex >= v0.116 compatibility warning for GitHub Models in `setup-codex.sh` and `setup-codex.ps1`. (#605)
+- Added `LAST_COMPAT_VERSION_MINOR` constant to both Codex setup scripts so the compatibility boundary is defined once. (#605)
 - `apm pack --marketplace=FORMATS` filters which marketplace formats are built in a single run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
 - `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. Env var overrides (`APM_MARKETPLACE_<FORMAT>_PATH`) are planned for v0.15. (#1317)
 - `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [{format, path, ...}]}}`); all logs move to stderr so downstream tooling can `jq` the output safely. (#1317)

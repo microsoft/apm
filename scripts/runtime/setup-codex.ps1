@@ -24,6 +24,8 @@ if (Test-Path $tokenHelperPath) {
 
 # Configuration
 $CodexRepo = "openai/codex"
+# Last Codex minor version that works with GitHub Models without wire_api=chat (#605)
+$LastCompatVersionMinor = 115
 
 function Install-Codex {
     Write-Info "Setting up Codex runtime..."
@@ -173,13 +175,13 @@ wire_api = "responses"
         # Version compatibility check
         if ($Version -match '^rust-v0\.(\d+)') {
             $codexMinor = [int]$Matches[1]
-            if ($codexMinor -ge 116) {
+            if ($codexMinor -gt $LastCompatVersionMinor) {
                 Write-Host ""
-                Write-Host "[!] WARNING: Codex >= v0.116 requires the OpenAI Responses API (wire_api=responses)." -ForegroundColor Yellow
-                Write-Host "    GitHub Models does not expose the /responses endpoint and will return 404." -ForegroundColor Yellow
-                Write-Host "    If you are using GitHub Models as your provider, you have two options:" -ForegroundColor Yellow
-                Write-Host "      1. Use an OpenAI API key instead of GitHub Models" -ForegroundColor Yellow
-                Write-Host "      2. Install a compatible older version: apm runtime setup codex --version rust-v0.115.0" -ForegroundColor Yellow
+                Write-Warning "codex >= v0.116 requires wire_api=chat configuration for GitHub Models compatibility."
+                Write-Warning "The generated config uses wire_api=responses, which returns 404 with GitHub Models."
+                Write-Warning "To fix, update wire_api in ${codexConfig}:"
+                Write-Warning "  wire_api = `"chat`""
+                Write-Warning "Or install an older compatible version: apm runtime setup codex --version rust-v0.115.0"
                 Write-Host ""
             }
         }
