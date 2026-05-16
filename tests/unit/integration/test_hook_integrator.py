@@ -2972,7 +2972,7 @@ class TestIssue1007Fixes:
 
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
         assert len(scripts) == 1, "Script copy entry must be produced"
-        assert cmd.startswith("/fake/home/"), (
+        assert cmd.startswith(str(deploy_root.resolve())), (
             f"Command must be absolute path under deploy_root; got {cmd}"
         )
         assert cmd.endswith(".claude/hooks/my-pkg/hooks/run.sh"), (
@@ -2999,7 +2999,7 @@ class TestIssue1007Fixes:
 
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
         assert len(scripts) == 0, "No script copy entry when source is absent"
-        assert cmd.startswith("/"), "Command must be absolute path"
+        assert Path(cmd).is_absolute(), "Command must be absolute path"
         assert "run.sh" in cmd, "Command must contain the script name"
         # Command should resolve to the source path (even if file doesn't exist)
 
@@ -3046,7 +3046,7 @@ class TestIssue1007Fixes:
 
         assert "./" not in cmd, "Relative ./ reference must be replaced"
         assert len(scripts) == 1, "Script copy entry must be produced"
-        assert cmd.startswith("/fake/home/"), (
+        assert cmd.startswith(str(deploy_root.resolve())), (
             f"Command must be absolute path under deploy_root; got {cmd}"
         )
         assert not cmd.startswith("./"), "Command must not be relative"
@@ -3073,7 +3073,7 @@ class TestIssue1007Fixes:
             "Variable must be resolved to source path when deploy_root is set"
         )
         assert "missing.sh" in cmd, "Command must contain the script name"
-        assert cmd.startswith("/"), "Command must be an absolute path (the source file)"
+        assert Path(cmd).is_absolute(), "Command must be an absolute path (the source file)"
 
     # ------------------------------------------------------------------
     # Group C: Event normalisation for Claude

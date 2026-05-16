@@ -52,7 +52,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
@@ -344,6 +345,11 @@ class HookIntegrator(BaseIntegrator):
             target: "vscode" or "claude"
             hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
             root_dir: Override root directory (e.g. ".copilot" for user scope)
+            deploy_root: Absolute root of the deployment directory.  When provided,
+                rewritten script paths are resolved to absolute paths under this
+                root so the target (e.g. Claude Code) can execute them regardless
+                of the working directory.  When *None*, rewritten paths stay
+                relative (backward-compatible behaviour).
 
         Returns:
             Tuple of (rewritten_command, list of (source_file, relative_target_path))
@@ -371,7 +377,7 @@ class HookIntegrator(BaseIntegrator):
         # Match both forward-slash and backslash separators (Windows hook JSON
         # may use backslashes: ${CLAUDE_PLUGIN_ROOT}\scripts\scan.ps1)
         plugin_root_pattern = (
-            r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}([\\/][^\s]+)"
+            r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}([\\/][^\s\"']+)"
         )
         for match in re.finditer(plugin_root_pattern, command):
             full_var = match.group(0)
@@ -379,9 +385,9 @@ class HookIntegrator(BaseIntegrator):
             # (on Unix, Path treats backslashes as literal filename chars)
             rel_path = match.group(1).replace("\\", "/").lstrip("/")
 
-            source_file = (package_path / rel_path).resolve()
-            # Reject path traversal outside the package directory
-            if not source_file.is_relative_to(package_path.resolve()):
+            try:
+                source_file = ensure_path_within(package_path / rel_path, package_path)
+            except PathTraversalError:
                 continue
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
@@ -395,6 +401,7 @@ class HookIntegrator(BaseIntegrator):
             elif deploy_root is not None:
                 # File absent: resolve to absolute source path so Claude Code
                 # gets a clear "file not found" rather than an unexpanded variable.
+                _rich_warning(f"Hook script not found: {source_file}")
                 new_command = new_command.replace(full_var, str(source_file))
 
         # Handle relative ./path and .\path references (safe to run after
@@ -404,15 +411,15 @@ class HookIntegrator(BaseIntegrator):
         # may use backslashes: .\scripts\scan.ps1)
         # Resolve from hook file's directory if available, else fall back to package root
         resolve_base = hook_file_dir if hook_file_dir else package_path
-        rel_pattern = r"(\.[\\/][^\s]+)"
+        rel_pattern = r"(\.[\\/][^\s\"']+)"
         for match in re.finditer(rel_pattern, new_command):
             rel_ref = match.group(1)
             # Normalize to forward slashes for path resolution
             rel_path = rel_ref[2:].replace("\\", "/")
 
-            source_file = (resolve_base / rel_path).resolve()
-            # Reject path traversal outside the package directory
-            if not source_file.is_relative_to(package_path.resolve()):
+            try:
+                source_file = ensure_path_within(resolve_base / rel_path, package_path)
+            except PathTraversalError:
                 continue
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
@@ -426,6 +433,7 @@ class HookIntegrator(BaseIntegrator):
             elif deploy_root is not None:
                 # File absent: resolve to absolute source path so the target
                 # gets a clear "file not found" rather than a bare relative ref.
+                _rich_warning(f"Hook script not found: {source_file}")
                 new_command = new_command.replace(rel_ref, str(source_file))
 
         return new_command, scripts_to_copy
@@ -451,6 +459,10 @@ class HookIntegrator(BaseIntegrator):
             target: "vscode" or "claude"
             hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
             root_dir: Override root directory (e.g. ".copilot" for user scope)
+            deploy_root: Absolute root of the deployment directory.  When provided,
+                all rewritten script paths are resolved to absolute paths so the
+                target can locate scripts regardless of the working directory.
+                When *None*, paths remain relative (backward-compatible behaviour).
 
         Returns:
             Tuple of (rewritten_data_copy, list of (source_file, target_rel_path))
