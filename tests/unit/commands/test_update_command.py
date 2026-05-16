@@ -169,6 +169,102 @@ class TestUpdateBackCompatShim:
 
 
 # -----------------------------------------------------------------------------
+# apm update --target flag
+# -----------------------------------------------------------------------------
+
+
+class TestUpdateTarget:
+    def test_target_forwarded_to_install(self, runner, tmp_path):
+        """--target value is passed through to _install_apm_dependencies."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "--target", "claude"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] == "claude"
+
+    def test_short_target_flag(self, runner, tmp_path):
+        """-t short form is accepted and forwarded."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "-t", "copilot"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] == "copilot"
+
+    def test_no_target_defaults_to_none(self, runner, tmp_path):
+        """Omitting --target passes None to _install_apm_dependencies."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] is None
+
+    def test_target_with_assume_yes(self, runner, tmp_path):
+        """--target and --yes work together; target is forwarded and install proceeds."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                captured["proceeded"] = cb(_stub_plan_with_changes())
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult(installed_count=1)
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "--yes", "--target", "cursor"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] == "cursor"
+            assert captured["proceeded"] is True
+
+
+# -----------------------------------------------------------------------------
 # apm install --frozen / --update mutex
 # -----------------------------------------------------------------------------
 

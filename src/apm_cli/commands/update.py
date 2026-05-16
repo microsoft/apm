@@ -43,6 +43,7 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import InstallLogger
+from ..core.target_detection import TargetParamType
 from ..install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -121,6 +122,19 @@ def _stdin_is_tty() -> bool:
     help="(Deprecated) Forwarded to 'apm self-update --check' when run outside an apm.yml project; rejected inside a project.",
     hidden=True,
 )
+@click.option(
+    "--target",
+    "-t",
+    "target",
+    type=TargetParamType(),
+    default=None,
+    help=(
+        "Target harness(es) to deploy to. "
+        "Comma-separated for multiple: --target claude,cursor. "
+        "Highest-priority entry in the resolution chain "
+        "(--target > apm.yml targets: > auto-detect)."
+    ),
+)
 @click.pass_context
 def update(
     ctx: click.Context,
@@ -128,6 +142,7 @@ def update(
     dry_run: bool,
     verbose: bool,
     check_only: bool,
+    target: str | None,
 ) -> None:
     """Refresh APM dependencies to the latest matching refs.
 
@@ -178,6 +193,7 @@ def update(
         dry_run=dry_run,
         verbose=verbose,
         project_root=project_root,
+        target=target,
     )
 
 
@@ -187,6 +203,7 @@ def _run_dep_update(
     dry_run: bool,
     verbose: bool,
     project_root: Path | None = None,
+    target: str | None = None,
 ) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
@@ -282,6 +299,7 @@ def _run_dep_update(
             scope=InstallScope.PROJECT,
             logger=logger,
             plan_callback=_plan_callback,
+            target=target,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
