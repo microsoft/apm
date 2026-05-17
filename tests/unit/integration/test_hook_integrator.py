@@ -3959,6 +3959,22 @@ class TestIssue1007Fixes:
 
         assert HookIntegrator._dependency_hook_sources(temp_project) == set()
 
+    def test_bounded_dependency_scan_rejects_symlinked_marker(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Fallback discovery does not accept symlinked package markers."""
+        package_root = temp_project / "apm_modules" / "owner" / "repo" / "collections" / "dep-hooks"
+        package_root.mkdir(parents=True)
+        outside_hooks = temp_project / "outside" / "hooks"
+        outside_hooks.mkdir(parents=True)
+        try:
+            (package_root / "hooks").symlink_to(outside_hooks, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
     def test_root_local_source_marker_does_not_collide_with_dependency_name(
         self,
         temp_project: Path,
