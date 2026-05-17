@@ -56,7 +56,16 @@ def _resolve_download_strategy(
     # npm-like behavior: Branches always fetch latest, only tags/commits use cache
     # Resolve git reference to determine type
     resolved_ref = None
-    if dep_ref.get_unique_key() not in ctx.pre_downloaded_keys:
+    # Registry-sourced deps don't have a git reference to resolve — calling
+    # ``resolve_git_reference`` on them would issue ``git ls-remote`` against
+    # the dep's notional host (default github.com), which can trigger an SSH
+    # key-acceptance prompt or a wasted network call. Skip the git probe
+    # entirely for non-git sources.
+    is_git_source = dep_ref.source in (None, "git")
+    if (
+        is_git_source
+        and dep_ref.get_unique_key() not in ctx.pre_downloaded_keys
+    ):
         # Resolve when there is an explicit ref, OR when update_refs
         # is True AND we have a non-cached lockfile entry to compare
         # against (otherwise resolution is wasted work -- the package

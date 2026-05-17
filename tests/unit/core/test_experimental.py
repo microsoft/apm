@@ -412,14 +412,14 @@ class TestRegistryInvariants:
 
         for key, flag in FLAGS.items():
             # Invariant 1: key == name
-            assert key == flag.name, (
-                f"Registry key mismatch: key={key!r} but flag.name={flag.name!r}"
-            )
+            assert (
+                key == flag.name
+            ), f"Registry key mismatch: key={key!r} but flag.name={flag.name!r}"
 
             # Invariant 2: all defaults must be False
-            assert flag.default is False, (
-                f"Flag {flag.name!r} has non-False default: {flag.default!r}"
-            )
+            assert (
+                flag.default is False
+            ), f"Flag {flag.name!r} has non-False default: {flag.default!r}"
 
             # Invariant 3: description must be printable ASCII
             assert re.fullmatch(printable_ascii.pattern, flag.description), (
@@ -567,3 +567,54 @@ class TestCoworkFlagRegistration:
         from apm_cli.core.experimental import FLAGS
 
         assert FLAGS["copilot_cowork"].name == "copilot_cowork"
+
+
+# ---------------------------------------------------------------------------
+# Package registry flag registration
+# ---------------------------------------------------------------------------
+
+
+class TestPackageRegistryFlagRegistration:
+    """Tests for the package_registry experimental flag registration."""
+
+    def test_package_registry_flag_is_registered(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert "package_registry" in FLAGS
+
+    def test_package_registry_flag_default_is_false(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert FLAGS["package_registry"].default is False
+
+    def test_package_registry_flag_is_disabled_by_default(
+        self, inject_config: Any
+    ) -> None:
+        inject_config({})
+        from apm_cli.core.experimental import is_enabled
+
+        assert is_enabled("package_registry") is False
+
+    def test_package_registry_flag_can_be_enabled(self, isolated_config: Any) -> None:
+        from apm_cli.core.experimental import enable, is_enabled
+
+        enable("package_registry")
+        assert is_enabled("package_registry") is True
+
+    def test_package_registry_flag_hint_contains_docs_url(self) -> None:
+        from urllib.parse import urlparse
+        from apm_cli.core.experimental import FLAGS
+
+        hint = FLAGS["package_registry"].hint
+        assert hint is not None
+        urls = re.findall(r"https?://\S+", hint)
+        assert urls, "hint must contain at least one URL"
+        parsed = urlparse(urls[0])
+        assert parsed.scheme == "https"
+        assert parsed.hostname is not None
+        assert parsed.path.endswith("/guides/registries/")
+
+    def test_package_registry_key_equals_name(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert FLAGS["package_registry"].name == "package_registry"

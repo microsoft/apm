@@ -6,9 +6,10 @@ Dependency and validation types have been extracted to sibling modules
 compatibility.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Union  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
@@ -66,6 +67,136 @@ def clear_apm_yml_cache() -> None:
     _apm_yml_cache.clear()
 
 
+def _parse_registries_block(data: dict, apm_yml_path: Path):
+    """Parse the top-level ``registries:`` block per design §3.1.
+
+    Schema::
+
+        registries:
+          corp-main:
+            url: https://registry.corp.example.com/apm
+          corp-other:
+            url: https://other.example.com/apm
+          default: corp-main           # optional; routes unscoped deps here
+
+    Returns ``(registries_map, default_name)`` where *registries_map* is
+    ``{name: url}`` and *default_name* is the value of ``default:`` (or
+    ``None``). Absent block returns ``(None, None)``.
+    """
+    raw = data.get("registries")
+    if raw is None:
+        return None, None
+    if raw != {}:
+        from ..deps.registry.feature_gate import require_package_registry_enabled
+
+        require_package_registry_enabled("Top-level 'registries:' blocks")
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Top-level 'registries:' block in {apm_yml_path} must be a "
+            f"mapping (name -> {{url: ...}})"
+        )
+
+    default_value = raw.get("default")
+    registries_map: dict[str, str] = {}
+    for name, body in raw.items():
+        if name == "default":
+            continue
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(
+                f"Registry name in 'registries:' block must be a non-empty "
+                f"string (got {name!r})"
+            )
+        if not isinstance(body, dict):
+            raise ValueError(
+                f"Registry {name!r} must be a mapping with at least 'url:' "
+                f"(got {type(body).__name__})"
+            )
+        # Token trap: tokens must never appear in repo-tracked YAML files.
+        if "token" in body:
+            raise ValueError(
+                f"Registry {name!r}: 'token' must not appear in apm.yml. "
+                f"Use the APM_REGISTRY_{name.upper().replace('-', '_')}_TOKEN "
+                f"environment variable or 'apm config set registry.{name}.token <value>'."
+            )
+        url = body.get("url")
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError(f"Registry {name!r} is missing required field 'url:'")
+        url = url.strip()
+        if not url.startswith(("https://", "http://")):
+            raise ValueError(
+                f"Registry {name!r} URL must start with https:// or http:// "
+                f"(got {url!r})"
+            )
+        # Reject any unknown keys to catch typos early.
+        unknown = set(body.keys()) - {"url"}
+        if unknown:
+            raise ValueError(
+                f"Registry {name!r} has unknown fields: {sorted(unknown)} "
+                f"(known fields: ['url'])"
+            )
+        registries_map[name] = url
+
+    default_name: str | None = None
+    if default_value is not None:
+        if not isinstance(default_value, str) or not default_value.strip():
+            raise ValueError(
+                f"'registries.default' in {apm_yml_path} must be a non-empty "
+                f"string naming one of the configured registries"
+            )
+        default_name = default_value.strip()
+        if default_name not in registries_map:
+            raise ValueError(
+                f"'registries.default: {default_name}' refers to an "
+                f"unconfigured registry. Configured: {sorted(registries_map.keys())}"
+            )
+
+    if not registries_map and default_name is None:
+        return None, None
+
+    return registries_map, default_name
+
+
+def _route_unscoped_to_default_registry(
+    dep_list: list,
+    default_registry: str,
+) -> None:
+    """Route unscoped APM deps to *default_registry* in place.
+
+    Two cases:
+    * Object-form entries already parsed as ``source="registry"`` but with no
+      ``registry_name`` (i.e. ``registry:`` key was omitted, caller relies on
+      the project-level ``registries.default``).
+    * String-shorthand entries whose ``reference`` is a semver range — these
+      should be resolved via the registry, not git tag walk.
+    """
+    from ..deps.registry.semver import is_semver_range
+
+    for dep in dep_list:
+        if not isinstance(dep, DependencyReference):
+            continue
+        if dep.source == "registry" and dep.registry_name is None:
+            dep.registry_name = default_registry
+        elif dep.source != "registry":
+            ref = dep.reference
+            if ref and is_semver_range(ref):
+                dep.source = "registry"
+                dep.registry_name = default_registry
+
+
+def _iter_apm_dependency_lists(
+    dependencies: dict[str, Any] | None,
+    dev_dependencies: dict[str, Any] | None,
+) -> Iterator[list[Any]]:
+    """Yield each parsed ``dependencies['apm']`` / ``devDependencies['apm']`` list."""
+    for bucket in (dependencies, dev_dependencies):
+        if not bucket:
+            continue
+        apm_list = bucket.get("apm") if isinstance(bucket, dict) else None
+        if isinstance(apm_list, list):
+            yield apm_list
+
+
+
 @dataclass
 class APMPackage:
     """Represents an APM package with metadata."""
@@ -99,6 +230,12 @@ class APMPackage:
     )
     includes: str | list[str] | None = None  # Include-only manifest: 'auto' or list of repo paths
 
+    # Top-level ``registries:`` block per docs/proposals/registry-api.md §3.1.
+    # Maps registry name -> base URL. None when no ``registries:`` block is present.
+    registries: dict[str, str] | None = None
+    # Value of ``registries.default:`` — routes unscoped deps to this registry.
+    default_registry: str | None = None
+
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
         """Parse a dependencies or devDependencies dict from apm.yml.
@@ -124,7 +261,9 @@ class APMPackage:
                             raise ValueError(f"Invalid {label}APM dependency '{dep_entry}': {e}")  # noqa: B904
                     elif isinstance(dep_entry, dict):
                         try:
-                            parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
+                            parsed_deps.append(
+                                DependencyReference.parse_from_dict(dep_entry)
+                            )
                         except ValueError as e:
                             raise ValueError(f"Invalid {label}APM dependency {dep_entry}: {e}")  # noqa: B904
                 parsed[dep_type] = parsed_deps
@@ -140,7 +279,9 @@ class APMPackage:
                             raise ValueError(f"Invalid {label}MCP dependency: {e}")  # noqa: B904
                 parsed[dep_type] = parsed_mcp
             else:
-                parsed[dep_type] = [dep for dep in dep_list if isinstance(dep, (str, dict))]
+                parsed[dep_type] = [
+                    dep for dep in dep_list if isinstance(dep, (str, dict))
+                ]
         return parsed
 
     @classmethod
@@ -200,6 +341,9 @@ class APMPackage:
         if "version" not in data:
             raise ValueError("Missing required field 'version' in apm.yml")
 
+        # Top-level ``registries:`` block per design §3.1.
+        registries, default_registry = _parse_registries_block(data, apm_yml_path)
+
         # Parse dependencies
         dependencies = None
         raw_deps = data.get("dependencies")
@@ -229,6 +373,11 @@ class APMPackage:
                     "      - owner/repo"
                 )
             dev_dependencies = cls._parse_dependency_dict(raw_dev_deps, label="dev ")
+
+        # Route unscoped deps to the default registry when configured.
+        if default_registry:
+            for dep_list in _iter_apm_dependency_lists(dependencies, dev_dependencies):
+                _route_unscoped_to_default_registry(dep_list, default_registry)
 
         # Parse package content type
         pkg_type = None
@@ -281,6 +430,8 @@ class APMPackage:
             target=target_value,
             type=pkg_type,
             includes=includes,
+            registries=registries,
+            default_registry=default_registry,
         )
         _apm_yml_cache[cache_key] = result
         return result
@@ -290,14 +441,20 @@ class APMPackage:
         if not self.dependencies or "apm" not in self.dependencies:
             return []
         # Filter to only return DependencyReference objects
-        return [dep for dep in self.dependencies["apm"] if isinstance(dep, DependencyReference)]
+        return [
+            dep
+            for dep in self.dependencies["apm"]
+            if isinstance(dep, DependencyReference)
+        ]
 
     def get_mcp_dependencies(self) -> list["MCPDependency"]:
         """Get list of MCP dependencies."""
         if not self.dependencies or "mcp" not in self.dependencies:
             return []
         return [
-            dep for dep in (self.dependencies.get("mcp") or []) if isinstance(dep, MCPDependency)
+            dep
+            for dep in (self.dependencies.get("mcp") or [])
+            if isinstance(dep, MCPDependency)
         ]
 
     def has_apm_dependencies(self) -> bool:
@@ -308,7 +465,11 @@ class APMPackage:
         """Get list of dev APM dependencies."""
         if not self.dev_dependencies or "apm" not in self.dev_dependencies:
             return []
-        return [dep for dep in self.dev_dependencies["apm"] if isinstance(dep, DependencyReference)]
+        return [
+            dep
+            for dep in self.dev_dependencies["apm"]
+            if isinstance(dep, DependencyReference)
+        ]
 
     def get_dev_mcp_dependencies(self) -> list["MCPDependency"]:
         """Get list of dev MCP dependencies."""
@@ -329,7 +490,7 @@ class PackageInfo:
     install_path: Path
     resolved_reference: ResolvedReference | None = None
     installed_at: str | None = None  # ISO timestamp
-    dependency_ref: Optional["DependencyReference"] = (
+    dependency_ref: DependencyReference | None = (
         None  # Original dependency reference for canonical string
     )
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
@@ -358,7 +519,13 @@ class PackageInfo:
         apm_dir = self.get_primitives_path()
         if apm_dir.exists():
             # Check for any primitive files in .apm/ subdirectories
-            for primitive_type in ["instructions", "chatmodes", "contexts", "prompts", "hooks"]:
+            for primitive_type in [
+                "instructions",
+                "chatmodes",
+                "contexts",
+                "prompts",
+                "hooks",
+            ]:
                 primitive_dir = apm_dir / primitive_type
                 if primitive_dir.exists() and any(primitive_dir.iterdir()):
                     return True

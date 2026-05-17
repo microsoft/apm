@@ -70,6 +70,21 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "See https://microsoft.github.io/apm/integrations/copilot-cowork/"
         ),
     ),
+    "marketplace_authoring": ExperimentalFlag(
+        name="marketplace_authoring",
+        description="Enable marketplace authoring commands (init, build, publish, etc.).",
+        default=False,
+        hint="Run 'apm marketplace --help' to see available commands.",
+    ),
+    "registries": ExperimentalFlag(
+        name="registries",
+        description="Enable REST-based APM package registries in apm.yml.",
+        default=False,
+        hint=(
+            "Use registries: in apm.yml. "
+            "See https://microsoft.github.io/apm/guides/registries/"
+        ),
+    ),
 }
 
 
@@ -275,4 +290,6 @@ def get_malformed_flag_keys() -> list[str]:
     ``True``).  They are safe to remove via ``apm experimental reset``.
     """
     experimental = _get_experimental_section()
-    return [k for k in experimental if k in FLAGS and not isinstance(experimental[k], bool)]
+    return [
+        k for k in experimental if k in FLAGS and not isinstance(experimental[k], bool)
+    ]

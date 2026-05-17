@@ -57,9 +57,23 @@ dependencies:
 
 The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated.
 
-### No registry
+### Registry security model
 
-APM does not use a package registry. Dependencies are specified as git repository URLs in `apm.yml`. This eliminates the registry compromise vector entirely — there is no centralized service that can be poisoned to redirect installs.
+By default, APM resolves dependencies as git repository URLs, eliminating the centralized-registry compromise vector.
+
+The experimental `registries` feature adds REST-based package sources. When enabled:
+
+- **Byte-level reproducibility.** `resolved_hash` in `apm.lock.yaml` is a SHA-256 digest of the downloaded archive. Re-installs verify bytes against the lockfile hash before writing to disk. A mismatch triggers re-download and a warning.
+- **Token containment.** Tokens for registry auth MUST NOT appear in repo-tracked YAML files. APM hard-fails if a `token:` key is found in `apm.yml` or `apm-policy.yml`. Tokens belong in `APM_REGISTRY_TOKEN_<NAME>` env vars or `~/.apm/config.json`.
+- **Policy enforcement.** The `registry_source` block in `apm-policy.yml` lets platform teams mandate specific registries and block non-registry sources. Checks apply transitively.
+
+**Known limitations at v1:**
+
+- **No package signing.** The `resolved_hash` detects corruption and post-download tampering but does not verify publisher identity. Package signing is a planned hardening item.
+- **No SBOM or provenance attestations.** The lockfile records resolved version and hash, which is suitable for internal audit, but is not a standards-format SBOM (SPDX/CycloneDX) and does not include SLSA provenance.
+- **SHA-256 floor only.** The hash algorithm is fixed at SHA-256 with no upgrade path to SHA-384/512 at v1.
+
+Do not represent this feature as "supply-chain secure," "tamper-proof," "SLSA-compliant," or "signed" in compliance documentation or vendor assessments. The appropriate framing is **APM dependency governance**: controlled sources, locked versions, and byte-level verification.
 
 ### HTTP (insecure) dependencies
 
@@ -305,7 +319,7 @@ See [Azure DevOps AAD bearer tokens](#azure-devops-aad-bearer-tokens) above for 
 
 | Vector | Traditional package manager | APM |
 |---|---|---|
-| Registry compromise | Attacker poisons central registry | No registry exists |
+| Registry compromise | Attacker poisons central registry | No registry by default (git-direct). With experimental `registries`: `resolved_hash` detects tampered archives; token containment enforced; no signing at v1. |
 | Version substitution | Malicious version replaces legitimate one | Lock file pins exact commit SHA; content hash detects post-download tampering |
 | Post-install scripts | Arbitrary code runs after install | No code execution |
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |

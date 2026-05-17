@@ -16,6 +16,7 @@ from .schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    RegistrySourcePolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -32,6 +33,7 @@ __all__ = [
     "McpTransportPolicy",
     "PolicyCache",
     "PolicyFetchResult",
+    "RegistrySourcePolicy",
     "PolicyInheritanceError",
     "PolicyValidationError",
     "UnmanagedFilesPolicy",

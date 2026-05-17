@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add experimental registry resolver and `apm-policy.yml` source-mandate enforcement. Git-based dependencies are unchanged. Enable with `apm experimental enable registries`; configure per-registry credentials via `apm config set registry.<name>.{url,token}`; mandate registry usage in `apm-policy.yml` via `registry_source: {require: [...], allow_non_registry: false}`. Framing: APM dependency governance — controlled sources, locked versions, and byte-level SHA-256 verification. Package signing, SBOM generation, and SLSA provenance are not included at v1.
+
 ### Fixed
 
 - `apm audit` drift check now returns skip-with-info (`passed=True`) when the install cache is cold, instead of failing the audit; bare `apm audit` surfaces the skip reason on stderr so CI pipelines that have not yet run `apm install` are not incorrectly red-marked. (#1289)
