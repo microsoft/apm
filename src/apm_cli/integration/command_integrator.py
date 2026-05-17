@@ -3,6 +3,7 @@
 Integrates .prompt.md files as commands for any target that supports the
 ``commands`` primitive (e.g. ``.claude/commands/``, ``.opencode/commands/``).
 """
+# pylint: disable=R0801
 
 from __future__ import annotations
 
@@ -550,21 +551,14 @@ class CommandIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.is_content_identical_to_source(target_path, prompt_file):
-                # Pre-existing file is byte-identical to source -- silently
-                # adopt. See BaseIntegrator.is_content_identical_to_source.
-                target_paths.append(target_path)
-                files_adopted += 1
-                continue
-
-            if self.check_collision(
-                target_path,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                files_skipped += 1
+            skip, adopted = self._check_adopt_or_skip(
+                target_path, prompt_file, rel_path, managed_files, force, diagnostics, target_paths
+            )
+            if skip:
+                if adopted:
+                    files_adopted += 1
+                else:
+                    files_skipped += 1
                 continue
 
             if mapping.format_id == "gemini_command":

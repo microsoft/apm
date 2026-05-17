@@ -6,6 +6,7 @@ target directory (e.g. ``.github/instructions/`` for Copilot,
 Content transforms are selected by the ``format_id`` field in
 ``PrimitiveMapping``.
 """
+# pylint: disable=R0801
 
 from __future__ import annotations
 
@@ -120,22 +121,14 @@ class InstructionIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.is_content_identical_to_source(target_path, source_file):
-                # Pre-existing file is byte-identical to source -- silently
-                # adopt so deployed_files reflects reality. See
-                # BaseIntegrator.is_content_identical_to_source for rationale.
-                target_paths.append(target_path)
-                files_adopted += 1
-                continue
-
-            if self.check_collision(
-                target_path,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                files_skipped += 1
+            skip, adopted = self._check_adopt_or_skip(
+                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
+            )
+            if skip:
+                if adopted:
+                    files_adopted += 1
+                else:
+                    files_skipped += 1
                 continue
 
             if fmt == "cursor_rules":
