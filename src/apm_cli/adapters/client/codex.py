@@ -303,7 +303,9 @@ class CodexClientAdapter(MCPClientAdapter):
 
         return config
 
-    def _process_arguments(self, arguments, resolved_env=None, runtime_vars=None):
+    def _process_arguments(  # pylint: disable=duplicate-code  # structural similarity with copilot adapter is intentional
+        self, arguments, resolved_env=None, runtime_vars=None
+    ):
         """Process argument objects to extract simple string values with environment resolution.
 
         Args:

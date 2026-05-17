@@ -318,7 +318,7 @@ class InstructionIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def sync_integration_cursor(
+    def sync_integration_cursor(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,
@@ -464,7 +464,7 @@ class InstructionIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration_claude(
+    def sync_integration_claude(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,

@@ -5,6 +5,8 @@ import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from ...utils.console import _rich_error, _rich_warning
+
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
 # Matches ${VAR} and ${env:VAR}, capturing VAR. Intentionally does NOT match
@@ -181,7 +183,7 @@ class MCPClientAdapter(ABC):
                 if var_id in seen:
                     continue
                 seen.add(var_id)
-                print(
+                _rich_warning(
                     f"[!]  Warning: ${{input:{var_id}}} in server "
                     f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
@@ -220,7 +222,7 @@ class MCPClientAdapter(ABC):
             return server_info_cache[server_url]
         server_info = self.registry_client.find_server_by_reference(server_url)
         if not server_info:
-            print(f"Error: MCP server '{server_url}' not found in registry")
+            _rich_error(f"Error: MCP server '{server_url}' not found in registry")
             return None
         return server_info
 
@@ -278,8 +280,9 @@ class MCPClientAdapter(ABC):
             config["command"] = launcher
             config["args"] = [package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
         elif registry_name == "homebrew":
-            config["command"] = package_name
-            config["args"] = processed_package_args
+            formula_name = package_name.split("/")[-1] if "/" in package_name else package_name
+            config["command"] = formula_name
+            config["args"] = processed_runtime_args + processed_package_args
         else:
             # Generic / npm-compatible fallback
             config["command"] = "npx"
@@ -317,6 +320,7 @@ class MCPClientAdapter(ABC):
 
         server_name = server_info.get("name", "")
         is_github_server = self._is_github_server(server_name, remote.get("url", ""))
+        local_token_injected = False
         if is_github_server:
             _tm = token_manager_class()
             github_token = _tm.get_token_for_purpose("copilot") or os.getenv(
@@ -324,6 +328,7 @@ class MCPClientAdapter(ABC):
             )
             if github_token:
                 config["headers"] = {"Authorization": f"Bearer {github_token}"}
+                local_token_injected = True
         headers = remote.get("headers", [])
         if headers:
             if "headers" not in config:
@@ -332,7 +337,7 @@ class MCPClientAdapter(ABC):
                 header_name = header.get("name", "")
                 header_value = header.get("value", "")
                 if header_name and header_value:
-                    if header_name == "Authorization" and is_github_server:
+                    if header_name == "Authorization" and local_token_injected:
                         continue
                     resolved_value = self._resolve_env_variable(
                         header_name, header_value, env_overrides
@@ -379,13 +384,19 @@ class MCPClientAdapter(ABC):
 
         # Determine whether interactive prompting is available.
         # If env_overrides is provided the CLI has already collected variables -- never prompt again.
-        skip_prompting = bool(env_overrides) or not sys.stdout.isatty() or not sys.stdin.isatty()
+        skip_prompting = (
+            bool(env_overrides)
+            or bool(os.getenv("CI"))
+            or bool(os.getenv("APM_E2E_TESTS"))
+            or not sys.stdout.isatty()
+            or not sys.stdin.isatty()
+        )
 
         # First pass: identify variables with empty values to warn the user.
         empty_value_vars = [ev for ev in env_vars if ev.get("required") and not ev.get("value")]
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
-            print(
+            _rich_warning(
                 f"Warning: The following required environment variables have no default "
                 f"value and cannot be prompted in non-interactive mode: {var_names}"
             )
@@ -432,7 +443,7 @@ class MCPClientAdapter(ABC):
             elif default_value:
                 resolved[name] = default_value
             elif required:
-                print(
+                _rich_warning(
                     f"Warning: Required environment variable '{name}' could not be resolved. "
                     f"The MCP server may not function correctly."
                 )

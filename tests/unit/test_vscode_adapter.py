@@ -1216,24 +1216,24 @@ class TestWarnInputVariables(unittest.TestCase):
         self,
     ):
         mapping = {"Authorization": "Bearer ${input:my-token}"}
-        with patch("builtins.print") as mock_print:
+        with patch("apm_cli.adapters.client.base._rich_warning") as mock_warn:
             MCPClientAdapter._warn_input_variables(mapping, "my-server", "Copilot CLI")
-        mock_print.assert_called_once()
-        msg = mock_print.call_args[0][0]
+        mock_warn.assert_called_once()
+        msg = mock_warn.call_args[0][0]
         assert "my-token" in msg
         assert "Copilot CLI" in msg
 
     def test_no_warning_for_plain_values(self):
         mapping = {"Content-Type": "application/json"}
-        with patch("builtins.print") as mock_print:
+        with patch("apm_cli.adapters.client.base._rich_warning") as mock_warn:
             MCPClientAdapter._warn_input_variables(mapping, "s", "Codex CLI")
-        mock_print.assert_not_called()
+        mock_warn.assert_not_called()
 
     def test_no_warning_for_empty_mapping(self):
-        with patch("builtins.print") as mock_print:
+        with patch("apm_cli.adapters.client.base._rich_warning") as mock_warn:
             MCPClientAdapter._warn_input_variables({}, "s", "Codex CLI")
             MCPClientAdapter._warn_input_variables(None, "s", "Codex CLI")
-        mock_print.assert_not_called()
+        mock_warn.assert_not_called()
 
 
 class TestWarnOnLegacyAngleVars(unittest.TestCase):

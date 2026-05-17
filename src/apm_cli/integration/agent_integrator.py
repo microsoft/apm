@@ -610,7 +610,7 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def sync_integration_cursor(
+    def sync_integration_cursor(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,
@@ -648,7 +648,7 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(
+    def sync_integration_opencode(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,

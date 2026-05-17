@@ -716,7 +716,12 @@ class CommandIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration(self, apm_package, project_root: Path, managed_files: set = None) -> dict:  # noqa: RUF013
+    def sync_integration(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict:
         """Remove APM-managed command files from .claude/commands/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -760,7 +765,7 @@ class CommandIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(
+    def sync_integration_opencode(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,
