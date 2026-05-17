@@ -184,7 +184,7 @@ class MCPClientAdapter(ABC):
                     continue
                 seen.add(var_id)
                 _rich_warning(
-                    f"[!]  Warning: ${{input:{var_id}}} in server "
+                    f"${{input:{var_id}}} in server "
                     f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
                 )
@@ -316,8 +316,6 @@ class MCPClientAdapter(ABC):
                 instantiate.  Passed by the caller so tests can patch the right
                 module-level name.
         """
-        import os
-
         server_name = server_info.get("name", "")
         is_github_server = self._is_github_server(server_name, remote.get("url", ""))
         local_token_injected = False
@@ -374,10 +372,7 @@ class MCPClientAdapter(ABC):
             ``resolved`` dict mapping each env-var name to its resolved value
             (empty string when unresolvable).
         """
-        import os
         import sys
-
-        from rich.prompt import Prompt
 
         env_overrides = env_overrides or {}
         resolved: dict = {}
@@ -427,6 +422,8 @@ class MCPClientAdapter(ABC):
             required = env_var.get("required", False)
 
             if not skip_prompting:
+                from rich.prompt import Prompt
+
                 description = env_var.get("description", "")
                 prompt_text = f"Enter value for {name}"
                 if description:

@@ -1236,6 +1236,57 @@ class TestWarnInputVariables(unittest.TestCase):
         mock_warn.assert_not_called()
 
 
+class TestApplyPypiHomebrewGenericConfig(unittest.TestCase):
+    """Regression tests for _apply_pypi_homebrew_generic_config edge cases."""
+
+    def test_homebrew_tap_formula_strips_prefix(self):
+        """Tap-formula like 'user/tap/formula' must produce command='formula'."""
+        config = {}
+        MCPClientAdapter._apply_pypi_homebrew_generic_config(
+            config=config,
+            registry_name="homebrew",
+            package_name="user/tap/formula",
+            runtime_hint="",
+            processed_runtime_args=[],
+            processed_package_args=["--flag"],
+            resolved_env={},
+        )
+        self.assertEqual(config["command"], "formula")
+        self.assertEqual(config["args"], ["--flag"])
+        self.assertNotIn("env", config)
+
+    def test_homebrew_simple_name_unchanged(self):
+        """Plain formula name with no slash is used as-is."""
+        config = {}
+        MCPClientAdapter._apply_pypi_homebrew_generic_config(
+            config=config,
+            registry_name="homebrew",
+            package_name="jq",
+            runtime_hint="",
+            processed_runtime_args=["--arg1"],
+            processed_package_args=[],
+            resolved_env={},
+        )
+        self.assertEqual(config["command"], "jq")
+        self.assertEqual(config["args"], ["--arg1"])
+
+    def test_pypi_uses_uvx_default(self):
+        """PyPI without runtime_hint defaults to 'uvx'."""
+        config = {}
+        MCPClientAdapter._apply_pypi_homebrew_generic_config(
+            config=config,
+            registry_name="pypi",
+            package_name="my-pkg",
+            runtime_hint="",
+            processed_runtime_args=["--rt"],
+            processed_package_args=["--pa"],
+            resolved_env={"KEY": "val"},
+        )
+        self.assertEqual(config["command"], "uvx")
+        self.assertEqual(config["args"], ["my-pkg", "--rt", "--pa"])
+        self.assertEqual(config["env"], {"KEY": "val"})
+
+
 class TestWarnOnLegacyAngleVars(unittest.TestCase):
     """VS Code cannot resolve <VAR> placeholders -- the warning surfaces this."""
 
