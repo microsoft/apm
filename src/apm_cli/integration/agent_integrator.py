@@ -4,7 +4,6 @@ Note: SKILL.md files are NOT transformed to .agent.md files. Skills are handled
 separately by SkillIntegrator and installed to .github/skills/ as native skills.
 See skill-strategy.md for the full architectural rationale (T5).
 """
-# pylint: disable=R0801
 
 from __future__ import annotations
 

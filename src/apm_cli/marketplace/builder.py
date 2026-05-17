@@ -14,7 +14,6 @@ Hard rule: the output ``marketplace.json`` conforms byte-for-byte to
 Anthropic's schema.  No APM-specific keys, no extensions, no renamed
 fields.  ``packages`` in yml becomes ``plugins`` in json.
 """
-# pylint: disable=R0801
 
 from __future__ import annotations
 

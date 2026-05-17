@@ -3,7 +3,6 @@
 Integrates .prompt.md files as commands for any target that supports the
 ``commands`` primitive (e.g. ``.claude/commands/``, ``.opencode/commands/``).
 """
-# pylint: disable=R0801
 
 from __future__ import annotations
 

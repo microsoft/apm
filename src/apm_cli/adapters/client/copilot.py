@@ -654,8 +654,8 @@ class CopilotClientAdapter(MCPClientAdapter):
         else:
             self._apply_pypi_homebrew_generic_config(
                 config,
-                package_name,
                 registry_name,
+                package_name,
                 runtime_hint,
                 processed_runtime_args,
                 processed_package_args,

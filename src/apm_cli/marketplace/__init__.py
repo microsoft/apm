@@ -1,5 +1,4 @@
 """Marketplace integration for plugin discovery and governance."""
-# pylint: disable=R0801
 
 from .builder import (
     BuildOptions,

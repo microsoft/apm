@@ -33,7 +33,14 @@ def _stream_subprocess_output(cmd: list, timeout: int | None = None) -> tuple[li
         print(line, end="", flush=True)
         output_lines.append(line)
 
-    return_code = process.wait(timeout=timeout)
+    try:
+        return_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        for line in iter(process.stdout.readline, ""):
+            output_lines.append(line)
+        process.stdout.close()
+        raise
     return output_lines, return_code
 
 

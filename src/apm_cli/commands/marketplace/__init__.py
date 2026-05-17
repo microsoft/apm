@@ -3,7 +3,6 @@
 This package keeps click group wiring, shared helpers, and compatibility
 exports for the marketplace command surface.
 """
-# pylint: disable=R0801
 
 from __future__ import annotations
 

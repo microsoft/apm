@@ -230,7 +230,7 @@ class MCPClientAdapter(ABC):
 
         The caller-supplied *server_name* takes precedence; if empty the last
         path segment of *server_url* is used as a fallback, which mirrors the
-        convention ``owner/repo → repo``.
+        convention ``owner/repo -> repo``.
 
         Args:
             server_url: Registry reference used as fallback source.
@@ -276,7 +276,7 @@ class MCPClientAdapter(ABC):
         if registry_name == "pypi":
             launcher = runtime_hint or "uvx"
             config["command"] = launcher
-            config["args"] = processed_runtime_args + [package_name] + processed_package_args  # noqa: RUF005
+            config["args"] = [package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
         elif registry_name == "homebrew":
             config["command"] = package_name
             config["args"] = processed_package_args
@@ -378,7 +378,8 @@ class MCPClientAdapter(ABC):
         resolved: dict = {}
 
         # Determine whether interactive prompting is available.
-        skip_prompting = not sys.stdout.isatty() or not sys.stdin.isatty()
+        # If env_overrides is provided the CLI has already collected variables -- never prompt again.
+        skip_prompting = bool(env_overrides) or not sys.stdout.isatty() or not sys.stdin.isatty()
 
         # First pass: identify variables with empty values to warn the user.
         empty_value_vars = [ev for ev in env_vars if ev.get("required") and not ev.get("value")]
@@ -399,13 +400,10 @@ class MCPClientAdapter(ABC):
                 resolved[name] = env_overrides[name]
                 continue
 
-            # Priority 2: check GitHub-specific defaults
+            # Priority 2: check GitHub-specific defaults (values are literal defaults, not env-var names)
             if name in default_github_env:
-                env_key = default_github_env[name]
-                env_val = os.getenv(env_key, "")
-                if env_val:
-                    resolved[name] = env_val
-                    continue
+                resolved[name] = os.getenv(name) or default_github_env[name]
+                continue
 
             # Priority 3: environment variable with the same name
             env_val = os.getenv(name, "")
@@ -422,7 +420,14 @@ class MCPClientAdapter(ABC):
                 prompt_text = f"Enter value for {name}"
                 if description:
                     prompt_text += f" ({description})"
-                user_input = Prompt.ask(prompt_text, default=default_value)
+                is_secret = "token" in name.lower() or "key" in name.lower()
+                user_input = Prompt.ask(
+                    prompt_text,
+                    default=default_value,
+                    password=True  # noqa: SIM210
+                    if is_secret
+                    else False,
+                )
                 resolved[name] = user_input
             elif default_value:
                 resolved[name] = default_value

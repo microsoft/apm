@@ -6,7 +6,6 @@ target directory (e.g. ``.github/instructions/`` for Copilot,
 Content transforms are selected by the ``format_id`` field in
 ``PrimitiveMapping``.
 """
-# pylint: disable=R0801
 
 from __future__ import annotations
 

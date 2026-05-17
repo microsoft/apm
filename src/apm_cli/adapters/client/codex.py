@@ -1,5 +1,4 @@
 """OpenAI Codex CLI implementation of MCP client adapter."""
-# pylint: disable=R0801
 
 import logging
 import os
@@ -294,8 +293,8 @@ class CodexClientAdapter(MCPClientAdapter):
                 elif registry_name == "pypi":
                     self._apply_pypi_homebrew_generic_config(
                         config,
-                        package_name,
                         registry_name,
+                        package_name,
                         runtime_hint,
                         processed_runtime_args,
                         processed_package_args,
