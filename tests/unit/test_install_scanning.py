@@ -5,8 +5,6 @@ critical findings and allows deployment on warnings/clean, and that
 install exits non-zero when packages are blocked.
 """
 
-from pathlib import Path  # noqa: F401
-
 import pytest
 
 from apm_cli.commands.install import _pre_deploy_security_scan
@@ -51,7 +49,7 @@ class TestDiagnosticsSecurityRendering:
         for f in mixed_files:
             findings = ContentScanner.scan_file(f)
             if findings:
-                has_crit, summary = ContentScanner.classify(findings)  # noqa: RUF059
+                has_crit, _summary = ContentScanner.classify(findings)
                 sev = "critical" if has_crit else "warning"
                 diag.security(
                     message=str(f),

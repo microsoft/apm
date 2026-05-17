@@ -10,14 +10,11 @@ user-visible install flow:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from pathlib import Path
-from typing import Optional  # noqa: F401
-
 import click
 
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
+from .flags import MCPInstallParams
 from .registry import registry_env_override
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
@@ -36,28 +33,30 @@ except ImportError:
     pass
 
 
-def run_mcp_install(
-    *,
-    mcp_name: str,
-    transport: str | None,
-    url: str | None,
-    env_pairs: Sequence[str] | None,
-    header_pairs: Sequence[str] | None,
-    mcp_version: str | None,
-    command_argv: Sequence[str] | None,
-    dev: bool,
-    force: bool,
-    runtime: str | None,
-    exclude: str | None,
-    verbose: bool,
-    logger,
-    manifest_path: Path,
-    apm_dir: Path,
-    scope: str | None,
-    registry_url: str | None = None,
-) -> None:
+def run_mcp_install(params: MCPInstallParams | None = None, **kwargs: object) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL."""
+    if params is None:
+        params = MCPInstallParams(**kwargs)
+
+    mcp_name = params.mcp_name
+    transport = params.transport
+    url = params.url
+    env_pairs = params.env_pairs
+    header_pairs = params.header_pairs
+    mcp_version = params.mcp_version
+    command_argv = params.command_argv
+    dev = params.dev
+    force = params.force
+    runtime = params.runtime
+    exclude = params.exclude
+    verbose = params.verbose
+    logger = params.logger
+    manifest_path = params.manifest_path
+    apm_dir = params.apm_dir
+    scope = params.scope
+    registry_url = params.registry_url
+
     from ...models.dependency.mcp import MCPDependency
 
     env = parse_env_pairs(env_pairs)

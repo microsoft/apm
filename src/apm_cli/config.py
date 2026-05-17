@@ -2,7 +2,6 @@
 
 import json
 import os
-from typing import Optional  # noqa: F401
 
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")

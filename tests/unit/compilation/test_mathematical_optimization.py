@@ -4,7 +4,6 @@ Tests the mathematical optimization implementation that replaced the old
 threshold-based filtering approach with constraint satisfaction optimization.
 """
 
-import os  # noqa: F401
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -13,8 +12,6 @@ import pytest
 
 from apm_cli.compilation.context_optimizer import (
     ContextOptimizer,
-    DirectoryAnalysis,  # noqa: F401
-    PlacementCandidate,  # noqa: F401
 )
 from apm_cli.primitives.models import Instruction
 
@@ -117,7 +114,7 @@ class TestMathematicalOptimization:
 
         # Should have exactly one placement location
         assert len(result) == 1
-        placement_dir = list(result.keys())[0]  # noqa: RUF015
+        placement_dir = next(iter(result.keys()))
 
         # Should be placed in the directory with shell files
         assert "scripts" in str(placement_dir)
@@ -156,7 +153,7 @@ class TestMathematicalOptimization:
             # Verify that the selective strategy was actually used by checking
             # that we get a reasonable placement (not just fallback to root)
             placement_paths = list(result.keys())
-            placement_path_str = str(placement_paths[0])  # noqa: F841
+            str(placement_paths[0])
 
             # Should not be placing at root if we have better options
             # (unless root is actually the best option)
@@ -184,7 +181,7 @@ class TestMathematicalOptimization:
         else:
             # High distribution - should be at root
             assert len(result) == 1
-            assert list(result.keys())[0] == optimizer.base_dir  # noqa: RUF015
+            assert next(iter(result.keys())) == optimizer.base_dir
             print("Pattern has high distribution - using distributed placement at root")
 
     def test_distributed_placement_strategy(self, optimizer):
@@ -201,7 +198,7 @@ class TestMathematicalOptimization:
 
         # Should be placed at root (distributed strategy)
         assert len(result) == 1
-        root_placement = list(result.keys())[0]  # noqa: RUF015
+        root_placement = next(iter(result.keys()))
 
         # Should be the base directory (root)
         assert root_placement == optimizer.base_dir
@@ -335,7 +332,7 @@ class TestMathematicalOptimization:
         python_dirs = optimizer._find_matching_directories("**/*.py")
         assert len(python_dirs) > 0
 
-        test_dir = list(python_dirs)[0]  # noqa: RUF015
+        test_dir = next(iter(python_dirs))
         efficiency = optimizer._calculate_coverage_efficiency(test_dir, "**/*.py")
 
         # Should return relevance score (matches/total_files)
@@ -392,10 +389,8 @@ class TestMathematicalOptimization:
 
         if shallow_candidates and deep_candidates:
             # Deep candidates should have lower total scores due to depth penalty
-            avg_shallow_score = sum(c.total_score for c in shallow_candidates) / len(  # noqa: F841
-                shallow_candidates
-            )
-            avg_deep_score = sum(c.total_score for c in deep_candidates) / len(deep_candidates)  # noqa: F841
+            sum(c.total_score for c in shallow_candidates) / len(shallow_candidates)
+            sum(c.total_score for c in deep_candidates) / len(deep_candidates)
 
             # Generally, shallower should have higher scores (though not guaranteed due to other factors)
             # At minimum, verify depth penalty is being applied to deep candidates
@@ -419,7 +414,7 @@ class TestMathematicalOptimization:
 
         # Should still place the instruction (at root)
         assert len(result) == 1
-        placed_dir = list(result.keys())[0]  # noqa: RUF015
+        placed_dir = next(iter(result.keys()))
         assert placed_dir == optimizer.base_dir
         assert len(result[placed_dir]) == 1
         assert result[placed_dir][0].name == "nonexistent-pattern"
@@ -460,7 +455,7 @@ class TestMathematicalOptimization:
         )
 
         optimizer._analyze_project_structure()
-        matching_dirs = optimizer._find_matching_directories("**/*.py")  # noqa: F841
+        optimizer._find_matching_directories("**/*.py")
 
         # Test with different distribution scores by mocking the calculation
 
@@ -524,7 +519,7 @@ class TestMathematicalOptimization:
 
         if len(candidates) > 1:
             # Verify candidates are properly scored
-            scores = [c.total_score for c in candidates]  # noqa: F841
+            [c.total_score for c in candidates]
 
             # Get the actual placement decision
             result = optimizer.optimize_instruction_placement([instruction])

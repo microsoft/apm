@@ -13,7 +13,6 @@ from apm_cli.core.build_orchestrator import (
     BuildError,
     BuildOptions,
     BuildOrchestrator,
-    BuildResult,  # noqa: F401
     MarketplaceProducer,
     OutputKind,
     ProducerResult,

@@ -1,8 +1,5 @@
 """Unit tests for local filesystem path dependency support."""
 
-from pathlib import Path  # noqa: F401
-from unittest.mock import Mock  # noqa: F401
-
 import pytest
 import yaml
 

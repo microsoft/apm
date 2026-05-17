@@ -12,7 +12,7 @@ the real CLI entry point instead of calling internal functions directly.
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -25,7 +25,9 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 # ---------------------------------------------------------------------------
 
 
-def _write_apm_yml(path: Path, *, name: str = "test-project", deps: list = None, mcp: list = None):  # noqa: RUF013
+def _write_apm_yml(
+    path: Path, *, name: str = "test-project", deps: list | None = None, mcp: list | None = None
+):
     """Write a minimal apm.yml."""
     data = {"name": name, "version": "1.0.0", "dependencies": {}}
     if deps:
@@ -40,9 +42,9 @@ def _make_pkg(
     apm_modules: Path,
     repo_url: str,
     *,
-    name: str = None,  # noqa: RUF013
-    mcp: list = None,  # noqa: RUF013
-    apm_deps: list = None,  # noqa: RUF013
+    name: str | None = None,
+    mcp: list | None = None,
+    apm_deps: list | None = None,
 ):
     """Create a package directory with apm.yml under apm_modules."""
     pkg_dir = apm_modules / repo_url
@@ -67,7 +69,7 @@ def _mark_copilot(project_root: Path) -> None:
     (github / "copilot-instructions.md").write_text("# test\n")
 
 
-def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list = None):  # noqa: RUF013
+def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list | None = None):
     """Write a lockfile pre-populated with given dependencies."""
     lf = LockFile()
     for dep in locked_deps:
@@ -191,7 +193,7 @@ class TestSelectiveInstallTransitiveMCPIntegration:
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, cli_env
     ):
         """_install_mcp_dependencies must be called with transitive deps."""
-        tmp_path, runner = cli_env  # noqa: RUF059
+        _tmp_path, runner = cli_env
         from apm_cli.cli import cli
 
         runner.invoke(

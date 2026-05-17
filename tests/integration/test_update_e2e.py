@@ -56,7 +56,7 @@ def temp_project(tmp_path):
 
 def _run_apm(apm_command, args, cwd, timeout=180, stdin_input=None):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_command, *args],
         cwd=cwd,
         capture_output=True,
         text=True,

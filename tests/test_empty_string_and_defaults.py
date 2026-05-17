@@ -10,7 +10,7 @@ This test verifies that the adapter:
 
 import os
 import sys
-from unittest.mock import Mock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 

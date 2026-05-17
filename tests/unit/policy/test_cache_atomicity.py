@@ -7,21 +7,17 @@ and metadata sidecar.  No torn writes, no truncated JSON, no partial YAML.
 
 from __future__ import annotations
 
-import json  # noqa: F401
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from apm_cli.policy.discovery import (
-    CACHE_SCHEMA_VERSION,  # noqa: F401
-    _cache_key,  # noqa: F401
     _get_cache_dir,
     _read_cache,
     _read_cache_entry,
     _write_cache,
 )
-from apm_cli.policy.parser import load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
 NUM_WRITERS = 16
@@ -76,7 +72,7 @@ class TestCacheAtomicity(unittest.TestCase):
                     if result:
                         errors.append(result)
 
-            self.assertEqual(errors, [], f"Torn writes detected:\n" + "\n".join(errors))  # noqa: F541
+            self.assertEqual(errors, [], "Torn writes detected:\n" + "\n".join(errors))
 
             # Final validation: cache must be readable by the public API
             final = _read_cache(repo_ref, root)
@@ -109,7 +105,7 @@ class TestCacheAtomicity(unittest.TestCase):
                     if result:
                         errors.append(result)
 
-            self.assertEqual(errors, [], f"Cross-key interference:\n" + "\n".join(errors))  # noqa: F541
+            self.assertEqual(errors, [], "Cross-key interference:\n" + "\n".join(errors))
 
     def test_rapid_overwrite_cycle(self):
         """100 rapid sequential overwrites -- last writer wins, no corruption."""

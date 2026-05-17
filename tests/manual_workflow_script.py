@@ -8,7 +8,6 @@ as part of the automated test suite. Run it manually when needed.
 """
 
 import os
-import subprocess  # noqa: F401
 import sys
 import tempfile
 

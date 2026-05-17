@@ -1,7 +1,6 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
-import os  # noqa: F401
 from pathlib import Path
 
 import pytest

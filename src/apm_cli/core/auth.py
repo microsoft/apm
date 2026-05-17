@@ -33,7 +33,7 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple, Optional, TypeVar  # noqa: F401
+from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.utils.github_host import (

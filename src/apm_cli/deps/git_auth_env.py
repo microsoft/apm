@@ -69,7 +69,7 @@ class GitAuthEnvBuilder:
 
             temp_base = get_apm_temp_dir() or tempfile.gettempdir()
             empty_cfg = os.path.join(temp_base, ".apm_empty_gitconfig")
-            with open(empty_cfg, "w") as f:  # noqa: F841
+            with open(empty_cfg, "w"):
                 pass
             env["GIT_CONFIG_GLOBAL"] = empty_cfg
         else:

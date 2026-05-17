@@ -1,6 +1,6 @@
 """Test Codex runtime adapter."""
 
-from unittest.mock import MagicMock, Mock, patch  # noqa: F401
+from unittest.mock import Mock, patch
 
 import pytest
 

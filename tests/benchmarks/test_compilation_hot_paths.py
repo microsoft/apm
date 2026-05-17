@@ -17,7 +17,6 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 import pytest
 
@@ -29,8 +28,7 @@ from apm_cli.compilation.link_resolver import (
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.primitives.models import Context, Instruction  # noqa: F401
-from apm_cli.utils.content_hash import compute_file_hash  # noqa: F401
+from apm_cli.primitives.models import Instruction
 
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data

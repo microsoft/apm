@@ -1,7 +1,6 @@
 """Characterisation tests for MCPIntegrator.remove_stale()."""
 
-from pathlib import Path  # noqa: F401
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import MagicMock
 
 import pytest
 

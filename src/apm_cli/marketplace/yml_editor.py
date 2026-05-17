@@ -13,10 +13,8 @@ atomic-write-then-revalidate pattern:
 
 from __future__ import annotations
 
-import re  # noqa: F401
 from io import StringIO
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 from ruamel.yaml import YAML
 

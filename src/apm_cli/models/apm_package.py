@@ -8,7 +8,7 @@ compatibility.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Union  # noqa: F401, UP035
+from typing import Optional
 
 import yaml
 
@@ -31,25 +31,25 @@ from .validation import (
 )
 
 # Re-export all moved symbols so `from apm_cli.models.apm_package import X` keeps working
-__all__ = [  # noqa: RUF022
+__all__ = [
+    # Defined in this module
+    "APMPackage",
     # Backward-compatible re-exports from .dependency
     "DependencyReference",
     "GitReferenceType",
-    "MCPDependency",
-    "RemoteRef",
-    "ResolvedReference",
-    "parse_git_reference",
     # Backward-compatible re-exports from .validation
     "InvalidVirtualPackageExtensionError",
+    "MCPDependency",
     "PackageContentType",
+    "PackageInfo",
     "PackageType",
+    "RemoteRef",
+    "ResolvedReference",
     "ValidationError",
     "ValidationResult",
-    "validate_apm_package",
-    # Defined in this module
-    "APMPackage",
-    "PackageInfo",
     "clear_apm_yml_cache",
+    "parse_git_reference",
+    "validate_apm_package",
 ]
 
 # Module-level parse cache: (resolved apm.yml path, resolved source dir) ->

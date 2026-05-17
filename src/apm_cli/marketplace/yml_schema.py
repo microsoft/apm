@@ -32,9 +32,10 @@ Key design rules
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
@@ -931,19 +932,17 @@ def load_marketplace_from_apm_yml(apm_yml_path: Path) -> MarketplaceConfig:
 
     if desc_overridden:
         description = _require_str(raw_block, "description", context="marketplace")
-    else:  # noqa: PLR5501
-        if not isinstance(top_desc, str) or not top_desc.strip():
-            description = ""
-        else:
-            description = top_desc.strip()
+    elif not isinstance(top_desc, str) or not top_desc.strip():
+        description = ""
+    else:
+        description = top_desc.strip()
 
     if ver_overridden:
         version_str = _require_str(raw_block, "version", context="marketplace")
-    else:  # noqa: PLR5501
-        if top_ver is None:  # noqa: SIM108
-            version_str = ""
-        else:
-            version_str = str(top_ver).strip()
+    elif top_ver is None:
+        version_str = ""
+    else:
+        version_str = str(top_ver).strip()
 
     if version_str:
         _validate_semver(version_str, context="version")

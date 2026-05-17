@@ -143,7 +143,7 @@ class TestTargetGatingRegression:
             "instruction_integrator",
             "hook_integrator",
         ):
-            for method_name, method in vars(mocks[name]).items():  # noqa: B007
+            for _method_name, method in vars(mocks[name]).items():
                 if hasattr(method, "call_args_list"):
                     for call_args in method.call_args_list:
                         if call_args[0]:
@@ -789,7 +789,7 @@ class TestForScope:
         """resolve_targets at user scope includes all user-capable targets."""
         from pathlib import Path
 
-        from apm_cli.integration.targets import KNOWN_TARGETS, resolve_targets  # noqa: F401
+        from apm_cli.integration.targets import resolve_targets
 
         targets = resolve_targets(Path.home(), user_scope=True, explicit_target="all")
         target_names = {t.name for t in targets}
@@ -879,7 +879,7 @@ class TestDispatchTable:
         from apm_cli.integration.dispatch import get_dispatch_table
 
         dispatch = get_dispatch_table()
-        for name, entry in dispatch.items():  # noqa: B007
+        for _name, entry in dispatch.items():
             integrator = entry.integrator_class()
             assert hasattr(integrator, entry.integrate_method), (
                 f"{entry.integrator_class.__name__} missing {entry.integrate_method}"

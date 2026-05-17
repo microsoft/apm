@@ -19,11 +19,8 @@ Scenarios:
 
 from __future__ import annotations
 
-import os  # noqa: F401
-import sys  # noqa: F401
 from pathlib import Path
-from typing import Optional  # noqa: F401
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,7 +31,6 @@ from apm_cli.policy.install_preflight import (
     PolicyBlockError,
     run_policy_preflight,
 )
-from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
@@ -186,7 +182,7 @@ class TestTransitiveMCPWarn:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/fake/project"),
                 mcp_deps=[dep],
                 no_policy=False,
@@ -330,7 +326,7 @@ class TestNoTransitiveMCP:
         fetch = _make_fetch_result(policy=policy)
 
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/fake/project"),
                 mcp_deps=[],
                 no_policy=False,
@@ -347,7 +343,7 @@ class TestNoTransitiveMCP:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/fake/project"),
                 mcp_deps=None,
                 no_policy=False,
@@ -389,7 +385,7 @@ class TestDirectMCPNotAffected:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/fake/project"),
                 mcp_deps=[dep],
                 no_policy=False,

@@ -6,7 +6,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
-import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 

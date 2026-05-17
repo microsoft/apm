@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from apm_cli.bundle.packer import PackResult, _filter_files_by_target, pack_bundle  # noqa: F401
+from apm_cli.bundle.packer import _filter_files_by_target, pack_bundle
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
@@ -494,7 +494,7 @@ class TestFilterFilesByTargetList:
     def test_list_copilot_vscode_dedup(self):
         """copilot and vscode share .github/ prefix -- should not duplicate."""
         files = [".github/agents/a.md"]
-        result, mappings = _filter_files_by_target(files, ["copilot", "vscode"])  # noqa: RUF059
+        result, _mappings = _filter_files_by_target(files, ["copilot", "vscode"])
         assert result == [".github/agents/a.md"]
 
     def test_list_single_element_matches_string(self):

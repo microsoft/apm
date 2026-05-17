@@ -14,7 +14,6 @@ resolution, and CLI output using local fixtures only.
 """
 
 import os
-import platform  # noqa: F401
 import shutil
 import subprocess
 import sys
@@ -70,7 +69,7 @@ def _env_with_home(fake_home):
 def _run_apm(apm_command, args, cwd, fake_home, timeout=60):
     """Run an apm CLI command with an overridden home directory."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_command, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -304,7 +303,7 @@ class TestGlobalManifestPlacement:
         work_dir = fake_home / "workdir"
         work_dir.mkdir()
 
-        result = _run_apm(  # noqa: F841
+        _run_apm(
             apm_command,
             ["install", "--global", str(local_package)],
             work_dir,

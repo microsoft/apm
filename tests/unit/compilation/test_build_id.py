@@ -7,8 +7,6 @@ the placeholder line removed (so the hash is not self-referential).
 
 import re
 
-import pytest  # noqa: F401
-
 from apm_cli.compilation.build_id import stabilize_build_id
 from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
 

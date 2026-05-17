@@ -12,7 +12,7 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from apm_cli.workflow.discovery import create_workflow_template
-from apm_cli.workflow.parser import WorkflowDefinition, parse_workflow_file  # noqa: F401
+from apm_cli.workflow.parser import WorkflowDefinition
 from apm_cli.workflow.runner import substitute_parameters
 
 

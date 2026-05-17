@@ -1,7 +1,7 @@
 """Coverage gap tests for MCPIntegrator methods."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 

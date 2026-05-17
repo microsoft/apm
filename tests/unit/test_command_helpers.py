@@ -6,12 +6,9 @@ and update notification helper (_check_and_notify_updates).
 """
 
 import os
-import tempfile  # noqa: F401
-from pathlib import Path  # noqa: F401
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
-import yaml  # noqa: F401
 
 from apm_cli.commands._helpers import (
     _atomic_write,
@@ -92,7 +89,7 @@ class TestUpdateGitignoreForApmModules:
         monkeypatch.chdir(tmp_path)
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text("node_modules/\napm_modules/\n")
-        mtime_before = gitignore.stat().st_mtime  # noqa: F841
+        gitignore.stat().st_mtime
         _update_gitignore_for_apm_modules()
         # File should not have been modified
         assert gitignore.read_text() == "node_modules/\napm_modules/\n"

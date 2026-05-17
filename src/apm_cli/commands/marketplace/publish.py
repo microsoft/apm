@@ -11,12 +11,12 @@ from ...core.command_logger import CommandLogger
 from ...marketplace.pr_integration import PrIntegrator, PrResult, PrState
 from ...marketplace.publisher import MarketplacePublisher, PublishOutcome
 from .._helpers import _get_console, _is_interactive
-from . import (
-    _load_config_or_exit,
+from . import marketplace
+from ._io import _load_config_or_exit
+from ._publish_helpers import (
     _load_targets_file,
     _render_publish_plan,
     _render_publish_summary,
-    marketplace,
 )
 
 
@@ -186,27 +186,26 @@ def publish(
                             message=f"No PR needed: {result.outcome.value}",
                         )
                     )
-            else:  # noqa: PLR5501
-                if result.outcome == PublishOutcome.UPDATED:
-                    pr_result = pr.open_or_update(
-                        plan,
-                        result.target,
-                        result,
-                        no_pr=False,
-                        draft=draft,
-                        dry_run=False,
+            elif result.outcome == PublishOutcome.UPDATED:
+                pr_result = pr.open_or_update(
+                    plan,
+                    result.target,
+                    result,
+                    no_pr=False,
+                    draft=draft,
+                    dry_run=False,
+                )
+                pr_results.append(pr_result)
+            else:
+                pr_results.append(
+                    PrResult(
+                        target=result.target,
+                        state=PrState.SKIPPED,
+                        pr_number=None,
+                        pr_url=None,
+                        message=f"No PR needed: {result.outcome.value}",
                     )
-                    pr_results.append(pr_result)
-                else:
-                    pr_results.append(
-                        PrResult(
-                            target=result.target,
-                            state=PrState.SKIPPED,
-                            pr_number=None,
-                            pr_url=None,
-                            message=f"No PR needed: {result.outcome.value}",
-                        )
-                    )
+                )
 
     # ------------------------------------------------------------------
     # 4. Summary rendering

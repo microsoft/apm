@@ -8,8 +8,9 @@ the ``InstallService`` consumes.  This is the typed-IO companion to
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.core.auth import AuthResolver

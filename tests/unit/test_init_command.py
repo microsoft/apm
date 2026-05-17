@@ -1,12 +1,10 @@
 """Tests for the apm init command."""
 
-import json  # noqa: F401
 import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 

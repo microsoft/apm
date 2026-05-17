@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -92,7 +92,7 @@ class AgentIntegrator(BaseIntegrator):
         project_root: Path,
         *,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
@@ -189,7 +189,7 @@ class AgentIntegrator(BaseIntegrator):
         target: TargetProfile,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed agent files for a single *target*."""
         mapping = target.primitives.get("agents")
@@ -370,7 +370,7 @@ class AgentIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate agents into .github/agents/ + auto-copy to claude/cursor.
@@ -522,7 +522,7 @@ class AgentIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate agents into .claude/agents/.
@@ -548,7 +548,7 @@ class AgentIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed agent files from .github/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -565,7 +565,7 @@ class AgentIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed agent files from .claude/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -594,7 +594,7 @@ class AgentIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate agents into .cursor/agents/."""
@@ -614,7 +614,7 @@ class AgentIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed agent files from .cursor/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -632,7 +632,7 @@ class AgentIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate agents into .opencode/agents/."""
@@ -652,7 +652,7 @@ class AgentIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed agent files from .opencode/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS

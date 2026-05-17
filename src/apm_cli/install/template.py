@@ -13,8 +13,6 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
-from typing import Dict, Optional  # noqa: F401, UP035
-
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.services import integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization

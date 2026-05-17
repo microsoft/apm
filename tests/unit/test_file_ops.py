@@ -4,8 +4,6 @@ import errno
 import os
 import shutil
 import stat
-import sys  # noqa: F401
-from pathlib import Path  # noqa: F401
 from unittest.mock import patch
 
 import pytest
@@ -436,7 +434,7 @@ class TestRobustCopy2:
             patch("apm_cli.utils.file_ops._reflink_copy_file", side_effect=flaky_reflink_copy),
             patch("apm_cli.utils.file_ops.time.sleep"),
         ):
-            result = robust_copy2(src, dst)  # noqa: F841
+            robust_copy2(src, dst)
 
         assert copy_calls == 2
         assert dst.read_text() == "content"

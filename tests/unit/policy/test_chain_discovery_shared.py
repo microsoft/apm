@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -160,7 +160,7 @@ class TestChainResolution:
         fetch = _make_fetch(policy=policy, cached=True)
         mock_discover.return_value = fetch
 
-        result = discover_policy_with_chain(Path("/fake"))  # noqa: F841
+        discover_policy_with_chain(Path("/fake"))
         mock_write_cache.assert_not_called()
         # discover_policy called only once (no parent fetch)
         assert mock_discover.call_count == 1
@@ -196,7 +196,7 @@ class TestCachePaths:
         parent_fetch = _make_fetch(policy=parent, source="org:hub/.github")
         mock_discover.side_effect = [leaf_fetch, parent_fetch]
 
-        result = discover_policy_with_chain(Path("/fake"))  # noqa: F841
+        discover_policy_with_chain(Path("/fake"))
 
         # Cache writer called with merged policy
         assert mock_write_cache.called
@@ -217,7 +217,7 @@ class TestGatePhaseDelegate:
     def test_gate_discover_returns_same_as_shared(self, mock_discover, mock_write_cache):
         """Gate-phase _discover_with_chain produces identical results."""
         from dataclasses import dataclass, field
-        from typing import Any, List  # noqa: F401, UP035
+        from typing import Any
 
         @dataclass
         class _FakeCtx:

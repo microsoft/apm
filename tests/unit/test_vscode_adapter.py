@@ -8,8 +8,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
-
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 
@@ -256,7 +254,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
                 }
             ],
         }
-        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+        config, _inputs = adapter._format_server_config(server_info)
 
         self.assertEqual(config["type"], "streamable-http")
         self.assertEqual(config["url"], "https://stream.example.com")
@@ -280,7 +278,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
                 }
             ],
         }
-        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+        config, _inputs = adapter._format_server_config(server_info)
 
         self.assertEqual(config["type"], "http")
         self.assertEqual(
@@ -329,7 +327,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "atlassian-mcp-server",
             "remotes": [{"url": "https://mcp.atlassian.com/v1/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+        config, _inputs = adapter._format_server_config(server_info)
 
         self.assertEqual(config["type"], "http")
         self.assertEqual(config["url"], "https://mcp.atlassian.com/v1/mcp")
@@ -345,7 +343,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "remote-srv",
             "remotes": [{"transport_type": "", "url": "https://example.com/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+        config, _inputs = adapter._format_server_config(server_info)
 
         self.assertEqual(config["type"], "http")
         self.assertEqual(config["url"], "https://example.com/mcp")
@@ -360,7 +358,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "remote-srv",
             "remotes": [{"transport_type": None, "url": "https://example.com/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+        config, _inputs = adapter._format_server_config(server_info)
 
         self.assertEqual(config["type"], "http")
 
@@ -374,7 +372,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "remote-srv",
             "remotes": [{"transport_type": "  ", "url": "https://example.com/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+        config, _inputs = adapter._format_server_config(server_info)
 
         self.assertEqual(config["type"], "http")
 
@@ -407,7 +405,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
                 {"transport_type": "sse", "url": "https://good.example.com/sse"},
             ],
         }
-        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
+        config, _inputs = adapter._format_server_config(server_info)
 
         self.assertEqual(config["type"], "sse")
         self.assertEqual(config["url"], "https://good.example.com/sse")

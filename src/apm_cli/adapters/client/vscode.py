@@ -6,7 +6,6 @@ https://code.visualstudio.com/docs/copilot/chat/mcp-servers
 """
 
 import json
-import os  # noqa: F401
 import re
 from pathlib import Path
 
@@ -282,7 +281,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 server_config = {
                     "type": "stdio",
                     "command": "npx",
-                    "args": ["-y", package_name] + extra_args,  # noqa: RUF005
+                    "args": ["-y", package_name, *extra_args],
                 }
 
             # Handle docker packages

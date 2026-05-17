@@ -1,9 +1,8 @@
 """Console utility functions for formatting and output."""
 
-import sys  # noqa: F401
 import threading
 from contextlib import contextmanager
-from typing import Any, Optional  # noqa: F401
+from typing import Any
 
 import click
 
@@ -109,9 +108,9 @@ def _reset_console() -> None:
 def _rich_echo(
     message: str,
     color: str = "white",
-    style: str = None,  # noqa: RUF013
+    style: str | None = None,
     bold: bool = False,
-    symbol: str = None,  # noqa: RUF013
+    symbol: str | None = None,
 ):
     """Echo message with Rich formatting or colorama fallback."""
     # Handle backward compatibility - if style is provided, use it as color
@@ -153,27 +152,27 @@ def _rich_echo(
         click.echo(message, err=_console_stderr)
 
 
-def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
+def _rich_success(message: str, symbol: str | None = None):
     """Display success message with green color and bold styling."""
     _rich_echo(message, color="green", symbol=symbol, bold=True)
 
 
-def _rich_error(message: str, symbol: str = None):  # noqa: RUF013
+def _rich_error(message: str, symbol: str | None = None):
     """Display error message with red color."""
     _rich_echo(message, color="red", symbol=symbol)
 
 
-def _rich_warning(message: str, symbol: str = None):  # noqa: RUF013
+def _rich_warning(message: str, symbol: str | None = None):
     """Display warning message with yellow color."""
     _rich_echo(message, color="yellow", symbol=symbol)
 
 
-def _rich_info(message: str, symbol: str = None):  # noqa: RUF013
+def _rich_info(message: str, symbol: str | None = None):
     """Display info message with blue color."""
     _rich_echo(message, color="blue", symbol=symbol)
 
 
-def _rich_panel(content: str, title: str = None, style: str = "cyan"):  # noqa: RUF013
+def _rich_panel(content: str, title: str | None = None, style: str = "cyan"):
     """Display content in a Rich panel with fallback."""
     console = _get_console()
     if console and Panel:

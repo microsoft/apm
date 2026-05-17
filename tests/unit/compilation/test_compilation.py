@@ -394,7 +394,6 @@ class TestCLIIntegration(unittest.TestCase):
     def test_validate_mode_with_valid_primitives(self):
         """Test validation mode with valid primitives."""
         from apm_cli.commands.compile import (
-            _display_validation_errors,  # noqa: F401
             _get_validation_suggestion,
         )
 
@@ -414,7 +413,6 @@ class TestCLIIntegration(unittest.TestCase):
         """Test validation error display functionality."""
         from apm_cli.commands.compile import (
             _display_validation_errors,
-            _get_validation_suggestion,  # noqa: F401
         )
 
         # Test with mock errors

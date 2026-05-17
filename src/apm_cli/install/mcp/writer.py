@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Any, Union
 
 import click
 
@@ -31,7 +31,7 @@ def _diff_entry(
         return [f"  {old} -> {new}"]
     old_d = {"name": old} if isinstance(old, str) else (old or {})
     new_d = {"name": new} if isinstance(new, str) else (new or {})
-    keys = list(old_d.keys()) + [k for k in new_d.keys() if k not in old_d]  # noqa: SIM118
+    keys = list(old_d.keys()) + [k for k in new_d if k not in old_d]
     diff: list[str] = []
     for k in keys:
         ov = old_d.get(k, "<absent>")

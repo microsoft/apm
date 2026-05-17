@@ -1,9 +1,7 @@
 """LLM runtime adapter for APM."""
 
-import os  # noqa: F401
 import subprocess
-import tempfile  # noqa: F401
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
 
 from .base import RuntimeAdapter, _stream_subprocess_output
 
@@ -21,7 +19,7 @@ class LLMRuntime(RuntimeAdapter):
 
         # Verify llm CLI is available
         try:
-            result = subprocess.run(  # noqa: F841
+            subprocess.run(
                 ["llm", "--version"], capture_output=True, text=True, encoding="utf-8", check=True
             )
         except (subprocess.CalledProcessError, FileNotFoundError):

@@ -11,9 +11,7 @@ Run with: uv run pytest tests/benchmarks/test_git_and_compiler_benchmarks.py -v 
 
 import hashlib
 import time
-from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 import pytest
 

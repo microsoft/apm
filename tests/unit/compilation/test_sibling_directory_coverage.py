@@ -114,7 +114,6 @@ class TestSiblingDirectoryCoverage:
 
         # The instruction should be placed at the root (common ancestor)
         # to ensure all sibling directories can inherit it
-        root_dir = sibling_directory_project  # noqa: F841
 
         # Verify the instruction is accessible from root or a high enough level
         # that covers all sibling directories

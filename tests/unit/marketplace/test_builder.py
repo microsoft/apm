@@ -8,7 +8,6 @@ import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
@@ -20,14 +19,12 @@ from apm_cli.marketplace.builder import (
     ResolvedPackage,
 )
 from apm_cli.marketplace.errors import (
-    BuildError,  # noqa: F401
     HeadNotAllowedError,
     NoMatchingVersionError,
     RefNotFoundError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.semver import (
-    SemVer,  # noqa: F401
     parse_semver,
     satisfies_range,
 )

@@ -1,7 +1,6 @@
 """Tests for the apm config command."""
 
 import os
-import sys  # noqa: F401
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -89,7 +88,7 @@ class TestConfigShow:
         """Fallback plain-text display when Rich (rich.table.Table) is unavailable."""
         import rich.table
 
-        mock_table_cls = MagicMock(side_effect=ImportError("no rich"))  # noqa: F841
+        MagicMock(side_effect=ImportError("no rich"))
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:

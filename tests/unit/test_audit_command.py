@@ -1,14 +1,12 @@
 """Tests for the ``apm audit`` command."""
 
 import textwrap
-from pathlib import Path  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.audit import (
     _apply_strip,
-    _preview_strip,  # noqa: F401
     _scan_single_file,
     audit,
 )
@@ -476,7 +474,7 @@ class TestScanSingleFile:
         findings, count = _scan_single_file(warning_file, _logger)
         assert count == 1
         assert len(findings) == 1
-        key = list(findings.keys())[0]  # noqa: RUF015
+        key = next(iter(findings.keys()))
         assert str(warning_file.resolve()) == key
 
 

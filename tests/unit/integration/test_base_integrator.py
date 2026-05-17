@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.primitives.discovery import discover_primitives  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # IntegrationResult
@@ -613,7 +612,7 @@ class TestResolveLinks:
         mock_resolver.resolve_links_for_installation.return_value = "Hello [link](foo.md)"
         bi.link_resolver = mock_resolver
         content = "Hello [link](foo.md)"
-        result, count = bi.resolve_links(content, Path("src.md"), Path("tgt.md"))  # noqa: RUF059
+        _result, count = bi.resolve_links(content, Path("src.md"), Path("tgt.md"))
         assert count == 0
 
     def test_resolver_changes_links_counts_removed(self):

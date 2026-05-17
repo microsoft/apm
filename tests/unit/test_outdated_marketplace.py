@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
-
 from apm_cli.commands.outdated import (
     OutdatedRow,
     _check_marketplace_ref,

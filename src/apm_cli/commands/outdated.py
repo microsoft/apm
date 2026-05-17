@@ -10,7 +10,6 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import List  # noqa: F401, UP035
 
 import click
 

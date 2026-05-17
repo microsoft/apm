@@ -103,7 +103,7 @@ class TestPluginHeroScenarios:
         (project_root / ".github").mkdir()
 
         pkg_info = _make_package_info(result.package, plugin_dir, result.package_type)
-        prompt_r, agent_r, skill_r, command_r = _run_integrators(pkg_info, project_root)  # noqa: RUF059
+        _prompt_r, _agent_r, _skill_r, _command_r = _run_integrators(pkg_info, project_root)
 
         # 5. Assert scattered files
         assert (project_root / ".github" / "prompts" / "test-command.prompt.md").exists()
@@ -162,7 +162,7 @@ class TestPluginHeroScenarios:
             if has_skill and not has_apm:
                 is_sub = False
                 check = candidate.parent
-                while check != modules_root and check != check.parent:  # noqa: PLR1714
+                while check not in (modules_root, check.parent):
                     if (check / "apm.yml").exists():
                         is_sub = True
                         break

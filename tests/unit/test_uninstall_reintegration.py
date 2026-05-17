@@ -7,8 +7,6 @@ then remaining packages are re-integrated from apm_modules/.
 from datetime import datetime
 from pathlib import Path
 
-import pytest  # noqa: F401
-
 from apm_cli.integration import AgentIntegrator, PromptIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator

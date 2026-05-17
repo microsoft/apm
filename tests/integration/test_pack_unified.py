@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace

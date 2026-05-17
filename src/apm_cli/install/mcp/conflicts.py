@@ -8,10 +8,9 @@ turns invalid ``apm install --mcp`` flag combinations into
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Optional, Tuple  # noqa: F401, UP035
-
 import click
+
+from .flags import MCPConflictParams
 
 # Mapping for E10: which flags require --mcp.  Keyed by attribute-style
 # name so we can read directly from the Click handler locals.
@@ -24,26 +23,27 @@ MCP_REQUIRED_FLAGS: tuple[tuple[str, str], ...] = (
 )
 
 
-def validate_mcp_conflicts(
-    *,
-    mcp_name: str | None,
-    packages: Sequence[str],
-    pre_dash_packages: Sequence[str],
-    transport: str | None,
-    url: str | None,
-    env: Mapping[str, str],
-    headers: Mapping[str, str],
-    mcp_version: str | None,
-    command_argv: Sequence[str] | None,
-    global_: bool,
-    only: str | None,
-    update: bool,
-    use_ssh: bool,
-    use_https: bool,
-    allow_protocol_fallback: bool,
-    registry_url: str | None = None,
-) -> None:
+def validate_mcp_conflicts(params: MCPConflictParams | None = None, **kwargs: object) -> None:
     """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit."""
+    if params is None:
+        params = MCPConflictParams(**kwargs)
+
+    mcp_name = params.mcp_name
+    pre_dash_packages = params.pre_dash_packages
+    transport = params.transport
+    url = params.url
+    env = params.env
+    headers = params.headers
+    mcp_version = params.mcp_version
+    command_argv = params.command_argv
+    global_ = params.global_
+    only = params.only
+    update = params.update
+    use_ssh = params.use_ssh
+    use_https = params.use_https
+    allow_protocol_fallback = params.allow_protocol_fallback
+    registry_url = params.registry_url
+
     # E10: flags require --mcp -- run first so users get the right hint.
     if mcp_name is None:
         flag_values = {
@@ -67,7 +67,7 @@ def validate_mcp_conflicts(
     if mcp_name == "":
         raise click.UsageError("MCP name cannot be empty")
     if mcp_name.startswith("-"):
-        raise click.UsageError(f"MCP name cannot start with '-'; did you forget a value for --mcp?")  # noqa: F541
+        raise click.UsageError("MCP name cannot start with '-'; did you forget a value for --mcp?")
 
     # E1: positional packages mixed with --mcp.
     if pre_dash_packages:

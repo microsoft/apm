@@ -165,7 +165,7 @@ class TestLinkRewriting:
                 available_contexts={},
             )
 
-            result = resolver._rewrite_markdown_links(content, ctx)  # noqa: F841
+            resolver._rewrite_markdown_links(content, ctx)
 
             # These URLs should NOT be preserved as-is since they're not external
             # They may be rewritten or preserved depending on whether they match patterns

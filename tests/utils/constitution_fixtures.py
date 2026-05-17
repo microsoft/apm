@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import shutil
 import tempfile
-from collections.abc import Callable  # noqa: F401
 from pathlib import Path
 
 

@@ -28,10 +28,7 @@ def get_version() -> str:
     if not getattr(sys, "frozen", False):
         try:
             # Python 3.8+ has importlib.metadata
-            if sys.version_info >= (3, 8):  # noqa: UP036
-                from importlib.metadata import PackageNotFoundError, version
-            else:
-                from importlib_metadata import PackageNotFoundError, version
+            from importlib.metadata import PackageNotFoundError, version
 
             return version("apm-cli")
         except (ImportError, PackageNotFoundError):

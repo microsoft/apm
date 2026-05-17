@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from unittest.mock import mock_open, patch
 
-import frontmatter  # noqa: F401
 import yaml
 
 from apm_cli.deps.aggregator import (

@@ -10,11 +10,10 @@ checks to isolate the phase logic.
 
 from __future__ import annotations
 
-import os  # noqa: F401
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -380,7 +379,7 @@ class TestEnforcementWarn:
 
         assert ctx.policy_enforcement_active is True
         ctx.logger.policy_violation.assert_called_once()
-        args, kwargs = ctx.logger.policy_violation.call_args  # noqa: RUF059
+        _args, kwargs = ctx.logger.policy_violation.call_args
         assert kwargs.get("severity") == "warn"
 
     @patch(_PATCH_CHECKS)
@@ -475,7 +474,7 @@ class TestChainRefs:
         ctx = _make_ctx()
         from apm_cli.install.phases.policy_gate import _discover_with_chain
 
-        result = _discover_with_chain(ctx)  # noqa: F841
+        _discover_with_chain(ctx)
 
         # _write_cache should have been called with chain_refs covering both
         assert mock_write_cache.called
@@ -503,7 +502,7 @@ class TestChainRefs:
         ctx = _make_ctx()
         from apm_cli.install.phases.policy_gate import _discover_with_chain
 
-        result = _discover_with_chain(ctx)  # noqa: F841
+        _discover_with_chain(ctx)
 
         # _write_cache should NOT be called by _discover_with_chain
         # (it's already cached by discover_policy itself)
@@ -525,7 +524,7 @@ class TestChainRefs:
         ctx = _make_ctx()
         from apm_cli.install.phases.policy_gate import _discover_with_chain
 
-        result = _discover_with_chain(ctx)  # noqa: F841
+        _discover_with_chain(ctx)
 
         mock_write_cache.assert_not_called()
 

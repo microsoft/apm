@@ -1,7 +1,5 @@
 """Tests for marketplace error hierarchy."""
 
-import pytest  # noqa: F401
-
 from apm_cli.marketplace.errors import (
     MarketplaceError,
     MarketplaceFetchError,

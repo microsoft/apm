@@ -1,7 +1,7 @@
 """Tests for MCP conflict detection functionality."""
 
 import unittest
-from unittest.mock import Mock, patch  # noqa: F401
+from unittest.mock import Mock
 
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.core.conflict_detector import MCPConflictDetector
@@ -54,11 +54,7 @@ class TestMCPConflictDetection(unittest.TestCase):
 
         # Mock registry to resolve "github" to canonical name and UUID
         def mock_find_server(server_ref):
-            if (
-                server_ref == "github"  # noqa: PLR1714
-                or server_ref == "my-github-server"
-                or server_ref == "github-server"
-            ):
+            if server_ref in {"github", "my-github-server", "github-server"}:
                 return {
                     "name": "io.github.github/github-mcp-server",
                     "id": "github-server-uuid-123",

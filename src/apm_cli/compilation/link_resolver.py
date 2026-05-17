@@ -13,7 +13,6 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -656,7 +655,7 @@ def _remove_frontmatter(content: str) -> str:
         in_frontmatter = True
         content_lines = []
 
-        for i, line in enumerate(lines[1:], 1):  # Skip first ---  # noqa: B007
+        for _i, line in enumerate(lines[1:], 1):  # Skip first ---
             if line.strip() == "---" and in_frontmatter:
                 in_frontmatter = False
                 continue

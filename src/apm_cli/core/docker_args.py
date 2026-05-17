@@ -1,7 +1,5 @@
 """Docker arguments processing utilities for MCP configuration."""
 
-from typing import Dict, List, Tuple  # noqa: F401, UP035
-
 
 class DockerArgsProcessor:
     """Handles Docker argument processing with deduplication."""
@@ -23,8 +21,8 @@ class DockerArgsProcessor:
         has_rm = False
 
         # Check for existing -i and --rm flags
-        for i, arg in enumerate(base_args):  # noqa: B007
-            if arg == "-i" or arg == "--interactive":  # noqa: PLR1714
+        for _i, arg in enumerate(base_args):
+            if arg in {"-i", "--interactive"}:
                 has_interactive = True
             elif arg == "--rm":
                 has_rm = True

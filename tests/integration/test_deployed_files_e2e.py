@@ -12,7 +12,6 @@ Tests the complete lifecycle of deployed_files tracking with real packages:
 Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
-import json  # noqa: F401
 import shutil
 import subprocess
 from pathlib import Path
@@ -63,7 +62,7 @@ def temp_project(tmp_path):
 def _run_apm(apm_command, args, cwd, timeout=120):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_command, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -90,7 +89,7 @@ def _get_locked_dep(lockfile, key):
             repo_url = entry.get("repo_url", "")
             virtual_path = entry.get("virtual_path")
             dep_key = f"{repo_url}/{virtual_path}" if virtual_path else repo_url
-            if dep_key == key or repo_url == key:  # noqa: PLR1714
+            if key in (dep_key, repo_url):
                 return entry
         return None
     # dict format (shouldn't happen, but be safe)
@@ -255,7 +254,6 @@ class TestCollisionDetection:
             pytest.skip("No prompt files found")
 
         target_file = prompt_files[0]
-        target_name = target_file.name  # noqa: F841
 
         # Delete the lockfile to clear deployed_files tracking, then create
         # a user-authored file at the same path

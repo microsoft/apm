@@ -1,6 +1,5 @@
 """Integration tests for version update notification in CLI."""
 
-import os  # noqa: F401
 import unittest
 from unittest.mock import patch
 

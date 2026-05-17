@@ -141,7 +141,7 @@ class TestResolveMarketplacePlugin:
     def test_raw_ref_overrides_source(self):
         """version_spec is treated as raw git ref override."""
         plugin = _make_plugin()
-        canonical, resolved = self._resolve(plugin, version_spec="develop")  # noqa: RUF059
+        canonical, _resolved = self._resolve(plugin, version_spec="develop")
         assert canonical == "acme-org/my-plugin#develop"
 
     def test_ref_tag_override(self):
@@ -191,7 +191,7 @@ class TestCanonicalString:
         assert canonical == "acme-org/my-plugin#main"
 
     def test_plugin_root_applied(self):
-        plugin = _make_plugin(name="reviewer")  # noqa: F841
+        _make_plugin(name="reviewer")
         plugin_with_subdir = MarketplacePlugin(
             name="reviewer",
             source={

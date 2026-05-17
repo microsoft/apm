@@ -10,9 +10,8 @@ import pytest
 import yaml
 
 from apm_cli.bundle.plugin_exporter import (
-    PackResult,  # noqa: F401
     _collect_apm_components,
-    _collect_bare_skill,  # noqa: F401
+    _collect_bare_skill,
     _collect_hooks_from_apm,
     _collect_hooks_from_root,
     _collect_mcp,
@@ -276,7 +275,6 @@ class TestCollectBareSkill:
 
     def test_bare_skill_detected(self, tmp_path):
         """A SKILL.md at root with no skills/ subdir is collected."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# My Skill")
         (tmp_path / "LICENSE.txt").write_text("MIT")
@@ -293,7 +291,6 @@ class TestCollectBareSkill:
 
     def test_virtual_path_used_as_slug(self, tmp_path):
         """virtual_path is preferred over repo_url for the skill slug."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Frontend")
         dep = LockedDependency(
@@ -309,7 +306,6 @@ class TestCollectBareSkill:
 
     def test_skills_prefix_stripped_from_virtual_path(self, tmp_path):
         """A skills/ virtual path should not produce skills/skills/ nesting."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Jest")
         dep = LockedDependency(
@@ -327,7 +323,6 @@ class TestCollectBareSkill:
 
     def test_skips_when_no_skill_md(self, tmp_path):
         """No SKILL.md at root means nothing collected."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "README.md").write_text("hello")
         dep = LockedDependency(
@@ -341,7 +336,6 @@ class TestCollectBareSkill:
 
     def test_skips_when_skills_already_collected(self, tmp_path):
         """If skills/ was already collected via normal paths, bare skill is skipped."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Root skill")
         dep = LockedDependency(
@@ -356,7 +350,6 @@ class TestCollectBareSkill:
 
     def test_excludes_apm_files(self, tmp_path):
         """apm.yml, apm.lock.yaml, plugin.json are excluded from bare skill output."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Skill")
         (tmp_path / "apm.yml").write_text("name: x")

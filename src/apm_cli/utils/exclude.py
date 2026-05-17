@@ -9,7 +9,6 @@ import fnmatch
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +82,7 @@ def should_exclude(
 
     rel_path_str = str(rel_path).replace(os.sep, "/")
 
-    for pattern in exclude_patterns:  # noqa: SIM110
-        if _matches_pattern(rel_path_str, pattern):
-            return True
-
-    return False
+    return any(_matches_pattern(rel_path_str, pattern) for pattern in exclude_patterns)
 
 
 def _matches_pattern(rel_path_str: str, pattern: str) -> bool:
@@ -152,7 +147,7 @@ def _match_double_star(path_parts: list, pattern_parts: list) -> bool:
         return not path_parts
 
     if not path_parts:
-        return all(p == "**" or p == "" for p in pattern_parts)  # noqa: PLR1714
+        return all(p in {"**", ""} for p in pattern_parts)
 
     part = pattern_parts[0]
 

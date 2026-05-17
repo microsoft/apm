@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest  # noqa: F401
-
 from apm_cli.marketplace._git_utils import redact_token
 
 

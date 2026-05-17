@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional  # noqa: F401
+from typing import Literal
 
-from .constants import CONSTITUTION_MARKER_BEGIN, CONSTITUTION_MARKER_END  # noqa: F401
 from .constitution import read_constitution
 from .constitution_block import find_existing_block, render_block
 

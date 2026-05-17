@@ -579,7 +579,7 @@ def test_audit_detects_lockfile_drift(tmp_path, apm_command, fake_home):
     manifest_path = work_dir / "apm.yml"
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     deps = manifest["dependencies"]["apm"]
-    for i, entry in enumerate(deps):  # noqa: B007
+    for _i, entry in enumerate(deps):
         if isinstance(entry, dict) and "vercel-labs/agent-skills" in entry.get("git", ""):
             entry["skills"] = ["totally-different-skill"]
             break

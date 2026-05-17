@@ -1,12 +1,10 @@
 """Helper utility functions for APM."""
 
-import os  # noqa: F401
 import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional  # noqa: F401
 
 
 def is_tool_available(tool_name):
@@ -27,19 +25,16 @@ def is_tool_available(tool_name):
         # Different approaches for different platforms
         if sys.platform == "win32":
             # On Windows, use 'where' command but WITHOUT shell=True
-            result = subprocess.run(  # noqa: UP022
+            result = subprocess.run(
                 ["where", tool_name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 shell=False,  # Changed from True to False
                 check=False,
             )
             return result.returncode == 0
         else:
             # On Unix-like systems, use 'which' command
-            result = subprocess.run(  # noqa: UP022
-                ["which", tool_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
-            )
+            result = subprocess.run(["which", tool_name], capture_output=True, check=False)
             return result.returncode == 0
     except Exception:
         return False

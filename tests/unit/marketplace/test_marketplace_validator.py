@@ -11,7 +11,6 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 from apm_cli.marketplace.validator import (
-    ValidationResult,  # noqa: F401
     validate_marketplace,
     validate_no_duplicate_names,
     validate_plugin_schema,

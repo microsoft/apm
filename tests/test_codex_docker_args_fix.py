@@ -9,7 +9,7 @@ This test verifies that the Docker args processing in the Codex adapter:
 
 import os
 import sys
-from unittest.mock import Mock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 

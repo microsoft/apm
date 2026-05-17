@@ -163,15 +163,14 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_name:
                 # Use explicitly provided server name
                 config_key = server_name
-            else:  # noqa: PLR5501
-                # Extract name from server_url (part after last slash)
-                # For URLs like "microsoft/azure-devops-mcp" -> "azure-devops-mcp"
-                # For URLs like "github/github-mcp-server" -> "github-mcp-server"
-                if "/" in server_url:  # noqa: SIM108
-                    config_key = server_url.split("/")[-1]
-                else:
-                    # Fallback to full server_url if no slash
-                    config_key = server_url
+            # Extract name from server_url (part after last slash)
+            # For URLs like "microsoft/azure-devops-mcp" -> "azure-devops-mcp"
+            # For URLs like "github/github-mcp-server" -> "github-mcp-server"
+            elif "/" in server_url:
+                config_key = server_url.split("/")[-1]
+            else:
+                # Fallback to full server_url if no slash
+                config_key = server_url
 
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
@@ -370,8 +369,74 @@ class CodexClientAdapter(MCPClientAdapter):
         Returns:
             dict: Dictionary of resolved environment variable values.
         """
+        import os
+        import sys
+
+        from rich.prompt import Prompt
+
+        resolved = {}
+        env_overrides = env_overrides or {}
+
+        # If env_overrides is provided, it means the CLI has already handled environment variable collection
+        # In this case, we should NEVER prompt for additional variables
+        skip_prompting = bool(env_overrides)
+
+        # Check for CI/automated environment via APM_E2E_TESTS flag (more reliable than TTY detection)
+        if os.getenv("APM_E2E_TESTS") == "1":
+            skip_prompting = True
+            print(" APM_E2E_TESTS detected, will skip environment variable prompts")
+
+        # Also skip prompting if we're in a non-interactive environment (fallback)
+        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
+        if not is_interactive:
+            skip_prompting = True
+
+        # Add default GitHub MCP server environment variables for essential functionality first
+        # This ensures variables have defaults when user provides empty values or they're optional
         default_github_env = {"GITHUB_TOOLSETS": "context", "GITHUB_DYNAMIC_TOOLSETS": "1"}
-        return self._resolve_env_vars_with_prompting(env_vars, env_overrides, default_github_env)
+
+        # Track which variables were explicitly provided with empty values (user wants defaults)
+        empty_value_vars = set()
+        if env_overrides:
+            for key, value in env_overrides.items():
+                if key in env_overrides and (not value or not value.strip()):
+                    empty_value_vars.add(key)
+
+        for env_var in env_vars:
+            if isinstance(env_var, dict):
+                name = env_var.get("name", "")
+                description = env_var.get("description", "")
+                required = env_var.get("required", True)
+
+                if name:
+                    # First check overrides, then environment
+                    value = env_overrides.get(name) or os.getenv(name)
+
+                    # Only prompt if not provided in overrides or environment AND it's required AND we're not in managed override mode
+                    if not value and required and not skip_prompting:
+                        # Only prompt if not provided in overrides
+                        prompt_text = f"Enter value for {name}"
+                        if description:
+                            prompt_text += f" ({description})"
+                        value = Prompt.ask(
+                            prompt_text,
+                            password=bool("token" in name.lower() or "key" in name.lower()),
+                        )
+
+                    # Add variable if it has a value OR if user explicitly provided empty and we have a default
+                    if value and value.strip():
+                        resolved[name] = value
+                    elif name in empty_value_vars and name in default_github_env:
+                        # User provided empty value and we have a default - use default
+                        resolved[name] = default_github_env[name]
+                    elif not required and name in default_github_env:
+                        # Variable is optional and we have a default - use default
+                        resolved[name] = default_github_env[name]
+                    elif skip_prompting and name in default_github_env:
+                        # Non-interactive environment and we have a default - use default
+                        resolved[name] = default_github_env[name]
+
+        return resolved
 
     def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
         """Resolve both environment and runtime variable placeholders in values.
@@ -501,7 +566,7 @@ class CodexClientAdapter(MCPClientAdapter):
             result.append(arg)
             # If this is a docker run command, inject new environment variables after "run"
             if arg == "run":
-                for env_name in env_vars.keys():  # noqa: SIM118
+                for env_name in env_vars:
                     if env_name not in existing_env_vars:
                         result.extend(["-e", env_name])
 

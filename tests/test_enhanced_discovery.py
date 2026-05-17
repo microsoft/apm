@@ -86,7 +86,7 @@ class TestEnhancedPrimitiveDiscovery(unittest.TestCase):
         file_path: Path,
         primitive_type: str,
         name: str,
-        content: str = None,  # noqa: RUF013
+        content: str | None = None,
     ):
         """Create a primitive file with frontmatter."""
         if content is None:

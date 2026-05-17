@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace  # noqa: F401
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest

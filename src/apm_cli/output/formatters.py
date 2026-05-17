@@ -1,8 +1,6 @@
 """Professional CLI output formatters for APM compilation."""
 
-import time  # noqa: F401
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 try:
     from io import StringIO  # noqa: F401
@@ -164,10 +162,9 @@ class CompilationFormatter:
 
         if stats.generation_time_ms is not None:
             metrics_lines.append(f"+- Generation time:       {stats.generation_time_ms}ms")
-        else:  # noqa: PLR5501
-            # Change last |- to +-
-            if len(metrics_lines) > 1:
-                metrics_lines[-1] = metrics_lines[-1].replace("|-", "+-")
+        # Change last |- to +-
+        elif len(metrics_lines) > 1:
+            metrics_lines[-1] = metrics_lines[-1].replace("|-", "+-")
 
         for line in metrics_lines:
             if self.use_color:
@@ -315,7 +312,7 @@ class CompilationFormatter:
                         if hasattr(decision, "relevance_score")
                         else 1.0
                     )
-                    pollution = (
+                    (
                         getattr(decision, "pollution_score", 0.0)
                         if hasattr(decision, "pollution_score")
                         else 0.0
@@ -369,7 +366,7 @@ class CompilationFormatter:
                         if hasattr(decision, "relevance_score")
                         else 1.0
                     )
-                    pollution = (  # noqa: F841
+                    (
                         getattr(decision, "pollution_score", 0.0)
                         if hasattr(decision, "pollution_score")
                         else 0.0
@@ -433,10 +430,9 @@ class CompilationFormatter:
 
         if stats.generation_time_ms is not None:
             metrics_lines.append(f"+- Generation time:       {stats.generation_time_ms}ms")
-        else:  # noqa: PLR5501
-            # Change last |- to +-
-            if len(metrics_lines) > 1:
-                metrics_lines[-1] = metrics_lines[-1].replace("|-", "+-")
+        # Change last |- to +-
+        elif len(metrics_lines) > 1:
+            metrics_lines[-1] = metrics_lines[-1].replace("|-", "+-")
 
         for line in metrics_lines:
             if self.use_color:
@@ -884,12 +880,11 @@ Example: 36.7% efficiency means agents working in specific directories see only 
                             lines.append(self._styled(f"           {line}", "yellow"))
                         else:
                             lines.append(f"           {line}")
-            else:  # noqa: PLR5501
-                # Single-line warning - standard format
-                if self.use_color:
-                    lines.append(self._styled(f"[!] Warning: {warning}", "yellow"))
-                else:
-                    lines.append(f"[!] Warning: {warning}")
+            # Single-line warning - standard format
+            elif self.use_color:
+                lines.append(self._styled(f"[!] Warning: {warning}", "yellow"))
+            else:
+                lines.append(f"[!] Warning: {warning}")
 
         return lines
 

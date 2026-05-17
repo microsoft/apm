@@ -1,12 +1,9 @@
 """Tests for prompt integration functionality."""
 
-import os  # noqa: F401
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import Mock, patch  # noqa: F401
-
-import pytest  # noqa: F401
+from unittest.mock import Mock
 
 from apm_cli.integration import PromptIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
@@ -30,12 +27,12 @@ class TestPromptIntegrator:
     def test_should_integrate_always_returns_true(self):
         """Test integration is always enabled (zero-config approach)."""
         # No .github/ directory needed
-        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
+        assert self.integrator.should_integrate(self.project_root)
 
         # Even with .github/ present
         github_dir = self.project_root / ".github"
         github_dir.mkdir()
-        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
+        assert self.integrator.should_integrate(self.project_root)
 
     def test_find_prompt_files_in_root(self):
         """Test finding .prompt.md files in package root."""

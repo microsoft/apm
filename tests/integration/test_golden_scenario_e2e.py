@@ -30,10 +30,8 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest import mock  # noqa: F401
 
 import pytest
-import toml  # noqa: F401
 
 # Skip all tests in this module if not in E2E mode
 E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
@@ -288,7 +286,7 @@ Basic instructions for E2E testing.
             with open(apm_yml_path, "w") as f:
                 yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
-            print(f"✓ Created hello-world.prompt.md, .apm/ directory, and updated apm.yml")  # noqa: F541
+            print("✓ Created hello-world.prompt.md, .apm/ directory, and updated apm.yml")
 
             # Show project contents for debugging
             print("\n=== Project structure ===")
@@ -316,7 +314,7 @@ Basic instructions for E2E testing.
 
             # Show agents.md content for verification
             agents_content = agents_md.read_text()
-            print(f"\n=== Generated AGENTS.md (first 500 chars) ===")  # noqa: F541
+            print("\n=== Generated AGENTS.md (first 500 chars) ===")
             print(f"{agents_content[:500]}...")
 
             # Step 5: Install MCP dependencies (equivalent to: apm install)
@@ -402,7 +400,7 @@ Basic instructions for E2E testing.
                     f"Output seems too short, API call might have failed. Output: {full_output}"
                 )
 
-                print(f"\n✅ Golden scenario completed successfully!")  # noqa: F541
+                print("\n✅ Golden scenario completed successfully!")
                 print(f"Output length: {len(full_output)} characters")
                 print(f"Contains parameter: {'✓' if 'developer' in output_lower else '❌'}")
 
@@ -439,7 +437,7 @@ Basic instructions for E2E testing.
         assert "GITHUB_TOKEN" in config_content, (
             f"Expected GITHUB_TOKEN in config. Found: {config_content}"
         )
-        print(f"✓ Codex configuration created with GITHUB_TOKEN for GitHub Models")  # noqa: F541
+        print("✓ Codex configuration created with GITHUB_TOKEN for GitHub Models")
 
         # Step 2: Use existing project or create new one
         with tempfile.TemporaryDirectory() as project_workspace:
@@ -497,7 +495,7 @@ Instructions for Codex E2E testing.
             with open(apm_yml_path, "w") as f:
                 yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
-            print(f"✓ Created debug.prompt.md, .apm/ directory, and updated apm.yml")  # noqa: F541
+            print("✓ Created debug.prompt.md, .apm/ directory, and updated apm.yml")
 
             # Step 3: Compile Agent Primitives
             print("\n=== Compiling Agent Primitives ===")
@@ -552,11 +550,11 @@ Instructions for Codex E2E testing.
                 output = full_output.lower()
                 assert "developer" in output, "Parameter substitution failed"
                 assert len(output.strip()) > 50, "Output seems too short"
-                print(f"\n✅ Codex CLI scenario completed successfully!")  # noqa: F541
+                print("\n✅ Codex CLI scenario completed successfully!")
                 print(f"Output length: {len(full_output)} characters")
             else:
                 # Codex CLI might fail due to auth setup in CI, log for debugging
-                print(f"\n=== Codex CLI execution failed (expected in some environments) ===")  # noqa: F541
+                print("\n=== Codex CLI execution failed (expected in some environments) ===")
                 print(f"Output: {full_output}")
 
                 # Check for common authentication issues
@@ -648,7 +646,7 @@ Instructions for LLM E2E testing.
             with open(apm_yml_path, "w") as f:
                 yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
-            print(f"✓ Created llm.prompt.md, .apm/ directory, and updated apm.yml")  # noqa: F541
+            print("✓ Created llm.prompt.md, .apm/ directory, and updated apm.yml")
 
             # Step 3: Compile Agent Primitives
             print("\\n=== Compiling Agent Primitives ===")
@@ -708,7 +706,7 @@ Instructions for LLM E2E testing.
                 print(f"\\n=== LLM scenario output ===\\n{full_output}")
             else:
                 # LLM might fail due to auth setup in CI, log for debugging
-                print(f"\\n=== LLM execution failed (expected in CI) ===")  # noqa: F541
+                print("\\n=== LLM execution failed (expected in CI) ===")
                 print(f"Output: {full_output}")
                 pytest.skip("LLM execution failed, likely due to authentication in CI environment")
 
@@ -854,10 +852,10 @@ Instructions for Gemini CLI E2E testing.
                 output = full_output.lower()
                 assert "developer" in output, "Parameter substitution failed"
                 assert len(output.strip()) > 50, "Output seems too short"
-                print(f"\nGemini CLI scenario completed successfully!")  # noqa: F541
+                print("\nGemini CLI scenario completed successfully!")
                 print(f"Output length: {len(full_output)} characters")
             else:
-                print(f"\n=== Gemini CLI execution failed (expected in some environments) ===")  # noqa: F541
+                print("\n=== Gemini CLI execution failed (expected in some environments) ===")
                 print(f"Output: {full_output}")
 
                 if (
@@ -934,7 +932,7 @@ Instructions for Gemini CLI E2E testing.
                 "Agent Primitives directory should not be created in minimal mode"
             )
 
-            print(f"✅ Minimal mode test passed: Only apm.yml created")  # noqa: F541
+            print("✅ Minimal mode test passed: Only apm.yml created")
 
 
 class TestRuntimeInteroperability:
@@ -962,7 +960,7 @@ class TestRuntimeInteroperability:
         result = run_command(f"{apm_binary} runtime list")
         assert result.returncode == 0, f"Runtime list failed: {result.stderr}"
 
-        output = result.stdout.lower()  # noqa: F841
+        result.stdout.lower()
         # Should show both runtimes (exact format may vary)
         print(f"Runtime list with both installed: {result.stdout}")
 

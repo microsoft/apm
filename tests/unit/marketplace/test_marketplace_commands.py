@@ -1,8 +1,7 @@
 """Tests for marketplace CLI commands using CliRunner."""
 
-import json  # noqa: F401
 import re
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pytest

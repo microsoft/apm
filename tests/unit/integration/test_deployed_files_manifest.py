@@ -16,9 +16,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-import pytest  # noqa: F401
-
-from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
+from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
@@ -37,11 +35,11 @@ from apm_cli.utils.diagnostics import CATEGORY_COLLISION, DiagnosticCollector
 def _make_package_info(
     tmp_path: Path,
     name: str = "test-pkg",
-    prompt_files: dict = None,  # noqa: RUF013
-    agent_files: dict = None,  # noqa: RUF013
-    command_files: dict = None,  # noqa: RUF013
-    hook_files: dict = None,  # noqa: RUF013
-    skill_md: str = None,  # noqa: RUF013
+    prompt_files: dict | None = None,
+    agent_files: dict | None = None,
+    command_files: dict | None = None,
+    hook_files: dict | None = None,
+    skill_md: str | None = None,
 ) -> PackageInfo:
     """Create a PackageInfo with optional primitive files on disk.
 

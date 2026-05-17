@@ -34,10 +34,7 @@ class TestFilterMatchingLogic:
             return True
         # Check if dep_str ends with "/<pkg>" to ensure path boundary matching
         # This prevents "prefix-owner/repo" from matching "owner/repo"
-        for pkg in only_set:  # noqa: SIM110
-            if dep_str.endswith(f"/{pkg}"):
-                return True
-        return False
+        return any(dep_str.endswith(f"/{pkg}") for pkg in only_set)
 
     def test_exact_match(self):
         """Test exact string match."""

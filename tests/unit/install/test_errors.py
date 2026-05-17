@@ -2,8 +2,6 @@
 
 from apm_cli.install.errors import (
     AuthenticationError,
-    DirectDependencyError,  # noqa: F401
-    PolicyViolationError,  # noqa: F401
 )
 
 

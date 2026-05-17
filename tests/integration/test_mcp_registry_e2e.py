@@ -14,12 +14,10 @@ the MCP registry functionality we've implemented.
 
 import json
 import os
-import shutil  # noqa: F401
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from unittest import mock  # noqa: F401
 
 import pytest
 import toml
@@ -53,12 +51,7 @@ def _is_registry_healthy() -> bool:
         packages = server.get("packages", [])
 
         # Look for docker runtime packages
-        for package in packages:  # noqa: SIM110
-            if package.get("runtime") == "docker":
-                return True
-
-        # No docker packages = remote server only = unhealthy
-        return False
+        return any(package.get("runtime") == "docker" for package in packages)
 
     except Exception:
         return False
@@ -607,7 +600,7 @@ class TestMCPRegistryE2E:
                     # Skip TOML parsing if library not available
                     servers = {"github": {}} if "github" in config_content else {}
 
-                server_found = any("github" in name.lower() for name in servers.keys())  # noqa: SIM118
+                server_found = any("github" in name.lower() for name in servers)
                 assert server_found, "Codex configuration should contain GitHub server"
 
                 print("[OK] Codex configuration contains GitHub server")
@@ -651,9 +644,7 @@ class TestMCPRegistryE2E:
             # GitHub server needs environment variables for Docker configuration
             env_input = "test-token\n\n\n\n\n"  # token + empty for optional vars
 
-            result1 = run_command(  # noqa: F841
-                f"{apm_binary} install", cwd=project_dir, input_text=env_input, timeout=120
-            )
+            run_command(f"{apm_binary} install", cwd=project_dir, input_text=env_input, timeout=120)
 
             # Second installation (should detect existing and skip)
             print("Running second installation (should skip duplicates)...")

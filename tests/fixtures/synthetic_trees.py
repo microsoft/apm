@@ -8,7 +8,6 @@ Generates apm.yml manifests that simulate real-world dependency patterns:
 
 import textwrap
 from pathlib import Path
-from typing import Dict, List  # noqa: F401, UP035
 
 
 def generate_deep_tree_fixtures(

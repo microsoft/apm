@@ -402,7 +402,7 @@ class TestArtifactoryDownloader:
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is not None
-            host, prefix, scheme = result  # noqa: RUF059
+            _host, prefix, _scheme = result
             assert prefix == "artifactory/github"
 
     def test_parse_artifactory_base_url_not_set(self):
@@ -1192,7 +1192,7 @@ class TestRegistryOnlyConflictDetection:
 
     def test_github_com_dep_is_a_conflict(self):
         """github.com host is a direct VCS source -> conflict when enforce_only=True."""
-        from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
+        from apm_cli.deps.lockfile import LockedDependency
         from apm_cli.deps.registry_proxy import RegistryConfig
 
         with patch.dict(
@@ -1717,7 +1717,7 @@ class TestParseArtifactoryBaseUrlCanonicalVar:
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is not None
-            host, prefix, scheme = result  # noqa: RUF059
+            host, prefix, _scheme = result
             assert host == "proxy.example.com"
             assert prefix == "registry/github"
 

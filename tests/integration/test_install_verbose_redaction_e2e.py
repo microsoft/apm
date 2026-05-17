@@ -61,7 +61,7 @@ def _bogus_env():
 
 def _run_apm_with_env(apm_command, args, cwd, env, timeout=60):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_command, *args],
         cwd=cwd,
         capture_output=True,
         text=True,

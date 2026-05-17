@@ -1,10 +1,5 @@
 """Tests for the content scanner module."""
 
-import tempfile  # noqa: F401
-from pathlib import Path  # noqa: F401
-
-import pytest  # noqa: F401
-
 from apm_cli.security.content_scanner import ContentScanner, ScanFinding
 
 

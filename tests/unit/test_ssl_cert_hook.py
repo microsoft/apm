@@ -11,8 +11,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -23,7 +21,7 @@ import pytest  # noqa: F401
 def _find_repo_root() -> Path:
     """Walk up from this file until we find pyproject.toml (the repo root)."""
     current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):  # noqa: RUF005
+    for parent in [current, *list(current.parents)]:
         if (parent / "pyproject.toml").is_file():
             return parent
     raise RuntimeError("Cannot locate repository root (no pyproject.toml found)")

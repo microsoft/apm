@@ -503,8 +503,6 @@ class TestContentIntegrity:
     def test_hash_skips_symlink(self, tmp_path):
         import os
 
-        from apm_cli.utils.content_hash import compute_file_hash  # noqa: F401
-
         # Create a real target file outside the deployed path
         target = tmp_path / "target.md"
         target.write_text("target content\n", encoding="utf-8")

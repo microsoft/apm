@@ -23,13 +23,13 @@ class TestPolicyFixtures(unittest.TestCase):
 
         for yml_file in yml_files:
             with self.subTest(fixture=yml_file.name):
-                policy, warnings = load_policy(yml_file)  # noqa: RUF059
+                policy, _warnings = load_policy(yml_file)
                 self.assertIsNotNone(policy)
                 self.assertTrue(policy.name)
 
     def test_org_policy_fields(self):
         """Org policy fixture contains expected field values."""
-        policy, warnings = load_policy(FIXTURES_DIR / "org-policy.yml")  # noqa: RUF059
+        policy, _warnings = load_policy(FIXTURES_DIR / "org-policy.yml")
         self.assertEqual(policy.name, "devexpgbb-test-policy")
         self.assertEqual(policy.enforcement, "warn")
         self.assertIn("DevExpGbb/*", policy.dependencies.allow)
@@ -40,7 +40,7 @@ class TestPolicyFixtures(unittest.TestCase):
 
     def test_enterprise_hub_policy_fields(self):
         """Enterprise hub fixture has strict settings."""
-        policy, warnings = load_policy(FIXTURES_DIR / "enterprise-hub-policy.yml")  # noqa: RUF059
+        policy, _warnings = load_policy(FIXTURES_DIR / "enterprise-hub-policy.yml")
         self.assertEqual(policy.enforcement, "block")
         self.assertEqual(policy.dependencies.require_resolution, "policy-wins")
         self.assertIn("contoso-governance/coding-standards", policy.dependencies.require)
@@ -48,7 +48,7 @@ class TestPolicyFixtures(unittest.TestCase):
 
     def test_minimal_policy_defaults(self):
         """Minimal fixture fills in defaults correctly."""
-        policy, warnings = load_policy(FIXTURES_DIR / "minimal-policy.yml")  # noqa: RUF059
+        policy, _warnings = load_policy(FIXTURES_DIR / "minimal-policy.yml")
         self.assertEqual(policy.name, "minimal")
         self.assertEqual(policy.enforcement, "warn")
         self.assertEqual(policy.dependencies.require_resolution, "project-wins")
@@ -58,7 +58,7 @@ class TestPolicyFixtures(unittest.TestCase):
 
     def test_repo_override_has_extends(self):
         """Repo override fixture declares extends=org."""
-        policy, warnings = load_policy(FIXTURES_DIR / "repo-override-policy.yml")  # noqa: RUF059
+        policy, _warnings = load_policy(FIXTURES_DIR / "repo-override-policy.yml")
         self.assertEqual(policy.extends, "org")
         self.assertIn("experimental/*", policy.dependencies.deny)
 

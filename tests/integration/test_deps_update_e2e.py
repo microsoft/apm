@@ -75,7 +75,7 @@ def _env_with_home(fake_home):
 def _run_apm(apm_command, args, cwd, env=None, timeout=180):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_command, *args],
         cwd=cwd,
         capture_output=True,
         text=True,

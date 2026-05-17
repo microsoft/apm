@@ -8,7 +8,6 @@ Tests that:
 5. PAT regression: auth_scheme="basic" still embeds token in URL.
 """
 
-import subprocess  # noqa: F401
 import urllib.parse
 from unittest.mock import MagicMock, patch
 

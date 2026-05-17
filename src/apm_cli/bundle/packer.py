@@ -1,11 +1,9 @@
 """Bundle packer  -- creates self-contained APM bundles from the resolved dependency tree."""
 
-import os  # noqa: F401
 import shutil
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Union  # noqa: F401, UP035
 
 from ..core.target_detection import detect_target
 from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
@@ -184,8 +182,8 @@ def pack_bundle(
             missing.append(disk_path)
     if missing:
         raise ValueError(
-            f"The following deployed files are missing on disk  -- "  # noqa: F541
-            f"run 'apm install' to restore them:\n" + "\n".join(f"  - {m}" for m in missing)  # noqa: F541
+            "The following deployed files are missing on disk  -- "
+            "run 'apm install' to restore them:\n" + "\n".join(f"  - {m}" for m in missing)
         )
 
     # Dry-run: return file list without writing anything

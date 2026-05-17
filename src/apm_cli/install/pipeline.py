@@ -25,13 +25,13 @@ import builtins
 import contextlib
 import sys
 import time
-from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
-from .errors import AuthenticationError, DirectDependencyError, PolicyViolationError  # noqa: F401
+from .errors import AuthenticationError, DirectDependencyError
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -244,28 +244,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
-def run_install_pipeline(  # noqa: PLR0913, RUF100
-    apm_package: APMPackage,
-    update_refs: bool = False,
-    verbose: bool = False,
-    only_packages: builtins.list = None,  # noqa: RUF013
-    force: bool = False,
-    parallel_downloads: int = 4,
-    logger: InstallLogger = None,
-    scope=None,
-    auth_resolver: AuthResolver = None,
-    target: str = None,  # noqa: RUF013
-    allow_insecure: bool = False,
-    allow_insecure_hosts=(),
-    marketplace_provenance: dict = None,
-    protocol_pref=None,
-    allow_protocol_fallback: bool | None = None,
-    no_policy: bool = False,
-    skill_subset: tuple | None = None,
-    skill_subset_from_cli: bool = False,
-    legacy_skill_paths: bool = False,
-    plan_callback=None,
-):
+def run_install_pipeline(apm_package: APMPackage, **params: object):
     """Install APM package dependencies.
 
     This is the main orchestrator for the install pipeline.  It builds an
@@ -294,6 +273,26 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         allow_insecure_hosts: Extra approved hosts for transitive HTTP dependencies
         marketplace_provenance: Marketplace provenance data for packages
     """
+
+    update_refs = params.get("update_refs", False)
+    verbose = params.get("verbose", False)
+    only_packages = params.get("only_packages")
+    force = params.get("force", False)
+    parallel_downloads = params.get("parallel_downloads", 4)
+    logger = params.get("logger")
+    scope = params.get("scope")
+    auth_resolver = params.get("auth_resolver")
+    target = params.get("target")
+    allow_insecure = params.get("allow_insecure", False)
+    allow_insecure_hosts = params.get("allow_insecure_hosts", ())
+    marketplace_provenance = params.get("marketplace_provenance")
+    protocol_pref = params.get("protocol_pref")
+    allow_protocol_fallback = params.get("allow_protocol_fallback")
+    no_policy = params.get("no_policy", False)
+    skill_subset = params.get("skill_subset")
+    skill_subset_from_cli = params.get("skill_subset_from_cli", False)
+    legacy_skill_paths = params.get("legacy_skill_paths", False)
+    plan_callback = params.get("plan_callback")
     # Late import: the ``APM_DEPS_AVAILABLE`` guard in commands/install.py
     # already prevents callers from reaching here when deps are missing, but
     # keep the check as a defensive belt-and-suspenders measure.

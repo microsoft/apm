@@ -10,7 +10,6 @@ Tests the core mathematical foundation:
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch  # noqa: F401
 
 import pytest
 
@@ -364,7 +363,7 @@ class TestCoverageGuarantees:
 
         # Constraint 2: Every directory with files that match instruction patterns should have optimization consideration
         directories_needing_coverage = set()
-        for root, dirs, files in os.walk(complex_project):  # noqa: B007
+        for root, _dirs, files in os.walk(complex_project):
             if files and not any(part.startswith(".") for part in Path(root).parts):
                 # Resolve paths to match the same format used in placement_map
                 try:

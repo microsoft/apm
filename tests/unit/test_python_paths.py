@@ -1,7 +1,6 @@
 """Test handling of Python path configuration in MCP server configuration."""
 
 import unittest
-from unittest import mock  # noqa: F401
 
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 

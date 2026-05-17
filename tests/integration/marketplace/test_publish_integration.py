@@ -23,12 +23,10 @@ Scenarios covered:
 
 from __future__ import annotations
 
-import json  # noqa: F401
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import publish
@@ -285,7 +283,7 @@ class TestPublishDryRun:
                     return_value=False,
                 ),
             ):
-                result = runner.invoke(publish, ["--yes", "--dry-run"], catch_exceptions=False)  # noqa: F841
+                runner.invoke(publish, ["--yes", "--dry-run"], catch_exceptions=False)
 
         # execute must have been called with dry_run=True
         assert execute_mock.called

@@ -1,6 +1,6 @@
 """Tests for GitHubPackageDownloader.list_remote_refs() and helpers."""
 
-from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 from git.exc import GitCommandError

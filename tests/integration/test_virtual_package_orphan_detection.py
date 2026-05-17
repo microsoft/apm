@@ -8,9 +8,6 @@ Also tests Azure DevOps (ADO) packages which use a 3-level directory structure
 (org/project/repo) instead of GitHub's 2-level structure (owner/repo).
 """
 
-import tempfile  # noqa: F401
-from pathlib import Path  # noqa: F401
-
 import pytest
 import yaml
 

@@ -9,17 +9,17 @@ from .template_builder import (
     render_instructions_block,
 )
 
-__all__ = [  # noqa: RUF022
+__all__ = [
     # Main compilation interface
     "AgentsCompiler",
-    "compile_agents_md",
     "CompilationConfig",
     "CompilationResult",
+    "TemplateData",
     # Template building
     "build_conditional_sections",
-    "render_instructions_block",
-    "TemplateData",
+    "compile_agents_md",
     "find_chatmode_by_name",
+    "render_instructions_block",
     # Link resolution
     "resolve_markdown_links",
     "validate_link_targets",

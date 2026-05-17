@@ -1,7 +1,5 @@
 """Tests for marketplace registry CRUD with tmp_path isolation."""
 
-import json  # noqa: F401
-
 import pytest
 
 from apm_cli.marketplace import registry as registry_mod

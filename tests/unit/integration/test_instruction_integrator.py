@@ -6,8 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
-import pytest  # noqa: F401
-
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference

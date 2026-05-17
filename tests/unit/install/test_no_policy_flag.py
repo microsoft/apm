@@ -24,7 +24,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -120,9 +119,9 @@ class TestHelpTextShowsNoPolicy:
     def test_help_text_is_plain_ascii(self):
         """Help text must be plain ASCII per cli.instructions.md."""
         result = self.runner.invoke(cli, ["install", "--help"])
-        assert result.output.isascii(), f"Non-ASCII characters in install --help output"  # noqa: F541
+        assert result.output.isascii(), "Non-ASCII characters in install --help output"
         result = self.runner.invoke(cli, ["update", "--help"])
-        assert result.output.isascii(), f"Non-ASCII characters in update --help output"  # noqa: F541
+        assert result.output.isascii(), "Non-ASCII characters in update --help output"
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +232,7 @@ class TestInstallPkgNoPolicy:
     ):
         """apm install <pkg> --no-policy succeeds; apm.yml has the new dep."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
-            original_bytes = _write_seed_apm_yml(tmp_dir)  # noqa: F841
+            _write_seed_apm_yml(tmp_dir)
 
             mock_validate.return_value = True
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
@@ -392,7 +391,7 @@ class TestEnvVarPolicyDisable:
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
             mock_install_apm.return_value = _successful_install_result()
 
-            result = self.runner.invoke(  # noqa: F841
+            self.runner.invoke(
                 cli,
                 ["install"],
                 env={"APM_POLICY_DISABLE": "0"},

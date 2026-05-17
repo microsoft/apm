@@ -9,7 +9,7 @@ field self-documenting.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional  # noqa: F401
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.deps.registry_proxy import RegistryConfig

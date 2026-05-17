@@ -1,8 +1,5 @@
 """Tests for SHA-256 content integrity hashing."""
 
-import os  # noqa: F401
-from pathlib import Path  # noqa: F401
-
 import pytest
 
 from apm_cli.utils.content_hash import compute_package_hash, verify_package_hash

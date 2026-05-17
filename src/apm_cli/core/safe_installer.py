@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 
 from ..factory import ClientFactory
 from ..utils.console import _rich_error, _rich_success, _rich_warning
@@ -87,9 +87,9 @@ class SafeMCPInstaller:
     def install_servers(
         self,
         server_references: list[str],
-        env_overrides: dict[str, str] = None,  # noqa: RUF013
-        server_info_cache: dict[str, Any] = None,  # noqa: RUF013
-        runtime_vars: dict[str, str] = None,  # noqa: RUF013
+        env_overrides: dict[str, str] | None = None,
+        server_info_cache: dict[str, Any] | None = None,
+        runtime_vars: dict[str, str] | None = None,
     ) -> InstallationSummary:
         """Install MCP servers with conflict detection.
 

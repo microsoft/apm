@@ -1,10 +1,8 @@
 """Unit tests for runnable prompts feature."""
 
 import os
-import shutil  # noqa: F401
-import tempfile  # noqa: F401
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 
@@ -423,7 +421,7 @@ scripts:
 
         # Mock the execution to avoid actually running commands
         with patch.object(runner, "_execute_script_command", return_value=True) as mock_exec:
-            result = runner.run_script("test", {})  # noqa: F841
+            runner.run_script("test", {})
 
             # Verify explicit script was used
             mock_exec.assert_called_once()
@@ -451,7 +449,7 @@ scripts:
 
         # Mock the execution
         with patch.object(runner, "_execute_script_command", return_value=True) as mock_exec:
-            result = runner.run_script("test", {})  # noqa: F841
+            runner.run_script("test", {})
 
             # Verify auto-discovered command was used
             mock_exec.assert_called_once()

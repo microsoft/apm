@@ -11,8 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
-
 from apm_cli.integration.skill_integrator import SkillIntegrator
 
 # ---------------------------------------------------------------------------

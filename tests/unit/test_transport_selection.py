@@ -17,7 +17,6 @@ Covers the selection matrix from issue microsoft/apm#778:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
@@ -27,10 +26,7 @@ from apm_cli.deps.transport_selection import (
     ENV_PROTOCOL,
     FALLBACK_HINT,
     GitConfigInsteadOfResolver,
-    InsteadOfResolver,  # noqa: F401
-    NoOpInsteadOfResolver,  # noqa: F401
     ProtocolPreference,
-    TransportAttempt,  # noqa: F401
     TransportPlan,
     TransportSelector,
     is_fallback_allowed,

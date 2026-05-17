@@ -23,7 +23,6 @@ import contextlib
 import ipaddress
 import os
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse, urlunparse
 
 import click

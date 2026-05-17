@@ -8,10 +8,9 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 from apm_cli.core.operations import install_package
-from apm_cli.factory import ClientFactory, PackageManagerFactory  # noqa: F401
 
 
 def safe_rmdir(path):

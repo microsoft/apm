@@ -150,7 +150,7 @@ class LockfileBuilder:
         if not self.ctx.skill_subset:
             return  # No CLI override; dep_ref.skill_subset already flows through
         effective = sorted(set(self.ctx.skill_subset))
-        for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
+        for _dep_key, locked_dep in lockfile.dependencies.items():
             if locked_dep.package_type == "skill_bundle":
                 locked_dep.skill_subset = effective
 
@@ -184,7 +184,7 @@ class LockfileBuilder:
         if self.ctx.only_packages:
             existing = _LF.read(lockfile_path)
             if existing:
-                for key, dep in lockfile.dependencies.items():  # noqa: B007
+                for _key, dep in lockfile.dependencies.items():
                     existing.add_dependency(dep)
                 lockfile = existing
         return lockfile

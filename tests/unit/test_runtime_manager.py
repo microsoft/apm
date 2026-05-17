@@ -1,10 +1,7 @@
 """Unit tests for RuntimeManager and runtime CLI commands."""
 
-import shutil  # noqa: F401
-import subprocess  # noqa: F401
-import sys  # noqa: F401
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -107,7 +104,7 @@ class TestRuntimeManagerListRuntimes:
         with patch("apm_cli.runtime.manager.shutil.which", return_value=None):
             result = manager.list_runtimes()
         assert set(result.keys()) == {"copilot", "codex", "llm", "gemini"}
-        for name, info in result.items():  # noqa: B007
+        for _name, info in result.items():
             assert info["installed"] is False
             assert info["path"] is None
 
@@ -299,10 +296,10 @@ class TestRuntimeManagerRemoveRuntime:
 class TestRuntimeManagerGetEmbeddedScript:
     def test_dev_script_found(self, tmp_path):
         """Script loading works when repo script exists on disk."""
-        manager = RuntimeManager()  # noqa: F841
+        RuntimeManager()
         # Script search walks up from __file__ 4 levels then into scripts/runtime/
         # Create a fake script where the code looks for it
-        current_file = Path(__file__)  # noqa: F841
+        Path(__file__)
         # We just check that when a script is found it returns its content
         with patch("apm_cli.runtime.manager.Path") as MockPath:
             fake_script = MagicMock()
@@ -374,7 +371,7 @@ class TestRuntimeSetupCommand:
             mock_mgr = MagicMock()
             mock_mgr.setup_runtime.return_value = True
             MockMgr.return_value = mock_mgr
-            result = runner.invoke(runtime_group, ["setup", "copilot", "--version", "2.0"])  # noqa: F841
+            runner.invoke(runtime_group, ["setup", "copilot", "--version", "2.0"])
         mock_mgr.setup_runtime.assert_called_once_with("copilot", "2.0", False)
 
     def test_setup_with_vanilla_flag(self):
@@ -383,7 +380,7 @@ class TestRuntimeSetupCommand:
             mock_mgr = MagicMock()
             mock_mgr.setup_runtime.return_value = True
             MockMgr.return_value = mock_mgr
-            result = runner.invoke(runtime_group, ["setup", "copilot", "--vanilla"])  # noqa: F841
+            runner.invoke(runtime_group, ["setup", "copilot", "--vanilla"])
         mock_mgr.setup_runtime.assert_called_once_with("copilot", None, True)
 
     def test_setup_invalid_runtime_name(self):

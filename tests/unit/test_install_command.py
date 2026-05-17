@@ -503,7 +503,6 @@ class TestTransitiveDepParentChain:
         the parent_chain arg is passed through correctly.
         """
         from apm_cli.deps.apm_resolver import APMDependencyResolver
-        from apm_cli.models.apm_package import APMPackage, DependencyReference  # noqa: F401
 
         # Set up apm_modules with root-pkg that declares leaf-pkg as dep
         modules_dir = tmp_path / "apm_modules"
@@ -1772,7 +1771,7 @@ class TestInstallMcpFlag:
         ref = "io.github.example/srv"
         boom = RuntimeError("internal token=ghp_SECRET path=/tmp/x.yml")
         with (
-            self._chdir_with_apm_yml() as tmp,  # noqa: F841
+            self._chdir_with_apm_yml(),
             patch(
                 "apm_cli.commands.install._get_invocation_argv",
                 return_value=["apm", "install", "--mcp", ref],

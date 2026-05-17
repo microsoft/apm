@@ -11,8 +11,6 @@ import dataclasses
 from pathlib import Path
 from unittest.mock import MagicMock, sentinel
 
-import pytest  # noqa: F401
-
 from apm_cli.commands.install import InstallContext
 
 # ---------------------------------------------------------------------------

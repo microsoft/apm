@@ -27,7 +27,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 import requests

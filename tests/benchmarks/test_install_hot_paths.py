@@ -13,10 +13,10 @@ Plus correctness and cache-opportunity checks.
 Run with: uv run pytest tests/benchmarks/test_install_hot_paths.py -v -m benchmark
 """
 
+import itertools
 import os
 import time
 from pathlib import Path
-from typing import List  # noqa: F401, UP035
 
 import pytest
 
@@ -149,7 +149,7 @@ class TestGetAllDependenciesPerf:
 
         assert len(deps) == dep_count
         # Verify sort order
-        for a, b in zip(deps, deps[1:]):  # noqa: B905, RUF007
+        for a, b in itertools.pairwise(deps):
             assert (a.depth, a.repo_url) <= (b.depth, b.repo_url)
         assert elapsed < 0.5, f"Sorting {dep_count} deps took {elapsed:.3f}s (limit 0.5s)"
 

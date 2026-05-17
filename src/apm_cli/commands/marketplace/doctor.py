@@ -17,12 +17,9 @@ from ...marketplace.yml_schema import (
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
 )
-from . import (
-    _DoctorCheck,
-    _find_duplicate_names,
-    _render_doctor_table,
-    marketplace,
-)
+from . import marketplace
+from ._check import _find_duplicate_names
+from ._doctor import _DoctorCheck, _render_doctor_table
 
 
 @marketplace.command(help="Run environment diagnostics for marketplace publishing")

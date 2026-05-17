@@ -1,10 +1,8 @@
 """Integration tests for auto-integration feature."""
 
-import os  # noqa: F401
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch  # noqa: F401
 
 import pytest
 

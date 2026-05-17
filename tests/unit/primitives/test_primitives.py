@@ -17,7 +17,6 @@ from apm_cli.primitives.models import (
 from apm_cli.primitives.parser import (
     _extract_primitive_name,
     parse_primitive_file,
-    validate_primitive,  # noqa: F401
 )
 
 

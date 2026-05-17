@@ -16,7 +16,7 @@ import hashlib
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List  # noqa: F401, UP035
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -2,12 +2,8 @@
 
 from pathlib import Path
 
-import pytest  # noqa: F401
-
 from src.apm_cli.models.apm_package import (
-    APMPackage,  # noqa: F401
     PackageType,
-    ValidationResult,  # noqa: F401
     validate_apm_package,
 )
 from src.apm_cli.models.validation import (
@@ -238,7 +234,7 @@ class TestSkillBundleValidation:
         sd = skills_dir / "..%2f..%2fetc"
         sd.mkdir()
         (sd / "SKILL.md").write_text("---\nname: ..%2f..%2fetc\ndescription: hack\n---\n# x\n")
-        result = validate_apm_package(tmp_path)  # noqa: F841
+        validate_apm_package(tmp_path)
         # The percent-encoded dots aren't traversal themselves, but let's test
         # real traversal with a symlink (if possible):
         # Actually validate_path_segments checks for literal ".." and "/" in the name
@@ -311,7 +307,6 @@ class TestSkillSubsetNormalization:
 
     def test_skill_names_empty_gives_none(self):
         """No --skill -> None (install all)."""
-        from apm_cli.commands.install import install  # noqa: F401
 
         # This is implicitly tested by the Click default (multiple=True -> empty tuple)
         # The normalization: empty tuple is falsy, so _skill_subset stays None.

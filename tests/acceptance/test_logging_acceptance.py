@@ -14,7 +14,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 
@@ -444,7 +443,7 @@ class TestLoggingRules(_InstallAcceptanceBase):
             self._write_apm_yml(tmp)
             original = (tmp / "apm.yml").read_text()
 
-            result = self.runner.invoke(cli, ["install", "--dry-run", "owner/repo"])  # noqa: F841
+            self.runner.invoke(cli, ["install", "--dry-run", "owner/repo"])
 
             # apm.yml should be unchanged (dry-run skips writing)
             final = (tmp / "apm.yml").read_text()

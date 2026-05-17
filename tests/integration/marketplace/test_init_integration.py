@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import init
@@ -74,7 +73,7 @@ class TestInitScaffold:
     def test_verbose_shows_path(self, tmp_path: Path):
         """--verbose must show the output path."""
         runner = CliRunner()
-        with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:  # noqa: F841
+        with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             result = runner.invoke(init, ["--verbose"], catch_exceptions=False)
         assert "apm.yml" in result.output or "Path" in result.output
 

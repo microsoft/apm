@@ -13,11 +13,7 @@ Covers:
 
 from __future__ import annotations
 
-from typing import List, Optional  # noqa: F401, UP035
-
-import pytest  # noqa: F401
-
-from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
+from apm_cli.policy.models import CIAuditResult
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import (
     ApmPolicy,

@@ -183,7 +183,7 @@ def sync_markers_for_lockfile(
             )
 
     written = 0
-    for dep_key, dep in lockfile.dependencies.items():  # noqa: B007
+    for _dep_key, dep in lockfile.dependencies.items():
         if not _is_markable(dep):
             continue
         try:

@@ -13,9 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.policy.discovery import (
-    CACHE_SCHEMA_VERSION,  # noqa: F401
     DEFAULT_CACHE_TTL,
-    MAX_STALE_TTL,  # noqa: F401
     PolicyFetchResult,
     _auto_discover,
     _cache_key,
@@ -30,7 +28,7 @@ from apm_cli.policy.discovery import (
     _write_cache,
     discover_policy,
 )
-from apm_cli.policy.parser import PolicyValidationError, load_policy  # noqa: F401
+from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
 # Minimal valid YAML that produces a valid ApmPolicy

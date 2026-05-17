@@ -12,8 +12,6 @@ import json
 import os
 from unittest.mock import patch
 
-import pytest  # noqa: F401
-
 from apm_cli.marketplace.version_pins import (
     _pin_key,
     _pins_path,

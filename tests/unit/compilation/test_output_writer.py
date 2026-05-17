@@ -77,7 +77,7 @@ def test_atomic_write_no_partial_file_on_failure(tmp_path: Path, monkeypatch):
     target = tmp_path / "AGENTS.md"
     target.write_text("PRE-EXISTING\n", encoding="utf-8")
 
-    import apm_cli.utils.atomic_io as atomic_io  # noqa: PLR0402
+    from apm_cli.utils import atomic_io
 
     def boom(*args, **kwargs):
         raise OSError("disk full")

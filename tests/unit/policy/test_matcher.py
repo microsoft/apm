@@ -79,7 +79,7 @@ class TestCheckDependencyAllowed(unittest.TestCase):
 
     def test_empty_allow_deny_matches(self):
         policy = DependencyPolicy(deny=["evil-corp/**"])
-        allowed, reason = check_dependency_allowed("evil-corp/bad", policy)  # noqa: RUF059
+        allowed, _reason = check_dependency_allowed("evil-corp/bad", policy)
         self.assertFalse(allowed)
 
     def test_allowlist_mode_ref_allowed(self):
@@ -102,7 +102,7 @@ class TestCheckDependencyAllowed(unittest.TestCase):
 
     def test_deny_pattern_with_double_wildcard(self):
         policy = DependencyPolicy(deny=["untrusted/**"])
-        allowed, reason = check_dependency_allowed("untrusted/deep/nested", policy)  # noqa: RUF059
+        allowed, _reason = check_dependency_allowed("untrusted/deep/nested", policy)
         self.assertFalse(allowed)
 
 
@@ -120,7 +120,7 @@ class TestCheckMcpAllowed(unittest.TestCase):
 
     def test_empty_allow_deny_only(self):
         policy = McpPolicy(deny=["bad-server"])
-        allowed, reason = check_mcp_allowed("good-server", policy)  # noqa: RUF059
+        allowed, _reason = check_mcp_allowed("good-server", policy)
         self.assertTrue(allowed)
 
     def test_allowlist_blocks_unlisted(self):
@@ -131,12 +131,12 @@ class TestCheckMcpAllowed(unittest.TestCase):
 
     def test_allowlist_permits_match(self):
         policy = McpPolicy(allow=["approved/*"])
-        allowed, reason = check_mcp_allowed("approved/tool", policy)  # noqa: RUF059
+        allowed, _reason = check_mcp_allowed("approved/tool", policy)
         self.assertTrue(allowed)
 
     def test_no_rules_all_allowed(self):
         policy = McpPolicy()
-        allowed, reason = check_mcp_allowed("anything", policy)  # noqa: RUF059
+        allowed, _reason = check_mcp_allowed("anything", policy)
         self.assertTrue(allowed)
 
 

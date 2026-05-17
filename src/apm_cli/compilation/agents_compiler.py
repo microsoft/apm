@@ -9,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 
 from ..core.target_detection import (
     CompileTargetType,
@@ -425,7 +425,7 @@ class AgentsCompiler:
         if config.dry_run:
             # Count files that would be written (directories that exist)
             successful_writes = 0
-            for agents_path in distributed_result.content_map.keys():  # noqa: SIM118
+            for agents_path in distributed_result.content_map:
                 if agents_path.parent.exists():
                     successful_writes += 1
 
@@ -445,7 +445,7 @@ class AgentsCompiler:
 
         # Write distributed AGENTS.md files
         successful_writes = 0
-        total_content_entries = len(distributed_result.content_map)  # noqa: F841
+        len(distributed_result.content_map)
 
         for agents_path, content in distributed_result.content_map.items():
             try:
@@ -571,7 +571,7 @@ class AgentsCompiler:
             preview_lines = [
                 f"CLAUDE.md Preview: Would generate {len(claude_result.placements)} files"
             ]
-            for claude_path in claude_result.content_map.keys():  # noqa: SIM118
+            for claude_path in claude_result.content_map:
                 rel_path = portable_relpath(claude_path, self.base_dir)
                 preview_lines.append(f"  {rel_path}")
 
@@ -661,8 +661,8 @@ class AgentsCompiler:
 
         # Generate summary content for result object
         summary_lines = [
-            f"# CLAUDE.md Compilation Summary",  # noqa: F541
-            f"",  # noqa: F541
+            "# CLAUDE.md Compilation Summary",
+            "",
             f"Generated {files_written} CLAUDE.md files:",
         ]
         for placement in claude_result.placements:
@@ -1123,7 +1123,7 @@ class AgentsCompiler:
                     from .injector import ConstitutionInjector
 
                     injector = ConstitutionInjector(str(agents_path.parent))
-                    final_content, c_status, c_hash = injector.inject(  # noqa: RUF059
+                    final_content, _c_status, _c_hash = injector.inject(
                         content, with_constitution=True, output_path=agents_path
                     )
                 except Exception as exc:

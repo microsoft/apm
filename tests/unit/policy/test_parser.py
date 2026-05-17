@@ -19,36 +19,36 @@ class TestValidatePolicy(unittest.TestCase):
 
     def test_valid_enforcement_values(self):
         for val in ("warn", "block", "off"):
-            errors, warnings = validate_policy({"enforcement": val})  # noqa: RUF059
+            errors, _warnings = validate_policy({"enforcement": val})
             self.assertEqual(errors, [])
 
     def test_invalid_enforcement(self):
-        errors, warnings = validate_policy({"enforcement": "strict"})  # noqa: RUF059
+        errors, _warnings = validate_policy({"enforcement": "strict"})
         self.assertEqual(len(errors), 1)
         self.assertIn("enforcement", errors[0])
 
     def test_invalid_require_resolution(self):
-        errors, warnings = validate_policy({"dependencies": {"require_resolution": "merge"}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"dependencies": {"require_resolution": "merge"}})
         self.assertEqual(len(errors), 1)
         self.assertIn("require_resolution", errors[0])
 
     def test_valid_require_resolution(self):
         for val in ("project-wins", "policy-wins", "block"):
-            errors, warnings = validate_policy({"dependencies": {"require_resolution": val}})  # noqa: RUF059
+            errors, _warnings = validate_policy({"dependencies": {"require_resolution": val}})
             self.assertEqual(errors, [])
 
     def test_invalid_self_defined(self):
-        errors, warnings = validate_policy({"mcp": {"self_defined": "ignore"}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"mcp": {"self_defined": "ignore"}})
         self.assertEqual(len(errors), 1)
         self.assertIn("self_defined", errors[0])
 
     def test_valid_self_defined(self):
         for val in ("deny", "warn", "allow"):
-            errors, warnings = validate_policy({"mcp": {"self_defined": val}})  # noqa: RUF059
+            errors, _warnings = validate_policy({"mcp": {"self_defined": val}})
             self.assertEqual(errors, [])
 
     def test_invalid_scripts(self):
-        errors, warnings = validate_policy({"manifest": {"scripts": "warn"}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"manifest": {"scripts": "warn"}})
         self.assertEqual(len(errors), 1)
         self.assertIn("scripts", errors[0])
 
@@ -59,51 +59,51 @@ class TestValidatePolicy(unittest.TestCase):
             self.assertEqual(warnings, [])
 
     def test_invalid_require_explicit_includes_string(self):
-        errors, warnings = validate_policy({"manifest": {"require_explicit_includes": "true"}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"manifest": {"require_explicit_includes": "true"}})
         self.assertEqual(len(errors), 1)
         self.assertIn("require_explicit_includes", errors[0])
 
     def test_invalid_require_explicit_includes_int(self):
-        errors, warnings = validate_policy({"manifest": {"require_explicit_includes": 1}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"manifest": {"require_explicit_includes": 1}})
         self.assertEqual(len(errors), 1)
         self.assertIn("require_explicit_includes", errors[0])
 
     def test_invalid_unmanaged_action(self):
-        errors, warnings = validate_policy({"unmanaged_files": {"action": "block"}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"unmanaged_files": {"action": "block"}})
         self.assertEqual(len(errors), 1)
         self.assertIn("unmanaged_files.action", errors[0])
 
     def test_unmanaged_files_must_be_mapping(self):
         for bad in ([], ["x"], "warn", 1):
-            errors, warnings = validate_policy({"unmanaged_files": bad})  # noqa: RUF059
+            errors, _warnings = validate_policy({"unmanaged_files": bad})
             self.assertEqual(len(errors), 1, repr(bad))
             self.assertIn("unmanaged_files must be a YAML mapping", errors[0])
 
     def test_negative_cache_ttl(self):
-        errors, warnings = validate_policy({"cache": {"ttl": -1}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"cache": {"ttl": -1}})
         self.assertEqual(len(errors), 1)
         self.assertIn("cache.ttl", errors[0])
 
     def test_zero_cache_ttl(self):
-        errors, warnings = validate_policy({"cache": {"ttl": 0}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"cache": {"ttl": 0}})
         self.assertEqual(len(errors), 1)
 
     def test_string_cache_ttl(self):
-        errors, warnings = validate_policy({"cache": {"ttl": "fast"}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"cache": {"ttl": "fast"}})
         self.assertEqual(len(errors), 1)
         self.assertIn("cache.ttl", errors[0])
 
     def test_bool_cache_ttl(self):
-        errors, warnings = validate_policy({"cache": {"ttl": True}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"cache": {"ttl": True}})
         self.assertEqual(len(errors), 1)
 
     def test_negative_max_depth(self):
-        errors, warnings = validate_policy({"dependencies": {"max_depth": -5}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"dependencies": {"max_depth": -5}})
         self.assertEqual(len(errors), 1)
         self.assertIn("max_depth", errors[0])
 
     def test_string_max_depth(self):
-        errors, warnings = validate_policy({"dependencies": {"max_depth": "deep"}})  # noqa: RUF059
+        errors, _warnings = validate_policy({"dependencies": {"max_depth": "deep"}})
         self.assertEqual(len(errors), 1)
 
     def test_unknown_top_level_keys_no_error(self):
@@ -114,12 +114,12 @@ class TestValidatePolicy(unittest.TestCase):
         self.assertIn("custom_field", warnings[0])
 
     def test_non_dict_input(self):
-        errors, warnings = validate_policy("not a dict")  # type: ignore[arg-type]  # noqa: RUF059
+        errors, _warnings = validate_policy("not a dict")  # type: ignore[arg-type]
         self.assertEqual(len(errors), 1)
         self.assertIn("mapping", errors[0])
 
     def test_multiple_errors(self):
-        errors, warnings = validate_policy(  # noqa: RUF059
+        errors, _warnings = validate_policy(
             {
                 "enforcement": "bad",
                 "cache": {"ttl": -1},
@@ -246,7 +246,7 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertFalse(policy.manifest.require_explicit_includes)
 
     def test_empty_yaml(self):
-        policy, warnings = load_policy("")  # noqa: RUF059
+        policy, _warnings = load_policy("")
         self.assertIsInstance(policy, ApmPolicy)
         self.assertEqual(policy.name, "")
 
@@ -280,7 +280,7 @@ class TestLoadPolicyFromString(unittest.TestCase):
               allow:
                 - "org/*"
         """)
-        policy, warnings = load_policy(yaml_str)  # noqa: RUF059
+        policy, _warnings = load_policy(yaml_str)
         self.assertEqual(policy.dependencies.allow, ("org/*",))
         self.assertIsNone(policy.dependencies.deny)
         self.assertEqual(policy.dependencies.effective_deny, ())
@@ -288,15 +288,15 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.mcp.self_defined, "warn")
 
     def test_extends_org(self):
-        policy, warnings = load_policy("extends: org")  # noqa: RUF059
+        policy, _warnings = load_policy("extends: org")
         self.assertEqual(policy.extends, "org")
 
     def test_extends_owner_repo(self):
-        policy, warnings = load_policy("extends: acme/policies")  # noqa: RUF059
+        policy, _warnings = load_policy("extends: acme/policies")
         self.assertEqual(policy.extends, "acme/policies")
 
     def test_extends_url(self):
-        policy, warnings = load_policy("extends: https://example.com/policy.yml")  # noqa: RUF059
+        policy, _warnings = load_policy("extends: https://example.com/policy.yml")
         self.assertEqual(policy.extends, "https://example.com/policy.yml")
 
     def test_malformed_yaml_raises(self):
@@ -309,7 +309,7 @@ class TestLoadPolicyFromString(unittest.TestCase):
             load_policy("- item1\n- item2")
 
     def test_version_coerced_to_string(self):
-        policy, warnings = load_policy("version: '2.0'")  # noqa: RUF059
+        policy, _warnings = load_policy("version: '2.0'")
         self.assertEqual(policy.version, "2.0")
 
     def test_long_yaml_string_does_not_crash(self):
@@ -322,7 +322,7 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertGreater(len(yaml_str), 1024)
 
         # This should parse as inline YAML, not as a file path
-        policy, warnings = load_policy(yaml_str)  # noqa: RUF059
+        policy, _warnings = load_policy(yaml_str)
         self.assertEqual(policy.name, "long-policy")
         self.assertEqual(policy.version, "1.0")
         self.assertEqual(policy.enforcement, "off")
@@ -372,7 +372,7 @@ class TestLoadPolicyFromFile(unittest.TestCase):
             path = f.name
 
         try:
-            policy, warnings = load_policy(path)  # noqa: RUF059
+            policy, _warnings = load_policy(path)
             self.assertEqual(policy.name, "file-policy")
             self.assertEqual(policy.enforcement, "off")
         finally:
@@ -388,7 +388,7 @@ class TestLoadPolicyFromFile(unittest.TestCase):
             path = Path(f.name)
 
         try:
-            policy, warnings = load_policy(path)  # noqa: RUF059
+            policy, _warnings = load_policy(path)
             self.assertEqual(policy.name, "pathlib-test")
         finally:
             os.unlink(str(path))

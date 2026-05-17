@@ -32,10 +32,9 @@ from __future__ import annotations
 
 import hashlib
 import os
-from dataclasses import replace  # noqa: F401
 from pathlib import Path
-from typing import Any, Optional  # noqa: F401
-from unittest.mock import MagicMock, patch  # noqa: F401
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -166,7 +165,7 @@ def _make_pkg(
 
 def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list | None = None):
     """Write a lockfile pre-populated with given dependencies."""
-    from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
+    from apm_cli.deps.lockfile import LockFile
 
     lf = LockFile()
     for dep in locked_deps:
@@ -384,7 +383,7 @@ class TestI5TransportDenied:
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
     def test_ssh_transport_blocked(self, mock_gate, mock_preflight, mock_updates, project):
-        project_dir, runner = project  # noqa: RUF059
+        _project_dir, runner = project
 
         policy = _load_fixture_policy("apm-policy-mcp.yml")
         # Fixture allows [stdio, http] but NOT ssh.  enforcement=block.

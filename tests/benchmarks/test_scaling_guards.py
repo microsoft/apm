@@ -14,11 +14,9 @@ caught.
 
 import os
 import statistics
-import tempfile  # noqa: F401
 import time
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 import pytest
 

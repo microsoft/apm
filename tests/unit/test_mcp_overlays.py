@@ -1,7 +1,7 @@
 """Tests for MCP overlay functionality: MCPDependency model, self-defined server
 info building, overlay application, and install flow integration."""
 
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 

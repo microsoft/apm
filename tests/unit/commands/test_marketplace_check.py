@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +11,6 @@ from click.testing import CliRunner
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.marketplace.errors import (
     GitLsRemoteError,
-    MarketplaceYmlError,  # noqa: F401
     OfflineMissError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef

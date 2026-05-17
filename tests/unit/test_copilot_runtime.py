@@ -118,7 +118,7 @@ class TestCopilotRuntime:
             mock_popen.return_value = mock_process
 
             runtime = CopilotRuntime()
-            result = runtime.execute_prompt(  # noqa: F841
+            runtime.execute_prompt(
                 "Test prompt", full_auto=True, log_level="debug", add_dirs=["/path/to/dir"]
             )
 

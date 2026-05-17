@@ -6,7 +6,6 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
-import shutil  # noqa: F401
 from pathlib import Path
 
 import pytest

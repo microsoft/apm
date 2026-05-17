@@ -33,7 +33,7 @@ import pytest
 def _find_repo_root() -> Path:
     """Walk up from this file until pyproject.toml is found (the repo root)."""
     current = Path(__file__).resolve().parent
-    for candidate in [current] + list(current.parents):  # noqa: RUF005
+    for candidate in [current, *list(current.parents)]:
         if (candidate / "pyproject.toml").is_file():
             return candidate
     raise RuntimeError("Cannot locate repository root (no pyproject.toml found)")

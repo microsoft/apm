@@ -3,11 +3,10 @@
 import builtins
 from pathlib import Path
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
-from ...core.command_logger import CommandLogger
+from ...constants import APM_MODULES_DIR
 from ...deps.lockfile import LockFile
 from ...integration.mcp_integrator import MCPIntegrator
-from ...models.apm_package import APMPackage, DependencyReference  # noqa: F401
+from ...models.apm_package import DependencyReference
 from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
 
@@ -302,7 +301,7 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         if apm_modules_dir.exists() and package_path.exists():
             logger.progress(f"  - {pkg} from apm_modules/")
 
-    from ...deps.lockfile import LockFile, get_lockfile_path
+    from ...deps.lockfile import get_lockfile_path
 
     lockfile_path = get_lockfile_path(Path("."))
     lockfile = LockFile.read(lockfile_path)
@@ -326,7 +325,7 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
                 potential_orphans.add(key)
                 queue.append(dep.repo_url)
         if potential_orphans:
-            logger.progress(f"  Transitive dependencies that would be removed:")  # noqa: F541
+            logger.progress("  Transitive dependencies that would be removed:")
             for orphan_key in sorted(potential_orphans):
                 logger.progress(f"    - {orphan_key}")
 

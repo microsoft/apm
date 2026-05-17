@@ -7,10 +7,8 @@ package names only (no private/project-specific identifiers).
 
 import json
 import os
-import tempfile  # noqa: F401
 from pathlib import Path
 
-import pytest  # noqa: F401
 import yaml
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -21,7 +19,9 @@ from apm_cli.integration.mcp_integrator import MCPIntegrator
 # ---------------------------------------------------------------------------
 
 
-def _write_apm_yml(path: Path, deps: list = None, mcp: list = None, name: str = "test-project"):  # noqa: RUF013
+def _write_apm_yml(
+    path: Path, deps: list | None = None, mcp: list | None = None, name: str = "test-project"
+):
     """Write a minimal apm.yml at *path* with optional APM and MCP deps."""
     data = {"name": name, "version": "1.0.0", "dependencies": {}}
     if deps:
@@ -35,10 +35,10 @@ def _write_apm_yml(path: Path, deps: list = None, mcp: list = None, name: str = 
 def _make_pkg_dir(
     apm_modules: Path,
     repo_url: str,
-    mcp: list = None,  # noqa: RUF013
-    apm_deps: list = None,  # noqa: RUF013
-    name: str = None,  # noqa: RUF013
-    virtual_path: str = None,  # noqa: RUF013
+    mcp: list | None = None,
+    apm_deps: list | None = None,
+    name: str | None = None,
+    virtual_path: str | None = None,
 ):
     """Create a package directory under apm_modules with an apm.yml."""
     base = apm_modules / repo_url
@@ -54,7 +54,7 @@ def _make_pkg_dir(
     (base / "apm.yml").write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
 
 
-def _write_lockfile(path: Path, locked_deps: list, mcp_servers: list = None):  # noqa: RUF013
+def _write_lockfile(path: Path, locked_deps: list, mcp_servers: list | None = None):
     """Write a lockfile from LockedDependency list and optional MCP server names."""
     lf = LockFile()
     for dep in locked_deps:

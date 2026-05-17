@@ -10,9 +10,7 @@ Covers W1-logger deliverables from issue #827:
 - _render_policy_group renders blocked vs warn items correctly
 """
 
-from unittest.mock import call, patch  # noqa: F401
-
-import pytest  # noqa: F401
+from unittest.mock import patch
 
 from apm_cli.core.command_logger import InstallLogger
 from apm_cli.utils.diagnostics import (

@@ -238,7 +238,7 @@ class TestFilterFilesByTarget:
         # A crafted file path with traversal should only remap the prefix,
         # the traversal components remain as literal path segments
         files = [".github/skills/../../etc/passwd"]
-        filtered, mappings = _filter_files_by_target(files, "claude")  # noqa: RUF059
+        filtered, _mappings = _filter_files_by_target(files, "claude")
         # The mapping still happens (prefix replacement) but the packer's
         # bundle-escape check will catch the bad destination path
         if filtered:
@@ -280,7 +280,7 @@ class TestFilterFilesByTarget:
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 
         files = [".github/skills/../../etc/passwd"]
-        filtered, mappings = _filter_files_by_target(files, "agent-skills")  # noqa: RUF059
+        filtered, _mappings = _filter_files_by_target(files, "agent-skills")
 
         # Original .github/ path must never appear directly.
         assert ".github/skills/../../etc/passwd" not in filtered
@@ -344,7 +344,7 @@ class TestFilterFilesByTargetList:
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 
         files = [".claude/skills/s1/SKILL.md", ".cursor/rules/r.md", ".github/agents/a.md"]
-        filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])  # noqa: RUF059
+        filtered, _mappings = _filter_files_by_target(files, ["claude", "cursor"])
         assert ".claude/skills/s1/SKILL.md" in filtered
         assert ".cursor/rules/r.md" in filtered
         # .github/ is not a direct prefix for either claude or cursor

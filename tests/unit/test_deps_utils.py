@@ -5,8 +5,6 @@ Covers the pure helpers that scan, count, and describe installed packages.
 
 from pathlib import Path
 
-import pytest  # noqa: F401
-
 from apm_cli.commands.deps._utils import (
     _count_package_files,
     _count_primitives,

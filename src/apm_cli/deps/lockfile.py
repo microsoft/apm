@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any, Optional
 
 import yaml
 

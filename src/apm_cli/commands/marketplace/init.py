@@ -9,10 +9,8 @@ from pathlib import Path
 import click
 
 from ...core.command_logger import CommandLogger
-from . import (
-    _check_gitignore_for_marketplace_json,
-    marketplace,
-)
+from . import marketplace
+from ._io import _check_gitignore_for_marketplace_json
 
 
 @marketplace.command(help="Add a 'marketplace:' block to apm.yml (scaffolds apm.yml if missing)")

@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile  # noqa: F401
-from pathlib import Path  # noqa: F401
-
-import pytest  # noqa: F401
 import yaml
 
 from apm_cli.marketplace.init_template import render_marketplace_yml_template

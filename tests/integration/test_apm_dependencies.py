@@ -18,16 +18,13 @@ These tests validate:
 
 import os
 import shutil
-import subprocess  # noqa: F401
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List  # noqa: F401, UP035
-from unittest.mock import Mock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 import yaml
 
-from apm_cli.deps.apm_resolver import APMDependencyResolver  # noqa: F401
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 
@@ -57,7 +54,7 @@ class TestAPMDependenciesIntegration:
         if self.test_dir.exists():
             shutil.rmtree(self.test_dir, ignore_errors=True)
 
-    def create_apm_yml(self, dependencies: list[str] = None, **kwargs):  # noqa: RUF013
+    def create_apm_yml(self, dependencies: list[str] | None = None, **kwargs):
         """Create an apm.yml file with specified dependencies."""
         config = {
             "name": "test-project",
@@ -214,7 +211,7 @@ class TestAPMDependenciesIntegration:
         package_dir = (
             apm_modules_dir / "github" / "awesome-copilot" / "skills" / "review-and-refactor"
         )
-        result = downloader.download_package(str(dependencies[0]), package_dir)  # noqa: F841
+        downloader.download_package(str(dependencies[0]), package_dir)
 
         # Verify installation
         assert package_dir.exists()
@@ -307,10 +304,10 @@ This local instruction should override any dependency instruction.
         downloader.download_package(str(dep_ref), package_dir)
 
         # Compile AGENTS.md to verify source attribution
-        agents_md_path = self.test_dir / "AGENTS.md"  # noqa: F841
+        self.test_dir / "AGENTS.md"
 
         # The actual compilation may require additional setup, but we test the key aspects
-        project_package = APMPackage.from_apm_yml(self.apm_yml_path)  # noqa: F841
+        APMPackage.from_apm_yml(self.apm_yml_path)
 
         # Verify that local primitives exist alongside dependency primitives
         assert local_instruction.exists()
@@ -321,7 +318,7 @@ This local instruction should override any dependency instruction.
         local_files = list(instructions_dir.glob("*.instructions.md"))
         assert len(local_files) >= 1
 
-        dep_instruction_files = list((package_dir / ".apm" / "instructions").glob("*.md"))  # noqa: F841
+        list((package_dir / ".apm" / "instructions").glob("*.md"))
         # Note: actual files in dependency may vary, just verify directory exists
         assert (package_dir / ".apm" / "instructions").exists()
 

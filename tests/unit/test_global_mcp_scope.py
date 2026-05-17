@@ -353,14 +353,14 @@ class TestUpdateLockfileGlobalScope(unittest.TestCase):
     """Regression tests for #794: update_lockfile must receive scope-resolved path."""
 
     def test_install_module_passes_lock_path_to_update_lockfile(self):
-        """All update_lockfile calls in install.py pass _lock_path positionally."""
+        """All update_lockfile calls in the install pipeline pass _lock_path positionally."""
         import ast
         from pathlib import Path
 
-        install_src = Path(__file__).resolve().parent.parent.parent / (
-            "src/apm_cli/commands/install.py"
-        )
-        tree = ast.parse(install_src.read_text(encoding="utf-8"))
+        import apm_cli.commands.install.pipeline as install_pipeline
+
+        source = Path(install_pipeline.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
 
         for node in ast.walk(tree):
             if (

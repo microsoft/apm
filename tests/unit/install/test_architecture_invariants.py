@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest  # noqa: F401
-
 ENGINE_ROOT = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "install"
 
 
@@ -186,12 +184,12 @@ def test_install_py_under_legacy_budget():
     additions are entry-point glue at the Click handler boundary; the
     actual logic lives in ``apm_cli/install/`` (plan, errors, service).
     """
-    install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
-    assert install_py.is_file()
-    n = _line_count(install_py)
-    assert n <= 2010, (
-        f"commands/install.py grew to {n} LOC (budget 2010). "
-        "Do NOT trim cosmetically -- engage the python-architecture skill "
-        "(.github/skills/python-architecture/SKILL.md) and propose an "
-        "extraction into apm_cli/install/."
-    )
+    install_pkg = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install"
+    assert install_pkg.is_dir()
+    assert (install_pkg / "__init__.py").is_file()
+    offenders = [
+        (path.name, _line_count(path))
+        for path in install_pkg.glob("*.py")
+        if _line_count(path) > 1400
+    ]
+    assert not offenders, f"commands/install package files exceed 1400 LOC: {offenders}"

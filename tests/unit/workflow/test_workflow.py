@@ -7,7 +7,7 @@ import unittest
 
 from apm_cli.workflow.discovery import create_workflow_template, discover_workflows
 from apm_cli.workflow.parser import WorkflowDefinition, parse_workflow_file
-from apm_cli.workflow.runner import collect_parameters, substitute_parameters  # noqa: F401
+from apm_cli.workflow.runner import substitute_parameters
 
 
 class TestWorkflowParser(unittest.TestCase):

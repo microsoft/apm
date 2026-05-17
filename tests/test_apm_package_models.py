@@ -3,7 +3,6 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import mock_open, patch  # noqa: F401
 
 import pytest
 import yaml
@@ -17,7 +16,6 @@ from src.apm_cli.models.apm_package import (
     PackageInfo,
     PackageType,
     ResolvedReference,
-    ValidationError,  # noqa: F401
     ValidationResult,
     parse_git_reference,
     validate_apm_package,
@@ -196,7 +194,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "dmeppiel-org"
         assert dep.ado_project == "market-js-app"
         assert dep.ado_repo == "compliance-rules"
-        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_azure_devops()
         assert dep.repo_url == "dmeppiel-org/market-js-app/compliance-rules"
 
         # Simplified ADO format (without _git)
@@ -205,12 +203,12 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_azure_devops()
 
         # Legacy visualstudio.com format
         dep = DependencyReference.parse("mycompany.visualstudio.com/myorg/myproject/myrepo")
         assert dep.host == "mycompany.visualstudio.com"
-        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_azure_devops()
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "myrepo"
@@ -221,8 +219,8 @@ class TestDependencyReference:
         dep = DependencyReference.parse(
             "dev.azure.com/myorg/myproject/myrepo/prompts/code-review.prompt.md"
         )
-        assert dep.is_azure_devops() == True  # noqa: E712
-        assert dep.is_virtual == True  # noqa: E712
+        assert dep.is_azure_devops()
+        assert dep.is_virtual
         assert dep.repo_url == "myorg/myproject/myrepo"
         assert dep.virtual_path == "prompts/code-review.prompt.md"
         assert dep.ado_organization == "myorg"
@@ -233,8 +231,8 @@ class TestDependencyReference:
         dep = DependencyReference.parse(
             "dev.azure.com/myorg/myproject/_git/myrepo/prompts/test.prompt.md"
         )
-        assert dep.is_azure_devops() == True  # noqa: E712
-        assert dep.is_virtual == True  # noqa: E712
+        assert dep.is_azure_devops()
+        assert dep.is_virtual
         assert dep.virtual_path == "prompts/test.prompt.md"
 
     def test_parse_azure_devops_invalid_virtual_package(self):
@@ -249,12 +247,12 @@ class TestDependencyReference:
 
         # Valid 4-segment ADO virtual package should work
         dep = DependencyReference.parse("dev.azure.com/org/proj/repo/file.prompt.md")
-        assert dep.is_virtual == True  # noqa: E712
+        assert dep.is_virtual
         assert dep.repo_url == "org/proj/repo"
 
         # 3 segments after host (org/proj/repo) without a path - this is a regular package, not virtual
         dep = DependencyReference.parse("dev.azure.com/myorg/myproject/myrepo")
-        assert dep.is_virtual == False  # noqa: E712
+        assert not dep.is_virtual
         assert dep.repo_url == "myorg/myproject/myrepo"
 
     def test_parse_azure_devops_project_with_spaces(self):
@@ -269,7 +267,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "My Project"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_azure_devops()
         assert dep.repo_url == "myorg/My Project/myrepo"
 
         # Literal space in project name (simplified format without _git)
@@ -278,7 +276,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "My Project"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_azure_devops()
 
         # Percent-encoded space in simplified format
         dep = DependencyReference.parse("dev.azure.com/org/America%20Oh%20Yeah/repo")
@@ -298,7 +296,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "Zifo"
         assert dep.ado_project == "AIdeate and AIterate"
         assert dep.ado_repo == "AiDeate SDLC Guidelines"
-        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_azure_devops()
         assert dep.repo_url == "Zifo/AIdeate and AIterate/AiDeate SDLC Guidelines"
 
         # Spaces in both project and repo names (literal)

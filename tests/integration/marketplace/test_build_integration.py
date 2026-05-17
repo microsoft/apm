@@ -14,13 +14,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 
 from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
-from apm_cli.marketplace.ref_resolver import RemoteRef  # noqa: F401
-from apm_cli.marketplace.yml_schema import load_marketplace_yml  # noqa: F401
 
 from .conftest import (
     GOLDEN_YML,
@@ -61,7 +59,7 @@ class TestBuildGoldenFile:
 
         opts = BuildOptions(dry_run=False)
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml", options=opts)
-        report = builder.build()  # noqa: F841
+        builder.build()
 
         out_path = tmp_path / "marketplace.json"
         assert out_path.exists(), "marketplace.json was not produced"
@@ -74,7 +72,7 @@ class TestBuildGoldenFile:
         _write_yml(tmp_path, GOLDEN_YML)
 
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
-        report = builder.build()  # noqa: F841
+        builder.build()
 
         out_path = tmp_path / "marketplace.json"
         raw_text = out_path.read_text(encoding="utf-8")
@@ -93,7 +91,7 @@ class TestBuildGoldenFile:
 
         data = _read_json(tmp_path)
         for plugin in data["plugins"]:
-            keys = [k for k in plugin.keys() if k != "description"]  # noqa: SIM118
+            keys = [k for k in plugin if k != "description"]
             # name must be first; tags before source; source last
             assert keys[0] == "name"
             assert "tags" in keys

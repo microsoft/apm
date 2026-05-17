@@ -19,26 +19,26 @@ from .validation import (
     validate_apm_package,
 )
 
-__all__ = [  # noqa: RUF022
+__all__ = [
     # Core
     "APMPackage",
-    "PackageInfo",
-    "clear_apm_yml_cache",
     # Dependency
     "DependencyReference",
     "GitReferenceType",
-    "MCPDependency",
-    "ResolvedReference",
-    "parse_git_reference",
-    # Validation
-    "InvalidVirtualPackageExtensionError",
-    "PackageContentType",
-    "PackageType",
-    "ValidationError",
-    "ValidationResult",
-    "detect_package_type",
-    "validate_apm_package",
     # Results
     "InstallResult",
+    # Validation
+    "InvalidVirtualPackageExtensionError",
+    "MCPDependency",
+    "PackageContentType",
+    "PackageInfo",
+    "PackageType",
     "PrimitiveCounts",
+    "ResolvedReference",
+    "ValidationError",
+    "ValidationResult",
+    "clear_apm_yml_cache",
+    "detect_package_type",
+    "parse_git_reference",
+    "validate_apm_package",
 ]

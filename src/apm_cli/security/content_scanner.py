@@ -12,7 +12,6 @@ be tested and used independently.
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)

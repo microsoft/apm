@@ -22,8 +22,6 @@ from ..core.auth import AuthResolver, HostInfo
 from ..models.apm_package import DependencyReference
 from ..utils.github_host import (
     build_ado_api_url,
-    build_ado_https_clone_url,  # noqa: F401  -- re-exported for tests/back-compat
-    build_ado_ssh_url,  # noqa: F401  -- re-exported for tests/back-compat
     build_artifactory_archive_url,
     build_https_clone_url,
     build_raw_content_url,

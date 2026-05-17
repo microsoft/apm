@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -220,7 +219,7 @@ class TestDryRunRequiredMissingBlock:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
+            _result_fetch, _result_active = run_policy_preflight(
                 project_root=Path("/fake"),
                 apm_deps=[some_dep],
                 no_policy=False,
@@ -260,7 +259,7 @@ class TestDryRunAllowedDeps:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
+            _result_fetch, _result_active = run_policy_preflight(
                 project_root=Path("/fake"),
                 apm_deps=[allowed_dep],
                 no_policy=False,
@@ -466,7 +465,7 @@ class TestDryRunMcpDenied:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
+            result_fetch, _result_active = run_policy_preflight(
                 project_root=Path("/fake"),
                 mcp_deps=[denied_mcp],
                 no_policy=False,
@@ -532,7 +531,7 @@ class TestDryRunWarnSeverity:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
+            _result_fetch, _result_active = run_policy_preflight(
                 project_root=Path("/fake"),
                 apm_deps=[outside_dep],
                 no_policy=False,

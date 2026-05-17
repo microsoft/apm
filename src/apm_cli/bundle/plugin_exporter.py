@@ -9,12 +9,10 @@ under ``pack.bundle_files`` (issue #1098).
 
 import hashlib
 import json
-import os  # noqa: F401
 import re
 import shutil
 import tarfile
 from pathlib import Path, PurePosixPath
-from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 import yaml
 
@@ -25,7 +23,7 @@ from ..deps.lockfile import (
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
-from ..utils.console import _rich_info, _rich_warning
+from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
 

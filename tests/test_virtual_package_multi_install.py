@@ -1,7 +1,5 @@
 """Tests for installing multiple virtual packages from the same repository."""
 
-from pathlib import Path  # noqa: F401
-
 import pytest
 
 from src.apm_cli.deps.apm_resolver import APMDependencyResolver

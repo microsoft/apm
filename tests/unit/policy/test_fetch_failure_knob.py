@@ -13,7 +13,7 @@ from __future__ import annotations
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List  # noqa: F401, UP035
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -310,7 +310,7 @@ class TestPreflightFailClosed:
 
         mock_discover.return_value = _fetch("cache_miss_fetch_fail", fetch_error="dns fail")
         # No apm.yml -> default warn.
-        result, active = run_policy_preflight(  # noqa: RUF059
+        _result, active = run_policy_preflight(
             project_root=tmp_path,
             apm_deps=[],
             no_policy=False,
@@ -328,7 +328,7 @@ class TestPreflightFailClosed:
             encoding="utf-8",
         )
         # dry_run never raises.
-        result, active = run_policy_preflight(  # noqa: RUF059
+        _result, active = run_policy_preflight(
             project_root=tmp_path,
             apm_deps=[],
             no_policy=False,

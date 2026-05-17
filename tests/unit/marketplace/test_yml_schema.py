@@ -10,9 +10,6 @@ import pytest
 from apm_cli.marketplace.errors import MarketplaceYmlError
 from apm_cli.marketplace.yml_schema import (
     MarketplaceBuild,
-    MarketplaceOwner,  # noqa: F401
-    MarketplaceYml,  # noqa: F401
-    PackageEntry,  # noqa: F401
     load_marketplace_yml,
 )
 

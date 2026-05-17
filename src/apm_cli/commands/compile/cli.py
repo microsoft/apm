@@ -258,64 +258,353 @@ def _resolve_compile_target(target):
     return target  # single string pass-through
 
 
-def _resolve_effective_target(
-    target: str | list[str] | None,
-) -> tuple[CompileTargetType, str, str | list[str] | None]:
-    """Resolve the CLI --target arg to the compiler-understood effective target.
+def _ensure_compilable_content(logger: CommandLogger, dry_run: bool) -> None:
+    """Validate that the current project has content worth compiling."""
+    from ...compilation.constitution import find_constitution
 
-    Mirrors the resolution the one-shot compile path performs (load
-    apm.yml ``target:`` / ``targets:``, run :func:`_resolve_compile_target`
-    on both, fall back to :func:`detect_target` for the auto-detect case)
-    so the watch path can build ``CompilationConfig`` with the same
-    ``target=`` value the one-shot path uses (#1345).
+    if not Path(APM_YML_FILENAME).exists():
+        logger.error("Not an APM project - no apm.yml found")
+        logger.progress(" To initialize an APM project, run:")
+        logger.progress("   apm init")
+        sys.exit(1)
 
-    Args:
-        target: The raw ``--target`` CLI argument (None, str, or list).
+    apm_modules_exists = Path(APM_MODULES_DIR).exists()
+    constitution_exists = find_constitution(Path(".")).exists()
+    apm_dir = Path(APM_DIR)
+    local_apm_has_content = apm_dir.exists() and (
+        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
+    )
+    if apm_modules_exists or local_apm_has_content or constitution_exists:
+        return
 
-    Returns:
-        Tuple ``(effective_target, detection_reason, config_target)`` where
-        ``effective_target`` is what to pass as ``target=`` to
-        :meth:`CompilationConfig.from_apm_yml`, ``detection_reason`` is the
-        provenance label, and ``config_target`` is the raw apm.yml value
-        (str | list | None) for user-facing label rendering.
-    """
-    from ...core.target_detection import detect_target
+    has_empty_apm = (
+        apm_dir.exists()
+        and not any(apm_dir.rglob("*.instructions.md"))
+        and not any(apm_dir.rglob("*.chatmode.md"))
+    )
+    if has_empty_apm:
+        logger.error("No instruction files found in .apm/ directory")
+        logger.progress(" To add instructions, create files like:")
+        logger.progress("   .apm/instructions/coding-standards.instructions.md")
+        logger.progress("   .apm/chatmodes/backend-engineer.chatmode.md")
+    else:
+        logger.error("No APM content found to compile")
+        logger.progress(" To get started:")
+        logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
+        logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
+        logger.progress("   3. Then create .instructions.md or .chatmode.md files")
+    if not dry_run:
+        sys.exit(1)
+
+
+def _run_validation_mode(logger: CommandLogger) -> None:
+    """Run validation-only mode and exit the command."""
+    logger.start("Validating APM context...", symbol="gear")
+    compiler = AgentsCompiler(".")
+    try:
+        primitives = discover_primitives(".")
+    except Exception as e:
+        logger.error(f"Failed to discover primitives: {e}")
+        logger.progress(f" Error details: {type(e).__name__}")
+        sys.exit(1)
+    validation_errors = compiler.validate_primitives(primitives)
+    if validation_errors:
+        _display_validation_errors(validation_errors)
+        logger.error(f"Validation failed with {len(validation_errors)} errors")
+        sys.exit(1)
+    logger.success("All primitives validated successfully!")
+    logger.progress(f"Validated {primitives.count()} primitives:")
+    logger.progress(f"  * {len(primitives.chatmodes)} chatmodes")
+    logger.progress(f"  * {len(primitives.instructions)} instructions")
+    logger.progress(f"  * {len(primitives.contexts)} contexts")
+    try:
+        from ...models.apm_package import APMPackage
+
+        mcp_count = len(APMPackage.from_apm_yml(Path(APM_YML_FILENAME)).get_mcp_dependencies())
+        if mcp_count > 0:
+            logger.progress(f"  * {mcp_count} MCP dependencies")
+    except Exception:
+        pass
+
+
+def _load_config_target(apm_yml_path: Path):
+    """Load target or targets from apm.yml."""
     from ...models.apm_package import APMPackage
 
-    config_target = None
-    apm_yml_path = Path(APM_YML_FILENAME)
-    if apm_yml_path.exists():
-        apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
-        config_target = apm_pkg.target
-        if config_target is None:
-            try:
-                from ...core.apm_yml import parse_targets_field
-                from ...utils.yaml_io import load_yaml
+    if not apm_yml_path.exists():
+        return None
+    apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
+    if apm_pkg.target is not None:
+        return apm_pkg.target
+    try:
+        from ...core.apm_yml import parse_targets_field
+        from ...utils.yaml_io import load_yaml
 
-                _raw = load_yaml(apm_yml_path)
-                if isinstance(_raw, dict):
-                    _yaml_targets = parse_targets_field(_raw)
-                    if _yaml_targets:
-                        config_target = (
-                            _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
-                        )
-            except Exception:
-                pass
+        raw = load_yaml(apm_yml_path)
+        if not isinstance(raw, dict):
+            return None
+        yaml_targets = parse_targets_field(raw)
+        if not yaml_targets:
+            return None
+        return yaml_targets[0] if len(yaml_targets) == 1 else yaml_targets
+    except Exception:
+        return None
 
+
+def _resolve_effective_target(target):
+    """Resolve CLI/config target input to the compiler target and reason."""
+    from ...core.target_detection import detect_target
+
+    config_target = _load_config_target(Path(APM_YML_FILENAME))
     compile_target = _resolve_compile_target(target)
     compile_config_target = _resolve_compile_target(config_target)
-
     if isinstance(compile_target, frozenset):
         return compile_target, "explicit --target flag", config_target
     if isinstance(compile_config_target, frozenset) and compile_target is None:
         return compile_config_target, "apm.yml target", config_target
-
     detected_target, detection_reason = detect_target(
         project_root=Path("."),
         explicit_target=compile_target,
         config_target=compile_config_target if isinstance(compile_config_target, str) else None,
     )
     return detected_target, detection_reason, config_target
+
+
+def _coerce_provenance_targets(value):
+    """Coerce target provenance input to a list of target labels."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    if isinstance(value, list):
+        return [str(t) for t in value]
+    if isinstance(value, frozenset):
+        return sorted(value)
+    return []
+
+
+def _emit_target_provenance(target, config_target, effective_target, detection_reason) -> None:
+    """Emit the canonical target provenance line."""
+    from ...core.target_detection import ResolvedTargets, format_provenance
+    from ...utils.console import _rich_info
+
+    if detection_reason == "explicit --target flag":
+        provenance_targets = _coerce_provenance_targets(target)
+        provenance_source = "--target flag"
+    elif detection_reason == "apm.yml target":
+        provenance_targets = _coerce_provenance_targets(config_target)
+        provenance_source = "apm.yml"
+    else:
+        provenance_targets = _coerce_provenance_targets(effective_target)
+        provenance_source = f"auto-detect ({detection_reason})"
+    if provenance_targets:
+        _rich_info(
+            format_provenance(
+                ResolvedTargets(
+                    targets=sorted(set(provenance_targets)),
+                    source=provenance_source,
+                    auto_create=True,
+                )
+            ),
+            symbol="info",
+        )
+
+
+def _log_compile_strategy(
+    logger, config, target, config_target, effective_target, detection_reason
+) -> None:
+    """Render the target-aware compilation mode line."""
+    from ...core.target_detection import (
+        REASON_NO_TARGET_FOLDER,
+        get_target_description,
+        should_compile_agents_md,
+        should_compile_claude_md,
+        should_compile_gemini_md,
+    )
+
+    if config.strategy != "distributed" or config.single_agents:
+        logger.progress("Using single-file compilation (legacy mode)", symbol="page")
+        return
+    if isinstance(effective_target, frozenset):
+        if isinstance(target, list):
+            target_label = f"--target {','.join(target)}"
+        elif isinstance(config_target, list):
+            target_label = f"apm.yml target: [{', '.join(config_target)}]"
+        else:
+            target_label = "multi-target"
+        parts = []
+        if should_compile_agents_md(effective_target):
+            parts.append("AGENTS.md")
+        if should_compile_claude_md(effective_target):
+            parts.append("CLAUDE.md")
+        if should_compile_gemini_md(effective_target):
+            parts.append("GEMINI.md")
+        logger.progress(f"Compiling for {' + '.join(parts)} ({target_label})")
+        return
+    if (
+        isinstance(effective_target, str)
+        and effective_target == "vscode"
+        and detection_reason == REASON_NO_TARGET_FOLDER
+    ):
+        logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
+        logger.progress(
+            " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
+            symbol="light_bulb",
+        )
+        return
+    logger.progress(
+        f"Compiling for {get_target_description(effective_target)} - {detection_reason}"
+    )
+
+
+def _build_compile_config(params, effective_target):
+    """Build the compilation config from Click parameters."""
+    config = CompilationConfig.from_apm_yml(
+        output_path=params["output"] if params["output"] != AGENTS_MD_FILENAME else None,
+        chatmode=params["chatmode"],
+        resolve_links=not params["no_links"] if params["no_links"] else None,
+        dry_run=params["dry_run"],
+        single_agents=params["single_agents"],
+        trace=params["verbose"],
+        local_only=params["local_only"],
+        debug=params["verbose"],
+        clean_orphaned=params["clean"],
+        target=effective_target,
+    )
+    config.with_constitution = params["with_constitution"]
+    return config
+
+
+def _handle_distributed_success(logger: CommandLogger, result, dry_run: bool) -> None:
+    """Render distributed compilation success or zero-output warning."""
+    if dry_run:
+        return
+    files_written = sum(
+        int(v or 0)
+        for k, v in result.stats.items()
+        if k.endswith(("_files_written", "_files_generated"))
+    )
+    if files_written > 0:
+        logger.success("Compilation completed successfully!", symbol="check")
+        return
+    logger.warning(
+        "Compilation completed but produced no output files. Check that target directories exist "
+        "(e.g. .github/, .claude/) or set 'target:' in apm.yml / pass --target explicitly."
+    )
+
+
+def _scan_and_write_single_file(
+    logger, final_content: str, output_path: Path, c_status: str
+) -> bool:
+    """Scan and write a single-file compile result. Return critical-finding state."""
+    if c_status not in ("CREATED", "UPDATED", "MISSING"):
+        logger.progress("No changes detected; preserving existing AGENTS.md for idempotency")
+        return False
+    from ...security.gate import WARN_POLICY, SecurityGate
+
+    compile_has_critical = False
+    verdict = SecurityGate.scan_text(final_content, str(output_path), policy=WARN_POLICY)
+    if verdict.has_findings:
+        actionable = verdict.critical_count + verdict.warning_count
+        compile_has_critical = verdict.has_critical
+        if actionable:
+            logger.warning(
+                f"Compiled output contains {actionable} hidden character(s) "
+                f"-- run 'apm audit --file {output_path}' to inspect"
+            )
+    try:
+        from ...compilation.output_writer import CompiledOutputWriter
+
+        CompiledOutputWriter().write(output_path, final_content)
+    except OSError as e:
+        logger.error(f"Failed to write final AGENTS.md: {e}")
+        sys.exit(1)
+    return compile_has_critical
+
+
+def _handle_single_file_success(logger, compiler, config, dry_run: bool, output: str) -> bool:
+    """Run legacy single-file post-processing and render output."""
+    intermediate_config = CompilationConfig(
+        output_path=config.output_path,
+        chatmode=config.chatmode,
+        resolve_links=config.resolve_links,
+        dry_run=True,
+        with_constitution=config.with_constitution,
+        strategy="single-file",
+    )
+    intermediate_result = compiler.compile(intermediate_config)
+    if not intermediate_result.success:
+        return False
+    from ...compilation.injector import ConstitutionInjector
+
+    output_path = Path(config.output_path)
+    final_content, c_status, c_hash = ConstitutionInjector(base_dir=".").inject(
+        intermediate_result.content,
+        with_constitution=config.with_constitution,
+        output_path=output_path,
+    )
+    compile_has_critical = False
+    if not dry_run:
+        compile_has_critical = _scan_and_write_single_file(
+            logger, final_content, output_path, c_status
+        )
+    if dry_run:
+        logger.success("Context compilation completed successfully (dry run)", symbol="check")
+    else:
+        logger.success(f"Context compiled successfully to {output_path}")
+    _rich_blank_line()
+    _display_single_file_summary(intermediate_result.stats, c_status, c_hash, output_path, dry_run)
+    if dry_run:
+        preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
+        _rich_panel(preview, title=" Generated Content Preview", style="cyan")
+    else:
+        _display_next_steps(output)
+    return compile_has_critical
+
+
+def _handle_compile_result(logger, compiler, config, result, params) -> bool:
+    """Handle success output for distributed and single-file compile modes."""
+    compile_has_critical = result.has_critical_security
+    if not result.success:
+        return compile_has_critical
+    if config.strategy == "distributed" and not params["single_agents"]:
+        _handle_distributed_success(logger, result, params["dry_run"])
+        return compile_has_critical
+    return (
+        _handle_single_file_success(
+            logger,
+            compiler,
+            config,
+            params["dry_run"],
+            params["output"],
+        )
+        or compile_has_critical
+    )
+
+
+def _report_warnings_errors_and_orphans(logger, result) -> None:
+    """Render warnings, errors, and orphan-package diagnostics."""
+    if result.warnings:
+        logger.warning(f"Compilation completed with {len(result.warnings)} warning(s):")
+        for warning in result.warnings:
+            logger.warning(f"  {warning}")
+    if result.errors:
+        logger.error(f"Compilation failed with {len(result.errors)} errors:")
+        for error in result.errors:
+            logger.error(f"  {error}")
+        sys.exit(1)
+    try:
+        orphaned_packages = _check_orphaned_packages()
+        if orphaned_packages:
+            _rich_blank_line()
+            logger.warning(
+                f"Found {len(orphaned_packages)} orphaned package(s) that were included in compilation:"
+            )
+            for pkg in orphaned_packages:
+                logger.progress(f"  * {pkg}")
+            logger.progress(" Run 'apm prune' to remove orphaned packages")
+    except Exception:
+        pass
 
 
 @click.command(help="Compile APM context into distributed AGENTS.md files")
@@ -388,45 +677,11 @@ def _resolve_effective_target(
     help="Compile for all canonical targets. Equivalent to --target all.",
 )
 @click.pass_context
-def compile(
-    ctx,
-    output,
-    target,
-    dry_run,
-    no_links,
-    chatmode,
-    watch,
-    validate,
-    with_constitution,
-    single_agents,
-    verbose,
-    local_only,
-    clean,
-    legacy_skill_paths,
-    compile_all,
-):
-    """Compile APM context into distributed AGENTS.md files.
-
-    By default, uses distributed compilation to generate multiple focused AGENTS.md
-    files across your directory structure following the Minimal Context Principle.
-
-    Use --single-agents for traditional single-file compilation when needed.
-
-    Target platforms:
-    * vscode/agents: Generates AGENTS.md + .github/ structure (VSCode/GitHub Copilot)
-    * claude: Generates CLAUDE.md + .claude/ structure (Claude Code)
-    * all: Generates both targets (default)
-
-    Advanced options:
-    * --dry-run: Preview compilation without writing files (shows placement decisions)
-    * --verbose: Show detailed source attribution and optimizer analysis
-    * --local-only: Ignore dependencies, compile only local .apm/ primitives
-    * --clean: Remove orphaned AGENTS.md files that are no longer generated
-    """
-    logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
-
-    # --all flag: equivalent to --target all, with deprecation path
-    if compile_all:
+def compile(ctx: click.Context, **params: object) -> None:
+    """Compile APM context into distributed AGENTS.md files."""
+    logger = CommandLogger("compile", verbose=params["verbose"], dry_run=params["dry_run"])
+    target = params["target"]
+    if params["compile_all"]:
         if target is not None:
             logger.error("Cannot use --all together with --target")
             sys.exit(2)
@@ -434,462 +689,45 @@ def compile(
     elif (isinstance(target, str) and target == "all") or (
         isinstance(target, list) and "all" in target
     ):
-        # Surface deprecation through the same UX channel as other
-        # warnings so users actually see it (convergence item 9).
-        # warnings.warn(DeprecationWarning) is invisible by default in
-        # CLI output and would only ever fire for downstream library
-        # consumers running with -W default, which we have none of.
         logger.warning("'--target all' is deprecated; use '--all' instead.")
 
     try:
-        # Check if this is an APM project first
-        from pathlib import Path
-
-        if not Path(APM_YML_FILENAME).exists():
-            logger.error("Not an APM project - no apm.yml found")
-            logger.progress(" To initialize an APM project, run:")
-            logger.progress("   apm init")
-            sys.exit(1)
-
-        # Check if there are any instruction files to compile
-        from ...compilation.constitution import find_constitution
-
-        apm_modules_exists = Path(APM_MODULES_DIR).exists()
-        constitution_exists = find_constitution(Path(".")).exists()
-
-        # Check if .apm directory has actual content
-        apm_dir = Path(APM_DIR)
-        local_apm_has_content = apm_dir.exists() and (
-            any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
-        )
-
-        # If no primitive sources exist, check deeper to provide better feedback
-        if not apm_modules_exists and not local_apm_has_content and not constitution_exists:
-            # Check if .apm directories exist but are empty
-            has_empty_apm = (
-                apm_dir.exists()
-                and not any(apm_dir.rglob("*.instructions.md"))
-                and not any(apm_dir.rglob("*.chatmode.md"))
-            )
-
-            if has_empty_apm:
-                logger.error("No instruction files found in .apm/ directory")
-                logger.progress(" To add instructions, create files like:")
-                logger.progress("   .apm/instructions/coding-standards.instructions.md")
-                logger.progress("   .apm/chatmodes/backend-engineer.chatmode.md")
-            else:
-                logger.error("No APM content found to compile")
-                logger.progress(" To get started:")
-                logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
-                logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
-                logger.progress("   3. Then create .instructions.md or .chatmode.md files")
-
-            if not dry_run:  # Don't exit on dry-run to allow testing
-                sys.exit(1)
-
-        # Validation-only mode
-        if validate:
-            logger.start("Validating APM context...", symbol="gear")
-            compiler = AgentsCompiler(".")
-            try:
-                primitives = discover_primitives(".")
-            except Exception as e:
-                logger.error(f"Failed to discover primitives: {e}")
-                logger.progress(f" Error details: {type(e).__name__}")
-                sys.exit(1)
-            validation_errors = compiler.validate_primitives(primitives)
-            if validation_errors:
-                _display_validation_errors(validation_errors)
-                logger.error(f"Validation failed with {len(validation_errors)} errors")
-                sys.exit(1)
-            logger.success("All primitives validated successfully!")
-            logger.progress(f"Validated {primitives.count()} primitives:")
-            logger.progress(f"  * {len(primitives.chatmodes)} chatmodes")
-            logger.progress(f"  * {len(primitives.instructions)} instructions")
-            logger.progress(f"  * {len(primitives.contexts)} contexts")
-            # Show MCP dependency validation count
-            try:
-                from ...models.apm_package import APMPackage
-
-                apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-                mcp_count = len(apm_pkg.get_mcp_dependencies())
-                if mcp_count > 0:
-                    logger.progress(f"  * {mcp_count} MCP dependencies")
-            except Exception:
-                pass
+        _ensure_compilable_content(logger, params["dry_run"])
+        if params["validate"]:
+            _run_validation_mode(logger)
             return
-
-        # Watch mode
-        if watch:
-            # Resolve the same effective target the one-shot path uses so
-            # `targets: [claude, cursor]` does not silently regress to the
-            # all-families fanout on every recompile (#1345).
-            effective_target, _detection_reason, config_target = _resolve_effective_target(target)
+        if params["watch"]:
             _watch_mode(
-                output,
-                chatmode,
-                no_links,
-                dry_run,
-                verbose=verbose,
-                effective_target=effective_target,
-                target_label_user=target,
-                target_label_config=config_target,
+                params["output"],
+                params["chatmode"],
+                params["no_links"],
+                params["dry_run"],
+                verbose=params["verbose"],
             )
             return
 
         logger.start("Starting context compilation...", symbol="cogs")
-
-        # Auto-detect target if not explicitly provided
-        from ...core.target_detection import (
-            REASON_NO_TARGET_FOLDER,
-            detect_target,
-            get_target_description,
+        effective_target, detection_reason, config_target = _resolve_effective_target(target)
+        _emit_target_provenance(target, config_target, effective_target, detection_reason)
+        config = _build_compile_config(params, effective_target)
+        _log_compile_strategy(
+            logger, config, target, config_target, effective_target, detection_reason
         )
+        if params["dry_run"]:
+            logger.dry_run_notice("showing placement without writing files")
+        if params["verbose"]:
+            logger.verbose_detail("Verbose mode: showing source attribution and optimizer analysis")
 
-        # Get config target from apm.yml if available.  When the file is
-        # absent we proceed with auto-detection; when it is present but
-        # malformed we let the parse error surface so users see exactly
-        # what is wrong (e.g. ``target: opencode,bogus`` -> a ValueError
-        # naming the bad token), rather than silently falling through to
-        # auto-detect.  See #820.
-        from ...models.apm_package import APMPackage
-
-        config_target = None
-        apm_yml_path = Path(APM_YML_FILENAME)
-        if apm_yml_path.exists():
-            apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
-            config_target = apm_pkg.target
-            # Parity with `apm install`: also honor canonical plural
-            # `targets:` key (#1154).  APMPackage only reads singular
-            # `target:`; parse_targets_field handles both keys, raises
-            # ConflictingTargetsError when both appear, and validates
-            # tokens against CANONICAL_TARGETS.  When only `targets:` is
-            # present, apm_pkg.target is None and we promote the plural
-            # list here so compile sees the same schema install sees.
-            if config_target is None:
-                try:
-                    from ...core.apm_yml import parse_targets_field
-                    from ...utils.yaml_io import load_yaml
-
-                    _raw = load_yaml(apm_yml_path)
-                    if isinstance(_raw, dict):
-                        _yaml_targets = parse_targets_field(_raw)
-                        if _yaml_targets:
-                            config_target = (
-                                _yaml_targets[0] if len(_yaml_targets) == 1 else _yaml_targets
-                            )
-                except Exception:
-                    pass
-
-        # Resolve list targets to compiler-understood value
-        compile_target = _resolve_compile_target(target)
-        # Also handle config_target being a list (from apm.yml target: [claude, copilot])
-        compile_config_target = _resolve_compile_target(config_target)
-
-        # A frozenset means multiple compiler families were explicitly
-        # requested -- bypass detect_target() since it only handles strings.
-        if isinstance(compile_target, frozenset):
-            effective_target = compile_target
-            detection_reason = "explicit --target flag"
-        elif isinstance(compile_config_target, frozenset) and compile_target is None:
-            effective_target = compile_config_target
-            detection_reason = "apm.yml target"
-        else:
-            # Pass config_target only when it's a string -- detect_target() is
-            # typed for Optional[str], and a frozenset config_target is already
-            # handled by the branch above.
-            detected_target, detection_reason = detect_target(
-                project_root=Path("."),
-                explicit_target=compile_target,
-                config_target=compile_config_target
-                if isinstance(compile_config_target, str)
-                else None,
-            )
-            # Keep the detected target intact so the compiler can preserve
-            # minimal-mode semantics (AGENTS.md only, no .github side outputs).
-            effective_target = detected_target
-
-        # Emit canonical provenance line BEFORE compilation -- mirrors
-        # `apm install` so users see the same `[i] Targets: ...
-        # (source: ...)` line on both surfaces.  Use the user-facing
-        # source values (target / config_target) NOT the compiler-family
-        # expansion in effective_target -- install shows the schema names
-        # the user wrote (e.g. "copilot"), so compile must too, otherwise
-        # parity drifts (compile would print "agents, vscode" for the
-        # same input).
-        from ...core.target_detection import ResolvedTargets, format_provenance
-        from ...utils.console import _rich_info
-
-        def _coerce_provenance_targets(value):
-            if value is None:
-                return []
-            if isinstance(value, str):
-                return [t.strip() for t in value.split(",") if t.strip()]
-            if isinstance(value, list):
-                return [str(t) for t in value]
-            if isinstance(value, frozenset):
-                return sorted(value)
-            return []
-
-        if detection_reason == "explicit --target flag":
-            _provenance_targets = _coerce_provenance_targets(target)
-            _provenance_source = "--target flag"
-        elif detection_reason == "apm.yml target":
-            _provenance_targets = _coerce_provenance_targets(config_target)
-            _provenance_source = "apm.yml"
-        else:
-            if isinstance(effective_target, frozenset):
-                _provenance_targets = sorted(effective_target)
-            elif isinstance(effective_target, str):
-                _provenance_targets = [effective_target]
-            else:
-                _provenance_targets = []
-            _provenance_source = f"auto-detect ({detection_reason})"
-
-        if _provenance_targets:
-            _rich_info(
-                format_provenance(
-                    ResolvedTargets(
-                        targets=sorted(set(_provenance_targets)),
-                        source=_provenance_source,
-                        auto_create=True,
-                    )
-                ),
-                symbol="info",
-            )
-
-        # Build config with distributed compilation flags (Task 7)
-        config = CompilationConfig.from_apm_yml(
-            output_path=output if output != AGENTS_MD_FILENAME else None,
-            chatmode=chatmode,
-            resolve_links=not no_links if no_links else None,
-            dry_run=dry_run,
-            single_agents=single_agents,
-            trace=verbose,
-            local_only=local_only,
-            debug=verbose,
-            clean_orphaned=clean,
-            target=effective_target,
-        )
-        config.with_constitution = with_constitution
-
-        # Handle distributed vs single-file compilation
-        if config.strategy == "distributed" and not single_agents:
-            # Show target-aware message with detection reason. Use
-            # get_target_description() so any future target added to
-            # target_detection shows up here automatically.
-            if isinstance(effective_target, frozenset):
-                # Multi-target compile (from CLI `--target a,b` OR apm.yml
-                # `target: [a, b]`): show what the compiler will produce.
-                if isinstance(target, list):
-                    _target_label = f"--target {','.join(target)}"
-                elif isinstance(config_target, list):
-                    _target_label = f"apm.yml target: [{', '.join(config_target)}]"
-                else:
-                    _target_label = "multi-target"
-                from ...core.target_detection import (
-                    should_compile_agents_md,
-                    should_compile_claude_md,
-                    should_compile_gemini_md,
-                )
-
-                _parts = []
-                if should_compile_agents_md(effective_target):
-                    _parts.append("AGENTS.md")
-                if should_compile_claude_md(effective_target):
-                    _parts.append("CLAUDE.md")
-                if should_compile_gemini_md(effective_target):
-                    _parts.append("GEMINI.md")
-                logger.progress(f"Compiling for {' + '.join(_parts)} ({_target_label})")
-            elif (
-                isinstance(effective_target, str)
-                and effective_target == "vscode"
-                and detection_reason == REASON_NO_TARGET_FOLDER
-            ):
-                logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
-                logger.progress(
-                    " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
-                    symbol="light_bulb",
-                )
-            else:
-                description = get_target_description(effective_target)
-                logger.progress(f"Compiling for {description} - {detection_reason}")
-
-            if dry_run:
-                logger.dry_run_notice("showing placement without writing files")
-            if verbose:
-                logger.verbose_detail(
-                    "Verbose mode: showing source attribution and optimizer analysis"
-                )
-        else:
-            logger.progress("Using single-file compilation (legacy mode)", symbol="page")
-
-        # Perform compilation
         compiler = AgentsCompiler(".")
         result = compiler.compile(config, logger=logger)
-        compile_has_critical = result.has_critical_security
-
-        if result.success:
-            # Handle different compilation modes
-            if config.strategy == "distributed" and not single_agents:
-                # Distributed compilation results - output already shown by professional formatter
-                # Just show final success message
-                if dry_run:
-                    # Success message for dry run already included in formatter output
-                    pass
-                else:
-                    # Defense-in-depth (#820): don't claim "completed
-                    # successfully" when zero files were emitted.  With
-                    # parse_target_field as the upstream gatekeeper this is
-                    # unreachable in normal flow, but silent zero-effect
-                    # success is the worst-case package-manager DX.
-                    #
-                    # Pattern-based stat scan (instead of a hardcoded key
-                    # list) so new compile-time targets pick up the guard
-                    # automatically: any stat ending in ``_files_written``
-                    # or ``_files_generated`` contributes to the total.
-                    _files_written = sum(
-                        int(v or 0)
-                        for k, v in result.stats.items()
-                        if k.endswith(("_files_written", "_files_generated"))
-                    )
-                    if _files_written > 0:
-                        logger.success(
-                            "Compilation completed successfully!",
-                            symbol="check",
-                        )
-                    else:
-                        # Zero-output compile is the silent-success failure
-                        # mode #820 guards against.  Don't claim success;
-                        # surface what the user can act on.  The cause is
-                        # usually one of: target dirs not present (auto-
-                        # detect found nothing), explicit target rejected
-                        # by policy, or no primitives in the project.
-                        logger.warning(
-                            "Compilation completed but produced no output "
-                            "files. Check that target directories exist "
-                            "(e.g. .github/, .claude/) or set 'target:' "
-                            "in apm.yml / pass --target explicitly."
-                        )
-
-            else:
-                # Traditional single-file compilation - keep existing logic
-                # Perform initial compilation in dry-run to get generated body (without constitution)
-                # TODO: Refactor to use dataclasses.replace() once CompilationConfig fields stabilise
-                intermediate_config = CompilationConfig(
-                    output_path=config.output_path,
-                    chatmode=config.chatmode,
-                    resolve_links=config.resolve_links,
-                    dry_run=True,  # force
-                    with_constitution=config.with_constitution,
-                    strategy="single-file",
-                    target=config.target,
-                )
-                intermediate_result = compiler.compile(intermediate_config)
-
-                if intermediate_result.success:
-                    # Perform constitution injection / preservation
-                    from ...compilation.injector import ConstitutionInjector
-
-                    injector = ConstitutionInjector(base_dir=".")
-                    output_path = Path(config.output_path)
-                    final_content, c_status, c_hash = injector.inject(
-                        intermediate_result.content,
-                        with_constitution=config.with_constitution,
-                        output_path=output_path,
-                    )
-
-                    if not dry_run:
-                        # Only rewrite when content materially changes (creation, update, missing constitution case)
-                        if c_status in ("CREATED", "UPDATED", "MISSING"):
-                            # Defense-in-depth: scan compiled output before writing
-                            from ...security.gate import WARN_POLICY, SecurityGate
-
-                            verdict = SecurityGate.scan_text(
-                                final_content, str(output_path), policy=WARN_POLICY
-                            )
-                            if verdict.has_findings:
-                                actionable = verdict.critical_count + verdict.warning_count
-                                if verdict.has_critical:
-                                    compile_has_critical = True
-                                if actionable:
-                                    logger.warning(
-                                        f"Compiled output contains {actionable} hidden character(s) "
-                                        f"-- run 'apm audit --file {output_path}' to inspect"
-                                    )
-                            try:
-                                from ...compilation.output_writer import CompiledOutputWriter
-
-                                CompiledOutputWriter().write(output_path, final_content)
-                            except OSError as e:
-                                logger.error(f"Failed to write final AGENTS.md: {e}")
-                                sys.exit(1)
-                        else:
-                            logger.progress(
-                                "No changes detected; preserving existing AGENTS.md for idempotency"
-                            )
-
-                    # Report success at the top
-                    if dry_run:
-                        logger.success(
-                            "Context compilation completed successfully (dry run)",
-                            symbol="check",
-                        )
-                    else:
-                        logger.success(
-                            f"Context compiled successfully to {output_path}",
-                        )
-
-                    stats = (
-                        intermediate_result.stats
-                    )  # timestamp removed; stats remain version + counts
-
-                    # Add spacing before summary table
-                    _rich_blank_line()
-
-                    _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run)
-
-                    if dry_run:
-                        preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
-                        _rich_panel(preview, title=" Generated Content Preview", style="cyan")
-                    else:
-                        _display_next_steps(output)
-
-        # Display warnings for all compilation modes
-        if result.warnings:
-            logger.warning(f"Compilation completed with {len(result.warnings)} warning(s):")
-            for warning in result.warnings:
-                logger.warning(f"  {warning}")
-
-        if result.errors:
-            logger.error(f"Compilation failed with {len(result.errors)} errors:")
-            for error in result.errors:
-                logger.error(f"  {error}")
-            sys.exit(1)
-
-        # Check for orphaned packages after successful compilation
-        try:
-            orphaned_packages = _check_orphaned_packages()
-            if orphaned_packages:
-                _rich_blank_line()
-                logger.warning(
-                    f"Found {len(orphaned_packages)} orphaned package(s) that were included in compilation:"
-                )
-                for pkg in orphaned_packages:
-                    logger.progress(f"  * {pkg}")
-                logger.progress(" Run 'apm prune' to remove orphaned packages")
-        except Exception:
-            pass  # Continue if orphan check fails
-
-        # Hard-fail when critical security findings were detected in compiled
-        # output. Consistent with apm install and apm unpack behavior.
+        compile_has_critical = _handle_compile_result(logger, compiler, config, result, params)
+        _report_warnings_errors_and_orphans(logger, result)
         if compile_has_critical:
             logger.error(
                 "Compiled output contains critical hidden characters"
                 " -- run 'apm audit' to inspect, 'apm audit --strip' to clean"
             )
             sys.exit(1)
-
     except ImportError as e:
         logger.error(f"Compilation module not available: {e}")
         logger.progress("This might be a development environment issue.")

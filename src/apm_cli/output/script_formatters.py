@@ -1,7 +1,6 @@
 """Professional CLI output formatters for APM script execution."""
 
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 try:
     from rich.console import Console
@@ -73,11 +72,10 @@ class ScriptExecutionFormatter:
                 lines.append(self._styled("Compiling prompt...", "cyan"))
             else:
                 lines.append("Compiling prompt...")
-        else:  # noqa: PLR5501
-            if self.use_color:
-                lines.append(self._styled(f"Compiling {len(prompt_files)} prompts...", "cyan"))
-            else:
-                lines.append(f"Compiling {len(prompt_files)} prompts...")
+        elif self.use_color:
+            lines.append(self._styled(f"Compiling {len(prompt_files)} prompts...", "cyan"))
+        else:
+            lines.append(f"Compiling {len(prompt_files)} prompts...")
 
         # Show each file being compiled
         for prompt_file in prompt_files:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 import frontmatter
 
@@ -115,7 +115,7 @@ def _extract_input_names(
             if isinstance(item, str):
                 _accept(item)
             elif isinstance(item, dict):
-                for k in item.keys():  # noqa: SIM118
+                for k in item:
                     _accept(k)
             else:
                 rejected.append(repr(item))
@@ -126,7 +126,7 @@ def _extract_input_names(
         return valid, rejected
 
     if isinstance(input_spec, dict):
-        for k in input_spec.keys():  # noqa: SIM118
+        for k in input_spec:
             _accept(k)
         return valid, rejected
 
@@ -453,7 +453,7 @@ class CommandIntegrator(BaseIntegrator):
         project_root: Path,
         *,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
@@ -628,7 +628,7 @@ class CommandIntegrator(BaseIntegrator):
         target: TargetProfile,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> dict:
         """Remove APM-managed command files for a single *target*."""
         mapping = target.primitives.get("commands")
@@ -695,7 +695,7 @@ class CommandIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate prompt files as Claude commands (.claude/commands/).
@@ -716,11 +716,8 @@ class CommandIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
-        self,
-        apm_package,
-        project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+    def sync_integration(
+        self, apm_package, project_root: Path, managed_files: set | None = None
     ) -> dict:
         """Remove APM-managed command files from .claude/commands/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -737,7 +734,7 @@ class CommandIntegrator(BaseIntegrator):
         self,
         package_name: str,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> int:
         """Remove APM-managed command files."""
         stats = self.sync_integration(None, project_root, managed_files=managed_files)
@@ -749,7 +746,7 @@ class CommandIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate prompt files as OpenCode commands (.opencode/commands/)."""
@@ -769,7 +766,7 @@ class CommandIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
     ) -> dict:
         """Remove APM-managed command files from .opencode/commands/."""
         from apm_cli.integration.targets import KNOWN_TARGETS

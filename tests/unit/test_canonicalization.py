@@ -9,8 +9,7 @@ Covers:
 - only_packages filter in _install_apm_dependencies
 """
 
-from pathlib import Path  # noqa: F401
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 

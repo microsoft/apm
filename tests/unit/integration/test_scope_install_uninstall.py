@@ -12,7 +12,6 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Set  # noqa: F401, UP035
 
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator

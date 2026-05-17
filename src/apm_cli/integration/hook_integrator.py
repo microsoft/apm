@@ -47,9 +47,8 @@ import json
 import logging
 import re
 import shutil
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.console import _rich_warning
@@ -599,7 +598,7 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
         target=None,
     ) -> HookIntegrationResult:
@@ -710,7 +709,7 @@ class HookIntegrator(BaseIntegrator):
         project_root: Path,
         *,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
         target=None,
     ) -> HookIntegrationResult:
@@ -962,7 +961,7 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> HookIntegrationResult:
         """Integrate hooks into .claude/settings.json.
@@ -983,7 +982,7 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> HookIntegrationResult:
         """Integrate hooks into .cursor/hooks.json.
@@ -1004,7 +1003,7 @@ class HookIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> HookIntegrationResult:
         """Integrate hooks into .codex/hooks.json.
@@ -1031,7 +1030,7 @@ class HookIntegrator(BaseIntegrator):
         project_root: Path,
         *,
         force: bool = False,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         diagnostics=None,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
@@ -1073,7 +1072,7 @@ class HookIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: set = None,  # noqa: RUF013
+        managed_files: set | None = None,
         targets=None,
     ) -> dict:
         """Remove APM-managed hook files.

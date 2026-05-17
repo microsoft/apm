@@ -4,11 +4,8 @@ Tests the Context Optimization Engine that minimizes irrelevant context
 loaded by agents working in specific directories.
 """
 
-import fnmatch  # noqa: F401
-import os  # noqa: F401
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 
@@ -275,9 +272,9 @@ class TestContextOptimizer:
         optimizer = ContextOptimizer(str(temp_project))
 
         # The general-standards instruction applies to many file types and should go to root
-        general_instruction = [  # noqa: RUF015
+        general_instruction = next(
             inst for inst in sample_instructions if inst.name == "general-standards"
-        ][0]
+        )
 
         placement = optimizer.optimize_instruction_placement([general_instruction])
 
@@ -311,7 +308,7 @@ class TestContextOptimizer:
 
         # Test pollution for placing Python instruction at root
         # This should create pollution for styles directory (no Python files)
-        pollution = optimizer._calculate_inheritance_pollution(temp_project.resolve(), "**/*.py")  # noqa: F841
+        optimizer._calculate_inheritance_pollution(temp_project.resolve(), "**/*.py")
         # Note: pollution calculation depends on child directories existing
         # If styles directory has no Python files, placing Python instruction at root creates pollution
         # The actual value depends on the implementation details
@@ -474,7 +471,7 @@ class TestContextOptimizer:
 
     def test_real_project_optimization_benefits(self, temp_project):
         """Test that optimization provides real benefits over naive placement."""
-        optimizer = ContextOptimizer(str(temp_project))  # noqa: F841
+        ContextOptimizer(str(temp_project))
 
     def test_real_project_optimization_benefits(self, temp_project):  # noqa: F811
         """Test that optimization provides real benefits over naive placement."""

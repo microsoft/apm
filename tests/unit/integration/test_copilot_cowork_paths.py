@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import os  # noqa: F401
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 
 from apm_cli.integration.copilot_cowork_paths import (
-    COWORK_LOCKFILE_PREFIX,  # noqa: F401
-    COWORK_URI_SCHEME,  # noqa: F401
     CoworkResolutionError,
     from_lockfile_path,
     is_cowork_path,

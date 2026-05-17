@@ -15,9 +15,8 @@ lists two remediations (pin the URL scheme, or drop
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch  # noqa: F401
+from unittest.mock import patch
 
-import pytest  # noqa: F401
 from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader

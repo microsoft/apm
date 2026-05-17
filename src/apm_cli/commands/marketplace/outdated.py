@@ -11,13 +11,13 @@ from ...core.command_logger import CommandLogger
 from ...marketplace.errors import BuildError
 from ...marketplace.ref_resolver import RefResolver
 from ...marketplace.semver import satisfies_range
-from . import (
+from . import marketplace
+from ._io import _load_config_or_exit
+from ._outdated import (
     _extract_tag_versions,
-    _load_config_or_exit,
     _load_current_versions,
     _OutdatedRow,
     _render_outdated_table,
-    marketplace,
 )
 
 
@@ -105,7 +105,7 @@ def outdated(offline, include_prerelease, verbose):
 
             # Find highest in-range and highest overall
             in_range = [(sv, tag) for sv, tag in tag_versions if satisfies_range(sv, version_range)]
-            latest_overall_sv, latest_overall_tag = max(tag_versions, key=lambda x: x[0])  # noqa: RUF059
+            _latest_overall_sv, latest_overall_tag = max(tag_versions, key=lambda x: x[0])
             latest_in_range_tag = "--"
             if in_range:
                 _, latest_in_range_tag = max(in_range, key=lambda x: x[0])
@@ -116,7 +116,7 @@ def outdated(offline, include_prerelease, verbose):
             if current == latest_in_range_tag:
                 status = "[+]"
                 up_to_date += 1
-            elif latest_in_range_tag != "--" and current != latest_in_range_tag:  # noqa: PLR1714
+            elif latest_in_range_tag not in ("--", current):
                 status = "[!]"
                 upgradable += 1
             else:

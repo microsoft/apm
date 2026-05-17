@@ -191,7 +191,7 @@ class TestFormatDistributed:
 
         assert result.success
         if result.content_map:
-            content = list(result.content_map.values())[0]  # noqa: RUF015
+            content = next(iter(result.content_map.values()))
             assert "# Constitution" in content
             assert "Be helpful and accurate." in content
 

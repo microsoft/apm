@@ -6,9 +6,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional  # noqa: F401, UP035
-
-import yaml  # noqa: F401
 
 from ..output.script_formatters import ScriptExecutionFormatter
 from ..runtime.utils import find_runtime_binary
@@ -56,7 +53,7 @@ class ScriptRunner:
         if not config:
             if is_virtual_package:
                 # Create minimal config for zero-config virtual package execution
-                print(f"  [i]  Creating minimal apm.yml for zero-config execution...")  # noqa: F541
+                print("  [i]  Creating minimal apm.yml for zero-config execution...")
                 self._create_minimal_config()
                 config = self._load_config()
             else:
@@ -92,7 +89,7 @@ class ScriptRunner:
                 if discovered_prompt:
                     # Signal successful install before attempting runtime detection
                     # This allows E2E tests to validate auto-install without requiring runtime
-                    print(f"\n* Package installed and ready to run\n")  # noqa: F541
+                    print("\n* Package installed and ready to run\n")
                     runtime = self._detect_installed_runtime()
                     command = self._generate_runtime_command(runtime, discovered_prompt)
                     return self._execute_script_command(command, params)
@@ -109,11 +106,11 @@ class ScriptRunner:
         # Build helpful error message
         error_msg = f"Script or prompt '{script_name}' not found.\n"
         error_msg += f"Available scripts in apm.yml: {available}\n"
-        error_msg += f"\nTo find available prompts, check:\n"  # noqa: F541
-        error_msg += f"  - Local: .apm/prompts/, .github/prompts/, or project root\n"  # noqa: F541
-        error_msg += f"  - Dependencies: apm_modules/*/.apm/prompts/\n"  # noqa: F541
-        error_msg += f"\nOr install a prompt package:\n"  # noqa: F541
-        error_msg += f"  apm install <owner>/<repo>/path/to/prompt.prompt.md\n"  # noqa: F541
+        error_msg += "\nTo find available prompts, check:\n"
+        error_msg += "  - Local: .apm/prompts/, .github/prompts/, or project root\n"
+        error_msg += "  - Dependencies: apm_modules/*/.apm/prompts/\n"
+        error_msg += "\nOr install a prompt package:\n"
+        error_msg += "  apm install <owner>/<repo>/path/to/prompt.prompt.md\n"
 
         raise RuntimeError(error_msg)
 
@@ -330,7 +327,7 @@ class ScriptRunner:
         runtime_cmd: str,
         command_part: str,
         prompt_file: str,
-        env_prefix: str = None,  # noqa: RUF013
+        env_prefix: str | None = None,
     ) -> str | None:
         """Parse arguments around the prompt file and delegate to a per-runtime builder.
 
@@ -762,7 +759,7 @@ class ScriptRunner:
             else:
                 error_msg += f"  - {match}\n"
 
-        error_msg += f"\nPlease specify using qualified path:\n"  # noqa: F541
+        error_msg += "\nPlease specify using qualified path:\n"
 
         # Suggest qualified paths based on matches
         for match in matches:
@@ -774,8 +771,8 @@ class ScriptRunner:
                     pkg = path_parts[idx + 2]
                     error_msg += f"  apm run {owner}/{pkg}/{name}\n"
 
-        error_msg += f"\nOr add an explicit script to apm.yml:\n"  # noqa: F541
-        error_msg += f"  scripts:\n"  # noqa: F541
+        error_msg += "\nOr add an explicit script to apm.yml:\n"
+        error_msg += "  scripts:\n"
         error_msg += f'    my-{name}: "copilot -p <path-to-preferred-prompt>"\n'
 
         raise RuntimeError(error_msg)
@@ -910,7 +907,7 @@ class ScriptRunner:
 
         dump_yaml(minimal_config, "apm.yml")
 
-        print(f"  [i]  Created minimal apm.yml for zero-config execution")  # noqa: F541
+        print("  [i]  Created minimal apm.yml for zero-config execution")
 
     def _detect_installed_runtime(self) -> str:
         """Detect installed runtime with priority order.
@@ -995,7 +992,7 @@ class PromptCompiler:
             # Split frontmatter and content
             parts = content.split("---", 2)
             if len(parts) >= 3:
-                frontmatter = parts[1].strip()  # noqa: F841
+                parts[1].strip()
                 main_content = parts[2].strip()
             else:
                 main_content = content
@@ -1117,7 +1114,7 @@ class PromptCompiler:
             f"Prompt file '{prompt_file}' not found.\n"
             f"Searched in:\n"
             + "\n".join(searched_locations)
-            + f"\n\nTip: Run 'apm install' to ensure dependencies are installed."  # noqa: F541
+            + "\n\nTip: Run 'apm install' to ensure dependencies are installed."
         )
 
     def _substitute_parameters(self, content: str, params: dict[str, str]) -> str:

@@ -15,7 +15,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
@@ -501,7 +501,7 @@ def _map_plugin_artifacts(
             shutil.rmtree(target_prompts)
         target_prompts.mkdir(parents=True, exist_ok=True)
 
-        def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):  # noqa: RUF013
+        def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path | None = None):
             """Copy a command file, normalizing .md -> .prompt.md."""
             if rel_to:
                 relative_path = source_file.relative_to(rel_to)

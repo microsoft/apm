@@ -1,11 +1,9 @@
 """Discovery functionality for primitive files."""
 
 import fnmatch
-import glob  # noqa: F401
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..constants import DEFAULT_SKIP_DIRS
 from ..utils.exclude import should_exclude, validate_exclude_patterns
@@ -86,11 +84,11 @@ def discover_primitives(
         PrimitiveCollection: Collection of discovered and parsed primitives.
     """
     collection = PrimitiveCollection()
-    base_path = Path(base_dir)  # noqa: F841
+    Path(base_dir)
     safe_patterns = validate_exclude_patterns(exclude_patterns)
 
     # Find and parse files for each primitive type
-    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():  # noqa: B007
+    for _primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():
         files = find_primitive_files(base_dir, patterns, exclude_patterns=safe_patterns)
 
         for file_path in files:
@@ -154,7 +152,7 @@ def scan_local_primitives(
         exclude_patterns (Optional[List[str]]): Pre-validated exclude patterns.
     """
     # Find and parse files for each primitive type
-    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():  # noqa: B007
+    for _primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():
         files = find_primitive_files(base_dir, patterns, exclude_patterns=exclude_patterns)
 
         # Filter out files from apm_modules to avoid conflicts with dependency scanning
@@ -336,10 +334,7 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
 
 def _matches_any_pattern(rel_path: str, patterns: list[str]) -> bool:
     """Return ``True`` if *rel_path* matches at least one glob pattern."""
-    for pattern in patterns:  # noqa: SIM110
-        if _glob_match(rel_path, pattern):
-            return True
-    return False
+    return any(_glob_match(rel_path, pattern) for pattern in patterns)
 
 
 def _scan_patterns(

@@ -9,7 +9,6 @@ Tests cover:
 
 import shutil
 import tempfile
-from dataclasses import dataclass  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock
 

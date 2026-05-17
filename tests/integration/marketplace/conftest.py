@@ -18,8 +18,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 

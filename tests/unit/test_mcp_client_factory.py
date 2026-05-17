@@ -1,11 +1,10 @@
 """Unit tests for MCP client factory and adapters."""
 
-import json  # noqa: F401
 import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter

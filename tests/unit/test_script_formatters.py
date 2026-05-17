@@ -6,7 +6,7 @@ review) as well as basic happy-path formatting.
 
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
+from unittest.mock import patch
 
 
 class TestFormatContentPreviewRichFallback(unittest.TestCase):

@@ -11,7 +11,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile  # noqa: F401
 from pathlib import Path
 
 import pytest

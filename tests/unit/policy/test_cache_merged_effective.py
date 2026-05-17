@@ -17,28 +17,25 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,
     DEFAULT_CACHE_TTL,
     MAX_STALE_TTL,
-    PolicyFetchResult,  # noqa: F401
     _cache_key,
     _detect_garbage,
     _fetch_from_repo,
-    _fetch_from_url,  # noqa: F401
     _get_cache_dir,
     _is_policy_empty,
     _policy_fingerprint,
-    _policy_to_dict,  # noqa: F401
     _read_cache,
     _read_cache_entry,
     _serialize_policy,
     _stale_fallback_or_error,
     _write_cache,
 )
-from apm_cli.policy.inheritance import merge_policies, resolve_policy_chain  # noqa: F401
+from apm_cli.policy.inheritance import resolve_policy_chain
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import (
     ApmPolicy,

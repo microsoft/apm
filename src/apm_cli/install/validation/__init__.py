@@ -23,14 +23,16 @@ _local_path_no_markers_hint
     Scan a local directory for nested installable packages and hint the user.
 """
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 
 import requests
 
-from ..utils.console import _rich_echo, _rich_info, _rich_warning
-from ..utils.github_host import default_host, is_ado_auth_failure_signal
-from .errors import AuthenticationError
+from apm_cli.install.errors import AuthenticationError
+from apm_cli.utils.console import _rich_echo, _rich_info, _rich_warning
+from apm_cli.utils.github_host import default_host, is_ado_auth_failure_signal
 
 # ---------------------------------------------------------------------------
 # TLS failure helpers

@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 
 from apm_cli.utils.exclude import (
-    _match_double_star,  # noqa: F401
     _match_glob_recursive,
     _matches_pattern,
     should_exclude,
@@ -146,7 +145,6 @@ class TestShouldExclude(unittest.TestCase):
         self.assertFalse(should_exclude(f, self.base, ["docs/**"]))
 
     def test_path_outside_base_not_excluded(self):
-        import os  # noqa: F401
 
         outside = Path(tempfile.mkdtemp())
         try:

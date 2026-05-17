@@ -13,8 +13,6 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
-
 from apm_cli.install import validation
 
 

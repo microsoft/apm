@@ -10,7 +10,6 @@ import pytest
 
 from apm_cli.marketplace.git_stderr import (
     GitErrorKind,
-    TranslatedGitError,  # noqa: F401
     translate_git_stderr,
 )
 

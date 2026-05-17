@@ -555,7 +555,7 @@ class TestInfoAlias(_InfoCmdBase):
         # Check that "info" doesn't appear as a listed command
         # (it may appear in other text, so check the commands section)
         lines = result.output.splitlines()
-        command_lines = [  # noqa: F841
+        [
             l.strip()
             for l in lines  # noqa: E741
             if l.strip().startswith("info") and not l.strip().startswith("info")  # skip false match

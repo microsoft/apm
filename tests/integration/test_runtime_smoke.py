@@ -6,7 +6,6 @@ runtimes can be detected and used by APM, without making actual API calls.
 """
 
 import os
-import shutil  # noqa: F401
 import subprocess
 import sys
 import tempfile
@@ -286,7 +285,6 @@ class TestGoldenScenarioSetup:
             project_dir.mkdir()
 
             # Manually copy template files (simulating what init does)
-            import shutil  # noqa: F401
 
             # Copy template files
             for template_file in ["apm.yml", "hello-world.prompt.md", "README.md"]:

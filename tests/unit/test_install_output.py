@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest  # noqa: F401
-
 from apm_cli.models.dependency import (
     DependencyReference,
     GitReferenceType,

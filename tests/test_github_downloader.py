@@ -1260,7 +1260,6 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
 
     def test_sparse_checkout_success_closes_sha_repo_before_rmtree(self, tmp_path):
         """When sparse checkout succeeds the SHA-capture Repo is closed before _rmtree."""
-        from apm_cli.deps.github_downloader import _close_repo  # noqa
 
         downloader = GitHubPackageDownloader()
         dep = self._make_dep_ref()

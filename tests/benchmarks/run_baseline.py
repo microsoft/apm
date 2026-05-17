@@ -7,7 +7,6 @@ No dependency on cache-clearing functions (those only exist post-optimization).
 Usage: uv run python tests/benchmarks/run_baseline.py
 """
 
-import importlib  # noqa: F401
 import statistics
 import sys
 import time

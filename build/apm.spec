@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 # Check if UPX is available
 def is_upx_available():
     try:
@@ -152,13 +154,15 @@ hiddenimports = [
     'apm_cli.core.docker_args',
     'apm_cli.core.safe_installer',
     'apm_cli.core.token_manager',
+    *collect_submodules('apm_cli.commands.install'),
     'apm_cli.deps',
     'apm_cli.deps.aggregator',
     'apm_cli.deps.verifier',
     'apm_cli.deps.apm_resolver',
-    'apm_cli.deps.github_downloader',
+    *collect_submodules('apm_cli.deps.github_downloader'),
     'apm_cli.deps.package_validator',
     'apm_cli.deps.dependency_graph',
+    *collect_submodules('apm_cli.models.dependency.reference'),
     'apm_cli.models',
     'apm_cli.models.apm_package',
     'apm_cli.output',
@@ -174,6 +178,8 @@ hiddenimports = [
     'apm_cli.runtime.factory',
     'apm_cli.runtime.llm_runtime',
     'apm_cli.runtime.manager',  # Add runtime manager
+    *collect_submodules('apm_cli.integration.skill_integrator'),
+    *collect_submodules('apm_cli.integration.mcp_integrator_install'),
     'apm_cli.utils',
     'apm_cli.utils.helpers',
     'apm_cli.workflow',

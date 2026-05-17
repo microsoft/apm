@@ -12,9 +12,7 @@ import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from functools import lru_cache  # noqa: F401
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 from ..output.models import (
     CompilationResults,

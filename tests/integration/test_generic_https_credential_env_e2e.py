@@ -68,12 +68,13 @@ def _make_resolver() -> AuthResolver:
 # ── Context managers ──────────────────────────────────────────────────
 # Reusable patches shared across multiple tests.
 
-_NO_GIT_CRED = lambda: patch.object(  # noqa: E731
-    GitHubTokenManager, "resolve_credential_from_git", return_value=None
-)
-_NO_GH_CLI = lambda: patch.object(  # noqa: E731
-    GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None
-)
+
+def _NO_GIT_CRED():
+    return patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None)
+
+
+def _NO_GH_CLI():
+    return patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None)
 
 
 # =====================================================================

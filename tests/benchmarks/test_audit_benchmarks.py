@@ -10,12 +10,10 @@ Covers the bottlenecks identified in the complexity audit:
 Run with: uv run pytest tests/benchmarks/test_audit_benchmarks.py -v -m benchmark
 """
 
-import os  # noqa: F401
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import MagicMock
 
 import pytest
 

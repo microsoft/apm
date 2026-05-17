@@ -12,18 +12,14 @@ Run with: uv run pytest tests/benchmarks/test_security_and_resolver_benchmarks.p
 
 import time
 from pathlib import Path
-from typing import List  # noqa: F401, UP035
 
 import pytest
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.dependency_graph import (
-    DependencyNode,  # noqa: F401
     DependencyTree,
     FlatDependencyMap,
 )
-from apm_cli.models.apm_package import APMPackage  # noqa: F401
-from apm_cli.models.dependency.reference import DependencyReference  # noqa: F401
 from apm_cli.security.content_scanner import ContentScanner, ScanFinding
 from apm_cli.utils.exclude import (
     _match_double_star,

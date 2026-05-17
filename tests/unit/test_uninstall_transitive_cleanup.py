@@ -11,7 +11,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 

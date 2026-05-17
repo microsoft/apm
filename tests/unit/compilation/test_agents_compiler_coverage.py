@@ -14,7 +14,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import yaml
 
@@ -193,7 +193,7 @@ class TestAgentsCompilerCompileException(unittest.TestCase):
             "apm_cli.compilation.agents_compiler.discover_primitives",
             return_value=primitives,
         ) as mock_disc:
-            result = compiler.compile(config)  # no primitives passed → discovers  # noqa: F841
+            compiler.compile(config)  # no primitives passed → discovers
 
         mock_disc.assert_called_once_with(str(compiler.base_dir), exclude_patterns=config.exclude)
 

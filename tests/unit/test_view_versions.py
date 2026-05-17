@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from click.testing import CliRunner  # noqa: F401
 
 from apm_cli.commands.view import _display_marketplace_plugin
 from apm_cli.marketplace.models import (

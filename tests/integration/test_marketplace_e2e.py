@@ -61,7 +61,7 @@ def _env_with_home(fake_home):
 
 def _run_apm(apm_command, args, fake_home, cwd=None, timeout=60):
     return subprocess.run(
-        [apm_command] + args,  # noqa: RUF005
+        [apm_command, *args],
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,

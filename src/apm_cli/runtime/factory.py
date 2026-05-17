@@ -1,6 +1,6 @@
 """Runtime factory for automatic runtime detection and instantiation."""
 
-from typing import Any, Dict, List, Optional, Type  # noqa: F401, UP035
+from typing import Any
 
 from .base import RuntimeAdapter
 from .codex_runtime import CodexRuntime
@@ -95,7 +95,7 @@ class RuntimeFactory:
                         return adapter_class(model_name)
                     else:
                         return adapter_class()
-                except Exception as e:  # noqa: F841, S112
+                except Exception:  # noqa: S112
                     # Continue to next runtime if this one fails to initialize
                     continue
 

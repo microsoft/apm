@@ -1,6 +1,5 @@
 """Tests for installation scope resolution."""
 
-import os  # noqa: F401
 from pathlib import Path
 from unittest.mock import patch
 

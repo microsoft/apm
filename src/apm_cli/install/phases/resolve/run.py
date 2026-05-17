@@ -25,6 +25,9 @@ from typing import TYPE_CHECKING
 
 from apm_cli.utils.short_sha import format_short_sha
 
+from .state_capture import _build_dep_base_dirs
+from .transitive_resolve import _apply_only_filter
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -43,7 +46,6 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.install.phases.local_content import _copy_local_package
-    from apm_cli.models.apm_package import DependencyReference
 
     # ------------------------------------------------------------------
     # 1. Lockfile loading
@@ -376,38 +378,7 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 7. --only filtering
     # ------------------------------------------------------------------
-    if ctx.only_packages:
-        # Build identity set from user-supplied package specs.
-        # Accepts any input form: git URLs, FQDN, shorthand.
-        only_identities = builtins.set()
-        for p in ctx.only_packages:
-            try:
-                ref = DependencyReference.parse(p)
-                only_identities.add(ref.get_identity())
-            except Exception:
-                only_identities.add(p)
-
-        # Expand the set to include transitive descendants of the
-        # requested packages so their MCP servers, primitives, etc.
-        # are correctly installed and written to the lockfile.
-        tree = dependency_graph.dependency_tree
-
-        def _collect_descendants(node, visited=None):
-            """Walk the tree and add every child identity (cycle-safe)."""
-            if visited is None:
-                visited = builtins.set()
-            for child in node.children:
-                identity = child.dependency_ref.get_identity()
-                if identity not in visited:
-                    visited.add(identity)
-                    only_identities.add(identity)
-                    _collect_descendants(child, visited)
-
-        for node in tree.nodes.values():
-            if node.dependency_ref.get_identity() in only_identities:
-                _collect_descendants(node)
-
-        deps_to_install = [dep for dep in deps_to_install if dep.get_identity() in only_identities]
+    deps_to_install = _apply_only_filter(ctx, deps_to_install, dependency_graph)
 
     from apm_cli.install.insecure_policy import (
         _check_insecure_dependencies,
@@ -438,63 +409,7 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 7.5 Build dep_key -> parent source_path map for transitive locals
     # ------------------------------------------------------------------
-    # Local deps declared by a transitive parent must be anchored on the
-    # parent's source dir, not on the consumer's project root (#857). We
-    # walk the dependency tree once here and stash the per-dep base_dir
-    # for the integrate phase to consume.
-    #
-    # Keying caveat (PR #1111 review C3): the map is keyed by
-    # ``dep_ref.get_unique_key()``, which for local deps is the raw
-    # ``local_path`` string. Two different parents that both declare the
-    # same relative ``local_path`` (e.g. both write ``../base``) collapse
-    # to the same key. In the current architecture this collision is
-    # latent: the BFS walk in ``APMDependencyResolver`` already dedupes
-    # by ``get_unique_key()`` so only one node ever exists for that key,
-    # and ``DependencyReference.get_install_path`` shares the same
-    # ``apm_modules/_local/<basename>`` slot regardless of the parent.
-    # That means today the "second parent wins" question never actually
-    # fires -- the second occurrence is dropped at queue-time. We still
-    # detect divergent-anchor writes here and warn loudly, both because
-    # silent first-wins behaviour would mask a real bug if BFS dedup ever
-    # changes, and because the warning gives the user a path to diagnose
-    # surprising layouts (e.g. ``../base`` from two parents resolving to
-    # different absolute directories).
-    dep_base_dirs: builtins.dict[str, Path] = {}
-    try:
-        tree = dependency_graph.dependency_tree
-        for node in tree.nodes.values():
-            parent_node = node.parent
-            if parent_node is None or parent_node.package is None:
-                continue
-            anchor = (
-                parent_node.package.source_path
-                if parent_node.package.source_path is not None
-                else project_root
-            )
-            key = node.dependency_ref.get_unique_key()
-            existing = dep_base_dirs.get(key)
-            if existing is not None and existing != anchor:
-                # Divergent anchors for the same dep key. Keep the first
-                # (deterministic) and surface the conflict so the user can
-                # rename one of the colliding refs or use absolute paths.
-                _logger.warning(
-                    "Local dep %r is referenced from two parents with "
-                    "different anchors (%s vs %s). Using the first; "
-                    "rename one of the local_path values or use absolute "
-                    "paths to disambiguate.",
-                    key,
-                    existing,
-                    anchor,
-                )
-                continue
-            dep_base_dirs[key] = anchor
-    except (AttributeError, KeyError):
-        # Tree shape may differ across releases; fall back to empty map
-        # (callers default to project_root anchoring, matching legacy).
-        # Narrow set: real bugs (TypeError/NameError) should surface, not
-        # silently degrade to legacy anchoring.
-        dep_base_dirs = {}
-    ctx.dep_base_dirs = dep_base_dirs
+    ctx.dep_base_dirs = _build_dep_base_dirs(dependency_graph, project_root)
 
     # ------------------------------------------------------------------
     # 8. Orphan detection: intended_dep_keys

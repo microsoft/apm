@@ -4,11 +4,8 @@ Tests the full install/uninstall/deps workflow using local path dependencies.
 These tests create real file structures and invoke CLI commands via subprocess.
 """
 
-import os  # noqa: F401
 import shutil
 import subprocess
-import sys  # noqa: F401
-import tempfile  # noqa: F401
 from pathlib import Path
 
 import pytest

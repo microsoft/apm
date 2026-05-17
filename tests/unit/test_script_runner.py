@@ -1,7 +1,6 @@
 """Unit tests for script runner functionality."""
 
 import os
-import shutil  # noqa: F401
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
@@ -175,7 +174,7 @@ class TestScriptRunner:
         content = "test content"
         env = {"EXISTING_VAR": "value"}
 
-        result = self.script_runner._execute_runtime_command(command, content, env)  # noqa: F841
+        self.script_runner._execute_runtime_command(command, content, env)
 
         # Verify subprocess was called with correct arguments and environment
         mock_subprocess.assert_called_once()
@@ -205,7 +204,7 @@ class TestScriptRunner:
         content = "test content"
         env = {}
 
-        result = self.script_runner._execute_runtime_command(command, content, env)  # noqa: F841
+        self.script_runner._execute_runtime_command(command, content, env)
 
         # Verify subprocess was called with correct arguments and environment
         mock_subprocess.assert_called_once()
@@ -300,7 +299,7 @@ Hello ${input:name}!"""
 
         mock_file.return_value.read.return_value = file_content
 
-        result_path = self.compiler.compile("test.prompt.md", {"name": "World"})  # noqa: F841
+        self.compiler.compile("test.prompt.md", {"name": "World"})
 
         # Check that the compiled content was written correctly
         mock_file.return_value.write.assert_called_once()
@@ -319,7 +318,7 @@ Hello ${input:name}!"""
         file_content = "Hello ${input:name}!"
         mock_file.return_value.read.return_value = file_content
 
-        result_path = self.compiler.compile("test.prompt.md", {"name": "World"})  # noqa: F841
+        self.compiler.compile("test.prompt.md", {"name": "World"})
 
         # Check that the compiled content was written correctly
         mock_file.return_value.write.assert_called_once()
@@ -523,7 +522,7 @@ class TestPromptCompilerDependencyDiscovery:
             file_content = "Hello ${input:name}!"
             mock_file.return_value.read.return_value = file_content
 
-            result_path = self.compiler.compile("test.prompt.md", {"name": "World"})  # noqa: F841
+            self.compiler.compile("test.prompt.md", {"name": "World"})
 
             # Verify _resolve_prompt_file was called
             mock_resolve.assert_called_once_with("test.prompt.md")

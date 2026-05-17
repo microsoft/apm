@@ -1,7 +1,7 @@
 """Utility helpers for APM dependency commands."""
 
 from pathlib import Path
-from typing import Any, Dict  # noqa: F401, UP035
+from typing import Any
 
 from ...constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage
@@ -41,7 +41,7 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     a standalone package.
     """
     parent = candidate.parent
-    while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714
+    while parent not in (apm_modules_path, parent.parent):
         if (parent / APM_YML_FILENAME).exists():
             return True
         parent = parent.parent
@@ -214,7 +214,7 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
                 "hooks": primitives.get("hooks", 0),
             }
         else:
-            context_count, workflow_count = _count_package_files(package_path)  # noqa: RUF059
+            _context_count, workflow_count = _count_package_files(package_path)
             primitives = _count_primitives(package_path)
             return {
                 "name": package_path.name,

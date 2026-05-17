@@ -3,12 +3,10 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch  # noqa: F401
 
 from src.apm_cli.deps.apm_resolver import APMDependencyResolver
 from src.apm_cli.deps.dependency_graph import (
     CircularRef,
-    ConflictInfo,  # noqa: F401
     DependencyGraph,
     DependencyNode,
     DependencyTree,

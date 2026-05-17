@@ -13,10 +13,8 @@ Covers:
 
 from __future__ import annotations
 
-import os  # noqa: F401
 from pathlib import Path
-from typing import Optional  # noqa: F401
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 
@@ -27,13 +25,10 @@ from apm_cli.policy.install_preflight import (
     PolicyBlockError,
     run_policy_preflight,
 )
-from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import (
     ApmPolicy,
-    DependencyPolicy,  # noqa: F401
     McpPolicy,
-    McpTransportPolicy,  # noqa: F401
 )
 
 # -- Fixtures / helpers -----------------------------------------------
@@ -180,7 +175,7 @@ class TestAllowedMCPProceeds:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -274,7 +269,7 @@ class TestDeniedMCPWarn:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -340,7 +335,7 @@ class TestTransportAllow:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -408,7 +403,7 @@ class TestSelfDefined:
             # Under block enforcement, self_defined='warn' means the
             # self_defined check itself passes (it returns passed=True
             # with details). No exception.
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -440,7 +435,7 @@ class TestSelfDefined:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -505,7 +500,7 @@ class TestTrustTransitive:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[transitive_dep],
                 logger=logger,
@@ -544,7 +539,7 @@ class TestDiscoveryOutcomes:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[_make_mcp_dep("io.github.untrusted/evil")],
                 logger=logger,
@@ -586,7 +581,7 @@ class TestDiscoveryOutcomes:
         # Verbose: the info line surfaces with the explanatory text.
         logger = _make_logger(verbose=True)
         with _patch_discover(fetch), patch("apm_cli.core.command_logger._rich_info") as mock_info:
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[_make_mcp_dep("anything/server")],
                 logger=logger,
@@ -629,7 +624,7 @@ class TestHelperReturnShape:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(  # noqa: RUF059
+            _result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=None,
                 logger=logger,

@@ -11,14 +11,10 @@ from ...core.command_logger import CommandLogger
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
 from ...marketplace.ref_resolver import RefResolver
 from ...marketplace.semver import satisfies_range
-from . import (
-    _CheckResult,
-    _extract_tag_versions,
-    _load_config_or_exit,
-    _render_check_table,
-    _warn_duplicate_names,
-    marketplace,
-)
+from . import marketplace
+from ._check import _CheckResult, _render_check_table, _warn_duplicate_names
+from ._io import _load_config_or_exit
+from ._outdated import _extract_tag_versions
 
 
 @marketplace.command(help="Validate marketplace entries are resolvable")
@@ -60,7 +56,7 @@ def check(offline, verbose):
                             tag_name = tag_name[len("refs/tags/") :]
                         elif tag_name.startswith("refs/heads/"):
                             tag_name = tag_name[len("refs/heads/") :]
-                        if tag_name == entry.ref or r.name == entry.ref:  # noqa: PLR1714
+                        if entry.ref in (tag_name, r.name):
                             ref_ok = True
                             break
                     if not ref_ok:

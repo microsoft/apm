@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import textwrap
-from pathlib import Path  # noqa: F401
-from unittest.mock import MagicMock, call, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner

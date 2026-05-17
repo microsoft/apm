@@ -247,12 +247,15 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         Source-level guard: if a future refactor drops the callback,
         this test fails before any malicious package can exploit it.
         """
+        import importlib
         import inspect
 
-        from apm_cli.integration import skill_integrator
-
-        source = inspect.getsource(skill_integrator)
-        # All three copytree calls in skill_integrator.py must reference
+        modules = [
+            importlib.import_module("apm_cli.integration.skill_integrator.class_"),
+            importlib.import_module("apm_cli.integration.skill_integrator.integrate_native"),
+        ]
+        source = "\n".join(inspect.getsource(module) for module in modules)
+        # All three copytree calls in the skill integrator modules must reference
         # ignore_non_content (directly or via a composing helper).
         copytree_count = source.count("shutil.copytree(")
         ignore_non_content_refs = source.count("ignore_non_content")

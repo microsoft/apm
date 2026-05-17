@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import textwrap  # noqa: F401
 from pathlib import Path
 
 import pytest
@@ -10,13 +9,11 @@ import yaml
 
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.policy.inheritance import merge_policies
-from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.policy_checks import (
     _check_compilation_strategy,
     _check_compilation_target,
     _check_dependency_allowlist,
     _check_dependency_denylist,
-    _check_includes_explicit,  # noqa: F401
     _check_mcp_allowlist,
     _check_mcp_denylist,
     _check_mcp_self_defined,

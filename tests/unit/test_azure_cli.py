@@ -1,7 +1,6 @@
 """Unit tests for AzureCliBearerProvider and AzureCliBearerError."""
 
 import subprocess
-import threading  # noqa: F401
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import MagicMock, patch
 

@@ -10,9 +10,7 @@ Covers:
 """
 
 import logging
-from unittest.mock import MagicMock, patch  # noqa: F401
-
-import pytest  # noqa: F401
+from unittest.mock import patch
 
 from apm_cli.marketplace.models import (
     MarketplaceManifest,

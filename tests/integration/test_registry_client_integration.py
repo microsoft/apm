@@ -30,7 +30,7 @@ class TestRegistryClientIntegration(unittest.TestCase):
     def test_list_servers(self):
         """list_servers returns spec-shaped server dicts with 'name'."""
         try:
-            servers, next_cursor = self.client.list_servers(limit=5)  # noqa: RUF059
+            servers, _next_cursor = self.client.list_servers(limit=5)
             self.assertIsInstance(servers, list)
             if servers:
                 # v0.1 spec shape: 'name' is the stable identifier; 'id' may be absent.

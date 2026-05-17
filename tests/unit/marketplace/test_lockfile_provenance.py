@@ -1,7 +1,5 @@
 """Tests for lockfile provenance fields -- serialization round-trip and backward compat."""
 
-import pytest  # noqa: F401
-
 from apm_cli.deps.lockfile import LockedDependency
 
 

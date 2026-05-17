@@ -3,7 +3,6 @@
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 import requests
 
@@ -128,7 +127,7 @@ class MCPServerOperations:
                     if runtime == "copilot":
                         # Copilot stores servers in mcpServers object in mcp-config.json
                         mcp_servers = config.get("mcpServers", {})
-                        for server_name, server_config in mcp_servers.items():  # noqa: B007
+                        for _server_name, server_config in mcp_servers.items():
                             if isinstance(server_config, dict):
                                 server_id = server_config.get("id")
                                 if server_id:
@@ -137,7 +136,7 @@ class MCPServerOperations:
                     elif runtime == "codex":
                         # Codex stores servers as mcp_servers.{name} sections in config.toml
                         mcp_servers = config.get("mcp_servers", {})
-                        for server_name, server_config in mcp_servers.items():  # noqa: B007
+                        for _server_name, server_config in mcp_servers.items():
                             if isinstance(server_config, dict):
                                 server_id = server_config.get("id")
                                 if server_id:
@@ -149,7 +148,7 @@ class MCPServerOperations:
                         # older settings.json-style structures when present.
                         for key in ("servers", "mcpServers"):
                             mcp_servers = config.get(key, {})
-                            for server_name, server_config in mcp_servers.items():  # noqa: B007
+                            for _server_name, server_config in mcp_servers.items():
                                 if isinstance(server_config, dict):
                                     server_id = (
                                         server_config.get("id")
@@ -164,7 +163,7 @@ class MCPServerOperations:
                         # project .mcp.json or user ~/.claude.json -- the adapter normalizes
                         # both shapes to {"mcpServers": {...}} via get_current_config.
                         mcp_servers = config.get("mcpServers", {})
-                        for server_name, server_config in mcp_servers.items():  # noqa: B007
+                        for _server_name, server_config in mcp_servers.items():
                             if isinstance(server_config, dict):
                                 server_id = server_config.get("id")
                                 if server_id:
@@ -254,7 +253,7 @@ class MCPServerOperations:
     def collect_runtime_variables(
         self,
         server_references: list[str],
-        server_info_cache: dict[str, dict | None] = None,  # noqa: RUF013
+        server_info_cache: dict[str, dict | None] | None = None,
     ) -> dict[str, str]:
         """Collect runtime variables from runtime_arguments.variables fields.
 
@@ -309,7 +308,7 @@ class MCPServerOperations:
     def collect_environment_variables(
         self,
         server_references: list[str],
-        server_info_cache: dict[str, dict | None] = None,  # noqa: RUF013
+        server_info_cache: dict[str, dict | None] | None = None,
     ) -> dict[str, str]:
         """Collect environment variables needed by the specified servers.
 
@@ -398,22 +397,21 @@ class MCPServerOperations:
 
                 if existing_value:
                     env_vars[var_name] = existing_value
-                else:  # noqa: PLR5501
-                    # Provide sensible defaults for known variables
-                    if var_name == "GITHUB_DYNAMIC_TOOLSETS":
-                        env_vars[var_name] = "1"  # Enable dynamic toolsets for GitHub MCP server
-                    elif "token" in var_name.lower() or "key" in var_name.lower():
-                        # Map known token vars to appropriate purposes
-                        _tm = GitHubTokenManager()
-                        if "ado" in var_name.lower():
-                            env_vars[var_name] = _tm.get_token_for_purpose("ado_modules") or ""
-                        elif "copilot" in var_name.lower():
-                            env_vars[var_name] = _tm.get_token_for_purpose("copilot") or ""
-                        else:
-                            env_vars[var_name] = _tm.get_token_for_purpose("modules") or ""
+                # Provide sensible defaults for known variables
+                elif var_name == "GITHUB_DYNAMIC_TOOLSETS":
+                    env_vars[var_name] = "1"  # Enable dynamic toolsets for GitHub MCP server
+                elif "token" in var_name.lower() or "key" in var_name.lower():
+                    # Map known token vars to appropriate purposes
+                    _tm = GitHubTokenManager()
+                    if "ado" in var_name.lower():
+                        env_vars[var_name] = _tm.get_token_for_purpose("ado_modules") or ""
+                    elif "copilot" in var_name.lower():
+                        env_vars[var_name] = _tm.get_token_for_purpose("copilot") or ""
                     else:
-                        # For other variables, use empty string or reasonable default
-                        env_vars[var_name] = ""
+                        env_vars[var_name] = _tm.get_token_for_purpose("modules") or ""
+                else:
+                    # For other variables, use empty string or reasonable default
+                    env_vars[var_name] = ""
 
             if is_e2e_tests:
                 print("E2E test mode detected")

@@ -23,10 +23,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..core.command_logger import InstallLogger
-    from ..core.scope import InstallScope
-    from ..install.context import InstallContext
-    from ..utils.diagnostics import DiagnosticCollector
+    from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.context import InstallContext
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 # CRITICAL: Shadow Python builtins that share names with Click commands so
@@ -70,7 +70,7 @@ def _deployed_path_entry(
         raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
-            f"target matched. This is a bug — please report it."
+            f"target matched. This is a bug -- please report it."
         )
 
 
@@ -416,7 +416,7 @@ def integrate_local_content(
     Returns a dict with integration counters and deployed file paths,
     same shape as ``integrate_package_primitives()``.
     """
-    from ..models.apm_package import APMPackage, PackageInfo, PackageType
+    from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 
     local_pkg = APMPackage(
         name="_local",
@@ -510,10 +510,9 @@ def integrate_local_bundle(
     import hashlib
     import shutil
 
+    from apm_cli.core.scope import InstallScope
     from apm_cli.utils.content_hash import compute_file_hash
-
-    from ..core.scope import InstallScope
-    from ..utils.path_security import (
+    from apm_cli.utils.path_security import (
         PathTraversalError,
         ensure_path_within,
         validate_path_segments,

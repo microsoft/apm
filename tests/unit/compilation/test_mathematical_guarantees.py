@@ -4,8 +4,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest  # noqa: F401
-
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
 
@@ -61,7 +59,7 @@ class TestMathematicalGuarantees:
         instructions = [instruction]
 
         # Run optimization
-        placement_map = self.optimizer.optimize_instruction_placement(instructions)  # noqa: F841
+        self.optimizer.optimize_instruction_placement(instructions)
 
         # Test inheritance chain for deep file
         deep_file = self.base_path / "src" / "components" / "widget.py"

@@ -2,7 +2,7 @@
 
 import threading
 from dataclasses import FrozenInstanceError
-from unittest.mock import call, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 
@@ -408,7 +408,7 @@ class TestInfoCategory:
         dc.info("2 dependencies have no pinned version -- pin with #tag")
         with (
             patch(f"{_MOCK_BASE}._get_console", return_value=None),
-            patch(f"{_MOCK_BASE}._rich_echo") as mock_echo,  # noqa: F841
+            patch(f"{_MOCK_BASE}._rich_echo"),
             patch(f"{_MOCK_BASE}._rich_warning"),
             patch(f"{_MOCK_BASE}._rich_info") as mock_info,
         ):
@@ -425,7 +425,7 @@ class TestInfoCategory:
         call_order = []
         with (
             patch(f"{_MOCK_BASE}._get_console", return_value=None),
-            patch(f"{_MOCK_BASE}._rich_echo") as mock_echo,  # noqa: F841
+            patch(f"{_MOCK_BASE}._rich_echo"),
             patch(
                 f"{_MOCK_BASE}._rich_warning",
                 side_effect=lambda *a, **k: call_order.append("warning"),

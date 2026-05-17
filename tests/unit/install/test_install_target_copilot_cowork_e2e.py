@@ -27,10 +27,8 @@ Design notes
 from __future__ import annotations
 
 import json
-import os  # noqa: F401
-import tempfile  # noqa: F401
 from pathlib import Path
-from typing import Any, Dict  # noqa: F401, UP035
+from typing import Any
 from unittest.mock import patch
 
 import pytest

@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
-from apm_cli.models.apm_package import APMPackage, DependencyReference  # noqa: F401
+from apm_cli.models.apm_package import APMPackage
 
 
 @pytest.mark.integration
@@ -116,7 +116,7 @@ class TestGenericGitUrlInstallation:
             self.test_dir / "apm_modules" / "github" / "awesome-copilot" / "skills" / "aspire"
         )
         install_dir.mkdir(parents=True)
-        result = dl.download_package(str(dep), install_dir)  # noqa: F841
+        dl.download_package(str(dep), install_dir)
 
         assert install_dir.exists()
         assert (install_dir / "SKILL.md").exists()
@@ -154,7 +154,7 @@ class TestGenericGitUrlInstallation:
             / "review-and-refactor"
         )
         install_dir.mkdir(parents=True)
-        result = dl.download_package(str(dep), install_dir)  # noqa: F841
+        dl.download_package(str(dep), install_dir)
 
         assert install_dir.exists()
         assert (install_dir / "SKILL.md").exists()

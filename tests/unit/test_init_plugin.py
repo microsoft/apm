@@ -9,7 +9,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 

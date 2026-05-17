@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
-from apm_cli.commands.marketplace.plugin import _SHA_RE, _resolve_ref  # noqa: F401
+from apm_cli.commands.marketplace.plugin import _resolve_ref
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.marketplace.ref_resolver import RemoteRef
 

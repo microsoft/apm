@@ -1,10 +1,7 @@
 """Tests for RuntimeManager token precedence logic."""
 
 import os
-import tempfile  # noqa: F401
 from unittest.mock import Mock, patch
-
-import pytest  # noqa: F401
 
 from src.apm_cli.runtime.manager import RuntimeManager
 
@@ -38,7 +35,6 @@ class TestRuntimeManagerTokenPrecedence:
 
                     # Check that the environment passed to the script has the right precedence
                     assert mock_run.called
-                    call_args = mock_run.call_args  # noqa: F841
                     # The run_embedded_script method should have been called
                     assert result is True
 
@@ -92,7 +88,7 @@ class TestRuntimeManagerTokenPrecedence:
                             mock_script.return_value = "#!/bin/bash\necho 'test'"
                             mock_common.return_value = "#!/bin/bash\necho 'common'"
 
-                            result = self.runtime_manager.setup_runtime("codex")  # noqa: F841
+                            self.runtime_manager.setup_runtime("codex")
 
                             # Check that subprocess was called with the right environment
                             assert mock_subprocess.called, (
@@ -120,7 +116,7 @@ class TestRuntimeManagerTokenPrecedence:
                         mock_script.return_value = "#!/bin/bash\necho 'test'"
                         mock_common.return_value = "#!/bin/bash\necho 'common'"
 
-                        result = self.runtime_manager.setup_runtime("codex")  # noqa: F841
+                        self.runtime_manager.setup_runtime("codex")
 
                         # Should still work, but without tokens
                         assert mock_subprocess.called

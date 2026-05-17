@@ -6,7 +6,6 @@ remote packages (paths via to_dependency_ref(), apm_modules/<repo_url>, etc.)
 must skip it. These tests pin the contract for representative call sites.
 """
 
-from pathlib import Path  # noqa: F401
 from unittest.mock import patch
 
 from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
@@ -82,7 +81,7 @@ class TestUninstallRejectsSelfKey:
         """Trying to uninstall the literal '.' returns 'not found', no crash."""
         logger = CommandLogger(command="uninstall", verbose=False)
         # current_deps are real apm.yml dependency entries; "." is not one.
-        to_remove, not_found = _validate_uninstall_packages(  # noqa: RUF059
+        to_remove, _not_found = _validate_uninstall_packages(
             packages=["."],
             current_deps=["owner/repo"],
             logger=logger,

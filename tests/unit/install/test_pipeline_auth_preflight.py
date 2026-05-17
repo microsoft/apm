@@ -1,6 +1,5 @@
 """Unit tests for --update auth pre-flight probe in pipeline.py (#1015)."""
 
-import subprocess  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -1,12 +1,10 @@
 """Unit tests for content scanning during bundle unpack."""
 
-import os  # noqa: F401
 from pathlib import Path
-from typing import Union  # noqa: F401
 
 import pytest
 
-from apm_cli.bundle.unpacker import UnpackResult, unpack_bundle  # noqa: F401
+from apm_cli.bundle.unpacker import unpack_bundle
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 

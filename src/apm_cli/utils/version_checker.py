@@ -3,7 +3,6 @@
 import re
 import sys
 from pathlib import Path
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 
 def get_latest_version_from_github(repo: str = "microsoft/apm", timeout: int = 2) -> str | None:

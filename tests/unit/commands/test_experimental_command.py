@@ -16,7 +16,7 @@ Coverage:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -435,7 +435,7 @@ class TestJsonOutput:
         result = runner.invoke(experimental, ["list", "--json"])
         rows = json.loads(result.output)
 
-        vv = [r for r in rows if r["name"] == "verbose_version"][0]  # noqa: RUF015
+        vv = next(r for r in rows if r["name"] == "verbose_version")
         assert vv["enabled"] is False
         assert vv["source"] == "default"
 
@@ -449,7 +449,7 @@ class TestJsonOutput:
         result = runner.invoke(experimental, ["list", "--json"])
         rows = json.loads(result.output)
 
-        vv = [r for r in rows if r["name"] == "verbose_version"][0]  # noqa: RUF015
+        vv = next(r for r in rows if r["name"] == "verbose_version")
         assert vv["enabled"] is True
         assert vv["source"] == "config"
 
@@ -479,7 +479,6 @@ class TestMalformedValueReset:
         """reset --yes removes a registered flag with a string value (e.g. 'true')."""
         import json as _json
 
-        import apm_cli.config as _conf  # noqa: F401
         from apm_cli.commands.experimental import experimental
 
         # Write a malformed config directly
@@ -518,7 +517,6 @@ class TestMalformedValueReset:
         """reset --yes handles bool override + malformed value + stale key together."""
         import json as _json
 
-        import apm_cli.config as _conf  # noqa: F401
         from apm_cli.commands.experimental import experimental
 
         config_dir = tmp_path / ".apm-mixed"

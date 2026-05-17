@@ -330,9 +330,9 @@ class TestSkillIntegrator:
         name: str = "test-pkg",
         version: str = "1.0.0",
         commit: str = "abc123",
-        install_path: Path = None,  # noqa: RUF013
-        source: str = None,  # noqa: RUF013
-        description: str = None,  # noqa: RUF013
+        install_path: Path | None = None,
+        source: str | None = None,
+        description: str | None = None,
         dependency_ref: DependencyReference = None,
         package_type: PackageType = None,
         content_type: "PackageContentType" = None,
@@ -1007,9 +1007,9 @@ class TestCopySkillToTarget:
         name: str = "test-pkg",
         version: str = "1.0.0",
         commit: str = "abc123",
-        install_path: Path = None,  # noqa: RUF013
-        source: str = None,  # noqa: RUF013
-        description: str = None,  # noqa: RUF013
+        install_path: Path | None = None,
+        source: str | None = None,
+        description: str | None = None,
         dependency_ref: DependencyReference = None,
         pkg_type: PackageContentType = None,
         package_type: PackageType = PackageType.CLAUDE_SKILL,
@@ -1398,8 +1398,8 @@ class TestNativeSkillIntegration:
         name: str = "test-pkg",
         version: str = "1.0.0",
         commit: str = "abc123",
-        install_path: Path = None,  # noqa: RUF013
-        source: str = None,  # noqa: RUF013
+        install_path: Path | None = None,
+        source: str | None = None,
         dependency_ref: DependencyReference = None,
         package_type: PackageType = PackageType.CLAUDE_SKILL,
     ) -> PackageInfo:
@@ -1864,8 +1864,8 @@ class TestClaudeSkillsCompatibilityCopy:
         name: str = "test-pkg",
         version: str = "1.0.0",
         commit: str = "abc123",
-        install_path: Path = None,  # noqa: RUF013
-        source: str = None,  # noqa: RUF013
+        install_path: Path | None = None,
+        source: str | None = None,
         dependency_ref: DependencyReference = None,
         package_type: PackageType = PackageType.CLAUDE_SKILL,
     ) -> PackageInfo:
@@ -2161,7 +2161,7 @@ Detailed instructions here.
         paths = copy_skill_to_target(package_info, skill_source, self.project_root)
 
         assert len(paths) == 1
-        github_path = paths[0]  # noqa: F841
+        paths[0]
 
     # ========== Test: sync_integration cleans both locations ==========
 
@@ -2413,7 +2413,7 @@ class TestSubSkillPromotion:
     def _create_package_info(
         self,
         name: str = "test-pkg",
-        install_path: Path = None,  # noqa: RUF013
+        install_path: Path | None = None,
         package_type: PackageType = PackageType.CLAUDE_SKILL,
     ) -> PackageInfo:
         package = APMPackage(
@@ -2765,7 +2765,7 @@ class TestSubSkillContentSkipAndCollisionProtection:
     def _create_package_info(
         self,
         name: str = "test-pkg",
-        install_path: Path = None,  # noqa: RUF013
+        install_path: Path | None = None,
         package_type: PackageType = PackageType.CLAUDE_SKILL,
     ) -> PackageInfo:
         package = APMPackage(
@@ -3012,8 +3012,8 @@ class TestCursorSkillIntegration:
         name: str = "test-pkg",
         version: str = "1.0.0",
         commit: str = "abc123",
-        install_path: Path = None,  # noqa: RUF013
-        source: str = None,  # noqa: RUF013
+        install_path: Path | None = None,
+        source: str | None = None,
         dependency_ref: DependencyReference = None,
         package_type: PackageType = PackageType.CLAUDE_SKILL,
     ) -> PackageInfo:
@@ -3783,7 +3783,6 @@ def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa:
     Returns:
         A frozen TargetProfile suitable for cowork deployment tests.
     """
-    from apm_cli.integration.targets import TargetProfile  # noqa: F401
 
     return _dc_replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
@@ -3826,7 +3825,7 @@ class TestIntegrateNativeSkillCowork:
 
         integrator = SkillIntegrator()
         with patch.object(integrator, "_build_ownership_maps", return_value=({}, {})):
-            result = integrator._integrate_native_skill(  # noqa: F841
+            integrator._integrate_native_skill(
                 pkg_info,
                 project_root,
                 pkg_dir / "SKILL.md",
@@ -3903,7 +3902,7 @@ class TestPromoteSubSkillsCowork:
         project_root.mkdir()
 
         integrator = SkillIntegrator()
-        count, deployed = integrator._promote_sub_skills_standalone(  # noqa: RUF059
+        count, _deployed = integrator._promote_sub_skills_standalone(
             pkg_info,
             project_root,
             targets=[cowork_target],
@@ -3928,7 +3927,7 @@ class TestPromoteSubSkillsCowork:
 
         # Should NOT raise ValueError from relative_to
         integrator = SkillIntegrator()
-        count, deployed = integrator._promote_sub_skills_standalone(  # noqa: RUF059
+        count, _deployed = integrator._promote_sub_skills_standalone(
             pkg_info,
             project_root,
             targets=[cowork_target],
@@ -3953,7 +3952,7 @@ class TestPromoteSubSkillsCowork:
 
         integrator = SkillIntegrator()
         with patch.object(integrator, "_build_ownership_maps", return_value=({}, {})):
-            result = integrator._integrate_native_skill(  # noqa: F841
+            integrator._integrate_native_skill(
                 pkg_info,
                 project_root,
                 pkg_dir / "SKILL.md",

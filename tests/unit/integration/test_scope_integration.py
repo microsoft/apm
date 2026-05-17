@@ -11,8 +11,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import pytest  # noqa: F401
-
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator

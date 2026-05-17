@@ -317,10 +317,6 @@ description: "Test instruction"
 
     def test_compile_with_both_github_and_ado_deps(self, temp_project):
         """Test compilation with both GitHub and ADO dependencies."""
-        from apm_cli.compilation.agents_compiler import (
-            AgentsCompiler,  # noqa: F401
-            CompilationConfig,  # noqa: F401
-        )
 
         # Create apm.yml with both
         self._create_apm_yml(

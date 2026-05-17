@@ -1,7 +1,5 @@
 """Test Runtime Factory."""
 
-from unittest.mock import Mock, patch  # noqa: F401
-
 import pytest
 
 from apm_cli.runtime.factory import RuntimeFactory

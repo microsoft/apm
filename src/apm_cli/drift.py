@@ -51,8 +51,7 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
-from pathlib import Path  # noqa: F401
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile

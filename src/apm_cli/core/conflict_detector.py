@@ -1,6 +1,6 @@
 """MCP server conflict detection and resolution."""
 
-from typing import Any, Dict  # noqa: F401, UP035
+from typing import Any
 
 from ..adapters.client.base import MCPClientAdapter
 
@@ -49,7 +49,7 @@ class MCPConflictDetector:
                 return True
 
             # Check if any existing server resolves to the same canonical name
-            for existing_name in existing_servers.keys():  # noqa: SIM118
+            for existing_name in existing_servers:
                 if existing_name != canonical_name:  # Avoid duplicate checking
                     try:
                         existing_canonical = self.get_canonical_server_name(existing_name)
@@ -146,7 +146,7 @@ class MCPConflictDetector:
             )
 
         # Check if any existing server resolves to the same canonical name
-        for existing_name in existing_servers.keys():  # noqa: SIM118
+        for existing_name in existing_servers:
             if existing_name != canonical_name:  # Avoid duplicate reporting
                 existing_canonical = self.get_canonical_server_name(existing_name)
                 if existing_canonical == canonical_name:

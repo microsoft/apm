@@ -13,7 +13,7 @@ from src.apm_cli.integration.prompt_integrator import PromptIntegrator
 from src.apm_cli.models.apm_package import APMPackage, DependencyReference
 
 
-def create_test_integrated_file(path: Path, source_repo: str, source_dependency: str = None):  # noqa: RUF013
+def create_test_integrated_file(path: Path, source_repo: str, source_dependency: str | None = None):
     """Create a test integrated file with APM metadata.
 
     Args:

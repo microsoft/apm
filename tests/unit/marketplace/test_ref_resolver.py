@@ -353,7 +353,7 @@ class TestResolveRefSha:
         sha = resolver.resolve_ref_sha("acme/tools", ref="main")
         assert sha == _SHA_B
         # Verify command uses the ref directly (no --tags --heads).
-        args, kwargs = mock_run.call_args  # noqa: RUF059
+        args, _kwargs = mock_run.call_args
         cmd = args[0]
         assert cmd[:2] == ["git", "ls-remote"]
         assert cmd[-1] == "main"

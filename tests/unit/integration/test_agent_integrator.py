@@ -27,12 +27,12 @@ class TestAgentIntegrator:
     def test_should_integrate_always_returns_true(self):
         """Test integration is always enabled (zero-config approach)."""
         # No .github/ directory needed
-        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
+        assert self.integrator.should_integrate(self.project_root)
 
         # Even with .github/ present
         github_dir = self.project_root / ".github"
         github_dir.mkdir()
-        assert self.integrator.should_integrate(self.project_root) == True  # noqa: E712
+        assert self.integrator.should_integrate(self.project_root)
 
     def test_find_agent_files_in_root_new_format(self):
         """Test finding .agent.md files in package root."""
@@ -963,7 +963,7 @@ You are a security reviewer. Analyze code for vulnerabilities."""
         (package_dir / "security.agent.md").write_text("# Security Agent")
 
         package_info = self._create_package_info(package_dir)
-        result = self.integrator.integrate_package_agents(package_info, self.project_root)  # noqa: F841
+        self.integrator.integrate_package_agents(package_info, self.project_root)
 
         assert (self.project_root / ".github" / "agents" / "security.agent.md").exists()
         assert not (self.project_root / ".cursor" / "agents").exists()

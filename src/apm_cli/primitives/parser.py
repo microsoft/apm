@@ -1,15 +1,13 @@
 """Parser for primitive definition files."""
 
-import os  # noqa: F401
 from pathlib import Path
-from typing import List, Union  # noqa: F401, UP035
 
 import frontmatter
 
 from .models import Chatmode, Context, Instruction, Primitive, Skill
 
 
-def parse_skill_file(file_path: str | Path, source: str = None) -> Skill:  # noqa: RUF013
+def parse_skill_file(file_path: str | Path, source: str | None = None) -> Skill:
     """Parse a SKILL.md file.
 
     SKILL.md files are package meta-guides that describe how to use the package.
@@ -50,7 +48,7 @@ def parse_skill_file(file_path: str | Path, source: str = None) -> Skill:  # noq
         raise ValueError(f"Failed to parse SKILL.md file {file_path}: {e}")  # noqa: B904
 
 
-def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive:  # noqa: RUF013
+def parse_primitive_file(file_path: str | Path, source: str | None = None) -> Primitive:
     """Parse a primitive file.
 
     Determines the primitive type based on file extension and parses accordingly.
@@ -99,7 +97,7 @@ def _parse_chatmode(
     file_path: Path,
     metadata: dict,
     content: str,
-    source: str = None,  # noqa: RUF013
+    source: str | None = None,
 ) -> Chatmode:
     """Parse a chatmode primitive.
 
@@ -130,7 +128,7 @@ def _parse_instruction(
     file_path: Path,
     metadata: dict,
     content: str,
-    source: str = None,  # noqa: RUF013
+    source: str | None = None,
 ) -> Instruction:
     """Parse an instruction primitive.
 
@@ -161,7 +159,7 @@ def _parse_context(
     file_path: Path,
     metadata: dict,
     content: str,
-    source: str = None,  # noqa: RUF013
+    source: str | None = None,
 ) -> Context:
     """Parse a context primitive.
 

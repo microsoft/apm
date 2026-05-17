@@ -13,8 +13,9 @@ Exit-code contract (consumed by the ``apm audit --ci`` command):
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
@@ -532,8 +533,19 @@ def run_baseline_checks(
     # Parse manifest ONCE -- this function owns parse-error handling.
     manifest = None
     if apm_yml_path.exists():
-        manifest = _parse_apm_yml_safe(apm_yml_path, result)
-        if manifest is None:
+        import yaml
+
+        try:
+            clear_apm_yml_cache()
+            manifest = APMPackage.from_apm_yml(apm_yml_path)
+        except (ValueError, yaml.YAMLError, OSError) as exc:
+            result.checks.append(
+                CheckResult(
+                    name="manifest-parse",
+                    passed=False,
+                    message=f"Cannot parse apm.yml: {exc} -- fix the YAML syntax error in apm.yml and re-run.",
+                )
+            )
             return result
 
     # Check 1: Lockfile exists (manifest already parsed, pass it in)

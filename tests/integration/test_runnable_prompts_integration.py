@@ -1,8 +1,6 @@
 """Integration tests for runnable prompts feature."""
 
 import os
-import subprocess  # noqa: F401
-import tempfile  # noqa: F401
 from pathlib import Path
 
 import pytest
@@ -100,8 +98,6 @@ Analyze this code.
 """)
 
         os.chdir(tmp_path)
-
-        from unittest.mock import patch  # noqa: F401
 
         from apm_cli.core.script_runner import ScriptRunner
 

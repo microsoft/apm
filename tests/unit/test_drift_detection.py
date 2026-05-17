@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional  # noqa: F401, UP035
-from unittest.mock import MagicMock  # noqa: F401
 
 from apm_cli.drift import (
     build_download_ref,

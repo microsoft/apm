@@ -1,13 +1,11 @@
 """Runner for workflow execution."""
 
 import os
-import re  # noqa: F401
 
 from colorama import Fore, Style
 
 from ..runtime.factory import RuntimeFactory
 from .discovery import discover_workflows
-from .parser import WorkflowDefinition  # noqa: F401
 
 # Color constants (matching cli.py)
 WARNING = f"{Fore.YELLOW}"

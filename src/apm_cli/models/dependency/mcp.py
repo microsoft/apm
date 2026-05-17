@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 from urllib.parse import urlparse
 
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
@@ -257,11 +257,11 @@ class MCPDependency:
                     "\n".join(
                         [
                             f"'command' contains whitespace in MCP dependency '{self.name}'.",
-                            f"  Rule: 'command' must be a single binary path -- APM does not split on whitespace. Use 'args' for additional arguments.",  # noqa: F541
+                            "  Rule: 'command' must be a single binary path -- APM does not split on whitespace. Use 'args' for additional arguments.",
                             f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
                             f"  Fix:  command: {first}",
                             f"        args: {suggested_args}",
-                            f"  See:  https://microsoft.github.io/apm/guides/mcp-servers/",  # noqa: F541
+                            "  See:  https://microsoft.github.io/apm/guides/mcp-servers/",
                         ]
                     )
                 )

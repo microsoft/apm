@@ -1,9 +1,6 @@
 """Tests for Windows platform support in RuntimeManager and ScriptRunner."""
 
-import sys  # noqa: F401
 from unittest.mock import MagicMock, patch
-
-import pytest  # noqa: F401
 
 from apm_cli.core.script_runner import ScriptRunner
 

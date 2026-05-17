@@ -22,7 +22,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Tuple  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
@@ -131,7 +130,7 @@ class TestPublicShorthandPath:
         assert ok, f"clone failed; URLs tried: {urls}"
         assert any(u.startswith("https://") for u in urls)
         assert not any(u.startswith("git@") or u.startswith("ssh://") for u in urls), (
-            "shorthand-default must not silently try SSH; URLs tried: %s" % urls  # noqa: UP031
+            f"shorthand-default must not silently try SSH; URLs tried: {urls}"
         )
 
 
@@ -204,11 +203,11 @@ class TestEnvProtocolOverride:
 @_REQUIRES_SSH
 class TestAllowFallbackEscapeHatch:
     def test_explicit_ssh_with_allow_fallback_can_reach_https(self, tmp_clone_dir, isolated_env):
-        ok, urls = _attempt_clone(  # noqa: RUF059
+        _ok, urls = _attempt_clone(
             "ssh://git@nonexistent-host-apm-test.invalid/foo/bar.git",
             target_dir=tmp_clone_dir / "c",
             allow_fallback=True,
         )
         assert any(u.startswith("https://") for u in urls), (
-            "allow_fallback must permit cross-protocol retry; URLs tried: %s" % urls  # noqa: UP031
+            f"allow_fallback must permit cross-protocol retry; URLs tried: {urls}"
         )

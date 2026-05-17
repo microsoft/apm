@@ -18,7 +18,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from apm_cli.integration.hook_integrator import (
-    HookIntegrationResult,  # noqa: F401
     HookIntegrator,
     _filter_hook_files_for_target,
     _reinject_apm_source_from_sidecar,
@@ -430,7 +429,7 @@ class TestVSCodeIntegration:
         pkg_info = _make_package_info(pkg_dir)
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks(pkg_info, temp_project)  # noqa: F841
+        integrator.integrate_package_hooks(pkg_info, temp_project)
         assert (temp_project / ".github" / "hooks").exists()
 
 
@@ -584,7 +583,7 @@ class TestClaudeIntegration:
         pkg_info = _make_package_info(pkg_dir, "ralph-loop")
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)  # noqa: F841
+        integrator.integrate_package_hooks_claude(pkg_info, temp_project)
 
         settings = json.loads(settings_path.read_text())
         # Original settings preserved
@@ -1211,7 +1210,7 @@ class TestCursorIntegration:
         pkg_info = _make_package_info(pkg_dir, "ralph-loop")
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks_cursor(pkg_info, temp_project)  # noqa: F841
+        integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
 
         config = json.loads(hooks_path.read_text())
         # User hook preserved
@@ -1263,7 +1262,7 @@ class TestCursorIntegration:
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks_cursor(pkg_info, temp_project)  # noqa: F841
+        integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
 
         # Verify scripts exist under .cursor/hooks/hookify/
         scripts_dir = temp_project / ".cursor" / "hooks" / "hookify" / "hooks"
@@ -1299,7 +1298,7 @@ class TestCursorIntegration:
         )
 
         integrator = HookIntegrator()
-        stats = integrator.sync_integration(None, temp_project)  # noqa: F841
+        integrator.sync_integration(None, temp_project)
 
         updated = json.loads(hooks_path.read_text())
         # APM entries removed, user entries preserved
@@ -1400,7 +1399,7 @@ class TestSyncIntegration:
         settings_path.write_text(json.dumps(settings))
 
         integrator = HookIntegrator()
-        stats = integrator.sync_integration(None, temp_project)  # noqa: F841
+        integrator.sync_integration(None, temp_project)
 
         updated_settings = json.loads(settings_path.read_text())
         # Model preserved
@@ -1824,7 +1823,7 @@ class TestScriptPathRewriting:
         (temp_project / "secret.ps1").write_text("bad")
 
         integrator = HookIntegrator()
-        cmd, scripts = integrator._rewrite_command_for_target(  # noqa: RUF059
+        _cmd, scripts = integrator._rewrite_command_for_target(
             ".\\..\\secret.ps1",
             pkg_dir,
             "my-pkg",
@@ -2429,7 +2428,7 @@ class TestCodexHookIntegration:
 
         pi = self._make_package_info()
         integrator = HookIntegrator()
-        result = integrator.integrate_package_hooks_codex(pi, self.root)  # noqa: F841
+        integrator.integrate_package_hooks_codex(pi, self.root)
 
         data = json.loads(hooks_json.read_text())
         # User hook preserved
@@ -2834,7 +2833,7 @@ class TestScopeResolvedHookDeployment:
         pi = _make_package_info(self.pkg_dir, "scope-pkg")
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks(  # noqa: F841
+        integrator.integrate_package_hooks(
             pi,
             self.root,
             target=copilot_target,
