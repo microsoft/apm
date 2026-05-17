@@ -659,11 +659,15 @@ class HookIntegrator(BaseIntegrator):
     def _is_dependency_package_dir(path: Path) -> bool:
         """Return True when *path* looks like an installed package root."""
         try:
+            hooks = path / "hooks"
+            apm_hooks = path / ".apm" / "hooks"
+            apm_yml = path / "apm.yml"
+            skill_md = path / "SKILL.md"
             return (
-                (path / "hooks").is_dir()
-                or (path / ".apm" / "hooks").is_dir()
-                or (path / "apm.yml").is_file()
-                or (path / "SKILL.md").is_file()
+                (hooks.is_dir() and not hooks.is_symlink())
+                or (apm_hooks.is_dir() and not apm_hooks.is_symlink())
+                or (apm_yml.is_file() and not apm_yml.is_symlink())
+                or (skill_md.is_file() and not skill_md.is_symlink())
             )
         except OSError:
             return False
