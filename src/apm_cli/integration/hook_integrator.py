@@ -55,7 +55,11 @@ import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.console import _rich_warning
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
@@ -664,17 +668,166 @@ class HookIntegrator(BaseIntegrator):
         apm_modules = project_root / "apm_modules"
         if not apm_modules.is_dir():
             return set()
-        sources: set[str] = set()
-        for path in apm_modules.rglob("*"):
-            if not path.is_dir():
-                continue
-            if (
+
+        lockfile_paths, lockfile_readable = HookIntegrator._lockfile_dependency_paths(project_root)
+        if lockfile_readable:
+            sources: set[str] = set()
+            for rel_path in lockfile_paths:
+                package_path = HookIntegrator._safe_dependency_path(apm_modules, rel_path)
+                if package_path is None:
+                    continue
+                HookIntegrator._add_dependency_source(sources, package_path)
+            return sources
+
+        return HookIntegrator._bounded_dependency_hook_sources(apm_modules)
+
+    @staticmethod
+    def _lockfile_dependency_paths(project_root: Path) -> tuple[list[str], bool]:
+        """Return installed dependency paths from a readable lockfile, if present."""
+        try:
+            from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, LockFile, get_lockfile_path
+
+            lockfile_path = get_lockfile_path(project_root)
+            if not lockfile_path.exists():
+                legacy_path = project_root / LEGACY_LOCKFILE_NAME
+                if legacy_path.exists():
+                    lockfile_path = legacy_path
+            if not lockfile_path.exists():
+                return [], False
+            lockfile = LockFile.read(lockfile_path)
+            if lockfile is None:
+                return [], False
+            return lockfile.get_installed_paths(project_root / "apm_modules"), True
+        except (AttributeError, OSError, TypeError, ValueError, KeyError):
+            return [], False
+
+    @staticmethod
+    def _safe_dependency_path(apm_modules: Path, rel_path: str) -> Path | None:
+        """Return a lockfile dependency path without escaping apm_modules."""
+        try:
+            validate_path_segments(
+                rel_path,
+                context="lockfile dependency path",
+                reject_empty=True,
+            )
+            package_path = apm_modules / Path(rel_path)
+            ensure_path_within(package_path, apm_modules)
+            if HookIntegrator._has_symlink_component(apm_modules, package_path):
+                return None
+            return package_path
+        except (OSError, PathTraversalError, RuntimeError, TypeError):
+            return None
+
+    @staticmethod
+    def _has_symlink_component(apm_modules: Path, package_path: Path) -> bool:
+        """Return True when any component below apm_modules is a symlink."""
+        try:
+            relative = package_path.relative_to(apm_modules)
+            current = apm_modules
+            for part in relative.parts:
+                current = current / part
+                if current.is_symlink():
+                    return True
+            return False
+        except (OSError, ValueError):
+            return True
+
+    @staticmethod
+    def _is_dependency_package_dir(path: Path) -> bool:
+        """Return True when *path* looks like an installed package root."""
+        try:
+            return (
                 (path / "hooks").is_dir()
                 or (path / ".apm" / "hooks").is_dir()
                 or (path / "apm.yml").is_file()
                 or (path / "SKILL.md").is_file()
+            )
+        except OSError:
+            return False
+
+    @staticmethod
+    def _add_dependency_source(sources: set[str], package_path: Path) -> bool:
+        """Add package_path.name to sources when package_path is a package root."""
+        try:
+            if (
+                not package_path.is_dir()
+                or package_path.is_symlink()
+                or not HookIntegrator._is_dependency_package_dir(package_path)
             ):
-                sources.add(path.name)
+                return False
+        except OSError:
+            return False
+        sources.add(package_path.name)
+        return True
+
+    @staticmethod
+    def _child_dependency_dirs(path: Path) -> list[Path]:
+        """Return direct non-hidden child dirs without following symlink roots."""
+        try:
+            if path.is_symlink() or not path.is_dir():
+                return []
+            return sorted(
+                [
+                    child
+                    for child in path.iterdir()
+                    if not child.is_symlink() and child.is_dir() and not child.name.startswith(".")
+                ],
+                key=lambda child: child.name,
+            )
+        except OSError:
+            return []
+
+    @staticmethod
+    def _collect_known_subdirectory_sources(sources: set[str], repo_root: Path) -> None:
+        """Collect dependency sources from known virtual subdirectory layouts."""
+        for namespace in ("collections", "skills"):
+            for package_path in HookIntegrator._child_dependency_dirs(repo_root / namespace):
+                HookIntegrator._add_dependency_source(sources, package_path)
+
+        apm_dir = repo_root / ".apm"
+        try:
+            if apm_dir.is_symlink() or not apm_dir.is_dir():
+                return
+        except OSError:
+            return
+        for primitive in ("agents", "commands", "hooks", "instructions", "prompts", "skills"):
+            for package_path in HookIntegrator._child_dependency_dirs(apm_dir / primitive):
+                HookIntegrator._add_dependency_source(sources, package_path)
+
+    @staticmethod
+    def _collect_remote_dependency_sources(sources: set[str], namespace: Path) -> None:
+        """Collect fallback sources from explicit remote install layouts."""
+        if HookIntegrator._add_dependency_source(sources, namespace):
+            return
+
+        for repo_or_project in HookIntegrator._child_dependency_dirs(namespace):
+            if HookIntegrator._add_dependency_source(sources, repo_or_project):
+                continue
+
+            HookIntegrator._collect_known_subdirectory_sources(sources, repo_or_project)
+
+            for ado_repo in HookIntegrator._child_dependency_dirs(repo_or_project):
+                if HookIntegrator._add_dependency_source(sources, ado_repo):
+                    continue
+                HookIntegrator._collect_known_subdirectory_sources(sources, ado_repo)
+
+    @staticmethod
+    def _collect_local_dependency_sources(sources: set[str], local_namespace: Path) -> None:
+        """Collect apm_modules/_local/<name> package roots only."""
+        for local_package in HookIntegrator._child_dependency_dirs(local_namespace):
+            HookIntegrator._add_dependency_source(sources, local_package)
+
+    @staticmethod
+    def _bounded_dependency_hook_sources(apm_modules: Path) -> set[str]:
+        """Fallback source scan limited to known apm_modules package layouts."""
+        sources: set[str] = set()
+
+        for package_root in HookIntegrator._child_dependency_dirs(apm_modules):
+            if package_root.name == "_local":
+                HookIntegrator._collect_local_dependency_sources(sources, package_root)
+                continue
+
+            HookIntegrator._collect_remote_dependency_sources(sources, package_root)
         return sources
 
     def _should_remove_prior_merged_entry(
