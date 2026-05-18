@@ -696,6 +696,7 @@ def compile(
             else:
                 # Traditional single-file compilation - keep existing logic
                 # Perform initial compilation in dry-run to get generated body (without constitution)
+                # TODO: Refactor to use dataclasses.replace() once CompilationConfig fields stabilise
                 intermediate_config = CompilationConfig(
                     output_path=config.output_path,
                     chatmode=config.chatmode,
@@ -703,6 +704,7 @@ def compile(
                     dry_run=True,  # force
                     with_constitution=config.with_constitution,
                     strategy="single-file",
+                    target=config.target,
                 )
                 intermediate_result = compiler.compile(intermediate_config)
 
