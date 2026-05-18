@@ -9,9 +9,23 @@ Covers:
 
 from __future__ import annotations
 
+import json as _json
+import textwrap as _tw
+from pathlib import Path as _Path
+
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.pack import pack_cmd
+
+
+@pytest.fixture(autouse=True)
+def _reset_console_state():
+    """Reset console singleton; --json mode flips a global stream flag."""
+    from apm_cli.utils.console import _reset_console
+
+    yield
+    _reset_console()
 
 
 class TestMarketplaceFilterFlag:
@@ -81,3 +95,183 @@ class TestDeprecationWarning:
         result = CliRunner().invoke(pack_cmd, ["--marketplace-output", "test.json"])
         combined = result.output or ""
         assert "deprecated" in combined.lower() or result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# Wave 4 release-gate flags: --check-versions / --check-clean
+# ---------------------------------------------------------------------------
+
+
+_APM_ALIGNED = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  packages:
+    - name: local-tool
+      source: ./packages/local-tool
+      description: Tool.
+      version: 1.0.0
+"""
+
+_APM_MISALIGNED = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  packages:
+    - name: local-tool
+      source: ./packages/local-tool
+      description: Tool.
+      version: 0.9.0
+"""
+
+
+def _write_project(tmp_path: _Path, apm_yml: str, *, pkg_version: str = "1.0.0") -> _Path:
+    (tmp_path / "apm.yml").write_text(_tw.dedent(apm_yml), encoding="utf-8")
+    pkg_dir = tmp_path / "packages" / "local-tool"
+    pkg_dir.mkdir(parents=True)
+    pkg_dir.joinpath("apm.yml").write_text(
+        f"name: local-tool\ndescription: Tool.\nversion: {pkg_version}\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+class TestHelpExitCodes:
+    """Help text should document exit codes 3 and 4."""
+
+    def test_exit_code_3_documented(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--help"])
+        assert result.exit_code == 0
+        assert "3" in result.output
+        assert "--check-versions" in result.output
+
+    def test_exit_code_4_documented(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--help"])
+        assert result.exit_code == 0
+        assert "4" in result.output
+        assert "--check-clean" in result.output
+
+
+class TestCheckVersionsFlag:
+    """--check-versions release gate."""
+
+    def test_flag_recognized(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--help"])
+        assert "--check-versions" in result.output
+
+    def test_skip_when_no_marketplace_block(self, tmp_path: _Path, monkeypatch) -> None:
+        # apm.yml without a marketplace block -> skip gate, exit 0
+        (tmp_path / "apm.yml").write_text(
+            "name: x\ndescription: y\nversion: 1.0.0\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-versions", "--dry-run"])
+        # Build itself should succeed or fail with code 1 (not 3) since gate skipped.
+        assert result.exit_code != 3
+
+    def test_passes_with_aligned_versions(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-versions", "--dry-run", "--offline"])
+        # Either gate passed (no exit 3) or bundle build hit unrelated failure;
+        # the meaningful assertion is: exit code is not 3 (gate did not trip).
+        assert result.exit_code != 3
+
+    def test_fails_with_misaligned_versions(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_MISALIGNED, pkg_version="0.9.0")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-versions", "--dry-run", "--offline"])
+        assert result.exit_code == 3
+
+    def test_json_envelope_carries_version_alignment(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--check-versions", "--dry-run", "--offline", "--json"]
+        )
+        data = _json.loads(result.output)
+        assert "version_alignment" in data
+        assert data["version_alignment"] is not None
+
+    def test_json_envelope_drift_null_when_not_requested(
+        self, tmp_path: _Path, monkeypatch
+    ) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--check-versions", "--dry-run", "--offline", "--json"]
+        )
+        data = _json.loads(result.output)
+        assert "drift" in data
+        assert data["drift"] is None
+
+
+class TestCheckCleanFlag:
+    """--check-clean release gate."""
+
+    def test_flag_recognized(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--help"])
+        assert "--check-clean" in result.output
+
+    def test_skip_when_no_marketplace_block(self, tmp_path: _Path, monkeypatch) -> None:
+        (tmp_path / "apm.yml").write_text(
+            "name: x\ndescription: y\nversion: 1.0.0\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run"])
+        assert result.exit_code != 4
+
+    def test_fails_when_on_disk_missing(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+        # No marketplace.json on disk -> "missing" -> exit 4.
+        assert result.exit_code == 4
+
+    def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline", "--json"])
+        data = _json.loads(result.output)
+        assert "drift" in data
+        assert data["drift"] is not None
+        assert data["drift"]["ok"] is False
+
+
+class TestBothFlagsCombined:
+    """Combined --check-versions + --check-clean: version exit (3) wins."""
+
+    def test_both_flags_misaligned_versions_wins_exit_3(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_MISALIGNED, pkg_version="0.9.0")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--check-versions", "--check-clean", "--dry-run", "--offline"]
+        )
+        # version-misalignment exit 3 takes precedence over drift exit 4
+        assert result.exit_code == 3
+
+    def test_both_flags_aligned_but_drift_exits_4(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--check-versions", "--check-clean", "--dry-run", "--offline"]
+        )
+        # versions pass; drift fails (no marketplace.json on disk) -> exit 4
+        assert result.exit_code == 4
+
+    def test_json_envelope_carries_both_payloads(self, tmp_path: _Path, monkeypatch) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd,
+            ["--check-versions", "--check-clean", "--dry-run", "--offline", "--json"],
+        )
+        data = _json.loads(result.output)
+        assert data["version_alignment"] is not None
+        assert data["drift"] is not None
