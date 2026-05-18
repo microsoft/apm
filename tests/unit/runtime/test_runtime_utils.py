@@ -63,6 +63,11 @@ class TestFindRuntimeBinary:
 
         assert result is None
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows does not honor POSIX execute bits; os.access(X_OK) returns True "
+        "for any readable file, so the non-executable fallback path is unreachable.",
+    )
     def test_skips_non_executable_apm_binary(self, fake_home):
         """Non-executable APM binary should be skipped in favor of PATH.
 
@@ -168,6 +173,11 @@ class TestFindRuntimeBinary:
 
         assert result == str(node_binary)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows does not honor POSIX execute bits; os.access(X_OK) returns True "
+        "for any readable file, so the non-executable fallback path is unreachable.",
+    )
     def test_apm_binary_without_execute_permission_falls_back(self, fake_home):
         """An APM binary without execute permission should trigger fallback.
 
