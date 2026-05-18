@@ -31,6 +31,7 @@ from apm_cli.commands.marketplace import search as marketplace_search
 from apm_cli.commands.mcp import mcp
 from apm_cli.commands.outdated import outdated as outdated_cmd
 from apm_cli.commands.pack import pack_cmd, unpack_cmd
+from apm_cli.commands.plugin import plugin as plugin_cmd
 from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
 from apm_cli.commands.run import preview, run
@@ -92,6 +93,7 @@ cli.add_command(uninstall)
 cli.add_command(prune)
 cli.add_command(update)
 cli.add_command(self_update)
+cli.add_command(plugin_cmd, name="plugin")
 cli.add_command(compile_cmd, name="compile")
 cli.add_command(run)
 cli.add_command(preview)
