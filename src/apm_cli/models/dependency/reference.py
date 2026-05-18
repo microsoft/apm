@@ -1089,7 +1089,9 @@ class DependencyReference:
         elif len(uparts) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
 
-        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        # ``~`` is allowed on non-ADO hosts to support Bitbucket Data Center /
+        # Server personal repository URLs (``/scm/~username/repo.git``).
+        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._~-]+$"
         validate_path_segments("/".join(uparts), context="repository path")
         for part in uparts:
             if not re.match(allowed_pattern, part.rstrip(".git")):
@@ -1202,7 +1204,9 @@ class DependencyReference:
                         f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
                     )
 
-        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        # ``~`` is allowed on non-ADO hosts to support Bitbucket Data Center /
+        # Server personal repository URLs (``/scm/~username/repo.git``).
+        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._~-]+$"
         validate_path_segments(
             "/".join(path_parts),
             context="repository URL path",
@@ -1309,7 +1313,9 @@ class DependencyReference:
         segments = repo_url.split("/")
         if len(segments) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
-        if not all(re.match(r"^[a-zA-Z0-9._-]+$", s) for s in segments):
+        # ``~`` is allowed on non-ADO hosts to support Bitbucket Data Center /
+        # Server personal repository URLs (``/scm/~username/repo.git``).
+        if not all(re.match(r"^[a-zA-Z0-9._~-]+$", s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
         validate_path_segments(repo_url, context="repository path")
         for seg in segments:

@@ -463,6 +463,19 @@ class TestSecurityWithGenericHosts:
         with pytest.raises(ValueError, match="Invalid repository path component"):
             DependencyReference.parse("https://gitlab.com/user/repo$bad")
 
+    def test_bitbucket_personal_repo_tilde_url(self):
+        """Bitbucket Data Center personal repos use ``~username`` path segments."""
+        dep = DependencyReference.parse("https://example.com/scm/~myuser/my-apm-repo.git")
+        assert dep.host == "example.com"
+        assert dep.repo_url == "scm/~myuser/my-apm-repo"
+        assert dep.is_virtual is False
+
+    def test_bitbucket_personal_repo_tilde_shorthand(self):
+        """Tilde-prefixed user segment is also valid in FQDN shorthand form."""
+        dep = DependencyReference.parse("example.com/scm/~myuser/my-apm-repo")
+        assert dep.host == "example.com"
+        assert dep.repo_url == "scm/~myuser/my-apm-repo"
+
 
 class TestFQDNVirtualPaths:
     """Test FQDN shorthand with virtual paths on generic hosts.
