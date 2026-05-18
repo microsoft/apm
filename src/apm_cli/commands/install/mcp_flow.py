@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """APM install command and dependency installation engine."""
 
 import builtins

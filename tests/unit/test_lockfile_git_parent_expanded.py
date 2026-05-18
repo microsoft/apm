@@ -5,7 +5,7 @@ explicit virtual git dependency. The lockfile must persist those expanded fields
 and never use ``parent`` as durable ``repo_url`` / ``source`` identity.
 """
 
-from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile, _DepResolutionInfo
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -36,11 +36,13 @@ class TestLockfileExpandedGitParent:
     def test_from_dependency_ref_copies_expanded_coordinates(self):
         dep_ref = _expanded_parent_equivalent_ref()
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=dep_ref,
-            resolved_commit="a" * 40,
-            depth=2,
-            resolved_by="org/monorepo/agents/pkg-a",
-            is_dev=False,
+            dep_ref,
+            _DepResolutionInfo(
+                resolved_commit="a" * 40,
+                depth=2,
+                resolved_by="org/monorepo/agents/pkg-a",
+                is_dev=False,
+            ),
         )
         assert locked.repo_url == "org/monorepo"
         assert locked.host == "git.example.com"
@@ -54,10 +56,8 @@ class TestLockfileExpandedGitParent:
 
     def test_to_dict_has_no_parent_sentinel(self):
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=_expanded_parent_equivalent_ref(),
-            resolved_commit="b" * 40,
-            depth=2,
-            resolved_by="org/parent-pkg",
+            _expanded_parent_equivalent_ref(),
+            _DepResolutionInfo(resolved_commit="b" * 40, depth=2, resolved_by="org/parent-pkg"),
         )
         d = locked.to_dict()
         assert d["repo_url"] == "org/monorepo"
@@ -71,10 +71,8 @@ class TestLockfileExpandedGitParent:
 
     def test_round_trip_dict_preserves_fields_and_unique_key(self):
         original = LockedDependency.from_dependency_ref(
-            dep_ref=_expanded_parent_equivalent_ref(),
-            resolved_commit="c" * 40,
-            depth=2,
-            resolved_by="org/parent-pkg",
+            _expanded_parent_equivalent_ref(),
+            _DepResolutionInfo(resolved_commit="c" * 40, depth=2, resolved_by="org/parent-pkg"),
         )
         key_before = original.get_unique_key()
         restored = LockedDependency.from_dict(original.to_dict())
@@ -91,10 +89,8 @@ class TestLockfileExpandedGitParent:
     def test_lockfile_yaml_round_trip_preserves_unique_key(self):
         lf = LockFile()
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=_expanded_parent_equivalent_ref(),
-            resolved_commit="d" * 40,
-            depth=2,
-            resolved_by="org/parent-pkg",
+            _expanded_parent_equivalent_ref(),
+            _DepResolutionInfo(resolved_commit="d" * 40, depth=2, resolved_by="org/parent-pkg"),
         )
         key_before = locked.get_unique_key()
         lf.add_dependency(locked)
@@ -113,15 +109,11 @@ class TestLockfileExpandedGitParent:
         """Same persisted shape as an explicit ``git`` + ``path`` virtual dep."""
         a = LockedDependency.from_dependency_ref(
             _expanded_parent_equivalent_ref(),
-            resolved_commit="e" * 40,
-            depth=2,
-            resolved_by="x",
+            _DepResolutionInfo(resolved_commit="e" * 40, depth=2, resolved_by="x"),
         )
         b = LockedDependency.from_dependency_ref(
             _explicit_equivalent_ref(),
-            resolved_commit="e" * 40,
-            depth=2,
-            resolved_by="x",
+            _DepResolutionInfo(resolved_commit="e" * 40, depth=2, resolved_by="x"),
         )
         assert a.to_dict() == b.to_dict()
         assert a.get_unique_key() == b.get_unique_key()
@@ -160,10 +152,8 @@ class TestParentExpansionToLockfilePipeline:
     def _round_trip(self, dep_ref, *, sha: str = "f" * 40):
         lf = LockFile()
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=dep_ref,
-            resolved_commit=sha,
-            depth=2,
-            resolved_by="org/parent-pkg",
+            dep_ref,
+            _DepResolutionInfo(resolved_commit=sha, depth=2, resolved_by="org/parent-pkg"),
         )
         lf.add_dependency(locked)
         parsed = LockFile.from_yaml(lf.to_yaml())

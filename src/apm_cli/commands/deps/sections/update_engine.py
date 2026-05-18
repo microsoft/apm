@@ -1,11 +1,74 @@
 """APM dependency update engine."""
 
+from __future__ import annotations
+
 import sys
+from dataclasses import dataclass
 
 import click
 
 from ....constants import APM_YML_FILENAME
 from ....core.scope import InstallScope, get_apm_dir
+
+
+def _resolve_legacy_skill_paths(legacy_skill_paths: bool) -> bool:
+    """Resolve the compatibility flag via CLI first, then env defaults."""
+    if legacy_skill_paths:
+        return legacy_skill_paths
+
+    from ....integration.targets import should_use_legacy_skill_paths
+
+    return should_use_legacy_skill_paths()
+
+
+def _load_apm_package_for_update(apm_yml_path, logger):
+    """Load and validate the project manifest for dependency updates."""
+    try:
+        return sys.modules["apm_cli.commands.deps.cli"].APMPackage.from_apm_yml(apm_yml_path)
+    except Exception as exc:
+        logger.error(f"Failed to parse {APM_YML_FILENAME}: {exc}")
+        sys.exit(1)
+
+
+@dataclass(frozen=True, slots=True)
+class _UpdateRunContext:
+    """Arguments for executing dependency updates through the install engine."""
+
+    apm_package: object
+    logger: object
+    auth_resolver: object
+    verbose: bool
+    only_pkgs: object
+    force: bool
+    parallel_downloads: int
+    target: object
+    scope: object
+    legacy_skill_paths: bool
+
+
+def _run_dependency_update(context: _UpdateRunContext):
+    """Execute the install engine in update-refs mode."""
+    from ...install import _install_apm_dependencies
+
+    try:
+        return _install_apm_dependencies(
+            context.apm_package,
+            update_refs=True,
+            verbose=context.verbose,
+            only_packages=context.only_pkgs,
+            force=context.force,
+            parallel_downloads=context.parallel_downloads,
+            logger=context.logger,
+            auth_resolver=context.auth_resolver,
+            target=context.target,
+            scope=context.scope,
+            legacy_skill_paths=context.legacy_skill_paths,
+        )
+    except Exception as exc:
+        context.logger.error(f"Update failed: {exc}")
+        if not context.verbose:
+            context.logger.progress("Run with --verbose for detailed diagnostics")
+        sys.exit(1)
 
 
 def _validate_packages(packages, all_deps, logger):
@@ -103,7 +166,7 @@ def _emit_update_summary(changed, error_count, had_baseline, logger):
         logger.success("All packages already at latest refs.")
 
 
-def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
+def update(packages, **params):
     """Update APM dependencies to latest git refs.
 
     Re-resolves git references (branches/tags) to their current SHAs,
@@ -119,12 +182,14 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     """
     from ....core.auth import AuthResolver
     from ....core.command_logger import InstallLogger
-    from ...install import (
-        _APM_IMPORT_ERROR,
-        APM_DEPS_AVAILABLE,
-        _install_apm_dependencies,
-    )
+    from ...install import _APM_IMPORT_ERROR, APM_DEPS_AVAILABLE
 
+    verbose = params["verbose"]
+    force = params["force"]
+    target = params["target"]
+    parallel_downloads = params["parallel_downloads"]
+    global_ = params["global_"]
+    legacy_skill_paths = params["legacy_skill_paths"]
     logger = InstallLogger(verbose=verbose, partial=bool(packages))
 
     if not APM_DEPS_AVAILABLE:
@@ -142,11 +207,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
         logger.error(f"No {APM_YML_FILENAME} found in {scope_hint}")
         sys.exit(1)
 
-    try:
-        apm_package = sys.modules["apm_cli.commands.deps.cli"].APMPackage.from_apm_yml(apm_yml_path)
-    except Exception as e:
-        logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
-        sys.exit(1)
+    apm_package = _load_apm_package_for_update(apm_yml_path, logger)
 
     all_deps = apm_package.get_apm_dependencies() + apm_package.get_dev_apm_dependencies()
     if not all_deps:
@@ -165,33 +226,24 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     auth_resolver = AuthResolver()
 
     noun = f"{len(packages)} package(s)" if packages else f"all {len(all_deps)} dependencies"
-    # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
-    if not legacy_skill_paths:
-        from ....integration.targets import should_use_legacy_skill_paths
-
-        legacy_skill_paths = should_use_legacy_skill_paths()
+    legacy_skill_paths = _resolve_legacy_skill_paths(legacy_skill_paths)
 
     logger.start(f"Updating {noun}...")
 
-    try:
-        install_result = _install_apm_dependencies(
-            apm_package,
-            update_refs=True,
-            verbose=verbose,
-            only_packages=only_pkgs,
-            force=force,
-            parallel_downloads=parallel_downloads,
+    install_result = _run_dependency_update(
+        _UpdateRunContext(
+            apm_package=apm_package,
             logger=logger,
             auth_resolver=auth_resolver,
+            verbose=verbose,
+            only_pkgs=only_pkgs,
+            force=force,
+            parallel_downloads=parallel_downloads,
             target=target,
             scope=scope,
             legacy_skill_paths=legacy_skill_paths,
         )
-    except Exception as e:
-        logger.error(f"Update failed: {e}")
-        if not verbose:
-            logger.progress("Run with --verbose for detailed diagnostics")
-        sys.exit(1)
+    )
 
     # Show diagnostics if any
     if install_result.diagnostics and install_result.diagnostics.has_diagnostics:

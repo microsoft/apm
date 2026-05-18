@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.deps.artifactory_entry import _ArchiveCoords
+from apm_cli.deps.download_strategies.artifactory_strategy import _ArtifactoryTarget
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import (
     DependencyReference,
@@ -453,11 +455,13 @@ class TestArtifactoryArchiveDownload:
         target = self.temp_dir / "pkg"
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
             self.downloader._download_artifactory_archive(
-                "art.example.com",
-                "artifactory/github",
-                "owner",
-                "repo",
-                "main",
+                _ArtifactoryTarget(
+                    host="art.example.com",
+                    prefix="artifactory/github",
+                    owner="owner",
+                    repo="repo",
+                    ref="main",
+                ),
                 target,
             )
 
@@ -482,11 +486,13 @@ class TestArtifactoryArchiveDownload:
             side_effect=[mock_resp_404, mock_resp_200],
         ):
             self.downloader._download_artifactory_archive(
-                "art.example.com",
-                "artifactory/github",
-                "owner",
-                "repo",
-                "v1.0.0",
+                _ArtifactoryTarget(
+                    host="art.example.com",
+                    prefix="artifactory/github",
+                    owner="owner",
+                    repo="repo",
+                    ref="v1.0.0",
+                ),
                 target,
             )
 
@@ -501,11 +507,13 @@ class TestArtifactoryArchiveDownload:
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
             with pytest.raises(RuntimeError, match="Failed to download"):
                 self.downloader._download_artifactory_archive(
-                    "art.example.com",
-                    "artifactory/github",
-                    "owner",
-                    "repo",
-                    "main",
+                    _ArtifactoryTarget(
+                        host="art.example.com",
+                        prefix="artifactory/github",
+                        owner="owner",
+                        repo="repo",
+                        ref="main",
+                    ),
                     target,
                 )
 
@@ -522,11 +530,13 @@ class TestArtifactoryArchiveDownload:
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
             with pytest.raises(RuntimeError, match="Empty archive"):
                 self.downloader._download_artifactory_archive(
-                    "art.example.com",
-                    "artifactory/github",
-                    "owner",
-                    "repo",
-                    "main",
+                    _ArtifactoryTarget(
+                        host="art.example.com",
+                        prefix="artifactory/github",
+                        owner="owner",
+                        repo="repo",
+                        ref="main",
+                    ),
                     target,
                 )
 
@@ -545,11 +555,13 @@ class TestArtifactoryArchiveDownload:
         target = self.temp_dir / "pkg"
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
             self.downloader._download_artifactory_archive(
-                "art.example.com",
-                "artifactory/github",
-                "owner",
-                "repo",
-                "main",
+                _ArtifactoryTarget(
+                    host="art.example.com",
+                    prefix="artifactory/github",
+                    owner="owner",
+                    repo="repo",
+                    ref="main",
+                ),
                 target,
             )
 
@@ -583,12 +595,14 @@ class TestArtifactoryFileDownload:
         with patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
                 content = self.downloader._download_file_from_artifactory(
-                    "art.example.com",
-                    "artifactory/github",
-                    "owner",
-                    "repo",
+                    _ArtifactoryTarget(
+                        host="art.example.com",
+                        prefix="artifactory/github",
+                        owner="owner",
+                        repo="repo",
+                        ref="main",
+                    ),
                     "apm.yml",
-                    "main",
                 )
 
         assert b"name: test" in content
@@ -604,12 +618,14 @@ class TestArtifactoryFileDownload:
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
                 with pytest.raises(RuntimeError, match="Failed to download file"):
                     self.downloader._download_file_from_artifactory(
-                        "art.example.com",
-                        "artifactory/github",
-                        "owner",
-                        "repo",
+                        _ArtifactoryTarget(
+                            host="art.example.com",
+                            prefix="artifactory/github",
+                            owner="owner",
+                            repo="repo",
+                            ref="main",
+                        ),
                         "nonexistent.txt",
-                        "main",
                     )
 
     def test_entry_download_used_before_full_archive(self):
@@ -620,12 +636,14 @@ class TestArtifactoryFileDownload:
             "apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=expected
         ) as mock_entry:
             content = self.downloader._download_file_from_artifactory(
-                "art.example.com",
-                "artifactory/github",
-                "owner",
-                "repo",
+                _ArtifactoryTarget(
+                    host="art.example.com",
+                    prefix="artifactory/github",
+                    owner="owner",
+                    repo="repo",
+                    ref="main",
+                ),
                 "prompts/deploy.prompt.md",
-                "main",
             )
 
         assert content == expected
@@ -641,12 +659,14 @@ class TestArtifactoryFileDownload:
         with patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
                 content = self.downloader._download_file_from_artifactory(
-                    "art.example.com",
-                    "artifactory/github",
-                    "owner",
-                    "repo",
+                    _ArtifactoryTarget(
+                        host="art.example.com",
+                        prefix="artifactory/github",
+                        owner="owner",
+                        repo="repo",
+                        ref="main",
+                    ),
                     "prompts/deploy.prompt.md",
-                    "main",
                 )
 
         assert b"# Prompt content" in content
@@ -714,7 +734,14 @@ class TestArtifactoryEdgeCases:
         target = self.temp_dir / "pkg"
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
             self.downloader._download_artifactory_archive(
-                "art.example.com", "artifactory/github", "owner", "repo", "main", target
+                _ArtifactoryTarget(
+                    host="art.example.com",
+                    prefix="artifactory/github",
+                    owner="owner",
+                    repo="repo",
+                    ref="main",
+                ),
+                target,
             )
         # Legitimate file extracted
         assert (target / "apm.yml").exists()
@@ -734,11 +761,13 @@ class TestArtifactoryEdgeCases:
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
                 with pytest.raises(RuntimeError, match="Failed to download"):
                     self.downloader._download_artifactory_archive(
-                        "art.example.com",
-                        "artifactory/github",
-                        "owner",
-                        "repo",
-                        "main",
+                        _ArtifactoryTarget(
+                            host="art.example.com",
+                            prefix="artifactory/github",
+                            owner="owner",
+                            repo="repo",
+                            ref="main",
+                        ),
                         target,
                     )
 
@@ -937,7 +966,7 @@ class TestRegistryConfig:
 
     def test_compound_string_never_stored_as_host(self):
         """The compound 'host/prefix' string must not be stored as LockedDependency.host."""
-        from apm_cli.deps.lockfile import LockedDependency
+        from apm_cli.deps.lockfile import LockedDependency, _DepResolutionInfo
         from apm_cli.deps.registry_proxy import RegistryConfig
 
         with patch.dict(
@@ -949,11 +978,10 @@ class TestRegistryConfig:
 
         dep = DependencyReference.parse("owner/repo")
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=dep,
-            resolved_commit="abc123",
-            depth=1,
-            resolved_by=None,
-            registry_config=cfg,
+            dep,
+            _DepResolutionInfo(
+                resolved_commit="abc123", depth=1, resolved_by=None, registry_config=cfg
+            ),
         )
         assert locked.host == "art.example.com"
         assert locked.registry_prefix == "artifactory/github"
@@ -1072,7 +1100,7 @@ class TestRegistryConfig:
 
     def test_registry_config_lockfile_round_trip(self):
         """host and registry_prefix survive YAML write -> read round trip."""
-        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, _DepResolutionInfo
         from apm_cli.deps.registry_proxy import RegistryConfig
 
         with patch.dict(
@@ -1084,11 +1112,10 @@ class TestRegistryConfig:
 
         dep = DependencyReference.parse("owner/repo")
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=dep,
-            resolved_commit="abc123",
-            depth=1,
-            resolved_by=None,
-            registry_config=cfg,
+            dep,
+            _DepResolutionInfo(
+                resolved_commit="abc123", depth=1, resolved_by=None, registry_config=cfg
+            ),
         )
         lock = LockFile()
         lock.add_dependency(locked)
@@ -1411,10 +1438,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=expected)
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "prompts/deploy.prompt.md",
             "main",
             headers={"Authorization": "Bearer tok"},
@@ -1434,10 +1463,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(status_code=404)
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "missing.md",
             "main",
             resilient_get=mock_get,
@@ -1457,10 +1488,12 @@ class TestArchiveEntryDownload:
         mock_get = Mock(side_effect=_requests.ConnectionError("refused"))
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "file.md",
             "main",
             resilient_get=mock_get,
@@ -1477,10 +1510,12 @@ class TestArchiveEntryDownload:
         mock_get = Mock(side_effect=[resp_404, resp_404, resp_200])
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "SKILL.md",
             "v1.0",
             resilient_get=mock_get,
@@ -1500,10 +1535,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "path with spaces/file.md",
             "main",
             resilient_get=mock_get,
@@ -1521,10 +1558,12 @@ class TestArchiveEntryDownload:
         headers = {"Authorization": "Bearer my-token"}
 
         fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "file.md",
             "main",
             headers=headers,
@@ -1541,10 +1580,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=b"first hit")
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "file.md",
             "main",
             resilient_get=mock_get,
@@ -1560,10 +1601,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "../../etc/passwd",
             "main",
             resilient_get=mock_get,
@@ -1579,10 +1622,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "subdir/../../../secret",
             "main",
             resilient_get=mock_get,
@@ -1598,10 +1643,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "subdir/./file.md",
             "main",
             resilient_get=mock_get,
@@ -1617,10 +1664,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "subdir//file.md",
             "main",
             resilient_get=mock_get,
@@ -1636,10 +1685,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=b"tagged content")
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "my-repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="my-repo",
+            ),
             "README.md",
             "v2.1.0",
             resilient_get=mock_get,
@@ -1660,10 +1711,12 @@ class TestArchiveEntryDownload:
         mock_get = Mock(side_effect=[resp_404, resp_200])
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "file.md",
             "feature/foo",
             resilient_get=mock_get,
@@ -1683,10 +1736,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=b"public")
 
         result = fetch_entry_from_archive(
-            "art.example.com",
-            "artifactory/github",
-            "owner",
-            "repo",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="owner",
+                repo="repo",
+            ),
             "file.md",
             "main",
             resilient_get=mock_get,

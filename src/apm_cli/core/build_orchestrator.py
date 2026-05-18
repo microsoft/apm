@@ -95,18 +95,20 @@ class BundleProducer:
     kind = OutputKind.BUNDLE
 
     def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
-        from ..bundle.packer import pack_bundle
+        from ..bundle.packer import PackOptions, pack_bundle
 
         output_dir = options.bundle_output or (options.project_root / "build")
         try:
             pack_result = pack_bundle(
                 project_root=options.project_root,
                 output_dir=output_dir,
-                fmt=options.bundle_format,
-                target=options.bundle_target,
-                archive=options.bundle_archive,
-                dry_run=options.dry_run,
-                force=options.bundle_force,
+                options=PackOptions(
+                    fmt=options.bundle_format,
+                    target=options.bundle_target,
+                    archive=options.bundle_archive,
+                    dry_run=options.dry_run,
+                    force=options.bundle_force,
+                ),
                 logger=logger,
             )
         except (FileNotFoundError, ValueError) as exc:
@@ -120,6 +122,23 @@ class BundleProducer:
             outputs=outputs,
             payload=pack_result,
         )
+
+
+def _resolve_output_path(
+    options: BuildOptions,
+    output_name: str,
+    profile: Any,
+    config: Any,
+    project_root: Path,
+) -> Path:
+    """Compute the output path for a marketplace output, applying overrides."""
+    configured_output_value = getattr(config, profile.config_attr).output
+    output_path = project_root / Path(configured_output_value)
+    if options.marketplace_path_overrides and output_name in options.marketplace_path_overrides:
+        output_path = project_root / options.marketplace_path_overrides[output_name]
+    elif profile.supports_cli_output_override and options.marketplace_output is not None:
+        output_path = options.marketplace_output
+    return output_path
 
 
 # ---------------------------------------------------------------------------
@@ -203,20 +222,9 @@ class MarketplaceProducer:
                     resolve_result = builder.resolve()
                 resolved = resolve_result.entries
 
-                configured_output_value = getattr(config, profile.config_attr).output
-                configured_output = Path(configured_output_value)
-                output_path = project_root / configured_output
-
-                # Apply --marketplace-path override
-                if (
-                    options.marketplace_path_overrides
-                    and output_name in options.marketplace_path_overrides
-                ):
-                    output_path = project_root / options.marketplace_path_overrides[output_name]
-                elif (
-                    profile.supports_cli_output_override and options.marketplace_output is not None
-                ):
-                    output_path = options.marketplace_output
+                output_path = _resolve_output_path(
+                    options, output_name, profile, config, project_root
+                )
 
                 output_report = builder.write_output(
                     profile,

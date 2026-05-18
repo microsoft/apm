@@ -291,6 +291,32 @@ def _cleanup_empty_parents(deleted_path: Path, base_dir: Path) -> None:
         parent = parent.parent
 
 
+def _handle_migration_collisions(collisions: list, ctx) -> None:
+    """Emit collision diagnostics for all detected skill-path collisions.
+
+    Called when :func:`check_collisions` returns a non-empty list.
+    Emits a rich error header + per-collision detail lines, an actionable
+    hint, and pushes each collision into ``ctx.diagnostics`` when present.
+    """
+    from ..utils.console import _rich_error, _rich_info
+
+    _rich_error(
+        COLLISION_HEADER_TEMPLATE.format(count=len(collisions)),
+        symbol="error",
+    )
+    for _c in collisions:
+        _rich_error(f"  {_c}", symbol="error")
+    # H5: actionable next-step hint.
+    _rich_info(COLLISION_HINT, symbol="info")
+    # H2: surface via DiagnosticCollector.
+    if ctx.diagnostics:
+        for _c in collisions:
+            ctx.diagnostics.error(
+                f"Skill migration collision: {_c}",
+                package="skill-path-migration",
+            )
+
+
 def run_skill_migration(ctx) -> None:
     """Orchestrate legacy skill-path auto-migration within the install pipeline.
 
@@ -308,7 +334,7 @@ def run_skill_migration(ctx) -> None:
     * Emits info/warning/error lines to the console.
     * Pushes collision errors to ``ctx.diagnostics`` when present.
     """
-    from ..utils.console import _rich_error, _rich_info, _rich_warning
+    from ..utils.console import _rich_info, _rich_warning
 
     _migration_plans = detect_legacy_skill_deployments(ctx.existing_lockfile, ctx.project_root)
     if not _migration_plans:
@@ -316,22 +342,7 @@ def run_skill_migration(ctx) -> None:
 
     _collisions = check_collisions(_migration_plans, ctx.project_root)
     if _collisions:
-        # H2: collision is an error, not a warning.
-        _rich_error(
-            COLLISION_HEADER_TEMPLATE.format(count=len(_collisions)),
-            symbol="error",
-        )
-        for _c in _collisions:
-            _rich_error(f"  {_c}", symbol="error")
-        # H5: actionable next-step hint.
-        _rich_info(COLLISION_HINT, symbol="info")
-        # H2: surface via DiagnosticCollector.
-        if ctx.diagnostics:
-            for _c in _collisions:
-                ctx.diagnostics.error(
-                    f"Skill migration collision: {_c}",
-                    package="skill-path-migration",
-                )
+        _handle_migration_collisions(_collisions, ctx)
         return
 
     _migration_result = execute_migration(_migration_plans, ctx.existing_lockfile, ctx.project_root)

@@ -44,6 +44,26 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+@dataclass(frozen=True, slots=True)
+class _FallbackRequest:
+    """Options for auth fallback execution."""
+
+    org: str | None = None
+    port: int | None = None
+    path: str | None = None
+    unauth_first: bool = False
+    verbose_callback: Callable[[str], None] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ErrorContextRequest:
+    """Options for auth error-context construction."""
+
+    port: int | None = None
+    dep_url: str | None = None
+    bearer_also_failed: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -237,23 +257,11 @@ class AuthResolver:
         self,
         host: str,
         operation: Callable[..., T],
-        *,
-        org: str | None = None,
-        port: int | None = None,
-        path: str | None = None,
-        unauth_first: bool = False,
-        verbose_callback: Callable[[str], None] | None = None,
+        request: _FallbackRequest | None = None,
+        **legacy_kwargs,
     ) -> T:
-        return _fallback.try_with_fallback(
-            self,
-            host,
-            operation,
-            org=org,
-            port=port,
-            path=path,
-            unauth_first=unauth_first,
-            verbose_callback=verbose_callback,
-        )
+        request = request or _FallbackRequest(**legacy_kwargs)
+        return _fallback.try_with_fallback(self, host, operation, request)
 
     # -- error context ------------------------------------------------------
 
@@ -262,20 +270,11 @@ class AuthResolver:
         host: str,
         operation: str,
         org: str | None = None,
-        *,
-        port: int | None = None,
-        dep_url: str | None = None,
-        bearer_also_failed: bool = False,
+        request: _ErrorContextRequest | None = None,
+        **legacy_kwargs,
     ) -> str:
-        return _errors.build_error_context(
-            self,
-            host,
-            operation,
-            org,
-            port=port,
-            dep_url=dep_url,
-            bearer_also_failed=bearer_also_failed,
-        )
+        request = request or _ErrorContextRequest(**legacy_kwargs)
+        return _errors.build_error_context(self, host, operation, org, request)
 
     # -- internals ----------------------------------------------------------
 

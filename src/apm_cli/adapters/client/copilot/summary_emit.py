@@ -5,6 +5,8 @@ targeting the global ~/.copilot/mcp-config.json file as specified in the MCP ins
 architecture specification.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import sys
@@ -16,6 +18,29 @@ from .class_ import _has_env_placeholder
 
 _COPILOT_ENV_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
+
+
+def _scan_env_block(block: dict) -> set:
+    """Return the set of env-block keys whose values are literal (non-placeholder) strings."""
+    from .class_ import _has_env_placeholder
+
+    keys: set = set()
+    if isinstance(block, dict):
+        for k, v in block.items():
+            if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
+                keys.add(k)
+    return keys
+
+
+def _scan_headers_block(block: dict) -> bool:
+    """Return True if any headers-block value is a literal (non-placeholder) string."""
+    from .class_ import _has_env_placeholder
+
+    if isinstance(block, dict):
+        for v in block.values():
+            if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
+                return True
+    return False
 
 
 def _collect_previously_baked_keys(self, server_url, server_name):
@@ -42,19 +67,8 @@ def _collect_previously_baked_keys(self, server_url, server_name):
     existing = servers.get(key)
     if not isinstance(existing, dict):
         return set(), False
-    baked_env_keys = set()
-    env_block = existing.get("env") or {}
-    if isinstance(env_block, dict):
-        for k, v in env_block.items():
-            if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
-                baked_env_keys.add(k)
-    headers_were_baked = False
-    headers_block = existing.get("headers") or {}
-    if isinstance(headers_block, dict):
-        for v in headers_block.values():
-            if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
-                headers_were_baked = True
-                break
+    baked_env_keys = _scan_env_block(existing.get("env") or {})
+    headers_were_baked = _scan_headers_block(existing.get("headers") or {})
     return baked_env_keys, headers_were_baked
 
 

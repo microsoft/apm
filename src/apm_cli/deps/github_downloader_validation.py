@@ -39,6 +39,7 @@ from __future__ import annotations
 import contextlib
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -84,6 +85,13 @@ def _split_owner_repo(repo_url: str) -> tuple[str, str] | None:
     if len(parts) != 2 or not parts[0] or not parts[1]:
         return None
     return parts[0], parts[1]
+
+
+@dataclass(frozen=True, slots=True)
+class _TreeProbeCtx:
+    dep_ref: DependencyReference
+    vpath: str
+    ref: str
 
 
 def validate_virtual_package_exists(
@@ -151,74 +159,14 @@ def validate_virtual_package_exists(
             _log(f"  [i] {path}@{ref} ({exc})")
             return False
 
-    def _validate_subdirectory() -> bool:
-        # Probe order: apm.yml first (a `collections/<name>/apm.yml` is the
-        # supported way to express a curated dependency aggregator -- see
-        # microsoft/apm#1094), then the standard primitive markers.
-        marker_paths = [
-            f"{vpath}/apm.yml",
-            f"{vpath}/SKILL.md",
-            f"{vpath}/plugin.json",
-            f"{vpath}/.github/plugin/plugin.json",
-            f"{vpath}/.claude-plugin/plugin.json",
-            f"{vpath}/.cursor-plugin/plugin.json",
-            f"{vpath}/README.md",
-        ]
-        for marker_path in marker_paths:
-            if _probe(marker_path):
-                return True
-
-        # Fallback 1: directory-exists probe via Contents API.
-        if _directory_exists_at_ref(downloader, dep_ref, vpath, ref, _log):
-            return True
-
-        # Fallback 2: explicit ref + git ls-remote + shallow-fetch path
-        # probe.  Mirrors install's auth chain so we accept packages
-        # whose API auth is stricter than their git auth.  Only kicks in
-        # with an explicit, NON-EMPTY ref -- without one, strict
-        # validation keeps path typos failing fast on the default
-        # branch. Round-3 finding 1: a bare `#` fragment produces
-        # `reference == ""`, which `is not None` would let through; the
-        # truthy check below rejects it so the fallback is reachable
-        # only for explicitly-pinned refs.
-        if dep_ref.reference:
-            ref_ok, winning_attempt = _ref_exists_via_ls_remote(downloader, dep_ref, ref, _log)
-            if ref_ok and winning_attempt is not None:
-                # SECURITY (round-2 finding 6): close the fail-open.  ls-remote
-                # only confirms the ref exists; we MUST also confirm the
-                # subdirectory exists at that ref via a shallow-fetch +
-                # ls-tree probe, otherwise a typo'd vpath silently passes
-                # validation.  Reuse the WINNING attempt (panel round-3
-                # auth-chain bug fix) so we don't fall back to attempts[0].
-                if _path_exists_in_tree_at_ref(
-                    downloader, dep_ref, vpath, ref, _log, winning_attempt
-                ):
-                    _log(f'  [+] "{vpath}@{ref}" confirmed via shallow-fetch + ls-tree')
-                    if warn_callback is not None:
-                        # devx-ux + cli-logging (round-3): name the
-                        # security-relevant outcome explicitly. A scoped
-                        # PAT may have *correctly* rejected this package
-                        # on the API surface; the operator must be able
-                        # to distinguish that from a legitimate API hit.
-                        warn_callback(
-                            f"API validation skipped for {dep_ref.to_canonical()}; "
-                            "resolved via git credential fallback. "
-                            "Run with --verbose for details."
-                        )
-                    return True
-                _log(
-                    f'  [!] ref "{ref}" resolves but "{vpath}" not present in the tree at that ref'
-                )
-                return False
-        return False
-
     _log(f'  [i] Validating virtual package at ref "{ref}": {dep_ref.repo_url}/{vpath}')
 
     if dep_ref.is_virtual_file():
         return _probe(vpath)
 
     if dep_ref.is_virtual_subdirectory():
-        return _validate_subdirectory()
+        ctx = _TreeProbeCtx(dep_ref=dep_ref, vpath=vpath, ref=ref)
+        return _run_subdirectory_validation(downloader, ctx, _probe, _log, warn_callback)
 
     return _probe(vpath)
 
@@ -294,15 +242,85 @@ def _directory_exists_at_ref(
         return False
 
 
+def _run_subdirectory_validation(
+    downloader: GitHubPackageDownloader,
+    ctx: _TreeProbeCtx,
+    probe: Callable[[str], bool],
+    log: Callable[[str], None],
+    warn_callback: Callable[[str], None] | None,
+) -> bool:
+    """Validate a subdirectory virtual package via marker-file probes and fallbacks.
+
+    Probe order: apm.yml first (a ``collections/<name>/apm.yml`` is the
+    supported way to express a curated dependency aggregator -- see
+    microsoft/apm#1094), then the standard primitive markers.
+
+    Extracted from ``validate_virtual_package_exists`` to keep McCabe
+    complexity under the project threshold.
+    """
+    marker_paths = [
+        f"{ctx.vpath}/apm.yml",
+        f"{ctx.vpath}/SKILL.md",
+        f"{ctx.vpath}/plugin.json",
+        f"{ctx.vpath}/.github/plugin/plugin.json",
+        f"{ctx.vpath}/.claude-plugin/plugin.json",
+        f"{ctx.vpath}/.cursor-plugin/plugin.json",
+        f"{ctx.vpath}/README.md",
+    ]
+    for marker_path in marker_paths:
+        if probe(marker_path):
+            return True
+
+    # Fallback 1: directory-exists probe via Contents API.
+    if _directory_exists_at_ref(downloader, ctx.dep_ref, ctx.vpath, ctx.ref, log):
+        return True
+
+    # Fallback 2: explicit ref + git ls-remote + shallow-fetch path probe.
+    # Mirrors install's auth chain so we accept packages whose API auth is
+    # stricter than their git auth.  Only kicks in with an explicit,
+    # NON-EMPTY ref -- without one, strict validation keeps path typos
+    # failing fast on the default branch. Round-3 finding 1: a bare `#`
+    # fragment produces `reference == ""`, which `is not None` would let
+    # through; the truthy check below rejects it so the fallback is
+    # reachable only for explicitly-pinned refs.
+    if ctx.dep_ref.reference:
+        ref_ok, winning_attempt = _ref_exists_via_ls_remote(downloader, ctx.dep_ref, ctx.ref, log)
+        if ref_ok and winning_attempt is not None:
+            # SECURITY (round-2 finding 6): close the fail-open.  ls-remote
+            # only confirms the ref exists; we MUST also confirm the
+            # subdirectory exists at that ref via a shallow-fetch + ls-tree
+            # probe, otherwise a typo'd vpath silently passes validation.
+            # Reuse the WINNING attempt (panel round-3 auth-chain bug fix)
+            # so we don't fall back to attempts[0].
+            if _path_exists_in_tree_at_ref(downloader, ctx, log, winning_attempt):
+                log(f'  [+] "{ctx.vpath}@{ctx.ref}" confirmed via shallow-fetch + ls-tree')
+                if warn_callback is not None:
+                    # devx-ux + cli-logging (round-3): name the
+                    # security-relevant outcome explicitly. A scoped PAT
+                    # may have *correctly* rejected this package on the API
+                    # surface; the operator must be able to distinguish that
+                    # from a legitimate API hit.
+                    warn_callback(
+                        f"API validation skipped for {ctx.dep_ref.to_canonical()}; "
+                        "resolved via git credential fallback. "
+                        "Run with --verbose for details."
+                    )
+                return True
+            log(
+                f'  [!] ref "{ctx.ref}" resolves but "{ctx.vpath}" '
+                "not present in the tree at that ref"
+            )
+            return False
+    return False
+
+
 def _path_exists_in_tree_at_ref(
     downloader: GitHubPackageDownloader,
-    dep_ref: DependencyReference,
-    vpath: str,
-    ref: str,
+    ctx: _TreeProbeCtx,
     log: Callable[[str], None],
     winning_attempt: AttemptSpec,
 ) -> bool:
-    """Confirm ``vpath`` exists at ``ref`` via shallow fetch + ``ls-tree``.
+    """Confirm ``ctx.vpath`` exists at ``ctx.ref`` via shallow fetch + ``ls-tree``.
 
     Closes the fail-open hole in ``_ref_exists_via_ls_remote``: knowing
     that the ref exists is not the same as knowing the subdirectory
@@ -320,7 +338,7 @@ def _path_exists_in_tree_at_ref(
 
     Returns:
         True iff the shallow fetch succeeded AND ``ls-tree`` reported
-        at least one entry for ``vpath`` at the resolved ref.
+        at least one entry for ``ctx.vpath`` at the resolved ref.
     """
     label, url, env = winning_attempt
 
@@ -339,7 +357,7 @@ def _path_exists_in_tree_at_ref(
                 "--depth=1",
                 "--filter=tree:0",
                 "origin",
-                ref,
+                ctx.ref,
                 env=env,
             )
         except (GitCommandError, OSError) as exc:
@@ -350,15 +368,15 @@ def _path_exists_in_tree_at_ref(
             return False
 
         try:
-            output = g.ls_tree("FETCH_HEAD", vpath, env=env)
+            output = g.ls_tree("FETCH_HEAD", ctx.vpath, env=env)
         except (GitCommandError, OSError) as exc:
             log(f"  [x] ls-tree failed via {label}: {downloader._sanitize_git_error(str(exc))}")
             return False
 
         if output and output.strip():
-            log(f"  [+] {vpath}@{ref} present in tree")
+            log(f"  [+] {ctx.vpath}@{ctx.ref} present in tree")
             return True
-        log(f"  [!] {vpath} not present in tree at {ref}")
+        log(f"  [!] {ctx.vpath} not present in tree at {ctx.ref}")
         return False
     finally:
         # safe_rmtree wraps robust_rmtree with an ensure_path_within

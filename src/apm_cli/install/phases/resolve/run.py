@@ -34,6 +34,47 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
+def _log_verbose_lockfile(ctx: InstallContext, existing_lockfile) -> None:
+    """Emit verbose lockfile diagnostics (count + per-dep SHA table)."""
+    if not (ctx.logger and existing_lockfile and existing_lockfile.dependencies):
+        return
+    lockfile_count = len(existing_lockfile.dependencies)
+    if ctx.update_refs:
+        ctx.logger.verbose_detail(
+            f"Loaded apm.lock.yaml for SHA comparison ({lockfile_count} dependencies)"
+        )
+    else:
+        ctx.logger.verbose_detail(f"Using apm.lock.yaml ({lockfile_count} locked dependencies)")
+    if ctx.logger.verbose:
+        for locked_dep in existing_lockfile.get_all_dependencies():
+            _sha = format_short_sha(locked_dep.resolved_commit)
+            _ref = (
+                locked_dep.resolved_ref
+                if hasattr(locked_dep, "resolved_ref") and locked_dep.resolved_ref
+                else ""
+            )
+            ctx.logger.lockfile_entry(locked_dep.get_unique_key(), ref=_ref, sha=_sha)
+
+
+def _log_verbose_tree(ctx: InstallContext, dependency_graph) -> None:
+    """Emit the resolved dependency-tree summary at verbose level."""
+    if not ctx.logger:
+        return
+    tree = dependency_graph.dependency_tree
+    direct_count = len(tree.get_nodes_at_depth(1))
+    transitive_count = len(tree.nodes) - direct_count
+    if transitive_count > 0:
+        ctx.logger.verbose_detail(
+            f"Resolved dependency tree: {direct_count} direct + "
+            f"{transitive_count} transitive deps (max depth {tree.max_depth})"
+        )
+        for node in tree.nodes.values():
+            if node.depth > 1:
+                ctx.logger.verbose_detail(f"    {node.get_ancestor_chain()}")
+    else:
+        ctx.logger.verbose_detail(f"Resolved {direct_count} direct dependencies (no transitive)")
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the resolve phase.
 
@@ -53,31 +94,12 @@ def run(ctx: InstallContext) -> None:
     lockfile_path = get_lockfile_path(ctx.apm_dir)
     ctx.lockfile_path = lockfile_path
     existing_lockfile = None
-    lockfile_count = 0
     if ctx.early_lockfile is not None:
         existing_lockfile = ctx.early_lockfile
     elif lockfile_path.exists():
         existing_lockfile = LockFile.read(lockfile_path)
     if existing_lockfile and existing_lockfile.dependencies:
-        lockfile_count = len(existing_lockfile.dependencies)
-        if ctx.logger:
-            if ctx.update_refs:
-                ctx.logger.verbose_detail(
-                    f"Loaded apm.lock.yaml for SHA comparison ({lockfile_count} dependencies)"
-                )
-            else:
-                ctx.logger.verbose_detail(
-                    f"Using apm.lock.yaml ({lockfile_count} locked dependencies)"
-                )
-            if ctx.logger.verbose:
-                for locked_dep in existing_lockfile.get_all_dependencies():
-                    _sha = format_short_sha(locked_dep.resolved_commit)
-                    _ref = (
-                        locked_dep.resolved_ref
-                        if hasattr(locked_dep, "resolved_ref") and locked_dep.resolved_ref
-                        else ""
-                    )
-                    ctx.logger.lockfile_entry(locked_dep.get_unique_key(), ref=_ref, sha=_sha)
+        _log_verbose_lockfile(ctx, existing_lockfile)
     ctx.existing_lockfile = existing_lockfile
 
     # ------------------------------------------------------------------
@@ -183,6 +205,60 @@ def run(ctx: InstallContext) -> None:
     logger = ctx.logger
 
     def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+
+        def _handle_local_dep(dep_ref, install_path, parent_pkg):
+            if (
+                scope is InstallScope.USER
+                and not Path(dep_ref.local_path).expanduser().is_absolute()
+            ):
+                with callback_lock:
+                    callback_failures.add(dep_ref.get_unique_key())
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_failed(dep_ref.get_unique_key())
+                return None
+            base_dir = (
+                parent_pkg.source_path
+                if parent_pkg is not None and parent_pkg.source_path is not None
+                else project_root
+            )
+            result_path = _copy_local_package(
+                dep_ref,
+                install_path,
+                base_dir,
+                project_root=project_root,
+                logger=logger,
+            )
+            if result_path:
+                with callback_lock:
+                    callback_downloaded[dep_ref.get_unique_key()] = None
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_completed(dep_ref.get_unique_key())
+                return result_path
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_failed(dep_ref.get_unique_key())
+            return None
+
+        def _handle_download_failure(e, dep_ref, parent_chain):
+            dep_display = dep_ref.get_display_name()
+            dep_key = dep_ref.get_unique_key()
+            is_direct = dep_key in direct_dep_keys
+            if is_direct:
+                fail_msg = f"Failed to download dependency {dep_ref.repo_url}: {e}"
+            else:
+                chain_hint = f" (via {parent_chain})" if parent_chain else ""
+                fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
+            with callback_lock:
+                if logger:
+                    logger.verbose_detail(f"  {fail_msg}")
+                callback_failures.add(dep_key)
+                transitive_failures.append((dep_display, fail_msg))
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_failed(dep_key)
+
         """Download a package during dependency resolution.
 
         Args:
@@ -219,47 +295,7 @@ def run(ctx: InstallContext) -> None:
         try:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
-                if (
-                    scope is InstallScope.USER
-                    and not Path(dep_ref.local_path).expanduser().is_absolute()
-                ):
-                    # At user scope, relative local paths have no meaningful
-                    # root (cwd is arbitrary, $HOME is not a project).  Only
-                    # absolute paths are unambiguous; reject relative refs.
-                    # Note: callback_failures is a set (see line ~105),
-                    # so use .add() rather than dict-style assignment.
-                    with callback_lock:
-                        callback_failures.add(dep_ref.get_unique_key())
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_failed(dep_ref.get_unique_key())
-                    return None
-                # Anchor relative paths on the *declaring* package's source
-                # directory when available (#857). Falls back to project_root
-                # for direct deps and for parents that predate source_path.
-                base_dir = (
-                    parent_pkg.source_path
-                    if parent_pkg is not None and parent_pkg.source_path is not None
-                    else project_root
-                )
-                result_path = _copy_local_package(
-                    dep_ref,
-                    install_path,
-                    base_dir,
-                    project_root=project_root,
-                    logger=logger,
-                )
-                if result_path:
-                    with callback_lock:
-                        callback_downloaded[dep_ref.get_unique_key()] = None
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_completed(dep_ref.get_unique_key())
-                    return result_path
-                _tui = getattr(ctx, "tui", None)
-                if _tui is not None:
-                    _tui.task_failed(dep_ref.get_unique_key())
-                return None
+                return _handle_local_dep(dep_ref, install_path, parent_pkg)
 
             # T5: Use locked commit if available (reproducible installs)
             locked_ref = None
@@ -295,32 +331,7 @@ def run(ctx: InstallContext) -> None:
                 _tui.task_completed(dep_ref.get_unique_key())
             return install_path
         except Exception as e:
-            dep_display = dep_ref.get_display_name()
-            dep_key = dep_ref.get_unique_key()
-            is_direct = dep_key in direct_dep_keys
-
-            # Distinguish direct vs transitive failure messages so users
-            # don't see a misleading "transitive dep" label for top-level deps.
-            if is_direct:
-                fail_msg = f"Failed to download dependency {dep_ref.repo_url}: {e}"
-            else:
-                chain_hint = f" (via {parent_chain})" if parent_chain else ""
-                fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
-
-            # Verbose: inline detail via logger (single output path).
-            # Deferred diagnostics below cover the non-logger case.
-            # F7 (#1116): single critical section for both the logger
-            # emission and the result-recording so concurrent failures
-            # don't interleave their lines.
-            with callback_lock:
-                if logger:
-                    logger.verbose_detail(f"  {fail_msg}")
-                # Collect for deferred diagnostics summary (always, even non-verbose)
-                callback_failures.add(dep_key)
-                transitive_failures.append((dep_display, fail_msg))
-            _tui = getattr(ctx, "tui", None)
-            if _tui is not None:
-                _tui.task_failed(dep_key)
+            _handle_download_failure(e, dep_ref, parent_chain)
             return None
 
     # ------------------------------------------------------------------
@@ -343,22 +354,7 @@ def run(ctx: InstallContext) -> None:
         callback_failures.update(rejected_remote_local)
 
     # Verbose: show resolved tree summary
-    if ctx.logger:
-        tree = dependency_graph.dependency_tree
-        direct_count = len(tree.get_nodes_at_depth(1))
-        transitive_count = len(tree.nodes) - direct_count
-        if transitive_count > 0:
-            ctx.logger.verbose_detail(
-                f"Resolved dependency tree: {direct_count} direct + "
-                f"{transitive_count} transitive deps (max depth {tree.max_depth})"
-            )
-            for node in tree.nodes.values():
-                if node.depth > 1:
-                    ctx.logger.verbose_detail(f"    {node.get_ancestor_chain()}")
-        else:
-            ctx.logger.verbose_detail(
-                f"Resolved {direct_count} direct dependencies (no transitive)"
-            )
+    _log_verbose_tree(ctx, dependency_graph)
 
     # Check for circular dependencies
     if dependency_graph.circular_dependencies:

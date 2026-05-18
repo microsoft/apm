@@ -32,6 +32,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class _ArchiveCoords:
+    """Repository coordinates for an Artifactory archive."""
+
+    host: str
+    prefix: str
+    owner: str
+    repo: str
+
+
 @dataclass
 class _FetchOpts:
     """Bundled options for :func:`_fetch_entry`."""
@@ -71,10 +81,12 @@ class ArtifactoryRegistryClient:
         back to downloading the full archive.
         """
         return _fetch_entry(
-            host=self._config.host,
-            prefix=self._config.prefix,
-            owner=owner,
-            repo=repo,
+            _ArchiveCoords(
+                host=self._config.host,
+                prefix=self._config.prefix,
+                owner=owner,
+                repo=repo,
+            ),
             file_path=file_path,
             opts=_FetchOpts(
                 ref=ref,
@@ -91,10 +103,7 @@ class ArtifactoryRegistryClient:
 
 
 def fetch_entry_from_archive(
-    host: str,
-    prefix: str,
-    owner: str,
-    repo: str,
+    coords: _ArchiveCoords,
     file_path: str,
     ref: str = "main",
     scheme: str = "https",
@@ -109,10 +118,7 @@ def fetch_entry_from_archive(
     Returns raw file bytes on success, or ``None`` on failure.
     """
     return _fetch_entry(
-        host=host,
-        prefix=prefix,
-        owner=owner,
-        repo=repo,
+        coords,
         file_path=file_path,
         opts=_FetchOpts(
             ref=ref,
@@ -129,16 +135,15 @@ def fetch_entry_from_archive(
 
 
 def _fetch_entry(
-    host: str,
-    prefix: str,
-    owner: str,
-    repo: str,
+    coords: _ArchiveCoords,
     file_path: str,
     opts: _FetchOpts,
 ) -> bytes | None:
     """Core entry-download logic shared by the class and standalone helper."""
     from ..utils.github_host import build_artifactory_archive_url
     from ..utils.path_security import PathTraversalError, validate_path_segments
+
+    host, prefix, owner, repo = coords.host, coords.prefix, coords.owner, coords.repo
 
     # Guard: reject traversal sequences via the centralized path validator
     try:
@@ -156,7 +161,7 @@ def _fetch_entry(
         prefix,
         owner,
         repo,
-        opts.ref,
+        ref=opts.ref,
         scheme=opts.scheme,
     )
 

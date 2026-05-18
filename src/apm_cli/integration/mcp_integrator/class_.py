@@ -13,6 +13,9 @@ import builtins
 import logging
 import shutil
 from pathlib import Path
+from typing import Any
+
+from apm_cli.integration.mcp_integrator_install.opts import MCPStaleOpts, RuntimeDispatchOpts
 
 _log = logging.getLogger(__name__)
 
@@ -194,19 +197,21 @@ class MCPIntegrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    @staticmethod
     def remove_stale(
         stale_names: builtins.set,
-        runtime: str | None = None,
-        exclude: str | None = None,
-        project_root=None,
-        user_scope: bool = False,
-        logger=None,
-        scope=None,
+        opts: MCPStaleOpts | None = None,
+        **legacy_kwargs,
     ) -> None:
-        return _cleanup.remove_stale(
-            stale_names, runtime, exclude, project_root, user_scope, logger, scope
-        )
+        if opts is None:
+            opts = MCPStaleOpts(
+                runtime=legacy_kwargs.get("runtime"),
+                exclude=legacy_kwargs.get("exclude"),
+                project_root=legacy_kwargs.get("project_root"),
+                user_scope=legacy_kwargs.get("user_scope", False),
+                logger=legacy_kwargs.get("logger"),
+                scope=legacy_kwargs.get("scope"),
+            )
+        return _cleanup.remove_stale(stale_names, opts)
 
     # ------------------------------------------------------------------
     # Lockfile persistence
@@ -241,27 +246,16 @@ class MCPIntegrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    @staticmethod
     def _install_for_runtime(
         runtime: str,
         mcp_deps: list[str],
-        shared_env_vars: dict | None = None,
-        server_info_cache: dict | None = None,
-        shared_runtime_vars: dict | None = None,
-        project_root=None,
-        user_scope: bool = False,
-        logger=None,
+        opts: RuntimeDispatchOpts | None = None,
+        *,
+        logger: Any = None,
     ) -> bool:
-        return _runtime_dispatch._install_for_runtime(
-            runtime,
-            mcp_deps,
-            shared_env_vars,
-            server_info_cache,
-            shared_runtime_vars,
-            project_root,
-            user_scope,
-            logger,
-        )
+        if opts is None and logger is not None:
+            opts = RuntimeDispatchOpts(logger=logger)
+        return _runtime_dispatch._install_for_runtime(runtime, mcp_deps, opts)
 
     # ------------------------------------------------------------------
     # Main orchestrator

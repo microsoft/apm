@@ -56,6 +56,38 @@ if TYPE_CHECKING:
 # ======================================================================
 
 
+def _accumulate_counter_deltas(ctx: InstallContext, deltas: dict[str, int]) -> None:
+    ctx.installed_count += deltas.get("installed", 0)
+    ctx.unpinned_count += deltas.get("unpinned", 0)
+    ctx.total_prompts_integrated += deltas.get("prompts", 0)
+    ctx.total_agents_integrated += deltas.get("agents", 0)
+    ctx.total_skills_integrated += deltas.get("skills", 0)
+    ctx.total_sub_skills_promoted += deltas.get("sub_skills", 0)
+    ctx.total_instructions_integrated += deltas.get("instructions", 0)
+    ctx.total_commands_integrated += deltas.get("commands", 0)
+    ctx.total_hooks_integrated += deltas.get("hooks", 0)
+    ctx.total_links_resolved += deltas.get("links_resolved", 0)
+
+
+def _handle_dep_failure(
+    ctx: InstallContext,
+    dep_key: str,
+    install_path,
+    direct_dep_keys: set[str],
+) -> None:
+    if dep_key not in direct_dep_keys:
+        return
+    if ctx.diagnostics:
+        ctx.diagnostics.error(
+            f"{dep_key}: integration failed",
+            package=dep_key,
+            detail=(f"Resolved at {install_path}. Run with --verbose for details."),
+        )
+    elif ctx.logger:
+        ctx.logger.error(f"{dep_key}: integration failed")
+    ctx.direct_dep_failed = True
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the sequential integration phase.
 
@@ -76,21 +108,7 @@ def run(ctx: InstallContext) -> None:
     deps_to_install = ctx.deps_to_install
     apm_modules_dir = ctx.apm_modules_dir
 
-    # Direct dep keys: used to distinguish direct vs transitive failures
-    # so direct failures can be surfaced immediately.
     direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
-
-    # Int counters (written back to ctx at end of function)
-    installed_count = ctx.installed_count
-    unpinned_count = ctx.unpinned_count
-    total_prompts_integrated = ctx.total_prompts_integrated
-    total_agents_integrated = ctx.total_agents_integrated
-    total_skills_integrated = ctx.total_skills_integrated
-    total_sub_skills_promoted = ctx.total_sub_skills_promoted
-    total_instructions_integrated = ctx.total_instructions_integrated
-    total_commands_integrated = ctx.total_commands_integrated
-    total_hooks_integrated = ctx.total_hooks_integrated
-    total_links_resolved = ctx.total_links_resolved
 
     # ------------------------------------------------------------------
     # Main loop: iterate deps_to_install and dispatch to the appropriate
@@ -153,65 +171,17 @@ def run(ctx: InstallContext) -> None:
         deltas = run_integration_template(source)
 
         if deltas is None:
-            # Direct dependency failure: surface a single concise
-            # inline marker so the user sees `[x] <pkg>: integration
-            # failed` immediately (fixes "perceived hang" on HYBRID
-            # validation failures). The full diagnostic detail --
-            # resolved path and `--verbose` hint -- is rendered once
-            # by `render_summary()` to avoid double-output.
-            if dep_key in direct_dep_keys:
-                if ctx.diagnostics:
-                    ctx.diagnostics.error(
-                        f"{dep_key}: integration failed",
-                        package=dep_key,
-                        detail=(f"Resolved at {install_path}. Run with --verbose for details."),
-                    )
-                elif ctx.logger:
-                    ctx.logger.error(f"{dep_key}: integration failed")
-                ctx.direct_dep_failed = True
+            _handle_dep_failure(ctx, dep_key, install_path, direct_dep_keys)
             continue
 
-        # Accumulate counter deltas from this package
-        installed_count += deltas.get("installed", 0)
-        unpinned_count += deltas.get("unpinned", 0)
-        total_prompts_integrated += deltas.get("prompts", 0)
-        total_agents_integrated += deltas.get("agents", 0)
-        total_skills_integrated += deltas.get("skills", 0)
-        total_sub_skills_promoted += deltas.get("sub_skills", 0)
-        total_instructions_integrated += deltas.get("instructions", 0)
-        total_commands_integrated += deltas.get("commands", 0)
-        total_hooks_integrated += deltas.get("hooks", 0)
-        total_links_resolved += deltas.get("links_resolved", 0)
+        _accumulate_counter_deltas(ctx, deltas)
 
     # ------------------------------------------------------------------
     # Integrate root project's own .apm/ primitives (#714).
     # ------------------------------------------------------------------
     root_deltas = _integrate_root_project(ctx)
     if root_deltas:
-        installed_count += root_deltas.get("installed", 0)
-        total_prompts_integrated += root_deltas.get("prompts", 0)
-        total_agents_integrated += root_deltas.get("agents", 0)
-        total_skills_integrated += root_deltas.get("skills", 0)
-        total_sub_skills_promoted += root_deltas.get("sub_skills", 0)
-        total_instructions_integrated += root_deltas.get("instructions", 0)
-        total_commands_integrated += root_deltas.get("commands", 0)
-        total_hooks_integrated += root_deltas.get("hooks", 0)
-        total_links_resolved += root_deltas.get("links_resolved", 0)
-
-    # ------------------------------------------------------------------
-    # Write int counters back to ctx (mutable containers already share
-    # the reference and need no write-back).
-    # ------------------------------------------------------------------
-    ctx.installed_count = installed_count
-    ctx.unpinned_count = unpinned_count
-    ctx.total_prompts_integrated = total_prompts_integrated
-    ctx.total_agents_integrated = total_agents_integrated
-    ctx.total_skills_integrated = total_skills_integrated
-    ctx.total_sub_skills_promoted = total_sub_skills_promoted
-    ctx.total_instructions_integrated = total_instructions_integrated
-    ctx.total_commands_integrated = total_commands_integrated
-    ctx.total_hooks_integrated = total_hooks_integrated
-    ctx.total_links_resolved = total_links_resolved
+        _accumulate_counter_deltas(ctx, root_deltas)
 
     # ------------------------------------------------------------------
     # Amendment 7: cowork 50-skill / 1 MB cap check (warn-only).

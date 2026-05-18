@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Dataclasses, loader, and validation for marketplace authoring config.
 
 The marketplace publisher configuration may live in two places:
@@ -32,16 +33,14 @@ Key design rules
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from ...utils.path_security import PathTraversalError, validate_path_segments
 from ..errors import MarketplaceYmlError
-from ..output_profiles import MARKETPLACE_OUTPUTS
-from .class_ import MarketplaceConfig, MarketplaceOutputSpec, PackageEntry
+from ._loader_validators import _build_config, _BuildConfigInput
+from .class_ import MarketplaceConfig
 from .parse_helpers import (
     _check_unknown_keys,
     _parse_build,
@@ -102,6 +101,7 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "build",
         "codex",
         "packages",
+        "versioning",
     }
 )
 _CLAUDE_KEYS = frozenset(
@@ -286,181 +286,3 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise MarketplaceYmlError(f"'{path}' must contain a YAML mapping at the top level")
     return data
-
-
-@dataclass
-class _BuildConfigInput:
-    """Input parameters for :func:`_build_config`."""
-
-    marketplace_dict: dict[str, Any]
-    name: str
-    description: str
-    version: str
-    source_path: Path
-    is_legacy: bool
-    name_overridden: bool
-    description_overridden: bool
-    version_overridden: bool
-    default_output: str = ".claude-plugin/marketplace.json"
-
-
-def _build_config(ctx: _BuildConfigInput) -> MarketplaceConfig:
-    """Shared parser for the marketplace fields once name/desc/version
-    have been resolved (either inherited or read directly).
-    """
-    marketplace_dict = ctx.marketplace_dict
-    name = ctx.name
-    description = ctx.description
-    version = ctx.version
-    source_path = ctx.source_path
-    is_legacy = ctx.is_legacy
-    name_overridden = ctx.name_overridden
-    description_overridden = ctx.description_overridden
-    version_overridden = ctx.version_overridden
-    default_output = ctx.default_output
-    warnings_sink: list[str] = []
-
-    # -- owner --
-    raw_owner = marketplace_dict.get("owner")
-    if raw_owner is None:
-        raise MarketplaceYmlError("'owner' is required")
-    owner = _parse_owner(raw_owner)
-
-    # -- output selection --
-    outputs, output_specs = _parse_outputs(
-        marketplace_dict.get("outputs"), warnings_sink=warnings_sink
-    )
-
-    # -- Claude output (default differs between legacy and new layouts) --
-    # ``output`` remains as a backwards-compatible shorthand for
-    # ``claude.output``. The explicit block wins when both are present.
-    legacy_output = marketplace_dict.get("output")
-    output = default_output if legacy_output is None else legacy_output
-    if not isinstance(output, str) or not output.strip():
-        raise MarketplaceYmlError("'output' must be a non-empty string")
-    output = output.strip()
-
-    # Path-traversal guard -- reject output paths containing ".." segments.
-    try:
-        validate_path_segments(output, context="marketplace output")
-    except PathTraversalError as exc:
-        raise MarketplaceYmlError(str(exc)) from exc
-
-    claude = _parse_claude(marketplace_dict.get("claude"), default_output=output)
-    output = claude.output
-
-    # -- metadata (Anthropic pass-through, preserve verbatim) --
-    metadata: dict[str, Any] = {}
-    raw_metadata = marketplace_dict.get("metadata")
-    if raw_metadata is not None:
-        if not isinstance(raw_metadata, dict):
-            raise MarketplaceYmlError("'metadata' must be a mapping")
-        metadata = dict(raw_metadata)
-
-    # S1: validate pluginRoot with path-safety checks if present.
-    plugin_root = metadata.get("pluginRoot")
-    if plugin_root is not None and isinstance(plugin_root, str) and plugin_root.strip():
-        try:
-            validate_path_segments(
-                plugin_root.strip(),
-                context="metadata.pluginRoot",
-                allow_current_dir=True,
-            )
-        except PathTraversalError as exc:
-            raise MarketplaceYmlError(str(exc)) from exc
-
-    # -- build --
-    build = _parse_build(marketplace_dict.get("build"))
-
-    # -- codex output --
-    codex = _parse_codex(marketplace_dict.get("codex"))
-
-    # -- Sibling-vs-map conflict detection (A1: sibling wins) --
-    # Only fire when the user EXPLICITLY set a sibling block AND the map
-    # also has an explicit path. Default/absent sibling is not a conflict.
-    has_explicit_claude = marketplace_dict.get("claude") is not None
-    has_explicit_codex = marketplace_dict.get("codex") is not None
-
-    final_specs_list = list(output_specs)
-    for i, spec in enumerate(final_specs_list):
-        if spec.path_explicit:
-            sibling_path: str | None = None
-            if spec.name == "claude" and has_explicit_claude and claude.output != spec.path:
-                sibling_path = claude.output
-            elif spec.name == "codex" and has_explicit_codex and codex.output != spec.path:
-                sibling_path = codex.output
-            if sibling_path is not None:
-                warnings_sink.append(
-                    f"marketplace.outputs.{spec.name}.path ('{spec.path}') "
-                    f"conflicts with marketplace.{spec.name}.output "
-                    f"('{sibling_path}').\n"
-                    f"    Using marketplace.{spec.name}.output for backwards "
-                    f"compatibility.\n\n"
-                    f"    To resolve: pick one source and remove the other.\n"
-                    f"      Keep map form (recommended):\n"
-                    f"        outputs:\n"
-                    f"          {spec.name}:\n"
-                    f"            path: {sibling_path}\n"
-                    f"        # remove the marketplace.{spec.name}: block\n\n"
-                    f"    The marketplace.{spec.name} sibling block becomes a "
-                    f"schema error in v0.15."
-                )
-                # Sibling wins: override the spec's path
-                final_specs_list[i] = MarketplaceOutputSpec(
-                    name=spec.name,
-                    path=sibling_path,
-                    path_explicit=True,
-                )
-    output_specs = tuple(final_specs_list)
-
-    # -- packages --
-    raw_packages = marketplace_dict.get("packages")
-    if raw_packages is None:
-        raw_packages = []
-    if not isinstance(raw_packages, list):
-        raise MarketplaceYmlError("'packages' must be a list")
-
-    entries: list[PackageEntry] = []
-    seen_names: dict[str, int] = {}
-    for idx, raw_entry in enumerate(raw_packages):
-        entry = _parse_package_entry(raw_entry, idx)
-        lower_name = entry.name.lower()
-        if lower_name in seen_names:
-            raise MarketplaceYmlError(
-                f"Duplicate package name '{entry.name}' "
-                f"(packages[{seen_names[lower_name]}] and packages[{idx}])"
-            )
-        seen_names[lower_name] = idx
-        entries.append(entry)
-
-    for output_name in outputs:
-        profile = MARKETPLACE_OUTPUTS[output_name]
-        for field_name in profile.required_package_fields:
-            missing = [entry.name for entry in entries if not getattr(entry, field_name)]
-            if missing:
-                names = ", ".join(missing)
-                raise MarketplaceYmlError(
-                    f"packages must define '{field_name}' when marketplace.outputs includes "
-                    f"'{output_name}' (missing: {names})"
-                )
-
-    return MarketplaceConfig(
-        name=name,
-        description=description,
-        version=version,
-        owner=owner,
-        output=output,
-        outputs=outputs,
-        claude=claude,
-        codex=codex,
-        metadata=metadata,
-        build=build,
-        packages=tuple(entries),
-        output_specs=output_specs,
-        warnings=tuple(warnings_sink),
-        source_path=source_path,
-        is_legacy=is_legacy,
-        name_overridden=name_overridden,
-        description_overridden=description_overridden,
-        version_overridden=version_overridden,
-    )

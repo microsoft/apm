@@ -5,6 +5,8 @@ For tag-pinned deps, also shows the latest available semver tag.
 For marketplace-sourced deps, checks available versions in the marketplace.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import re
@@ -13,7 +15,8 @@ from dataclasses import dataclass, field
 
 import click
 
-from ._outdated_runner import _check_deps_with_progress
+from ..core.command_logger import CommandLogger
+from ._outdated_runner import _check_deps_with_progress, _CheckRunContext
 
 logger = logging.getLogger(__name__)
 
@@ -73,90 +76,62 @@ def _find_remote_tip(ref_name, remote_refs):
     return None
 
 
-def _check_marketplace_ref(dep, verbose):
-    """Check a marketplace-sourced dep against its marketplace entry.
-
-    Compares the installed ref (resolved_ref or resolved_commit) against
-    the marketplace entry's current source ref. Returns a result tuple
-    ``(package, current, latest, status, extra, source)`` or ``None``
-    when the check cannot be performed (caller should fall through to
-    the git-based check).
-    """
-    if not dep.discovered_via or not dep.marketplace_plugin_name:
-        return None
-
+def _get_marketplace_checker():
     try:
         from ..marketplace.client import fetch_or_cache
         from ..marketplace.errors import MarketplaceError
         from ..marketplace.registry import get_marketplace_by_name
     except ImportError:
         return None
+    return fetch_or_cache, MarketplaceError, get_marketplace_by_name
 
-    source_label = f"marketplace: {dep.discovered_via}"
 
+def _load_marketplace_plugin(dep):
+    checker = _get_marketplace_checker()
+    if checker is None or not dep.discovered_via or not dep.marketplace_plugin_name:
+        return None
+    fetch_or_cache, marketplace_error, get_marketplace_by_name = checker
     try:
         source_obj = get_marketplace_by_name(dep.discovered_via)
-    except MarketplaceError:
-        logger.warning(
-            "Marketplace '%s' not found; falling back to git check for '%s'",
-            dep.discovered_via,
-            dep.marketplace_plugin_name,
-        )
-        return None
-
-    try:
         manifest = fetch_or_cache(source_obj)
-    except MarketplaceError:
+    except marketplace_error as exc:
         logger.warning(
-            "Failed to fetch marketplace '%s'; falling back to git check for '%s'",
+            "Marketplace '%s' unavailable; falling back to git check for '%s' (%s)",
             dep.discovered_via,
             dep.marketplace_plugin_name,
+            exc,
         )
         return None
+    return manifest.find_plugin(dep.marketplace_plugin_name)
 
-    plugin = manifest.find_plugin(dep.marketplace_plugin_name)
-    if not plugin:
-        return None
 
-    # Determine marketplace entry's current ref
-    mkt_ref = None
-    mkt_version = plugin.version or ""
-    if isinstance(plugin.source, dict):
-        mkt_ref = plugin.source.get("ref", "")
-    else:
-        # String sources are relative paths, not refs -- skip
-        return None
+def _short_ref(ref: str) -> str:
+    return ref[:12] if len(ref) > 12 else ref
 
-    if not mkt_ref:
-        return None
 
-    # Determine installed ref
-    installed_ref = dep.resolved_ref or dep.resolved_commit or ""
-    if not installed_ref:
-        return None
-
-    package_name = f"{dep.marketplace_plugin_name}@{dep.discovered_via}"
-    current_display = installed_ref[:12] if len(installed_ref) > 12 else installed_ref
-    latest_display = mkt_ref[:12] if len(mkt_ref) > 12 else mkt_ref
-    if mkt_version:
-        latest_display = f"{mkt_version} ({latest_display})"
-
-    if installed_ref != mkt_ref:
-        return OutdatedRow(
-            package=package_name,
-            current=current_display,
-            latest=latest_display,
-            status="outdated",
-            source=source_label,
-        )
-
+def _build_marketplace_row(dep, plugin, installed_ref: str, marketplace_ref: str) -> OutdatedRow:
+    latest_display = _short_ref(marketplace_ref)
+    if plugin.version:
+        latest_display = f"{plugin.version} ({latest_display})"
     return OutdatedRow(
-        package=package_name,
-        current=current_display,
+        package=f"{dep.marketplace_plugin_name}@{dep.discovered_via}",
+        current=_short_ref(installed_ref),
         latest=latest_display,
-        status="up-to-date",
-        source=source_label,
+        status="outdated" if installed_ref != marketplace_ref else "up-to-date",
+        source=f"marketplace: {dep.discovered_via}",
     )
+
+
+def _check_marketplace_ref(dep, verbose):
+    """Check a marketplace-sourced dep against its marketplace entry."""
+    plugin = _load_marketplace_plugin(dep)
+    if plugin is None or not isinstance(plugin.source, dict):
+        return None
+    marketplace_ref = plugin.source.get("ref", "")
+    installed_ref = dep.resolved_ref or dep.resolved_commit or ""
+    if not marketplace_ref or not installed_ref:
+        return None
+    return _build_marketplace_row(dep, plugin, installed_ref, marketplace_ref)
 
 
 def _check_one_dep(dep, downloader, verbose):
@@ -264,6 +239,91 @@ def _check_one_dep(dep, downloader, verbose):
             )
 
 
+def _load_outdated_lockfile(global_: bool, logger: CommandLogger):
+    from ..core.scope import InstallScope, get_apm_dir
+    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+
+    scope = InstallScope.USER if global_ else InstallScope.PROJECT
+    project_root = get_apm_dir(scope)
+    migrate_lockfile_if_needed(project_root)
+    lockfile = LockFile.read(get_lockfile_path(project_root))
+    if lockfile is not None:
+        return lockfile
+    scope_hint = "~/.apm/" if global_ else "current directory"
+    logger.error(f"No lockfile found in {scope_hint}")
+    sys.exit(1)
+
+
+def _build_outdated_downloader():
+    from ..core.auth import AuthResolver
+    from ..deps.github_downloader import GitHubPackageDownloader
+
+    return GitHubPackageDownloader(auth_resolver=AuthResolver())
+
+
+def _collect_checkable_dependencies(lockfile, logger: CommandLogger):
+    checkable = []
+    for key, dep in lockfile.dependencies.items():
+        if dep.source == "local":
+            logger.verbose_detail(f"Skipping local dep: {key}")
+            continue
+        if dep.registry_prefix:
+            logger.verbose_detail(f"Skipping Artifactory dep: {key}")
+            continue
+        checkable.append(dep)
+    return checkable
+
+
+def _render_outdated_rows(rows: list[OutdatedRow], verbose: bool) -> None:
+    try:
+        from rich.table import Table
+
+        from ._helpers import _get_console
+
+        console = _get_console()
+        if console is None:
+            raise ImportError("Rich console not available")
+        table = Table(title="Dependency Status", show_header=True, header_style="bold cyan")
+        table.add_column("Package", style="white", min_width=20)
+        table.add_column("Current", style="white", min_width=10)
+        table.add_column("Latest", style="white", min_width=10)
+        table.add_column("Status", min_width=12)
+        table.add_column("Source", style="dim", min_width=14)
+        status_styles = {"up-to-date": "green", "outdated": "yellow", "unknown": "dim"}
+        for row in rows:
+            style = status_styles.get(row.status, "white")
+            table.add_row(
+                row.package,
+                row.current,
+                row.latest,
+                f"[{style}]{row.status}[/{style}]",
+                row.source,
+            )
+            if verbose and row.extra_tags:
+                table.add_row("", "", f"[dim]tags: {', '.join(row.extra_tags)}[/dim]", "", "")
+        console.print(table)
+    except (ImportError, Exception):
+        click.echo(f"{'Package':<24}{'Current':<13}{'Latest':<13}{'Status':<15}{'Source'}")
+        click.echo("-" * 82)
+        for row in rows:
+            click.echo(
+                f"{row.package:<24}{row.current:<13}{row.latest:<13}{row.status:<15}{row.source}"
+            )
+            if verbose and row.extra_tags:
+                click.echo(f"{'':24}tags: {', '.join(row.extra_tags)}")
+
+
+def _summarise_outdated_rows(rows: list[OutdatedRow], logger: CommandLogger) -> None:
+    outdated_count = sum(1 for row in rows if row.status == "outdated")
+    has_unknown = any(row.status == "unknown" for row in rows)
+    if outdated_count:
+        logger.warning(
+            f"{outdated_count} outdated {'dependency' if outdated_count == 1 else 'dependencies'} found"
+        )
+    elif has_unknown:
+        logger.progress("Some dependencies could not be checked (branch/commit refs)")
+
+
 @click.command(name="outdated", help="Show outdated locked dependencies")
 @click.option(
     "--global",
@@ -300,160 +360,30 @@ def outdated(global_, verbose, parallel_checks):
         apm outdated --verbose   # Show available tags
         apm outdated -j 8        # Use 8 parallel checks
     """
-    from ..core.command_logger import CommandLogger
-    from ..core.scope import InstallScope, get_apm_dir
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
-
     logger = CommandLogger("outdated", verbose=verbose)
-
-    # Resolve scope and lockfile path
-    scope = InstallScope.USER if global_ else InstallScope.PROJECT
-    project_root = get_apm_dir(scope)
-
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
-    lockfile = LockFile.read(lockfile_path)
-
-    if lockfile is None:
-        scope_hint = "~/.apm/" if global_ else "current directory"
-        logger.error(f"No lockfile found in {scope_hint}")
-        sys.exit(1)
-
+    lockfile = _load_outdated_lockfile(global_, logger)
     if not lockfile.dependencies:
         logger.success("No locked dependencies to check")
         return
-
-    # Lazy-init downloader only when we have deps to check
-    from ..core.auth import AuthResolver
-    from ..deps.github_downloader import GitHubPackageDownloader
-
-    auth_resolver = AuthResolver()
-    downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
-
-    # #1369: wire the tiered ref resolver here too -- outdated calls
-    # downloader.resolve_git_reference() N times across a ThreadPoolExecutor,
-    # which is exactly the duplicate-resolution workload the L0 cache +
-    # coalesce lock are designed to collapse.
-    try:
-        from ..cache.git_cache import GitCache
-        from ..cache.paths import get_cache_root
-        from ..deps.tiered_ref_resolver import build_tiered_ref_resolver
-
-        _git_cache = None
-        if not os.environ.get("APM_NO_CACHE"):
-            try:
-                _git_cache = GitCache(get_cache_root(), refresh=False)
-                downloader.persistent_git_cache = _git_cache
-            except (OSError, ValueError):
-                pass
-        _tiered = build_tiered_ref_resolver(
-            downloader=downloader,
-            git_cache=_git_cache,
-        )
-        if _tiered is not None:
-            downloader._tiered_resolver = _tiered
-    except Exception as exc:  # pragma: no cover - never block outdated on resolver wiring
-        # Non-blocking, but log so --verbose surfaces wiring failures.
-        import logging as _logging
-
-        _logging.getLogger(__name__).debug(
-            "Tiered ref resolver wiring skipped for outdated (%s): %s",
-            type(exc).__name__,
-            exc,
-        )
-
-    # Filter to checkable deps (skip local + Artifactory)
-    checkable = []
-    for key, dep in lockfile.dependencies.items():
-        if dep.source == "local":
-            logger.verbose_detail(f"Skipping local dep: {key}")
-            continue
-        if dep.registry_prefix:
-            logger.verbose_detail(f"Skipping Artifactory dep: {key}")
-            continue
-        checkable.append(dep)
-
+    checkable = _collect_checkable_dependencies(lockfile, logger)
     if not checkable:
         logger.success("No remote dependencies to check")
         return
-
-    # Check deps with progress feedback and optional parallelism
     rows = _check_deps_with_progress(
-        checkable, downloader, verbose, parallel_checks, logger, _check_one_dep
+        checkable,
+        parallel_checks,
+        _CheckRunContext(
+            downloader=_build_outdated_downloader(),
+            verbose=verbose,
+            logger_obj=logger,
+            check_fn=_check_one_dep,
+        ),
     )
-
     if not rows:
         logger.success("No remote dependencies to check")
         return
-
-    # Check if everything is up-to-date
-    has_outdated = any(row.status == "outdated" for row in rows)
-    has_unknown = any(row.status == "unknown" for row in rows)
-
-    if not has_outdated and not has_unknown:
+    if not any(row.status in {"outdated", "unknown"} for row in rows):
         logger.success("All dependencies are up-to-date")
         return
-
-    # Render the table
-    try:
-        from rich.table import Table
-
-        from ._helpers import _get_console
-
-        console = _get_console()
-        if console is None:
-            raise ImportError("Rich console not available")
-
-        table = Table(
-            title="Dependency Status",
-            show_header=True,
-            header_style="bold cyan",
-        )
-        table.add_column("Package", style="white", min_width=20)
-        table.add_column("Current", style="white", min_width=10)
-        table.add_column("Latest", style="white", min_width=10)
-        table.add_column("Status", min_width=12)
-        table.add_column("Source", style="dim", min_width=14)
-
-        status_styles = {
-            "up-to-date": "green",
-            "outdated": "yellow",
-            "unknown": "dim",
-        }
-
-        for row in rows:
-            style = status_styles.get(row.status, "white")
-            table.add_row(
-                row.package,
-                row.current,
-                row.latest,
-                f"[{style}]{row.status}[/{style}]",
-                row.source,
-            )
-
-            if verbose and row.extra_tags:
-                tags_str = ", ".join(row.extra_tags)
-                table.add_row("", "", f"[dim]tags: {tags_str}[/dim]", "", "")
-
-        console.print(table)
-
-    except (ImportError, Exception):
-        # Fallback: plain text output
-        click.echo(f"{'Package':<24}{'Current':<13}{'Latest':<13}{'Status':<15}{'Source'}")
-        click.echo("-" * 82)
-        for row in rows:
-            click.echo(
-                f"{row.package:<24}{row.current:<13}{row.latest:<13}{row.status:<15}{row.source}"
-            )
-            if verbose and row.extra_tags:
-                click.echo(f"{'':24}tags: {', '.join(row.extra_tags)}")
-
-    # Summary
-    outdated_count = sum(1 for row in rows if row.status == "outdated")
-    if outdated_count:
-        logger.warning(
-            f"{outdated_count} outdated "
-            f"{'dependency' if outdated_count == 1 else 'dependencies'} found"
-        )
-    elif has_unknown:
-        logger.progress("Some dependencies could not be checked (branch/commit refs)")
+    _render_outdated_rows(rows, verbose)
+    _summarise_outdated_rows(rows, logger)

@@ -113,6 +113,7 @@ def _run_update_install(
     plan_callback,
     *,
     verbose: bool,
+    target: str | list[str] | None = None,
 ):
     """Execute the update install flow with a callback-backed plan."""
     try:
@@ -123,6 +124,7 @@ def _run_update_install(
             scope=InstallScope.PROJECT,
             logger=logger,
             plan_callback=plan_callback,
+            target=target,
         )
     except FrozenInstallError as exc:
         _rich_error(str(exc))

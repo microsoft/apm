@@ -11,6 +11,7 @@ import pytest
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.deps.artifactory_entry import _ArchiveCoords
 from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
@@ -252,10 +253,12 @@ class TestProxyAwareFetch:
 
         assert result == self._MARKETPLACE_JSON
         mock_fetch.assert_called_once_with(
-            host="art.example.com",
-            prefix="artifactory/github",
-            owner="acme-org",
-            repo="plugins",
+            _ArchiveCoords(
+                host="art.example.com",
+                prefix="artifactory/github",
+                owner="acme-org",
+                repo="plugins",
+            ),
             file_path="marketplace.json",
             ref="main",
             scheme="https",

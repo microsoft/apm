@@ -11,6 +11,17 @@ from typing import Any
 from ..models.apm_package import DependencyReference
 
 
+@dataclass(frozen=True, slots=True)
+class _DepResolutionInfo:
+    """Bundled resolution info for :meth:`LockedDependency.from_dependency_ref`."""
+
+    resolved_commit: str | None
+    depth: int
+    resolved_by: str | None
+    is_dev: bool = False
+    registry_config: Any = None
+
+
 @dataclass
 class LockedDependency:
     """A resolved dependency with exact commit/version information."""
@@ -152,29 +163,23 @@ class LockedDependency:
     def from_dependency_ref(
         cls,
         dep_ref: DependencyReference,
-        resolved_commit: str | None,
-        depth: int,
-        resolved_by: str | None,
-        is_dev: bool = False,
-        registry_config=None,
+        resolution: _DepResolutionInfo,
     ) -> "LockedDependency":
         """Create from a DependencyReference with resolution info.
 
         Args:
             dep_ref: The resolved dependency reference.
-            resolved_commit: Exact commit SHA that was installed, or ``None``.
-            depth: Dependency tree depth.
-            resolved_by: Parent repo URL, or ``None`` for direct dependencies.
-            is_dev: Whether this is a dev-only dependency.
-            registry_config: Optional :class:`~apm_cli.deps.registry_proxy.RegistryConfig`
-                used for this download.  When provided, ``host`` is set to the
-                pure FQDN (e.g. ``"art.example.com"``) and ``registry_prefix``
-                is set to the URL path prefix (e.g. ``"artifactory/github"``),
-                ensuring correct auth routing on subsequent installs.
+            resolution: Bundled resolution metadata (commit, depth, resolver,
+                dev-flag, and optional registry config).  When
+                ``resolution.registry_config`` is provided, ``host`` is set to
+                the pure FQDN (e.g. ``"art.example.com"``) and
+                ``registry_prefix`` is set to the URL path prefix (e.g.
+                ``"artifactory/github"``), ensuring correct auth routing on
+                subsequent installs.
         """
-        if registry_config is not None:
-            host = registry_config.host
-            registry_prefix = registry_config.prefix
+        if resolution.registry_config is not None:
+            host = resolution.registry_config.host
+            registry_prefix = resolution.registry_config.prefix
         else:
             host = dep_ref.host
             registry_prefix = None
@@ -183,15 +188,15 @@ class LockedDependency:
             host=host,
             port=dep_ref.port,
             registry_prefix=registry_prefix,
-            resolved_commit=resolved_commit,
+            resolved_commit=resolution.resolved_commit,
             resolved_ref=dep_ref.reference,
             virtual_path=dep_ref.virtual_path,
             is_virtual=dep_ref.is_virtual,
-            depth=depth,
-            resolved_by=resolved_by,
+            depth=resolution.depth,
+            resolved_by=resolution.resolved_by,
             source="local" if dep_ref.is_local else None,
             local_path=dep_ref.local_path if dep_ref.is_local else None,
-            is_dev=is_dev,
+            is_dev=resolution.is_dev,
             is_insecure=dep_ref.is_insecure,
             allow_insecure=dep_ref.allow_insecure,
             skill_subset=sorted(dep_ref.skill_subset)

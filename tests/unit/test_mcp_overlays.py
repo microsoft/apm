@@ -819,8 +819,8 @@ class TestInstallMCPDepsWithOverlays:
         # First positional arg is runtime, second is dep list
         assert call_args[0][0] == "vscode"
         assert call_args[0][1] == ["my-local"]
-        # Fourth positional arg is server_info_cache with synthetic info
-        server_cache = call_args[0][3]
+        # Third positional arg is RuntimeDispatchOpts with server_info_cache
+        server_cache = call_args[0][2].server_info_cache
         assert "my-local" in server_cache
         assert "packages" in server_cache["my-local"]
         assert count == 1

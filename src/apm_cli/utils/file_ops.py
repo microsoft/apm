@@ -26,6 +26,7 @@ import stat
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -72,6 +73,16 @@ def _is_transient_lock_error(exc: OSError) -> bool:
 # ---------------------------------------------------------------------------
 # Retry core
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _RetryOpts:
+    """Options for retry-on-lock logic."""
+
+    max_retries: int = _DEFAULT_MAX_RETRIES
+    initial_delay: float = _DEFAULT_INITIAL_DELAY
+    max_delay: float = _DEFAULT_MAX_DELAY
+    backoff_factor: float = _DEFAULT_BACKOFF_FACTOR
 
 
 def _retry_on_lock(
@@ -235,7 +246,7 @@ def robust_copytree(
     dst: Path | str,
     *,
     symlinks: bool = False,
-    ignore: Any = None,
+    ignore: Any | None = None,
     dirs_exist_ok: bool = False,
     max_retries: int = _DEFAULT_MAX_RETRIES,
 ) -> Path:

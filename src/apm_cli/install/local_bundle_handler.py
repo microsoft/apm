@@ -20,16 +20,15 @@ The bundle's ``.mcp.json`` itself is metadata and never deployed verbatim.
 
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import click
 
-if TYPE_CHECKING:
-    from apm_cli.models.dependency.mcp import MCPDependency
+from ._bundle_lockfile import _migrate_legacy_skill_paths, _persist_local_bundle_lockfile
+from ._bundle_mcp import _parse_bundle_mcp_servers, _wire_bundle_mcp_servers, _WireOpts
 
 
 @dataclass
@@ -61,13 +60,32 @@ def _reject_local_bundle_flags(bundle_arg: str, rejected_flags: dict[str, object
         )
 
 
-def _resolve_bundle_targets(
-    *, bundle_info, project_root: Path, target, global_: bool, legacy_skill_paths: bool, logger
-):
+@dataclass(frozen=True, slots=True)
+class _ResolveOpts:
+    """Bundled resolve-target options for :func:`_resolve_bundle_targets`."""
+
+    target: Any
+    global_: bool
+    legacy_skill_paths: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _InstallFlags:
+    """Bundled install flags for :func:`install_local_bundle`."""
+
+    force: bool
+    dry_run: bool
+    logger: Any
+
+
+def _resolve_bundle_targets(*, bundle_info, project_root: Path, resolve_opts: _ResolveOpts, logger):
     """Resolve install targets and apply bundle mismatch warnings."""
     from ..bundle.local_bundle import check_target_mismatch
     from ..integration.targets import apply_legacy_skill_paths, resolve_targets
 
+    target = resolve_opts.target
+    global_ = resolve_opts.global_
+    legacy_skill_paths = resolve_opts.legacy_skill_paths
     explicit = target if target else None
     targets = resolve_targets(
         project_root,
@@ -117,90 +135,6 @@ def _render_local_bundle_dry_run(deployed: list[str], logger) -> None:
         logger.tree_item(path)
 
 
-def _persist_local_bundle_lockfile(
-    *,
-    project_root: Path,
-    deployed: list[str],
-    deployed_hashes: dict[str, str],
-    legacy_skill_paths: bool,
-    logger,
-) -> None:
-    """Persist local bundle deployment state into the lockfile."""
-    if not deployed:
-        return
-
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
-
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
-    lockfile = LockFile.read(lockfile_path) or LockFile()
-    existing = set(lockfile.local_deployed_files)
-    existing.update(deployed)
-    lockfile.local_deployed_files = sorted(existing)
-    existing_hashes = dict(lockfile.local_deployed_file_hashes)
-    existing_hashes.update(deployed_hashes)
-    lockfile.local_deployed_file_hashes = existing_hashes
-
-    if not legacy_skill_paths:
-        _migrate_legacy_skill_paths(lockfile, lockfile_path, project_root, logger)
-
-    lockfile.write(lockfile_path)
-
-
-def _migrate_legacy_skill_paths(lockfile, lockfile_path: Path, project_root: Path, logger) -> None:
-    """Auto-migrate legacy per-client skill paths after bundle deployment."""
-    del lockfile_path
-    from ..utils.console import _rich_error, _rich_info
-    from .skill_path_migration import (
-        COLLISION_DETAIL_TEMPLATE,
-        COLLISION_HEADER_TEMPLATE,
-        COLLISION_HINT,
-        MIGRATION_SUMMARY_TEMPLATE,
-    )
-    from .skill_path_migration import (
-        check_collisions as _check_coll,
-    )
-    from .skill_path_migration import (
-        detect_legacy_skill_deployments as _detect_legacy,
-    )
-    from .skill_path_migration import (
-        execute_migration as _exec_mig,
-    )
-
-    plans = _detect_legacy(lockfile, project_root)
-    if not plans:
-        return
-
-    collisions = _check_coll(plans, project_root)
-    if collisions:
-        _rich_error(
-            COLLISION_HEADER_TEMPLATE.format(count=len(collisions)),
-            symbol="error",
-        )
-        for plan in plans:
-            for collision_detail in collisions:
-                if plan.dst_path in collision_detail:
-                    _rich_error(
-                        COLLISION_DETAIL_TEMPLATE.format(
-                            dst_path=plan.dst_path,
-                            src_path=plan.src_path,
-                            dep_name=plan.dep_name,
-                        ),
-                        symbol="error",
-                    )
-                    break
-        _rich_info(COLLISION_HINT, symbol="info")
-        return
-
-    migration_result = _exec_mig(plans, lockfile, project_root)
-    total = len(migration_result.deleted) + len(migration_result.skipped_no_file)
-    if total:
-        _rich_info(MIGRATION_SUMMARY_TEMPLATE.format(count=total), symbol="info")
-    if getattr(logger, "verbose", False) and migration_result.deleted:
-        for deleted_path in migration_result.deleted:
-            _rich_info(f"  removed {deleted_path}", symbol="info")
-
-
 def _emit_local_bundle_success(ctx: _EmitSuccessCtx) -> None:
     """Emit post-install success messages and optional MCP wiring."""
     deployed = ctx.deployed
@@ -232,9 +166,11 @@ def _emit_local_bundle_success(ctx: _EmitSuccessCtx) -> None:
             bundle_dir=bundle_info.source_dir,
             targets=targets,
             project_root=project_root,
-            user_scope=global_,
-            verbose=getattr(logger, "verbose", False),
-            logger=logger,
+            wire_opts=_WireOpts(
+                user_scope=global_,
+                verbose=getattr(logger, "verbose", False),
+                logger=logger,
+            ),
         )
 
 
@@ -244,9 +180,7 @@ def install_local_bundle(
     bundle_arg: str,
     target,
     global_: bool,
-    force: bool,
-    dry_run: bool,
-    logger,
+    install_flags: _InstallFlags,
     **kwargs,
 ) -> None:
     """Deploy a local bundle into project / user scope.
@@ -259,6 +193,9 @@ def install_local_bundle(
     alias: str | None = kwargs.get("alias")
     legacy_skill_paths: bool = kwargs.get("legacy_skill_paths", False)
     rejected_flags: dict[str, object] = kwargs.get("rejected_flags", {})
+    force = install_flags.force
+    dry_run = install_flags.dry_run
+    logger = install_flags.logger
     from ..bundle.local_bundle import verify_bundle_integrity
     from ..core.scope import InstallScope
     from ..install.services import LocalBundleOpts, integrate_local_bundle
@@ -299,9 +236,11 @@ def install_local_bundle(
         targets = _resolve_bundle_targets(
             bundle_info=bundle_info,
             project_root=project_root,
-            target=target,
-            global_=global_,
-            legacy_skill_paths=legacy_skill_paths,
+            resolve_opts=_ResolveOpts(
+                target=target,
+                global_=global_,
+                legacy_skill_paths=legacy_skill_paths,
+            ),
             logger=logger,
         )
         if not targets:
@@ -311,9 +250,9 @@ def install_local_bundle(
             bundle_info,
             project_root,
             targets=targets,
-            force=force,
-            dry_run=dry_run,
             opts=LocalBundleOpts(
+                force=force,
+                dry_run=dry_run,
                 diagnostics=None,
                 logger=logger,
                 scope=scope,
@@ -373,107 +312,3 @@ def install_local_bundle(
         # Tarball cleanup (caller-owned per LocalBundleInfo contract).
         if bundle_info.temp_dir is not None and bundle_info.temp_dir.exists():
             shutil.rmtree(bundle_info.temp_dir, ignore_errors=True)
-
-
-def _parse_bundle_mcp_servers(bundle_dir: Path) -> list[MCPDependency]:
-    """Parse ``<bundle>/.mcp.json`` (case-insensitive) into a list of
-    self-defined :class:`MCPDependency` entries.
-
-    Returns an empty list when the file is missing, malformed, or has no
-    ``mcpServers`` map.  Per-server parsing errors are logged at debug
-    level and the offending entry is dropped so a single bad entry does
-    not block the rest of the bundle's MCP wiring.
-    """
-    from apm_cli.models.dependency.mcp import MCPDependency
-
-    # Case-insensitive lookup mirrors the rest of the bundle metadata
-    # filtering (HFS+/NTFS case folding).
-    mcp_path: Path | None = None
-    for entry in bundle_dir.iterdir() if bundle_dir.is_dir() else []:
-        if entry.is_file() and not entry.is_symlink() and entry.name.lower() == ".mcp.json":
-            mcp_path = entry
-            break
-    if mcp_path is None:
-        return []
-
-    try:
-        data = json.loads(mcp_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    servers = data.get("mcpServers")
-    if not isinstance(servers, dict):
-        return []
-
-    out: list[MCPDependency] = []
-    for name, cfg in servers.items():
-        if not isinstance(name, str) or not isinstance(cfg, dict):
-            continue
-        # Anthropic plugin .mcp.json schema -> MCPDependency self-defined:
-        # ``type`` aliases ``transport`` (handled by MCPDependency.from_dict).
-        spec = dict(cfg)
-        spec["name"] = name
-        spec["registry"] = False
-        try:
-            out.append(MCPDependency.from_dict(spec))
-        except (ValueError, TypeError):
-            # Per-server parse failure: skip and continue.
-            continue
-    return out
-
-
-def _wire_bundle_mcp_servers(
-    *,
-    bundle_dir: Path,
-    targets,
-    project_root: Path,
-    user_scope: bool,
-    verbose: bool,
-    logger,
-) -> int:
-    """Wire bundle ``.mcp.json`` servers through ``MCPIntegrator.install``.
-
-    Returns the count of newly configured/updated MCP servers across all
-    resolved targets.  The function is best-effort: any per-target failure
-    is logged and the remaining targets continue to be processed.
-    """
-    deps = _parse_bundle_mcp_servers(bundle_dir)
-    if not deps:
-        return 0
-
-    from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-    target_names = [t.name for t in targets]
-    apm_config = {"targets": target_names, "scripts": {}}
-    try:
-        count = MCPIntegrator.install(
-            deps,
-            verbose=verbose,
-            apm_config=apm_config,
-            project_root=project_root,
-            user_scope=user_scope,
-            explicit_target=target_names,
-            logger=logger,
-        )
-    except Exception as exc:
-        logger.warning(
-            f"Bundle .mcp.json present but MCP wiring failed: {exc}. "
-            "Copy the entries into your project's apm.yml mcp_dependencies "
-            "and re-run 'apm install' to register them."
-        )
-        return 0
-
-    if count:
-        joined = ", ".join(target_names)
-        logger.success(f"Wired {count} MCP server(s) from bundle .mcp.json (target(s): {joined})")
-    elif deps:
-        # Bundle declared servers but none applied (e.g. resolved targets
-        # all gated out, or all servers already configured).  Emit an info
-        # line so users have a paper-trail.
-        joined = ", ".join(target_names)
-        logger.info(
-            f"Bundle .mcp.json declared {len(deps)} server(s); "
-            f"no new MCP config changes for target(s): {joined}"
-        )
-    return count

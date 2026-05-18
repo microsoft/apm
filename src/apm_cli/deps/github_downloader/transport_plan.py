@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """GitHub package downloader for APM dependencies."""
 
 import contextlib
@@ -19,9 +20,8 @@ from ...utils.github_host import (
     default_host,
     sanitize_token_url_in_message,
 )
-from ..bare_cache import (
-    clone_with_fallback,
-)
+from ..bare_cache._wt_clone import WtCloneOpts, clone_with_fallback
+from ..download_strategies.artifactory_strategy import _ArtifactoryTarget
 from ..git_remote_ops import (
     parse_ls_remote_output,
     semver_sort_key,
@@ -131,10 +131,12 @@ class _TransportPlanMixin:
             self._execute_transport_plan,
             repo_url_base,
             target_path,
-            progress_reporter=progress_reporter,
-            dep_ref=dep_ref,
-            verbose_callback=verbose_callback,
-            repo_cls=sys.modules[__package__].Repo,
+            WtCloneOpts(
+                progress_reporter=progress_reporter,
+                dep_ref=dep_ref,
+                verbose_callback=verbose_callback,
+                repo_cls=sys.modules[__package__].Repo,
+            ),
             **clone_kwargs,
         )
 
@@ -240,12 +242,14 @@ class _TransportPlanMixin:
         if dep_ref.is_artifactory():
             repo_parts = dep_ref.repo_url.split("/")
             return self._download_file_from_artifactory(
-                dep_ref.host,
-                dep_ref.artifactory_prefix,
-                repo_parts[0],
-                repo_parts[1] if len(repo_parts) > 1 else repo_parts[0],
+                _ArtifactoryTarget(
+                    host=dep_ref.host,
+                    prefix=dep_ref.artifactory_prefix,
+                    owner=repo_parts[0],
+                    repo=repo_parts[1] if len(repo_parts) > 1 else repo_parts[0],
+                    ref=ref,
+                ),
                 file_path,
-                ref,
             )
 
         # Check if this should go through Artifactory proxy (Mode 2)
@@ -253,13 +257,15 @@ class _TransportPlanMixin:
         if art_proxy and self._should_use_artifactory_proxy(dep_ref):
             repo_parts = dep_ref.repo_url.split("/")
             return self._download_file_from_artifactory(
-                art_proxy[0],
-                art_proxy[1],
-                repo_parts[0],
-                repo_parts[1] if len(repo_parts) > 1 else repo_parts[0],
+                _ArtifactoryTarget(
+                    host=art_proxy[0],
+                    prefix=art_proxy[1],
+                    owner=repo_parts[0],
+                    repo=repo_parts[1] if len(repo_parts) > 1 else repo_parts[0],
+                    ref=ref,
+                    scheme=art_proxy[2],
+                ),
                 file_path,
-                ref,
-                scheme=art_proxy[2],
             )
 
         # Check if this is Azure DevOps

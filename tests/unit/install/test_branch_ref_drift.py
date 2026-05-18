@@ -30,6 +30,7 @@ from apm_cli.install.heals.buggy_lockfile_recovery import (
 )
 from apm_cli.install.phases.integrate import _resolve_download_strategy
 from apm_cli.install.sources import CachedDependencySource
+from apm_cli.install.sources._cached import _CachedSourceExtras
 from apm_cli.models.apm_package import GitReferenceType
 
 # ----------------------------------------------------------------------
@@ -411,9 +412,11 @@ class TestCachedSourceShaPriority:
             dep_ref=dep_ref,
             install_path=Path("/tmp/no-such-path"),
             dep_key="github.com/owner/repo",
-            resolved_ref=resolved_ref,
-            dep_locked_chk=dep_locked_chk,
-            fetched_this_run=fetched_this_run,
+            extras=_CachedSourceExtras(
+                resolved_ref=resolved_ref,
+                dep_locked_chk=dep_locked_chk,
+                fetched_this_run=fetched_this_run,
+            ),
         )
 
     def test_true_cached_path_uses_lockfile_sha(self):

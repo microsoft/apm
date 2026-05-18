@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """fetch_sha_into_bare: hydrate a specific SHA into an existing bare repo."""
 
 from __future__ import annotations
@@ -7,6 +8,7 @@ import os
 import re
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -116,6 +118,106 @@ def _scrub_fetch_head(bare_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class _FetchShaCtx:
+    """Bundled context for :func:`_try_fetch_sha_step2` and :func:`_try_broaden_shallow`."""
+
+    execute_transport_plan: Callable[..., None]
+    git_exe: str
+    repo_url_base: str
+    bare_path: Path
+    sha: str
+    dep_ref: DependencyReference
+
+
+def _try_fetch_sha_step2(ctx: _FetchShaCtx) -> bool:
+    """Attempt a shallow fetch for the specific SHA (step 2). Return True on success."""
+
+    def _fetch_action_sha(url: str, env: dict[str, str], target: Path) -> None:
+        subprocess.run(
+            [ctx.git_exe, "--git-dir", str(target), "fetch", "--depth=1", url, ctx.sha],
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+
+    try:
+        ctx.execute_transport_plan(
+            ctx.repo_url_base,
+            ctx.bare_path,
+            dep_ref=ctx.dep_ref,
+            clone_action=_fetch_action_sha,
+        )
+        _scrub_fetch_head(ctx.bare_path)
+        if _rev_parse_present(ctx.git_exe, ctx.bare_path, ctx.sha):
+            _log.debug("fetch_sha_into_bare: shallow fetch of %s succeeded", ctx.sha[:12])
+            _pin_sha_as_head_ref(ctx.git_exe, ctx.bare_path, ctx.sha)
+            return True
+    except subprocess.CalledProcessError as exc:
+        stderr_text = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
+        _log.debug(
+            "fetch_sha_into_bare: shallow fetch of %s failed: %s",
+            ctx.sha[:12],
+            stderr_text,
+        )
+    except Exception:
+        _log.debug(
+            "fetch_sha_into_bare: shallow fetch of %s raised unexpected error",
+            ctx.sha[:12],
+        )
+    return False
+
+
+def _try_broaden_shallow(ctx: _FetchShaCtx) -> bool:
+    """Try broadening the shallow clone to expose a previously-unreachable SHA. Return True on success."""
+    # Depth is capped to avoid unbounded history download on large repos.
+    # Override via APM_BROAD_FETCH_DEPTH environment variable.
+    broad_depth = os.environ.get("APM_BROAD_FETCH_DEPTH", "50")
+    _log.info(
+        "Hydrating missing commit %s into shared bare for %s", ctx.sha[:12], ctx.repo_url_base
+    )
+    _log.debug(
+        "fetch_sha_into_bare: broadening shallow in %s to find %s", ctx.bare_path, ctx.sha[:12]
+    )
+
+    def _fetch_action_broad(url: str, env: dict[str, str], target: Path) -> None:
+        subprocess.run(
+            [ctx.git_exe, "--git-dir", str(target), "fetch", f"--depth={broad_depth}", url],
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+
+    try:
+        ctx.execute_transport_plan(
+            ctx.repo_url_base,
+            ctx.bare_path,
+            dep_ref=ctx.dep_ref,
+            clone_action=_fetch_action_broad,
+        )
+        _scrub_fetch_head(ctx.bare_path)
+        if _rev_parse_present(ctx.git_exe, ctx.bare_path, ctx.sha):
+            _log.debug("fetch_sha_into_bare: broad fetch succeeded, %s now present", ctx.sha[:12])
+            _pin_sha_as_head_ref(ctx.git_exe, ctx.bare_path, ctx.sha)
+            return True
+    except subprocess.CalledProcessError as exc:
+        stderr_text = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
+        _log.debug(
+            "fetch_sha_into_bare: broad fetch failed for %s in %s: %s",
+            ctx.sha[:12],
+            ctx.bare_path,
+            stderr_text,
+        )
+    except Exception:
+        _log.debug(
+            "fetch_sha_into_bare: broad fetch raised unexpected error for %s",
+            ctx.sha[:12],
+        )
+    return False
+
+
 def fetch_sha_into_bare(
     execute_transport_plan: Callable[..., None],
     repo_url_base: str,
@@ -176,87 +278,26 @@ def fetch_sha_into_bare(
         _pin_sha_as_head_ref(git_exe, bare_path, sha)
         return True
 
+    _ctx = _FetchShaCtx(
+        execute_transport_plan=execute_transport_plan,
+        git_exe=git_exe,
+        repo_url_base=repo_url_base,
+        bare_path=bare_path,
+        sha=sha,
+        dep_ref=dep_ref,
+    )
+
     # Step 2: shallow fetch by full SHA (only for full 40-char SHAs).
     if len(sha) == 40:
         _log.debug(
             "fetch_sha_into_bare: attempting shallow fetch of %s into %s", sha[:12], bare_path
         )
-
-        def _fetch_action_sha(url: str, env: dict[str, str], target: Path) -> None:
-            subprocess.run(
-                [git_exe, "--git-dir", str(target), "fetch", "--depth=1", url, sha],
-                env=env,
-                check=True,
-                capture_output=True,
-                timeout=300,
-            )
-
-        try:
-            execute_transport_plan(
-                repo_url_base,
-                bare_path,
-                dep_ref=dep_ref,
-                clone_action=_fetch_action_sha,
-            )
-            _scrub_fetch_head(bare_path)
-            if _rev_parse_present(git_exe, bare_path, sha):
-                _log.debug("fetch_sha_into_bare: shallow fetch of %s succeeded", sha[:12])
-                _pin_sha_as_head_ref(git_exe, bare_path, sha)
-                return True
-        except subprocess.CalledProcessError as exc:
-            stderr_text = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
-            _log.debug(
-                "fetch_sha_into_bare: shallow fetch of %s failed: %s",
-                sha[:12],
-                stderr_text,
-            )
-        except Exception:
-            _log.debug(
-                "fetch_sha_into_bare: shallow fetch of %s raised unexpected error",
-                sha[:12],
-            )
+        if _try_fetch_sha_step2(_ctx):
+            return True
 
     # Step 3: broaden shallow -- fetch all refs without a SHA argument.
-    # Depth is capped to avoid unbounded history download on large repos.
-    # Override via APM_BROAD_FETCH_DEPTH environment variable.
-    broad_depth = os.environ.get("APM_BROAD_FETCH_DEPTH", "50")
-    _log.info("Hydrating missing commit %s into shared bare for %s", sha[:12], repo_url_base)
-    _log.debug("fetch_sha_into_bare: broadening shallow in %s to find %s", bare_path, sha[:12])
-
-    def _fetch_action_broad(url: str, env: dict[str, str], target: Path) -> None:
-        subprocess.run(
-            [git_exe, "--git-dir", str(target), "fetch", f"--depth={broad_depth}", url],
-            env=env,
-            check=True,
-            capture_output=True,
-            timeout=300,
-        )
-
-    try:
-        execute_transport_plan(
-            repo_url_base,
-            bare_path,
-            dep_ref=dep_ref,
-            clone_action=_fetch_action_broad,
-        )
-        _scrub_fetch_head(bare_path)
-        if _rev_parse_present(git_exe, bare_path, sha):
-            _log.debug("fetch_sha_into_bare: broad fetch succeeded, %s now present", sha[:12])
-            _pin_sha_as_head_ref(git_exe, bare_path, sha)
-            return True
-    except subprocess.CalledProcessError as exc:
-        stderr_text = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
-        _log.debug(
-            "fetch_sha_into_bare: broad fetch failed for %s in %s: %s",
-            sha[:12],
-            bare_path,
-            stderr_text,
-        )
-    except Exception:
-        _log.debug(
-            "fetch_sha_into_bare: broad fetch raised unexpected error for %s",
-            sha[:12],
-        )
+    if _try_broaden_shallow(_ctx):
+        return True
 
     _log.debug(
         "fetch_sha_into_bare: all fetch attempts exhausted for %s in %s",

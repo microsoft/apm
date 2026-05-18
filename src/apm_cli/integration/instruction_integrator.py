@@ -9,13 +9,21 @@ Content transforms are selected by the ``format_id`` field in
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+
+from ._opts import IntegrateOpts, SyncRemoveOpts
+from ._rule_transforms import (
+    _apply_claude_rules_format,
+    _apply_cursor_rules_format,
+    _apply_windsurf_rules_format,
+    _copy_instruction_for_format,
+    _instruction_target_name,
+)
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -62,10 +70,8 @@ class InstructionIntegrator(BaseIntegrator):
         target: TargetProfile,
         package_info,
         project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set[str] | None = None,
-        diagnostics=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate instructions for a single *target*.
 
@@ -76,6 +82,17 @@ class InstructionIntegrator(BaseIntegrator):
         * ``windsurf_rules``  -- convert ``applyTo:`` to ``trigger: glob`` frontmatter
         * anything else       -- copy verbatim (identity transform)
         """
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
+        resolved_opts = opts or IntegrateOpts()
+        force = resolved_opts.force
+        managed_files = resolved_opts.managed_files
+        diagnostics = resolved_opts.diagnostics
+
         mapping = target.primitives.get("instructions")
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
@@ -94,7 +111,6 @@ class InstructionIntegrator(BaseIntegrator):
         deploy_dir.mkdir(parents=True, exist_ok=True)
 
         fmt = mapping.format_id
-        needs_rename = fmt in ("cursor_rules", "claude_rules", "windsurf_rules")
 
         files_integrated = 0
         files_skipped = 0
@@ -103,15 +119,7 @@ class InstructionIntegrator(BaseIntegrator):
         total_links_resolved = 0
 
         for source_file in instruction_files:
-            if needs_rename:
-                stem = source_file.name
-                if stem.endswith(".instructions.md"):
-                    stem = stem[: -len(".instructions.md")]
-                target_name = f"{stem}{mapping.extension}"
-            else:
-                target_name = source_file.name
-
-            target_path = deploy_dir / target_name
+            target_path = deploy_dir / _instruction_target_name(source_file, mapping)
             # target_name is Path.name (no separators), so traversal via
             # deploy_dir is impossible.  Validated against deploy_dir (not
             # project_root) so user-scope targets whose root resolves
@@ -130,14 +138,12 @@ class InstructionIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
-            if fmt == "cursor_rules":
-                links_resolved = self.copy_instruction_cursor(source_file, target_path)
-            elif fmt == "claude_rules":
-                links_resolved = self.copy_instruction_claude(source_file, target_path)
-            elif fmt == "windsurf_rules":
-                links_resolved = self.copy_instruction_windsurf(source_file, target_path)
-            else:
-                links_resolved = self.copy_instruction(source_file, target_path)
+            links_resolved = _copy_instruction_for_format(
+                self,
+                fmt,
+                source_file,
+                target_path,
+            )
 
             total_links_resolved += links_resolved
             files_integrated += 1
@@ -181,10 +187,12 @@ class InstructionIntegrator(BaseIntegrator):
         return self.sync_remove_files(
             project_root,
             managed_files,
-            prefix=prefix,
-            legacy_glob_dir=legacy_dir,
-            legacy_glob_pattern=legacy_pattern,
-            targets=[target],
+            prefix,
+            SyncRemoveOpts(
+                legacy_glob_dir=legacy_dir,
+                legacy_glob_pattern=legacy_pattern,
+                targets=[target],
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -203,21 +211,23 @@ class InstructionIntegrator(BaseIntegrator):
         self,
         package_info,
         project_root: Path,
-        force: bool = False,
-        managed_files: set[str] | None = None,
-        diagnostics=None,
-        logger=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate instructions into .github/instructions/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
         return self.integrate_instructions_for_target(
             KNOWN_TARGETS["copilot"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            opts,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["copilot"], ...) instead.
@@ -243,46 +253,8 @@ class InstructionIntegrator(BaseIntegrator):
 
     @staticmethod
     def _convert_to_cursor_rules(content: str) -> str:
-        """Convert APM instruction content to Cursor Rules ``.mdc`` format.
-
-        Parses existing YAML frontmatter, maps ``applyTo`` → ``globs``,
-        extracts or generates a ``description``, and rewrites the
-        frontmatter in Cursor's expected format.
-        """
-        body = content
-        apply_to = ""
-        description = ""
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            fm_block = fm_match.group(1)
-            body = content[fm_match.end() :]
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
-                elif line_stripped.startswith("description:"):
-                    description = line_stripped[len("description:") :].strip().strip("'\"")
-
-        # Generate description from first content sentence if missing
-        if not description:
-            for line in body.splitlines():
-                stripped = line.strip().lstrip("#").strip()
-                if stripped:
-                    description = stripped.split(".")[0].strip()
-                    break
-
-        # Build Cursor Rules frontmatter
-        parts = ["---"]
-        if description:
-            parts.append(f"description: {description}")
-        if apply_to:
-            parts.append(f'globs: "{apply_to}"')
-        parts.append("---")
-
-        return "\n".join(parts) + "\n\n" + body.lstrip("\n")
+        """Convert APM instruction content to Cursor Rules ``.mdc`` format."""
+        return _apply_cursor_rules_format(content)
 
     def copy_instruction_cursor(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Cursor Rules format.
@@ -300,21 +272,23 @@ class InstructionIntegrator(BaseIntegrator):
         self,
         package_info,
         project_root: Path,
-        force: bool = False,
-        managed_files: set[str] | None = None,
-        diagnostics=None,
-        logger=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate instructions as Cursor Rules into ``.cursor/rules/``."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
         return self.integrate_instructions_for_target(
             KNOWN_TARGETS["cursor"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            opts,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["cursor"], ...) instead.
@@ -340,43 +314,8 @@ class InstructionIntegrator(BaseIntegrator):
 
     @staticmethod
     def _convert_to_windsurf_rules(content: str) -> str:
-        """Convert APM instruction content to Windsurf rules ``.md`` format.
-
-        Parses existing YAML frontmatter via ``yaml.safe_load``, maps
-        ``applyTo`` to Windsurf's ``trigger: glob`` + ``globs`` frontmatter.
-        Instructions without ``applyTo`` become ``trigger: always_on`` rules.
-
-        Ref: https://docs.windsurf.com/windsurf/cascade/memories
-        """
-        import yaml
-
-        body = content
-        apply_to = ""
-
-        # Parse existing frontmatter with yaml.safe_load (consistent with
-        # _write_windsurf_agent_skill and all other frontmatter parsers).
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            body = content[fm_match.end() :]
-            try:
-                fm = yaml.safe_load(fm_match.group(1)) or {}
-            except Exception:
-                fm = {}
-            apply_to = str(fm.get("applyTo", "")).strip()
-
-        # Build Windsurf rules frontmatter
-        parts = ["---"]
-        if apply_to:
-            # Sanitize: strip newlines to prevent frontmatter injection
-            # via crafted applyTo values (e.g. "**\ntrigger: always_on").
-            safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
-            parts.append("trigger: glob")
-            parts.append(f'globs: "{safe_apply_to}"')
-        else:
-            parts.append("trigger: always_on")
-        parts.append("---")
-
-        return "\n".join(parts) + "\n\n" + body.lstrip("\n")
+        """Convert APM instruction content to Windsurf rules ``.md`` format."""
+        return _apply_windsurf_rules_format(content)
 
     def copy_instruction_windsurf(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Windsurf rules format.
@@ -396,39 +335,8 @@ class InstructionIntegrator(BaseIntegrator):
 
     @staticmethod
     def _convert_to_claude_rules(content: str) -> str:
-        """Convert APM instruction content to Claude Code rules ``.md`` format.
-
-        Parses existing YAML frontmatter, maps ``applyTo`` to ``paths``
-        (YAML list), and rewrites the frontmatter in Claude's expected
-        format.  Instructions without ``applyTo`` become unconditional
-        rules (no ``paths`` key).
-
-        Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
-        """
-        body = content
-        apply_to = ""
-
-        # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
-        if fm_match:
-            fm_block = fm_match.group(1)
-            body = content[fm_match.end() :]
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
-
-        # Build Claude rules frontmatter (only when path-scoped)
-        if apply_to:
-            parts = ["---"]
-            parts.append("paths:")
-            parts.append(f'  - "{apply_to}"')
-            parts.append("---")
-            return "\n".join(parts) + "\n\n" + body.lstrip("\n")
-
-        # No applyTo -> unconditional rule, return body without frontmatter
-        return body.lstrip("\n")
+        """Convert APM instruction content to Claude Code rules ``.md`` format."""
+        return _apply_claude_rules_format(content)
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.
@@ -446,21 +354,23 @@ class InstructionIntegrator(BaseIntegrator):
         self,
         package_info,
         project_root: Path,
-        force: bool = False,
-        managed_files: set[str] | None = None,
-        diagnostics=None,
-        logger=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate instructions as Claude Code rules into ``.claude/rules/``."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
         return self.integrate_instructions_for_target(
             KNOWN_TARGETS["claude"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            opts,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.

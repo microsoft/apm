@@ -7,13 +7,23 @@ and ``unittest.mock.patch`` targets remain unchanged.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from apm_cli.install.phases.heal import run_heal_chain
+from apm_cli.install.phases.heal import _HealChainOpts, run_heal_chain
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+
+
+@dataclass(frozen=True, slots=True)
+class _LockfileCheckParams:
+    """Parameter bundle for :func:`_check_lockfile_match`."""
+
+    resolved_ref: Any
+    update_refs: bool
+    ref_changed: bool
 
 
 def _check_git_or_content_hash(install_path: Path, locked_dep: Any) -> tuple[bool, bool]:
@@ -47,9 +57,7 @@ def _check_lockfile_match(
     install_path: Path,
     existing_lockfile: Any,
     dep_ref: Any,
-    resolved_ref: Any,
-    update_refs: bool,
-    ref_changed: bool,
+    params: _LockfileCheckParams,
 ) -> tuple[bool, bool]:
     """Return ``(lockfile_match, lockfile_match_via_content_hash_only)``.
 
@@ -61,13 +69,16 @@ def _check_lockfile_match(
     locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
     if not (locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached"):
         return False, False
-    if update_refs:
+    if params.update_refs:
         # Update mode: remote ref must still resolve to the same commit,
         # then verify the local checkout matches.
-        if not (resolved_ref and resolved_ref.resolved_commit == locked_dep.resolved_commit):
+        if not (
+            params.resolved_ref
+            and params.resolved_ref.resolved_commit == locked_dep.resolved_commit
+        ):
             return False, False
         return _check_git_or_content_hash(install_path, locked_dep)
-    elif not ref_changed:
+    elif not params.ref_changed:
         # Normal mode: compare local HEAD with lockfile SHA.
         return _check_git_or_content_hash(install_path, locked_dep)
     return False, False
@@ -134,7 +145,12 @@ def _resolve_download_strategy(
     # The self-heal logic below uses this to recover from the v<=0.12.2
     # branch-ref drift bug for upgrading users.
     lockfile_match, lockfile_match_via_content_hash_only = _check_lockfile_match(
-        install_path, existing_lockfile, dep_ref, resolved_ref, update_refs, ref_changed
+        install_path,
+        existing_lockfile,
+        dep_ref,
+        _LockfileCheckParams(
+            resolved_ref=resolved_ref, update_refs=update_refs, ref_changed=ref_changed
+        ),
     )
 
     # Self-heal pipeline (PR #1158).
@@ -153,12 +169,14 @@ def _resolve_download_strategy(
     lockfile_match, ref_changed = run_heal_chain(
         ctx,
         dep_ref,
-        resolved_ref=resolved_ref,
-        existing_lockfile=existing_lockfile,
-        lockfile_match=lockfile_match,
-        lockfile_match_via_content_hash_only=lockfile_match_via_content_hash_only,
-        update_refs=update_refs,
-        ref_changed=ref_changed,
+        _HealChainOpts(
+            resolved_ref=resolved_ref,
+            existing_lockfile=existing_lockfile,
+            lockfile_match=lockfile_match,
+            lockfile_match_via_content_hash_only=lockfile_match_via_content_hash_only,
+            update_refs=update_refs,
+            ref_changed=ref_changed,
+        ),
     )
 
     skip_download = install_path.exists() and (

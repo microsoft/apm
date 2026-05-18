@@ -186,9 +186,14 @@ class TestDownloadPackageDelegation:
 
         archive.download_artifactory_archive.assert_called_once()
         call = archive.download_artifactory_archive.call_args
-        assert call.args[:5] == ("art.example.com", "apm/github", "owner", "repo", "v1.0.0")
-        assert call.args[5] == target
-        assert call.kwargs["scheme"] == "https"
+        art_target = call.args[0]
+        assert art_target.host == "art.example.com"
+        assert art_target.prefix == "apm/github"
+        assert art_target.owner == "owner"
+        assert art_target.repo == "repo"
+        assert art_target.ref == "v1.0.0"
+        assert art_target.scheme == "https"
+        assert call.args[1] == target
         assert result.dependency_ref is dep
         assert result.install_path == target
 
@@ -210,8 +215,9 @@ class TestDownloadPackageDelegation:
             return_value=validation,
         ):
             orch.download_package(dep, tmp_path / "pkg")
-        # The 5th positional arg is `ref`; defaults to "main".
-        assert archive.download_artifactory_archive.call_args.args[4] == "main"
+        # The first positional arg is _ArtifactoryTarget; ref defaults to "main".
+        art_target = archive.download_artifactory_archive.call_args.args[0]
+        assert art_target.ref == "main"
 
     def test_validation_failure_raises_and_cleans_up(self, tmp_path):
         orch, _archive = self._orchestrator_with_validation_ok()

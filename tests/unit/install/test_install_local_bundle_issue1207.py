@@ -533,9 +533,11 @@ class TestBundleMcpWiring:
             bundle_dir=bundle,
             targets=targets,
             project_root=tmp_path / "project",
-            user_scope=False,
-            verbose=False,
-            logger=logger,
+            wire_opts=local_bundle_handler._WireOpts(
+                user_scope=False,
+                verbose=False,
+                logger=logger,
+            ),
         )
         assert count == 1
         # Per scsec N1 (PR #1336): the bundle wiring forwards canonical
@@ -575,9 +577,11 @@ class TestBundleMcpWiring:
             bundle_dir=bundle,
             targets=[KNOWN_TARGETS["copilot"]],
             project_root=tmp_path / "project",
-            user_scope=False,
-            verbose=False,
-            logger=logger,
+            wire_opts=local_bundle_handler._WireOpts(
+                user_scope=False,
+                verbose=False,
+                logger=logger,
+            ),
         )
         assert count == 0
         # Integrator is not invoked when the bundle has no servers to wire.
@@ -618,9 +622,11 @@ class TestBundleMcpWiring:
             bundle_dir=bundle,
             targets=[KNOWN_TARGETS["copilot"]],
             project_root=tmp_path / "project",
-            user_scope=False,
-            verbose=False,
-            logger=logger,
+            wire_opts=local_bundle_handler._WireOpts(
+                user_scope=False,
+                verbose=False,
+                logger=logger,
+            ),
         )
         assert count == 0
         assert any("simulated wiring failure" in w for w in warnings)

@@ -34,8 +34,8 @@ from apm_cli.install.sources._base import (
     Materialization,
     _format_package_type_label,
 )
-from apm_cli.install.sources._cached import CachedDependencySource
-from apm_cli.install.sources._fresh import FreshDependencySource
+from apm_cli.install.sources._cached import CachedDependencySource, _CachedSourceExtras
+from apm_cli.install.sources._fresh import FreshDependencySource, _FreshSourceExtras
 from apm_cli.install.sources._local import LocalDependencySource
 
 if TYPE_CHECKING:
@@ -84,17 +84,21 @@ def make_dependency_source(
             dep_ref,
             install_path,
             dep_key,
-            resolved_ref,
-            dep_locked_chk,
-            fetched_this_run=fetched_this_run,
+            _CachedSourceExtras(
+                resolved_ref=resolved_ref,
+                dep_locked_chk=dep_locked_chk,
+                fetched_this_run=fetched_this_run,
+            ),
         )
     return FreshDependencySource(
         ctx,
         dep_ref,
         install_path,
         dep_key,
-        resolved_ref,
-        dep_locked_chk,
-        ref_changed,
-        progress,
+        _FreshSourceExtras(
+            resolved_ref=resolved_ref,
+            dep_locked_chk=dep_locked_chk,
+            ref_changed=ref_changed,
+            progress=progress,
+        ),
     )

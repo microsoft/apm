@@ -1,7 +1,7 @@
 """Tests for safe MCP installer functionality."""
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from apm_cli.core.safe_installer import InstallationSummary, SafeMCPInstaller
 
@@ -40,7 +40,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(summary.installed[0], "github")
 
         # Verify adapter was called
-        self.mock_adapter.configure_mcp_server.assert_called_once_with("github")
+        self.mock_adapter.configure_mcp_server.assert_called_once_with("github", ANY)
 
     def test_skip_existing_server(self):
         """Test skipping server that already exists."""
@@ -99,7 +99,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         def mock_check_exists(server_ref):
             return server_ref == "existing-server"
 
-        def mock_configure(server_ref):
+        def mock_configure(server_ref, request=None):
             if server_ref == "failing-server":
                 raise Exception("Configuration failed")
             return server_ref == "new-server"

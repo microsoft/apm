@@ -11,6 +11,22 @@ from ...core.command_logger import CommandLogger
 from . import marketplace
 
 
+def _render_validate_result(r, logger):
+    """Render a single validation result; return (passed_delta, warning_delta, error_delta)."""
+    if r.passed and not r.warnings:
+        logger.success(f"  {r.check_name}: all plugins valid", symbol="check")
+        return 1, 0, 0
+    if r.warnings and not r.errors:
+        for w in r.warnings:
+            logger.warning(f"  {r.check_name}: {w}", symbol="warning")
+        return 0, len(r.warnings), 0
+    for e in r.errors:
+        logger.error(f"  {r.check_name}: {e}", symbol="error")
+    for w in r.warnings:
+        logger.warning(f"  {r.check_name}: {w}", symbol="warning")
+    return 0, len(r.warnings), len(r.errors)
+
+
 @marketplace.command(help="Validate a marketplace manifest")
 @click.argument("name", required=True)
 @click.option(
@@ -58,20 +74,10 @@ def validate(name, check_refs, verbose):
         logger.blank_line()
         logger.progress("Validation Results:", symbol="info")
         for r in results:
-            if r.passed and not r.warnings:
-                logger.success(f"  {r.check_name}: all plugins valid", symbol="check")
-                passed += 1
-            elif r.warnings and not r.errors:
-                for w in r.warnings:
-                    logger.warning(f"  {r.check_name}: {w}", symbol="warning")
-                warning_count += len(r.warnings)
-            else:
-                for e in r.errors:
-                    logger.error(f"  {r.check_name}: {e}", symbol="error")
-                for w in r.warnings:
-                    logger.warning(f"  {r.check_name}: {w}", symbol="warning")
-                error_count += len(r.errors)
-                warning_count += len(r.warnings)
+            p_d, w_d, e_d = _render_validate_result(r, logger)
+            passed += p_d
+            warning_count += w_d
+            error_count += e_d
 
         logger.blank_line()
         logger.progress(

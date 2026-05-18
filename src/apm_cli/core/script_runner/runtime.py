@@ -1,5 +1,7 @@
 """Script runner for APM NPM-like script execution."""
 
+from __future__ import annotations
+
 import os
 import re
 import subprocess
@@ -109,6 +111,43 @@ def run_script(self, script_name: str, params: dict[str, str]) -> bool:
     raise RuntimeError(error_msg)
 
 
+def _show_env_setup_if_relevant(self, env: dict, runtime: str) -> None:
+    """Show environment setup info if relevant tokens are set."""
+    env_vars_set = []
+    if env.get("GITHUB_TOKEN"):
+        env_vars_set.append("GITHUB_TOKEN")
+    if env.get("GITHUB_APM_PAT"):
+        env_vars_set.append("GITHUB_APM_PAT")
+    if env_vars_set:
+        env_lines = self.formatter.format_environment_setup(runtime, env_vars_set)
+        for line in env_lines:
+            print(line)
+
+
+def _extract_env_vars_from_args(args: list, env: dict) -> tuple[dict, list]:
+    """Split a parsed arg list into (env_vars dict, actual_command_args list)."""
+    env_vars = env.copy()
+    actual_command_args = []
+    for arg in args:
+        if "=" in arg and not actual_command_args:
+            key, value = arg.split("=", 1)
+            if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key):
+                env_vars[key] = value
+                continue
+        actual_command_args.append(arg)
+    return env_vars, actual_command_args
+
+
+def _append_content_for_runtime(actual_args: list, runtime: str, content: str) -> list:
+    """Return a copy of actual_args with content appended using runtime conventions."""
+    result = list(actual_args)
+    if runtime in ("copilot", "gemini"):
+        result.extend(["-p", content])
+    else:
+        result.append(content)
+    return result
+
+
 def _execute_script_command(self, command: str, params: dict[str, str]) -> bool:
     """Execute a script command (from apm.yml or auto-generated).
 
@@ -154,17 +193,7 @@ def _execute_script_command(self, command: str, params: dict[str, str]) -> bool:
         # Set up GitHub token environment for all runtimes using centralized manager
         env = setup_runtime_environment(os.environ.copy())
 
-        # Show environment setup if relevant
-        env_vars_set = []
-        if env.get("GITHUB_TOKEN"):
-            env_vars_set.append("GITHUB_TOKEN")
-        if env.get("GITHUB_APM_PAT"):
-            env_vars_set.append("GITHUB_APM_PAT")
-
-        if env_vars_set:
-            env_lines = self.formatter.format_environment_setup(runtime, env_vars_set)
-            for line in env_lines:
-                print(line)
+        _show_env_setup_if_relevant(self, env, runtime)
 
         # Track execution time
         start_time = time.time()
@@ -246,40 +275,11 @@ def _execute_runtime_command(
         args = shlex.split(command.strip())
 
     # Handle environment variables at the beginning of the command
-    # Extract environment variables (key=value pairs) from the beginning of args
-    env_vars = env.copy()  # Start with existing environment
-    actual_command_args = []
-
-    for arg in args:
-        if "=" in arg and not actual_command_args:
-            # This looks like an environment variable and we haven't started the actual command yet
-            key, value = arg.split("=", 1)
-            # Validate environment variable name with restrictive pattern
-            # Only allow uppercase letters, numbers, and underscores, starting with letter or underscore
-            if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key):
-                env_vars[key] = value
-                continue
-        # Once we hit a non-env-var argument, everything else is part of the command
-        actual_command_args.append(arg)
+    env_vars, actual_command_args = _extract_env_vars_from_args(args, env)
 
     # Determine how to pass content based on runtime
     runtime = self._detect_runtime(" ".join(actual_command_args))
-
-    if runtime == "copilot":
-        # Copilot uses -p flag
-        actual_command_args.extend(["-p", content])
-    elif runtime == "codex":
-        # Codex exec expects content as the last argument
-        actual_command_args.append(content)
-    elif runtime == "llm":
-        # LLM expects content as argument
-        actual_command_args.append(content)
-    elif runtime == "gemini":
-        # Gemini uses -p flag for prompt content
-        actual_command_args.extend(["-p", content])
-    else:
-        # Default: assume content as last argument
-        actual_command_args.append(content)
+    actual_command_args = _append_content_for_runtime(actual_command_args, runtime, content)
 
     # Show subprocess details for debugging
     subprocess_lines = self.formatter.format_subprocess_details(
@@ -299,11 +299,10 @@ def _execute_runtime_command(
             for line in env_lines:
                 print(line)
 
-    # Execute using argument list (no shell interpretation) with updated environment
-    # On Windows, resolve the executable via shutil.which() so that shell
-    # wrappers like copilot.cmd / copilot.ps1 are found without shell=True.
-    if package_module.sys.platform == "win32" and actual_command_args:
-        resolved = package_module.shutil.which(actual_command_args[0])
+    # Resolve the executable via find_runtime_binary so that
+    # APM-managed runtimes and shell wrappers (copilot.cmd) are found without shell=True.
+    if actual_command_args:
+        resolved = package_module.find_runtime_binary(actual_command_args[0])
         if resolved:
             actual_command_args[0] = resolved
     return package_module.subprocess.run(actual_command_args, check=True, env=env_vars)
@@ -320,13 +319,12 @@ def _detect_installed_runtime(self) -> str:
     Raises:
         RuntimeError: If no compatible runtime is found
     """
-    import shutil
-
-    if shutil.which("copilot"):
+    package_module = sys.modules[__package__]
+    if package_module.find_runtime_binary("copilot"):
         return "copilot"
-    elif shutil.which("codex"):
+    elif package_module.find_runtime_binary("codex"):
         return "codex"
-    elif shutil.which("gemini"):
+    elif package_module.find_runtime_binary("gemini"):
         return "gemini"
     else:
         raise RuntimeError(

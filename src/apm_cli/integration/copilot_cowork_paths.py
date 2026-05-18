@@ -72,6 +72,46 @@ class CoworkResolutionError(Exception):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_override_path(value: str, *, context: str) -> Path:
+    """Validate and resolve a configured cowork path override."""
+    from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
+    try:
+        validate_path_segments(value, context=context)
+    except PathTraversalError as exc:
+        raise CoworkResolutionError(f"{context} contains a traversal sequence: {exc}") from exc
+    return Path(value).expanduser().resolve()
+
+
+def _resolve_windows_skills_dir() -> Path | None:
+    """Resolve the cowork skills directory from Windows environment variables."""
+    for env_name in ("ONEDRIVECOMMERCIAL", "ONEDRIVE"):
+        win_root = os.environ.get(env_name, "")
+        if win_root:
+            return _resolve_override_path(
+                str(Path(win_root) / _COPILOT_COWORK_SKILLS_SUBDIR),
+                context=f"{env_name} env var",
+            )
+    return None
+
+
+def _resolve_macos_skills_dir() -> Path | None:
+    """Resolve the cowork skills directory from the macOS OneDrive mount."""
+    cloud_storage = Path.home() / "Library" / "CloudStorage"
+    candidates = sorted(cloud_storage.glob(_ONEDRIVE_GLOB)) if cloud_storage.is_dir() else []
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        listing = "\n".join(f"  - {c}" for c in candidates)
+        raise CoworkResolutionError(
+            f"Multiple OneDrive mounts detected:\n{listing}\n"
+            f"Set APM_COPILOT_COWORK_SKILLS_DIR to the desired skills directory, e.g.:\n"
+            f"  export APM_COPILOT_COWORK_SKILLS_DIR="
+            f'"{candidates[0] / _COPILOT_COWORK_SKILLS_SUBDIR}"'
+        )
+    return candidates[0] / _COPILOT_COWORK_SKILLS_SUBDIR
+
+
 def resolve_copilot_cowork_skills_dir() -> Path | None:
     """Locate the Cowork skills directory on the current machine.
 
@@ -95,73 +135,27 @@ def resolve_copilot_cowork_skills_dir() -> Path | None:
     # --- env-var override ---
     env_override = os.environ.get("APM_COPILOT_COWORK_SKILLS_DIR")
     if env_override:
-        from apm_cli.utils.path_security import (
-            PathTraversalError,
-            validate_path_segments,
+        return _resolve_override_path(
+            env_override,
+            context="APM_COPILOT_COWORK_SKILLS_DIR",
         )
-
-        try:
-            validate_path_segments(env_override, context="APM_COPILOT_COWORK_SKILLS_DIR")
-        except PathTraversalError as exc:
-            raise CoworkResolutionError(
-                f"APM_COPILOT_COWORK_SKILLS_DIR contains a traversal sequence: {exc}"
-            ) from exc
-        return Path(env_override).expanduser().resolve()
 
     # --- persisted config value ---
     from apm_cli.config import get_copilot_cowork_skills_dir
 
     config_value = get_copilot_cowork_skills_dir()
     if config_value:
-        from apm_cli.utils.path_security import (
-            PathTraversalError,
-            validate_path_segments,
+        return _resolve_override_path(
+            config_value,
+            context="copilot_cowork_skills_dir config",
         )
-
-        try:
-            validate_path_segments(config_value, context="copilot_cowork_skills_dir config")
-        except PathTraversalError as exc:
-            raise CoworkResolutionError(
-                f"copilot_cowork_skills_dir config contains a traversal sequence: {exc}"
-            ) from exc
-        return Path(config_value).expanduser().resolve()
 
     # --- Windows auto-detection ---
     if sys.platform == "win32":
-        from apm_cli.utils.path_security import (
-            PathTraversalError,
-            validate_path_segments,
-        )
-
-        for _env_name in ("ONEDRIVECOMMERCIAL", "ONEDRIVE"):
-            _win_root = os.environ.get(_env_name, "")
-            if _win_root:
-                _win_skills = Path(_win_root) / _COPILOT_COWORK_SKILLS_SUBDIR
-                try:
-                    validate_path_segments(str(_win_skills), context=f"{_env_name} env var")
-                except PathTraversalError as exc:
-                    raise CoworkResolutionError(
-                        f"{_env_name} contains a traversal sequence: {exc}"
-                    ) from exc
-                return _win_skills.resolve()
-        return None
+        return _resolve_windows_skills_dir()
 
     # --- macOS auto-detection ---
-    cloud_storage = Path.home() / "Library" / "CloudStorage"
-    candidates = sorted(cloud_storage.glob(_ONEDRIVE_GLOB)) if cloud_storage.is_dir() else []
-    if not candidates:
-        return None
-
-    if len(candidates) > 1:
-        listing = "\n".join(f"  - {c}" for c in candidates)
-        raise CoworkResolutionError(
-            f"Multiple OneDrive mounts detected:\n{listing}\n"
-            f"Set APM_COPILOT_COWORK_SKILLS_DIR to the desired skills directory, e.g.:\n"
-            f"  export APM_COPILOT_COWORK_SKILLS_DIR="
-            f'"{candidates[0] / _COPILOT_COWORK_SKILLS_SUBDIR}"'
-        )
-
-    return candidates[0] / _COPILOT_COWORK_SKILLS_SUBDIR
+    return _resolve_macos_skills_dir()
 
 
 # ---------------------------------------------------------------------------

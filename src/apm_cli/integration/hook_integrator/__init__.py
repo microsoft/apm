@@ -1,3 +1,4 @@
+from ._sidecar import _reinject_apm_source_from_sidecar  # noqa: F401
 from .class_ import (
     HookIntegrationResult,  # noqa: F401
     HookIntegrator,  # noqa: F401
@@ -9,4 +10,5 @@ __all__ = [
     "HookIntegrationResult",
     "HookIntegrator",
     "_filter_hook_files_for_target",
+    "_reinject_apm_source_from_sidecar",
 ]

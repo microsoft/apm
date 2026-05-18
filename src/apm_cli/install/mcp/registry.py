@@ -22,7 +22,7 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import os
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator
 from urllib.parse import urlparse, urlunparse
 
 import click
@@ -241,13 +241,8 @@ def registry_env_override(registry_url: str | None) -> Iterator[None]:
 def validate_mcp_dry_run_entry(
     name: str,
     *,
-    transport: str | None = None,
-    url: str | None = None,
-    env: Mapping[str, str] | None = None,
-    headers: Mapping[str, str] | None = None,
-    version: str | None = None,
-    command_argv: Sequence[str] | None = None,
-    registry_url: str | None = None,
+    opts=None,
+    **kwargs,
 ) -> None:
     """C1: validate the MCP entry that ``apm install --mcp ... --dry-run``
     would persist, raising :class:`click.UsageError` on rejection.
@@ -262,15 +257,6 @@ def validate_mcp_dry_run_entry(
     from .entry import build_mcp_entry
 
     try:
-        build_mcp_entry(
-            name,
-            transport=transport,
-            url=url,
-            env=env,
-            headers=headers,
-            version=version,
-            command_argv=command_argv,
-            registry_url=registry_url,
-        )
+        build_mcp_entry(name, opts=opts, **kwargs)
     except ValueError as exc:
         raise click.UsageError(str(exc))  # noqa: B904

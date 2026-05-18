@@ -108,6 +108,41 @@ class APMPackage:
     includes: str | list[str] | None = None  # Include-only manifest: 'auto' or list of repo paths
 
     @classmethod
+    def _parse_apm_dependencies(cls, dep_list: list, label: str) -> list:
+        """Parse APM dependency entries."""
+        from .dependency.reference import DependencyReference
+
+        parsed_deps: list = []
+        for dep_entry in dep_list:
+            if isinstance(dep_entry, str):
+                try:
+                    parsed_deps.append(DependencyReference.parse(dep_entry))
+                except ValueError as e:
+                    raise ValueError(f"Invalid {label}APM dependency '{dep_entry}': {e}")  # noqa: B904
+            elif isinstance(dep_entry, dict):
+                try:
+                    parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
+                except ValueError as e:
+                    raise ValueError(f"Invalid {label}APM dependency {dep_entry}: {e}")  # noqa: B904
+        return parsed_deps
+
+    @classmethod
+    def _parse_mcp_dependencies(cls, dep_list: list, label: str) -> list:
+        """Parse MCP dependency entries."""
+        from .dependency.mcp import MCPDependency
+
+        parsed_mcp: list = []
+        for dep in dep_list:
+            if isinstance(dep, str):
+                parsed_mcp.append(MCPDependency.from_string(dep))
+            elif isinstance(dep, dict):
+                try:
+                    parsed_mcp.append(MCPDependency.from_dict(dep))
+                except ValueError as e:
+                    raise ValueError(f"Invalid {label}MCP dependency: {e}")  # noqa: B904
+        return parsed_mcp
+
+    @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
         """Parse a dependencies or devDependencies dict from apm.yml.
 
@@ -115,38 +150,14 @@ class APMPackage:
             raw_deps: Raw dict mapping dep type -> list of entries.
             label: Prefix for error messages (e.g. "dev " for devDependencies).
         """
-        from .dependency.mcp import MCPDependency
-        from .dependency.reference import DependencyReference
-
         parsed: dict = {}
         for dep_type, dep_list in raw_deps.items():
             if not isinstance(dep_list, list):
                 continue
             if dep_type == "apm":
-                parsed_deps: list = []
-                for dep_entry in dep_list:
-                    if isinstance(dep_entry, str):
-                        try:
-                            parsed_deps.append(DependencyReference.parse(dep_entry))
-                        except ValueError as e:
-                            raise ValueError(f"Invalid {label}APM dependency '{dep_entry}': {e}")  # noqa: B904
-                    elif isinstance(dep_entry, dict):
-                        try:
-                            parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
-                        except ValueError as e:
-                            raise ValueError(f"Invalid {label}APM dependency {dep_entry}: {e}")  # noqa: B904
-                parsed[dep_type] = parsed_deps
+                parsed[dep_type] = cls._parse_apm_dependencies(dep_list, label)
             elif dep_type == "mcp":
-                parsed_mcp: list = []
-                for dep in dep_list:
-                    if isinstance(dep, str):
-                        parsed_mcp.append(MCPDependency.from_string(dep))
-                    elif isinstance(dep, dict):
-                        try:
-                            parsed_mcp.append(MCPDependency.from_dict(dep))
-                        except ValueError as e:
-                            raise ValueError(f"Invalid {label}MCP dependency: {e}")  # noqa: B904
-                parsed[dep_type] = parsed_mcp
+                parsed[dep_type] = cls._parse_mcp_dependencies(dep_list, label)
             else:
                 parsed[dep_type] = [dep for dep in dep_list if isinstance(dep, (str, dict))]
         return parsed
@@ -169,6 +180,83 @@ class APMPackage:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
             return list(includes_value)
         raise ValueError("'includes' must be 'auto' or a list of strings")
+
+    @classmethod
+    def _load_and_validate_yaml(cls, apm_yml_path: Path) -> dict:
+        """Load and perform basic validation on apm.yml content."""
+        try:
+            from ..utils.yaml_io import load_yaml
+
+            data = load_yaml(apm_yml_path)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML format in {apm_yml_path}: {e}")  # noqa: B904
+
+        if not isinstance(data, dict):
+            raise ValueError(f"apm.yml must contain a YAML object, got {type(data)}")
+        if "name" not in data:
+            raise ValueError("Missing required field 'name' in apm.yml")
+        if "version" not in data:
+            raise ValueError("Missing required field 'version' in apm.yml")
+        return data
+
+    @classmethod
+    def _parse_dependencies_field(cls, data: dict, apm_yml_path: Path) -> dict | None:
+        """Parse the dependencies field from apm.yml data."""
+        raw_deps = data.get("dependencies")
+        if raw_deps is None:
+            return None
+        if not isinstance(raw_deps, dict):
+            raise ValueError(
+                f"Invalid 'dependencies' in {apm_yml_path}: expected a mapping "
+                f"with 'apm:' and/or 'mcp:' keys, got {type(raw_deps).__name__}. "
+                "Use the structured format:\n"
+                "  dependencies:\n"
+                "    apm:\n"
+                "      - owner/repo"
+            )
+        return cls._parse_dependency_dict(raw_deps, label="")
+
+    @classmethod
+    def _parse_dev_dependencies_field(cls, data: dict, apm_yml_path: Path) -> dict | None:
+        """Parse the devDependencies field from apm.yml data."""
+        raw_dev_deps = data.get("devDependencies")
+        if raw_dev_deps is None:
+            return None
+        if not isinstance(raw_dev_deps, dict):
+            raise ValueError(
+                f"Invalid 'devDependencies' in {apm_yml_path}: expected a mapping "
+                f"with 'apm:' and/or 'mcp:' keys, got {type(raw_dev_deps).__name__}. "
+                "Use the structured format:\n"
+                "  devDependencies:\n"
+                "    apm:\n"
+                "      - owner/repo"
+            )
+        return cls._parse_dependency_dict(raw_dev_deps, label="dev ")
+
+    @classmethod
+    def _parse_type_field(cls, data: dict) -> PackageContentType | None:
+        """Parse the type field from apm.yml data."""
+        if "type" not in data or data["type"] is None:
+            return None
+        type_value = data["type"]
+        if not isinstance(type_value, str):
+            raise ValueError(
+                f"Invalid 'type' field: expected string, got {type(type_value).__name__}"
+            )
+        try:
+            return PackageContentType.from_string(type_value)
+        except ValueError as e:
+            raise ValueError(f"Invalid 'type' field in apm.yml: {e}")  # noqa: B904
+
+    @classmethod
+    def _parse_targets_field(cls, data: dict) -> list[str] | None:
+        """Parse the targets field from apm.yml data."""
+        if "targets" not in data or data["targets"] is None:
+            return None
+        raw_targets = data["targets"]
+        if isinstance(raw_targets, list):
+            return [str(t).strip() for t in raw_targets if str(t).strip()]
+        return [str(raw_targets).strip()]
 
     @classmethod
     def from_apm_yml(
@@ -211,93 +299,20 @@ class APMPackage:
         if cached is not None:
             return cached
 
-        try:
-            from ..utils.yaml_io import load_yaml
+        data = cls._load_and_validate_yaml(apm_yml_path)
+        dependencies = cls._parse_dependencies_field(data, apm_yml_path)
+        dev_dependencies = cls._parse_dev_dependencies_field(data, apm_yml_path)
+        pkg_type = cls._parse_type_field(data)
 
-            data = load_yaml(apm_yml_path)
-        except yaml.YAMLError as e:
-            raise ValueError(f"Invalid YAML format in {apm_yml_path}: {e}")  # noqa: B904
-
-        if not isinstance(data, dict):
-            raise ValueError(f"apm.yml must contain a YAML object, got {type(data)}")
-
-        # Required fields
-        if "name" not in data:
-            raise ValueError("Missing required field 'name' in apm.yml")
-        if "version" not in data:
-            raise ValueError("Missing required field 'version' in apm.yml")
-
-        # Parse dependencies
-        dependencies = None
-        raw_deps = data.get("dependencies")
-        if raw_deps is not None:
-            if not isinstance(raw_deps, dict):
-                raise ValueError(
-                    f"Invalid 'dependencies' in {apm_yml_path}: expected a mapping "
-                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_deps).__name__}. "
-                    "Use the structured format:\n"
-                    "  dependencies:\n"
-                    "    apm:\n"
-                    "      - owner/repo"
-                )
-            dependencies = cls._parse_dependency_dict(raw_deps, label="")
-
-        # Parse devDependencies (same structure as dependencies)
-        dev_dependencies = None
-        raw_dev_deps = data.get("devDependencies")
-        if raw_dev_deps is not None:
-            if not isinstance(raw_dev_deps, dict):
-                raise ValueError(
-                    f"Invalid 'devDependencies' in {apm_yml_path}: expected a mapping "
-                    f"with 'apm:' and/or 'mcp:' keys, got {type(raw_dev_deps).__name__}. "
-                    "Use the structured format:\n"
-                    "  devDependencies:\n"
-                    "    apm:\n"
-                    "      - owner/repo"
-                )
-            dev_dependencies = cls._parse_dependency_dict(raw_dev_deps, label="dev ")
-
-        # Parse package content type
-        pkg_type = None
-        if "type" in data and data["type"] is not None:
-            type_value = data["type"]
-            if not isinstance(type_value, str):
-                raise ValueError(
-                    f"Invalid 'type' field: expected string, got {type(type_value).__name__}"
-                )
-            try:
-                pkg_type = PackageContentType.from_string(type_value)
-            except ValueError as e:
-                raise ValueError(f"Invalid 'type' field in apm.yml: {e}")  # noqa: B904
-
-        # Parse includes (auto-publish opt-in): either the literal "auto" or a list of repo paths
         includes = None
         if "includes" in data and data["includes"] is not None:
             includes = cls._parse_includes(data["includes"])
 
-        # Parse target field through the same validator as --target so a CSV
-        # string like ``target: "claude,copilot"`` resolves identically to
-        # ``--target claude,copilot`` and unknown tokens fail at parse time
-        # (see apm_cli.core.target_detection.parse_target_field).
         target_value = parse_target_field(
             data.get("target"),
             source_path=apm_yml_path,
         )
-
-        # Plural 'targets:' field is stored raw (no canonical validation here)
-        # so the MCP install gate at mcp_integrator._gate_project_scoped_runtimes
-        # can re-run parse_targets_field on a dict that mirrors apm.yml shape
-        # and surface the same conflict / empty-list errors uniformly. Without
-        # this passthrough, the call site at commands/install.py would silently
-        # bypass the targets whitelist for any user on the modern plural form
-        # (#1335 regression caught in PR #1336 audit).
-        targets_value: list[str] | None = None
-        if "targets" in data and data["targets"] is not None:
-            raw_targets = data["targets"]
-            if isinstance(raw_targets, list):
-                targets_value = [str(t).strip() for t in raw_targets if str(t).strip()]
-            else:
-                targets_value = [str(raw_targets).strip()]
+        targets_value = cls._parse_targets_field(data)
 
         result = cls(
             name=data["name"],
@@ -354,51 +369,4 @@ class APMPackage:
         ]
 
 
-@dataclass
-class PackageInfo:
-    """Information about a downloaded/installed package."""
-
-    package: APMPackage
-    install_path: Path
-    resolved_reference: ResolvedReference | None = None
-    installed_at: str | None = None  # ISO timestamp
-    dependency_ref: Optional["DependencyReference"] = (
-        None  # Original dependency reference for canonical string
-    )
-    package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
-
-    def get_canonical_dependency_string(self) -> str:
-        """Get the canonical dependency string for this package.
-
-        Used for orphan detection - this is the unique identifier as stored in apm.yml.
-        For virtual packages, includes the full path (e.g., owner/repo/collections/name).
-        For regular packages, just the repo URL (e.g., owner/repo).
-
-        Returns:
-            str: Canonical dependency string, or package source/name as fallback
-        """
-        if self.dependency_ref:
-            return self.dependency_ref.get_canonical_dependency_string()
-        # Fallback to package source or name
-        return self.package.source or self.package.name or "unknown"
-
-    def get_primitives_path(self) -> Path:
-        """Get path to the .apm directory for this package."""
-        return self.install_path / ".apm"
-
-    def has_primitives(self) -> bool:
-        """Check if the package has any primitives."""
-        apm_dir = self.get_primitives_path()
-        if apm_dir.exists():
-            # Check for any primitive files in .apm/ subdirectories
-            for primitive_type in ["instructions", "chatmodes", "contexts", "prompts", "hooks"]:
-                primitive_dir = apm_dir / primitive_type
-                if primitive_dir.exists() and any(primitive_dir.iterdir()):
-                    return True
-
-        # Also check hooks/ at package root (Claude-native convention)
-        hooks_dir = self.install_path / "hooks"
-        if hooks_dir.exists() and any(hooks_dir.glob("*.json")):  # noqa: SIM103
-            return True
-
-        return False
+from ._package_info import PackageInfo as PackageInfo

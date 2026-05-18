@@ -1,48 +1,22 @@
 """Professional CLI output formatters for APM compilation."""
 
+from __future__ import annotations
+
 from rich import box
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from ._metric_constants import (
+    FOUNDATION_TEXT,
+    METRICS_GUIDE_TEXT,
+    _build_accuracy_assessment,
+    _build_assessment,
+    _build_efficiency_assessment,
+    _build_pollution_assessment,
+)
 from .formatters import RICH_AVAILABLE
 from .models import OptimizationDecision
-
-FOUNDATION_TEXT = """Objective: minimize sum(context_pollution x directory_weight)
-Constraints: for_allfile_matching_pattern -> can_inherit_instruction
-Variables: placement_matrix in {0,1}
-Algorithm: Three-tier strategy with hierarchical coverage verification
-
-Coverage Guarantee: Every file can access applicable instructions through
-hierarchical inheritance. Coverage takes priority over efficiency."""
-
-METRICS_GUIDE_TEXT = """How These Metrics Are Calculated
-
-Context Efficiency = Average across all directories of (Relevant Instructions / Total Instructions)
-* For each directory, APM analyzes what instructions agents would inherit from AGENTS.md files
-* Calculates ratio of instructions that apply to files in that directory vs total instructions loaded
-* Takes weighted average across all project directories with files
-
-Pollution Level = 100% - Context Efficiency (inverse relationship)
-* High pollution = agents load many irrelevant instructions when working in specific directories
-* Low pollution = agents see mostly relevant instructions for their current context
-
-Interpretation Benchmarks
-
-Context Efficiency:
-* 80-100%: Excellent - Instructions perfectly targeted to usage context
-* 60-80%: Good - Well-optimized with minimal wasted context
-* 40-60%: Fair - Some optimization opportunities exist
-* 20-40%: Poor - Significant context pollution, consider restructuring
-* 0-20%: Very Poor - High pollution, instructions poorly distributed
-
-Pollution Level:
-* 0-10%: Excellent - Agents see highly relevant instructions only
-* 10-25%: Good - Low noise, mostly relevant context
-* 25-50%: Fair - Moderate noise, some irrelevant instructions
-* 50%+: Poor - High noise, agents see many irrelevant instructions
-
-Example: 36.7% efficiency means agents working in specific directories see only 36.7% relevant instructions and 63.3% irrelevant context pollution."""
 
 
 def _append_heading(self, lines: list[str], title: str) -> None:
@@ -104,54 +78,6 @@ def _coverage_row(self, decision: OptimizationDecision) -> tuple[str, str, str, 
     else:
         coverage_result = "Selective -> Coverage verified"
     return pattern, matching_files, placement, coverage_result
-
-
-def _build_assessment(
-    value: float, thresholds: list[tuple[float, str, str]], fallback: tuple[str, str]
-) -> tuple[str, str]:
-    """Return assessment label and colour for a numeric threshold table."""
-    for minimum, label, colour in thresholds:
-        if value >= minimum:
-            return label, colour
-    return fallback
-
-
-def _build_efficiency_assessment(efficiency: float) -> tuple[str, str]:
-    return _build_assessment(
-        efficiency,
-        [
-            (80, "Excellent - perfect pattern locality", "bright_green"),
-            (60, "Good - well-optimized with minimal coverage conflicts", "green"),
-            (40, "Fair - moderate coverage-driven pollution", "yellow"),
-            (20, "Poor - significant coverage constraints", "orange1"),
-        ],
-        ("Very Poor - may be mathematically optimal given coverage", "red"),
-    )
-
-
-def _build_pollution_assessment(pollution_level: float) -> tuple[str, str]:
-    return _build_assessment(
-        -pollution_level,
-        [
-            (-20, "Excellent - perfect pattern locality", "bright_green"),
-            (-40, "Good - minimal coverage conflicts", "green"),
-            (-60, "Fair - acceptable coverage-driven pollution", "yellow"),
-            (-80, "Poor - high coverage constraints", "orange1"),
-        ],
-        ("Very Poor - but may guarantee coverage", "red"),
-    )
-
-
-def _build_accuracy_assessment(accuracy: float) -> tuple[str, str]:
-    return _build_assessment(
-        accuracy,
-        [
-            (95, "Excellent - mathematically optimal", "bright_green"),
-            (85, "Good - near optimal", "green"),
-            (70, "Fair - reasonably placed", "yellow"),
-        ],
-        ("Poor - suboptimal placement", "orange1"),
-    )
 
 
 def _format_mathematical_analysis(self, decisions: list[OptimizationDecision]) -> list[str]:
@@ -229,64 +155,63 @@ def _format_mathematical_analysis(self, decisions: list[OptimizationDecision]) -
     return lines
 
 
-def _format_detailed_metrics(self, stats) -> list[str]:
-    """Format detailed performance metrics table with interpretations."""
-    lines: list[str] = []
-    _append_heading(self, lines, "Performance Metrics")
+def _render_rich_detailed_metrics(
+    self, lines: list[str], stats, efficiency: float, pollution_level: float
+) -> None:
+    table = Table(box=box.SIMPLE)
+    table.add_column("Metric", style="white", width=20)
+    table.add_column("Value", style="white", width=12)
+    table.add_column("Assessment", style="blue", width=35)
 
-    efficiency = stats.efficiency_percentage
-    pollution_level = 100 - efficiency
-    if self.use_color and RICH_AVAILABLE:
-        table = Table(box=box.SIMPLE)
-        table.add_column("Metric", style="white", width=20)
-        table.add_column("Value", style="white", width=12)
-        table.add_column("Assessment", style="blue", width=35)
+    efficiency_assessment, efficiency_colour = _build_efficiency_assessment(efficiency)
+    pollution_assessment, pollution_colour = _build_pollution_assessment(pollution_level)
+    table.add_row(
+        "Context Efficiency",
+        Text(f"{efficiency:.1f}%", style=efficiency_colour),
+        Text(efficiency_assessment, style=efficiency_colour),
+    )
+    table.add_row(
+        "Pollution Level",
+        Text(f"{pollution_level:.1f}%", style=pollution_colour),
+        Text(pollution_assessment, style=pollution_colour),
+    )
 
-        efficiency_assessment, efficiency_colour = _build_efficiency_assessment(efficiency)
-        pollution_assessment, pollution_colour = _build_pollution_assessment(pollution_level)
+    if stats.placement_accuracy:
+        accuracy = stats.placement_accuracy * 100
+        accuracy_assessment, accuracy_colour = _build_accuracy_assessment(accuracy)
         table.add_row(
-            "Context Efficiency",
-            Text(f"{efficiency:.1f}%", style=efficiency_colour),
-            Text(efficiency_assessment, style=efficiency_colour),
-        )
-        table.add_row(
-            "Pollution Level",
-            Text(f"{pollution_level:.1f}%", style=pollution_colour),
-            Text(pollution_assessment, style=pollution_colour),
+            "Placement Accuracy",
+            Text(f"{accuracy:.1f}%", style=accuracy_colour),
+            Text(accuracy_assessment, style=accuracy_colour),
         )
 
-        if stats.placement_accuracy:
-            accuracy = stats.placement_accuracy * 100
-            accuracy_assessment, accuracy_colour = _build_accuracy_assessment(accuracy)
-            table.add_row(
-                "Placement Accuracy",
-                Text(f"{accuracy:.1f}%", style=accuracy_colour),
-                Text(accuracy_assessment, style=accuracy_colour),
-            )
+    _append_captured_renderable(self, lines, table)
+    lines.append("")
+    try:
+        _append_captured_renderable(
+            self,
+            lines,
+            Panel(
+                METRICS_GUIDE_TEXT,
+                title="Metrics Guide",
+                border_style="dim",
+                title_align="left",
+            ),
+        )
+    except Exception:
+        lines.extend(
+            [
+                "Metrics Guide:",
+                "* Context Efficiency 80-100%: Excellent | 60-80%: Good | 40-60%: Fair | <40%: Poor",
+                "* Pollution 0-10%: Excellent | 10-25%: Good | 25-50%: Fair | >50%: Poor",
+            ]
+        )
 
-        _append_captured_renderable(self, lines, table)
-        lines.append("")
-        try:
-            _append_captured_renderable(
-                self,
-                lines,
-                Panel(
-                    METRICS_GUIDE_TEXT,
-                    title="Metrics Guide",
-                    border_style="dim",
-                    title_align="left",
-                ),
-            )
-        except Exception:
-            lines.extend(
-                [
-                    "Metrics Guide:",
-                    "* Context Efficiency 80-100%: Excellent | 60-80%: Good | 40-60%: Fair | <40%: Poor",
-                    "* Pollution 0-10%: Excellent | 10-25%: Good | 25-50%: Fair | >50%: Poor",
-                ]
-            )
-        return lines
 
+def _render_plain_detailed_metrics(
+    lines: list[str], efficiency: float, pollution_level: float
+) -> None:
+    efficiency_assessment = "Very Poor"
     if efficiency >= 80:
         efficiency_assessment = "Excellent"
     elif efficiency >= 60:
@@ -295,17 +220,14 @@ def _format_detailed_metrics(self, stats) -> list[str]:
         efficiency_assessment = "Fair"
     elif efficiency >= 20:
         efficiency_assessment = "Poor"
-    else:
-        efficiency_assessment = "Very Poor"
 
+    pollution_assessment = "Poor"
     if pollution_level <= 10:
         pollution_assessment = "Excellent"
     elif pollution_level <= 25:
         pollution_assessment = "Good"
     elif pollution_level <= 50:
         pollution_assessment = "Fair"
-    else:
-        pollution_assessment = "Poor"
 
     lines.extend(
         [
@@ -314,6 +236,20 @@ def _format_detailed_metrics(self, stats) -> list[str]:
             "Guide: 80-100% Excellent | 60-80% Good | 40-60% Fair | 20-40% Poor | <20% Very Poor",
         ]
     )
+
+
+def _format_detailed_metrics(self, stats) -> list[str]:
+    """Format detailed performance metrics table with interpretations."""
+    lines: list[str] = []
+    _append_heading(self, lines, "Performance Metrics")
+
+    efficiency = stats.efficiency_percentage
+    pollution_level = 100 - efficiency
+    if self.use_color and RICH_AVAILABLE:
+        _render_rich_detailed_metrics(self, lines, stats, efficiency, pollution_level)
+        return lines
+
+    _render_plain_detailed_metrics(lines, efficiency, pollution_level)
     return lines
 
 

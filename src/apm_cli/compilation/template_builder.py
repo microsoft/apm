@@ -1,5 +1,7 @@
 """Template building system for AGENTS.md compilation."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +20,38 @@ class TemplateData:
     # Removed volatile timestamp for deterministic builds
     version: str
     chatmode_content: str | None = None
+
+
+def _instruction_sort_key(instruction: Instruction, base_dir: Path) -> str:
+    return portable_relpath(instruction.file_path, base_dir)
+
+
+def _group_instructions_by_pattern(
+    instructions: list[Instruction],
+) -> tuple[list[Instruction], dict[str, list[Instruction]]]:
+    globals_: list[Instruction] = []
+    pattern_groups: dict[str, list[Instruction]] = {}
+    for instruction in instructions:
+        if not instruction.apply_to:
+            globals_.append(instruction)
+        else:
+            pattern_groups.setdefault(instruction.apply_to, []).append(instruction)
+    return globals_, pattern_groups
+
+
+def _append_instruction_group(
+    sections: list[str],
+    heading: str,
+    instructions: list[Instruction],
+    *,
+    base_dir: Path,
+    emit_instruction: Callable[[Instruction], list[str]],
+) -> None:
+    sections.append(heading)
+    sections.append("")
+    for instruction in sorted(instructions, key=lambda inst: _instruction_sort_key(inst, base_dir)):
+        if instruction.content.strip():
+            sections.extend(emit_instruction(instruction))
 
 
 def render_instructions_block(
@@ -55,31 +89,25 @@ def render_instructions_block(
         return []
 
     sections: list[str] = []
-
-    def _sort_key(inst: Instruction) -> str:
-        return portable_relpath(inst.file_path, base_dir)
-
-    globals_: list[Instruction] = []
-    pattern_groups: dict[str, list[Instruction]] = {}
-    for instruction in instructions:
-        if not instruction.apply_to:
-            globals_.append(instruction)
-        else:
-            pattern_groups.setdefault(instruction.apply_to, []).append(instruction)
+    globals_, pattern_groups = _group_instructions_by_pattern(instructions)
 
     if globals_:
-        sections.append(global_heading)
-        sections.append("")
-        for instruction in sorted(globals_, key=_sort_key):
-            if instruction.content.strip():
-                sections.extend(emit_instruction(instruction))
+        _append_instruction_group(
+            sections,
+            global_heading,
+            globals_,
+            base_dir=base_dir,
+            emit_instruction=emit_instruction,
+        )
 
     for pattern, pattern_instructions in sorted(pattern_groups.items()):
-        sections.append(f"## Files matching `{pattern}`")
-        sections.append("")
-        for instruction in sorted(pattern_instructions, key=_sort_key):
-            if instruction.content.strip():
-                sections.extend(emit_instruction(instruction))
+        _append_instruction_group(
+            sections,
+            f"## Files matching `{pattern}`",
+            pattern_instructions,
+            base_dir=base_dir,
+            emit_instruction=emit_instruction,
+        )
 
     return sections
 

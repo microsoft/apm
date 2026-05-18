@@ -11,7 +11,10 @@ from typing import Any, Optional
 
 import yaml
 
-from ._locked_dependency import LockedDependency  # noqa: F401 – re-exported public symbol
+from ._locked_dependency import (  # noqa: F401 – re-exported public symbols
+    LockedDependency,
+    _DepResolutionInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,12 +184,14 @@ class LockFile:
                 registry_config = None
 
             locked_dep = LockedDependency.from_dependency_ref(
-                dep_ref=dep_ref,
-                resolved_commit=resolved_commit,
-                depth=depth,
-                resolved_by=resolved_by,
-                is_dev=is_dev,
-                registry_config=registry_config,
+                dep_ref,
+                _DepResolutionInfo(
+                    resolved_commit=resolved_commit,
+                    depth=depth,
+                    resolved_by=resolved_by,
+                    is_dev=is_dev,
+                    registry_config=registry_config,
+                ),
             )
             lock.add_dependency(locked_dep)
 

@@ -36,45 +36,10 @@ def _check_content_integrity(
     skipped silently.
     """
     from ..security.file_scanner import scan_lockfile_packages
-    from ..utils.content_hash import compute_file_hash
 
     findings_by_file, _files_scanned = scan_lockfile_packages(project_root)
-
-    # Only critical findings fail this check
-    critical_files: list[str] = []
-    for rel_path, findings in findings_by_file.items():
-        if any(f.severity == "critical" for f in findings):
-            critical_files.append(rel_path)
-
-    # Per-file hash verification across all dependencies (the synthesized
-    # self-entry is included in ``lock.dependencies`` so local content is
-    # covered through the same iteration).
-    hash_mismatches: list[tuple] = []  # (dep_key, rel_path, expected, actual)
-    # Local import: matches the scoping pattern used in
-    # _check_deployed_files_present; avoids cycles.
-    from ..integration.base_integrator import BaseIntegrator as _BaseIntegrator
-
-    for dep_key, dep in lock.dependencies.items():
-        if not dep.deployed_file_hashes:
-            continue
-        for rel_path, expected_hash in dep.deployed_file_hashes.items():
-            # Path safety: silently skip any rel_path that escapes
-            # project_root or targets a non-allowlisted prefix.  Mirrors
-            # the guard in _check_deployed_files_present so a forged
-            # lockfile cannot induce reads outside managed locations.
-            safe_rel = rel_path.rstrip("/")
-            if not _BaseIntegrator.validate_deploy_path(safe_rel, project_root):
-                continue
-            file_path = project_root / safe_rel
-            if not file_path.exists():
-                continue  # _check_deployed_files_present owns this signal
-            if file_path.is_symlink():
-                continue
-            if not file_path.is_file():
-                continue
-            actual_hash = compute_file_hash(file_path)
-            if actual_hash != expected_hash:
-                hash_mismatches.append((dep_key, rel_path, expected_hash, actual_hash))
+    critical_files = _extract_critical_files(findings_by_file)
+    hash_mismatches = _verify_deployed_hashes(project_root, lock)
 
     if not critical_files and not hash_mismatches:
         return CheckResult(
@@ -83,20 +48,73 @@ def _check_content_integrity(
             message="No critical hidden Unicode or hash drift detected",
         )
 
+    details = _build_integrity_details(critical_files, hash_mismatches)
+    message = _build_integrity_message(critical_files, hash_mismatches)
+    return CheckResult(
+        name="content-integrity",
+        passed=False,
+        message=message,
+        details=details,
+    )
+
+
+def _extract_critical_files(findings_by_file: dict) -> list[str]:
+    """Extract files with critical-severity Unicode findings."""
+    critical_files: list[str] = []
+    for rel_path, findings in findings_by_file.items():
+        if any(f.severity == "critical" for f in findings):
+            critical_files.append(rel_path)
+    return critical_files
+
+
+def _verify_deployed_hashes(
+    project_root: Path,
+    lock: LockFile,
+) -> list[tuple]:
+    """Verify deployed file hashes match lockfile records."""
+    from ..integration.base_integrator import BaseIntegrator as _BaseIntegrator
+    from ..utils.content_hash import compute_file_hash
+
+    hash_mismatches: list[tuple] = []  # (dep_key, rel_path, expected, actual)
+    for dep_key, dep in lock.dependencies.items():
+        if not dep.deployed_file_hashes:
+            continue
+        for rel_path, expected_hash in dep.deployed_file_hashes.items():
+            safe_rel = rel_path.rstrip("/")
+            if not _BaseIntegrator.validate_deploy_path(safe_rel, project_root):
+                continue
+            file_path = project_root / safe_rel
+            if not file_path.exists() or file_path.is_symlink() or not file_path.is_file():
+                continue
+            actual_hash = compute_file_hash(file_path)
+            if actual_hash != expected_hash:
+                hash_mismatches.append((dep_key, rel_path, expected_hash, actual_hash))
+    return hash_mismatches
+
+
+def _build_integrity_details(
+    critical_files: list[str],
+    hash_mismatches: list[tuple],
+) -> list[str]:
+    """Build detail lines for integrity check failures."""
     details: list[str] = []
     for rel_path in critical_files:
         details.append(f"unicode: {rel_path}")
     for dep_key, rel_path, expected, actual in hash_mismatches:
-        # Truncate hashes for terminal width; full hashes available via JSON output.
         exp_short = expected.split(":", 1)[-1][:12] if ":" in expected else expected[:12]
         act_short = actual.split(":", 1)[-1][:12] if ":" in actual else actual[:12]
-        # Render the synthesized self-entry with a friendly label rather
-        # than the internal _SELF_KEY constant ("." is opaque to users).
         dep_label = "<self>" if dep_key == _SELF_KEY else dep_key
         details.append(
             f"hash-drift: {rel_path} (dep={dep_label}, expected={exp_short}..., actual={act_short}...)"
         )
+    return details
 
+
+def _build_integrity_message(
+    critical_files: list[str],
+    hash_mismatches: list[tuple],
+) -> str:
+    """Build failure message for integrity check."""
     parts: list[str] = []
     remedies: list[str] = []
     if critical_files:
@@ -107,9 +125,4 @@ def _check_content_integrity(
         remedies.append("'apm install' to restore drifted files")
     summary = "; ".join(parts)
     remedy = " and ".join(remedies)
-    return CheckResult(
-        name="content-integrity",
-        passed=False,
-        message=f"{summary} -- run {remedy}",
-        details=details,
-    )
+    return f"{summary} -- run {remedy}"

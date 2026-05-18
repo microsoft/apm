@@ -1,8 +1,11 @@
 """Base adapter interface for MCP clients."""
 
+from __future__ import annotations
+
 import os
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 
 from ...utils.console import _rich_error, _rich_warning
@@ -15,6 +18,67 @@ _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 # identifier class). This keeps env-var handling fully disjoint from input
 # variable handling, so existing _INPUT_VAR_RE call sites are unaffected.
 _ENV_VAR_RE = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+@dataclass(frozen=True, slots=True)
+class McpServerRequest:
+    """Keyword arguments for :meth:`MCPClientAdapter.configure_mcp_server`.
+
+    Grouping these into a single object keeps the method signature at two
+    positional parameters (``self``, ``server_url``) and avoids PLR0913.
+    """
+
+    server_name: str | None = None
+    enabled: bool = True
+    env_overrides: dict | None = None
+    server_info_cache: dict | None = None
+    runtime_vars: dict | None = None
+    logger: object | None = None
+
+
+def _resolve_mcp_request(
+    request: McpServerRequest | str | None,
+    legacy_kwargs: dict,
+) -> McpServerRequest | None:
+    """Normalise the ``request`` arg from legacy positional/keyword callers.
+
+    Extracted so subclass ``configure_mcp_server`` implementations don't pay
+    the C901 complexity penalty for the compat shim.
+    """
+    if isinstance(request, str):
+        legacy_kwargs.setdefault("server_name", request)
+        request = None
+    if request is None and legacy_kwargs:
+        _valid = McpServerRequest.__dataclass_fields__
+        request = McpServerRequest(**{k: v for k, v in legacy_kwargs.items() if k in _valid})
+    return request
+
+
+def _infer_from_runtime_hint(runtime_hint: str) -> str:
+    """Map a runtime_hint value to a registry name, or return ``""``."""
+    if runtime_hint in ("npx", "npm"):
+        return "npm"
+    if runtime_hint in ("uvx", "pip", "pipx"):
+        return "pypi"
+    if runtime_hint == "docker":
+        return "docker"
+    if runtime_hint in ("dotnet", "dnx"):
+        return "nuget"
+    return ""
+
+
+def _infer_from_name(name: str) -> str:
+    """Map a package name to a registry name via heuristics, or return ``""``."""
+    if name.startswith("@") and "/" in name:
+        return "npm"  # scoped npm package, e.g. @azure/mcp
+    if name.startswith(("ghcr.io/", "mcr.microsoft.com/", "docker.io/")):
+        return "docker"
+    if name.startswith("https://") and name.endswith(".mcpb"):
+        return "mcpb"
+    # PascalCase with dots usually means nuget (e.g. Azure.Mcp)
+    if "." in name and not name.startswith("http") and name[0].isupper():
+        return "nuget"
+    return ""
 
 
 class MCPClientAdapter(ABC):
@@ -91,21 +155,16 @@ class MCPClientAdapter(ABC):
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        request: McpServerRequest | None = None,
+        **legacy_kwargs,
     ):
         """Configure an MCP server in the client configuration.
 
         Args:
             server_url (str): URL of the MCP server.
-            server_name (str, optional): Name of the server. Defaults to None.
-            enabled (bool, optional): Whether to enable the server. Defaults to True.
-            env_overrides (dict, optional): Environment variable overrides. Defaults to None.
-            server_info_cache (dict, optional): Pre-fetched server info to avoid duplicate registry calls.
-            runtime_vars (dict, optional): Runtime variable values. Defaults to None.
+            request (McpServerRequest, optional): Additional configuration
+                options bundled as a single object.
+            **legacy_kwargs: Deprecated -- pass individual fields through ``McpServerRequest`` instead.
 
         Returns:
             bool: True if successful, False otherwise.
@@ -136,28 +195,11 @@ class MCPClientAdapter(ABC):
         name = package.get("name", "")
         runtime_hint = package.get("runtime_hint", "")
 
-        # Infer from runtime_hint
-        if runtime_hint in ("npx", "npm"):
-            return "npm"
-        if runtime_hint in ("uvx", "pip", "pipx"):
-            return "pypi"
-        if runtime_hint == "docker":
-            return "docker"
-        if runtime_hint in ("dotnet", "dnx"):
-            return "nuget"
+        result = _infer_from_runtime_hint(runtime_hint)
+        if result:
+            return result
 
-        # Infer from package name patterns
-        if name.startswith("@") and "/" in name:
-            return "npm"  # scoped npm package, e.g. @azure/mcp
-        if name.startswith(("ghcr.io/", "mcr.microsoft.com/", "docker.io/")):
-            return "docker"
-        if name.startswith("https://") and name.endswith(".mcpb"):
-            return "mcpb"
-        # PascalCase with dots usually means nuget (e.g. Azure.Mcp)
-        if "." in name and not name.startswith("http") and name[0].isupper():
-            return "nuget"
-
-        return ""
+        return _infer_from_name(name)
 
     @staticmethod
     def _warn_input_variables(mapping, server_name, runtime_label):
@@ -347,6 +389,81 @@ class MCPClientAdapter(ABC):
             )
 
     @staticmethod
+    def _resolve_single_env_var(
+        env_var: dict,
+        env_overrides: dict,
+        default_github_env: dict,
+        skip_prompting: bool,
+    ) -> tuple[str, str] | None:
+        """Resolve a single env-var descriptor to a ``(name, value)`` pair.
+
+        Returns ``None`` when *env_var* has no usable ``name`` field.
+        Resolution priority:
+
+        1. Caller-supplied override in *env_overrides*.
+        2. GitHub-specific defaults from *default_github_env*.
+        3. OS environment variable with the same name.
+        4. Interactive :mod:`rich.prompt` (skipped when *skip_prompting*).
+
+        Args:
+            env_var: Env-var descriptor dict from the registry.
+            env_overrides: Pre-collected ``{name: value}`` overrides.
+            default_github_env: Mapping of well-known GitHub variable names
+                to their preferred default values.
+            skip_prompting: When ``True``, interactive prompts are suppressed.
+
+        Returns:
+            A ``(name, value)`` tuple, or ``None`` when *env_var* carries no
+            usable name.
+        """
+        name = env_var.get("name", "")
+        if not name:
+            return None
+
+        # Priority 1: caller-supplied override
+        if name in env_overrides:
+            return name, env_overrides[name]
+
+        # Priority 2: GitHub-specific defaults
+        if name in default_github_env:
+            return name, os.getenv(name) or default_github_env[name]
+
+        # Priority 3: environment variable with the same name
+        env_val = os.getenv(name, "")
+        if env_val:
+            return name, env_val
+
+        # Priority 4: interactive prompt or fallback
+        default_value = env_var.get("value", "")
+        required = env_var.get("required", False)
+
+        if not skip_prompting:
+            from rich.prompt import Prompt
+
+            description = env_var.get("description", "")
+            prompt_text = f"Enter value for {name}"
+            if description:
+                prompt_text += f" ({description})"
+            is_secret = "token" in name.lower() or "key" in name.lower()
+            user_input = Prompt.ask(
+                prompt_text,
+                default=default_value,
+                password=True  # noqa: SIM210
+                if is_secret
+                else False,
+            )
+            return name, user_input
+
+        if default_value:
+            return name, default_value
+        if required:
+            _rich_warning(
+                f"Warning: Required environment variable '{name}' could not be resolved. "
+                f"The MCP server may not function correctly."
+            )
+        return name, default_value
+
+    @staticmethod
     def _resolve_env_vars_with_prompting(
         env_vars: list,
         env_overrides: dict,
@@ -397,55 +514,11 @@ class MCPClientAdapter(ABC):
             )
 
         for env_var in env_vars:
-            name = env_var.get("name", "")
-            if not name:
-                continue
-
-            # Priority 1: caller-supplied override
-            if name in env_overrides:
-                resolved[name] = env_overrides[name]
-                continue
-
-            # Priority 2: check GitHub-specific defaults (values are literal defaults, not env-var names)
-            if name in default_github_env:
-                resolved[name] = os.getenv(name) or default_github_env[name]
-                continue
-
-            # Priority 3: environment variable with the same name
-            env_val = os.getenv(name, "")
-            if env_val:
-                resolved[name] = env_val
-                continue
-
-            # Priority 4: interactive prompt
-            default_value = env_var.get("value", "")
-            required = env_var.get("required", False)
-
-            if not skip_prompting:
-                from rich.prompt import Prompt
-
-                description = env_var.get("description", "")
-                prompt_text = f"Enter value for {name}"
-                if description:
-                    prompt_text += f" ({description})"
-                is_secret = "token" in name.lower() or "key" in name.lower()
-                user_input = Prompt.ask(
-                    prompt_text,
-                    default=default_value,
-                    password=True  # noqa: SIM210
-                    if is_secret
-                    else False,
-                )
-                resolved[name] = user_input
-            elif default_value:
-                resolved[name] = default_value
-            elif required:
-                _rich_warning(
-                    f"Warning: Required environment variable '{name}' could not be resolved. "
-                    f"The MCP server may not function correctly."
-                )
-                resolved[name] = ""
-            else:
-                resolved[name] = default_value
+            result = MCPClientAdapter._resolve_single_env_var(
+                env_var, env_overrides, default_github_env, skip_prompting
+            )
+            if result is not None:
+                name, value = result
+                resolved[name] = value
 
         return resolved

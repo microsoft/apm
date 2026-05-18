@@ -5,6 +5,16 @@ All symbols here are re-exported from that module so callers do not need to
 reference this path directly.
 """
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactoryArchiveOpts:
+    """Options for Artifactory archive URL building."""
+
+    ref: str = "main"
+    scheme: str = "https"
+
 
 def is_artifactory_path(path_segments: list) -> bool:
     """Return True if path segments indicate a JFrog Artifactory VCS repository.
@@ -38,7 +48,13 @@ def parse_artifactory_path(path_segments: list) -> tuple:
 
 
 def build_artifactory_archive_url(
-    host: str, prefix: str, owner: str, repo: str, ref: str = "main", scheme: str = "https"
+    host: str,
+    prefix: str,
+    owner: str,
+    repo: str,
+    *,
+    ref: str = "main",
+    scheme: str = "https",
 ) -> tuple:
     """Build Artifactory VCS archive download URLs.
 

@@ -1,6 +1,50 @@
 """Script runner for APM NPM-like script execution."""
 
+from __future__ import annotations
+
 from pathlib import Path
+
+
+def _search_apm_modules_for_prompt(self, search_name: str, name: str) -> Path | None:
+    """Search apm_modules for a prompt file, detecting collisions.
+
+    Returns the single matching Path, or None if nothing found.
+    Raises RuntimeError on collision.
+    """
+    apm_modules = Path("apm_modules")
+    if not apm_modules.exists():
+        return None
+
+    raw_matches = list(apm_modules.rglob(search_name))
+
+    for skill_dir in apm_modules.rglob(name):
+        if skill_dir.is_dir():
+            skill_file = skill_dir / "SKILL.md"
+            if skill_file.exists():
+                raw_matches.append(skill_file)
+
+    matches = [m for m in raw_matches if not m.is_symlink()]
+
+    if len(matches) == 0:
+        return None
+    elif len(matches) == 1:
+        return matches[0]
+    else:
+        self._handle_prompt_collision(name, matches)
+        return None
+
+
+def _find_in_owner_packages(
+    self, owner_dir: Path, prompt_name: str, qualified_path: str
+) -> Path | None:
+    """Search an owner's package directories for a prompt matching qualified_path."""
+    for pkg_dir in owner_dir.iterdir():
+        if not pkg_dir.is_dir():
+            continue
+        for prompt_path in pkg_dir.rglob(prompt_name):
+            if self._matches_qualified_path(prompt_path, qualified_path):
+                return prompt_path
+    return None
 
 
 def _discover_prompt_file(self, name: str) -> Path | None:
@@ -48,30 +92,7 @@ def _discover_prompt_file(self, name: str) -> Path | None:
             return path
 
     # 2. Search in dependencies and detect collisions
-    apm_modules = Path("apm_modules")
-    if apm_modules.exists():
-        # Collect ALL .prompt.md matches to detect collisions
-        raw_matches = list(apm_modules.rglob(search_name))
-
-        # Also search for SKILL.md in directories matching the name
-        for skill_dir in apm_modules.rglob(name):
-            if skill_dir.is_dir():
-                skill_file = skill_dir / "SKILL.md"
-                if skill_file.exists():
-                    raw_matches.append(skill_file)
-
-        # Filter out symlinks
-        matches = [m for m in raw_matches if not m.is_symlink()]
-
-        if len(matches) == 0:
-            return None
-        elif len(matches) == 1:
-            return matches[0]
-        else:
-            # Multiple matches - collision detected!
-            self._handle_prompt_collision(name, matches)
-
-    return None
+    return _search_apm_modules_for_prompt(self, search_name, name)
 
 
 def _discover_qualified_prompt(self, qualified_path: str) -> Path | None:
@@ -118,17 +139,7 @@ def _discover_qualified_prompt(self, qualified_path: str) -> Path | None:
             return skill_file
 
     # Search within this owner's packages for .prompt.md files
-    for pkg_dir in owner_dir.iterdir():
-        if not pkg_dir.is_dir():
-            continue
-
-        # Try to find the prompt in this package
-        for prompt_path in pkg_dir.rglob(prompt_name):
-            # Verify this matches the qualified path structure
-            if self._matches_qualified_path(prompt_path, qualified_path):
-                return prompt_path
-
-    return None
+    return _find_in_owner_packages(self, owner_dir, prompt_name, qualified_path)
 
 
 def _matches_qualified_path(self, prompt_path: Path, qualified_path: str) -> bool:

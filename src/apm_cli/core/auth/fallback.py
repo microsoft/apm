@@ -29,51 +29,76 @@ For operations with automatic auth/unauth fallback::
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TypeVar
 
-from .class_ import BearerFallbackOutcome
+from .class_ import BearerFallbackOutcome, _FallbackRequest
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class _CredentialFallbackContext:
+    """State required to retry auth via secondary credential sources."""
+
+    auth_ctx: object
+    host_info: object
+    operation: object
+    path: str | None
+    log_callback: object
+
+
+@dataclass(frozen=True, slots=True)
+class _FallbackExecutionContext:
+    """Common execution state for auth retry flows."""
+
+    auth_ctx: object
+    git_env: object
+    host_info: object
+    operation: object
+    log_callback: object
+    retry_auth: object
 
 
 def _try_credential_fallback_impl(
     exc: Exception,
     self_: object,
-    auth_ctx: object,
-    host_info: object,
-    operation: object,
-    path: str | None,
-    _log: object,
+    context: _CredentialFallbackContext,
 ) -> T:
     """Inner logic for the ``_try_credential_fallback`` closure.
 
     Extracted from :func:`try_with_fallback` to reduce its McCabe complexity
     within the configured Ruff thresholds.
     """
+    auth_ctx = context.auth_ctx
+    host_info = context.host_info
+    operation = context.operation
+    path = context.path
+    log_callback = context.log_callback
     if auth_ctx.source in ("gh-auth-token", "git-credential-fill", "none"):
         raise exc
     # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
     if host_info.kind == "ado":
         raise exc
-    _log(
+    log_callback(
         f"Token from {auth_ctx.source} failed for {host_info.display_name}; "
         "trying secondary credential sources"
     )
-    _log(f"trying gh auth token for {host_info.display_name}")
+    log_callback(f"trying gh auth token for {host_info.display_name}")
     gh_token = self_._token_manager.resolve_credential_from_gh_cli(host_info.host)
     if gh_token:
-        _log(f"gh auth token resolved a credential for {host_info.display_name}")
+        log_callback(f"gh auth token resolved a credential for {host_info.display_name}")
         return operation(
             gh_token,
             self_._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
         )
     path_suffix = f" (path={path})" if path else ""
-    _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
+    log_callback(f"trying git credential fill for {host_info.display_name}{path_suffix}")
     cred = self_._token_manager.resolve_credential_from_git(
         host_info.host, port=host_info.port, path=path
     )
     if cred:
-        _log(f"git credential fill resolved a credential for {host_info.display_name}")
+        log_callback(f"git credential fill resolved a credential for {host_info.display_name}")
         return operation(
             cred,
             self_._build_git_env(cred, scheme="basic", host_kind=host_info.kind),
@@ -119,16 +144,59 @@ def _try_ado_bearer_fallback_impl(
     raise exc
 
 
+def _execute_auth_only_flow(host_info, auth_ctx, git_env, operation, on_failure):
+    """Run the auth-only paths used by GHE Cloud and Azure DevOps."""
+    try:
+        return operation(auth_ctx.token, git_env)
+    except Exception as exc:
+        return on_failure(exc)
+
+
+def _execute_unauth_first_flow(context: _FallbackExecutionContext):
+    """Run the unauthenticated-first path used by validation flows."""
+    try:
+        context.log_callback(f"Trying unauthenticated access to {context.host_info.display_name}")
+        return context.operation(None, context.git_env)
+    except Exception:
+        if not context.auth_ctx.token:
+            raise
+        context.log_callback(
+            f"Unauthenticated failed, retrying with token (source: {context.auth_ctx.source})"
+        )
+        try:
+            return context.operation(context.auth_ctx.token, context.git_env)
+        except Exception as exc:
+            return context.retry_auth(exc)
+
+
+def _execute_auth_first_flow(context: _FallbackExecutionContext):
+    """Run the authenticated-first path for hosts with public repos."""
+    if context.auth_ctx.token:
+        try:
+            context.log_callback(
+                f"Trying authenticated access to {context.host_info.display_name} "
+                f"(source: {context.auth_ctx.source})"
+            )
+            return context.operation(context.auth_ctx.token, context.git_env)
+        except Exception as exc:
+            if context.host_info.has_public_repos:
+                context.log_callback("Authenticated failed, retrying without token")
+                try:
+                    return context.operation(None, context.git_env)
+                except Exception:
+                    return context.retry_auth(exc)
+            return context.retry_auth(exc)
+    context.log_callback(
+        f"No token available, trying unauthenticated access to {context.host_info.display_name}"
+    )
+    return context.operation(None, context.git_env)
+
+
 def try_with_fallback(
     self,
     host: str,
     operation: Callable[..., T],
-    *,
-    org: str | None = None,
-    port: int | None = None,
-    path: str | None = None,
-    unauth_first: bool = False,
-    verbose_callback: Callable[[str], None] | None = None,
+    request: _FallbackRequest,
 ) -> T:
     """Execute *operation* with automatic auth/unauth fallback.
 
@@ -155,13 +223,13 @@ def try_with_fallback(
     retries with ``gh auth token`` and then ``git credential fill``
     before giving up.
     """
-    auth_ctx = self.resolve(host, org, port=port)
+    auth_ctx = self.resolve(host, request.org, port=request.port)
     host_info = auth_ctx.host_info
     git_env = auth_ctx.git_env
 
     def _log(msg: str) -> None:
-        if verbose_callback:
-            verbose_callback(msg)
+        if request.verbose_callback:
+            request.verbose_callback(msg)
 
     def _try_credential_fallback(exc: Exception) -> T:
         """Retry the operation when the originally-resolved token fails.
@@ -174,7 +242,17 @@ def try_with_fallback(
         ``git-credential-fill``, ``none``) skip retry to avoid
         double-invocation.
         """
-        return _try_credential_fallback_impl(exc, self, auth_ctx, host_info, operation, path, _log)
+        return _try_credential_fallback_impl(
+            exc,
+            self,
+            _CredentialFallbackContext(
+                auth_ctx=auth_ctx,
+                host_info=host_info,
+                operation=operation,
+                path=request.path,
+                log_callback=_log,
+            ),
+        )
 
     # ADO bearer fallback machinery (PAT was tried first; bearer is the safety net)
     ado_bearer_fallback_available = (
@@ -187,54 +265,40 @@ def try_with_fallback(
             exc, self, operation, ado_bearer_fallback_available, auth_ctx
         )
 
+    execution_context = _FallbackExecutionContext(
+        auth_ctx=auth_ctx,
+        git_env=git_env,
+        host_info=host_info,
+        operation=operation,
+        log_callback=_log,
+        retry_auth=_try_credential_fallback,
+    )
+
     # Hosts that never have public repos -> auth-only
     if host_info.kind == "ghe_cloud":
         _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
-        try:
-            return operation(auth_ctx.token, git_env)
-        except Exception as exc:
-            return _try_credential_fallback(exc)
+        return _execute_auth_only_flow(
+            host_info,
+            auth_ctx,
+            git_env,
+            operation,
+            _try_credential_fallback,
+        )
 
     # ADO: auth-first with bearer fallback when PAT fails
     if host_info.kind == "ado":
         _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
-        try:
-            return operation(auth_ctx.token, git_env)
-        except Exception as exc:
-            return _try_ado_bearer_fallback(exc)
+        return _execute_auth_only_flow(
+            host_info,
+            auth_ctx,
+            git_env,
+            operation,
+            _try_ado_bearer_fallback,
+        )
 
-    if unauth_first:
-        # Validation path: save rate limits, EMU-safe
-        try:
-            _log(f"Trying unauthenticated access to {host_info.display_name}")
-            return operation(None, git_env)
-        except Exception:
-            if auth_ctx.token:
-                _log(f"Unauthenticated failed, retrying with token (source: {auth_ctx.source})")
-                try:
-                    return operation(auth_ctx.token, git_env)
-                except Exception as exc:
-                    return _try_credential_fallback(exc)
-            raise
-    # Download path: auth-first for higher rate limits
-    elif auth_ctx.token:
-        try:
-            _log(
-                f"Trying authenticated access to {host_info.display_name} "
-                f"(source: {auth_ctx.source})"
-            )
-            return operation(auth_ctx.token, git_env)
-        except Exception as exc:
-            if host_info.has_public_repos:
-                _log("Authenticated failed, retrying without token")
-                try:
-                    return operation(None, git_env)
-                except Exception:
-                    return _try_credential_fallback(exc)
-            return _try_credential_fallback(exc)
-    else:
-        _log(f"No token available, trying unauthenticated access to {host_info.display_name}")
-        return operation(None, git_env)
+    if request.unauth_first:
+        return _execute_unauth_first_flow(execution_context)
+    return _execute_auth_first_flow(execution_context)
 
 
 def execute_with_bearer_fallback(

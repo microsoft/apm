@@ -24,6 +24,84 @@ _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 
 
 @classmethod
+def _validate_ado_path(
+    cls, path_parts: list[str], hostname: str, path: str
+) -> tuple[list[str], str | None]:
+    """Validate and extract ADO path components and virtual path.
+
+    Returns:
+        (base_path_parts, virtual_path)
+    """
+    is_vs_legacy = is_visualstudio_legacy_hostname(hostname)
+    min_ado_parts = 2 if is_vs_legacy else 3
+    if len(path_parts) < min_ado_parts:
+        raise ValueError(
+            f"Invalid Azure DevOps repository path: expected 'org/project/repo', got '{path}'"
+        )
+
+    url_virtual_path: str | None = None
+    if len(path_parts) > min_ado_parts:
+        ado_virtual = "/".join(path_parts[min_ado_parts:])
+        validate_path_segments(ado_virtual, context="virtual path")
+
+        if any(ado_virtual.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+            raise ValueError(
+                f".collection.yml is no longer supported. "
+                f"Convert '{ado_virtual}' to an apm.yml with a "
+                f"'dependencies' section. "
+                f"See: https://microsoft.github.io/apm/guides/dependencies/"
+            )
+
+        if any(ado_virtual.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+            pass
+        else:
+            last_segment = ado_virtual.split("/")[-1]
+            if "." in last_segment:
+                raise InvalidVirtualPackageExtensionError(
+                    f"Invalid virtual package path '{ado_virtual}'. "
+                    f"Individual files must end with one of: "
+                    f"{', '.join(cls.VIRTUAL_FILE_EXTENSIONS)}. "
+                    f"For subdirectory packages, the path should not have a file extension."
+                )
+
+        url_virtual_path = ado_virtual
+        path_parts = path_parts[:min_ado_parts]
+
+    if is_vs_legacy:
+        vs_org = hostname.split(".")[0]
+        path_parts = [vs_org, *path_parts]
+
+    return path_parts, url_virtual_path
+
+
+@classmethod
+def _validate_non_ado_path(cls, path_parts: list[str], path: str) -> None:
+    """Validate non-ADO path components."""
+    if len(path_parts) < 2:
+        raise ValueError(f"Invalid repository path: expected at least 'user/repo', got '{path}'")
+    for pp in path_parts:
+        if any(pp.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+            raise ValueError(
+                f"Invalid repository path: '{path}' contains a virtual file extension. "
+                f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
+            )
+
+
+@classmethod
+def _validate_path_components(cls, path_parts: list[str], is_ado_host: bool) -> None:
+    """Validate individual path components."""
+    allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._~-]+$"
+    validate_path_segments(
+        "/".join(path_parts),
+        context="repository URL path",
+        reject_empty=True,
+    )
+    for part in path_parts:
+        if not re.match(allowed_pattern, part):
+            raise ValueError(f"Invalid repository path component: {part}")
+
+
+@classmethod
 def _validate_url_repo_path(cls, parsed_url) -> tuple[str, str | None]:
     """Validate and normalise the repository path from a parsed URL.
 
@@ -60,79 +138,14 @@ def _validate_url_repo_path(cls, parsed_url) -> tuple[str, str | None]:
         path_parts = path_parts[:git_idx] + path_parts[git_idx + 1 :]
 
     is_ado_host = is_azure_devops_hostname(hostname)
-
     url_virtual_path: str | None = None
 
     if is_ado_host:
-        # *.visualstudio.com encodes org in the subdomain; URL path is proj/repo (2 parts).
-        # dev.azure.com encodes org as the first path segment; URL path is org/proj/repo (3 parts).
-        is_vs_legacy = is_visualstudio_legacy_hostname(hostname)
-        min_ado_parts = 2 if is_vs_legacy else 3
-        if len(path_parts) < min_ado_parts:
-            raise ValueError(
-                f"Invalid Azure DevOps repository path: expected 'org/project/repo', got '{path}'"
-            )
-        if len(path_parts) > min_ado_parts:
-            # Extra segments are a virtual sub-path (e.g. sub/path in
-            # https://dev.azure.com/org/proj/_git/repo/sub/path or
-            # https://myorg.visualstudio.com/proj/_git/repo/sub/path).
-            ado_virtual = "/".join(path_parts[min_ado_parts:])
-
-            # Security: reject path traversal in virtual path.
-            validate_path_segments(ado_virtual, context="virtual path")
-
-            # Reject removed .collection.yml extensions.
-            if any(ado_virtual.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
-                raise ValueError(
-                    f".collection.yml is no longer supported. "
-                    f"Convert '{ado_virtual}' to an apm.yml with a "
-                    f"'dependencies' section. "
-                    f"See: https://microsoft.github.io/apm/guides/dependencies/"
-                )
-
-            # Accept any recognised virtual file extension; reject other
-            # dotted final segments (mirrors shorthand virtual detection).
-            if any(ado_virtual.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
-                pass
-            else:
-                last_segment = ado_virtual.split("/")[-1]
-                if "." in last_segment:
-                    raise InvalidVirtualPackageExtensionError(
-                        f"Invalid virtual package path '{ado_virtual}'. "
-                        f"Individual files must end with one of: "
-                        f"{', '.join(cls.VIRTUAL_FILE_EXTENSIONS)}. "
-                        f"For subdirectory packages, the path should not have a file extension."
-                    )
-
-            url_virtual_path = ado_virtual
-            path_parts = path_parts[:min_ado_parts]
-
-        # For *.visualstudio.com, inject the org from the subdomain so that the
-        # normalised repo_url is always org/project/repo (matching dev.azure.com).
-        if is_vs_legacy:
-            vs_org = hostname.split(".")[0]
-            path_parts = [vs_org, *path_parts]
+        path_parts, url_virtual_path = cls._validate_ado_path(path_parts, hostname, path)
     else:
-        if len(path_parts) < 2:
-            raise ValueError(
-                f"Invalid repository path: expected at least 'user/repo', got '{path}'"
-            )
-        for pp in path_parts:
-            if any(pp.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
-                raise ValueError(
-                    f"Invalid repository path: '{path}' contains a virtual file extension. "
-                    f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
-                )
+        cls._validate_non_ado_path(path_parts, path)
 
-    allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
-    validate_path_segments(
-        "/".join(path_parts),
-        context="repository URL path",
-        reject_empty=True,
-    )
-    for part in path_parts:
-        if not re.match(allowed_pattern, part):
-            raise ValueError(f"Invalid repository path component: {part}")
+    cls._validate_path_components(path_parts, is_ado_host)
 
     return "/".join(path_parts), url_virtual_path
 
@@ -161,7 +174,8 @@ def _validate_final_repo_fields(cls, host, repo_url):
     segments = repo_url.split("/")
     if len(segments) < 2:
         raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
-    if not all(re.match(r"^[a-zA-Z0-9._-]+$", s) for s in segments):
+    # Allow tilde for Bitbucket DC / Sourcehut personal repos (~username)
+    if not all(re.match(r"^[a-zA-Z0-9._~-]+$", s) for s in segments):
         raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
     validate_path_segments(repo_url, context="repository path")
     for seg in segments:

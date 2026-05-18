@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Union
@@ -20,6 +21,31 @@ from .class_ import _debug
 _PROTOCOL_FALLBACK_DOCS_URL = (
     "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressCtx:
+    """Bundled progress-reporting arguments to avoid wide signatures."""
+
+    progress_task_id: object = None
+    progress_obj: object = None
+    verbose_callback: object = None
+
+
+def _extract_description_from_frontmatter(file_content: bytes, default: str) -> str:
+    """Return description from YAML frontmatter, or *default* on any failure."""
+    try:
+        content_str = file_content.decode("utf-8")
+        if content_str.startswith("---\n"):
+            end_idx = content_str.find("\n---\n", 4)
+            if end_idx > 0:
+                frontmatter = content_str[4:end_idx]
+                for line in frontmatter.split("\n"):
+                    if line.startswith("description:"):
+                        return line.split(":", 1)[1].strip().strip("\"'")
+    except Exception:
+        pass
+    return default
 
 
 def download_virtual_file_package(
@@ -115,22 +141,9 @@ def download_virtual_file_package(
     package_name = dep_ref.get_virtual_package_name()
 
     # Try to extract description from file frontmatter
-    description = f"Virtual package containing {filename}"
-    try:
-        content_str = file_content.decode("utf-8")
-        # Simple frontmatter parsing (YAML between --- markers)
-        if content_str.startswith("---\n"):
-            end_idx = content_str.find("\n---\n", 4)
-            if end_idx > 0:
-                frontmatter = content_str[4:end_idx]
-                # Look for description field
-                for line in frontmatter.split("\n"):
-                    if line.startswith("description:"):
-                        description = line.split(":", 1)[1].strip().strip("\"'")
-                        break
-    except Exception:
-        # If frontmatter parsing fails, use default description
-        pass
+    description = _extract_description_from_frontmatter(
+        file_content, f"Virtual package containing {filename}"
+    )
 
     apm_yml_data = {
         "name": package_name,
@@ -256,13 +269,9 @@ def download_package(
     self,
     repo_ref: Union[str, "DependencyReference"],
     target_path: Path,
-    progress_task_id=None,
-    progress_obj=None,
-    verbose_callback=None,
+    ctx: "ProgressCtx | None" = None,
 ) -> PackageInfo:
-    return _download_package_ops.download_package(
-        self, repo_ref, target_path, progress_task_id, progress_obj, verbose_callback
-    )
+    return _download_package_ops.download_package(self, repo_ref, target_path, ctx)
 
 
 def _get_clone_progress_callback(self):

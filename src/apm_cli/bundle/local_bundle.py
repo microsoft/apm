@@ -24,7 +24,6 @@ Public surface:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import sys
@@ -197,6 +196,50 @@ def _find_extracted_root(extract_dir: Path) -> Path | None:
     return None
 
 
+def _validate_and_extract_tarball(path: Path, temp_dir: Path) -> bool:
+    """Validate and extract *path* (a .tar.gz archive) into *temp_dir*.
+
+    Returns ``True`` on success, ``False`` on any security or IO error.
+    Cleans up *temp_dir* on failure.
+    """
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            for member in tar.getmembers():
+                if member.issym() or member.islnk():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return False
+                name = member.name
+                if (
+                    name.startswith("/")
+                    or PureWindowsPath(name).drive
+                    or PureWindowsPath(name).is_absolute()
+                ):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return False
+                try:
+                    validate_path_segments(name, context="tar member")
+                except PathTraversalError:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return False
+            if sys.version_info >= (3, 12):
+                tar.extractall(temp_dir, filter="data")
+            else:
+                tar.extractall(temp_dir)  # noqa: S202 -- validated above
+    except (tarfile.TarError, OSError):
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return False
+    return True
+
+
+from ._bundle_integrity import (
+    _normalize_hash,
+    _verify_listed_files,
+)
+from ._bundle_integrity import (
+    verify_bundle_integrity as verify_bundle_integrity,
+)
+
+
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     """Probe *path*; return :class:`LocalBundleInfo` or ``None``.
 
@@ -220,41 +263,7 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
 
     if path.is_file() and _looks_like_archive(path):
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
-        try:
-            with tarfile.open(path, "r:gz") as tar:
-                # Reject member symlinks/hardlinks and absolute / parent paths
-                # for safety (analogous to the pack-side filter).  Using
-                # ``validate_path_segments`` normalises backslashes and
-                # percent-decoding, and ``PureWindowsPath`` catches drive-letter
-                # absolute forms (e.g. ``C:/foo``) that ``startswith('/')`` misses.
-                for member in tar.getmembers():
-                    if member.issym() or member.islnk():
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    name = member.name
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    try:
-                        validate_path_segments(name, context="tar member")
-                    except PathTraversalError:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                # tarfile.extractall(filter="data") requires Python 3.12+.
-                # The repo declares requires-python = ">=3.10", so on 3.10/3.11
-                # we extract without the filter.  The pre-extraction validation
-                # above is the primary gate (rejects symlinks, absolute paths,
-                # and any '..' segment), not filter="data".
-                if sys.version_info >= (3, 12):
-                    tar.extractall(temp_dir, filter="data")
-                else:
-                    tar.extractall(temp_dir)  # noqa: S202 -- validated above
-        except (tarfile.TarError, OSError):
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        if not _validate_and_extract_tarball(path, temp_dir):
             return None
         bundle_root = _find_extracted_root(temp_dir)
         if bundle_root is None:
@@ -263,103 +272,6 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         return _build_info(bundle_root, is_archive=True, temp_dir=temp_dir)
 
     return None
-
-
-# ---------------------------------------------------------------------------
-# Integrity verification
-# ---------------------------------------------------------------------------
-
-
-def _normalize_hash(value: str) -> str:
-    """Strip an optional ``sha256:`` prefix and lowercase the hex digest.
-
-    Raises :class:`ValueError` when the value carries an unsupported
-    algorithm prefix (e.g. ``sha512:...``) so callers cannot silently
-    accept a hash they will never compute.
-    """
-    if value.startswith("sha256:"):
-        return value[len("sha256:") :].strip().lower()
-    if ":" in value:
-        raise ValueError(f"Unsupported hash algorithm prefix in: {value!r}")
-    return value.strip().lower()
-
-
-def verify_bundle_integrity(bundle_dir: Path, lockfile: dict[str, Any]) -> list[str]:
-    """Walk *bundle_dir* and verify each file against ``pack.bundle_files``.
-
-    Returns a list of human-readable error strings -- empty means the bundle
-    is intact.  Symlinks anywhere under *bundle_dir* are always rejected,
-    even when not listed in the manifest (a symlink injected after pack
-    time is a tampering signal).  Files present in the bundle but absent
-    from ``pack.bundle_files`` (other than ``apm.lock.yaml`` and
-    ``plugin.json``) are also flagged: the manifest is the source of truth.
-    """
-    errors: list[str] = []
-
-    # 1) Reject any symlink under the bundle root, regardless of manifest.
-    for fp in bundle_dir.rglob("*"):
-        if fp.is_symlink():
-            rel = fp.relative_to(bundle_dir).as_posix()
-            errors.append(f"Symlink rejected in bundle: {rel}")
-
-    # 2) Verify each file listed in pack.bundle_files.
-    pack = lockfile.get("pack") or {}
-    bundle_files = pack.get("bundle_files") or {}
-    if not isinstance(bundle_files, dict):
-        errors.append("pack.bundle_files is not a mapping")
-        return errors
-
-    listed_rels: set[str] = set()
-    for rel, expected in sorted(bundle_files.items()):
-        # Reject lockfile-content keys that try to escape the bundle root.
-        try:
-            validate_path_segments(str(rel), context="bundle_files key")
-        except PathTraversalError as exc:
-            errors.append(f"Unsafe bundle_files entry {rel!r}: {exc}")
-            continue
-        target = bundle_dir / rel
-        try:
-            ensure_path_within(target, bundle_dir)
-        except PathTraversalError as exc:
-            errors.append(f"Unsafe bundle_files entry {rel!r}: {exc}")
-            continue
-        listed_rels.add(str(rel))
-        if target.is_symlink():
-            # Already reported by the symlink sweep above; skip hashing.
-            continue
-        if not target.is_file():
-            errors.append(f"Missing bundle file: {rel}")
-            continue
-        try:
-            actual = hashlib.sha256(target.read_bytes()).hexdigest()
-        except OSError as exc:
-            errors.append(f"Cannot read bundle file {rel}: {exc}")
-            continue
-        try:
-            normalized_expected = _normalize_hash(str(expected))
-        except ValueError as exc:
-            errors.append(f"Invalid hash for {rel}: {exc}")
-            continue
-        if actual != normalized_expected:
-            errors.append(
-                f"Hash mismatch for {rel}: expected "
-                f"{normalized_expected[:12]}..., got {actual[:12]}..."
-            )
-
-    # 3) Detect extra files present in the bundle but not listed in
-    # pack.bundle_files.  Anything outside the manifest is a tampering
-    # signal -- the only allowed exclusions are the bundle's own
-    # apm.lock.yaml and plugin.json.
-    _ALLOWED_EXTRAS = {"apm.lock.yaml", "plugin.json"}
-    for fp in bundle_dir.rglob("*"):
-        if not fp.is_file() or fp.is_symlink():
-            continue
-        rel = fp.relative_to(bundle_dir).as_posix()
-        if rel in _ALLOWED_EXTRAS or rel in listed_rels:
-            continue
-        errors.append(f"Unlisted bundle file (not in pack.bundle_files): {rel}")
-
-    return errors
 
 
 # ---------------------------------------------------------------------------

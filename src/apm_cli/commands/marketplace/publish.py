@@ -20,6 +20,7 @@ from .publish_flow import (
     _confirm_publish,
     _exit_for_publish_results,
     _load_publish_targets,
+    _PrBuildOpts,
     _render_state_path,
     _require_pr_integrator,
     _resolve_targets_path,
@@ -83,7 +84,9 @@ def publish(**kwargs):
     _confirm_publish(targets, yes, dry_run, logger)
 
     results = publisher.execute(plan, dry_run=dry_run, parallel=parallel)
-    pr_results = _build_pr_results(pr, results, plan, dry_run=dry_run, draft=draft, no_pr=no_pr)
+    pr_results = _build_pr_results(
+        pr, results, plan, _PrBuildOpts(dry_run=dry_run, draft=draft, no_pr=no_pr)
+    )
     _render_publish_summary(logger, results, pr_results, no_pr, dry_run)
     _render_state_path(logger)
     _exit_for_publish_results(results)

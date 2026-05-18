@@ -42,6 +42,7 @@ from ..models.apm_package import (
     validate_apm_package,
 )
 from ..utils.github_host import default_host, is_github_hostname
+from .download_strategies.artifactory_strategy import _ArtifactoryTarget
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -63,14 +64,8 @@ class _HasArchiveDownloader(Protocol):
 
     def download_artifactory_archive(  # pragma: no cover - protocol only
         self,
-        host: str,
-        prefix: str,
-        owner: str,
-        repo: str,
-        ref: str,
+        target: _ArtifactoryTarget,
         target_path: Path,
-        *,
-        scheme: str = "https",
     ) -> None: ...
 
 
@@ -212,7 +207,10 @@ class ArtifactoryOrchestrator:
         self._progress(progress_obj, progress_task_id, completed=10)
         try:
             self._archive_downloader.download_artifactory_archive(
-                host, prefix, owner, repo, ref, target_path, scheme=scheme
+                _ArtifactoryTarget(
+                    host=host, prefix=prefix, owner=owner, repo=repo, ref=ref, scheme=scheme
+                ),
+                target_path,
             )
         except RuntimeError:
             if target_path.exists():
@@ -265,7 +263,10 @@ class ArtifactoryOrchestrator:
         with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
             temp_path = Path(temp_dir) / "full_pkg"
             self._archive_downloader.download_artifactory_archive(
-                host, prefix, owner, repo, ref, temp_path, scheme=scheme
+                _ArtifactoryTarget(
+                    host=host, prefix=prefix, owner=owner, repo=repo, ref=ref, scheme=scheme
+                ),
+                temp_path,
             )
             self._progress(progress_obj, progress_task_id, completed=60)
             source_subdir = temp_path / subdir_path

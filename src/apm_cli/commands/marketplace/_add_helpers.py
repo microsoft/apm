@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import builtins
 import re
+import sys
+import urllib.parse as _up
 
+from ...core.command_logger import CommandLogger
 from ...utils.path_security import validate_path_segments
 
 # Restore builtins shadowed by subcommand names
@@ -15,6 +18,21 @@ list = builtins.list
 # ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 _TRUSTED_MARKETPLACE_HOST_KINDS = ("github", "ghe_cloud", "ghes", "gitlab")
+
+
+def _parse_https_url_segments(raw: str) -> tuple[str, list[str]]:
+    """Parse an HTTPS marketplace URL; return ``(embedded_host, path_segments)``.
+
+    Raises ``ValueError`` if the URL is missing a host.
+    """
+    parsed = _up.urlparse(raw)
+    embedded_host = (parsed.hostname or "").strip().lower()
+    if not embedded_host:
+        raise ValueError(f"HTTPS URL is missing a host: '{raw}'")
+    path = _up.unquote(parsed.path or "")
+    if path.endswith(".git"):
+        path = path[:-4]
+    return embedded_host, [seg for seg in path.split("/") if seg]
 
 
 def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str, str | None]:
@@ -38,18 +56,11 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
     The returned segments are validated through ``validate_path_segments`` to
     reject path-traversal sequences (``..``, ``.``, ``~``).
     """
-    from urllib.parse import urlparse
-
     from ...utils.github_host import is_valid_fqdn
 
     raw = (repo or "").strip()
     if not raw:
         raise ValueError("Empty repository argument")
-
-    # Reject control characters and percent-encoded traversal. urlparse normalizes
-    # the path but does not unescape; we unescape eagerly so the security guards
-    # below see the real bytes the user typed.
-    import urllib.parse as _up
 
     if any(ord(c) < 32 for c in raw):
         raise ValueError("Repository argument contains invalid control characters")
@@ -67,16 +78,7 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
         )
 
     if lowered.startswith("https://"):
-        parsed = urlparse(raw)
-        embedded_host = (parsed.hostname or "").strip().lower()
-        if not embedded_host:
-            raise ValueError(f"HTTPS URL is missing a host: '{raw}'")
-        # urlparse leaves the path percent-encoded; decode for segment splitting
-        # so traversal markers like '%2E%2E' are caught by validate_path_segments.
-        path = _up.unquote(parsed.path or "")
-        if path.endswith(".git"):
-            path = path[:-4]
-        segments = [seg for seg in path.split("/") if seg]
+        embedded_host, segments = _parse_https_url_segments(raw)
     else:
         # Mirror the HTTPS branch: decode percent-encoded sequences before splitting
         # so '%2E%2E' becomes '..' and is caught by validate_path_segments below.
@@ -158,3 +160,68 @@ def _marketplace_add_unsupported_host_error(
         "Then re-run:\n"
         f"  apm marketplace add {quoted_repo}\n"
     )
+
+
+def _is_valid_alias(value: str) -> bool:
+    """Return True when ``value`` is a legal marketplace alias."""
+    return bool(value) and _ALIAS_PATTERN.match(value) is not None
+
+
+def _resolve_host_for_add(
+    host: str | None, embedded_host: str | None, logger: CommandLogger
+) -> str:
+    """Resolve the effective git host; exits on invalid FQDN."""
+    from ...utils.github_host import default_host, is_valid_fqdn
+
+    if host is not None:
+        normalized_host = host.strip().lower()
+        if not is_valid_fqdn(normalized_host):
+            logger.error(
+                f"Invalid host: '{host}'. Expected a valid host FQDN (for example, 'github.com').",
+                symbol="error",
+            )
+            sys.exit(1)
+        return normalized_host
+    if embedded_host is not None:
+        return embedded_host
+    return default_host()
+
+
+def _check_trusted_host(resolved_host: str, repo: str, logger: CommandLogger) -> None:
+    """Exit with an error when resolved_host is not a trusted marketplace host."""
+    from ...core.auth import AuthResolver
+
+    host_info = AuthResolver.classify_host(resolved_host)
+    if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
+        import shlex as _shlex
+
+        quoted_repo = _shlex.quote(repo)
+        quoted_host = _shlex.quote(resolved_host)
+        logger.error(
+            _marketplace_add_unsupported_host_error(
+                resolved_host, quoted_repo, quoted_host, host_info.kind
+            )
+        )
+        sys.exit(1)
+
+
+def _resolve_display_name_for_add(
+    name: str | None, manifest_name: str, repo_name: str, logger: CommandLogger
+) -> tuple[str, str]:
+    """Return (display_name, alias_source) for marketplace registration."""
+    if name is not None:
+        return name, "--name flag"
+    if manifest_name and _is_valid_alias(manifest_name):
+        return manifest_name, f"manifest.name ('{manifest_name}')"
+    display_name = repo_name
+    if manifest_name and not _is_valid_alias(manifest_name):
+        logger.warning(
+            f"Manifest declares name '{manifest_name}' which is not a "
+            f"valid alias (must match [a-zA-Z0-9._-]+). "
+            f"Falling back to repo name.",
+            symbol="warning",
+        )
+        alias_source = f"repo name (manifest.name '{manifest_name}' invalid)"
+    else:
+        alias_source = "repo name (manifest.name missing)"
+    return display_name, alias_source

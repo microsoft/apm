@@ -72,6 +72,7 @@ class _GitHubFamilyBase:
             self._url_host(dep_ref),
             dep_ref.repo_url,
             port=getattr(dep_ref, "port", None),
+            user=getattr(dep_ref, "ssh_user", None) or "git",
         )
 
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
@@ -286,7 +287,12 @@ class GitLabBackend:
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        return build_ssh_url(host, dep_ref.repo_url, port=getattr(dep_ref, "port", None))
+        return build_ssh_url(
+            host,
+            dep_ref.repo_url,
+            port=getattr(dep_ref, "port", None),
+            user=getattr(dep_ref, "ssh_user", None) or "git",
+        )
 
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
@@ -369,7 +375,12 @@ class GenericGitBackend:
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        return build_ssh_url(host, dep_ref.repo_url, port=getattr(dep_ref, "port", None))
+        return build_ssh_url(
+            host,
+            dep_ref.repo_url,
+            port=getattr(dep_ref, "port", None),
+            user=getattr(dep_ref, "ssh_user", None) or "git",
+        )
 
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)

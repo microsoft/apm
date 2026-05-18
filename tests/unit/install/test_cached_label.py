@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from apm_cli.install.sources import CachedDependencySource
+from apm_cli.install.sources._cached import _CachedSourceExtras
 
 
 def _make_source(*, fetched_this_run: bool, sha: str = "abcd1234deadbeef"):
@@ -38,9 +39,11 @@ def _make_source(*, fetched_this_run: bool, sha: str = "abcd1234deadbeef"):
         dep_ref=dep_ref,
         install_path=Path("/tmp/fake-install-path"),
         dep_key="owner/repo@v1.2.3",
-        resolved_ref=None,
-        dep_locked_chk=dep_locked_chk,
-        fetched_this_run=fetched_this_run,
+        extras=_CachedSourceExtras(
+            resolved_ref=None,
+            dep_locked_chk=dep_locked_chk,
+            fetched_this_run=fetched_this_run,
+        ),
     )
 
 

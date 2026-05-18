@@ -172,6 +172,66 @@ def _load_from_install_path(
         raise
 
 
+def _handle_download_callback(
+    self,
+    dep_ref: DependencyReference,
+    parent_chain: str,
+    parent_pkg: APMPackage | None,
+    install_path: Path,
+) -> Path:
+    """Invoke the download callback (if set) and return the (possibly updated) install_path."""
+    if self._download_callback is None:
+        return install_path
+
+    unique_key = self._download_dedup_key(dep_ref, parent_pkg)
+    # F7 (#1116): atomically check-and-reserve under ``_download_lock`` so two
+    # BFS workers racing on the same logical dep can't both pass the gate and
+    # double-fetch.
+    with self._download_lock:
+        should_fetch = unique_key not in self._downloaded_packages
+        if should_fetch:
+            self._downloaded_packages.add(unique_key)
+    if should_fetch:
+        try:
+            if self._callback_accepts_parent_pkg:
+                downloaded_path = self._download_callback(
+                    dep_ref,
+                    self._apm_modules_dir,
+                    parent_chain,
+                    parent_pkg=parent_pkg,
+                )
+            else:
+                downloaded_path = self._download_callback(
+                    dep_ref, self._apm_modules_dir, parent_chain
+                )
+            if downloaded_path and downloaded_path.exists():
+                install_path = downloaded_path
+            else:
+                # Fetch produced no usable path -- release the reservation so a
+                # subsequent retry can try again.
+                with self._download_lock:
+                    self._downloaded_packages.discard(unique_key)
+        except Exception as exc:
+            # Surface the failure at default verbosity AND log a traceback at
+            # debug (#940 F2 + SR5).
+            with self._download_lock:
+                self._downloaded_packages.discard(unique_key)
+            try:
+                from apm_cli.utils.console import _rich_warning
+
+                _rich_warning(
+                    f"Failed to download dependency '{dep_ref.get_display_name()}': {exc}"
+                )
+            except Exception:
+                _logger.debug("Could not emit download-failure warning", exc_info=True)
+            _logger.debug(
+                "Download callback raised for %s",
+                dep_ref.get_display_name(),
+                exc_info=True,
+            )
+    return install_path
+
+
 def _try_load_dependency_package(
     self,
     dep_ref: DependencyReference,
@@ -252,69 +312,9 @@ def _try_load_dependency_package(
 
     # If package doesn't exist locally, try to download it
     if not install_path.exists():
-        if self._download_callback is not None:
-            unique_key = self._download_dedup_key(dep_ref, parent_pkg)
-            # Avoid re-downloading the same logical (dep_ref, anchor) pair
-            # in a single resolution. The anchor is part of the key so that
-            # two parents with different ``source_path`` values can each
-            # fetch / copy the same dep into their own slot if needed.
-            #
-            # F7 (#1116): atomically check-and-reserve under
-            # ``_download_lock`` so two BFS workers racing on the
-            # same logical dep can't both pass the gate and double-
-            # fetch. The reserving worker fetches; later workers
-            # observe the reservation and skip the callback.
-            with self._download_lock:
-                should_fetch = unique_key not in self._downloaded_packages
-                if should_fetch:
-                    # Reserve the slot before releasing the lock so a
-                    # concurrent worker can't slip past the gate while
-                    # we're inside the (potentially slow) callback.
-                    self._downloaded_packages.add(unique_key)
-            if should_fetch:
-                try:
-                    if self._callback_accepts_parent_pkg:
-                        downloaded_path = self._download_callback(
-                            dep_ref,
-                            self._apm_modules_dir,
-                            parent_chain,
-                            parent_pkg=parent_pkg,
-                        )
-                    else:
-                        downloaded_path = self._download_callback(
-                            dep_ref, self._apm_modules_dir, parent_chain
-                        )
-                    if downloaded_path and downloaded_path.exists():
-                        install_path = downloaded_path
-                    else:
-                        # Fetch produced no usable path -- release the
-                        # reservation so a subsequent retry (or a
-                        # different anchor with the same key) can try
-                        # again rather than silently treating the dep
-                        # as already-downloaded.
-                        with self._download_lock:
-                            self._downloaded_packages.discard(unique_key)
-                except Exception as exc:
-                    # Surface the failure at default verbosity AND log a
-                    # traceback at debug. Previously this branch silently
-                    # swallowed any error, masking transient network /
-                    # auth failures behind a generic "package not found"
-                    # downstream message (#940 F2 + SR5).
-                    with self._download_lock:
-                        self._downloaded_packages.discard(unique_key)
-                    try:
-                        from apm_cli.utils.console import _rich_warning
-
-                        _rich_warning(
-                            f"Failed to download dependency '{dep_ref.get_display_name()}': {exc}"
-                        )
-                    except Exception:
-                        _logger.debug("Could not emit download-failure warning", exc_info=True)
-                    _logger.debug(
-                        "Download callback raised for %s",
-                        dep_ref.get_display_name(),
-                        exc_info=True,
-                    )
+        install_path = _handle_download_callback(
+            self, dep_ref, parent_chain, parent_pkg, install_path
+        )
 
         # Still doesn't exist after download attempt
         if not install_path.exists():

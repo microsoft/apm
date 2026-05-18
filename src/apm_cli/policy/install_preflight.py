@@ -14,6 +14,7 @@ rather than duplicate it.  The gate phase adds pipeline-specific wiring
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
@@ -35,64 +36,36 @@ PolicyBlockError = PolicyViolationError
 _DRY_RUN_PREVIEW_LIMIT = 5
 
 
-def _extract_dep_ref(detail: str, check_name: str) -> str:
-    """Extract a dep ref from a ``CheckResult.details`` line.
+@dataclass(frozen=True, slots=True)
+class PreflightOpts:
+    """Options for run_policy_preflight."""
 
-    Contract: dependency-level checks in ``policy_checks.py`` produce
-    detail lines of the form ``"{ref}: {reason}"`` (see e.g.
-    ``_check_dependency_allowlist`` -- ``violations.append(f"{ref}: {reason}")``).
-    Splitting on the first ``":"`` yields the ref family without the
-    version suffix, which is what users want to see in the diagnostic.
-
-    Defensively falls back to ``check_name`` when the detail string is
-    empty or does not match the contract -- so a malformed check result
-    still surfaces something identifying instead of an empty string.
-    """
-    if not detail:
-        return check_name
-    if ":" in detail:
-        head = detail.split(":", 1)[0].strip()
-        if head:
-            return head
-        # Pathological "leading colon" -- fall back to check_name
-        # rather than returning the raw detail (which is just noise).
-        return check_name
-    return detail.strip() or check_name
+    project_root: Path | None = None
+    apm_deps: list | None = None
+    mcp_deps: list | None = None
+    no_policy: bool = False
+    dry_run: bool = False
 
 
 def run_policy_preflight(
-    *,
-    project_root: Path,
-    apm_deps=None,
-    mcp_deps=None,
-    no_policy: bool = False,
     logger,
-    dry_run: bool = False,
+    opts: PreflightOpts | None = None,
+    **kwargs,
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
     Parameters
     ----------
-    project_root:
-        Project root directory (for policy discovery via git remote).
-    apm_deps:
-        Iterable of ``DependencyReference``, or ``None`` to skip APM
-        dep checks.
-    mcp_deps:
-        Iterable of ``MCPDependency``, or ``None`` to skip MCP checks.
-    no_policy:
-        CLI ``--no-policy`` flag value.
     logger:
         An :class:`InstallLogger` (or any object exposing
         ``policy_disabled``, ``policy_resolved``, ``policy_violation``,
         ``warning``).
-    dry_run:
-        When ``True``, run discovery and checks but emit preview-style
-        verdicts instead of raising :class:`PolicyViolationError`.
-        Block-severity violations render as
-        ``"[!] Would be blocked by policy: <dep> -- <reason>"``
-        and warn-severity as ``"[!] Policy warning: <dep> -- <reason>"``.
-        The function always returns normally in dry-run mode.
+    opts:
+        Optional dataclass with all parameters. When provided,
+        kwargs are ignored.
+    **kwargs:
+        Backward-compatible parameters: project_root, apm_deps, mcp_deps,
+        no_policy, dry_run.
 
     Returns
     -------
@@ -105,9 +78,24 @@ def run_policy_preflight(
     PolicyViolationError
         When ``enforcement == "block"`` and at least one check fails
         **and** ``dry_run is False``.
-        The caller should abort the install and exit non-zero.
-        ``PolicyBlockError`` is a deprecated alias for the same class.
     """
+    # Resolve opts for backward compatibility
+    if opts is not None:
+        project_root = opts.project_root
+        apm_deps = opts.apm_deps
+        mcp_deps = opts.mcp_deps
+        no_policy = opts.no_policy
+        dry_run = opts.dry_run
+    else:
+        project_root = kwargs.get("project_root")
+        apm_deps = kwargs.get("apm_deps")
+        mcp_deps = kwargs.get("mcp_deps")
+        no_policy = kwargs.get("no_policy", False)
+        dry_run = kwargs.get("dry_run", False)
+
+    if project_root is None:
+        raise ValueError("project_root must be provided via opts or as keyword argument")
+
     # -- Escape hatches ------------------------------------------------
     if no_policy or os.environ.get("APM_POLICY_DISABLE") == "1":
         reason = "--no-policy" if no_policy else "APM_POLICY_DISABLE=1"
@@ -118,8 +106,6 @@ def run_policy_preflight(
     fetch_result = discover_policy_with_chain(project_root)
 
     # -- Route the outcome through the shared 9-outcome table ---------
-    # Logging + fail-closed gating live in ``policy/outcome_routing.py``
-    # so this preflight and the install-pipeline gate stay aligned.
     from .project_config import read_project_fetch_failure_default
 
     fetch_failure_default = read_project_fetch_failure_default(project_root)
@@ -131,12 +117,7 @@ def run_policy_preflight(
         raise_blocking_errors=not dry_run,
     )
 
-    if policy is None:
-        return fetch_result, False
-
-    enforcement = policy.enforcement
-
-    if enforcement == "off":
+    if policy is None or policy.enforcement == "off":
         return fetch_result, False
 
     # -- Enforcement (warn or block) -----------------------------------
@@ -145,64 +126,93 @@ def run_policy_preflight(
         lockfile=None,
         policy=policy,
         mcp_deps=mcp_deps,
-        fail_fast=(enforcement == "block"),
+        fail_fast=(policy.enforcement == "block"),
     )
 
     if not audit_result.passed:
-        if dry_run:
-            # -- D2: capped preview per severity bucket ----------------
-            block_lines: list[tuple[str, str]] = []
-            warn_lines: list[tuple[str, str]] = []
-            for check in audit_result.failed_checks:
-                # #832: fall back to ``check.name`` when ``details`` is
-                # empty so a failed check is never silently omitted from
-                # the dry-run preview.
-                items = check.details or [check.name]
-                for detail in items:
-                    dep_ref = _extract_dep_ref(detail, check.name)
-                    if enforcement == "block":
-                        block_lines.append((dep_ref, detail))
-                    else:
-                        warn_lines.append((dep_ref, detail))
-
-            # Emit block bucket (capped)
-            for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
-            overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
-            if overflow > 0:
-                logger.warning(
-                    f"... and {overflow} more would be blocked by policy. "
-                    "Run `apm audit` for full report."
-                )
-
-            # Emit warn bucket (capped)
-            for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(f"Policy warning: {dep_ref} -- {detail}")
-            overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
-            if overflow > 0:
-                logger.warning(
-                    f"... and {overflow} more policy warnings. Run `apm audit` for full report."
-                )
-        else:
-            # -- Real install: push each violation to DiagnosticCollector
-            for check in audit_result.failed_checks:
-                # Same fallback as dry-run: never silently drop a failed
-                # check that happens to have empty ``details``.
-                items = check.details or [check.name]
-                for detail in items:
-                    dep_ref = _extract_dep_ref(detail, check.name)
-                    logger.policy_violation(
-                        dep_ref=dep_ref,
-                        reason=detail,
-                        severity="block" if enforcement == "block" else "warn",
-                        source=fetch_result.source,
-                    )
-
-        if enforcement == "block" and not dry_run:
-            raise PolicyViolationError(
-                f"Install blocked by org policy: {len(audit_result.failed_checks)} check(s) failed",
-                audit_result=audit_result,
-                policy_source=fetch_result.source,
-            )
+        _handle_policy_violations(audit_result, fetch_result, policy.enforcement, logger, dry_run)
 
     return fetch_result, True
+
+
+def _handle_policy_violations(
+    audit_result,
+    fetch_result: PolicyFetchResult,
+    enforcement: str,
+    logger,
+    dry_run: bool,
+) -> None:
+    """Emit diagnostics or raise for policy violations."""
+    if dry_run:
+        _emit_dry_run_preview(audit_result, enforcement, logger)
+    else:
+        _emit_live_violations(audit_result, fetch_result, enforcement, logger)
+
+
+def _emit_dry_run_preview(audit_result, enforcement: str, logger) -> None:
+    """Emit capped preview per severity bucket."""
+    block_lines: list[tuple[str, str]] = []
+    warn_lines: list[tuple[str, str]] = []
+
+    for check in audit_result.failed_checks:
+        items = check.details or [check.name]
+        for detail in items:
+            dep_ref = _extract_dep_ref(detail, check.name)
+            if enforcement == "block":
+                block_lines.append((dep_ref, detail))
+            else:
+                warn_lines.append((dep_ref, detail))
+
+    # Emit block bucket (capped)
+    for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+        logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
+    overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
+    if overflow > 0:
+        logger.warning(
+            f"... and {overflow} more would be blocked by policy. Run `apm audit` for full report."
+        )
+
+    # Emit warn bucket (capped)
+    for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+        logger.warning(f"Policy warning: {dep_ref} -- {detail}")
+    overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
+    if overflow > 0:
+        logger.warning(f"... and {overflow} more policy warnings. Run `apm audit` for full report.")
+
+
+def _emit_live_violations(
+    audit_result,
+    fetch_result: PolicyFetchResult,
+    enforcement: str,
+    logger,
+) -> None:
+    """Push each violation to DiagnosticCollector and optionally raise."""
+    for check in audit_result.failed_checks:
+        items = check.details or [check.name]
+        for detail in items:
+            dep_ref = _extract_dep_ref(detail, check.name)
+            logger.policy_violation(
+                dep_ref=dep_ref,
+                reason=detail,
+                severity="block" if enforcement == "block" else "warn",
+                source=fetch_result.source,
+            )
+
+    if enforcement == "block":
+        raise PolicyViolationError(
+            f"Install blocked by org policy: {len(audit_result.failed_checks)} check(s) failed",
+            audit_result=audit_result,
+            policy_source=fetch_result.source,
+        )
+
+
+def _extract_dep_ref(detail: str, check_name: str) -> str:
+    """Extract a dep ref from a ``CheckResult.details`` line."""
+    if not detail:
+        return check_name
+    if ":" in detail:
+        head = detail.split(":", 1)[0].strip()
+        if head:
+            return head
+        return check_name
+    return detail.strip() or check_name

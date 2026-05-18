@@ -28,15 +28,22 @@ from __future__ import annotations
 # test patches: patch("apm_cli.deps.bare_cache.subprocess.run", ...).
 import subprocess  # noqa: F401
 
-from ._bare_clone import bare_clone_with_fallback
+from ._bare_clone import BareCloneOpts, bare_clone_with_fallback
 from ._fetch_sha import fetch_sha_into_bare
 from ._materialize import materialize_from_bare
 from ._scrub import _rmtree, _scrub_bare_remote_url
-from ._wt_clone import CloneFailureContext, build_clone_failure_message, clone_with_fallback
+from ._wt_clone import (
+    CloneFailureContext,
+    WtCloneOpts,
+    build_clone_failure_message,
+    clone_with_fallback,
+)
 
 # Includes private names that existing tests import directly.
 __all__ = [
+    "BareCloneOpts",
     "CloneFailureContext",
+    "WtCloneOpts",
     "_rmtree",
     "_scrub_bare_remote_url",
     "bare_clone_with_fallback",

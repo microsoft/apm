@@ -1,5 +1,7 @@
 """APM uninstall command CLI."""
 
+from __future__ import annotations
+
 import sys
 
 import click
@@ -18,6 +20,8 @@ from .flow import (
     _load_lockfile_state,
     _load_manifest_data,
     _log_cleanup_counts,
+    _ManifestUpdateContext,
+    _McpCleanupContext,
     _summarise_uninstall,
     _sync_integrations,
     _update_lockfile_after_uninstall,
@@ -92,9 +96,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             data,
             current_deps,
             packages_to_remove,
-            apm_yml_path,
-            dump_yaml,
-            logger,
+            _ManifestUpdateContext(
+                apm_yml_path=apm_yml_path,
+                dump_yaml=dump_yaml,
+                logger=logger,
+            ),
         )
         lockfile_path, lockfile, pre_uninstall_mcp_servers = _load_lockfile_state(apm_dir)
         removed_from_modules = _remove_packages_from_disk(packages_to_remove, modules_dir, logger)
@@ -124,13 +130,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         _log_cleanup_counts(cleaned, logger)
         _cleanup_mcp_state(
             manifest_path,
-            lockfile,
-            lockfile_path,
-            pre_uninstall_mcp_servers,
-            modules_dir,
-            deploy_root,
-            scope,
-            logger,
+            _McpCleanupContext(
+                lockfile=lockfile,
+                lockfile_path=lockfile_path,
+                pre_uninstall_mcp_servers=pre_uninstall_mcp_servers,
+                modules_dir=modules_dir,
+                deploy_root=deploy_root,
+                scope=scope,
+                logger=logger,
+            ),
         )
         _summarise_uninstall(packages_to_remove, removed_from_modules, packages_not_found, logger)
     except Exception as e:

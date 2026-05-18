@@ -34,7 +34,7 @@ echo "[*] Rule A: get_bearer_provider boundary (any reference)"
 rule_a_hits=$(
     grep -rEn '\bget_bearer_provider\b' \
         src/apm_cli/ --include='*.py' \
-        | grep -vE '(src/apm_cli/core/auth\.py|src/apm_cli/core/azure_cli\.py)' \
+        | grep -vE '(src/apm_cli/core/auth\.py|src/apm_cli/core/auth/|src/apm_cli/core/azure_cli\.py)' \
         || true
 )
 
@@ -49,7 +49,7 @@ rule_a_hits=$(
 #     monolith decomposition. Refactor onto execute_with_bearer_fallback
 #     is non-trivial because the loop wraps a stateful clone_action that
 #     mutates target_path; refactor tracked as a follow-up to #1212.
-rule_a_exempt="src/apm_cli/install/validation.py src/apm_cli/deps/github_downloader.py src/apm_cli/deps/clone_engine.py"
+rule_a_exempt="src/apm_cli/install/validation.py src/apm_cli/install/validation/_git_ls_remote.py src/apm_cli/deps/github_downloader.py src/apm_cli/deps/clone_engine.py"
 
 while IFS= read -r hit; do
     [ -z "$hit" ] && continue
@@ -78,7 +78,7 @@ EOF
 echo "[*] Rule B: git ls-remote auth-delegated annotation"
 rule_b_hits=$(
     grep -rEn '"ls-remote"' src/apm_cli/ --include='*.py' \
-        | grep -vE 'src/apm_cli/core/auth\.py' \
+        | grep -vE '(src/apm_cli/core/auth\.py|src/apm_cli/core/auth/)' \
         || true
 )
 while IFS= read -r hit; do
@@ -95,7 +95,10 @@ while IFS= read -r hit; do
     case "$file" in
         src/apm_cli/marketplace/ref_resolver.py) continue ;;
         src/apm_cli/commands/marketplace/doctor.py) continue ;;
+        src/apm_cli/commands/marketplace/doctor_checks.py) continue ;;
         src/apm_cli/install/validation.py) continue ;;
+        src/apm_cli/install/validation/_git_ls_remote.py) continue ;;
+        src/apm_cli/install/_preflight.py) continue ;;
         src/apm_cli/marketplace/git_stderr.py) continue ;;  # docstring example, not a call
     esac
     echo "  [x] $hit"

@@ -157,8 +157,6 @@ class TestInitConsumerNextSteps:
                 result = self.runner.invoke(cli, ["init", "--yes"])
                 assert result.exit_code == 0, result.output
                 assert "apm install" in result.output
-                assert "apm run" in result.output
-                assert "apm plugin init" in result.output
-                assert "apm marketplace init" in result.output
+                assert "apm pack" in result.output
             finally:
                 os.chdir(self.original_dir)

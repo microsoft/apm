@@ -1,5 +1,7 @@
 """Helpers for the ``apm prune`` command."""
 
+from __future__ import annotations
+
 import shutil
 import sys
 from pathlib import Path
@@ -66,6 +68,33 @@ def _remove_orphaned_packages(orphaned_packages, apm_modules_dir: Path, logger):
     return removed_count, pruned_keys, deleted_pkg_paths
 
 
+def _delete_deployed_targets(dep, project_root: Path) -> list[Path]:
+    from ..integration.base_integrator import BaseIntegrator
+
+    deleted_targets: list[Path] = []
+    for rel_path in dep.deployed_files:
+        if not BaseIntegrator.validate_deploy_path(rel_path, project_root):
+            continue
+        target = project_root / rel_path
+        if target.is_file():
+            target.unlink()
+            deleted_targets.append(target)
+        elif target.is_dir():
+            shutil.rmtree(target)
+            deleted_targets.append(target)
+    return deleted_targets
+
+
+def _persist_pruned_lockfile(lockfile, lockfile_path: Path) -> None:
+    try:
+        if lockfile.dependencies:
+            lockfile.write(lockfile_path)
+        else:
+            lockfile_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def _cleanup_pruned_lockfile(pruned_keys, logger) -> None:
     """Remove lockfile entries and deployed files for pruned packages."""
     if not pruned_keys:
@@ -79,36 +108,14 @@ def _cleanup_pruned_lockfile(pruned_keys, logger) -> None:
     if not lockfile:
         return
 
-    deployed_cleaned = 0
     deleted_targets: list[Path] = []
     for dep_key in pruned_keys:
         dep = lockfile.get_dependency(dep_key)
-        if not dep or not dep.deployed_files:
-            if dep_key in lockfile.dependencies:
-                del lockfile.dependencies[dep_key]
-            continue
-        for rel_path in dep.deployed_files:
-            if not BaseIntegrator.validate_deploy_path(rel_path, project_root):
-                continue
-            target = project_root / rel_path
-            if target.is_file():
-                target.unlink()
-                deployed_cleaned += 1
-                deleted_targets.append(target)
-            elif target.is_dir():
-                shutil.rmtree(target)
-                deployed_cleaned += 1
-                deleted_targets.append(target)
-        if dep_key in lockfile.dependencies:
-            del lockfile.dependencies[dep_key]
+        if dep and dep.deployed_files:
+            deleted_targets.extend(_delete_deployed_targets(dep, project_root))
+        lockfile.dependencies.pop(dep_key, None)
 
     BaseIntegrator.cleanup_empty_parents(deleted_targets, stop_at=project_root)
-    if deployed_cleaned > 0:
-        logger.progress(f"+ Cleaned {deployed_cleaned} deployed integration file(s)")
-    try:
-        if lockfile.dependencies:
-            lockfile.write(lockfile_path)
-        else:
-            lockfile_path.unlink(missing_ok=True)
-    except Exception:
-        pass
+    if deleted_targets:
+        logger.progress(f"+ Cleaned {len(deleted_targets)} deployed integration file(s)")
+    _persist_pruned_lockfile(lockfile, lockfile_path)

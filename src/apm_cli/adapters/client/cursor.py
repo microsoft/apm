@@ -9,11 +9,14 @@ APM only writes to ``.cursor/mcp.json`` when the ``.cursor/`` directory
 already exists -- Cursor support is opt-in.
 """
 
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
 
 from ...core.token_manager import GitHubTokenManager
+from .base import McpServerRequest
 from .copilot import CopilotClientAdapter
 
 
@@ -182,6 +185,35 @@ class CursorClientAdapter(CopilotClientAdapter):
         ]
         return config
 
+    def _apply_registry_headers(self, config, remote, env_overrides, server_name, is_github_server):
+        """Inject registry-supplied headers into *config*, guarding the GitHub auth token."""
+        if is_github_server:
+            _tm = GitHubTokenManager()
+            github_token = _tm.get_token_for_purpose("copilot") or os.getenv(
+                "GITHUB_PERSONAL_ACCESS_TOKEN"
+            )
+            if github_token:
+                config["headers"] = {"Authorization": f"Bearer {github_token}"}
+
+        headers = remote.get("headers", [])
+        if headers:
+            if "headers" not in config:
+                config["headers"] = {}
+            for header in headers:
+                header_name = header.get("name", "")
+                header_value = header.get("value", "")
+                if header_name and header_value:
+                    # Prevent registry-supplied headers from overriding the injected GitHub token
+                    if header_name == "Authorization" and is_github_server:
+                        continue
+                    resolved_value = self._resolve_env_variable(
+                        header_name, header_value, env_overrides
+                    )
+                    config["headers"][header_name] = resolved_value
+
+        if config.get("headers"):
+            self._warn_input_variables(config["headers"], server_name, "Cursor")
+
     def _format_remote_config(self, server_info, remotes, env_overrides):
         """Format configuration for remote servers."""
         remote = self._select_remote_with_url(remotes) or remotes[0]
@@ -201,35 +233,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         # Add authentication headers for GitHub MCP server
         server_name = server_info.get("name", "")
         is_github_server = self._is_github_server(server_name, remote.get("url", ""))
-
-        if is_github_server:
-            _tm = GitHubTokenManager()
-            github_token = _tm.get_token_for_purpose("copilot") or os.getenv(
-                "GITHUB_PERSONAL_ACCESS_TOKEN"
-            )
-            if github_token:
-                config["headers"] = {"Authorization": f"Bearer {github_token}"}
-
-        # Add any additional headers from registry if present
-        headers = remote.get("headers", [])
-        if headers:
-            if "headers" not in config:
-                config["headers"] = {}
-            for header in headers:
-                header_name = header.get("name", "")
-                header_value = header.get("value", "")
-                if header_name and header_value:
-                    # Prevent registry-supplied headers from overriding the injected GitHub token
-                    if header_name == "Authorization" and is_github_server:
-                        continue
-                    resolved_value = self._resolve_env_variable(
-                        header_name, header_value, env_overrides
-                    )
-                    config["headers"][header_name] = resolved_value
-
-        # Warn about unresolvable ${input:...} references in headers
-        if config.get("headers"):
-            self._warn_input_variables(config["headers"], server_info.get("name", ""), "Cursor")
+        self._apply_registry_headers(config, remote, env_overrides, server_name, is_github_server)
 
         return config
 
@@ -298,17 +302,20 @@ class CursorClientAdapter(CopilotClientAdapter):
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        request: McpServerRequest | None = None,
+        **legacy_kwargs,
     ):
         """Configure an MCP server in Cursor's ``.cursor/mcp.json``.
 
         Delegates entirely to the parent implementation but prints a
         Cursor-specific success message.
         """
+        if isinstance(request, str):
+            legacy_kwargs.setdefault("server_name", request)
+            request = None
+        if request is None and legacy_kwargs:
+            _valid = McpServerRequest.__dataclass_fields__
+            request = McpServerRequest(**{k: v for k, v in legacy_kwargs.items() if k in _valid})
         if not server_url:
             print("Error: server_url cannot be empty")
             return False
@@ -317,6 +324,12 @@ class CursorClientAdapter(CopilotClientAdapter):
         cursor_dir = self.project_root / ".cursor"
         if not cursor_dir.exists():
             return True  # nothing to do, not an error
+
+        req = request or McpServerRequest()
+        server_name = req.server_name
+        env_overrides = req.env_overrides
+        server_info_cache = req.server_info_cache
+        runtime_vars = req.runtime_vars
 
         try:
             server_info = self._fetch_server_info(server_url, server_info_cache)

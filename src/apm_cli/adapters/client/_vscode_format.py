@@ -8,6 +8,8 @@ existing call sites (``self.method(...)`` and
 ``VSCodeClientAdapter.method(...)``) continue to work unchanged.
 """
 
+from __future__ import annotations
+
 import re
 
 from .base import _ENV_VAR_RE
@@ -43,6 +45,27 @@ def _translate_env_vars_for_vscode(mapping):
     }
 
 
+def _parse_pkg_args(pkg_args: list) -> list[str]:
+    """Extract positional values from a ``package_arguments`` list."""
+    args = []
+    for arg in pkg_args:
+        if isinstance(arg, dict):
+            value = arg.get("value", "")
+            if value:
+                args.append(value)
+    return args
+
+
+def _parse_rt_args(rt_args: list) -> list[str]:
+    """Extract required positional hints from a ``runtime_arguments`` list."""
+    args = []
+    for arg in rt_args:
+        if isinstance(arg, dict):
+            if arg.get("is_required", False) and arg.get("value_hint"):
+                args.append(arg["value_hint"])
+    return args
+
+
 def _extract_package_args(package):
     """Extract positional arguments from a package entry.
 
@@ -63,23 +86,14 @@ def _extract_package_args(package):
     # Prefer package_arguments (current API format)
     pkg_args = package.get("package_arguments") or []
     if pkg_args:
-        args = []
-        for arg in pkg_args:
-            if isinstance(arg, dict):
-                value = arg.get("value", "")
-                if value:
-                    args.append(value)
+        args = _parse_pkg_args(pkg_args)
         if args:
             return args
 
     # Fall back to runtime_arguments (legacy / synthetic format)
     rt_args = package.get("runtime_arguments") or []
     if rt_args:
-        args = []
-        for arg in rt_args:
-            if isinstance(arg, dict):
-                if arg.get("is_required", False) and arg.get("value_hint"):
-                    args.append(arg["value_hint"])
+        args = _parse_rt_args(rt_args)
         if args:
             return args
 

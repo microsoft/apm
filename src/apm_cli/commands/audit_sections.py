@@ -37,14 +37,12 @@ def _render_findings_table(
     """Render a Rich table of scan findings."""
     console = _get_console()
 
-    # Flatten into rows, sorted by severity (critical first)
     severity_order = {"critical": 0, "warning": 1, "info": 2}
     rows: list[ScanFinding] = []
     for findings in findings_by_file.values():
         rows.extend(findings)
     rows.sort(key=lambda f: (severity_order.get(f.severity, 3), f.file, f.line))
 
-    # Filter out info-level in non-verbose mode
     if not verbose:
         rows = [r for r in rows if r.severity != "info"]
 
@@ -88,7 +86,6 @@ def _render_findings_table(
         except (ImportError, Exception):
             pass
 
-    # Fallback: plain text
     _rich_echo("")
     _rich_echo(
         f"{STATUS_SYMBOLS['search']} Content Scan Findings",
@@ -159,7 +156,6 @@ def _apply_strip(
     for rel_path, _findings in findings_by_file.items():
         abs_path = Path(rel_path)
         if not abs_path.is_absolute():
-            # Relative path from lockfile: validate within project_root
             abs_path = project_root / rel_path
             try:
                 abs_path.resolve().relative_to(project_root.resolve())
@@ -183,25 +179,50 @@ def _apply_strip(
     return modified
 
 
+def _iter_strippable_file_counts(findings_by_file: dict[str, list[ScanFinding]]):
+    """Yield ``(path, critical_count, warning_count, total)`` rows for strip preview."""
+    for rel_path, findings in findings_by_file.items():
+        strippable = [f for f in findings if f.severity in ("critical", "warning")]
+        if not strippable:
+            continue
+        crit = sum(1 for finding in strippable if finding.severity == "critical")
+        warn = sum(1 for finding in strippable if finding.severity == "warning")
+        yield rel_path, crit, warn, len(strippable)
+
+
+def _render_strip_preview_rich(console, rows) -> None:
+    """Render ``--strip --dry-run`` preview using Rich when available."""
+    from rich.table import Table
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("File", style="white")
+    table.add_column("Critical", style="bold red", justify="right", width=10)
+    table.add_column("Warning", style="yellow", justify="right", width=10)
+    table.add_column("Total", style="bold white", justify="right", width=10)
+    for rel_path, crit, warn, total in rows:
+        table.add_row(
+            rel_path,
+            str(crit) if crit else "-",
+            str(warn) if warn else "-",
+            str(total),
+        )
+    console.print(table)
+
+
+def _render_strip_preview_plain(rows) -> None:
+    """Render ``--strip --dry-run`` preview without Rich."""
+    for rel_path, _, _, total in rows:
+        _rich_echo(f"  {rel_path}: {total} character(s)", color="white")
+
+
 def _preview_strip(
     findings_by_file: dict[str, list[ScanFinding]],
     logger,
 ) -> int:
-    """Preview what --strip would remove without modifying files.
-
-    Shows a summary of strippable characters per file.
-    Returns the number of files that would be modified.
-    """
+    """Preview what --strip would remove; return count of files that would be modified."""
     console = _get_console()
-    affected = 0
-
-    for rel_path, findings in findings_by_file.items():  # noqa: B007
-        # Only critical+warning chars are stripped
-        strippable = [f for f in findings if f.severity in ("critical", "warning")]
-        if not strippable:
-            continue
-        affected += 1
-
+    rows = list(_iter_strippable_file_counts(findings_by_file))
+    affected = len(rows)
     if affected == 0:
         logger.progress("Nothing to clean -- no strippable characters found")
         return 0
@@ -212,44 +233,11 @@ def _preview_strip(
 
     if console:
         try:
-            from rich.table import Table
-
-            table = Table(
-                show_header=True,
-                header_style="bold cyan",
-            )
-            table.add_column("File", style="white")
-            table.add_column("Critical", style="bold red", justify="right", width=10)
-            table.add_column("Warning", style="yellow", justify="right", width=10)
-            table.add_column("Total", style="bold white", justify="right", width=10)
-
-            for rel_path, findings in findings_by_file.items():
-                strippable = [f for f in findings if f.severity in ("critical", "warning")]
-                if not strippable:
-                    continue
-                crit = sum(1 for f in strippable if f.severity == "critical")
-                warn = sum(1 for f in strippable if f.severity == "warning")
-                table.add_row(
-                    rel_path,
-                    str(crit) if crit else "-",
-                    str(warn) if warn else "-",
-                    str(len(strippable)),
-                )
-
-            console.print(table)
+            _render_strip_preview_rich(console, rows)
         except (ImportError, Exception):
-            # Fallback: plain text
-            for rel_path, findings in findings_by_file.items():
-                strippable = [f for f in findings if f.severity in ("critical", "warning")]
-                if not strippable:
-                    continue
-                _rich_echo(f"  {rel_path}: {len(strippable)} character(s)", color="white")
+            _render_strip_preview_plain(rows)
     else:
-        for rel_path, findings in findings_by_file.items():
-            strippable = [f for f in findings if f.severity in ("critical", "warning")]
-            if not strippable:
-                continue
-            _rich_echo(f"  {rel_path}: {len(strippable)} character(s)", color="white")
+        _render_strip_preview_plain(rows)
 
     _rich_echo("")
     logger.progress(f"{affected} file(s) would be modified")
@@ -257,61 +245,52 @@ def _preview_strip(
     return affected
 
 
-def _render_ci_results(ci_result: CIAuditResult) -> None:
-    """Render CI check results as a Rich table (text format)."""
+def _render_ci_summary(ci_result: CIAuditResult) -> None:
+    """Render the final CI summary line."""
+    summary = ci_result.to_json()["summary"]
+    if ci_result.passed:
+        _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
+        return
+    _rich_error(
+        f"{STATUS_SYMBOLS['error']} {summary['failed']} of {summary['total']} check(s) failed"
+    )
 
-    console = _get_console()
 
-    if console:
-        try:
-            from rich.table import Table
+def _render_ci_results_rich(console, ci_result: CIAuditResult) -> None:
+    """Render CI results with Rich output."""
+    from rich.table import Table
 
-            table = Table(
-                title=f"{STATUS_SYMBOLS['search']} APM Policy Compliance",
-                show_header=True,
-                header_style="bold cyan",
-            )
-            table.add_column("Status", style="bold", width=8)
-            table.add_column("Check", style="white")
-            table.add_column("Message", style="white")
+    table = Table(
+        title=f"{STATUS_SYMBOLS['search']} APM Policy Compliance",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Status", style="bold", width=8)
+    table.add_column("Check", style="white")
+    table.add_column("Message", style="white")
+    for check in ci_result.checks:
+        status = (
+            f"[green]{STATUS_SYMBOLS['check']}[/green]"
+            if check.passed
+            else f"[red]{STATUS_SYMBOLS['cross']}[/red]"
+        )
+        table.add_row(status, check.name, check.message)
 
-            for check in ci_result.checks:
-                status = (
-                    f"[green]{STATUS_SYMBOLS['check']}[/green]"
-                    if check.passed
-                    else f"[red]{STATUS_SYMBOLS['cross']}[/red]"
-                )
-                table.add_row(status, check.name, check.message)
+    console.print()
+    console.print(table)
+    for check in ci_result.failed_checks:
+        if not check.details:
+            continue
+        console.print()
+        _rich_echo(f"  {check.name} details:", color="red", bold=True)
+        for detail in check.details:
+            _rich_echo(f"    - {detail}", color="dim")
+    console.print()
+    _render_ci_summary(ci_result)
 
-            console.print()
-            console.print(table)
 
-            # Show details for failed checks
-            for check in ci_result.failed_checks:
-                if check.details:
-                    console.print()
-                    _rich_echo(
-                        f"  {check.name} details:",
-                        color="red",
-                        bold=True,
-                    )
-                    for detail in check.details:
-                        _rich_echo(f"    - {detail}", color="dim")
-
-            console.print()
-            summary = ci_result.to_json()["summary"]
-            if ci_result.passed:
-                _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
-            else:
-                _rich_error(
-                    f"{STATUS_SYMBOLS['error']} {summary['failed']} of "
-                    f"{summary['total']} check(s) failed"
-                )
-            return
-        except (ImportError, Exception):
-            pass
-
-    # Fallback: plain text
+def _render_ci_results_plain(ci_result: CIAuditResult) -> None:
+    """Render CI results without Rich."""
     _rich_echo("")
     _rich_echo(
         f"{STATUS_SYMBOLS['search']} APM Policy Compliance",
@@ -325,15 +304,22 @@ def _render_ci_results(ci_result: CIAuditResult) -> None:
         if not check.passed and check.details:
             for detail in check.details:
                 _rich_echo(f"      - {detail}", color="dim")
-
     _rich_echo("")
-    summary = ci_result.to_json()["summary"]
-    if ci_result.passed:
-        _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
-    else:
-        _rich_error(
-            f"{STATUS_SYMBOLS['error']} {summary['failed']} of {summary['total']} check(s) failed"
-        )
+    _render_ci_summary(ci_result)
+
+
+def _render_ci_results(ci_result: CIAuditResult) -> None:
+    """Render CI check results as a Rich table (text format)."""
+
+    console = _get_console()
+    if console:
+        try:
+            _render_ci_results_rich(console, ci_result)
+            return
+        except (ImportError, Exception):
+            pass
+
+    _render_ci_results_plain(ci_result)
 
 
 def _audit_ci_gate(
@@ -345,7 +331,14 @@ def _audit_ci_gate(
     no_drift: bool = False,
 ) -> None:
     return _audit_content._audit_ci_gate(
-        cfg, policy_source, no_cache, no_policy, no_fail_fast, no_drift
+        cfg,
+        _audit_content._CiGateRequest(
+            policy_source=policy_source,
+            no_cache=no_cache,
+            no_policy=no_policy,
+            no_fail_fast=no_fail_fast,
+            no_drift=no_drift,
+        ),
     )
 
 
@@ -357,7 +350,16 @@ def _audit_content_scan(
     dry_run: bool,
     no_drift: bool = False,
 ) -> None:
-    return _audit_content._audit_content_scan(cfg, package, file_path, strip, dry_run, no_drift)
+    return _audit_content._audit_content_scan(
+        cfg,
+        _audit_content._ContentScanRequest(
+            package=package,
+            file_path=file_path,
+            strip=strip,
+            dry_run=dry_run,
+            no_drift=no_drift,
+        ),
+    )
 
 
 def audit(

@@ -9,6 +9,7 @@ API surface lives in :mod:`git_strategy` which re-exports everything.
 import base64
 import json
 import os
+from dataclasses import dataclass
 
 import requests  # noqa: F401 – imported for type consistency with callers
 
@@ -35,8 +36,6 @@ def _build_contents_api_urls(
     repo: str,
     file_path: str,
     ref: str,
-    *,
-    is_github_host: bool | None = None,
 ) -> list[str]:
     """Return the ordered list of Contents-API URL candidates for *host*.
 
@@ -47,9 +46,7 @@ def _build_contents_api_urls(
     """
     from ..host_backends import GenericGitBackend, GHECloudBackend, GHESBackend, GitHubBackend
 
-    if is_github_host is None:
-        # Direct call to avoid a circular import with class_.py
-        is_github_host = is_github_hostname(host) or _is_configured_ghes(host)
+    is_github_host = is_github_hostname(host) or _is_configured_ghes(host)
 
     host_lower = (host or "").lower()
     if not is_github_host:
@@ -190,26 +187,32 @@ def _extract_contents_api_payload(response, is_github_host: bool) -> bytes:
     return _decode_json_envelope(body)
 
 
-def _build_unsupported_or_missing_error(
-    host: str,
-    repo_url: str,
-    file_path: str,
-    ref: str,
-    api_url_candidates: list[str],
-    *,
-    is_github_host: bool,
-    fallback_ref: str | None = None,
-) -> str:
+@dataclass(frozen=True, slots=True)
+class _MissingFileCtx:
+    host: str
+    repo_url: str
+    file_path: str
+    ref: str
+    api_url_candidates: list[str]
+    is_github_host: bool
+    fallback_ref: str | None = None
+
+
+def _build_unsupported_or_missing_error(ctx: _MissingFileCtx) -> str:
     """Build a discoverable error when no Contents-API candidate hits 200."""
-    ref_part = f"(tried refs: {ref}, {fallback_ref})" if fallback_ref else f"at ref '{ref}'"
-    if is_github_host:
-        return f"File not found: {file_path} in {repo_url} {ref_part}"
+    ref_part = (
+        f"(tried refs: {ctx.ref}, {ctx.fallback_ref})"
+        if ctx.fallback_ref
+        else f"at ref '{ctx.ref}'"
+    )
+    if ctx.is_github_host:
+        return f"File not found: {ctx.file_path} in {ctx.repo_url} {ref_part}"
     # Non-GitHub host: name what was tried so users can diagnose
     # GitLab / unsupported-host cases without re-reading source.
-    tried = ", ".join(["raw"] + [u.split("/api/")[1].split("/")[0] for u in api_url_candidates])
-    canonical_url = f"https://{host}/{repo_url}/raw/{ref}/{file_path}"
+    tried = ", ".join(["raw"] + [u.split("/api/")[1].split("/")[0] for u in ctx.api_url_candidates])
+    canonical_url = f"https://{ctx.host}/{ctx.repo_url}/raw/{ctx.ref}/{ctx.file_path}"
     return (
-        f"File not found on generic host {host}: {canonical_url} {ref_part}. "
+        f"File not found on generic host {ctx.host}: {canonical_url} {ref_part}. "
         f"Tried URL families: {tried}. "
         "If this is GitLab, virtual subdirectory packages are not "
         "supported (use the dict-form full repo URL instead)."

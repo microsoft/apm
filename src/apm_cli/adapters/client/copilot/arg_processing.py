@@ -5,6 +5,8 @@ targeting the global ~/.copilot/mcp-config.json file as specified in the MCP ins
 architecture specification.
 """
 
+from __future__ import annotations
+
 import re
 
 from ....utils.github_host import is_github_hostname
@@ -13,6 +15,31 @@ from .class_ import _extract_legacy_angle_vars, _translate_env_placeholder
 
 _COPILOT_ENV_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
+
+
+def _process_single_arg(self, arg, resolved_env, runtime_vars):
+    """Process one argument dict or string; return a list of result strings."""
+    processed = []
+    if isinstance(arg, dict):
+        arg_type = arg.get("type", "")
+        if arg_type == "positional":
+            value = arg.get("value", arg.get("default", ""))
+            if value:
+                processed.append(
+                    self._resolve_variable_placeholders(str(value), resolved_env, runtime_vars)
+                )
+        elif arg_type == "named":
+            name = arg.get("name", "")
+            value = arg.get("value", arg.get("default", ""))
+            if name:
+                processed.append(name)
+                if value and value != name and not value.startswith("-"):
+                    processed.append(
+                        self._resolve_variable_placeholders(str(value), resolved_env, runtime_vars)
+                    )
+    elif isinstance(arg, str):
+        processed.append(self._resolve_variable_placeholders(arg, resolved_env, runtime_vars))
+    return processed
 
 
 def _process_arguments(self, arguments, resolved_env=None, runtime_vars=None):
@@ -32,36 +59,8 @@ def _process_arguments(self, arguments, resolved_env=None, runtime_vars=None):
         runtime_vars = {}
 
     processed = []
-
     for arg in arguments:
-        if isinstance(arg, dict):
-            # Extract value from argument object
-            arg_type = arg.get("type", "")
-            if arg_type == "positional":
-                value = arg.get("value", arg.get("default", ""))
-                if value:
-                    # Resolve both environment and runtime variable placeholders with actual values
-                    processed_value = self._resolve_variable_placeholders(
-                        str(value), resolved_env, runtime_vars
-                    )
-                    processed.append(processed_value)
-            elif arg_type == "named":
-                name = arg.get("name", "")
-                value = arg.get("value", arg.get("default", ""))
-                if name:
-                    processed.append(name)
-                    # For named arguments, only add value if it's different from the flag name
-                    # and not empty
-                    if value and value != name and not value.startswith("-"):
-                        processed_value = self._resolve_variable_placeholders(
-                            str(value), resolved_env, runtime_vars
-                        )
-                        processed.append(processed_value)
-        elif isinstance(arg, str):
-            # Already a string, use as-is but resolve variable placeholders
-            processed_value = self._resolve_variable_placeholders(arg, resolved_env, runtime_vars)
-            processed.append(processed_value)
-
+        processed.extend(_process_single_arg(self, arg, resolved_env, runtime_vars))
     return processed
 
 

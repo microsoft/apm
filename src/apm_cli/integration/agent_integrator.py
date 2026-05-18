@@ -15,12 +15,31 @@ from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 from . import _agent_legacy, _agent_writers
+from ._agent_integrator_deprecated import _AgentDeprecatedMixin
+from ._opts import IntegrateOpts, SyncRemoveOpts
+
+
+def _write_agent_for_mapping(
+    integrator, mapping, source_file: Path, target_path: Path, diagnostics
+) -> int:
+    """Write one agent file using the target mapping format."""
+    if mapping.format_id == "codex_agent":
+        integrator._write_codex_agent(source_file, target_path)
+        return 0
+    if mapping.format_id == "windsurf_agent_skill":
+        return integrator._write_windsurf_agent_skill(
+            source_file,
+            target_path,
+            diagnostics=diagnostics,
+        )
+    return integrator.copy_agent(source_file, target_path)
+
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
 
 
-class AgentIntegrator(BaseIntegrator):
+class AgentIntegrator(BaseIntegrator, _AgentDeprecatedMixin):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, and .cursor/agents/."""
 
     def find_agent_files(self, package_path: Path) -> list[Path]:
@@ -89,10 +108,8 @@ class AgentIntegrator(BaseIntegrator):
         target: TargetProfile,
         package_info,
         project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 
@@ -100,6 +117,17 @@ class AgentIntegrator(BaseIntegrator):
         ``install.py`` calls this once per active target that supports
         the ``agents`` primitive.
         """
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
+        resolved_opts = opts or IntegrateOpts()
+        force = resolved_opts.force
+        managed_files = resolved_opts.managed_files
+        diagnostics = resolved_opts.diagnostics
+
         mapping = target.primitives.get("agents")
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
@@ -161,15 +189,13 @@ class AgentIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
-            if mapping.format_id == "codex_agent":
-                self._write_codex_agent(source_file, target_path)
-                links_resolved = 0
-            elif mapping.format_id == "windsurf_agent_skill":
-                links_resolved = self._write_windsurf_agent_skill(
-                    source_file, target_path, diagnostics=diagnostics
-                )
-            else:
-                links_resolved = self.copy_agent(source_file, target_path)
+            links_resolved = _write_agent_for_mapping(
+                self,
+                mapping,
+                source_file,
+                target_path,
+                diagnostics,
+            )
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -202,32 +228,12 @@ class AgentIntegrator(BaseIntegrator):
         return self.sync_remove_files(
             project_root,
             managed_files,
-            prefix=prefix,
-            legacy_glob_dir=legacy_dir,
-            legacy_glob_pattern=legacy_pattern,
-            targets=[target],
-        )
-
-    # ------------------------------------------------------------------
-    # Legacy per-target API (DEPRECATED)
-    #
-    # These methods hardcode a specific target and bypass scope
-    # resolution.  Use the target-driven API (*_for_target) with
-    # profiles from resolve_targets() instead.
-    #
-    # Kept for backward compatibility with external consumers.
-    # Do NOT add new per-target methods here.
-    # ------------------------------------------------------------------
-
-    # DEPRECATED: use get_target_filename_for_target(KNOWN_TARGETS["copilot"], ...) instead.
-    def get_target_filename(self, source_file: Path, package_name: str) -> str:
-        """Generate target filename for copilot (always .agent.md)."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.get_target_filename_for_target(
-            source_file,
-            package_name,
-            KNOWN_TARGETS["copilot"],
+            prefix,
+            SyncRemoveOpts(
+                legacy_glob_dir=legacy_dir,
+                legacy_glob_pattern=legacy_pattern,
+                targets=[target],
+            ),
         )
 
     def copy_agent(self, source: Path, target: Path) -> int:
@@ -273,188 +279,4 @@ class AgentIntegrator(BaseIntegrator):
         """
         return _agent_writers.write_windsurf_agent_skill(
             source, target, self.resolve_links, diagnostics=diagnostics
-        )
-
-    # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
-    def integrate_package_agents(
-        self,
-        package_info,
-        project_root: Path,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
-    ) -> IntegrationResult:
-        """Integrate agents into .github/agents/ + auto-copy to claude/cursor.
-
-        Legacy entry point that preserves the multi-target auto-copy
-        behaviour. New callers should use ``integrate_agents_for_target``
-        directly.
-
-        Implementation delegates to
-        :func:`._agent_legacy.run_legacy_multi_target_integration`.
-        """
-        self.init_link_resolver(package_info, project_root)
-        if not self.find_agent_files(package_info.install_path):
-            return IntegrationResult(0, 0, 0, [])
-        return _agent_legacy.run_legacy_multi_target_integration(
-            self, package_info, project_root, force, managed_files, diagnostics
-        )
-
-    # DEPRECATED: use get_target_filename_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def get_target_filename_claude(self, source_file: Path, package_name: str) -> str:
-        """Generate target filename for Claude agents (plain .md)."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.get_target_filename_for_target(
-            source_file,
-            package_name,
-            KNOWN_TARGETS["claude"],
-        )
-
-    # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def integrate_package_agents_claude(
-        self,
-        package_info,
-        project_root: Path,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
-    ) -> IntegrationResult:
-        """Integrate agents into .claude/agents/.
-
-        Legacy compat: ensures ``.claude/`` exists so the target-driven
-        method does not skip (the old method did not guard on root-dir
-        existence).
-        """
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        (project_root / ".claude").mkdir(parents=True, exist_ok=True)
-        return self.integrate_agents_for_target(
-            KNOWN_TARGETS["claude"],
-            package_info,
-            project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
-        )
-
-    # DEPRECATED: use sync_for_target(KNOWN_TARGETS["copilot"], ...) instead.
-    def sync_integration(
-        self,
-        apm_package,
-        project_root: Path,
-        managed_files: set | None = None,
-    ) -> dict[str, int]:
-        """Remove APM-managed agent files from .github/agents/."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.sync_for_target(
-            KNOWN_TARGETS["copilot"],
-            apm_package,
-            project_root,
-            managed_files=managed_files,
-        )
-
-    # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration_claude(
-        self,
-        apm_package,
-        project_root: Path,
-        managed_files: set | None = None,
-    ) -> dict[str, int]:
-        """Remove APM-managed agent files from .claude/agents/."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.sync_for_target(
-            KNOWN_TARGETS["claude"],
-            apm_package,
-            project_root,
-            managed_files=managed_files,
-        )
-
-    # DEPRECATED: use get_target_filename_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def get_target_filename_cursor(self, source_file: Path, package_name: str) -> str:
-        """Generate target filename for Cursor agents (plain .md)."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.get_target_filename_for_target(
-            source_file,
-            package_name,
-            KNOWN_TARGETS["cursor"],
-        )
-
-    # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def integrate_package_agents_cursor(
-        self,
-        package_info,
-        project_root: Path,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
-    ) -> IntegrationResult:
-        """Integrate agents into .cursor/agents/."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.integrate_agents_for_target(
-            KNOWN_TARGETS["cursor"],
-            package_info,
-            project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
-        )
-
-    # DEPRECATED: use sync_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def sync_integration_cursor(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
-        self,
-        apm_package,
-        project_root: Path,
-        managed_files: set | None = None,
-    ) -> dict[str, int]:
-        """Remove APM-managed agent files from .cursor/agents/."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.sync_for_target(
-            KNOWN_TARGETS["cursor"],
-            apm_package,
-            project_root,
-            managed_files=managed_files,
-        )
-
-    # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def integrate_package_agents_opencode(
-        self,
-        package_info,
-        project_root: Path,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
-    ) -> IntegrationResult:
-        """Integrate agents into .opencode/agents/."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.integrate_agents_for_target(
-            KNOWN_TARGETS["opencode"],
-            package_info,
-            project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
-        )
-
-    # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
-        self,
-        apm_package,
-        project_root: Path,
-        managed_files: set | None = None,
-    ) -> dict[str, int]:
-        """Remove APM-managed agent files from .opencode/agents/."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        return self.sync_for_target(
-            KNOWN_TARGETS["opencode"],
-            apm_package,
-            project_root,
-            managed_files=managed_files,
         )

@@ -40,6 +40,23 @@ def to_hyphen_case(name: str) -> str:
     return result[:64]
 
 
+def _check_name_chars(name: str) -> tuple[bool, str]:
+    """Validate the character-level constraints for a skill name."""
+    if any(c.isupper() for c in name):
+        return (False, "Skill name must be lowercase (no uppercase letters)")
+    if "_" in name:
+        return (False, "Skill name cannot contain underscores (use hyphens instead)")
+    if " " in name:
+        return (False, "Skill name cannot contain spaces (use hyphens instead)")
+    invalid_chars = set(re.findall(r"[^a-z0-9-]", name))
+    if invalid_chars:
+        return (
+            False,
+            f"Skill name contains invalid characters: {', '.join(sorted(invalid_chars))}",
+        )
+    return (False, "Skill name must be lowercase alphanumeric with hyphens only")
+
+
 def validate_skill_name(name: str) -> tuple[bool, str]:
     """Validate skill name per agentskills.io spec.
 
@@ -79,25 +96,7 @@ def validate_skill_name(name: str) -> tuple[bool, str]:
     # Pattern: must start and end with alphanumeric, with alphanumeric or hyphens in between
     pattern = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
     if not re.match(pattern, name):
-        # Determine specific error
-        if any(c.isupper() for c in name):
-            return (False, "Skill name must be lowercase (no uppercase letters)")
-
-        if "_" in name:
-            return (False, "Skill name cannot contain underscores (use hyphens instead)")
-
-        if " " in name:
-            return (False, "Skill name cannot contain spaces (use hyphens instead)")
-
-        # Check for other invalid characters
-        invalid_chars = set(re.findall(r"[^a-z0-9-]", name))
-        if invalid_chars:
-            return (
-                False,
-                f"Skill name contains invalid characters: {', '.join(sorted(invalid_chars))}",
-            )
-
-        return (False, "Skill name must be lowercase alphanumeric with hyphens only")
+        return _check_name_chars(name)
 
     return (True, "")
 

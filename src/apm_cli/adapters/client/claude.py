@@ -19,11 +19,14 @@ reproducible team installs, which aligns with PROJECT (VCS-shared) and USER
 See https://code.claude.com/docs/en/mcp
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
+from .base import McpServerRequest, _resolve_mcp_request
 from .copilot import CopilotClientAdapter
 
 
@@ -191,15 +194,19 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        request: McpServerRequest | None = None,
+        **legacy_kwargs,
     ):
+        request = _resolve_mcp_request(request, legacy_kwargs)
         if not server_url:
             _rich_error("server_url cannot be empty")
             return False
+
+        req = request or McpServerRequest()
+        server_name = req.server_name
+        env_overrides = req.env_overrides
+        server_info_cache = req.server_info_cache
+        runtime_vars = req.runtime_vars
 
         if not self._is_user_scope() and not self._should_write_project():
             _rich_warning(

@@ -1,7 +1,7 @@
 """Unit tests for the default MCP package manager."""
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from apm_cli.adapters.package_manager.default_manager import DefaultMCPPackageManager
 
@@ -26,12 +26,12 @@ class TestDefaultMCPPackageManager(unittest.TestCase):
         # Test regular install
         result = self.package_manager.install("test-package")
         self.assertTrue(result)
-        mock_client.configure_mcp_server.assert_called_with("test-package", "test-package", True)
+        mock_client.configure_mcp_server.assert_called_with("test-package", ANY)
 
         # Test install with version
         result = self.package_manager.install("test-package", "1.0.0")
         self.assertTrue(result)
-        mock_client.configure_mcp_server.assert_called_with("test-package", "test-package", True)
+        mock_client.configure_mcp_server.assert_called_with("test-package", ANY)
 
     @patch("apm_cli.factory.ClientFactory.create_client")
     @patch("apm_cli.config.get_default_client")

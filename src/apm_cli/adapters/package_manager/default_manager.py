@@ -1,5 +1,6 @@
 """Implementation of the default MCP package manager."""
 
+from ...adapters.client.base import McpServerRequest
 from ...config import get_default_client
 from ...registry.integration import RegistryIntegration
 from .base import MCPPackageManagerAdapter
@@ -27,7 +28,9 @@ class DefaultMCPPackageManager(MCPPackageManagerAdapter):
             client_adapter = ClientFactory.create_client(client_type)
 
             # For VSCode, configure MCP server in mcp.json
-            result = client_adapter.configure_mcp_server(package_name, package_name, True)
+            result = client_adapter.configure_mcp_server(
+                package_name, McpServerRequest(server_name=package_name)
+            )
 
             if result:
                 print(f"Successfully installed {package_name}")

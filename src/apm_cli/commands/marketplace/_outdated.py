@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Marketplace outdated helpers."""
 
 from __future__ import annotations
@@ -5,6 +6,7 @@ from __future__ import annotations
 import builtins
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from ...marketplace.semver import parse_semver
@@ -19,27 +21,17 @@ list = builtins.list
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
+@dataclass(frozen=True, slots=True)
 class _OutdatedRow:
     """Simple container for outdated table row data."""
 
-    __slots__ = (
-        "current",
-        "latest_in_range",
-        "latest_overall",
-        "name",
-        "note",
-        "range_spec",
-        "status",
-    )
-
-    def __init__(self, name, current, range_spec, latest_in_range, latest_overall, status, note):
-        self.name = name
-        self.current = current
-        self.range_spec = range_spec
-        self.latest_in_range = latest_in_range
-        self.latest_overall = latest_overall
-        self.status = status
-        self.note = note
+    name: str
+    current: str
+    range_spec: str
+    latest_in_range: str
+    latest_overall: str
+    status: str
+    note: str
 
 
 def _load_current_versions():

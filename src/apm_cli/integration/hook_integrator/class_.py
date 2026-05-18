@@ -50,177 +50,20 @@ from pathlib import Path
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 
+from ._opts import (
+    _HOOK_EVENT_MAP,
+    _HOOK_FILE_TARGET_SUFFIXES,
+    _MERGE_HOOK_TARGETS,
+    HookIntegrateOpts,
+    HookIntegrationResult,
+    HookRewriteOpts,
+    _copilot_keys_to_gemini,
+    _filter_hook_files_for_target,
+    _MergeHookConfig,
+    _to_gemini_hook_entries,
+)
+
 _log = logging.getLogger(__name__)
-
-
-# DEPRECATED -- use IntegrationResult directly for new code.
-# Backward-compatible shim: accepts hooks_integrated= kwarg and
-# exposes a hooks_integrated property for consumers of the old API.
-class HookIntegrationResult(IntegrationResult):
-    """Backward-compatible wrapper around IntegrationResult."""
-
-    def __init__(self, *args, hooks_integrated=None, **kwargs):
-        if hooks_integrated is not None:
-            kwargs.setdefault("files_integrated", hooks_integrated)
-            kwargs.setdefault("files_updated", 0)
-            kwargs.setdefault("files_skipped", 0)
-            kwargs.setdefault("target_paths", [])
-        super().__init__(*args, **kwargs)
-
-    @property
-    def hooks_integrated(self):
-        """Alias for files_integrated (backward compat)."""
-        return self.files_integrated
-
-
-@dataclass(frozen=True)
-class _MergeHookConfig:
-    """Configuration for targets that merge hooks into a single JSON file."""
-
-    config_filename: str  # e.g. "settings.json" or "hooks.json"
-    target_key: str  # target name passed to _rewrite_hooks_data
-    require_dir: bool  # True = skip if target dir doesn't exist
-
-
-# Per-target hook event name mapping.  Packages are authored with
-# Copilot (camelCase) or Claude (PascalCase) names; targets that use
-# different conventions get their events renamed during merge.
-_HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
-    "claude": {
-        # Copilot camelCase -> Claude PascalCase
-        "preToolUse": "PreToolUse",
-        "postToolUse": "PostToolUse",
-    },
-    "gemini": {
-        # Copilot / Claude -> Gemini
-        "PreToolUse": "BeforeTool",
-        "preToolUse": "BeforeTool",
-        "PostToolUse": "AfterTool",
-        "postToolUse": "AfterTool",
-        "Stop": "SessionEnd",
-    },
-}
-
-
-def _to_gemini_hook_entries(entries: list) -> list:
-    """Transform hook entries into Gemini CLI format.
-
-    Gemini requires ``{"hooks": [...]}`` nesting, uses ``command`` (not
-    ``bash``), and ``timeout`` in milliseconds (not ``timeoutSec`` in
-    seconds).  Entries already in Claude/Gemini nested format are left
-    unchanged.
-    """
-    result = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            result.append(entry)
-            continue
-        # Already nested (Claude / Gemini format) -- just fix inner keys
-        if "hooks" in entry and isinstance(entry["hooks"], list):
-            for hook in entry["hooks"]:
-                _copilot_keys_to_gemini(hook)
-            result.append(entry)
-            continue
-        # Flat Copilot entry -- wrap in nested format
-        inner = dict(entry)
-        _copilot_keys_to_gemini(inner)
-        # Pull _apm_source to outer level (set later, but keep if present)
-        apm_source = inner.pop("_apm_source", None)
-        outer: dict = {"hooks": [inner]}
-        if apm_source:
-            outer["_apm_source"] = apm_source
-        result.append(outer)
-    return result
-
-
-def _copilot_keys_to_gemini(hook: dict) -> None:
-    """Rename Copilot hook keys to Gemini equivalents in-place."""
-    # bash / powershell -> command
-    if "command" not in hook:
-        for key in ("bash", "powershell", "windows"):
-            if key in hook:
-                hook["command"] = hook.pop(key)
-                break
-    # timeoutSec (seconds) -> timeout (milliseconds)
-    if "timeoutSec" in hook:
-        hook["timeout"] = hook.pop("timeoutSec") * 1000
-
-
-_MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
-    "claude": _MergeHookConfig(
-        config_filename="settings.json",
-        target_key="claude",
-        require_dir=False,
-    ),
-    "cursor": _MergeHookConfig(
-        config_filename="hooks.json",
-        target_key="cursor",
-        require_dir=True,
-    ),
-    "codex": _MergeHookConfig(
-        config_filename="hooks.json",
-        target_key="codex",
-        require_dir=True,
-    ),
-    "gemini": _MergeHookConfig(
-        config_filename="settings.json",
-        target_key="gemini",
-        require_dir=True,
-    ),
-    "windsurf": _MergeHookConfig(
-        config_filename="hooks.json",
-        target_key="windsurf",
-        require_dir=True,
-    ),
-}
-
-
-# Mapping from hook-file stem suffix to the set of target keys that
-# should receive the file.  Files whose stem does not match any
-# suffix are treated as universal and deployed to every target.
-_HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
-    "copilot-hooks": {"copilot", "vscode"},
-    "cursor-hooks": {"cursor"},
-    "claude-hooks": {"claude"},
-    "codex-hooks": {"codex"},
-    "gemini-hooks": {"gemini"},
-    "windsurf-hooks": {"windsurf"},
-}
-
-
-def _filter_hook_files_for_target(
-    hook_files: list[Path],
-    target_key: str,
-) -> list[Path]:
-    """Return only hook files intended for *target_key*.
-
-    Routing is based on the file stem (case-insensitive):
-      - Stems ending with a known ``-<target>-hooks`` suffix are
-        restricted to matching targets.
-      - All other stems (e.g. ``hooks``, ``my-custom-hooks``) are
-        universal and pass through for every target.
-
-    Args:
-        hook_files: All discovered hook JSON files.
-        target_key: Lowercase target name (e.g. ``"claude"``, ``"cursor"``).
-
-    Returns:
-        Filtered list preserving original order.
-    """
-    result: list[Path] = []
-    for hf in hook_files:
-        stem_lower = hf.stem.lower()
-        matched_suffix: str | None = None
-        for suffix, allowed_targets in _HOOK_FILE_TARGET_SUFFIXES.items():
-            if stem_lower == suffix or stem_lower.endswith(f"-{suffix}"):
-                matched_suffix = suffix
-                if target_key in allowed_targets:
-                    result.append(hf)
-                break
-        if matched_suffix is None:
-            # Universal file -- deploy to all targets
-            result.append(hf)
-    return result
 
 
 class HookIntegrator(BaseIntegrator):
@@ -281,28 +124,44 @@ class HookIntegrator(BaseIntegrator):
     def _rewrite_command_for_target(
         self,
         command: str,
-        package_path: Path,
-        package_name: str,
-        target: str,
-        hook_file_dir: Path | None = None,
-        root_dir: str | None = None,
+        opts_or_package_path=None,
+        package_name: str | None = None,
+        target: str | None = None,
+        **legacy_kwargs,
     ) -> tuple[str, list[tuple[Path, str]]]:
-        return _gemini_translate._rewrite_command_for_target(
-            self, command, package_path, package_name, target, hook_file_dir, root_dir
-        )
+        if isinstance(opts_or_package_path, HookRewriteOpts):
+            opts = opts_or_package_path
+        else:
+            opts = HookRewriteOpts(
+                package_path=opts_or_package_path,
+                package_name=package_name or "",
+                target=target or "",
+                hook_file_dir=legacy_kwargs.get("hook_file_dir"),
+                root_dir=legacy_kwargs.get("root_dir"),
+                deploy_root=legacy_kwargs.get("deploy_root"),
+            )
+        return _gemini_translate._rewrite_command_for_target(self, command, opts)
 
     def _rewrite_hooks_data(
         self,
         data: dict,
-        package_path: Path,
-        package_name: str,
-        target: str,
-        hook_file_dir: Path | None = None,
-        root_dir: str | None = None,
+        opts_or_package_path=None,
+        package_name: str | None = None,
+        target: str | None = None,
+        **legacy_kwargs,
     ) -> tuple[dict, list[tuple[Path, str]]]:
-        return _gemini_translate._rewrite_hooks_data(
-            self, data, package_path, package_name, target, hook_file_dir, root_dir
-        )
+        if isinstance(opts_or_package_path, HookRewriteOpts):
+            opts = opts_or_package_path
+        else:
+            opts = HookRewriteOpts(
+                package_path=opts_or_package_path,
+                package_name=package_name or "",
+                target=target or "",
+                hook_file_dir=legacy_kwargs.get("hook_file_dir"),
+                root_dir=legacy_kwargs.get("root_dir"),
+                deploy_root=legacy_kwargs.get("deploy_root"),
+            )
+        return _gemini_translate._rewrite_hooks_data(self, data, opts)
 
     def _get_package_name(self, package_info) -> str:
         """Get a short package name for use in file/directory naming.
@@ -319,14 +178,17 @@ class HookIntegrator(BaseIntegrator):
         self,
         package_info,
         project_root: Path,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
-        target=None,
+        opts: HookIntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> HookIntegrationResult:
-        return _merge_config.integrate_package_hooks(
-            self, package_info, project_root, force, managed_files, diagnostics, target
-        )
+        if opts is None and legacy_kwargs:
+            opts = HookIntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+                target=legacy_kwargs.get("target"),
+            )
+        return _merge_config.integrate_package_hooks(self, package_info, project_root, opts)
 
     # ------------------------------------------------------------------
     # Shared JSON-merge implementation for Claude / Cursor / Codex
@@ -337,21 +199,14 @@ class HookIntegrator(BaseIntegrator):
         config: "_MergeHookConfig",
         package_info,
         project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
-        target=None,
+        opts: HookIntegrateOpts | None = None,
     ) -> HookIntegrationResult:
         return _merge_config._integrate_merged_hooks(
             self,
             config,
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
-            target=target,
+            opts=opts,
         )
 
     # ------------------------------------------------------------------
@@ -374,9 +229,11 @@ class HookIntegrator(BaseIntegrator):
             _MERGE_HOOK_TARGETS["claude"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            HookIntegrateOpts(
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+            ),
         )
 
     def integrate_package_hooks_cursor(
@@ -395,9 +252,11 @@ class HookIntegrator(BaseIntegrator):
             _MERGE_HOOK_TARGETS["cursor"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            HookIntegrateOpts(
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+            ),
         )
 
     def integrate_package_hooks_codex(
@@ -416,9 +275,11 @@ class HookIntegrator(BaseIntegrator):
             _MERGE_HOOK_TARGETS["codex"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            HookIntegrateOpts(
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -430,19 +291,14 @@ class HookIntegrator(BaseIntegrator):
         target,
         package_info,
         project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
+        opts: HookIntegrateOpts | None = None,
     ) -> "HookIntegrationResult":
         return _merge_config.integrate_hooks_for_target(
             self,
             target,
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            opts=opts,
         )
 
     def sync_integration(
@@ -452,7 +308,6 @@ class HookIntegrator(BaseIntegrator):
             self, apm_package, project_root, managed_files, targets
         )
 
-    @staticmethod
     @staticmethod
     def _clean_apm_entries_from_json(json_path: Path, stats: dict[str, int]) -> None:
         return _filter_files._clean_apm_entries_from_json(json_path, stats)

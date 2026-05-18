@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, _DepResolutionInfo
 from apm_cli.models.dependency.reference import DependencyReference
 
 # ============================================================================
@@ -151,10 +151,8 @@ class TestLockedDependencySkillSubset:
         ref = DependencyReference.parse("owner/repo#main")
         ref.skill_subset = ["cli", "web"]
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=ref,
-            resolved_commit="abc123",
-            depth=0,
-            resolved_by="direct",
+            ref,
+            _DepResolutionInfo(resolved_commit="abc123", depth=0, resolved_by="direct"),
         )
         assert locked.skill_subset == ["cli", "web"]
 
@@ -163,10 +161,8 @@ class TestLockedDependencySkillSubset:
         ref = DependencyReference.parse("owner/repo#main")
         ref.skill_subset = None
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=ref,
-            resolved_commit="abc123",
-            depth=0,
-            resolved_by="direct",
+            ref,
+            _DepResolutionInfo(resolved_commit="abc123", depth=0, resolved_by="direct"),
         )
         assert locked.skill_subset == []
 

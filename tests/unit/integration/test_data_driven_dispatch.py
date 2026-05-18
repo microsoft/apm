@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from apm_cli.commands.install import _integrate_package_primitives
+from apm_cli.install.services.primitives import _IntegratorSet
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 
@@ -96,7 +97,14 @@ def _dispatch(targets, integrators=None, package_info=None, project_root=None):
         force=False,
         managed_files=set(),
         diagnostics=None,
-        **integrators,
+        integrators=_IntegratorSet(
+            prompt_integrator=integrators["prompt_integrator"],
+            agent_integrator=integrators["agent_integrator"],
+            skill_integrator=integrators["skill_integrator"],
+            instruction_integrator=integrators["instruction_integrator"],
+        ),
+        command_integrator=integrators["command_integrator"],
+        hook_integrator=integrators["hook_integrator"],
     ), integrators
 
 

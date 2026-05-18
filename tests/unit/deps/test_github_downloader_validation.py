@@ -495,11 +495,10 @@ class TestRound3SafeRmtreeNotRobustRmtreeDirect:
             MockGit.return_value.remote = MagicMock()
             MockGit.return_value.fetch = MagicMock()
             MockGit.return_value.ls_tree = MagicMock(return_value="100644 blob abc\tskills/x")
+            ctx = gdv._TreeProbeCtx(dep_ref=dep_ref, vpath="skills/x", ref="main")
             ok = gdv._path_exists_in_tree_at_ref(
                 downloader,
-                dep_ref,
-                "skills/x",
-                "main",
+                ctx,
                 log=lambda _m: None,
                 winning_attempt=winning,
             )

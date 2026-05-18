@@ -5,12 +5,15 @@ following the official documentation at:
 https://code.visualstudio.com/docs/copilot/chat/mcp-servers
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
+from . import _vscode_server_config as _vsc
 from ._vscode_format import (
     _LEGACY_ANGLE_VAR_RE,
     _build_package_input_vars,
@@ -19,7 +22,32 @@ from ._vscode_format import (
     _select_remote_with_url,
     _translate_env_vars_for_vscode,
 )
-from .base import _INPUT_VAR_RE, MCPClientAdapter
+from .base import _INPUT_VAR_RE, MCPClientAdapter, McpServerRequest, _resolve_mcp_request
+
+
+def _emit_log(logger, level: str, msg: str) -> None:
+    """Emit a log message via *logger* or fall back to ``print``."""
+    if logger:
+        getattr(logger, level, logger.error)(msg)
+    else:
+        print(msg)
+
+
+def _merge_input_vars(current_inputs: list, input_vars: list) -> None:
+    """Append *input_vars* to *current_inputs*, skipping duplicate ids."""
+    existing_ids = {var.get("id") for var in current_inputs if isinstance(var, dict)}
+    for var in input_vars:
+        if var.get("id") not in existing_ids:
+            current_inputs.append(var)
+            existing_ids.add(var.get("id"))
+
+
+def _ensure_mcp_sections(config: dict) -> None:
+    """Ensure *config* has ``servers`` and ``inputs`` top-level keys."""
+    if "servers" not in config:
+        config["servers"] = {}
+    if "inputs" not in config:
+        config["inputs"] = []
 
 
 class VSCodeClientAdapter(MCPClientAdapter):
@@ -160,12 +188,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
-        logger=None,
+        request: McpServerRequest | None = None,
+        **legacy_kwargs,
     ):
         """Configure an MCP server in VS Code mcp.json file.
 
@@ -174,11 +198,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
         Args:
             server_url (str): URL or identifier of the MCP server.
-            server_name (str, optional): Name of the server. Defaults to None.
-            enabled (bool, optional): Whether to enable the server. Defaults to True.
-            env_overrides (dict, optional): Environment variable overrides. Defaults to None.
-            server_info_cache (dict, optional): Pre-fetched server info to avoid duplicate registry calls.
-            logger: Optional CommandLogger for structured output.
+            request: Optional McpServerRequest with server_name, server_info_cache,
+                and logger.
+            **legacy_kwargs: Deprecated -- pass individual fields through ``McpServerRequest`` instead.
 
         Returns:
             bool: True if successful, False otherwise.
@@ -186,12 +208,18 @@ class VSCodeClientAdapter(MCPClientAdapter):
         Raises:
             ValueError: If server is not found in registry.
         """
+        request = _resolve_mcp_request(request, legacy_kwargs)
         if not server_url:
-            if logger:
-                logger.error("server_url cannot be empty")
+            if request and request.logger:
+                request.logger.error("server_url cannot be empty")
             else:
                 print("Error: server_url cannot be empty")
             return False
+
+        req = request or McpServerRequest()
+        server_name = req.server_name
+        server_info_cache = req.server_info_cache
+        logger = req.logger
 
         try:
             # Use cached server info if available, otherwise fetch from registry
@@ -212,10 +240,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
             server_config, input_vars = self._format_server_config(server_info)
 
             if not server_config:
-                if logger:
-                    logger.error(f"Unable to configure server: {server_url}")
-                else:
-                    print(f"Unable to configure server: {server_url}")
+                _emit_log(logger, "error", f"Unable to configure server: {server_url}")
                 return False
 
             # Use provided server name or fallback to server_url
@@ -225,22 +250,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
             current_config = self.get_current_config(logger=logger)
 
             # Ensure servers and inputs sections exist
-            if "servers" not in current_config:
-                current_config["servers"] = {}
-            if "inputs" not in current_config:
-                current_config["inputs"] = []
+            _ensure_mcp_sections(current_config)
 
             # Add the server configuration
             current_config["servers"][config_key] = server_config
 
             # Add input variables (avoiding duplicates)
-            existing_input_ids = {
-                var.get("id") for var in current_config["inputs"] if isinstance(var, dict)
-            }
-            for var in input_vars:
-                if var.get("id") not in existing_input_ids:
-                    current_config["inputs"].append(var)
-                    existing_input_ids.add(var.get("id"))
+            _merge_input_vars(current_config["inputs"], input_vars)
 
             # Update the configuration
             result = self.update_config(current_config, logger=logger)
@@ -256,227 +272,43 @@ class VSCodeClientAdapter(MCPClientAdapter):
             # Re-raise ValueError for registry errors
             raise
         except Exception as e:
-            if logger:
-                logger.error(f"Error configuring MCP server: {e}")
-            else:
-                print(f"Error configuring MCP server: {e}")
+            _emit_log(logger, "error", f"Error configuring MCP server: {e}")
             return False
 
     def _format_server_config(self, server_info):
-        """Format server details into VSCode mcp.json compatible format.
-
-        Args:
-            server_info (dict): Server information from registry.
-
-        Returns:
-            tuple: (server_config, input_vars) where:
-                - server_config is the formatted server configuration for mcp.json
-                - input_vars is a list of input variable definitions
-        """
-        # Self-defined stdio deps carry raw command/args  -- use directly
-        raw = server_info.get("_raw_stdio")
-        if raw:
-            return self._format_raw_stdio_config(server_info, raw)
-
-        # Check for packages information
-        if server_info.get("packages"):
-            return self._format_package_config(server_info)
-
-        # Check for SSE endpoints or remotes
-        return self._format_remote_config(server_info)
+        """Delegate to _vscode_server_config."""
+        return _vsc._format_server_config(self, server_info)
 
     def _format_raw_stdio_config(self, server_info, raw):
-        """Format raw stdio configuration."""
-        server_config = {
-            "type": "stdio",
-            "command": raw["command"],
-            "args": raw["args"],
-        }
-        input_vars = []
-        if raw.get("env"):
-            # Translate bare ${VAR} -> ${env:VAR} so VS Code's runtime env
-            # interpolation resolves them at server-start. ${input:...}
-            # references are preserved for input-variable extraction below.
-            self._warn_on_legacy_angle_vars(raw["env"], server_info.get("name", "unknown"), "env")
-            env_translated = self._translate_env_vars_for_vscode(raw["env"])
-            server_config["env"] = env_translated
-            input_vars.extend(
-                self._extract_input_variables(env_translated, server_info.get("name", ""))
-            )
-        return server_config, input_vars
+        """Delegate to _vscode_server_config."""
+        return _vsc._format_raw_stdio_config(self, server_info, raw)
 
     def _format_package_config(self, server_info):
-        """Format package-based server configuration."""
-        package = self._select_best_package(server_info["packages"])
-        if package is None:
-            return self._handle_incomplete_config(server_info)
-
-        runtime_hint = package.get("runtime_hint", "")
-        registry_name = self._infer_registry_name(package)
-        pkg_args = self._extract_package_args(package)
-
-        server_config = self._build_package_server_config(
-            package, runtime_hint, registry_name, pkg_args
-        )
-        if not server_config:
-            return self._handle_incomplete_config(server_info)
-
-        input_vars = self._build_package_input_vars(package, server_config)
-        return server_config, input_vars
+        """Delegate to _vscode_server_config."""
+        return _vsc._format_package_config(self, server_info)
 
     def _build_package_server_config(self, package, runtime_hint, registry_name, pkg_args):
-        """Build server configuration for a package."""
-        # Handle npm packages
-        if runtime_hint == "npx" or registry_name == "npm":
-            package_name = package.get("name")
-            extra_args = [a for a in pkg_args if a != package_name] if pkg_args else []
-            return {
-                "type": "stdio",
-                "command": "npx",
-                "args": ["-y", package_name, *extra_args],
-            }
-
-        # Handle docker packages
-        if runtime_hint == "docker" or registry_name == "docker":
-            args = pkg_args if pkg_args else ["run", "-i", "--rm", package.get("name")]
-            return {"type": "stdio", "command": "docker", "args": args}
-
-        # Handle Python packages
-        if (
-            runtime_hint in ["uvx", "pip", "python"]
-            or "python" in runtime_hint
-            or registry_name == "pypi"
-        ):
-            command, args = self._build_python_command_args(package, runtime_hint, pkg_args)
-            return {"type": "stdio", "command": command, "args": args}
-
-        # Generic fallback for packages with a runtime_hint
-        if package and runtime_hint:
-            args = pkg_args if pkg_args else [package.get("name", "")]
-            return {"type": "stdio", "command": runtime_hint, "args": args}
-
-        return {}
-
-    def _format_remote_config(self, server_info):
-        """Format remote server configuration."""
-        # Check for SSE endpoints
-        if "sse_endpoint" in server_info:
-            server_config = {
-                "type": "sse",
-                "url": server_info["sse_endpoint"],
-                "headers": server_info.get("sse_headers", {}),
-            }
-            return server_config, []
-
-        # Check for remotes
-        if server_info.get("remotes"):
-            return self._format_remote_endpoint_config(server_info)
-
-        # No packages AND no endpoints/remotes
-        return self._handle_incomplete_config(server_info)
-
-    def _format_remote_endpoint_config(self, server_info):
-        """Format configuration for remote endpoint."""
-        remote = self._select_remote_with_url(server_info["remotes"])
-        if not remote:
-            return self._handle_incomplete_config(server_info)
-
-        transport = (remote.get("transport_type") or "").strip()
-        if not transport:
-            transport = "http"
-        elif transport not in ("sse", "http", "streamable-http"):
-            raise ValueError(
-                f"Unsupported remote transport '{transport}' for VS Code. "
-                f"Server: {server_info.get('name', 'unknown')}. "
-                f"Supported transports: http, sse, streamable-http."
-            )
-
-        headers = remote.get("headers", {})
-        if isinstance(headers, list):
-            headers = {h["name"]: h["value"] for h in headers if "name" in h and "value" in h}
-
-        self._warn_on_legacy_angle_vars(headers, server_info.get("name", "unknown"), "headers")
-        headers = self._translate_env_vars_for_vscode(headers)
-
-        server_config = {
-            "type": transport,
-            "url": remote["url"].strip(),
-            "headers": headers,
-        }
-        input_vars = self._extract_input_variables(headers, server_info.get("name", ""))
-        return server_config, input_vars
-
-    def _handle_incomplete_config(self, server_info):
-        """Handle error case for incomplete server configuration."""
-        packages = server_info.get("packages", [])
-        if packages:
-            inferred = [self._infer_registry_name(p) or p.get("name", "unknown") for p in packages]
-            raise ValueError(
-                f"No supported transport for VS Code runtime. "
-                f"Server '{server_info.get('name', 'unknown')}' provides stdio packages "
-                f"({', '.join(inferred)}) but none could be mapped to a VS Code configuration. "
-                f"Supported package types: npm, pypi, docker."
-            )
-        raise ValueError(
-            f"MCP server has incomplete configuration in registry - no package information or remote endpoints available. "
-            f"Server: {server_info.get('name', 'unknown')}"
+        """Delegate to _vscode_server_config."""
+        return _vsc._build_package_server_config(
+            self, package, runtime_hint, registry_name, pkg_args
         )
 
+    def _format_remote_config(self, server_info):
+        """Delegate to _vscode_server_config."""
+        return _vsc._format_remote_config(self, server_info)
+
+    def _format_remote_endpoint_config(self, server_info):
+        """Delegate to _vscode_server_config."""
+        return _vsc._format_remote_endpoint_config(self, server_info)
+
+    def _handle_incomplete_config(self, server_info):
+        """Delegate to _vscode_server_config."""
+        return _vsc._handle_incomplete_config(self, server_info)
+
     def _extract_input_variables(self, mapping, server_name):
-        """Scan dict values for ${input:...} references and return input variable definitions.
-
-        Args:
-            mapping (dict): Header or env dict whose values may contain
-                ``${input:<id>}`` placeholders.
-            server_name (str): Server name used in the description field.
-
-        Returns:
-            list[dict]: Input variable definitions (``promptString``, ``password: true``).
-                Duplicates within *mapping* are already deduplicated.
-        """
-        seen: set = set()
-        result: list = []
-        for value in (mapping or {}).values():
-            if not isinstance(value, str):
-                continue
-            for match in _INPUT_VAR_RE.finditer(value):
-                var_id = match.group(1)
-                if var_id in seen:
-                    continue
-                seen.add(var_id)
-                result.append(
-                    {
-                        "type": "promptString",
-                        "id": var_id,
-                        "description": f"{var_id} for MCP server {server_name}",
-                        "password": True,
-                    }
-                )
-        return result
+        """Delegate to _vscode_server_config."""
+        return _vsc._extract_input_variables(self, mapping, server_name)
 
     def _select_best_package(self, packages):
-        """Select the best package for VS Code installation from available packages.
-
-        Prioritizes packages in order: npm, pypi, docker, then others.
-        Uses ``_infer_registry_name`` so selection works even when the
-        API returns an empty ``registry_name``.
-
-        Args:
-            packages (list): List of package dictionaries.
-
-        Returns:
-            dict: Best package to use, or None if no suitable package found.
-        """
-        priority_order = ["npm", "pypi", "docker"]
-
-        for target in priority_order:
-            for package in packages:
-                if self._infer_registry_name(package) == target:
-                    return package
-
-        # Fall back to any package that has a runtime_hint
-        for package in packages:
-            if package.get("runtime_hint"):
-                return package
-
-        return packages[0] if packages else None
+        """Delegate to _vscode_server_config."""
+        return _vsc._select_best_package(self, packages)

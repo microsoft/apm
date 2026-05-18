@@ -12,13 +12,35 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
+def _handle_user_scope_local(ctx: InstallContext, dep_ref: Any, diagnostics: Any, logger) -> bool:
+    from apm_cli.core.scope import InstallScope
+
+    if ctx.scope is not InstallScope.USER:
+        return False
+    local_path_str = dep_ref.local_path or ""
+    if local_path_str and Path(local_path_str).expanduser().is_absolute():
+        return False
+    diagnostics.warn(
+        f"Skipped local package '{local_path_str}' "
+        "-- relative local paths are not supported at user scope "
+        "(--global). Use an absolute path or a remote reference "
+        "(owner/repo) instead.",
+        package=local_path_str,
+    )
+    if logger:
+        logger.verbose_detail(
+            f"  Skipping {local_path_str} (relative local paths "
+            "are project-relative and have no root at user scope)"
+        )
+    return True
+
+
 class LocalDependencySource(DependencySource):
     """Local (``file://``) dependency: copy from a filesystem path."""
 
     INTEGRATE_ERROR_PREFIX = "Failed to integrate primitives from local package"
 
     def acquire(self) -> Materialization | None:
-        from apm_cli.core.scope import InstallScope
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.install.phases.local_content import _copy_local_package
         from apm_cli.models.apm_package import (
@@ -38,25 +60,8 @@ class LocalDependencySource(DependencySource):
         diagnostics = ctx.diagnostics
         logger = ctx.logger
 
-        # User scope: relative paths are project-relative and have no
-        # meaningful root outside a project, so reject them.  Absolute
-        # paths are unambiguous and supported.
-        if ctx.scope is InstallScope.USER:
-            local_path_str = dep_ref.local_path or ""
-            if not local_path_str or not Path(local_path_str).expanduser().is_absolute():
-                diagnostics.warn(
-                    f"Skipped local package '{local_path_str}' "
-                    "-- relative local paths are not supported at user scope "
-                    "(--global). Use an absolute path or a remote reference "
-                    "(owner/repo) instead.",
-                    package=local_path_str,
-                )
-                if logger:
-                    logger.verbose_detail(
-                        f"  Skipping {local_path_str} (relative local paths "
-                        "are project-relative and have no root at user scope)"
-                    )
-                return None
+        if _handle_user_scope_local(ctx, dep_ref, diagnostics, logger):
+            return None
 
         # Determine the anchor for relative ``local_path`` (#857). For direct
         # deps from the root project this is project_root. For transitive

@@ -20,6 +20,7 @@ trip.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.heals import HEAL_CHAIN, HealContext, HealMessageLevel
@@ -28,16 +29,22 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
+@dataclass(frozen=True, slots=True)
+class _HealChainOpts:
+    """Parameter bundle for :func:`run_heal_chain`."""
+
+    resolved_ref: Any
+    existing_lockfile: Any
+    lockfile_match: bool
+    lockfile_match_via_content_hash_only: bool
+    update_refs: bool
+    ref_changed: bool
+
+
 def run_heal_chain(
     ctx: InstallContext,
     dep_ref: Any,
-    *,
-    resolved_ref: Any,
-    existing_lockfile: Any,
-    lockfile_match: bool,
-    lockfile_match_via_content_hash_only: bool,
-    update_refs: bool,
-    ref_changed: bool,
+    opts: _HealChainOpts,
 ) -> tuple[bool, bool]:
     """Run the heal chain for one dependency.
 
@@ -57,12 +64,12 @@ def run_heal_chain(
     hctx = HealContext(
         dep_ref=dep_ref,
         package_key=package_key,
-        resolved_ref=resolved_ref,
-        existing_lockfile=existing_lockfile,
-        lockfile_match=lockfile_match,
-        lockfile_match_via_content_hash_only=lockfile_match_via_content_hash_only,
-        update_refs=update_refs,
-        ref_changed=ref_changed,
+        resolved_ref=opts.resolved_ref,
+        existing_lockfile=opts.existing_lockfile,
+        lockfile_match=opts.lockfile_match,
+        lockfile_match_via_content_hash_only=opts.lockfile_match_via_content_hash_only,
+        update_refs=opts.update_refs,
+        ref_changed=opts.ref_changed,
     )
 
     for heal in HEAL_CHAIN:

@@ -23,6 +23,22 @@ from ._input_helpers import (
 )
 
 
+def _build_claude_metadata(post: frontmatter.Post) -> dict[str, object]:
+    """Build preserved Claude command metadata from source frontmatter."""
+    metadata: dict[str, object] = {}
+    for target_key, source_keys in (
+        ("description", ("description",)),
+        ("allowed-tools", ("allowed-tools", "allowedTools")),
+        ("model", ("model",)),
+        ("argument-hint", ("argument-hint", "argumentHint")),
+    ):
+        for source_key in source_keys:
+            if source_key in post.metadata:
+                metadata[target_key] = post.metadata[source_key]
+                break
+    return metadata
+
+
 def _transform_prompt_to_command(
     source: Path,
 ) -> tuple[str, frontmatter.Post, list[str], list[str]]:
@@ -49,24 +65,7 @@ def _transform_prompt_to_command(
         command_name = source.stem
 
     # Build Claude command frontmatter (preserve existing, add Claude-specific).
-    claude_metadata: dict = {}
-
-    # Map APM frontmatter to Claude frontmatter.
-    if "description" in post.metadata:
-        claude_metadata["description"] = post.metadata["description"]
-
-    if "allowed-tools" in post.metadata:
-        claude_metadata["allowed-tools"] = post.metadata["allowed-tools"]
-    elif "allowedTools" in post.metadata:
-        claude_metadata["allowed-tools"] = post.metadata["allowedTools"]
-
-    if "model" in post.metadata:
-        claude_metadata["model"] = post.metadata["model"]
-
-    if "argument-hint" in post.metadata:
-        claude_metadata["argument-hint"] = post.metadata["argument-hint"]
-    elif "argumentHint" in post.metadata:
-        claude_metadata["argument-hint"] = post.metadata["argumentHint"]
+    claude_metadata = _build_claude_metadata(post)
 
     # Map APM 'input' to Claude 'arguments' and 'argument-hint'.
     input_names, rejected_names = _extract_input_names(post.metadata.get("input"))

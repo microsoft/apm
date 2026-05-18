@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Main compilation orchestration for AGENTS.md generation.
 
 Timestamp generation removed in favor of deterministic Build ID handled after
@@ -5,7 +6,10 @@ full content assembly. This keeps repeated compiles byte-identical when source
 primitives & constitution are unchanged.
 """
 
+from __future__ import annotations
+
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from ...core.target_detection import (
@@ -58,47 +62,54 @@ def _init_no_output_result(
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class _CopilotRootWriteContext:
+    """Inputs required to finalise copilot root output."""
+
+    output_path: Path
+    content: str
+    existing: str | None
+    dry_run: bool
+
+
 def _finalize_copilot_root_write(
     self,
-    output_path: Path,
-    content: str,
     result: CompilationResult,
-    existing: str | None,
-    dry_run: bool,
+    context: _CopilotRootWriteContext,
 ) -> CompilationResult:
     """Write copilot-instructions.md unless unchanged or running dry.
 
     Handles the unchanged check, dry-run early exit, SecurityGate scan,
     and the actual write (including any OSError).
     """
-    if existing == content:
+    if context.existing == context.content:
         result.stats["copilot_root_instructions_written"] = 0
         result.stats["copilot_root_instructions_unchanged"] = 1
         return result
 
-    if dry_run:
+    if context.dry_run:
         return result
 
     from ...security.gate import WARN_POLICY, SecurityGate
 
-    verdict = SecurityGate.scan_text(content, str(output_path), policy=WARN_POLICY)
+    verdict = SecurityGate.scan_text(context.content, str(context.output_path), policy=WARN_POLICY)
     actionable = verdict.critical_count + verdict.warning_count
     if actionable:
         if verdict.has_critical:
             result.has_critical_security = True
         result.warnings.append(
             f"copilot-instructions.md contains {actionable} hidden character(s) "
-            f"-- run 'apm audit --file {output_path}' to inspect"
+            f"-- run 'apm audit --file {context.output_path}' to inspect"
         )
 
     try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content, encoding="utf-8")
+        context.output_path.parent.mkdir(parents=True, exist_ok=True)
+        context.output_path.write_text(context.content, encoding="utf-8")
         result.stats["copilot_root_instructions_written"] = 1
         result.stats["copilot_root_instructions_unchanged"] = 0
         return result
     except OSError as exc:
-        message = f"Failed to write {output_path}: {exc}"
+        message = f"Failed to write {context.output_path}: {exc}"
         self.errors.append(message)
         result.errors.append(message)
         result.success = False
@@ -172,7 +183,14 @@ def _maybe_emit_copilot_root_instructions(
         return result
 
     return _finalize_copilot_root_write(
-        self, output_path, content, result, existing, config.dry_run
+        self,
+        result,
+        _CopilotRootWriteContext(
+            output_path=output_path,
+            content=content,
+            existing=existing,
+            dry_run=config.dry_run,
+        ),
     )
 
 

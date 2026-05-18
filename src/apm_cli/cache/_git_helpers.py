@@ -88,30 +88,38 @@ def _ls_remote_resolve(
             f"git ls-remote failed for {_sanitize_url(url)}: {result.stderr.strip()}"
         )
 
-    # Parse ls-remote output: first column is SHA
-    for line in result.stdout.strip().splitlines():
-        parts = line.split("\t", 1)
-        if len(parts) >= 1 and _SHA_RE.match(parts[0]):
-            sha = parts[0].lower()
-            # If no ref specified, return HEAD (first line)
-            if not ref:
-                return sha
-            # Match exact ref or refs/heads/ref or refs/tags/ref
-            if len(parts) == 2:
-                remote_ref = parts[1]
-                if remote_ref in (
-                    ref,
-                    f"refs/heads/{ref}",
-                    f"refs/tags/{ref}",
-                ):
-                    return sha
-    # If we have any SHA from output, use the first one
-    for line in result.stdout.strip().splitlines():
-        parts = line.split("\t", 1)
-        if len(parts) >= 1 and _SHA_RE.match(parts[0]):
-            return parts[0].lower()
-
+    lines = result.stdout.strip().splitlines()
+    sha = _find_sha_for_ref(lines, ref)
+    if sha is not None:
+        return sha
     raise RuntimeError(f"Could not resolve ref '{ref}' for {_sanitize_url(url)}")
+
+
+def _find_sha_for_ref(lines: list[str], ref: str | None) -> str | None:
+    """Return a 40-char lowercase SHA from *ls-remote* output lines.
+
+    Two-pass strategy:
+    1. Exact match: ``ref``, ``refs/heads/<ref>``, or ``refs/tags/<ref>``.
+       When *ref* is ``None`` the very first SHA line is returned (HEAD).
+    2. Fallback: any SHA on any line (used when ls-remote returned only one
+       line with no ref column, which some servers do for HEAD requests).
+    """
+    # Pass 1 – exact match
+    for line in lines:
+        parts = line.split("\t", 1)
+        if not parts or not _SHA_RE.match(parts[0]):
+            continue
+        sha = parts[0].lower()
+        if not ref:
+            return sha
+        if len(parts) == 2 and parts[1] in (ref, f"refs/heads/{ref}", f"refs/tags/{ref}"):
+            return sha
+    # Pass 2 – any SHA fallback
+    for line in lines:
+        parts = line.split("\t", 1)
+        if parts and _SHA_RE.match(parts[0]):
+            return parts[0].lower()
+    return None
 
 
 def _dir_size(path: Path) -> int:

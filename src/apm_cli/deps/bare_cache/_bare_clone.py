@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,14 +14,20 @@ if TYPE_CHECKING:
     from ...models.apm_package import DependencyReference
 
 
+@dataclass(frozen=True, slots=True)
+class BareCloneOpts:
+    """Keyword-only arguments for :func:`bare_clone_with_fallback`."""
+
+    dep_ref: DependencyReference
+    ref: str | None
+    is_commit_sha: bool
+
+
 def bare_clone_with_fallback(
     execute_transport_plan: Callable[..., None],
     repo_url_base: str,
     bare_target: Path,
-    *,
-    dep_ref: DependencyReference,
-    ref: str | None,
-    is_commit_sha: bool,
+    opts: BareCloneOpts,
 ) -> None:
     """Clone a repository as a bare repo, with full transport-plan fallback.
 
@@ -63,6 +70,9 @@ def bare_clone_with_fallback(
     from ...utils.git_env import get_git_executable
 
     git_exe = get_git_executable()
+    dep_ref = opts.dep_ref
+    ref = opts.ref
+    is_commit_sha = opts.is_commit_sha
 
     def _bare_action(url: str, env: dict[str, str], target: Path) -> None:
         # Pre-attempt cleanup: any prior tier-1 partial state must be

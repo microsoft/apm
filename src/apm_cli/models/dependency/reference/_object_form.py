@@ -88,6 +88,38 @@ def _parse_object_parent(cls, entry: dict) -> "DependencyReference":
     )
 
 
+def _validate_skills_override(skills_raw) -> list[str]:
+    """Validate and return sorted list of skill names from skills: override.
+
+    Args:
+        skills_raw: Raw value from entry.get("skills")
+
+    Returns:
+        Sorted list of validated, deduplicated skill names
+
+    Raises:
+        ValueError: If skills_raw is invalid format
+    """
+    if not isinstance(skills_raw, list):
+        raise ValueError("'skills' field must be a list of skill names")
+    if len(skills_raw) == 0:
+        raise ValueError(
+            "skills: must contain at least one name; "
+            "remove the field to install all skills in the bundle."
+        )
+    seen: set = set()
+    validated: list = []
+    for name in skills_raw:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Each entry in 'skills' must be a non-empty string")
+        name = name.strip()
+        validate_path_segments(name, context="skills/<name>")
+        if name not in seen:
+            seen.add(name)
+            validated.append(name)
+    return sorted(validated)
+
+
 @classmethod
 def _parse_object_git_overrides(cls, dep, entry: dict, sub_path: str | None) -> None:
     """Apply ref, alias, sub-path, and skills overrides from an object entry (in-place)."""
@@ -114,26 +146,8 @@ def _parse_object_git_overrides(cls, dep, entry: dict, sub_path: str | None) -> 
 
     # Parse skills: field (SKILL_BUNDLE subset selection)
     skills_raw = entry.get("skills")
-    if skills_raw is None:
-        return
-    if not isinstance(skills_raw, list):
-        raise ValueError("'skills' field must be a list of skill names")
-    if len(skills_raw) == 0:
-        raise ValueError(
-            "skills: must contain at least one name; "
-            "remove the field to install all skills in the bundle."
-        )
-    seen: set = set()
-    validated: list = []
-    for name in skills_raw:
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("Each entry in 'skills' must be a non-empty string")
-        name = name.strip()
-        validate_path_segments(name, context="skills/<name>")
-        if name not in seen:
-            seen.add(name)
-            validated.append(name)
-    dep.skill_subset = sorted(validated)
+    if skills_raw is not None:
+        dep.skill_subset = _validate_skills_override(skills_raw)
 
 
 @classmethod

@@ -9,6 +9,8 @@ a deprecated alias when invoked outside an APM project (no ``apm.yml``
 in the current directory).
 """
 
+from __future__ import annotations
+
 import os
 import shutil
 import sys
@@ -55,6 +57,66 @@ def _get_installer_run_command(script_path: str) -> list[str]:
     return [shell_path, script_path]
 
 
+def _download_and_install_update(latest_version: str, logger) -> None:
+    """Download and run the install script for the given version."""
+    import subprocess
+    import tempfile
+
+    try:
+        import requests
+
+        install_script_url = _get_update_installer_url()
+        response = requests.get(install_script_url, timeout=10)
+        response.raise_for_status()
+
+        from ..config import get_apm_temp_dir
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=_get_update_installer_suffix(),
+            delete=False,
+            dir=get_apm_temp_dir(),
+        ) as f:
+            temp_script = f.name
+            f.write(response.text)
+
+        if not _is_windows_platform():
+            os.chmod(temp_script, 0o755)  # noqa: S103
+
+        logger.progress("Running installer...", symbol="gear")
+
+        result = subprocess.run(
+            _get_installer_run_command(temp_script),
+            check=False,
+            env=external_process_env(),
+        )
+
+        try:  # noqa: SIM105
+            os.unlink(temp_script)
+        except Exception:
+            pass
+
+        if result.returncode == 0:
+            logger.success(
+                f"Successfully updated to version {latest_version}!",
+            )
+            logger.progress("Please restart your terminal or run 'apm --version' to verify")
+        else:
+            logger.error("Installation failed - see output above for details")
+            sys.exit(1)
+
+    except ImportError:
+        logger.error("'requests' library not available")
+        logger.progress("Please update manually using:")
+        click.echo(f"  {_get_manual_update_command()}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Update failed: {e}")
+        logger.progress("Please update manually using:")
+        click.echo(f"  {_get_manual_update_command()}")
+        sys.exit(1)
+
+
 @click.command(name="self-update", help="Update the APM CLI binary itself to the latest version")
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
 def self_update(check):
@@ -70,7 +132,6 @@ def self_update(check):
     """
     try:
         import subprocess
-        import tempfile
 
         logger = CommandLogger("self-update")
 
@@ -118,71 +179,7 @@ def self_update(check):
 
         # Proceed with update
         logger.start("Downloading and installing update...")
-
-        # Download install script to temp file
-        try:
-            import requests
-
-            install_script_url = _get_update_installer_url()
-            response = requests.get(install_script_url, timeout=10)
-            response.raise_for_status()
-
-            # Create temporary file for install script
-            from ..config import get_apm_temp_dir
-
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=_get_update_installer_suffix(),
-                delete=False,
-                dir=get_apm_temp_dir(),
-            ) as f:
-                temp_script = f.name
-                f.write(response.text)
-
-            if not _is_windows_platform():
-                os.chmod(temp_script, 0o755)  # noqa: S103
-
-            # Run install script
-            logger.progress("Running installer...", symbol="gear")
-
-            # Note: We don't capture output so the installer can prompt when needed.
-            # Sanitise the environment so the installer (and the system binaries
-            # it spawns -- curl, tar, sudo) do not inherit the PyInstaller
-            # bootloader's LD_LIBRARY_PATH / DYLD_* overrides, which would
-            # otherwise redirect system linkers at this binary's bundled
-            # _internal directory.  See issue #894.
-            result = subprocess.run(
-                _get_installer_run_command(temp_script),
-                check=False,
-                env=external_process_env(),
-            )
-
-            # Clean up temp file
-            try:  # noqa: SIM105
-                os.unlink(temp_script)
-            except Exception:
-                # Non-fatal: failed to delete temp install script
-                pass
-
-            if result.returncode == 0:
-                logger.success(
-                    f"Successfully updated to version {latest_version}!",
-                )
-                logger.progress("Please restart your terminal or run 'apm --version' to verify")
-            else:
-                logger.error("Installation failed - see output above for details")
-                sys.exit(1)
-
-        except ImportError:
-            logger.error("'requests' library not available")
-            logger.progress("Please update manually using:")
-            click.echo(f"  {_get_manual_update_command()}")
-            sys.exit(1)
-        except Exception as e:
-            logger.error(f"Update failed: {e}")
-            logger.progress("Please update manually using:")
-            click.echo(f"  {_get_manual_update_command()}")
-            sys.exit(1)
+        _download_and_install_update(latest_version, logger)
 
     except Exception as e:
         _logger = CommandLogger("self-update")

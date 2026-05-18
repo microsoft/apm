@@ -9,6 +9,8 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
+from ._opts import IntegrateOpts, SyncRemoveOpts
+
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
 
@@ -70,12 +72,16 @@ class PromptIntegrator(BaseIntegrator):
         target: TargetProfile,
         package_info,
         project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set[str] | None = None,
-        diagnostics=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate prompts for a single *target*."""
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
         mapping = target.primitives.get("prompts")
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
@@ -83,13 +89,7 @@ class PromptIntegrator(BaseIntegrator):
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
-        return self.integrate_package_prompts(
-            package_info,
-            project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
-        )
+        return self.integrate_package_prompts(package_info, project_root, opts)
 
     def sync_for_target(
         self,
@@ -108,10 +108,12 @@ class PromptIntegrator(BaseIntegrator):
         return self.sync_remove_files(
             project_root,
             managed_files,
-            prefix=prefix,
-            legacy_glob_dir=legacy_dir,
-            legacy_glob_pattern="*-apm.prompt.md",
-            targets=[target],
+            prefix,
+            SyncRemoveOpts(
+                legacy_glob_dir=legacy_dir,
+                legacy_glob_pattern="*-apm.prompt.md",
+                targets=[target],
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -130,10 +132,8 @@ class PromptIntegrator(BaseIntegrator):
         self,
         package_info,
         project_root: Path,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
-        logger=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate all prompts from a package into .github/prompts/.
 
@@ -150,6 +150,17 @@ class PromptIntegrator(BaseIntegrator):
         Returns:
             IntegrationResult: Results of the integration operation
         """
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
+        resolved_opts = opts or IntegrateOpts()
+        force = resolved_opts.force
+        managed_files = resolved_opts.managed_files
+        diagnostics = resolved_opts.diagnostics
+
         self.init_link_resolver(package_info, project_root)
 
         # Find all prompt files in the package
@@ -237,7 +248,9 @@ class PromptIntegrator(BaseIntegrator):
         return self.sync_remove_files(
             project_root,
             managed_files,
-            prefix=".github/prompts/",
-            legacy_glob_dir=prompts_dir,
-            legacy_glob_pattern="*-apm.prompt.md",
+            ".github/prompts/",
+            SyncRemoveOpts(
+                legacy_glob_dir=prompts_dir,
+                legacy_glob_pattern="*-apm.prompt.md",
+            ),
         )

@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.integration.mcp_integrator_install.opts import MCPStaleOpts
 from apm_cli.utils.console import (
     _rich_success,
 )
@@ -21,15 +22,7 @@ from apm_cli.utils.console import (
 _log = logging.getLogger(__name__)
 
 
-def remove_stale(
-    stale_names: builtins.set,
-    runtime: str | None = None,  # noqa: RUF013
-    exclude: str | None = None,  # noqa: RUF013
-    project_root=None,
-    user_scope: bool = False,
-    logger=None,
-    scope=None,
-) -> None:
+def remove_stale(stale_names: builtins.set, opts: MCPStaleOpts | None = None) -> None:
     """Remove MCP server entries that are no longer required by any dependency.
 
     Cleans up runtime configuration files only for the runtimes that were
@@ -42,6 +35,13 @@ def remove_stale(
         scope: InstallScope (PROJECT or USER).  When USER, only
             global-capable runtimes are cleaned.
     """
+    resolved_opts = opts or MCPStaleOpts()
+    runtime = resolved_opts.runtime
+    exclude = resolved_opts.exclude
+    project_root = resolved_opts.project_root
+    user_scope = resolved_opts.user_scope
+    logger = resolved_opts.logger
+    scope = resolved_opts.scope
     if logger is None:
         logger = NullCommandLogger()
     if not stale_names:

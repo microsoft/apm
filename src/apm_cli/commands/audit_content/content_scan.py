@@ -1,6 +1,9 @@
 """Content scanning logic for audit command -- file scanning and reporting."""
 
+from __future__ import annotations
+
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -11,6 +14,27 @@ from ...security.file_scanner import scan_lockfile_packages
 from ...utils.console import STATUS_SYMBOLS
 from ..audit import _has_actionable_findings, _scan_single_file
 from ..audit_sections import _apply_strip, _preview_strip, _render_findings_table, _render_summary
+
+
+@dataclass(frozen=True, slots=True)
+class _ContentReportRequest:
+    """Inputs required to render a content-audit report."""
+
+    files_scanned: int
+    drift_findings: list
+    exit_code: int
+    effective_format: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ContentScanRequest:
+    """Options controlling the audit content scan path."""
+
+    package: str | None
+    file_path: str | None
+    strip: bool
+    dry_run: bool
+    no_drift: bool = False
 
 
 def _scan_files(cfg, package: str | None, file_path: str | None):
@@ -125,11 +149,9 @@ def _run_content_drift_detection(
     return drift_findings, drift_failed
 
 
-def _emit_content_report(
-    cfg, findings_by_file, files_scanned, drift_findings, exit_code, effective_format
-):
+def _emit_content_report(cfg, findings_by_file, request: _ContentReportRequest):
     """Emit content scan report in the appropriate format."""
-    if effective_format == "text":
+    if request.effective_format == "text":
         if cfg.output_path:
             cfg.logger.error(
                 "Text format does not support --output. "
@@ -138,16 +160,16 @@ def _emit_content_report(
             sys.exit(1)
         if findings_by_file:
             _render_findings_table(findings_by_file, verbose=cfg.verbose)
-        _render_summary(findings_by_file, files_scanned, cfg.logger)
-        if drift_findings:
+        _render_summary(findings_by_file, request.files_scanned, cfg.logger)
+        if request.drift_findings:
             from ...install.drift import render_drift_text
 
             click.echo("")
-            click.echo(render_drift_text(drift_findings, verbose=cfg.verbose))
-    elif effective_format == "markdown":
+            click.echo(render_drift_text(request.drift_findings, verbose=cfg.verbose))
+    elif request.effective_format == "markdown":
         from ...security.audit_report import findings_to_markdown
 
-        md_report = findings_to_markdown(findings_by_file, files_scanned=files_scanned)
+        md_report = findings_to_markdown(findings_by_file, files_scanned=request.files_scanned)
         if cfg.output_path:
             Path(cfg.output_path).parent.mkdir(parents=True, exist_ok=True)
             Path(cfg.output_path).write_text(md_report, encoding="utf-8")
@@ -162,13 +184,13 @@ def _emit_content_report(
             write_report,
         )
 
-        if effective_format == "sarif":
-            report = findings_to_sarif(findings_by_file, files_scanned=files_scanned)
+        if request.effective_format == "sarif":
+            report = findings_to_sarif(findings_by_file, files_scanned=request.files_scanned)
         else:
             report = findings_to_json(
                 findings_by_file,
-                files_scanned=files_scanned,
-                exit_code=exit_code,
+                files_scanned=request.files_scanned,
+                exit_code=request.exit_code,
             )
 
         if cfg.output_path:
@@ -178,14 +200,7 @@ def _emit_content_report(
             click.echo(serialize_report(report))
 
 
-def _audit_content_scan(
-    cfg,
-    package: str | None,
-    file_path: str | None,
-    strip: bool,
-    dry_run: bool,
-    no_drift: bool = False,
-) -> None:
+def _audit_content_scan(cfg, request: _ContentScanRequest) -> None:
     """Handle default ``apm audit`` -- content integrity scanning.
 
     Scans deployed prompt files (or a single file via ``--file``) for
@@ -199,29 +214,33 @@ def _audit_content_scan(
         effective_format = detect_format_from_extension(Path(cfg.output_path))
 
     # --format json/sarif/markdown is incompatible with --strip / --dry-run
-    if effective_format != "text" and (strip or dry_run):
+    if effective_format != "text" and (request.strip or request.dry_run):
         cfg.logger.error(
             f"--format {effective_format} cannot be combined with --strip or --dry-run"
         )
         sys.exit(1)
 
     # Scan files
-    findings_by_file, files_scanned = _scan_files(cfg, package, file_path)
+    findings_by_file, files_scanned = _scan_files(cfg, request.package, request.file_path)
 
     # -- Warn if --dry-run used without --strip --
-    if dry_run and not strip:
+    if request.dry_run and not request.strip:
         cfg.logger.progress("--dry-run only works with --strip (e.g. apm audit --strip --dry-run)")
 
     # -- Strip mode --
-    if strip:
-        _handle_strip_mode(findings_by_file, cfg, dry_run)
+    if request.strip:
+        _handle_strip_mode(findings_by_file, cfg, request.dry_run)
 
     # -- Drift detection (default-on per ADR-02) --------------------
     # Drift only applies to whole-project audit (not --file or --strip
     # modes; not single-package scoped).  Mutex on no_drift+strip/file
     # is enforced earlier via UsageError.
     drift_findings, drift_failed = _run_content_drift_detection(
-        cfg, no_drift, strip, file_path, package
+        cfg,
+        request.no_drift,
+        request.strip,
+        request.file_path,
+        request.package,
     )
 
     # -- Display findings --
@@ -239,7 +258,14 @@ def _audit_content_scan(
 
     # Emit report
     _emit_content_report(
-        cfg, findings_by_file, files_scanned, drift_findings, exit_code, effective_format
+        cfg,
+        findings_by_file,
+        _ContentReportRequest(
+            files_scanned=files_scanned,
+            drift_findings=drift_findings,
+            exit_code=exit_code,
+            effective_format=effective_format,
+        ),
     )
 
     # -- Exit code --

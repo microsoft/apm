@@ -39,48 +39,11 @@ def get_dependency_declaration_order(
         package = apm_package_cls.from_apm_yml(apm_yml_path)
         apm_dependencies = package.get_apm_dependencies()
 
-        # Extract installed paths from dependency references
-        # Virtual file/collection packages use get_virtual_package_name() (flattened),
-        # while virtual subdirectory packages use natural repo/subdir paths.
         dependency_names = []
         for dep in apm_dependencies:
-            if dep.alias:
-                dependency_names.append(dep.alias)
-            elif dep.is_virtual:
-                repo_parts = dep.repo_url.split("/")
+            path = _extract_installed_path_from_dep(dep)
+            dependency_names.append(path)
 
-                if dep.is_virtual_subdirectory() and dep.virtual_path:
-                    # Virtual subdirectory packages keep natural path structure.
-                    # GitHub: owner/repo/subdir
-                    # ADO: org/project/repo/subdir
-                    if dep.is_azure_devops() and len(repo_parts) >= 3:
-                        dependency_names.append(
-                            f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}/{dep.virtual_path}"
-                        )
-                    elif len(repo_parts) >= 2:
-                        dependency_names.append(
-                            f"{repo_parts[0]}/{repo_parts[1]}/{dep.virtual_path}"
-                        )
-                    else:
-                        dependency_names.append(dep.virtual_path)
-                else:
-                    # Virtual file/collection packages are flattened by package name.
-                    # GitHub: owner/virtual-pkg-name
-                    # ADO: org/project/virtual-pkg-name
-                    virtual_name = dep.get_virtual_package_name()
-                    if dep.is_azure_devops() and len(repo_parts) >= 3:
-                        dependency_names.append(f"{repo_parts[0]}/{repo_parts[1]}/{virtual_name}")
-                    elif len(repo_parts) >= 2:
-                        dependency_names.append(f"{repo_parts[0]}/{virtual_name}")
-                    else:
-                        dependency_names.append(virtual_name)
-            else:
-                # Regular packages: use full org/repo path
-                # This matches our org-namespaced directory structure
-                dependency_names.append(dep.repo_url)
-
-        # Include transitive dependencies from apm.lock
-        # Direct deps from apm.yml have priority; transitive deps are appended
         lockfile_paths = lockfile_cls.installed_paths_for_project(Path(base_dir))
         direct_set = set(dependency_names)
         for path in lockfile_paths:
@@ -92,3 +55,40 @@ def get_dependency_declaration_order(
     except Exception as e:
         print(f"Warning: Failed to parse dependency order from apm.yml: {e}")
         return []
+
+
+def _extract_installed_path_from_dep(dep: Any) -> str:
+    """Extract the installed path for a dependency based on its type."""
+    if dep.alias:
+        return dep.alias
+    if dep.is_virtual:
+        return _extract_virtual_dependency_path(dep)
+    return dep.repo_url
+
+
+def _extract_virtual_dependency_path(dep: Any) -> str:
+    """Extract installed path for a virtual dependency."""
+    repo_parts = dep.repo_url.split("/")
+
+    if dep.is_virtual_subdirectory() and dep.virtual_path:
+        return _build_virtual_subdirectory_path(repo_parts, dep)
+    return _build_virtual_package_path(repo_parts, dep)
+
+
+def _build_virtual_subdirectory_path(repo_parts: list[str], dep: Any) -> str:
+    """Build path for virtual subdirectory packages."""
+    if dep.is_azure_devops() and len(repo_parts) >= 3:
+        return f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}/{dep.virtual_path}"
+    if len(repo_parts) >= 2:
+        return f"{repo_parts[0]}/{repo_parts[1]}/{dep.virtual_path}"
+    return dep.virtual_path
+
+
+def _build_virtual_package_path(repo_parts: list[str], dep: Any) -> str:
+    """Build path for virtual file/collection packages."""
+    virtual_name = dep.get_virtual_package_name()
+    if dep.is_azure_devops() and len(repo_parts) >= 3:
+        return f"{repo_parts[0]}/{repo_parts[1]}/{virtual_name}"
+    if len(repo_parts) >= 2:
+        return f"{repo_parts[0]}/{virtual_name}"
+    return virtual_name

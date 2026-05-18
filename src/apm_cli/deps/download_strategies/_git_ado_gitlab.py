@@ -7,6 +7,7 @@ API surface lives in :mod:`git_strategy` which re-exports everything.
 """
 
 import base64
+from dataclasses import dataclass
 from urllib.parse import quote
 
 import requests
@@ -14,6 +15,18 @@ import requests
 from ...core.auth import AuthResolver
 from ...models.apm_package import DependencyReference
 from ...utils.github_host import build_ado_api_url, default_host
+
+
+@dataclass(frozen=True, slots=True)
+class _GitLabErrCtx:
+    dep_ref: DependencyReference
+    file_path: str
+    ref: str
+    headers: dict
+    host: str
+    org: str
+    token: object
+    verbose_callback: object
 
 
 def download_ado_file(
@@ -110,6 +123,56 @@ def download_ado_file(
         raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 
 
+def _handle_gitlab_http_error(
+    self,
+    e: requests.exceptions.HTTPError,
+    ctx: _GitLabErrCtx,
+    raw_url_fn,
+) -> bytes:
+    """Handle HTTPError from a GitLab file-download attempt.
+
+    Extracted from ``download_gitlab_file`` to reduce McCabe complexity.
+    Returns ``bytes`` on a successful fallback, or raises ``RuntimeError``.
+    """
+    if e.response is not None and e.response.status_code == 404:
+        if ctx.ref not in ("main", "master"):
+            raise RuntimeError(
+                f"File not found: {ctx.file_path} at ref '{ctx.ref}' in {ctx.dep_ref.repo_url}"
+            ) from e
+        fallback_ref = "master" if ctx.ref == "main" else "main"
+        fallback_url = raw_url_fn(fallback_ref)
+        try:
+            response = self._host._resilient_get(fallback_url, headers=ctx.headers, timeout=30)
+            response.raise_for_status()
+            if ctx.verbose_callback:
+                ctx.verbose_callback(
+                    f"Downloaded file: {ctx.host}/{ctx.dep_ref.repo_url}/{ctx.file_path}"
+                )
+            return response.content
+        except requests.exceptions.HTTPError as fallback_err:
+            raise RuntimeError(
+                f"File not found: {ctx.file_path} in {ctx.dep_ref.repo_url} "
+                f"(tried refs: {ctx.ref}, {fallback_ref})"
+            ) from fallback_err
+    if e.response is not None and e.response.status_code in (401, 403):
+        error_msg = (
+            f"Authentication failed for GitLab {ctx.dep_ref.repo_url} "
+            f"(file: {ctx.file_path}, ref: {ctx.ref}). "
+        )
+        if not ctx.token:
+            error_msg += self._host.auth_resolver.build_error_context(
+                ctx.host, "download", org=ctx.org, port=ctx.dep_ref.port
+            )
+        else:
+            error_msg += "Please verify your token can read this project (required API scope)."
+        raise RuntimeError(error_msg) from e
+    if e.response is not None:
+        raise RuntimeError(
+            f"Failed to download {ctx.file_path}: HTTP {e.response.status_code}"
+        ) from e
+    raise e
+
+
 def download_gitlab_file(
     self,
     dep_ref: DependencyReference,
@@ -128,6 +191,16 @@ def download_gitlab_file(
     file_ctx = self._host.auth_resolver.resolve(host, org, port=dep_ref.port)
     token = file_ctx.token
     headers = AuthResolver.gitlab_rest_headers(token)
+    _err_ctx = _GitLabErrCtx(
+        dep_ref=dep_ref,
+        file_path=file_path,
+        ref=ref,
+        headers=headers,
+        host=host,
+        org=org,
+        token=token,
+        verbose_callback=verbose_callback,
+    )
 
     api_base = host_info.api_base.rstrip("/")
     enc_proj = quote(project_path, safe="")
@@ -148,40 +221,6 @@ def download_gitlab_file(
             verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
         return response.content
     except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
-            if ref not in ("main", "master"):
-                raise RuntimeError(
-                    f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
-                ) from e
-            fallback_ref = "master" if ref == "main" else "main"
-            fallback_url = _raw_url(fallback_ref)
-            try:
-                response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
-                response.raise_for_status()
-                if verbose_callback:
-                    verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
-                return response.content
-            except requests.exceptions.HTTPError as fallback_err:
-                raise RuntimeError(
-                    f"File not found: {file_path} in {dep_ref.repo_url} "
-                    f"(tried refs: {ref}, {fallback_ref})"
-                ) from fallback_err
-        if e.response is not None and e.response.status_code in (401, 403):
-            error_msg = (
-                f"Authentication failed for GitLab {dep_ref.repo_url} "
-                f"(file: {file_path}, ref: {ref}). "
-            )
-            if not token:
-                error_msg += self._host.auth_resolver.build_error_context(
-                    host, "download", org=org, port=dep_ref.port
-                )
-            else:
-                error_msg += "Please verify your token can read this project (required API scope)."
-            raise RuntimeError(error_msg) from e
-        if e.response is not None:
-            raise RuntimeError(
-                f"Failed to download {file_path}: HTTP {e.response.status_code}"
-            ) from e
-        raise
+        return _handle_gitlab_http_error(self, e, _err_ctx, _raw_url)
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"Network error downloading {file_path}: {e}") from e

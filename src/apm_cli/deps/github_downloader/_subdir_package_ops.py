@@ -16,6 +16,7 @@ from ...models.apm_package import (
     ResolvedReference,
 )
 from ...utils.github_host import default_host
+from ..shared_clone_cache import _RepoCoords
 from .class_ import _close_repo, _rmtree
 from .progress import GitProgressReporter
 
@@ -128,9 +129,7 @@ def download_subdirectory_package(
 
             try:
                 shared_bare_path = shared_cache.get_or_clone(
-                    cache_host,
-                    cache_owner,
-                    cache_repo,
+                    _RepoCoords(host=cache_host, owner=cache_owner, repo=cache_repo),
                     ref,
                     _shared_bare_clone_fn,
                     fetch_fn=_shared_bare_fetch_fn if is_commit_sha else None,

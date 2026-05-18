@@ -1,4 +1,7 @@
+# pylint: disable=duplicate-code
 """APM install command and dependency installation engine."""
+
+from __future__ import annotations
 
 import builtins
 import sys
@@ -54,9 +57,12 @@ from ...constants import (
 # import time per comments in the original mid-file block.
 from ...utils.console import _rich_echo, _rich_error  # noqa: F401
 from .pipeline_helpers import (
+    _APMInstallRunCtx,
     _capture_existing_mcp_state,
     _collect_transitive_mcp,
+    _DryRunPreflightCtx,
     _install_mcp_dependencies,
+    _MCPDependencyInstallCtx,
     _MCPInstallCtx,
     _parse_install_manifest,
     _preflight_transitive_mcp,
@@ -141,12 +147,14 @@ def _install_apm_packages(ctx, outcome):
     if ctx.dry_run:
         return _run_dry_run_preflight(
             ctx,
-            logger,
-            apm_deps,
-            dev_apm_deps,
-            mcp_deps,
-            should_install_apm,
-            should_install_mcp,
+            _DryRunPreflightCtx(
+                logger=logger,
+                apm_deps=apm_deps,
+                dev_apm_deps=dev_apm_deps,
+                mcp_deps=mcp_deps,
+                should_install_apm=should_install_apm,
+                should_install_mcp=should_install_mcp,
+            ),
         )
 
     lock_path, existing_lock, old_mcp_servers, old_mcp_configs = _capture_existing_mcp_state(
@@ -154,12 +162,14 @@ def _install_apm_packages(ctx, outcome):
     )
     apm_count, apm_diagnostics = _run_apm_install(
         ctx,
-        outcome,
-        logger,
-        apm_package,
-        has_any_apm_deps,
-        should_install_apm,
-        existing_lock,
+        _APMInstallRunCtx(
+            outcome=outcome,
+            logger=logger,
+            apm_package=apm_package,
+            has_any_apm_deps=has_any_apm_deps,
+            should_install_apm=should_install_apm,
+            existing_lock=existing_lock,
+        ),
     )
     if ctx.update:
         from apm_cli.models.apm_package import clear_apm_yml_cache
@@ -176,21 +186,23 @@ def _install_apm_packages(ctx, outcome):
     _preflight_transitive_mcp(ctx, logger, should_install_mcp, mcp_deps)
     mcp_count = _install_mcp_dependencies(
         ctx,
-        logger,
-        apm_package,
-        mcp_deps,
-        should_install_mcp,
-        _MCPInstallCtx(
-            old_mcp_servers=old_mcp_servers,
-            old_mcp_configs=old_mcp_configs,
-            lock_path=lock_path,
-            apm_diagnostics=apm_diagnostics,
+        _MCPDependencyInstallCtx(
+            logger=logger,
+            apm_package=apm_package,
+            mcp_deps=mcp_deps,
+            should_install_mcp=should_install_mcp,
+            mcp_state=_MCPInstallCtx(
+                old_mcp_servers=old_mcp_servers,
+                old_mcp_configs=old_mcp_configs,
+                lock_path=lock_path,
+                apm_diagnostics=apm_diagnostics,
+            ),
         ),
     )
     return apm_count, mcp_count, apm_diagnostics
 
 
-def _install_apm_dependencies(apm_package: "APMPackage", **params: object):
+def _install_apm_dependencies(apm_package: APMPackage, **params: object):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
 

@@ -52,6 +52,20 @@ def _is_valid_input_name(name: str) -> bool:
     return bool(_INPUT_NAME_RE.match(name))
 
 
+def _accept_input_name(candidate: Any, valid: list[str], rejected: list[str]) -> None:
+    """Classify one raw input name candidate."""
+    if not isinstance(candidate, str):
+        rejected.append(repr(candidate))
+        return
+    stripped = candidate.strip()
+    if not stripped:
+        return
+    if _is_valid_input_name(stripped):
+        valid.append(stripped)
+    else:
+        rejected.append(stripped)
+
+
 def _extract_input_names(
     input_spec: Any,
 ) -> tuple[list[str], list[str]]:
@@ -75,39 +89,27 @@ def _extract_input_names(
     valid: list[str] = []
     rejected: list[str] = []
 
-    def _accept(candidate: Any) -> None:
-        if not isinstance(candidate, str):
-            rejected.append(repr(candidate))
-            return
-        stripped = candidate.strip()
-        if not stripped:
-            return  # silently drop pure-whitespace entries
-        if _is_valid_input_name(stripped):
-            valid.append(stripped)
-        else:
-            rejected.append(stripped)
-
     if input_spec is None:
         return valid, rejected
 
     if isinstance(input_spec, list):
         for item in input_spec:
             if isinstance(item, str):
-                _accept(item)
+                _accept_input_name(item, valid, rejected)
             elif isinstance(item, dict):
                 for k in item:
-                    _accept(k)
+                    _accept_input_name(k, valid, rejected)
             else:
                 rejected.append(repr(item))
         return valid, rejected
 
     if isinstance(input_spec, str):
-        _accept(input_spec)
+        _accept_input_name(input_spec, valid, rejected)
         return valid, rejected
 
     if isinstance(input_spec, dict):
         for k in input_spec:
-            _accept(k)
+            _accept_input_name(k, valid, rejected)
         return valid, rejected
 
     return valid, rejected

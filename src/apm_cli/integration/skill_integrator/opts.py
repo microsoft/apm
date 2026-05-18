@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SkillPromoteOpts:
     """Optional arguments for :func:`_promote_sub_skills`."""
 
@@ -21,7 +21,7 @@ class SkillPromoteOpts:
     name_filter: Any = None  # set | None
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SkillOpts:
     """Optional arguments for skill integration functions.
 
@@ -35,3 +35,13 @@ class SkillOpts:
     logger: Any = None
     targets: Any = None
     skill_subset: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class SkillCollisionOpts:
+    """Optional arguments for native skill collision warnings."""
+
+    current_key: str | None = None
+    lockfile_native_owners: dict[str, str] | None = None
+    diagnostics: Any = None
+    logger: Any = None

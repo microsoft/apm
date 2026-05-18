@@ -51,6 +51,15 @@ from pathlib import Path
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
+from ._hook_config import (
+    _copy_hook_scripts,
+    _empty_hook_result,
+    _load_hook_json_config,
+    _merge_hook_events,
+    _rewrite_hook_file,
+)
+from ._opts import HookIntegrateOpts, HookRewriteOpts
+from ._sidecar import _reinject_apm_source_from_sidecar
 from .class_ import (
     HookIntegrationResult,
     _filter_hook_files_for_target,
@@ -58,27 +67,15 @@ from .class_ import (
     _to_gemini_hook_entries,
 )
 
+_APM_HOOKS_SIDECAR = "apm-hooks.json"
 _log = logging.getLogger(__name__)
-_HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
-    "claude": {
-        # Copilot camelCase -> Claude PascalCase
-        "preToolUse": "PreToolUse",
-        "postToolUse": "PostToolUse",
-    },
-    "gemini": {
-        # Copilot / Claude -> Gemini
-        "PreToolUse": "BeforeTool",
-        "preToolUse": "BeforeTool",
-        "PostToolUse": "AfterTool",
-        "postToolUse": "AfterTool",
-        "Stop": "SessionEnd",
-    },
-}
+
 _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
     "claude": _MergeHookConfig(
         config_filename="settings.json",
         target_key="claude",
         require_dir=False,
+        schema_strict=True,
     ),
     "cursor": _MergeHookConfig(
         config_filename="hooks.json",
@@ -111,81 +108,12 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
 }
 
 
-def _clear_prior_package_hooks(
-    json_config: dict,
-    event_name: str,
-    package_name: str,
-    reverse_map: "dict[str, set[str]]",
-    cleared_events: set,
-) -> None:
-    """Drop prior entries owned by *package_name* for *event_name* (idempotent upsert).
-
-    Only strips once per event per install run -- a package with multiple hook
-    files targeting the same event contributes entries in turn, so stripping on
-    every iteration would erase earlier files' fresh entries.  If *event_name*
-    is already in *cleared_events*, returns immediately.
-
-    Also clears alias events that normalise to *event_name* to handle
-    corrupted installs with mixed-case event keys.
-    """
-    if event_name in cleared_events:
-        return
-    # Clear from the normalised event
-    json_config["hooks"][event_name] = [
-        e
-        for e in json_config["hooks"][event_name]
-        if not (isinstance(e, dict) and e.get("_apm_source") == package_name)
-    ]
-    # Also clear from any alias events that map to this normalised name.
-    for alias in reverse_map.get(event_name, set()):
-        if alias != event_name and alias in json_config["hooks"]:
-            json_config["hooks"][alias] = [
-                e
-                for e in json_config["hooks"][alias]
-                if not (isinstance(e, dict) and e.get("_apm_source") == package_name)
-            ]
-            # Remove the alias key entirely if now empty
-            if not json_config["hooks"][alias]:
-                del json_config["hooks"][alias]
-    cleared_events.add(event_name)
-
-
-def _dedup_hook_entries(entries: list) -> list:
-    """Deduplicate hook entries by ``(_apm_source, content)`` key.
-
-    Safety net for edge cases where multiple source files produce
-    semantically identical entries for the same event.
-    """
-    seen_content: list[dict] = []
-    deduped: list = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            deduped.append(entry)
-            continue
-        # Build comparison key (all fields except _apm_source)
-        cmp = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
-        source = entry.get("_apm_source")
-        is_dup = False
-        for seen in seen_content:
-            if seen.get("_source") == source and seen.get("_cmp") == cmp:
-                is_dup = True
-                break
-        if not is_dup:
-            seen_content.append({"_source": source, "_cmp": cmp})
-            deduped.append(entry)
-    return deduped
-
-
 def _integrate_merged_hooks(
     self,
     config: "_MergeHookConfig",
     package_info,
     project_root: Path,
-    *,
-    force: bool = False,
-    managed_files: set | None = None,
-    diagnostics=None,
-    target=None,
+    opts: HookIntegrateOpts | None = None,
 ) -> HookIntegrationResult:
     """Integrate hooks by merging into a target-specific JSON config.
 
@@ -193,137 +121,116 @@ def _integrate_merged_hooks(
     targets that merge hook entries into a single JSON file (as
     opposed to Copilot which uses individual JSON files).
     """
-    _empty = HookIntegrationResult(
-        files_integrated=0,
-        files_updated=0,
-        files_skipped=0,
-        target_paths=[],
-    )
-
+    resolved_opts = opts or HookIntegrateOpts()
+    target = resolved_opts.target
     root_dir = target.root_dir if target else f".{config.target_key}"
     target_dir = project_root / root_dir
 
-    # Opt-in check: some targets only deploy when their dir exists
     if config.require_dir and not target_dir.exists():
-        return _empty
+        return _empty_hook_result()
 
     hook_files = self.find_hook_files(package_info.install_path)
     hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
     if not hook_files:
-        return _empty
+        return _empty_hook_result()
 
     package_name = self._get_package_name(package_info)
     hooks_integrated = 0
     scripts_copied = 0
     scripts_adopted = 0
     target_paths: list[Path] = []
-    # Events whose prior-owned entries have already been cleared on
-    # this install run. Packages can contribute to the same event
-    # from multiple hook files -- we must only strip once so earlier
-    # files' fresh entries aren't wiped by later iterations.
     cleared_events: set = set()
-
-    # Read existing JSON config
     json_path = target_dir / config.config_filename
-    json_config: dict = {}
-    if json_path.exists():
-        try:
-            with open(json_path, encoding="utf-8") as f:
-                json_config = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            json_config = {}
+    json_config = _load_hook_json_config(json_path)
 
-    if "hooks" not in json_config:
-        json_config["hooks"] = {}
+    # Load sidecar ownership metadata (schema-strict targets)
+    sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+    sidecar_data: dict = {}
+    if config.schema_strict and sidecar_path.exists():
+        try:
+            with open(sidecar_path, encoding="utf-8") as f:
+                _raw = json.load(f)
+            if isinstance(_raw, dict):
+                sidecar_data = _raw
+            else:
+                _log.warning(
+                    "Sidecar file %s contains non-dict JSON; treating as empty.",
+                    sidecar_path,
+                )
+                sidecar_data = {}
+        except (json.JSONDecodeError, OSError) as exc:
+            _log.warning("Failed to read sidecar %s: %s; treating as empty.", sidecar_path, exc)
+            sidecar_data = {}
+
+        if sidecar_data and "hooks" in json_config:
+            _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
 
     for hook_file in hook_files:
-        data = self._parse_hook_json(hook_file)
-        if data is None:
+        rewritten_bundle = _rewrite_hook_file(
+            self,
+            package_info,
+            hook_file,
+            root_dir,
+            config.target_key,
+            deploy_root=project_root,
+        )
+        if rewritten_bundle is None:
             continue
 
-        # Rewrite script paths for the target
-        rewritten, scripts = self._rewrite_hooks_data(
-            data,
-            package_info.install_path,
-            package_name,
+        rewritten, scripts = rewritten_bundle
+        _merge_hook_events(
+            json_config,
+            rewritten.get("hooks", {}),
             config.target_key,
-            hook_file_dir=hook_file.parent,
-            root_dir=root_dir,
+            package_name,
+            cleared_events,
         )
-
-        # Merge hooks into config (additive)
-        hooks = rewritten.get("hooks", {})
-        event_map = _HOOK_EVENT_MAP.get(config.target_key, {})
-
-        # Build reverse map: normalised name -> set of source aliases
-        reverse_map: dict[str, set[str]] = {}
-        for source_name, norm_name in event_map.items():
-            reverse_map.setdefault(norm_name, set()).add(source_name)
-
-        for raw_event_name, entries in hooks.items():
-            if not isinstance(entries, list):
-                continue
-            event_name = event_map.get(raw_event_name, raw_event_name)
-            if event_name not in json_config["hooks"]:
-                json_config["hooks"][event_name] = []
-
-            # Transform flat Copilot entries to Gemini nested format
-            if config.target_key == "gemini":
-                entries = _to_gemini_hook_entries(entries)
-
-            # Mark each entry with APM source for sync/cleanup
-            for entry in entries:
-                if isinstance(entry, dict):
-                    entry["_apm_source"] = package_name
-
-            # Idempotent upsert: drop any prior entries owned by this
-            # package before appending fresh ones. Without this, every
-            # `apm install` re-run duplicates the package's hooks
-            # because `.extend()` is unconditional. See microsoft/apm#708.
-            # Only strip once per event per install run -- a package
-            # with multiple hook files targeting the same event
-            # contributes each file's entries in turn, and stripping
-            # on every iteration would erase earlier files' work.
-            _clear_prior_package_hooks(
-                json_config, event_name, package_name, reverse_map, cleared_events
-            )
-            json_config["hooks"][event_name].extend(entries)
-
-            # Deduplicate same-package entries by content.
-            # Safety net for edge cases where multiple source files
-            # produce semantically identical entries.
-            json_config["hooks"][event_name] = _dedup_hook_entries(json_config["hooks"][event_name])
-
         hooks_integrated += 1
 
-        # Copy referenced scripts
-        for source_file, target_rel in scripts:
-            target_script = project_root / target_rel
-            ensure_path_within(target_script, project_root)
-            if self.is_content_identical_to_source(target_script, source_file):
-                target_paths.append(target_script)
-                scripts_adopted += 1
-                continue
-            if self.check_collision(
-                target_script,
-                target_rel,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                continue
-            target_script.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_file, target_script)
-            scripts_copied += 1
-            target_paths.append(target_script)
+        copied_paths, copied_count, adopted_count = _copy_hook_scripts(
+            self,
+            scripts,
+            project_root,
+            resolved_opts,
+        )
+        target_paths.extend(copied_paths)
+        scripts_copied += copied_count
+        scripts_adopted += adopted_count
 
-    # Write JSON config back
-    # Don't track the config file in target_paths -- it's a shared
-    # file cleaned via _apm_source markers, not file-level deletion
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(json_config, f, indent=2)
-        f.write("\n")
+
+    if config.schema_strict:
+        # Build sidecar from entries that have _apm_source
+        sidecar_out: dict = {}
+        for event_name, entries_list in json_config.get("hooks", {}).items():
+            if not isinstance(entries_list, list):
+                continue
+            owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
+            if owned:
+                sidecar_out[event_name] = [dict(e) for e in owned]
+
+        # Strip _apm_source from entries before writing to disk
+        for entries_list in json_config.get("hooks", {}).values():
+            if isinstance(entries_list, list):
+                for entry in entries_list:
+                    if isinstance(entry, dict):
+                        entry.pop("_apm_source", None)
+
+        # Write sidecar
+        sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+        if sidecar_out:
+            try:
+                with open(sidecar_path, "w", encoding="utf-8") as f:
+                    json.dump(sidecar_out, f, indent=2)
+                    f.write("\n")
+            except OSError as exc:
+                _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
+        elif sidecar_path.exists():
+            sidecar_path.unlink()
+
+    with open(json_path, "w", encoding="utf-8") as handle:
+        json.dump(json_config, handle, indent=2)
+        handle.write("\n")
 
     return HookIntegrationResult(
         files_integrated=hooks_integrated,
@@ -339,10 +246,7 @@ def integrate_package_hooks(
     self,
     package_info,
     project_root: Path,
-    force: bool = False,
-    managed_files: set | None = None,
-    diagnostics=None,
-    target=None,
+    opts: HookIntegrateOpts | None = None,
 ) -> HookIntegrationResult:
     """Integrate hooks from a package into hooks dir (Copilot target).
 
@@ -370,6 +274,8 @@ def integrate_package_hooks(
             target_paths=[],
         )
 
+    resolved_opts = opts or HookIntegrateOpts()
+    target = resolved_opts.target
     root_dir = target.root_dir if target else ".github"
     hooks_dir = project_root / root_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -388,11 +294,13 @@ def integrate_package_hooks(
         # Rewrite script paths for VSCode target
         rewritten, scripts = self._rewrite_hooks_data(
             data,
-            package_info.install_path,
-            package_name,
-            "vscode",
-            hook_file_dir=hook_file.parent,
-            root_dir=root_dir,
+            HookRewriteOpts(
+                package_path=package_info.install_path,
+                package_name=package_name,
+                target="vscode",
+                hook_file_dir=hook_file.parent,
+                root_dir=root_dir,
+            ),
         )
 
         # Generate target filename (clean, no -apm suffix)
@@ -402,7 +310,11 @@ def integrate_package_hooks(
         rel_path = portable_relpath(target_path, project_root)
 
         if self.check_collision(
-            target_path, rel_path, managed_files, force, diagnostics=diagnostics
+            target_path,
+            rel_path,
+            resolved_opts.managed_files,
+            resolved_opts.force,
+            diagnostics=resolved_opts.diagnostics,
         ):
             continue
 
@@ -423,7 +335,11 @@ def integrate_package_hooks(
                 scripts_adopted += 1
                 continue
             if self.check_collision(
-                target_script, target_rel, managed_files, force, diagnostics=diagnostics
+                target_script,
+                target_rel,
+                resolved_opts.managed_files,
+                resolved_opts.force,
+                diagnostics=resolved_opts.diagnostics,
             ):
                 continue
             target_script.parent.mkdir(parents=True, exist_ok=True)
@@ -446,10 +362,7 @@ def integrate_hooks_for_target(
     target,
     package_info,
     project_root: Path,
-    *,
-    force: bool = False,
-    managed_files: set | None = None,
-    diagnostics=None,
+    opts: HookIntegrateOpts | None = None,
 ) -> "HookIntegrationResult":
     """Integrate hooks for a single *target*.
 
@@ -461,10 +374,12 @@ def integrate_hooks_for_target(
         return self.integrate_package_hooks(
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
-            target=target,
+            HookIntegrateOpts(
+                force=(opts.force if opts else False),
+                managed_files=(opts.managed_files if opts else None),
+                diagnostics=(opts.diagnostics if opts else None),
+                target=target,
+            ),
         )
 
     config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -473,10 +388,12 @@ def integrate_hooks_for_target(
             config,
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
-            target=target,
+            HookIntegrateOpts(
+                force=(opts.force if opts else False),
+                managed_files=(opts.managed_files if opts else None),
+                diagnostics=(opts.diagnostics if opts else None),
+                target=target,
+            ),
         )
 
     return HookIntegrationResult(

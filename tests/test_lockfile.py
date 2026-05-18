@@ -7,6 +7,7 @@ import yaml
 from apm_cli.deps.lockfile import (
     LockedDependency,
     LockFile,
+    _DepResolutionInfo,
     get_lockfile_path,
     migrate_lockfile_if_needed,
 )
@@ -39,7 +40,9 @@ class TestLockedDependency:
 
     def test_from_dependency_ref(self):
         dep_ref = DependencyReference(repo_url="owner/repo", host="github.com", reference="main")
-        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref, _DepResolutionInfo(resolved_commit="abc123", depth=1, resolved_by=None)
+        )
         assert locked.repo_url == "owner/repo"
         assert locked.resolved_commit == "abc123"
 
@@ -94,7 +97,9 @@ class TestLockedDependency:
             host="bitbucket.example.com",
             port=7999,
         )
-        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref, _DepResolutionInfo(resolved_commit="abc123", depth=1, resolved_by=None)
+        )
         assert locked.port == 7999
 
     def test_deployed_file_hashes_round_trip(self):

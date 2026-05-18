@@ -52,6 +52,57 @@ def is_local_path(dep_str: str) -> bool:
     )
 
 
+def _get_local_install_path(self, apm_modules_dir: Path) -> Path:
+    """Get install path for local packages."""
+    if not self.local_path:
+        raise ValueError("Local package missing local_path")
+    pkg_dir_name = Path(self.local_path).name
+    validate_path_segments(
+        pkg_dir_name,
+        context="local package path",
+        reject_empty=True,
+    )
+    result = apm_modules_dir / "_local" / pkg_dir_name
+    ensure_path_within(result, apm_modules_dir)
+    return result
+
+
+def _get_virtual_subdirectory_install_path(
+    self, apm_modules_dir: Path, repo_parts: list[str]
+) -> Path:
+    """Get install path for virtual subdirectory packages."""
+    if self.is_azure_devops() and len(repo_parts) >= 3:
+        result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2] / self.virtual_path
+    elif len(repo_parts) >= 2:
+        result = apm_modules_dir.joinpath(*repo_parts, self.virtual_path)
+    else:
+        result = apm_modules_dir.joinpath(*repo_parts)
+    return result
+
+
+def _get_virtual_file_install_path(self, apm_modules_dir: Path, repo_parts: list[str]) -> Path:
+    """Get install path for virtual file/collection packages."""
+    package_name = self.get_virtual_package_name()
+    if self.is_azure_devops() and len(repo_parts) >= 3:
+        result = apm_modules_dir / repo_parts[0] / repo_parts[1] / package_name
+    elif len(repo_parts) >= 2:
+        result = apm_modules_dir / repo_parts[0] / package_name
+    else:
+        result = apm_modules_dir.joinpath(*repo_parts)
+    return result
+
+
+def _get_regular_install_path(self, apm_modules_dir: Path, repo_parts: list[str]) -> Path:
+    """Get install path for regular (non-virtual) packages."""
+    if self.is_azure_devops() and len(repo_parts) >= 3:
+        result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2]
+    elif len(repo_parts) >= 2:
+        result = apm_modules_dir.joinpath(*repo_parts)
+    else:
+        result = apm_modules_dir.joinpath(*repo_parts)
+    return result
+
+
 def get_install_path(self, apm_modules_dir: Path) -> Path:
     """Get the canonical filesystem path where this package should be installed.
 
@@ -80,64 +131,21 @@ def get_install_path(self, apm_modules_dir: Path) -> Path:
     Returns:
         Path: Absolute path to the package installation directory
     """
-    if self.is_local and self.local_path:
-        pkg_dir_name = Path(self.local_path).name
-        validate_path_segments(
-            pkg_dir_name,
-            context="local package path",
-            reject_empty=True,
-        )
-        result = apm_modules_dir / "_local" / pkg_dir_name
-        ensure_path_within(result, apm_modules_dir)
-        return result
+    if self.is_local:
+        return self._get_local_install_path(apm_modules_dir)
 
     repo_parts = self.repo_url.split("/")
-
-    # Security: reject traversal in repo_url segments (catches lockfile injection)
     validate_path_segments(self.repo_url, context="repo_url")
-
-    # Security: reject traversal in virtual_path (catches lockfile injection)
     if self.virtual_path:
         validate_path_segments(self.virtual_path, context="virtual_path")
-    result: Path | None = None
 
     if self.is_virtual:
-        # Subdirectory packages (like Claude Skills) should use natural path structure
         if self.is_virtual_subdirectory():
-            # Use repo path + subdirectory path
-            if self.is_azure_devops() and len(repo_parts) >= 3:
-                # ADO: org/project/repo/subdir
-                result = (
-                    apm_modules_dir
-                    / repo_parts[0]
-                    / repo_parts[1]
-                    / repo_parts[2]
-                    / self.virtual_path
-                )
-            elif len(repo_parts) >= 2:
-                # owner/repo/subdir or group/subgroup/repo/subdir
-                result = apm_modules_dir.joinpath(*repo_parts, self.virtual_path)
+            result = self._get_virtual_subdirectory_install_path(apm_modules_dir, repo_parts)
         else:
-            # Virtual file/collection: use sanitized package name (flattened)
-            package_name = self.get_virtual_package_name()
-            if self.is_azure_devops() and len(repo_parts) >= 3:
-                # ADO: org/project/virtual-pkg-name
-                result = apm_modules_dir / repo_parts[0] / repo_parts[1] / package_name
-            elif len(repo_parts) >= 2:
-                # owner/virtual-pkg-name (use first segment as namespace)
-                result = apm_modules_dir / repo_parts[0] / package_name
-    # Regular package: use full repo path
-    elif self.is_azure_devops() and len(repo_parts) >= 3:
-        # ADO: org/project/repo
-        result = apm_modules_dir / repo_parts[0] / repo_parts[1] / repo_parts[2]
-    elif len(repo_parts) >= 2:
-        # owner/repo or group/subgroup/repo (generic hosts)
-        result = apm_modules_dir.joinpath(*repo_parts)
+            result = self._get_virtual_file_install_path(apm_modules_dir, repo_parts)
+    else:
+        result = self._get_regular_install_path(apm_modules_dir, repo_parts)
 
-    if result is None:
-        # Fallback: join all parts
-        result = apm_modules_dir.joinpath(*repo_parts)
-
-    # Security: ensure the computed path stays within apm_modules/
     ensure_path_within(result, apm_modules_dir)
     return result

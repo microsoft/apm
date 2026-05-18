@@ -32,42 +32,16 @@ class DryRunParams:
     only_packages: Sequence[str] | None = None
 
 
-def render_and_exit(params: DryRunParams) -> None:
-    """Render the dry-run preview to the user.
-
-    The caller is responsible for ``return``-ing after this function
-    completes -- this function does NOT exit or return early on its own.
-    """
-    logger = params.logger
-    should_install_apm = params.should_install_apm
-    apm_deps = params.apm_deps
-    mcp_deps = params.mcp_deps
-    dev_apm_deps = params.dev_apm_deps
-    should_install_mcp = params.should_install_mcp
-    update = params.update
-    only_packages = params.only_packages
-    apm_dir = params.apm_dir
+def _preview_orphan_removals(params: DryRunParams) -> None:
+    """Emit the orphan-preview section (lockfile -- manifest diff) to the logger."""
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.drift import detect_orphans
 
-    logger.progress("Dry run mode - showing what would be installed:")
-
-    if should_install_apm and apm_deps:
-        logger.progress(f"APM dependencies ({len(apm_deps)}):")
-        for dep in apm_deps:
-            action = "update" if update else "install"
-            logger.progress(f"  - {dep.repo_url}#{dep.reference or 'main'} -> {action}")
-
-    if should_install_mcp and mcp_deps:
-        logger.progress(f"MCP dependencies ({len(mcp_deps)}):")
-        for dep in mcp_deps:
-            logger.progress(f"  - {dep}")
-
-    if not apm_deps and not dev_apm_deps and not mcp_deps:
-        logger.progress("No dependencies found in apm.yml")
-
-    # Orphan preview: lockfile + manifest difference -- no integration
-    # required, accurate to compute.
+    logger = params.logger
+    apm_deps = params.apm_deps
+    dev_apm_deps = params.dev_apm_deps
+    apm_dir = params.apm_dir
+    only_packages = params.only_packages
     try:
         _dryrun_lock = LockFile.read(get_lockfile_path(apm_dir))
     except Exception:
@@ -95,6 +69,41 @@ def render_and_exit(params: DryRunParams) -> None:
                 logger.progress(f"  - {_orphan}")
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
+
+
+def render_and_exit(params: DryRunParams) -> None:
+    """Render the dry-run preview to the user.
+
+    The caller is responsible for ``return``-ing after this function
+    completes -- this function does NOT exit or return early on its own.
+    """
+    logger = params.logger
+    should_install_apm = params.should_install_apm
+    apm_deps = params.apm_deps
+    mcp_deps = params.mcp_deps
+    dev_apm_deps = params.dev_apm_deps
+    should_install_mcp = params.should_install_mcp
+    update = params.update
+
+    logger.progress("Dry run mode - showing what would be installed:")
+
+    if should_install_apm and apm_deps:
+        logger.progress(f"APM dependencies ({len(apm_deps)}):")
+        for dep in apm_deps:
+            action = "update" if update else "install"
+            logger.progress(f"  - {dep.repo_url}#{dep.reference or 'main'} -> {action}")
+
+    if should_install_mcp and mcp_deps:
+        logger.progress(f"MCP dependencies ({len(mcp_deps)}):")
+        for dep in mcp_deps:
+            logger.progress(f"  - {dep}")
+
+    if not apm_deps and not dev_apm_deps and not mcp_deps:
+        logger.progress("No dependencies found in apm.yml")
+
+    # Orphan preview: lockfile + manifest difference -- no integration
+    # required, accurate to compute.
+    _preview_orphan_removals(params)
 
     if apm_deps or dev_apm_deps:
         logger.dry_run_notice(

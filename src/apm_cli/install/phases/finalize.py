@@ -19,69 +19,69 @@ if TYPE_CHECKING:
     from apm_cli.models.results import InstallResult
 
 
+def _emit_verbose_stats(ctx: InstallContext) -> None:
+    if not ctx.logger:
+        return
+
+    verbose_stats = (
+        (ctx.total_links_resolved, "Resolved {count} context file links"),
+        (ctx.total_commands_integrated, "Integrated {count} command(s)"),
+        (ctx.total_hooks_integrated, "Integrated {count} hook(s)"),
+        (ctx.total_instructions_integrated, "Integrated {count} instruction(s)"),
+    )
+    for count, template in verbose_stats:
+        if count > 0:
+            ctx.logger.verbose_detail(template.format(count=count))
+
+
+def _emit_unpinned_warning(ctx: InstallContext) -> None:
+    if not ctx.unpinned_count:
+        return
+
+    unpinned_names: list[str] = []
+    for installed_package in ctx.installed_packages:
+        ref = getattr(installed_package, "dep_ref", None)
+        if ref is None or ref.reference:
+            continue
+        name = getattr(ref, "repo_url", None) or getattr(ref, "local_path", None) or ""
+        if name:
+            unpinned_names.append(str(name))
+
+    seen: set[str] = set()
+    unique_names: list[str] = []
+    for name in unpinned_names:
+        if name not in seen:
+            seen.add(name)
+            unique_names.append(name)
+
+    noun = "dependency" if ctx.unpinned_count == 1 else "dependencies"
+    if unique_names:
+        shown = unique_names[:5]
+        suffix = ", ".join(shown)
+        extra = len(unique_names) - len(shown)
+        if extra > 0:
+            suffix += f", and {extra} more"
+        ctx.diagnostics.warn(
+            f"{ctx.unpinned_count} {noun} unpinned: {suffix} -- add #tag or #sha to prevent drift"
+        )
+        return
+
+    ctx.diagnostics.warn(
+        f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
+    )
+
+
 def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
     from apm_cli.commands import install as _install_mod
     from apm_cli.models.results import InstallResult
 
-    # Show integration stats (verbose-only when logger is available)
-    if ctx.total_links_resolved > 0:
-        if ctx.logger:
-            ctx.logger.verbose_detail(f"Resolved {ctx.total_links_resolved} context file links")
+    _emit_verbose_stats(ctx)
 
-    if ctx.total_commands_integrated > 0:
-        if ctx.logger:
-            ctx.logger.verbose_detail(f"Integrated {ctx.total_commands_integrated} command(s)")
-
-    if ctx.total_hooks_integrated > 0:
-        if ctx.logger:
-            ctx.logger.verbose_detail(f"Integrated {ctx.total_hooks_integrated} hook(s)")
-
-    if ctx.total_instructions_integrated > 0:
-        if ctx.logger:
-            ctx.logger.verbose_detail(
-                f"Integrated {ctx.total_instructions_integrated} instruction(s)"
-            )
-
-    # Summary is now emitted by the caller via logger.install_summary()
     if not ctx.logger:
         _install_mod._rich_success(f"Installed {ctx.installed_count} APM dependencies")
 
-    if ctx.unpinned_count:
-        # Enumerate names of unpinned deps so the user knows which to pin.
-        # Cap at 5 names then "and M more"; fall back to count-only if names
-        # cannot be derived.
-        _unpinned_names: list[str] = []
-        for _ip in ctx.installed_packages:
-            _ref = getattr(_ip, "dep_ref", None)
-            if _ref is None or _ref.reference:
-                continue
-            _name = getattr(_ref, "repo_url", None) or getattr(_ref, "local_path", None) or ""
-            if _name:
-                _unpinned_names.append(str(_name))
-        # De-dupe while preserving order.
-        _seen: set[str] = set()
-        _unique_names: list[str] = []
-        for _n in _unpinned_names:
-            if _n not in _seen:
-                _seen.add(_n)
-                _unique_names.append(_n)
-
-        noun = "dependency" if ctx.unpinned_count == 1 else "dependencies"
-        if _unique_names:
-            _shown = _unique_names[:5]
-            _suffix = ", ".join(_shown)
-            _extra = len(_unique_names) - len(_shown)
-            if _extra > 0:
-                _suffix += f", and {_extra} more"
-            ctx.diagnostics.warn(
-                f"{ctx.unpinned_count} {noun} unpinned: {_suffix} "
-                "-- add #tag or #sha to prevent drift"
-            )
-        else:
-            ctx.diagnostics.warn(
-                f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
-            )
+    _emit_unpinned_warning(ctx)
 
     return InstallResult(
         ctx.installed_count,

@@ -1,5 +1,7 @@
 """APM config command group."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -9,6 +11,87 @@ from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..version import get_version
 from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
+
+
+def _render_rich_config(_logger) -> None:
+    """Render the current configuration with Rich table output."""
+    from rich.table import Table  # type: ignore
+
+    console = _get_console()
+    config_table = Table(
+        title="Current APM Configuration", show_header=True, header_style="bold cyan"
+    )
+    config_table.add_column("Category", style="bold yellow", min_width=12)
+    config_table.add_column("Setting", style="white", min_width=15)
+    config_table.add_column("Value", style="cyan")
+    if Path(APM_YML_FILENAME).exists():
+        apm_config = _load_apm_config()
+        config_table.add_row("Project", "Name", apm_config.get("name", "Unknown"))
+        config_table.add_row("", "Version", apm_config.get("version", "Unknown"))
+        config_table.add_row("", "Entrypoint", apm_config.get("entrypoint", "None"))
+        config_table.add_row(
+            "", "MCP Dependencies", str(len(apm_config.get("dependencies", {}).get("mcp", [])))
+        )
+        compilation_config = apm_config.get("compilation", {})
+        if compilation_config:
+            config_table.add_row(
+                "Compilation", "Output", compilation_config.get("output", "AGENTS.md")
+            )
+            config_table.add_row("", "Chatmode", compilation_config.get("chatmode", "auto-detect"))
+            config_table.add_row(
+                "", "Resolve Links", str(compilation_config.get("resolve_links", True))
+            )
+        else:
+            config_table.add_row("Compilation", "Status", "Using defaults (no config)")
+    else:
+        config_table.add_row("Project", "Status", "Not in an APM project directory")
+    config_table.add_row("Global", "APM CLI Version", get_version())
+    from ..config import get_temp_dir as _get_temp_dir
+
+    _temp_dir_val = _get_temp_dir()
+    if _temp_dir_val:
+        config_table.add_row("", "Temp Directory", _temp_dir_val)
+    from ..core.experimental import is_enabled as _is_enabled
+
+    if _is_enabled("copilot_cowork"):
+        from ..config import get_copilot_cowork_skills_dir as _get_csd
+
+        _csd_val = _get_csd()
+        config_table.add_row(
+            "", "Cowork Skills Dir", _csd_val if _csd_val else "Not set (using auto-detection)"
+        )
+    console.print(config_table)
+
+
+def _render_plain_config(logger) -> None:
+    """Render the current configuration without Rich."""
+    logger.progress("Current APM Configuration:")
+    if Path(APM_YML_FILENAME).exists():
+        apm_config = _load_apm_config()
+        click.echo(f"\n{HIGHLIGHT}Project (apm.yml):{RESET}")
+        click.echo(f"  Name: {apm_config.get('name', 'Unknown')}")
+        click.echo(f"  Version: {apm_config.get('version', 'Unknown')}")
+        click.echo(f"  Entrypoint: {apm_config.get('entrypoint', 'None')}")
+        click.echo(f"  MCP Dependencies: {len(apm_config.get('dependencies', {}).get('mcp', []))}")
+    else:
+        logger.progress("Not in an APM project directory")
+    click.echo(f"\n{HIGHLIGHT}Global:{RESET}")
+    click.echo(f"  APM CLI Version: {get_version()}")
+    from ..config import get_temp_dir as _get_temp_dir_fb
+
+    _temp_dir_fb = _get_temp_dir_fb()
+    if _temp_dir_fb:
+        click.echo(f"  Temp Directory: {_temp_dir_fb}")
+    from ..core.experimental import is_enabled as _is_enabled_fb
+
+    if _is_enabled_fb("copilot_cowork"):
+        from ..config import get_copilot_cowork_skills_dir as _get_csd_fb
+
+        _csd_fb = _get_csd_fb()
+        click.echo(
+            f"  Cowork Skills Dir: {_csd_fb if _csd_fb else 'Not set (using auto-detection)'}"
+        )
+
 
 _BOOLEAN_TRUE_VALUES = {"true", "1", "yes"}
 _BOOLEAN_FALSE_VALUES = {"false", "0", "no"}
@@ -61,116 +144,14 @@ def _valid_config_keys() -> str:
 @click.pass_context
 def config(ctx):
     """Configure APM CLI settings."""
-    # If no subcommand, show current configuration
-    if ctx.invoked_subcommand is None:
-        logger = CommandLogger("config")
-        try:
-            # Lazy import rich table
-            from rich.table import Table  # type: ignore
+    if ctx.invoked_subcommand is not None:
+        return
 
-            console = _get_console()
-            # Create configuration display
-            config_table = Table(
-                title="Current APM Configuration",
-                show_header=True,
-                header_style="bold cyan",
-            )
-            config_table.add_column("Category", style="bold yellow", min_width=12)
-            config_table.add_column("Setting", style="white", min_width=15)
-            config_table.add_column("Value", style="cyan")
-
-            # Show apm.yml if in project
-            if Path(APM_YML_FILENAME).exists():
-                apm_config = _load_apm_config()
-                config_table.add_row("Project", "Name", apm_config.get("name", "Unknown"))
-                config_table.add_row("", "Version", apm_config.get("version", "Unknown"))
-                config_table.add_row("", "Entrypoint", apm_config.get("entrypoint", "None"))
-                config_table.add_row(
-                    "",
-                    "MCP Dependencies",
-                    str(len(apm_config.get("dependencies", {}).get("mcp", []))),
-                )
-
-                # Show compilation configuration
-                compilation_config = apm_config.get("compilation", {})
-                if compilation_config:
-                    config_table.add_row(
-                        "Compilation",
-                        "Output",
-                        compilation_config.get("output", "AGENTS.md"),
-                    )
-                    config_table.add_row(
-                        "",
-                        "Chatmode",
-                        compilation_config.get("chatmode", "auto-detect"),
-                    )
-                    config_table.add_row(
-                        "",
-                        "Resolve Links",
-                        str(compilation_config.get("resolve_links", True)),
-                    )
-                else:
-                    config_table.add_row("Compilation", "Status", "Using defaults (no config)")
-            else:
-                config_table.add_row("Project", "Status", "Not in an APM project directory")
-
-            config_table.add_row("Global", "APM CLI Version", get_version())
-
-            from ..config import get_temp_dir as _get_temp_dir
-
-            _temp_dir_val = _get_temp_dir()
-            if _temp_dir_val:
-                config_table.add_row("", "Temp Directory", _temp_dir_val)
-
-            from ..core.experimental import is_enabled as _is_enabled
-
-            if _is_enabled("copilot_cowork"):
-                from ..config import get_copilot_cowork_skills_dir as _get_csd
-
-                _csd_val = _get_csd()
-                config_table.add_row(
-                    "",
-                    "Cowork Skills Dir",
-                    _csd_val if _csd_val else "Not set (using auto-detection)",
-                )
-
-            console.print(config_table)
-
-        except (ImportError, NameError):
-            # Fallback display
-            logger.progress("Current APM Configuration:")
-
-            if Path(APM_YML_FILENAME).exists():
-                apm_config = _load_apm_config()
-                click.echo(f"\n{HIGHLIGHT}Project (apm.yml):{RESET}")
-                click.echo(f"  Name: {apm_config.get('name', 'Unknown')}")
-                click.echo(f"  Version: {apm_config.get('version', 'Unknown')}")
-                click.echo(f"  Entrypoint: {apm_config.get('entrypoint', 'None')}")
-                click.echo(
-                    f"  MCP Dependencies: {len(apm_config.get('dependencies', {}).get('mcp', []))}"
-                )
-            else:
-                logger.progress("Not in an APM project directory")
-
-            click.echo(f"\n{HIGHLIGHT}Global:{RESET}")
-            click.echo(f"  APM CLI Version: {get_version()}")
-
-            from ..config import get_temp_dir as _get_temp_dir_fb
-
-            _temp_dir_fb = _get_temp_dir_fb()
-            if _temp_dir_fb:
-                click.echo(f"  Temp Directory: {_temp_dir_fb}")
-
-            from ..core.experimental import is_enabled as _is_enabled_fb
-
-            if _is_enabled_fb("copilot_cowork"):
-                from ..config import get_copilot_cowork_skills_dir as _get_csd_fb
-
-                _csd_fb = _get_csd_fb()
-                click.echo(
-                    f"  Cowork Skills Dir: "
-                    f"{_csd_fb if _csd_fb else 'Not set (using auto-detection)'}"
-                )
+    logger = CommandLogger("config")
+    try:
+        _render_rich_config(logger)
+    except (ImportError, NameError):
+        _render_plain_config(logger)
 
 
 @config.command(help="Set a configuration value")

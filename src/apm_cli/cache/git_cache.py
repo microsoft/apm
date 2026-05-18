@@ -4,22 +4,10 @@ Two-tier structure:
 - ``git/db_v1/<shard>/`` -- bare git repositories (full clones)
 - ``git/checkouts_v1/<shard>/<sha>/`` -- per-SHA working copies
 
-Cache keys are derived from normalized repository URLs (see
-:mod:`url_normalize`). Checkouts are keyed by resolved SHA, never
-by mutable ref strings.
-
-Resolution flow:
-1. If lockfile provides SHA for this dep -> use directly
-2. If ref looks like full SHA (40 hex chars) -> use as-is
-3. Else ``git ls-remote <url> <ref>`` to resolve ref -> SHA
-
-On every cache HIT:
-- Run integrity check (verify HEAD == expected SHA)
-- Mismatch -> evict shard, fall through to fresh fetch, log warning
-
-Concurrency:
-- Per-shard file locks (via filelock) for atomic operations
-- Atomic landing protocol for safe concurrent installs
+Cache keys come from normalised URLs; checkouts are keyed by resolved SHA.
+Resolution: lockfile SHA -> full-SHA ref -> ``git ls-remote``.
+Cache HITs verify HEAD; mismatches evict and re-fetch.
+Concurrency via per-shard file locks and an atomic landing protocol.
 """
 
 from __future__ import annotations
@@ -38,6 +26,14 @@ from .paths import get_git_checkouts_path, get_git_db_path
 from .url_normalize import cache_shard_key
 
 _log = logging.getLogger(__name__)
+
+
+from ._cache_maint import (  # noqa: E402
+    _evict_checkout_impl,
+    clean_all_impl,
+    get_cache_stats_impl,
+    prune_impl,
+)
 
 
 class GitCache:
@@ -382,86 +378,16 @@ class GitCache:
 
     def _evict_checkout(self, checkout_dir: Path) -> None:
         """Safely remove a corrupt checkout shard."""
-        from ..utils.file_ops import robust_rmtree
-
-        try:
-            robust_rmtree(checkout_dir, ignore_errors=True)
-        except Exception as exc:
-            _log.debug("Failed to evict checkout %s: %s", checkout_dir, exc)
+        return _evict_checkout_impl(checkout_dir)
 
     def get_cache_stats(self) -> dict[str, int]:
-        """Return cache statistics for ``apm cache info``.
+        """Return cache statistics for ``apm cache info``."""
+        return get_cache_stats_impl(self._db_root, self._checkouts_root)
 
-        Returns:
-            Dict with keys: db_count, checkout_count, total_size_bytes.
-        """
-        db_count = 0
-        checkout_count = 0
-        total_size = 0
-
-        if self._db_root.is_dir():
-            for entry in os.scandir(str(self._db_root)):
-                if entry.is_dir(follow_symlinks=False) and not entry.name.endswith(".lock"):
-                    db_count += 1
-                    total_size += _dir_size(Path(entry.path))
-
-        if self._checkouts_root.is_dir():
-            for shard_entry in os.scandir(str(self._checkouts_root)):
-                if shard_entry.is_dir(follow_symlinks=False):
-                    for sha_entry in os.scandir(shard_entry.path):
-                        if sha_entry.is_dir(follow_symlinks=False):
-                            checkout_count += 1
-                            total_size += _dir_size(Path(sha_entry.path))
-
-        return {
-            "db_count": db_count,
-            "checkout_count": checkout_count,
-            "total_size_bytes": total_size,
-        }
-
-    def clean_all(self) -> None:
-        """Remove ALL cache content (db + checkouts). Used by ``apm cache clean``."""
-        from ..utils.file_ops import robust_rmtree
-
-        for bucket in (self._db_root, self._checkouts_root):
-            if bucket.is_dir():
-                for entry in os.scandir(str(bucket)):
-                    if entry.is_dir(follow_symlinks=False):
-                        robust_rmtree(Path(entry.path), ignore_errors=True)
-                    elif entry.is_file(follow_symlinks=False):
-                        with contextlib.suppress(OSError):
-                            os.unlink(entry.path)
+    def clean_all(self) -> int:
+        """Remove all cached data."""
+        return clean_all_impl(self._db_root, self._checkouts_root)
 
     def prune(self, *, max_age_days: int = 30) -> int:
-        """Remove checkout entries older than *max_age_days*.
-
-        Uses mtime of the checkout directory as the access indicator.
-
-        Returns:
-            Number of entries pruned.
-        """
-        import time
-
-        from ..utils.file_ops import robust_rmtree
-
-        cutoff = time.time() - (max_age_days * 86400)
-        pruned = 0
-
-        if not self._checkouts_root.is_dir():
-            return 0
-
-        for shard_entry in os.scandir(str(self._checkouts_root)):
-            if not shard_entry.is_dir(follow_symlinks=False):
-                continue
-            for sha_entry in os.scandir(shard_entry.path):
-                if not sha_entry.is_dir(follow_symlinks=False):
-                    continue
-                try:
-                    stat = sha_entry.stat(follow_symlinks=False)
-                    if stat.st_mtime < cutoff:
-                        robust_rmtree(Path(sha_entry.path), ignore_errors=True)
-                        pruned += 1
-                except OSError:
-                    continue
-
-        return pruned
+        """Remove checkout shards older than *max_age_days*."""
+        return prune_impl(self._checkouts_root, max_age_days=max_age_days)

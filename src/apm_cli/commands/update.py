@@ -47,6 +47,7 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import InstallLogger
+from ..core.target_detection import TargetParamType
 from ..utils.console import _rich_info, _rich_warning
 from .update_helpers import (
     _build_plan_callback,
@@ -228,6 +229,7 @@ def _run_dep_update(
             verbose=verbose,
         ),
         verbose=verbose,
+        target=target,
     )
     _render_update_result(plan_state, result)
 

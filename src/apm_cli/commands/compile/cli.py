@@ -12,10 +12,9 @@ if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
 
 from ...compilation import AgentsCompiler, CompilationConfig
-from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
+from ...constants import AGENTS_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
-from ...primitives.discovery import discover_primitives
 from ...utils.console import _rich_panel
 from .._helpers import (
     _check_orphaned_packages,
@@ -27,7 +26,9 @@ from ._display import (
     _display_validation_errors,
     _get_validation_suggestion,
 )
+from ._preflight import _ensure_compilable_content, _run_validation_mode
 from ._target import (
+    _CompileStrategyContext,
     _emit_target_provenance,
     _log_compile_strategy,
     _resolve_compile_target,
@@ -44,73 +45,32 @@ __all__ = [
 ]
 
 
-def _ensure_compilable_content(logger: CommandLogger, dry_run: bool) -> None:
-    """Validate that the current project has content worth compiling."""
-    from ...compilation.constitution import find_constitution
+def _normalise_compile_target(logger: CommandLogger, raw_target, compile_all: bool):
+    """Resolve ``--all`` and deprecated ``--target all`` usage."""
+    if compile_all:
+        if raw_target is not None:
+            logger.error("Cannot use --all together with --target")
+            sys.exit(2)
+        return "all"
+    if (isinstance(raw_target, str) and raw_target == "all") or (
+        isinstance(raw_target, list) and "all" in raw_target
+    ):
+        logger.warning("'--target all' is deprecated; use '--all' instead.")
+    return raw_target
 
-    if not Path(APM_YML_FILENAME).exists():
-        logger.error("Not an APM project - no apm.yml found")
-        logger.progress(" To initialize an APM project, run:")
-        logger.progress("   apm init")
-        sys.exit(1)
 
-    apm_modules_exists = Path(APM_MODULES_DIR).exists()
-    constitution_exists = find_constitution(Path(".")).exists()
-    apm_dir = Path(APM_DIR)
-    local_apm_has_content = apm_dir.exists() and (
-        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
+def _run_watch_mode(logger: CommandLogger, params) -> bool:
+    """Run watch mode when requested and report whether execution ended."""
+    if not params["watch"]:
+        return False
+    _watch_mode(
+        params["output"],
+        params["chatmode"],
+        params["no_links"],
+        params["dry_run"],
+        verbose=params["verbose"],
     )
-    if apm_modules_exists or local_apm_has_content or constitution_exists:
-        return
-
-    has_empty_apm = (
-        apm_dir.exists()
-        and not any(apm_dir.rglob("*.instructions.md"))
-        and not any(apm_dir.rglob("*.chatmode.md"))
-    )
-    if has_empty_apm:
-        logger.error("No instruction files found in .apm/ directory")
-        logger.progress(" To add instructions, create files like:")
-        logger.progress("   .apm/instructions/coding-standards.instructions.md")
-        logger.progress("   .apm/chatmodes/backend-engineer.chatmode.md")
-    else:
-        logger.error("No APM content found to compile")
-        logger.progress(" To get started:")
-        logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
-        logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
-        logger.progress("   3. Then create .instructions.md or .chatmode.md files")
-    if not dry_run:
-        sys.exit(1)
-
-
-def _run_validation_mode(logger: CommandLogger) -> None:
-    """Run validation-only mode and exit the command."""
-    logger.start("Validating APM context...", symbol="gear")
-    compiler = AgentsCompiler(".")
-    try:
-        primitives = discover_primitives(".")
-    except Exception as e:
-        logger.error(f"Failed to discover primitives: {e}")
-        logger.progress(f" Error details: {type(e).__name__}")
-        sys.exit(1)
-    validation_errors = compiler.validate_primitives(primitives)
-    if validation_errors:
-        _display_validation_errors(validation_errors)
-        logger.error(f"Validation failed with {len(validation_errors)} errors")
-        sys.exit(1)
-    logger.success("All primitives validated successfully!")
-    logger.progress(f"Validated {primitives.count()} primitives:")
-    logger.progress(f"  * {len(primitives.chatmodes)} chatmodes")
-    logger.progress(f"  * {len(primitives.instructions)} instructions")
-    logger.progress(f"  * {len(primitives.contexts)} contexts")
-    try:
-        from ...models.apm_package import APMPackage
-
-        mcp_count = len(APMPackage.from_apm_yml(Path(APM_YML_FILENAME)).get_mcp_dependencies())
-        if mcp_count > 0:
-            logger.progress(f"  * {mcp_count} MCP dependencies")
-    except Exception:
-        pass
+    return True
 
 
 def _build_compile_config(params, effective_target):
@@ -187,6 +147,7 @@ def _handle_single_file_success(logger, compiler, config, dry_run: bool, output:
         dry_run=True,
         with_constitution=config.with_constitution,
         strategy="single-file",
+        target=config.target,
     )
     intermediate_result = compiler.compile(intermediate_config)
     if not intermediate_result.success:
@@ -336,30 +297,14 @@ def _report_warnings_errors_and_orphans(logger, result) -> None:
 def compile(ctx: click.Context, **params: object) -> None:
     """Compile APM context into distributed AGENTS.md files."""
     logger = CommandLogger("compile", verbose=params["verbose"], dry_run=params["dry_run"])
-    target = params["target"]
-    if params["compile_all"]:
-        if target is not None:
-            logger.error("Cannot use --all together with --target")
-            sys.exit(2)
-        target = "all"
-    elif (isinstance(target, str) and target == "all") or (
-        isinstance(target, list) and "all" in target
-    ):
-        logger.warning("'--target all' is deprecated; use '--all' instead.")
+    target = _normalise_compile_target(logger, params["target"], params["compile_all"])
 
     try:
         _ensure_compilable_content(logger, params["dry_run"])
         if params["validate"]:
             _run_validation_mode(logger)
             return
-        if params["watch"]:
-            _watch_mode(
-                params["output"],
-                params["chatmode"],
-                params["no_links"],
-                params["dry_run"],
-                verbose=params["verbose"],
-            )
+        if _run_watch_mode(logger, params):
             return
 
         logger.start("Starting context compilation...", symbol="cogs")
@@ -367,7 +312,14 @@ def compile(ctx: click.Context, **params: object) -> None:
         _emit_target_provenance(target, config_target, effective_target, detection_reason)
         config = _build_compile_config(params, effective_target)
         _log_compile_strategy(
-            logger, config, target, config_target, effective_target, detection_reason
+            logger,
+            config,
+            _CompileStrategyContext(
+                target=target,
+                config_target=config_target,
+                effective_target=effective_target,
+                detection_reason=detection_reason,
+            ),
         )
         if params["dry_run"]:
             logger.dry_run_notice("showing placement without writing files")

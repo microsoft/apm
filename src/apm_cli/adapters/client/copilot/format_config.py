@@ -1,9 +1,12 @@
+# pylint: disable=duplicate-code
 """GitHub Copilot CLI implementation of MCP client adapter.
 
 This adapter implements the Copilot CLI-specific handling of MCP server configuration,
 targeting the global ~/.copilot/mcp-config.json file as specified in the MCP installation
 architecture specification.
 """
+
+from __future__ import annotations
 
 import os
 import re
@@ -55,6 +58,37 @@ def _format_raw_stdio_config(self, server_info, raw, env_overrides, runtime_vars
     return config
 
 
+def _inject_remote_headers(config, self_obj, server_info, remote, env_overrides):
+    """Inject authentication and registry headers into *config["headers"]*.
+
+    Handles GitHub-token injection and per-header env-var resolution.
+    Mutates *config* in place; returns nothing.
+    """
+    server_name = server_info.get("name", "")
+    is_github_server = self_obj._is_github_server(server_name, remote.get("url", ""))
+
+    if is_github_server:
+        token_manager = sys.modules[__package__].GitHubTokenManager()
+        github_token = token_manager.get_token_for_purpose("copilot") or os.getenv(
+            "GITHUB_PERSONAL_ACCESS_TOKEN"
+        )
+        if github_token:
+            config["headers"] = {"Authorization": f"Bearer {github_token}"}
+
+    headers = remote.get("headers", [])
+    if headers:
+        if "headers" not in config:
+            config["headers"] = {}
+        for header in headers:
+            header_name = header.get("name", "")
+            header_value = header.get("value", "")
+            if header_name and header_value:
+                resolved_value = self_obj._resolve_env_variable(
+                    header_name, header_value, env_overrides
+                )
+                config["headers"][header_name] = resolved_value
+
+
 def _format_remote_config(self, server_info, remotes, env_overrides):
     """Format configuration for remote servers.
 
@@ -99,34 +133,8 @@ def _format_remote_config(self, server_info, remotes, env_overrides):
         "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
     }
 
-    # Add authentication headers for GitHub MCP server
-    server_name = server_info.get("name", "")
-    is_github_server = self._is_github_server(server_name, remote.get("url", ""))
-
-    if is_github_server:
-        # Use centralized token manager (copilot chain: GITHUB_COPILOT_PAT → GITHUB_TOKEN → GITHUB_APM_PAT),
-        # falling back to GITHUB_PERSONAL_ACCESS_TOKEN for Copilot CLI compat.
-        token_manager = sys.modules[__package__].GitHubTokenManager()
-        github_token = token_manager.get_token_for_purpose("copilot") or os.getenv(
-            "GITHUB_PERSONAL_ACCESS_TOKEN"
-        )
-        if github_token:
-            config["headers"] = {"Authorization": f"Bearer {github_token}"}
-
-    # Add any additional headers from registry if present
-    headers = remote.get("headers", [])
-    if headers:
-        if "headers" not in config:
-            config["headers"] = {}
-        for header in headers:
-            header_name = header.get("name", "")
-            header_value = header.get("value", "")
-            if header_name and header_value:
-                # Resolve environment variable value
-                resolved_value = self._resolve_env_variable(
-                    header_name, header_value, env_overrides
-                )
-                config["headers"][header_name] = resolved_value
+    # Add authentication headers and registry headers for this remote
+    _inject_remote_headers(config, self, server_info, remote, env_overrides)
 
     # Warn about unresolvable ${input:...} references in headers
     if config.get("headers"):

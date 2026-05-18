@@ -48,37 +48,47 @@ def get_available_package_managers():
     """
     package_managers = {}
 
-    # Check for Python package managers
-    if is_tool_available("uv"):
-        package_managers["uv"] = "uv"
-    if is_tool_available("pip"):
-        package_managers["pip"] = "pip"
-    if is_tool_available("pipx"):
-        package_managers["pipx"] = "pipx"
-
-    # Check for JavaScript package managers
-    if is_tool_available("npm"):
-        package_managers["npm"] = "npm"
-    if is_tool_available("yarn"):
-        package_managers["yarn"] = "yarn"
-    if is_tool_available("pnpm"):
-        package_managers["pnpm"] = "pnpm"
-
-    # Check for system package managers
-    if is_tool_available("brew"):  # macOS
-        package_managers["brew"] = "brew"
-    if is_tool_available("apt"):  # Debian/Ubuntu
-        package_managers["apt"] = "apt"
-    if is_tool_available("yum"):  # CentOS/RHEL
-        package_managers["yum"] = "yum"
-    if is_tool_available("dnf"):  # Fedora
-        package_managers["dnf"] = "dnf"
-    if is_tool_available("apk"):  # Alpine
-        package_managers["apk"] = "apk"
-    if is_tool_available("pacman"):  # Arch
-        package_managers["pacman"] = "pacman"
+    _collect_python_package_managers(package_managers)
+    _collect_javascript_package_managers(package_managers)
+    _collect_system_package_managers(package_managers)
 
     return package_managers
+
+
+def _collect_python_package_managers(managers: dict) -> None:
+    """Collect Python package managers into the given dictionary."""
+    if is_tool_available("uv"):
+        managers["uv"] = "uv"
+    if is_tool_available("pip"):
+        managers["pip"] = "pip"
+    if is_tool_available("pipx"):
+        managers["pipx"] = "pipx"
+
+
+def _collect_javascript_package_managers(managers: dict) -> None:
+    """Collect JavaScript package managers into the given dictionary."""
+    if is_tool_available("npm"):
+        managers["npm"] = "npm"
+    if is_tool_available("yarn"):
+        managers["yarn"] = "yarn"
+    if is_tool_available("pnpm"):
+        managers["pnpm"] = "pnpm"
+
+
+def _collect_system_package_managers(managers: dict) -> None:
+    """Collect system package managers into the given dictionary."""
+    if is_tool_available("brew"):
+        managers["brew"] = "brew"
+    if is_tool_available("apt"):
+        managers["apt"] = "apt"
+    if is_tool_available("yum"):
+        managers["yum"] = "yum"
+    if is_tool_available("dnf"):
+        managers["dnf"] = "dnf"
+    if is_tool_available("apk"):
+        managers["apk"] = "apk"
+    if is_tool_available("pacman"):
+        managers["pacman"] = "pacman"
 
 
 def detect_platform():

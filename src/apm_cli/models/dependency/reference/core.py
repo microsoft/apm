@@ -45,6 +45,14 @@ class DependencyReference:
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
 
+    # SSH username for SCP-shorthand or ``ssh://`` dependencies. ``None`` for
+    # non-SSH inputs. Defaults to ``"git"`` whenever an SSH form was parsed
+    # without an explicit user. Carried as auth/transport context, NOT
+    # baked into ``to_canonical()`` / ``get_identity()`` so dependency
+    # identity stays user-agnostic (lockfile pinning + dedup work the same
+    # whether a project uses ``git@`` or an EMU/custom SSH account).
+    ssh_user: str | None = None
+
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
@@ -76,17 +84,29 @@ from .identity import (
     to_canonical,
 )
 from .parsing import (
+    _detect_explicit_scheme,
+    _handle_local_path,
     _normalize_parent_repo_decl_path,
     _parse_object_git_overrides,
     _parse_object_local_path,
     _parse_object_parent,
+    _parse_ssh_forms,
     _parse_ssh_protocol_url,
     _parse_ssh_url,
     _parse_standard_url,
     parse,
     parse_from_dict,
 )
-from .paths import get_install_path, is_artifactory, is_azure_devops, is_local_path
+from .paths import (
+    _get_local_install_path,
+    _get_regular_install_path,
+    _get_virtual_file_install_path,
+    _get_virtual_subdirectory_install_path,
+    get_install_path,
+    is_artifactory,
+    is_azure_devops,
+    is_local_path,
+)
 from .serialization import to_apm_yml_entry, to_clone_url, to_github_url
 from .shorthand_gitlab import (
     _gitlab_shorthand_repo_segment_count,
@@ -95,10 +115,23 @@ from .shorthand_gitlab import (
     needs_gitlab_direct_shorthand_probing,
     split_gitlab_direct_shorthand_parts,
 )
-from .shorthand_resolve import _resolve_shorthand_to_parsed_url, _resolve_virtual_shorthand_repo
+from .shorthand_resolve import (
+    _extract_user_repo_from_parts,
+    _extract_user_repo_shorthand,
+    _resolve_ado_virtual_shorthand,
+    _resolve_explicit_host_virtual,
+    _resolve_gitlab_virtual_shorthand,
+    _resolve_implicit_host_virtual,
+    _resolve_shorthand_to_parsed_url,
+    _resolve_virtual_shorthand_repo,
+    _validate_user_repo_format,
+)
 from .validation import (
     _extract_artifactory_prefix,
+    _validate_ado_path,
     _validate_final_repo_fields,
+    _validate_non_ado_path,
+    _validate_path_components,
     _validate_url_repo_path,
 )
 from .virtual import (
@@ -128,6 +161,10 @@ DependencyReference.is_artifactory = is_artifactory
 DependencyReference.is_azure_devops = is_azure_devops
 DependencyReference.is_local_path = is_local_path
 DependencyReference.get_install_path = get_install_path
+DependencyReference._get_local_install_path = _get_local_install_path
+DependencyReference._get_regular_install_path = _get_regular_install_path
+DependencyReference._get_virtual_file_install_path = _get_virtual_file_install_path
+DependencyReference._get_virtual_subdirectory_install_path = _get_virtual_subdirectory_install_path
 DependencyReference._parse_ssh_protocol_url = _parse_ssh_protocol_url
 DependencyReference._normalize_parent_repo_decl_path = _normalize_parent_repo_decl_path
 DependencyReference._parse_object_local_path = _parse_object_local_path
@@ -135,7 +172,10 @@ DependencyReference._parse_object_parent = _parse_object_parent
 DependencyReference._parse_object_git_overrides = _parse_object_git_overrides
 DependencyReference.parse_from_dict = parse_from_dict
 DependencyReference._parse_ssh_url = _parse_ssh_url
+DependencyReference._parse_ssh_forms = _parse_ssh_forms
+DependencyReference._detect_explicit_scheme = _detect_explicit_scheme
 DependencyReference._parse_standard_url = _parse_standard_url
+DependencyReference._handle_local_path = _handle_local_path
 DependencyReference.parse = parse
 DependencyReference.split_gitlab_direct_shorthand_parts = split_gitlab_direct_shorthand_parts
 DependencyReference.needs_gitlab_direct_shorthand_probing = needs_gitlab_direct_shorthand_probing
@@ -148,8 +188,18 @@ DependencyReference.virtual_suffix_is_installable_shape = virtual_suffix_is_inst
 DependencyReference._compute_min_base_segments = _compute_min_base_segments
 DependencyReference._detect_virtual_package = _detect_virtual_package
 DependencyReference._resolve_virtual_shorthand_repo = _resolve_virtual_shorthand_repo
+DependencyReference._resolve_ado_virtual_shorthand = _resolve_ado_virtual_shorthand
+DependencyReference._resolve_gitlab_virtual_shorthand = _resolve_gitlab_virtual_shorthand
+DependencyReference._resolve_explicit_host_virtual = _resolve_explicit_host_virtual
+DependencyReference._resolve_implicit_host_virtual = _resolve_implicit_host_virtual
+DependencyReference._extract_user_repo_from_parts = _extract_user_repo_from_parts
+DependencyReference._extract_user_repo_shorthand = _extract_user_repo_shorthand
+DependencyReference._validate_user_repo_format = _validate_user_repo_format
 DependencyReference._resolve_shorthand_to_parsed_url = _resolve_shorthand_to_parsed_url
 DependencyReference._validate_url_repo_path = _validate_url_repo_path
+DependencyReference._validate_ado_path = _validate_ado_path
+DependencyReference._validate_non_ado_path = _validate_non_ado_path
+DependencyReference._validate_path_components = _validate_path_components
 DependencyReference._validate_final_repo_fields = _validate_final_repo_fields
 DependencyReference._extract_artifactory_prefix = _extract_artifactory_prefix
 DependencyReference.to_apm_yml_entry = to_apm_yml_entry

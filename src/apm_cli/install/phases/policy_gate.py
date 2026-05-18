@@ -29,6 +29,34 @@ if TYPE_CHECKING:
 __all__ = ["PolicyViolationError", "run"]
 
 
+def _check_reason(check) -> str:
+    reason = check.message
+    if check.details:
+        reason = f"{check.message}: {', '.join(check.details[:5])}"
+    return reason
+
+
+def _process_check_violation(check, enforcement: str, logger, source) -> bool:
+    if not check.passed:
+        severity = "block" if enforcement == "block" else "warn"
+        if logger:
+            logger.policy_violation(
+                dep_ref=check.name,
+                reason=_check_reason(check),
+                severity=severity,
+                source=source,
+            )
+        return severity == "block"
+    if check.details and logger:
+        logger.policy_violation(
+            dep_ref=check.name,
+            reason=_check_reason(check),
+            severity="warn",
+            source=source,
+        )
+    return False
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the policy-gate phase.
 
@@ -118,35 +146,7 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     has_blocking = False
     for check in audit_result.checks:
-        if not check.passed:
-            severity = "block" if enforcement == "block" else "warn"
-            reason = check.message
-            # Include detail lines for richer diagnostics
-            if check.details:
-                reason = f"{check.message}: {', '.join(check.details[:5])}"
-            if logger:
-                logger.policy_violation(
-                    dep_ref=check.name,
-                    reason=reason,
-                    severity=severity,
-                    source=source,
-                )
-            if severity == "block":
-                has_blocking = True
-        elif check.details:
-            # project-wins version-pin mismatches are passed=True with
-            # warning details (policy_checks.py:228-235).  Emit them so
-            # warn-mode surfaces all diagnostics.
-            if logger:
-                reason = check.message
-                if check.details:
-                    reason = f"{check.message}: {', '.join(check.details[:5])}"
-                logger.policy_violation(
-                    dep_ref=check.name,
-                    reason=reason,
-                    severity="warn",
-                    source=source,
-                )
+        has_blocking = _process_check_violation(check, enforcement, logger, source) or has_blocking
 
     if has_blocking:
         raise PolicyViolationError(

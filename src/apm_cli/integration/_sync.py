@@ -13,6 +13,8 @@ from pathlib import Path
 
 from apm_cli.utils.console import _rich_warning
 
+from ._opts import SyncRemoveOpts
+
 
 def cleanup_empty_parents(
     deleted_paths: list[Path],
@@ -47,15 +49,69 @@ def cleanup_empty_parents(
             pass
 
 
+def _warn_cowork_orphans(count: int, logger, warn_fn) -> None:
+    """Emit the cowork orphan warning once."""
+    orphan_msg = (
+        f"Cowork: skipping {count} orphaned lockfile "
+        f"{'entry' if count == 1 else 'entries'}"
+        " -- OneDrive path not detected.\n"
+        "Run: apm config set copilot-cowork-skills-dir <path>  "
+        "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
+        "to clean up these entries on the next install/uninstall."
+    )
+    if logger:
+        logger.warning(orphan_msg, symbol="warning")
+    else:
+        warn_fn(orphan_msg, symbol="warning")
+
+
+def _resolve_managed_target(
+    rel_path: str,
+    project_root: Path,
+    resolved_opts: SyncRemoveOpts,
+    cowork_root_state: dict[str, object],
+) -> tuple[Path | None, bool]:
+    """Resolve a managed-file entry to a filesystem path."""
+    from apm_cli.integration.base_integrator import BaseIntegrator
+    from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
+
+    if not BaseIntegrator.validate_deploy_path(
+        rel_path, project_root, targets=resolved_opts.targets
+    ):
+        return None, False
+    if not rel_path.startswith(COWORK_URI_SCHEME):
+        return project_root / rel_path, False
+    try:
+        if not cowork_root_state["resolved"]:
+            from apm_cli.integration.copilot_cowork_paths import resolve_copilot_cowork_skills_dir
+
+            cowork_root_state["root"] = resolve_copilot_cowork_skills_dir()
+            cowork_root_state["resolved"] = True
+        if cowork_root_state["root"] is None:
+            return None, True
+        from apm_cli.integration.copilot_cowork_paths import from_lockfile_path
+
+        return from_lockfile_path(rel_path, cowork_root_state["root"]), False
+    except Exception:
+        return None, False
+
+
+def _delete_existing_target(target: Path, stats: dict[str, int]) -> None:
+    """Delete *target* if it exists and update stats."""
+    if not target.exists():
+        return
+    try:
+        target.unlink()
+        stats["files_removed"] += 1
+    except Exception:
+        stats["errors"] += 1
+
+
 def sync_remove_files(
     project_root: Path,
     managed_files: set[str] | None,
     prefix: str,
-    legacy_glob_dir: Path | None = None,
-    legacy_glob_pattern: str | None = None,
-    targets=None,
-    logger=None,
-    _warn_fn=None,
+    opts: SyncRemoveOpts | None = None,
 ) -> dict[str, int]:
     """Remove APM-managed files matching *prefix* from *managed_files*.
 
@@ -82,74 +138,40 @@ def sync_remove_files(
     Returns:
         ``{"files_removed": int, "errors": int}``
     """
-    # Import here to avoid a circular dependency at module load time;
-    # validate_deploy_path lives on BaseIntegrator which imports _sync.
-    from apm_cli.integration.base_integrator import BaseIntegrator
-
-    if _warn_fn is None:
-        _warn_fn = _rich_warning
+    resolved_opts = opts or SyncRemoveOpts()
+    warn_fn = resolved_opts.warn_fn or _rich_warning
+    logger = resolved_opts.logger
 
     stats: dict[str, int] = {"files_removed": 0, "errors": 0}
 
     if managed_files is not None:
-        # Lazy-resolve cowork root at most once per invocation.
-        _cowork_root_resolved: bool = False
-        _cowork_root_cached: Path | None = None
-        _cowork_orphans_skipped: int = 0
+        cowork_root_state: dict[str, object] = {"resolved": False, "root": None}
+        cowork_orphans_skipped = 0
 
         for rel_path in managed_files:
-            # managed_files is pre-normalized  -- no .replace() needed
             if not rel_path.startswith(prefix):
                 continue
-            if not BaseIntegrator.validate_deploy_path(rel_path, project_root, targets=targets):
-                continue
-            # Resolve cowork:// paths to absolute before filesystem ops.
-            from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
-
-            if rel_path.startswith(COWORK_URI_SCHEME):
-                try:
-                    if not _cowork_root_resolved:
-                        from apm_cli.integration.copilot_cowork_paths import (
-                            resolve_copilot_cowork_skills_dir,
-                        )
-
-                        _cowork_root_cached = resolve_copilot_cowork_skills_dir()
-                        _cowork_root_resolved = True
-                    if _cowork_root_cached is None:
-                        _cowork_orphans_skipped += 1
-                        continue
-                    from apm_cli.integration.copilot_cowork_paths import (
-                        from_lockfile_path,
-                    )
-
-                    target = from_lockfile_path(rel_path, _cowork_root_cached)
-                except Exception:  # noqa: S112
-                    continue
-            else:
-                target = project_root / rel_path
-            if target.exists():
-                try:
-                    target.unlink()
-                    stats["files_removed"] += 1
-                except Exception:
-                    stats["errors"] += 1
-
-        # Emit a one-time warning when cowork orphans were skipped.
-        if _cowork_orphans_skipped > 0:
-            _orphan_msg = (
-                f"Cowork: skipping {_cowork_orphans_skipped} orphaned lockfile "
-                f"{'entry' if _cowork_orphans_skipped == 1 else 'entries'}"
-                " -- OneDrive path not detected.\n"
-                "Run: apm config set copilot-cowork-skills-dir <path>  "
-                "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                "to clean up these entries on the next install/uninstall."
+            target, skipped_orphan = _resolve_managed_target(
+                rel_path,
+                project_root,
+                resolved_opts,
+                cowork_root_state,
             )
-            if logger:
-                logger.warning(_orphan_msg, symbol="warning")
-            else:
-                _warn_fn(_orphan_msg, symbol="warning")
-    elif legacy_glob_dir and legacy_glob_pattern and legacy_glob_dir.exists():
-        for f in legacy_glob_dir.glob(legacy_glob_pattern):
+            if skipped_orphan:
+                cowork_orphans_skipped += 1
+                continue
+            if target is None:
+                continue
+            _delete_existing_target(target, stats)
+
+        if cowork_orphans_skipped > 0:
+            _warn_cowork_orphans(cowork_orphans_skipped, logger, warn_fn)
+    elif (
+        resolved_opts.legacy_glob_dir
+        and resolved_opts.legacy_glob_pattern
+        and resolved_opts.legacy_glob_dir.exists()
+    ):
+        for f in resolved_opts.legacy_glob_dir.glob(resolved_opts.legacy_glob_pattern):
             try:
                 f.unlink()
                 stats["files_removed"] += 1

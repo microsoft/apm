@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.install.services import _deployed_path_entry
+from apm_cli.install.services.primitives import _IntegratorSet
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 # ---------------------------------------------------------------------------
@@ -127,17 +128,40 @@ class TestAmendment6Warning:
     """Tests for the cowork non-skill primitive warning in integrate_package_primitives."""
 
     def _make_ctx(self, cowork_active: bool = True) -> MagicMock:
-        """Build a minimal ctx mock for Amendment 6 testing.
-
-        Args:
-            cowork_active: Whether cowork_nonsupported_warned starts False.
-
-        Returns:
-            A MagicMock configured as an InstallContext.
-        """
+        """Build a minimal ctx mock for Amendment 6 testing."""
         ctx = MagicMock()
         ctx.cowork_nonsupported_warned = False
         return ctx
+
+    def _make_integrators(self) -> tuple[_IntegratorSet, dict]:
+        """Return ``(_IntegratorSet, extra_kwargs)`` with all-MagicMock integrators."""
+        mocks = {
+            k: MagicMock()
+            for k in [
+                "prompt_integrator",
+                "agent_integrator",
+                "skill_integrator",
+                "instruction_integrator",
+                "command_integrator",
+                "hook_integrator",
+            ]
+        }
+        skill_result = MagicMock()
+        skill_result.target_paths = []
+        skill_result.skill_created = False
+        skill_result.sub_skills_promoted = 0
+        mocks["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators = _IntegratorSet(
+            prompt_integrator=mocks["prompt_integrator"],
+            agent_integrator=mocks["agent_integrator"],
+            skill_integrator=mocks["skill_integrator"],
+            instruction_integrator=mocks["instruction_integrator"],
+        )
+        extra = {
+            "command_integrator": mocks["command_integrator"],
+            "hook_integrator": mocks["hook_integrator"],
+        }
+        return integrators, extra
 
     def _make_pkg_info(self, tmp_path: Path, non_skill_dirs: list[str] | None = None) -> MagicMock:
         """Create a package info mock with optional non-skill directories.
@@ -178,23 +202,7 @@ class TestAmendment6Warning:
         ctx = self._make_ctx()
 
         # Mock all integrators to avoid real dispatch
-        integrators = {
-            k: MagicMock()
-            for k in [
-                "prompt_integrator",
-                "agent_integrator",
-                "skill_integrator",
-                "instruction_integrator",
-                "command_integrator",
-                "hook_integrator",
-            ]
-        }
-        # Make skill_integrator.integrate_package_skill return a result
-        skill_result = MagicMock()
-        skill_result.target_paths = []
-        skill_result.skill_created = False
-        skill_result.sub_skills_promoted = 0
-        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators, extra_integrators = self._make_integrators()
 
         # Mock dispatch table to skip integration loops
         mock_dispatch = {}
@@ -210,7 +218,8 @@ class TestAmendment6Warning:
                 package_name="test-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )
@@ -234,7 +243,8 @@ class TestAmendment6Warning:
                 package_name="test-pkg2",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )
@@ -257,22 +267,7 @@ class TestAmendment6Warning:
         logger = MagicMock()
         ctx = self._make_ctx()
 
-        integrators = {
-            k: MagicMock()
-            for k in [
-                "prompt_integrator",
-                "agent_integrator",
-                "skill_integrator",
-                "instruction_integrator",
-                "command_integrator",
-                "hook_integrator",
-            ]
-        }
-        skill_result = MagicMock()
-        skill_result.target_paths = []
-        skill_result.skill_created = False
-        skill_result.sub_skills_promoted = 0
-        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators, extra_integrators = self._make_integrators()
 
         with patch(
             "apm_cli.integration.dispatch.get_dispatch_table",
@@ -285,7 +280,8 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )
@@ -305,22 +301,7 @@ class TestAmendment6Warning:
         logger = MagicMock()
         ctx = self._make_ctx()
 
-        integrators = {
-            k: MagicMock()
-            for k in [
-                "prompt_integrator",
-                "agent_integrator",
-                "skill_integrator",
-                "instruction_integrator",
-                "command_integrator",
-                "hook_integrator",
-            ]
-        }
-        skill_result = MagicMock()
-        skill_result.target_paths = []
-        skill_result.skill_created = False
-        skill_result.sub_skills_promoted = 0
-        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators, extra_integrators = self._make_integrators()
 
         with patch(
             "apm_cli.integration.dispatch.get_dispatch_table",
@@ -333,7 +314,8 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )
@@ -352,22 +334,7 @@ class TestAmendment6Warning:
         pkg_info = self._make_pkg_info(tmp_path, ["agents"])
         logger = MagicMock()
 
-        integrators = {
-            k: MagicMock()
-            for k in [
-                "prompt_integrator",
-                "agent_integrator",
-                "skill_integrator",
-                "instruction_integrator",
-                "command_integrator",
-                "hook_integrator",
-            ]
-        }
-        skill_result = MagicMock()
-        skill_result.target_paths = []
-        skill_result.skill_created = False
-        skill_result.sub_skills_promoted = 0
-        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators, extra_integrators = self._make_integrators()
 
         # ctx=None should not raise
         with patch(
@@ -381,7 +348,8 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=None,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )
@@ -400,22 +368,7 @@ class TestAmendment6Warning:
         logger = MagicMock()
         ctx = self._make_ctx()
 
-        integrators = {
-            k: MagicMock()
-            for k in [
-                "prompt_integrator",
-                "agent_integrator",
-                "skill_integrator",
-                "instruction_integrator",
-                "command_integrator",
-                "hook_integrator",
-            ]
-        }
-        skill_result = MagicMock()
-        skill_result.target_paths = []
-        skill_result.skill_created = False
-        skill_result.sub_skills_promoted = 0
-        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators, extra_integrators = self._make_integrators()
 
         with patch(
             "apm_cli.integration.dispatch.get_dispatch_table",
@@ -429,7 +382,8 @@ class TestAmendment6Warning:
                 package_name="my-awesome-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )
@@ -453,22 +407,7 @@ class TestAmendment6Warning:
         ctx = self._make_ctx()
         diagnostics = MagicMock()
 
-        integrators = {
-            k: MagicMock()
-            for k in [
-                "prompt_integrator",
-                "agent_integrator",
-                "skill_integrator",
-                "instruction_integrator",
-                "command_integrator",
-                "hook_integrator",
-            ]
-        }
-        skill_result = MagicMock()
-        skill_result.target_paths = []
-        skill_result.skill_created = False
-        skill_result.sub_skills_promoted = 0
-        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators, extra_integrators = self._make_integrators()
 
         with patch(
             "apm_cli.integration.dispatch.get_dispatch_table",
@@ -482,7 +421,8 @@ class TestAmendment6Warning:
                 package_name="diag-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )
@@ -512,22 +452,7 @@ class TestAmendment6Warning:
         logger = MagicMock()
         ctx = self._make_ctx()
 
-        integrators = {
-            k: MagicMock()
-            for k in [
-                "prompt_integrator",
-                "agent_integrator",
-                "skill_integrator",
-                "instruction_integrator",
-                "command_integrator",
-                "hook_integrator",
-            ]
-        }
-        skill_result = MagicMock()
-        skill_result.target_paths = []
-        skill_result.skill_created = False
-        skill_result.sub_skills_promoted = 0
-        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators, extra_integrators = self._make_integrators()
 
         with patch(
             "apm_cli.integration.dispatch.get_dispatch_table",
@@ -541,7 +466,8 @@ class TestAmendment6Warning:
                 package_name="prompts-only-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=integrators,
+                **extra_integrators,
                 force=False,
                 managed_files=None,
             )

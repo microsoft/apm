@@ -32,6 +32,8 @@ All public symbols remain importable from *this* module so that existing
 ``from apm_cli.core.target_detection import …`` statements need no changes.
 """
 
+from __future__ import annotations
+
 import warnings
 from pathlib import Path
 
@@ -105,6 +107,46 @@ def agents_alias_was_detected() -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _collect_raw_tokens(value: str | list, source_path) -> list[str]:
+    """Parse value into a list of raw lowercased tokens, raising ValueError on bad input."""
+    if isinstance(value, str):
+        raw_parts = [v.strip().lower() for v in value.split(",") if v.strip()]
+    elif isinstance(value, list):
+        raw_parts = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError(
+                    _target_error(
+                        f"each entry must be a string, got {type(item).__name__}",
+                        source_path,
+                    )
+                )
+            if item.strip():
+                raw_parts.append(item.strip().lower())
+    else:
+        raise ValueError(
+            _target_error(
+                f"expected string or list of strings, got {type(value).__name__}",
+                source_path,
+            )
+        )
+    return raw_parts
+
+
+def _dedupe_targets_preserving_order(raw_parts: list[str]) -> list[str] | str:
+    """Resolve aliases and deduplicate, preserving order. Returns str if single result."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for p in raw_parts:
+        canonical = TARGET_ALIASES.get(p, p)
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append(canonical)
+    if len(result) == 1:
+        return result[0]
+    return result
+
+
 def parse_target_field(
     value: str | list[str] | None,
     *,
@@ -161,30 +203,7 @@ def parse_target_field(
     _agents_alias_detected = False
 
     # ---- collect raw tokens ----
-    if isinstance(value, str):
-        # Empty / whitespace-only / comma-only strings are user error -- a
-        # missing field comes through as ``None`` from the YAML loader, so
-        # an empty *string* means the user typed something invalid.
-        raw_parts = [v.strip().lower() for v in value.split(",") if v.strip()]
-    elif isinstance(value, list):
-        raw_parts = []
-        for item in value:
-            if not isinstance(item, str):
-                raise ValueError(
-                    _target_error(
-                        f"each entry must be a string, got {type(item).__name__}",
-                        source_path,
-                    )
-                )
-            if item.strip():
-                raw_parts.append(item.strip().lower())
-    else:
-        raise ValueError(
-            _target_error(
-                f"expected string or list of strings, got {type(value).__name__}",
-                source_path,
-            )
-        )
+    raw_parts = _collect_raw_tokens(value, source_path)
 
     if not raw_parts:
         raise ValueError(_target_error("target value must not be empty", source_path))
@@ -242,17 +261,7 @@ def parse_target_field(
         return raw_parts[0]
 
     # Multi-token: resolve aliases + dedupe, preserving input order.
-    seen: set[str] = set()
-    result: list[str] = []
-    for p in raw_parts:
-        canonical = TARGET_ALIASES.get(p, p)
-        if canonical not in seen:
-            seen.add(canonical)
-            result.append(canonical)
-
-    if len(result) == 1:
-        return result[0]
-    return result
+    return _dedupe_targets_preserving_order(raw_parts)
 
 
 def _target_error(message: str, source_path: Path | None) -> str:

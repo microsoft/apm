@@ -130,6 +130,100 @@ def _resolve_tag_pattern(entry: PackageEntry, default_pattern: str) -> str:
     return default_pattern
 
 
+def _check_single_package_version(
+    entry: PackageEntry,
+    project_root: Path,
+    strategy: str,
+    config_version: str | None,
+    config_tag_pattern: str,
+    rendered: dict[str, str],
+) -> PackageVersionRow:
+    """Evaluate version alignment for a single local *entry*.
+
+    Returns a :class:`PackageVersionRow` and, as a side-effect, updates
+    *rendered* (the tag -> first-path collision map) when *strategy* is
+    ``"tag_pattern"``.
+
+    Args:
+        entry: The :class:`~apm_cli.marketplace.yml_schema.PackageEntry` to check.
+        project_root: Absolute path to the project root used to locate each
+            package's ``apm.yml``.
+        strategy: One of ``"lockstep"``, ``"tag_pattern"``, or ``"per_package"``.
+        config_version: The top-level version from :attr:`MarketplaceConfig.version`
+            (used only for ``"lockstep"``).
+        config_tag_pattern: The default tag pattern from the build config
+            (used only for ``"tag_pattern"``).
+        rendered: Mutable ``{rendered_tag: first_path}`` map shared across
+            calls within one :func:`check_version_alignment` invocation.
+
+    Returns:
+        A :class:`PackageVersionRow` describing this package's alignment status.
+    """
+    rel = _local_path(entry)
+    version, status = _read_local_version(project_root, rel)
+
+    if status == "no_apm_yml":
+        return PackageVersionRow(path=rel, version=None, ok=False, reason="no_apm_yml")
+    if status == "invalid_yaml":
+        return PackageVersionRow(path=rel, version=None, ok=False, reason="invalid_yaml")
+    if status == "missing_version":
+        return PackageVersionRow(path=rel, version=None, ok=False, reason="missing_version")
+
+    if strategy == "lockstep":
+        if version == config_version:
+            return PackageVersionRow(path=rel, version=version, ok=True, reason="matches")
+        return PackageVersionRow(
+            path=rel,
+            version=version,
+            ok=False,
+            reason=f"drift:expected={config_version}",
+        )
+
+    if strategy == "tag_pattern":
+        pattern = _resolve_tag_pattern(entry, config_tag_pattern)
+        try:
+            tag = render_tag(pattern, name=entry.name, version=version)
+        except Exception:
+            return PackageVersionRow(
+                path=rel,
+                version=version,
+                ok=False,
+                reason="missing_version",
+                rendered_tag=None,
+            )
+        if tag in rendered:
+            other = rendered[tag]
+            # Track the most recent colliding entry so 3rd+ collisions blame nearest sibling.
+            rendered[tag] = rel
+            return PackageVersionRow(
+                path=rel,
+                version=version,
+                ok=False,
+                reason=f"duplicate_tag:other={other}",
+                rendered_tag=tag,
+            )
+        rendered[tag] = rel
+        return PackageVersionRow(
+            path=rel,
+            version=version,
+            ok=True,
+            reason="matches",
+            rendered_tag=tag,
+        )
+
+    if strategy == "per_package":
+        # Only requires version field; equality not enforced.
+        return PackageVersionRow(path=rel, version=version, ok=True, reason="matches")
+
+    # pragma: no cover - defensive; schema validates strategy upstream
+    return PackageVersionRow(
+        path=rel,
+        version=version,
+        ok=False,
+        reason=f"unknown_strategy:{strategy}",
+    )
+
+
 def check_version_alignment(
     config: MarketplaceConfig, project_root: Path
 ) -> VersionAlignmentReport:
@@ -146,96 +240,30 @@ def check_version_alignment(
     rendered: dict[str, str] = {}  # rendered_tag -> first package path that produced it
 
     for entry in local_entries:
-        rel = _local_path(entry)
-        version, status = _read_local_version(project_root, rel)
-        if status == "no_apm_yml":
-            rows.append(PackageVersionRow(path=rel, version=None, ok=False, reason="no_apm_yml"))
-            continue
-        if status == "invalid_yaml":
-            rows.append(PackageVersionRow(path=rel, version=None, ok=False, reason="invalid_yaml"))
-            continue
-        if status == "missing_version":
-            rows.append(
-                PackageVersionRow(path=rel, version=None, ok=False, reason="missing_version")
-            )
-            continue
-
-        # Strategy-specific evaluation.
-        if strategy == "lockstep":
-            if version == config.version:
-                rows.append(PackageVersionRow(path=rel, version=version, ok=True, reason="matches"))
-            else:
-                rows.append(
-                    PackageVersionRow(
-                        path=rel,
-                        version=version,
+        row = _check_single_package_version(
+            entry,
+            project_root,
+            strategy,
+            config.version,
+            config.build.tag_pattern,
+            rendered,
+        )
+        rows.append(row)
+        # For tag_pattern: flip the earlier row that first rendered the same tag,
+        # since both entries now collide.  The helper already updated `rendered`
+        # so we read the original conflicting path from the new row's reason string.
+        if strategy == "tag_pattern" and row.reason.startswith("duplicate_tag:other="):
+            other_path = row.reason.split("=", 1)[1]
+            for i, prev in enumerate(rows[:-1]):
+                if prev.path == other_path and prev.ok:
+                    rows[i] = PackageVersionRow(
+                        path=prev.path,
+                        version=prev.version,
                         ok=False,
-                        reason=f"drift:expected={config.version}",
+                        reason=f"duplicate_tag:other={row.path}",
+                        rendered_tag=prev.rendered_tag,
                     )
-                )
-        elif strategy == "tag_pattern":
-            pattern = _resolve_tag_pattern(entry, config.build.tag_pattern)
-            try:
-                tag = render_tag(pattern, name=entry.name, version=version)
-            except Exception:
-                rows.append(
-                    PackageVersionRow(
-                        path=rel,
-                        version=version,
-                        ok=False,
-                        reason="missing_version",
-                        rendered_tag=None,
-                    )
-                )
-                continue
-            if tag in rendered:
-                other = rendered[tag]
-                rows.append(
-                    PackageVersionRow(
-                        path=rel,
-                        version=version,
-                        ok=False,
-                        reason=f"duplicate_tag:other={other}",
-                        rendered_tag=tag,
-                    )
-                )
-                # Also flip the earlier-matched row to drift since both collide.
-                for i, prev in enumerate(rows[:-1]):
-                    if prev.path == other and prev.ok:
-                        rows[i] = PackageVersionRow(
-                            path=prev.path,
-                            version=prev.version,
-                            ok=False,
-                            reason=f"duplicate_tag:other={rel}",
-                            rendered_tag=prev.rendered_tag,
-                        )
-                        break
-                # Track the most recent colliding entry so a 3rd+ collision
-                # blames its nearest sibling instead of the original one.
-                rendered[tag] = rel
-            else:
-                rendered[tag] = rel
-                rows.append(
-                    PackageVersionRow(
-                        path=rel,
-                        version=version,
-                        ok=True,
-                        reason="matches",
-                        rendered_tag=tag,
-                    )
-                )
-        elif strategy == "per_package":
-            # Only requires version field; equality not enforced.
-            rows.append(PackageVersionRow(path=rel, version=version, ok=True, reason="matches"))
-        else:  # pragma: no cover - defensive; schema validates strategy upstream
-            rows.append(
-                PackageVersionRow(
-                    path=rel,
-                    version=version,
-                    ok=False,
-                    reason=f"unknown_strategy:{strategy}",
-                )
-            )
+                    break
 
     rows_sorted = tuple(sorted(rows, key=lambda r: r.path))
     expected = config.version if strategy == "lockstep" else None

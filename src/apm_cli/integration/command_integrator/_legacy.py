@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .._opts import IntegrateOpts
+
 
 class _LegacyCommandsMixin:
     """Mixin carrying deprecated per-target command methods.
@@ -45,9 +47,11 @@ class _LegacyCommandsMixin:
             KNOWN_TARGETS["claude"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            IntegrateOpts(
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+            ),
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
@@ -91,9 +95,11 @@ class _LegacyCommandsMixin:
             KNOWN_TARGETS["opencode"],
             package_info,
             project_root,
-            force=force,
-            managed_files=managed_files,
-            diagnostics=diagnostics,
+            IntegrateOpts(
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+            ),
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.

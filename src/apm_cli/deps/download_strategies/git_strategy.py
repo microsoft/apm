@@ -28,10 +28,12 @@ from ._git_host_utils import (
     _decode_json_envelope,
     _extract_contents_api_payload,
     _is_configured_ghes,
+    _MissingFileCtx,
 )
 
 __all__ = [
     "_HttpDownloadContext",
+    "_MissingFileCtx",
     "_build_contents_api_urls",
     "_build_generic_host_auth_headers",
     "_build_unsupported_or_missing_error",

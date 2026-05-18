@@ -9,6 +9,8 @@ so all call-sites remain unchanged.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 # Backward-compat aliases mapping raw ``{prim}_{target}`` keys to
 # the bucket names that existing callers expect.  Shared between
 # ``partition_managed_files`` and ``partition_bucket_key`` so the
@@ -33,6 +35,88 @@ def partition_bucket_key(prim_name: str, target_name: str) -> str:
     """
     raw = f"{prim_name}_{target_name}"
     return _BUCKET_ALIASES.get(raw, raw)
+
+
+def _build_prefix_trie(prefix_map: dict[str, str]) -> dict[str, dict]:
+    """Build a trie for longest-prefix path classification."""
+    trie: dict[str, dict] = {}
+    for prefix, bucket_key in prefix_map.items():
+        segments = [s for s in prefix.split("/") if s]
+        node = trie
+        for segment in segments:
+            child = node.get(segment)
+            if child is None:
+                child = {}
+                node[segment] = child
+            node = child
+        node["_bucket"] = bucket_key
+    return trie
+
+
+def _classify_path(trie: dict[str, dict], path: str) -> str | None:
+    """Return the deepest matching bucket for *path*."""
+    segments = [s for s in path.split("/") if s]
+    node = trie
+    last_bucket: str | None = None
+    for segment in segments:
+        child = node.get(segment)
+        if child is None:
+            break
+        node = child
+        bucket = node.get("_bucket")
+        if bucket is not None:
+            last_bucket = bucket
+    return last_bucket
+
+
+@dataclass(frozen=True, slots=True)
+class _PartitionBuildState:
+    """Mutable collections used while building prefix buckets."""
+
+    buckets: dict[str, set[str]]
+    prefix_map: dict[str, str]
+    skill_prefixes: list[str]
+    hook_prefixes: list[str]
+
+
+def _register_prefix(
+    state: _PartitionBuildState,
+    target,
+    prim_name: str,
+    mapping,
+) -> None:
+    """Register one primitive prefix in the correct bucket collection."""
+    if target.resolved_deploy_root is not None:
+        if prim_name == "skills":
+            from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
+
+            state.skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
+        return
+    effective_root = mapping.deploy_root or target.root_dir
+    prefix = f"{effective_root}/{mapping.subdir}/" if mapping.subdir else f"{effective_root}/"
+    if prim_name == "skills":
+        state.skill_prefixes.append(prefix)
+        return
+    if prim_name == "hooks":
+        state.hook_prefixes.append(prefix)
+        return
+    raw_key = f"{prim_name}_{target.name}"
+    bucket_key = _BUCKET_ALIASES.get(raw_key, raw_key)
+    state.buckets.setdefault(bucket_key, set())
+    state.prefix_map[prefix] = bucket_key
+
+
+def _categorise_cross_target(
+    path: str,
+    buckets: dict[str, set[str]],
+    skill_prefixes: tuple[str, ...],
+    hook_prefixes: tuple[str, ...],
+) -> None:
+    """Route paths that belong to cross-target buckets."""
+    if path.startswith(skill_prefixes):
+        buckets["skills"].add(path)
+    elif path.startswith(hook_prefixes):
+        buckets["hooks"].add(path)
 
 
 def partition_managed_files(
@@ -68,29 +152,10 @@ def partition_managed_files(
     # prefix -> bucket_key (longest-prefix-match routing)
     prefix_map: dict = {}
 
+    build_state = _PartitionBuildState(buckets, prefix_map, skill_prefixes, hook_prefixes)
     for target in source:
         for prim_name, mapping in target.primitives.items():
-            # Dynamic-root targets (cowork) use cowork:// URI prefix.
-            if target.resolved_deploy_root is not None:
-                if prim_name == "skills":
-                    from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
-
-                    skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
-                continue
-            effective_root = mapping.deploy_root or target.root_dir
-            prefix = (
-                f"{effective_root}/{mapping.subdir}/" if mapping.subdir else f"{effective_root}/"
-            )
-            if prim_name == "skills":
-                skill_prefixes.append(prefix)
-            elif prim_name == "hooks":
-                hook_prefixes.append(prefix)
-            else:
-                raw_key = f"{prim_name}_{target.name}"
-                bucket_key = _BUCKET_ALIASES.get(raw_key, raw_key)
-                if bucket_key not in buckets:
-                    buckets[bucket_key] = set()
-                prefix_map[prefix] = bucket_key
+            _register_prefix(build_state, target, prim_name, mapping)
 
     buckets["skills"] = set()
     buckets["hooks"] = set()
@@ -98,44 +163,13 @@ def partition_managed_files(
     skill_tuple = tuple(skill_prefixes)
     hook_tuple = tuple(hook_prefixes)
 
-    # Build a prefix trie keyed by path segments for O(depth) routing.
-    # Each node is a dict; the special key "_bucket" stores the bucket
-    # for a complete prefix ending at that node.  This preserves the
-    # "single pass, O(1) per path" property from the original
-    # component_map approach while supporting multi-level roots like
-    # .config/opencode/.
-    trie: dict = {}
-    for prefix, bucket_key in prefix_map.items():
-        segments = [s for s in prefix.split("/") if s]
-        node = trie
-        for segment in segments:
-            child = node.get(segment)
-            if child is None:
-                child = {}
-                node[segment] = child
-            node = child
-        node["_bucket"] = bucket_key
+    trie = _build_prefix_trie(prefix_map)
 
     for p in managed_files:
-        # Walk the trie; keep the deepest bucket match (longest prefix).
-        segments = [s for s in p.split("/") if s]
-        node = trie
-        last_bucket: str | None = None
-        for segment in segments:
-            child = node.get(segment)
-            if child is None:
-                break
-            node = child
-            bk = node.get("_bucket")
-            if bk is not None:
-                last_bucket = bk
-        if last_bucket is not None:
-            buckets[last_bucket].add(p)
+        bucket = _classify_path(trie, p)
+        if bucket is not None:
+            buckets[bucket].add(p)
             continue
-        # Fall back to cross-target buckets
-        if p.startswith(skill_tuple):
-            buckets["skills"].add(p)
-        elif p.startswith(hook_tuple):
-            buckets["hooks"].add(p)
+        _categorise_cross_target(p, buckets, skill_tuple, hook_tuple)
 
     return buckets

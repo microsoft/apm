@@ -15,6 +15,16 @@ if TYPE_CHECKING:
     from ...models.apm_package import DependencyReference
 
 
+@dataclass(frozen=True, slots=True)
+class WtCloneOpts:
+    """Keyword-only arguments for :func:`clone_with_fallback`."""
+
+    progress_reporter: Any = None
+    dep_ref: DependencyReference | None = None
+    verbose_callback: Callable[[str], None] | None = None
+    repo_cls: Any = None
+
+
 @dataclass
 class CloneFailureContext:
     """Bundled arguments for :func:`build_clone_failure_message`."""
@@ -38,11 +48,7 @@ def clone_with_fallback(
     execute_transport_plan: Callable[..., None],
     repo_url_base: str,
     target_path: Path,
-    *,
-    progress_reporter: Any = None,
-    dep_ref: DependencyReference | None = None,
-    verbose_callback: Callable[[str], None] | None = None,
-    repo_cls: Any = None,
+    opts: WtCloneOpts | None = None,
     **clone_kwargs: Any,
 ) -> Repo:
     """Clone a working-tree repository following the TransportSelector plan.
@@ -64,7 +70,12 @@ def clone_with_fallback(
         RuntimeError: If the planned attempt(s) all fail.
     """
     repo_holder: list[Repo] = []
-    _repo = repo_cls if repo_cls is not None else Repo
+    if opts is None:
+        opts = WtCloneOpts()
+    progress_reporter = opts.progress_reporter
+    dep_ref = opts.dep_ref
+    verbose_callback = opts.verbose_callback
+    _repo = opts.repo_cls if opts.repo_cls is not None else Repo
 
     def _wt_action(url: str, env: dict[str, str], target: Path) -> None:
         # Pre-attempt cleanup: GitPython's Repo.clone_from refuses a

@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from .deployed_path import _deployed_path_entry
 from .local_bundle import LocalBundleOpts, integrate_local_bundle
-from .primitives import integrate_package_primitives
+from .primitives import _IntegratorSet, integrate_package_primitives
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
@@ -101,10 +101,12 @@ def integrate_local_content(
         local_info,
         project_root,
         targets=targets,
-        prompt_integrator=prompt_integrator,
-        agent_integrator=agent_integrator,
-        skill_integrator=skill_integrator,
-        instruction_integrator=instruction_integrator,
+        integrators=_IntegratorSet(
+            prompt_integrator=prompt_integrator,
+            agent_integrator=agent_integrator,
+            skill_integrator=skill_integrator,
+            instruction_integrator=instruction_integrator,
+        ),
         command_integrator=command_integrator,
         hook_integrator=hook_integrator,
         force=force,

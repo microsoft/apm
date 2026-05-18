@@ -17,6 +17,56 @@ import sys
 _log = logging.getLogger(__name__)
 
 
+def _should_skip_prompting(env_overrides: dict | None) -> bool:
+    """Return True when interactive environment-variable prompting must be suppressed.
+
+    Three reasons to skip: pre-supplied overrides, CI flag, or non-interactive TTY.
+    """
+    if env_overrides:
+        return True
+    if os.getenv("APM_E2E_TESTS") == "1":
+        print(" APM_E2E_TESTS detected, will skip environment variable prompts")
+        return True
+    return not (sys.stdin.isatty() and sys.stdout.isatty())
+
+
+def _resolve_single_env_var(
+    env_var: dict,
+    env_overrides: dict,
+    skip_prompting: bool,
+    empty_value_vars: set[str],
+    default_github_env: dict[str, str],
+) -> tuple[str, str] | None:
+    """Resolve one env-var dict entry to a ``(name, value)`` pair, or None.
+
+    Returns ``None`` when the entry should be skipped (no name, no value
+    available, and no applicable default).
+    """
+    from rich.prompt import Prompt
+
+    name = env_var.get("name", "")
+    if not name:
+        return None
+    description = env_var.get("description", "")
+    required = env_var.get("required", True)
+
+    value = env_overrides.get(name) or os.getenv(name)
+    if not value and required and not skip_prompting:
+        prompt_text = f"Enter value for {name}"
+        if description:
+            prompt_text += f" ({description})"
+        value = Prompt.ask(
+            prompt_text,
+            password=bool("token" in name.lower() or "key" in name.lower()),
+        )
+
+    if value and value.strip():
+        return name, value
+    if name in default_github_env and (name in empty_value_vars or not required or skip_prompting):
+        return name, default_github_env[name]
+    return None
+
+
 def process_environment_variables(
     env_vars: list,
     env_overrides: dict | None = None,
@@ -28,26 +78,12 @@ def process_environment_variables(
         env_overrides: Pre-collected environment variable overrides.
 
     Returns:
-        Dictionary of resolved environment variable name → value.
+        Dictionary of resolved environment variable name -> value.
     """
-    from rich.prompt import Prompt
-
     resolved: dict[str, str] = {}
     env_overrides = env_overrides or {}
 
-    # If env_overrides is provided the CLI has already handled collection;
-    # never prompt for additional variables in that case.
-    skip_prompting = bool(env_overrides)
-
-    # Check for CI/automated environment via APM_E2E_TESTS flag.
-    if os.getenv("APM_E2E_TESTS") == "1":
-        skip_prompting = True
-        print(" APM_E2E_TESTS detected, will skip environment variable prompts")
-
-    # Also skip prompting if we're in a non-interactive environment (fallback).
-    is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
-    if not is_interactive:
-        skip_prompting = True
+    skip_prompting = _should_skip_prompting(env_overrides)
 
     # Default GitHub MCP server env vars used when the user supplies no value.
     default_github_env = {"GITHUB_TOOLSETS": "context", "GITHUB_DYNAMIC_TOOLSETS": "1"}
@@ -62,33 +98,11 @@ def process_environment_variables(
     for env_var in env_vars:
         if not isinstance(env_var, dict):
             continue
-
-        name = env_var.get("name", "")
-        description = env_var.get("description", "")
-        required = env_var.get("required", True)
-
-        if not name:
-            continue
-
-        # Preference: overrides → OS environment → prompt.
-        value = env_overrides.get(name) or os.getenv(name)
-
-        if not value and required and not skip_prompting:
-            prompt_text = f"Enter value for {name}"
-            if description:
-                prompt_text += f" ({description})"
-            value = Prompt.ask(
-                prompt_text,
-                password=bool("token" in name.lower() or "key" in name.lower()),
-            )
-
-        # Persist the resolved value under the first matching rule.
-        if value and value.strip():
-            resolved[name] = value
-        elif name in default_github_env and (
-            name in empty_value_vars or not required or skip_prompting
-        ):
-            resolved[name] = default_github_env[name]
+        pair = _resolve_single_env_var(
+            env_var, env_overrides, skip_prompting, empty_value_vars, default_github_env
+        )
+        if pair is not None:
+            resolved[pair[0]] = pair[1]
 
     return resolved
 

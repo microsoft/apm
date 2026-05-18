@@ -20,6 +20,49 @@ from pathlib import Path
 _log = logging.getLogger(__name__)
 
 
+def _resolve_git_dir(git_path: Path, checkout_dir: Path) -> Path | None:
+    """Return the resolved ``.git`` directory path, or None.
+
+    Handles both the plain directory case and the worktree-pointer-file
+    case (``gitdir: <path>``).
+    """
+    if git_path.is_file():
+        content = git_path.read_text(encoding="utf-8").strip()
+        if content.startswith("gitdir:"):
+            target = content.split(":", 1)[1].strip()
+            return (checkout_dir / target).resolve()
+        return None
+    if git_path.is_dir():
+        return git_path
+    return None
+
+
+def _resolve_head_ref(git_dir: Path, head_content: str) -> str | None:
+    """Return the 40-char hex SHA from a ``ref:`` HEAD or a detached HEAD.
+
+    Returns ``None`` when resolution fails (missing ref file, no match in
+    packed-refs, or HEAD content is not a valid hex SHA).
+    """
+    if head_content.startswith("ref:"):
+        ref_target = head_content.split(":", 1)[1].strip()
+        ref_path = git_dir / ref_target
+        if ref_path.is_file():
+            return ref_path.read_text(encoding="utf-8").strip().lower()
+        packed = git_dir / "packed-refs"
+        if packed.is_file():
+            for raw in packed.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith(("#", "^")):
+                    continue
+                parts = line.split(maxsplit=1)
+                if len(parts) == 2 and parts[1] == ref_target:
+                    return parts[0].lower()
+        return None
+    if len(head_content) == 40 and all(c in "0123456789abcdef" for c in head_content.lower()):
+        return head_content.lower()
+    return None
+
+
 def _read_head_sha(checkout_dir: Path) -> str | None:
     """Return the resolved 40-char SHA at HEAD, or None on any failure.
 
@@ -32,40 +75,15 @@ def _read_head_sha(checkout_dir: Path) -> str | None:
     """
     git_path = checkout_dir / ".git"
     try:
-        if git_path.is_file():
-            content = git_path.read_text(encoding="utf-8").strip()
-            if content.startswith("gitdir:"):
-                target = content.split(":", 1)[1].strip()
-                git_dir = (checkout_dir / target).resolve()
-            else:
-                return None
-        elif git_path.is_dir():
-            git_dir = git_path
-        else:
+        git_dir = _resolve_git_dir(git_path, checkout_dir)
+        if git_dir is None:
             return None
 
         head_path = git_dir / "HEAD"
         if not head_path.is_file():
             return None
         head_content = head_path.read_text(encoding="utf-8").strip()
-        if head_content.startswith("ref:"):
-            ref_target = head_content.split(":", 1)[1].strip()
-            ref_path = git_dir / ref_target
-            if ref_path.is_file():
-                return ref_path.read_text(encoding="utf-8").strip().lower()
-            packed = git_dir / "packed-refs"
-            if packed.is_file():
-                for raw in packed.read_text(encoding="utf-8").splitlines():
-                    line = raw.strip()
-                    if not line or line.startswith(("#", "^")):
-                        continue
-                    parts = line.split(maxsplit=1)
-                    if len(parts) == 2 and parts[1] == ref_target:
-                        return parts[0].lower()
-            return None
-        if len(head_content) == 40 and all(c in "0123456789abcdef" for c in head_content.lower()):
-            return head_content.lower()
-        return None
+        return _resolve_head_ref(git_dir, head_content)
     except OSError as exc:
         _log.debug("Failed to read HEAD in %s: %s", checkout_dir, exc)
         return None

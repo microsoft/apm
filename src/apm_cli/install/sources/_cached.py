@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from apm_cli.install.sources._base import DependencySource, Materialization
+
+
+@dataclass(frozen=True, slots=True)
+class _CachedSourceExtras:
+    resolved_ref: Any
+    dep_locked_chk: Any
+    fetched_this_run: bool = False
 
 
 class CachedDependencySource(DependencySource):
@@ -19,20 +27,14 @@ class CachedDependencySource(DependencySource):
         dep_ref: Any,
         install_path: Any,
         dep_key: str,
-        resolved_ref: Any,
-        dep_locked_chk: Any,
-        fetched_this_run: bool = False,
+        extras: _CachedSourceExtras | None = None,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
-        self.resolved_ref = resolved_ref
-        self.dep_locked_chk = dep_locked_chk
-        # F2 (#1116): when the resolver callback fetched this package
-        # earlier in the SAME install run, we still hit the cached
-        # source path (skip_download=True), but the install line should
-        # NOT say "(cached)" -- bytes were just downloaded. The integrate
-        # phase passes True here when the dep_key is in
-        # ctx.callback_downloaded.
-        self.fetched_this_run = fetched_this_run
+        if extras is None:
+            extras = _CachedSourceExtras(resolved_ref=None, dep_locked_chk=None)
+        self.resolved_ref = extras.resolved_ref
+        self.dep_locked_chk = extras.dep_locked_chk
+        self.fetched_this_run = extras.fetched_this_run
 
     def _resolve_cached_commit(self) -> str | None:
         """Determine the SHA to record in the lockfile for the cached path.
@@ -84,9 +86,8 @@ class CachedDependencySource(DependencySource):
             cached_commit = dep_ref.reference
         return cached_commit
 
-    def acquire(self) -> Materialization | None:
+    def _build_cached_package_info(self):
         from apm_cli.constants import APM_YML_FILENAME
-        from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.models.apm_package import (
             APMPackage,
             GitReferenceType,
@@ -94,13 +95,53 @@ class CachedDependencySource(DependencySource):
             ResolvedReference,
         )
         from apm_cli.models.validation import detect_package_type
+
+        dep_ref = self.dep_ref
+        install_path = self.install_path
+        resolved_ref = self.resolved_ref
+
+        apm_yml_path = install_path / APM_YML_FILENAME
+        if apm_yml_path.exists():
+            cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
+            if not cached_package.source:
+                cached_package.source = dep_ref.repo_url
+        else:
+            cached_package = APMPackage(
+                name=dep_ref.repo_url.split("/")[-1],
+                version="unknown",
+                package_path=install_path,
+                source=dep_ref.repo_url,
+            )
+
+        resolved_or_cached_ref = (
+            resolved_ref
+            if resolved_ref
+            else ResolvedReference(
+                original_ref=dep_ref.reference or "default",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit="cached",
+                ref_name=dep_ref.reference or "default",
+            )
+        )
+        cached_package_info = PackageInfo(
+            package=cached_package,
+            install_path=install_path,
+            resolved_reference=resolved_or_cached_ref,
+            installed_at=datetime.now().isoformat(),
+            dependency_ref=dep_ref,
+        )
+        pkg_type, _ = detect_package_type(install_path)
+        cached_package_info.package_type = pkg_type
+        return cached_package_info
+
+    def acquire(self) -> Materialization | None:
+        from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
         dep_ref = self.dep_ref
         install_path = self.install_path
         dep_key = self.dep_key
-        resolved_ref = self.resolved_ref
         dep_locked_chk = self.dep_locked_chk
         logger = ctx.logger
 
@@ -139,45 +180,7 @@ class CachedDependencySource(DependencySource):
                 deltas=deltas,
             )
 
-        # Load package from apm.yml. Anchor source_path on the clone location
-        # so transitive ``local_path`` deps inside this remote package resolve
-        # from there (#857).
-        apm_yml_path = install_path / APM_YML_FILENAME
-        if apm_yml_path.exists():
-            cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
-            # TODO(#940): see note in _materialize_local for the same caveat
-            # about post-construction mutation of .source.
-            if not cached_package.source:
-                cached_package.source = dep_ref.repo_url
-        else:
-            cached_package = APMPackage(
-                name=dep_ref.repo_url.split("/")[-1],
-                version="unknown",
-                package_path=install_path,
-                source=dep_ref.repo_url,
-            )
-
-        resolved_or_cached_ref = (
-            resolved_ref
-            if resolved_ref
-            else ResolvedReference(
-                original_ref=dep_ref.reference or "default",
-                ref_type=GitReferenceType.BRANCH,
-                resolved_commit="cached",
-                ref_name=dep_ref.reference or "default",
-            )
-        )
-
-        cached_package_info = PackageInfo(
-            package=cached_package,
-            install_path=install_path,
-            resolved_reference=resolved_or_cached_ref,
-            installed_at=datetime.now().isoformat(),
-            dependency_ref=dep_ref,
-        )
-
-        pkg_type, _ = detect_package_type(install_path)
-        cached_package_info.package_type = pkg_type
+        cached_package_info = self._build_cached_package_info()
 
         # Collect for lockfile
         node = ctx.dependency_graph.dependency_tree.get_node(dep_key)

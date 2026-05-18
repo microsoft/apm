@@ -1,5 +1,7 @@
 """Lockfile enrichment for pack-time metadata."""
 
+from __future__ import annotations
+
 import posixpath
 from datetime import datetime, timezone
 
@@ -118,57 +120,93 @@ def _filter_files_by_target(
         maps ``bundle_path -> disk_path`` for any file that was cross-target
         remapped.  Direct matches have no entry in the dict.
     """
+    prefixes, cross_map = _collect_prefixes_and_cross_map(target)
+    direct = [f for f in deployed_files if any(f.startswith(p) for p in prefixes)]
+    path_mappings = _apply_cross_map(direct, deployed_files, cross_map)
+    return direct, path_mappings
+
+
+def _collect_prefixes_and_cross_map(
+    target: str | list[str],
+) -> tuple[list[str], dict[str, str]]:
+    """Return ``(prefixes, cross_map)`` for *target* (string or list)."""
     if isinstance(target, list):
-        # Union all prefixes for the targets in the list
         prefixes: list[str] = []
-        seen_prefixes: set = set()
+        seen_prefixes: set[str] = set()
         for t in target:
             for p in _get_target_prefixes(t):
                 if p not in seen_prefixes:
                     seen_prefixes.add(p)
                     prefixes.append(p)
-        # Union all cross-target maps
-        # NOTE: dict.update() means the last target's mapping wins when
-        # multiple targets map the same source prefix. In practice this
-        # is benign -- common multi-target combos (e.g. claude+copilot)
-        # match prefixes directly without needing cross-maps.
         cross_map: dict[str, str] = {}
         for t in target:
             cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
     else:
         prefixes = _get_target_prefixes(target)
         cross_map = _CROSS_TARGET_MAPS.get(target, {})
+    return prefixes, cross_map
 
-    direct = [f for f in deployed_files if any(f.startswith(p) for p in prefixes)]
 
+def _apply_cross_map(
+    direct: list[str], deployed_files: list[str], cross_map: dict[str, str]
+) -> dict[str, str]:
+    """Append cross-mapped paths to *direct* and return the path_mappings dict."""
     path_mappings: dict[str, str] = {}
-    if cross_map:
-        direct_set = set(direct)
-        for f in deployed_files:
-            if f in direct_set:
-                continue
-            for src_prefix, dst_prefix in cross_map.items():
-                if f.startswith(src_prefix):
-                    mapped = dst_prefix + f[len(src_prefix) :]
-                    # Containment guard: normalise the remapped path and
-                    # reject any result that escapes the destination prefix
-                    # via traversal segments (e.g. "../../etc/passwd").
-                    normalised = posixpath.normpath(mapped)
-                    if ".." in normalised.split("/"):
-                        continue
-                    if not normalised.startswith(dst_prefix.rstrip("/")):
-                        continue
-                    # Preserve trailing slash (directory marker in lockfiles)
-                    if mapped.endswith("/") and not normalised.endswith("/"):
-                        normalised += "/"
-                    mapped = normalised
-                    if mapped not in direct_set:
-                        direct.append(mapped)
-                        direct_set.add(mapped)
-                        path_mappings[mapped] = f
-                    break
+    if not cross_map:
+        return path_mappings
+    direct_set = set(direct)
+    for f in deployed_files:
+        if f in direct_set:
+            continue
+        for src_prefix, dst_prefix in cross_map.items():
+            if f.startswith(src_prefix):
+                mapped = dst_prefix + f[len(src_prefix) :]
+                normalised = posixpath.normpath(mapped)
+                if ".." in normalised.split("/"):
+                    continue
+                if not normalised.startswith(dst_prefix.rstrip("/")):
+                    continue
+                if mapped.endswith("/") and not normalised.endswith("/"):
+                    normalised += "/"
+                mapped = normalised
+                if mapped not in direct_set:
+                    direct.append(mapped)
+                    direct_set.add(mapped)
+                    path_mappings[mapped] = f
+                break
+    return path_mappings
 
-    return direct, path_mappings
+
+def _build_pack_meta(
+    fmt: str,
+    target: str | list[str],
+    all_mappings: dict[str, str],
+    bundle_files: dict[str, str] | None,
+) -> dict:
+    """Build the ``pack:`` metadata section dict."""
+    target_str = ",".join(target) if isinstance(target, list) else target
+    pack_meta: dict = {
+        "format": fmt,
+        "target": target_str,
+        "packed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if all_mappings:
+        if isinstance(target, list):
+            cross_map: dict[str, str] = {}
+            for t in target:
+                cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
+        else:
+            cross_map = _CROSS_TARGET_MAPS.get(target, {})
+        used_src_prefixes: set[str] = set()
+        for original in all_mappings.values():
+            for src_prefix in cross_map:
+                if original.startswith(src_prefix):
+                    used_src_prefixes.add(src_prefix)
+                    break
+        pack_meta["mapped_from"] = sorted(used_src_prefixes)
+    if bundle_files:
+        pack_meta["bundle_files"] = dict(sorted(bundle_files.items()))
+    return pack_meta
 
 
 def enrich_lockfile_for_pack(
@@ -227,44 +265,10 @@ def enrich_lockfile_for_pack(
         data.pop("local_deployed_files", None)
         data.pop("local_deployed_file_hashes", None)
 
-    # Build the pack: metadata section (after filtering so we know if mapping
-    # occurred).
-    # Serialize target as a comma-joined string for backward compatibility
-    # with consumers that expect a plain string in pack.target.
-    target_str = ",".join(target) if isinstance(target, list) else target
-    pack_meta: dict = {
-        "format": fmt,
-        "target": target_str,
-        "packed_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if all_mappings:
-        # Record the source prefixes that were remapped so consumers know the
-        # bundle paths differ from the original lockfile.  Use the canonical
-        # prefix keys from _CROSS_TARGET_MAPS rather than reverse-engineering
-        # them from file paths.
-        if isinstance(target, list):
-            cross_map: dict[str, str] = {}
-            for t in target:
-                cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
-        else:
-            cross_map = _CROSS_TARGET_MAPS.get(target, {})
-        used_src_prefixes = set()
-        for original in all_mappings.values():
-            for src_prefix in cross_map:
-                if original.startswith(src_prefix):
-                    used_src_prefixes.add(src_prefix)
-                    break
-        pack_meta["mapped_from"] = sorted(used_src_prefixes)
-
-    if bundle_files:
-        # Bundle-relative path -> sha256 hex digest. Used by
-        # ``verify_bundle_integrity()`` at install time. Sorted for
-        # deterministic YAML output.
-        pack_meta["bundle_files"] = dict(sorted(bundle_files.items()))
+    pack_meta = _build_pack_meta(fmt, target, all_mappings, bundle_files)
 
     from ..utils.yaml_io import yaml_to_str
 
     pack_section = yaml_to_str({"pack": pack_meta})
-
     lockfile_yaml = yaml_to_str(data)
     return pack_section + lockfile_yaml

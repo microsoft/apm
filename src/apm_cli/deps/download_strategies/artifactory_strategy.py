@@ -7,7 +7,10 @@ a single :class:`DownloadDelegate` instance and delegates download
 operations to it (Facade/Delegate pattern).
 """
 
+from __future__ import annotations
+
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -16,6 +19,18 @@ from ...utils.github_host import (
     build_artifactory_archive_url,
 )
 from .class_ import _debug
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactoryTarget:
+    """Coordinates identifying an Artifactory-proxied repository + ref."""
+
+    host: str
+    prefix: str
+    owner: str
+    repo: str
+    ref: str
+    scheme: str = "https"
 
 
 def get_artifactory_headers(self) -> dict[str, str]:
@@ -32,13 +47,8 @@ def get_artifactory_headers(self) -> dict[str, str]:
 
 def download_artifactory_archive(
     self,
-    host: str,
-    prefix: str,
-    owner: str,
-    repo: str,
-    ref: str,
+    target: _ArtifactoryTarget,
     target_path: Path,
-    scheme: str = "https",
 ) -> None:
     """Download and extract a zip archive from Artifactory VCS proxy.
 
@@ -52,10 +62,11 @@ def download_artifactory_archive(
     import io
     import zipfile
 
-    archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
+    archive_urls = build_artifactory_archive_url(
+        target.host, target.prefix, target.owner, target.repo, ref=target.ref, scheme=target.scheme
+    )
     headers = self.get_artifactory_headers()
 
-    # Guard: reject unreasonably large archives (default 500 MB)
     max_archive_bytes = int(os.environ.get("ARTIFACTORY_MAX_ARCHIVE_MB", "500")) * 1024 * 1024
 
     last_error = None
@@ -68,37 +79,7 @@ def download_artifactory_archive(
                     last_error = f"Archive too large ({len(resp.content)} bytes) from {url}"
                     _debug(last_error)
                     continue
-                # Extract zip, stripping the top-level directory
-                target_path.mkdir(parents=True, exist_ok=True)
-                with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                    # Identify the root prefix (e.g., "repo-main/")
-                    names = zf.namelist()
-                    if not names:
-                        raise RuntimeError(f"Empty archive from {url}")
-                    root_prefix = names[0]
-                    if not root_prefix.endswith("/"):
-                        # Single file archive; extract as-is
-                        zf.extractall(target_path)
-                        return
-                    for member in zf.infolist():
-                        # Strip root prefix
-                        if member.filename == root_prefix:
-                            continue
-                        rel = member.filename[len(root_prefix) :]
-                        if not rel:
-                            continue
-                        # Guard: prevent zip path traversal (CWE-22)
-                        dest = target_path / rel
-                        if not dest.resolve().is_relative_to(target_path.resolve()):
-                            _debug(f"Skipping zip entry escaping target: {member.filename}")
-                            continue
-                        if member.is_dir():
-                            dest.mkdir(parents=True, exist_ok=True)
-                        else:
-                            dest.parent.mkdir(parents=True, exist_ok=True)
-                            with zf.open(member) as src, open(dest, "wb") as dst:
-                                dst.write(src.read())
-                _debug(f"Extracted Artifactory archive to {target_path}")
+                _extract_artifactory_zip(resp.content, target_path, url)
                 return
             else:
                 last_error = f"HTTP {resp.status_code} from {url}"
@@ -111,20 +92,48 @@ def download_artifactory_archive(
             _debug(f"Request failed: {last_error}")
 
     raise RuntimeError(
-        f"Failed to download package {owner}/{repo}#{ref} from Artifactory "
-        f"({host}/{prefix}). Last error: {last_error}"
+        f"Failed to download package {target.owner}/{target.repo}#{target.ref} from Artifactory "
+        f"({target.host}/{target.prefix}). Last error: {last_error}"
     )
+
+
+def _extract_artifactory_zip(content: bytes, target_path: Path, url: str) -> None:
+    """Extract zip archive content to target_path, stripping the root directory."""
+    import io
+    import zipfile
+
+    target_path.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        names = zf.namelist()
+        if not names:
+            raise RuntimeError(f"Empty archive from {url}")
+        root_prefix = names[0]
+        if not root_prefix.endswith("/"):
+            zf.extractall(target_path)
+            return
+        for member in zf.infolist():
+            if member.filename == root_prefix:
+                continue
+            rel = member.filename[len(root_prefix) :]
+            if not rel:
+                continue
+            dest = target_path / rel
+            if not dest.resolve().is_relative_to(target_path.resolve()):
+                _debug(f"Skipping zip entry escaping target: {member.filename}")
+                continue
+            if member.is_dir():
+                dest.mkdir(parents=True, exist_ok=True)
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(dest, "wb") as dst:
+                    dst.write(src.read())
+    _debug(f"Extracted Artifactory archive to {target_path}")
 
 
 def download_file_from_artifactory(
     self,
-    host: str,
-    prefix: str,
-    owner: str,
-    repo: str,
+    target: _ArtifactoryTarget,
     file_path: str,
-    ref: str,
-    scheme: str = "https",
 ) -> bytes:
     """Download a single file from Artifactory.
 
@@ -135,28 +144,27 @@ def download_file_from_artifactory(
     """
     # Fast path: use the RegistryClient interface for entry download
     cfg = self._host.registry_config
-    if cfg is not None and cfg.host == host:
+    if cfg is not None and cfg.host == target.host:
         client = cfg.get_client()
         content = client.fetch_file(
-            owner,
-            repo,
+            target.owner,
+            target.repo,
             file_path,
-            ref,
+            target.ref,
             resilient_get=self._host._resilient_get,
         )
     else:
         # No RegistryConfig or host mismatch (explicit FQDN mode) --
         # fall back to the standalone helper.
-        from ..artifactory_entry import fetch_entry_from_archive
+        from ..artifactory_entry import _ArchiveCoords, fetch_entry_from_archive
 
         content = fetch_entry_from_archive(
-            host,
-            prefix,
-            owner,
-            repo,
+            _ArchiveCoords(
+                host=target.host, prefix=target.prefix, owner=target.owner, repo=target.repo
+            ),
             file_path,
-            ref,
-            scheme=scheme,
+            target.ref,
+            scheme=target.scheme,
             headers=self.get_artifactory_headers(),
             resilient_get=self._host._resilient_get,
         )
@@ -167,7 +175,14 @@ def download_file_from_artifactory(
     import io
     import zipfile
 
-    archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
+    archive_urls = build_artifactory_archive_url(
+        target.host,
+        target.prefix,
+        target.owner,
+        target.repo,
+        ref=target.ref,
+        scheme=target.scheme,
+    )
     headers = self.get_artifactory_headers()
 
     for url in archive_urls:
@@ -188,5 +203,5 @@ def download_file_from_artifactory(
 
     raise RuntimeError(
         f"Failed to download file '{file_path}' from Artifactory "
-        f"({host}/{prefix}/{owner}/{repo}#{ref})"
+        f"({target.host}/{target.prefix}/{target.owner}/{target.repo}#{target.ref})"
     )

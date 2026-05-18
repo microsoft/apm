@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile, _DepResolutionInfo
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 
 
@@ -54,9 +54,7 @@ def _make_locked_dep(dep_ref) -> LockedDependency:
     """Create a LockedDependency from a DependencyReference with dummy resolution."""
     return LockedDependency.from_dependency_ref(
         dep_ref,
-        resolved_commit="abc123def456",
-        depth=1,
-        resolved_by=None,
+        _DepResolutionInfo(resolved_commit="abc123def456", depth=1, resolved_by=None),
     )
 
 

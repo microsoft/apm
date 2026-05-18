@@ -1,6 +1,9 @@
 """CI gate logic for audit command -- policy resolution and enforcement."""
 
+from __future__ import annotations
+
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -9,14 +12,28 @@ from ...utils.console import STATUS_SYMBOLS
 from ..audit import _audit_outcome_cause
 
 
-def _resolve_policy(
-    cfg,
-    policy_source: str | None,
-    no_cache: bool,
-    no_policy: bool,
-    fail_fast: bool,
-    ci_result,
-):
+@dataclass(frozen=True, slots=True)
+class _PolicyRequest:
+    """Options controlling policy resolution in CI mode."""
+
+    policy_source: str | None
+    no_cache: bool
+    no_policy: bool
+    fail_fast: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _CiGateRequest:
+    """Options controlling the audit CI gate."""
+
+    policy_source: str | None
+    no_cache: bool
+    no_policy: bool
+    no_fail_fast: bool
+    no_drift: bool = False
+
+
+def _resolve_policy(cfg, ci_result, request: _PolicyRequest):
     """Resolve policy source and handle fetch failures.
 
     Returns (fetch_result, should_run_policy) tuple.
@@ -27,13 +44,17 @@ def _resolve_policy(
     fetch_result = None
     auto_discovered = False
 
-    if policy_source and (not fail_fast or ci_result.passed):
+    if request.policy_source and (not request.fail_fast or ci_result.passed):
         fetch_result = policy_discovery.discover_policy(
             cfg.project_root,
-            policy_override=policy_source,
-            no_cache=no_cache,
+            policy_override=request.policy_source,
+            no_cache=request.no_cache,
         )
-    elif not policy_source and not no_policy and (not fail_fast or ci_result.passed):
+    elif (
+        not request.policy_source
+        and not request.no_policy
+        and (not request.fail_fast or ci_result.passed)
+    ):
         # Auto-discovery (mirror install path)
         fetch_result = policy_discovery.discover_policy_with_chain(cfg.project_root)
         auto_discovered = True
@@ -202,14 +223,7 @@ def _emit_ci_report(cfg, ci_result, drift_findings, no_drift):
     sys.exit(0 if ci_result.passed else 1)
 
 
-def _audit_ci_gate(
-    cfg,
-    policy_source: str | None,
-    no_cache: bool,
-    no_policy: bool,
-    no_fail_fast: bool,
-    no_drift: bool = False,
-) -> None:
+def _audit_ci_gate(cfg, request: _CiGateRequest) -> None:
     """Handle ``apm audit --ci`` -- lockfile consistency gate.
 
     Runs baseline lockfile checks, drift detection (unless ``--no-drift``),
@@ -218,20 +232,27 @@ def _audit_ci_gate(
     """
     from ...policy.ci_checks import run_baseline_checks
 
-    fail_fast = not no_fail_fast
+    fail_fast = not request.no_fail_fast
 
     # Always run baseline checks
     ci_result = run_baseline_checks(cfg.project_root, fail_fast=fail_fast, ci_mode=True)
 
     # Resolve policy source and run policy checks
     fetch_result, should_run = _resolve_policy(
-        cfg, policy_source, no_cache, no_policy, fail_fast, ci_result
+        cfg,
+        ci_result,
+        _PolicyRequest(
+            policy_source=request.policy_source,
+            no_cache=request.no_cache,
+            no_policy=request.no_policy,
+            fail_fast=fail_fast,
+        ),
     )
     if should_run and fetch_result is not None:
         _run_policy_checks(cfg, fetch_result, fail_fast, ci_result)
 
     # Run drift detection
-    drift_findings = _run_drift_detection(cfg, no_drift, ci_result)
+    drift_findings = _run_drift_detection(cfg, request.no_drift, ci_result)
 
     # Emit report and exit
-    _emit_ci_report(cfg, ci_result, drift_findings, no_drift)
+    _emit_ci_report(cfg, ci_result, drift_findings, request.no_drift)

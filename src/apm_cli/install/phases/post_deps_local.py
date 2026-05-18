@@ -34,6 +34,22 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
+def _persist_local_lockfile(ctx: InstallContext) -> None:
+    from apm_cli.deps.lockfile import LockFile as lock_file
+    from apm_cli.deps.lockfile import get_lockfile_path as get_lockfile_path
+    from apm_cli.install.phases.lockfile import compute_deployed_hashes as hash_deployed
+
+    lock_path = get_lockfile_path(ctx.apm_dir)
+    persist_lock = lock_file.read(lock_path) or lock_file()
+    persist_lock.local_deployed_files = sorted(ctx.local_deployed_files)
+    persist_lock.local_deployed_file_hashes = hash_deployed(
+        ctx.local_deployed_files, ctx.project_root
+    )
+    existing_for_cmp = lock_file.read(lock_path)
+    if not existing_for_cmp or not persist_lock.is_semantically_equivalent(existing_for_cmp):
+        persist_lock.save(lock_path)
+
+
 def run(ctx: InstallContext) -> None:
     """Execute local content stale cleanup and lockfile persistence.
 
@@ -67,7 +83,7 @@ def run(ctx: InstallContext) -> None:
 
     if ctx.old_local_deployed and not _local_had_errors:
         from apm_cli.integration.base_integrator import BaseIntegrator
-        from apm_cli.integration.cleanup import remove_stale_deployed_files
+        from apm_cli.integration.cleanup import CleanupOpts, remove_stale_deployed_files
 
         _stale = builtins.set(ctx.old_local_deployed) - builtins.set(ctx.local_deployed_files)
         if _stale:
@@ -80,10 +96,12 @@ def run(ctx: InstallContext) -> None:
             _cleanup_result = remove_stale_deployed_files(
                 _stale,
                 ctx.project_root,
-                dep_key="<local .apm/>",
-                targets=ctx.targets,
-                diagnostics=diagnostics,
-                recorded_hashes=_prev_hashes,
+                opts=CleanupOpts(
+                    dep_key="<local .apm/>",
+                    targets=ctx.targets,
+                    diagnostics=diagnostics,
+                    recorded_hashes=_prev_hashes,
+                ),
             )
             # Failed paths stay in lockfile so we retry next time.
             ctx.local_deployed_files.extend(_cleanup_result.failed)
@@ -97,21 +115,4 @@ def run(ctx: InstallContext) -> None:
             if logger:
                 logger.stale_cleanup("<local .apm/>", len(_cleanup_result.deleted))
 
-    # ------------------------------------------------------------------
-    # Lockfile persistence: read-modify-write the lockfile to add
-    # local_deployed_files and per-file content hashes.
-    # ------------------------------------------------------------------
-    from apm_cli.deps.lockfile import LockFile as _LF
-    from apm_cli.deps.lockfile import get_lockfile_path as _get_lfp
-    from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed
-
-    _lock_path = _get_lfp(ctx.apm_dir)
-    _persist_lock = _LF.read(_lock_path) or _LF()
-    _persist_lock.local_deployed_files = sorted(ctx.local_deployed_files)
-    _persist_lock.local_deployed_file_hashes = _hash_deployed(
-        ctx.local_deployed_files, ctx.project_root
-    )
-    # Only write if changed.
-    _existing_for_cmp = _LF.read(_lock_path)
-    if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):
-        _persist_lock.save(_lock_path)
+    _persist_local_lockfile(ctx)

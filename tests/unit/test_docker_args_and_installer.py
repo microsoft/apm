@@ -1,7 +1,7 @@
 """Tests for Docker arguments processing and safe installation."""
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from apm_cli.core.docker_args import DockerArgsProcessor
 from apm_cli.core.safe_installer import InstallationSummary, SafeMCPInstaller
@@ -165,7 +165,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(summary.installed[0], "new-server")
 
         # Verify adapter was called only for new server
-        mock_adapter.configure_mcp_server.assert_called_once_with("new-server")
+        mock_adapter.configure_mcp_server.assert_called_once_with("new-server", ANY)
 
     @patch("apm_cli.core.safe_installer.ClientFactory")
     @patch("apm_cli.core.safe_installer.MCPConflictDetector")

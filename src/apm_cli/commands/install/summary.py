@@ -1,6 +1,10 @@
+# pylint: disable=duplicate-code
 """APM install command and dependency installation engine."""
 
+from __future__ import annotations
+
 import builtins
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -94,22 +98,34 @@ except ImportError as e:
 # Package validation helpers (extracted from _validate_and_add_packages_to_apm_yml)
 
 
-def _post_install_summary(
-    *, logger, apm_count, mcp_count, apm_diagnostics, force, elapsed_seconds=None
-):
+@dataclass(frozen=True, slots=True)
+class _LegacyPostInstallSummaryParams:
+    """Compatibility wrapper for legacy summary keyword arguments."""
+
+    apm_count: int
+    mcp_count: int
+    apm_diagnostics: object
+    force: bool
+    elapsed_seconds: float | None = None
+
+
+def _post_install_summary(*, logger, params=None, **legacy_kwargs):
     """Thin shim forwarding to :func:`apm_cli.install.summary.render_post_install_summary`.
 
     Kept as a module-level alias so existing tests that
     ``@patch("apm_cli.commands.install._post_install_summary")`` continue
     to work after the extraction (microsoft/apm#1116, F5).
     """
-    from apm_cli.install.summary import render_post_install_summary
+    from apm_cli.install.summary import PostInstallSummaryParams, render_post_install_summary
 
-    render_post_install_summary(
-        logger=logger,
-        apm_count=apm_count,
-        mcp_count=mcp_count,
-        apm_diagnostics=apm_diagnostics,
-        force=force,
-        elapsed_seconds=elapsed_seconds,
-    )
+    if params is None:
+        legacy_params = _LegacyPostInstallSummaryParams(**legacy_kwargs)
+        params = PostInstallSummaryParams(
+            apm_count=legacy_params.apm_count,
+            mcp_count=legacy_params.mcp_count,
+            apm_diagnostics=legacy_params.apm_diagnostics,
+            force=legacy_params.force,
+            elapsed_seconds=legacy_params.elapsed_seconds,
+        )
+
+    render_post_install_summary(logger, params)

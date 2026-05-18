@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from ..adapters.client.base import McpServerRequest
 from ..factory import ClientFactory, PackageManagerFactory
 
 
@@ -89,7 +90,9 @@ def install_missing_dependencies(config_file="apm.yml", client_type="vscode"):
             if install_result:
                 # Configure the client to use the server
                 # For VSCode this updates the .vscode/mcp.json file in the project root
-                client_result = client.configure_mcp_server(server, server_name=server)
+                client_result = client.configure_mcp_server(
+                    server, McpServerRequest(server_name=server)
+                )
 
                 if client_result:
                     installed.append(server)

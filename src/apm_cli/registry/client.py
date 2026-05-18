@@ -8,6 +8,7 @@ from urllib.parse import quote, urlparse
 
 import requests
 
+from . import _client_search as _cs
 from ._helpers import (  # noqa: F401 – re-exported; callers import from this module
     _DEFAULT_CONNECT_TIMEOUT,
     _DEFAULT_READ_TIMEOUT,
@@ -340,135 +341,19 @@ class SimpleRegistryClient:
         return self.get_server(server_name)
 
     def get_server_by_name(self, name: str) -> dict[str, Any] | None:
-        """Find a server by its name using the search API.
+        """Find a server by its name using the search API."""
+        return _cs.get_server_by_name(self, name)
 
-        Args:
-            name (str): Name of the server to find.
+    def find_server_by_reference(self, reference: str) -> tuple[dict[str, Any] | None, str]:
+        """Find a server from a package reference (name, URL, or org/repo)."""
+        return _cs.find_server_by_reference(self, reference)
 
-        Returns:
-            Optional[Dict[str, Any]]: Server metadata dictionary or None if not found.
+    @staticmethod
+    def _extract_repository_name(reference: str) -> str | None:
+        """Extract a repository name from a URL."""
+        return _cs._extract_repository_name(reference)
 
-        Raises:
-            requests.RequestException: If the registry API request fails.
-        """
-        # Use search API to find by name - more efficient than listing all servers
-        search_results = self.search_servers(name)
-
-        # Look for an exact match in search results
-        for server in search_results:
-            if server.get("name") == name:
-                try:
-                    return self.get_server(server["name"])
-                except ValueError:
-                    continue
-
-        return None
-
-    def find_server_by_reference(self, reference: str) -> dict[str, Any] | None:
-        """Find a server by exact name match.
-
-        The legacy UUID strategy was removed because the MCP Registry v0.1
-        spec keys per-server lookup on serverName, not UUID. Old UUID-style
-        references silently route through search and produce no match,
-        which is acceptable per design ratification.
-
-        Args:
-            reference (str): Server reference (exact name or unqualified slug).
-
-        Returns:
-            Optional[Dict[str, Any]]: Server metadata dictionary or None if not found.
-
-        Raises:
-            requests.RequestException: If the registry API request fails.
-        """
-        # Use search API to find by name
-        search_results = self.search_servers(reference)
-
-        # Pass 1: exact full-name match (prevents slug collisions)
-        for server in search_results:
-            server_name = server.get("name", "")
-            if server_name == reference:
-                try:
-                    return self.get_server(server_name)
-                except ValueError:
-                    continue
-
-        # Pass 2: fuzzy slug match (only when reference has no namespace)
-        for server in search_results:
-            server_name = server.get("name", "")
-            if self._is_server_match(reference, server_name):
-                try:
-                    return self.get_server(server_name)
-                except ValueError:
-                    continue
-
-        # If not found by name, server is not in registry
-        return None
-
-    def _extract_repository_name(self, reference: str) -> str:
-        """Extract the repository name from various identifier formats.
-
-        This method handles various naming patterns by extracting the part after
-        the last slash, which typically represents the actual server/repository name.
-
-        Examples:
-        - "io.github.github/github-mcp-server" -> "github-mcp-server"
-        - "abc.dllde.io/some-server" -> "some-server"
-        - "adb.ok/another-server" -> "another-server"
-        - "github/github-mcp-server" -> "github-mcp-server"
-        - "github-mcp-server" -> "github-mcp-server"
-
-        Args:
-            reference (str): Server reference in various formats.
-
-        Returns:
-            str: Repository name suitable for API search.
-        """
-        # If there's a slash, extract the part after the last slash
-        # This works for any pattern like domain.tld/server, owner/repo, etc.
-        if "/" in reference:
-            return reference.split("/")[-1]
-
-        # Already a simple repo name
-        return reference
-
-    def _is_server_match(self, reference: str, server_name: str) -> bool:
-        """Check if a reference matches a server name using common patterns.
-
-        Matching rules:
-        1. Exact string match always wins.
-        2. Qualified references (contain '/') match if the server name ends
-           with the reference (e.g. 'github/github-mcp-server' matches
-           'io.github.github/github-mcp-server'). The match must happen at
-           a namespace boundary (preceded by '.' or start-of-string) to
-           prevent slug collisions like 'microsoftdocs/mcp' matching
-           'com.supabase/mcp'.
-        3. Unqualified references fall back to slug (last segment) comparison.
-
-        Args:
-            reference (str): Original reference from user.
-            server_name (str): Server name from registry.
-
-        Returns:
-            bool: True if they represent the same server.
-        """
-        # Direct match
-        if reference == server_name:
-            return True
-
-        if "/" in reference:
-            # Qualified reference: allow suffix match at a namespace boundary.
-            # e.g. "github/github-mcp-server" matches "io.github.github/github-mcp-server"
-            # but "microsoftdocs/mcp" must NOT match "com.supabase/mcp".
-            if server_name.endswith(reference):
-                prefix = server_name[: -len(reference)]
-                # Valid boundary: empty (exact), or ends with '.' (namespace separator)
-                if prefix == "" or prefix.endswith("."):
-                    return True
-            return False
-
-        # Unqualified reference: fall back to slug comparison
-        ref_repo = self._extract_repository_name(reference)
-        server_repo = self._extract_repository_name(server_name)
-
-        return ref_repo == server_repo
+    @staticmethod
+    def _is_server_match(reference: str, server_name: str) -> bool:
+        """Check whether *reference* matches *server_name*."""
+        return _cs._is_server_match(reference, server_name)

@@ -1,14 +1,8 @@
-"""Policy checks for organisational governance enforcement.
-
-These checks run WITH a policy file and validate that the project's manifest,
-lockfile, and on-disk state comply with the organisation's declared policies.
-They are always run in addition to the baseline checks in ``ci_checks``.
-"""
-
 from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..models import CheckResult, CIAuditResult
@@ -50,72 +44,53 @@ _DEFAULT_GOVERNANCE_DIRS = [
 _MAX_UNMANAGED_SCAN_FILES = 10_000
 
 
+@dataclass(frozen=True, slots=True)
+class PolicyCheckOpts:
+    """Options for run_dependency_policy_checks."""
+
+    lockfile: LockFile | None = None
+    mcp_deps: list | None = None
+    effective_target: str | None = None
+    fetch_outcome: str | None = None
+    fail_fast: bool = True
+    manifest_includes = _INCLUDES_NOT_PROVIDED
+
+
 def run_dependency_policy_checks(
     deps_to_install,
-    *,
-    lockfile=None,
     policy: ApmPolicy,
-    mcp_deps=None,
-    effective_target: str | None = None,
-    fetch_outcome: str | None = None,
-    fail_fast: bool = True,
-    manifest_includes=_INCLUDES_NOT_PROVIDED,
+    opts: PolicyCheckOpts | None = None,
+    **kwargs,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
-
-    Used by both ``apm audit --ci`` (after resolving from disk) and the
-    install pipeline ``policy_gate`` phase.  Reuses the private ``_check_*``
-    helpers -- no logic duplication.
 
     Parameters
     ----------
     deps_to_install:
-        Iterable of ``DependencyReference`` (the resolved set, including
-        transitives).  This is what ``InstallContext.deps_to_install``
-        contains after the resolve phase.
-    lockfile:
-        An ``ApmLockfile`` / ``LockFile`` instance, or ``None``.  Needed
-        for deployed-files and version-pin checks.
+        Iterable of ``DependencyReference``.
     policy:
         The effective :class:`ApmPolicy` to enforce.
-    mcp_deps:
-        Iterable of ``MCPDependency`` objects, or ``None``.  When the
-        resolved set includes MCP entries they are checked against
-        ``policy.mcp``.
-    effective_target:
-        The post-targets-phase compilation target string, or ``None``.
-        When ``None`` target/compilation checks are **skipped** (they
-        belong to the separate W2-target-aware call).
-    fetch_outcome:
-        Human-readable label for diagnostic context (e.g.
-        ``"cached"``, ``"fetched"``).  Currently informational only.
-    fail_fast:
-        Stop after the first failing check (default ``True``).
-    manifest_includes:
-        The parsed value of the manifest's ``includes:`` field
-        (``None``, ``"auto"``, or a list of paths).  When omitted,
-        the ``explicit-includes`` check is skipped -- callers that
-        do not have manifest information available (e.g. dep-only
-        seams) can leave it unset.
-
-    Returns
-    -------
-    CIAuditResult
-        Contains individual :class:`CheckResult` entries.  The caller
-        decides how to map ``enforcement`` level (block vs warn) onto
-        these results.
-
-    Notes
-    -----
-    ``require_resolution: project-wins`` semantics (rubber-duck I7):
-    version-pin mismatches are downgraded to warnings; missing required
-    packages still block; inherited org deny still wins.  This is
-    handled inside ``_check_required_package_version`` which already
-    reads ``policy.dependencies.require_resolution``.
-
-    Does **not** load ``apm.yml`` from disk -- the caller supplies the
-    resolved dep set directly.
+    opts:
+        Optional dataclass with all other parameters. When provided,
+        kwargs are ignored.
+    **kwargs:
+        Backward-compatible parameters: lockfile, mcp_deps,
+        effective_target, fetch_outcome, fail_fast, manifest_includes.
     """
+    # Resolve opts for backward compatibility
+    if opts is not None:
+        lockfile = opts.lockfile
+        mcp_deps = opts.mcp_deps
+        effective_target = opts.effective_target
+        fail_fast = opts.fail_fast
+        manifest_includes = opts.manifest_includes
+    else:
+        lockfile = kwargs.get("lockfile")
+        mcp_deps = kwargs.get("mcp_deps")
+        effective_target = kwargs.get("effective_target")
+        fail_fast = kwargs.get("fail_fast", True)
+        manifest_includes = kwargs.get("manifest_includes", _INCLUDES_NOT_PROVIDED)
+
     result = CIAuditResult()
     deps_list = list(deps_to_install)
     mcp_list = list(mcp_deps) if mcp_deps is not None else []
@@ -125,62 +100,68 @@ def run_dependency_policy_checks(
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # -- Dependency checks (1-6) -----------------------------------
-    if _run(_check_dependency_allowlist(deps_list, policy.dependencies)):
-        return result
-    if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
-        return result
-    if _run(_check_required_packages(deps_list, policy.dependencies)):
-        return result
-    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
-        return result
-    if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
-        return result
-    if _run(_check_transitive_depth(lockfile, policy.dependencies)):
+    # Run dependency checks
+    if _run_dependency_checks(result, deps_list, lockfile, policy, _run):
         return result
 
-    # -- MCP checks (7-10) ----------------------------------------
-    # When mcp_deps is None (not provided), skip MCP checks entirely.
-    # When mcp_deps is an empty list (provided but no MCP deps), still
-    # run MCP checks so they report "no X configured" for completeness.
+    # Run MCP checks if applicable
     if mcp_deps is not None:
-        if _run(_check_mcp_allowlist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_denylist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_transport(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
+        if _run_mcp_checks(result, mcp_list, policy, _run):
             return result
 
-    # -- Target / compilation checks (11-13) -----------------------
-    # Skipped when effective_target is None -- those run in a separate
-    # post-targets call (W2-target-aware).
+    # Run target checks if applicable
     if effective_target is not None:
-        # Build a minimal raw_yml dict so _check_compilation_target
-        # sees the effective (possibly CLI-overridden) target value
-        # rather than what is literally on disk.
         synthetic_yml = {"target": effective_target}
         if _run(_check_compilation_target(synthetic_yml, policy.compilation)):
             return result
 
-    # -- Manifest-level explicit-includes check --------------------
-    # Only run when the caller supplied the manifest includes value.
-    # Dep-only seams that lack manifest context (legacy callers) skip
-    # this check; the install pipeline and ``apm audit`` wrappers both
-    # supply it.
+    # Run explicit-includes check if applicable
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
         if _run(_check_includes_explicit(manifest_includes, policy.manifest)):
             return result
 
-    # NOTE: compilation strategy, source attribution, manifest fields,
-    # scripts policy, and unmanaged files are disk-level / manifest-level
-    # concerns.  They are NOT included in the resolved-dep seam because
-    # the install pipeline does not have the raw manifest at this point
-    # and they are already covered by the full ``run_policy_checks``
-    # wrapper that ``apm audit --ci`` calls.
-
     return result
+
+
+def _run_dependency_checks(
+    result: CIAuditResult,
+    deps_list: list,
+    lockfile,
+    policy: ApmPolicy,
+    _run,
+) -> bool:
+    """Run dependency checks; returns True if should stop."""
+    if _run(_check_dependency_allowlist(deps_list, policy.dependencies)):
+        return True
+    if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
+        return True
+    if _run(_check_required_packages(deps_list, policy.dependencies)):
+        return True
+    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
+        return True
+    if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
+        return True
+    if _run(_check_transitive_depth(lockfile, policy.dependencies)):
+        return True
+    return False
+
+
+def _run_mcp_checks(
+    result: CIAuditResult,
+    mcp_list: list,
+    policy: ApmPolicy,
+    _run,
+) -> bool:
+    """Run MCP checks; returns True if should stop."""
+    if _run(_check_mcp_allowlist(mcp_list, policy.mcp)):
+        return True
+    if _run(_check_mcp_denylist(mcp_list, policy.mcp)):
+        return True
+    if _run(_check_mcp_transport(mcp_list, policy.mcp)):
+        return True
+    if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
+        return True
+    return False
 
 
 def run_policy_checks(
@@ -287,22 +268,8 @@ def run_policy_checks(
     return result
 
 
-def _check_unmanaged_files(
-    project_root: Path,
-    lock: LockFile | None,
-    policy: UnmanagedFilesPolicy,
-) -> CheckResult:
-    """Check 16: no untracked files in governance directories."""
-    if policy.effective_action == "ignore":
-        return CheckResult(
-            name="unmanaged-files",
-            passed=True,
-            message="Unmanaged files check disabled (action: ignore)",
-        )
-
-    dirs = policy.directories if policy.directories else _DEFAULT_GOVERNANCE_DIRS
-
-    # Build set of deployed files AND directory prefixes from lockfile
+def _build_deployed_files_set(lock: LockFile | None) -> tuple[set, tuple]:
+    """Build set of deployed files and directory prefixes from lockfile."""
     deployed: set = set()
     deployed_dir_prefixes: list = []
     if lock:
@@ -312,14 +279,20 @@ def _check_unmanaged_files(
                 deployed.add(cleaned)
                 if f.endswith("/"):
                     deployed_dir_prefixes.append(cleaned + "/")
+    return deployed, tuple(deployed_dir_prefixes)
 
-    dir_prefix_tuple = tuple(deployed_dir_prefixes)
 
-    policy_checks_pkg = sys.modules.get("apm_cli.policy.policy_checks")
-    max_scan_files = getattr(
-        policy_checks_pkg, "_MAX_UNMANAGED_SCAN_FILES", _MAX_UNMANAGED_SCAN_FILES
-    )
+def _scan_governance_dirs(
+    project_root: Path,
+    dirs: list,
+    deployed: set,
+    dir_prefix_tuple: tuple,
+    max_scan_files: int,
+) -> tuple[list[str], bool]:
+    """Scan governance directories for unmanaged files.
 
+    Returns tuple of (unmanaged_files, cap_hit).
+    """
     unmanaged: list[str] = []
     files_scanned = 0
     cap_hit = False
@@ -340,7 +313,16 @@ def _check_unmanaged_files(
                     unmanaged.append(rel)
         if cap_hit:
             break
+    return unmanaged, cap_hit
 
+
+def _build_unmanaged_result(
+    unmanaged: list[str],
+    cap_hit: bool,
+    max_scan_files: int,
+    policy: UnmanagedFilesPolicy,
+) -> CheckResult:
+    """Build final check result for unmanaged files."""
     if cap_hit:
         return CheckResult(
             name="unmanaged-files",
@@ -374,3 +356,32 @@ def _check_unmanaged_files(
         message=f"{len(unmanaged)} unmanaged file(s) in governance directories",
         details=unmanaged,
     )
+
+
+def _check_unmanaged_files(
+    project_root: Path,
+    lock: LockFile | None,
+    policy: UnmanagedFilesPolicy,
+) -> CheckResult:
+    """Check 16: no untracked files in governance directories."""
+    if policy.effective_action == "ignore":
+        return CheckResult(
+            name="unmanaged-files",
+            passed=True,
+            message="Unmanaged files check disabled (action: ignore)",
+        )
+
+    dirs = policy.directories if policy.directories else _DEFAULT_GOVERNANCE_DIRS
+
+    deployed, dir_prefix_tuple = _build_deployed_files_set(lock)
+
+    policy_checks_pkg = sys.modules.get("apm_cli.policy.policy_checks")
+    max_scan_files = getattr(
+        policy_checks_pkg, "_MAX_UNMANAGED_SCAN_FILES", _MAX_UNMANAGED_SCAN_FILES
+    )
+
+    unmanaged, cap_hit = _scan_governance_dirs(
+        project_root, dirs, deployed, dir_prefix_tuple, max_scan_files
+    )
+
+    return _build_unmanaged_result(unmanaged, cap_hit, max_scan_files, policy)

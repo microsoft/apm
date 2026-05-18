@@ -121,6 +121,46 @@ def _integrate_phase_c_results(
                     queued_keys.add(sub_dep.get_unique_key())
 
 
+def _enqueue_root_deps(
+    root_package: APMPackage,
+    processing_queue: deque,
+    queued_keys: set,
+) -> None:
+    """Queue root-level prod and dev dependencies for BFS processing.
+
+    Validates that no root dependency uses the ``git: parent`` inheritance
+    form (which is only valid for transitive dependencies), then appends
+    each dependency to *processing_queue* and records its key in
+    *queued_keys*.  Prod entries are added first; if a dep appears in both
+    prod and dev, the prod entry wins and the dev entry is skipped.
+
+    Raises:
+        ValueError: If any root dependency uses ``git: parent``.
+    """
+    for dep_ref in root_package.get_apm_dependencies():
+        if dep_ref.is_parent_repo_inheritance:
+            raise ValueError(
+                "git: parent cannot be used in the root apm.yml manifest; "
+                "specify an explicit repository URL. "
+                "The git: parent form is only valid for transitive dependencies."
+            )
+        processing_queue.append((dep_ref, 1, None, False))
+        queued_keys.add(dep_ref.get_unique_key())
+
+    for dep_ref in root_package.get_dev_apm_dependencies():
+        if dep_ref.is_parent_repo_inheritance:
+            raise ValueError(
+                "git: parent cannot be used in the root apm.yml manifest; "
+                "specify an explicit repository URL. "
+                "The git: parent form is only valid for transitive dependencies."
+            )
+        key = dep_ref.get_unique_key()
+        if key not in queued_keys:
+            processing_queue.append((dep_ref, 1, None, True))
+            queued_keys.add(key)
+        # If already queued as prod, prod wins — skip
+
+
 def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
     """
     Build complete tree of all dependencies and sub-dependencies.
@@ -159,31 +199,7 @@ def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
     queued_keys: set[str] = set()
 
     # Add root dependencies to queue
-    root_deps = root_package.get_apm_dependencies()
-    for dep_ref in root_deps:
-        if dep_ref.is_parent_repo_inheritance:
-            raise ValueError(
-                "git: parent cannot be used in the root apm.yml manifest; "
-                "specify an explicit repository URL. "
-                "The git: parent form is only valid for transitive dependencies."
-            )
-        processing_queue.append((dep_ref, 1, None, False))
-        queued_keys.add(dep_ref.get_unique_key())
-
-    # Add root devDependencies to queue (marked is_dev=True)
-    root_dev_deps = root_package.get_dev_apm_dependencies()
-    for dep_ref in root_dev_deps:
-        if dep_ref.is_parent_repo_inheritance:
-            raise ValueError(
-                "git: parent cannot be used in the root apm.yml manifest; "
-                "specify an explicit repository URL. "
-                "The git: parent form is only valid for transitive dependencies."
-            )
-        key = dep_ref.get_unique_key()
-        if key not in queued_keys:
-            processing_queue.append((dep_ref, 1, None, True))
-            queued_keys.add(key)
-        # If already queued as prod, prod wins — skip
+    _enqueue_root_deps(root_package, processing_queue, queued_keys)
 
     # Process dependencies breadth-first with level-batched parallelism.
     #

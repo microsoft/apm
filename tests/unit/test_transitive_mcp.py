@@ -1286,8 +1286,9 @@ class TestCodexProjectScopedMCP:
 
         assert count == 1
         mock_install_runtime.assert_called_once()
-        assert mock_install_runtime.call_args.kwargs["project_root"] == tmp_path
-        assert mock_install_runtime.call_args.kwargs["user_scope"] is False
+        opts = mock_install_runtime.call_args.args[2]
+        assert opts.project_root == tmp_path
+        assert opts.user_scope is False
 
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)

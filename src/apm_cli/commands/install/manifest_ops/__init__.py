@@ -1,4 +1,7 @@
+# pylint: disable=duplicate-code
 """APM install command and dependency installation engine."""
+
+from __future__ import annotations
 
 import builtins
 import os
@@ -106,7 +109,7 @@ from ....utils.console import _rich_error as _rich_error
 from ....utils.console import _rich_success as _rich_success
 
 # Re-export complex function from helper module
-from .package_resolver import _resolve_package_references
+from .package_resolver import _resolve_package_references, _ResolvePackageReferencesRequest
 
 # ---------------------------------------------------------------------------
 # Manifest snapshot + rollback (W2-pkg-rollback, #827)
@@ -209,57 +212,19 @@ def _check_package_conflicts(current_deps):
     return existing_identities
 
 
-def _merge_packages_into_yml(
-    validated_packages,
-    apm_yml_entries,
-    current_deps,
-    data,
-    dep_section,
-    apm_yml_path,
-    *,
-    dev=False,
-    logger=None,
-):
-    """Append *validated_packages* to the dependency list and write apm.yml.
-
-    Mutates *current_deps* in place and persists the updated manifest to
-    *apm_yml_path*.
-    """
-    dep_label = "devDependencies" if dev else "apm.yml"
-    for package in validated_packages:
-        current_deps.append(apm_yml_entries.get(package, package))
-        if logger:
-            logger.verbose_detail(f"Added {package} to {dep_label}")
-
-    # Update dependencies
-    data[dep_section]["apm"] = current_deps
-
-    # Write back to apm.yml
-    try:
-        from ....utils.yaml_io import dump_yaml
-
-        dump_yaml(data, apm_yml_path)
-        if logger:
-            logger.success(
-                f"Updated {APM_YML_FILENAME} with {len(validated_packages)} new package(s)"
-            )
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed to write {APM_YML_FILENAME}: {e}")
-        else:
-            _rich_error(f"Failed to write {APM_YML_FILENAME}: {e}")
-        sys.exit(1)
+from ._manifest_io import (
+    _load_apm_yml_data,
+    _log_dry_run_additions,
+    _merge_packages_into_yml,
+    _MergeYmlContext,
+    _ValidationAddRequest,
+)
 
 
 def _validate_and_add_packages_to_apm_yml(
     packages,
-    dry_run=False,
-    dev=False,
-    logger=None,
-    manifest_path=None,
-    auth_resolver=None,
-    scope=None,
-    allow_insecure=False,
+    request: _ValidationAddRequest | None = None,
+    **legacy_kwargs,
 ):
     """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
 
@@ -281,22 +246,16 @@ def _validate_and_add_packages_to_apm_yml(
     """
     from pathlib import Path
 
-    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
+    request = request or _ValidationAddRequest(**legacy_kwargs)
+    dry_run = request.dry_run
+    logger = request.logger
+    apm_yml_path = request.manifest_path or Path(APM_YML_FILENAME)
 
     # Read current apm.yml
-    try:
-        from ....utils.yaml_io import load_yaml
-
-        data = load_yaml(apm_yml_path) or {}
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
-        else:
-            _rich_error(f"Failed to read {APM_YML_FILENAME}: {e}")
-        sys.exit(1)
+    data = _load_apm_yml_data(apm_yml_path, logger)
 
     # Ensure dependencies structure exists
-    dep_section = "devDependencies" if dev else "dependencies"
+    dep_section = "devDependencies" if request.dev else "dependencies"
     if dep_section not in data:
         data[dep_section] = {}
     if "apm" not in data[dep_section]:
@@ -319,10 +278,12 @@ def _validate_and_add_packages_to_apm_yml(
         packages,
         current_deps,
         existing_identities,
-        auth_resolver=auth_resolver,
-        logger=logger,
-        scope=scope,
-        allow_insecure=allow_insecure,
+        _ResolvePackageReferencesRequest(
+            auth_resolver=request.auth_resolver,
+            logger=logger,
+            scope=request.scope,
+            allow_insecure=request.allow_insecure,
+        ),
     )
 
     outcome = _ValidationOutcome(
@@ -356,22 +317,21 @@ def _validate_and_add_packages_to_apm_yml(
         return [], outcome
 
     if dry_run:
-        if logger:
-            logger.progress(f"Dry run: Would add {len(validated_packages)} package(s) to apm.yml")
-            for pkg in validated_packages:
-                logger.verbose_detail(f"  + {pkg}")
+        _log_dry_run_additions(validated_packages, logger)
         return validated_packages, outcome
 
     # Persist validated packages to apm.yml
     _merge_packages_into_yml(
         validated_packages,
-        _apm_yml_entries,
-        current_deps,
-        data,
-        dep_section,
-        apm_yml_path,
-        dev=dev,
-        logger=logger,
+        _MergeYmlContext(
+            apm_yml_entries=_apm_yml_entries,
+            current_deps=current_deps,
+            data=data,
+            dep_section=dep_section,
+            apm_yml_path=apm_yml_path,
+            dev=request.dev,
+            logger=logger,
+        ),
     )
 
     return validated_packages, outcome

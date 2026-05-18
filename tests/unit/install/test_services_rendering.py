@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.install.services.primitives import _IntegratorSet
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 # ---------------------------------------------------------------------------
@@ -73,17 +74,20 @@ def _make_pkg_info(tmp_path: Path) -> MagicMock:
     return pkg
 
 
-def _integrator_kwargs(prompt_integrator: MagicMock) -> dict[str, Any]:
+def _integrator_kwargs(prompt_integrator: MagicMock) -> tuple[_IntegratorSet, dict[str, Any]]:
     skill_integrator = MagicMock()
     skill_integrator.integrate_package_skill.return_value = _zero_skill_result()
-    return {
-        "prompt_integrator": MagicMock(),
-        "agent_integrator": prompt_integrator,
-        "skill_integrator": skill_integrator,
-        "instruction_integrator": MagicMock(),
+    integrators = _IntegratorSet(
+        prompt_integrator=MagicMock(),
+        agent_integrator=prompt_integrator,
+        skill_integrator=skill_integrator,
+        instruction_integrator=MagicMock(),
+    )
+    extra: dict[str, Any] = {
         "command_integrator": MagicMock(),
         "hook_integrator": MagicMock(),
     }
+    return integrators, extra
 
 
 def _prompts_only_dispatch() -> dict[str, Any]:
@@ -140,7 +144,7 @@ class TestMultiTargetCollapseRule:
         target_pool = ["copilot", "claude", "cursor", "codex"]
         targets = [KNOWN_TARGETS[name] for name in target_pool[:n_targets]]
         prompt_integrator = _make_integrator_returning(files_per_target)
-        kwargs = _integrator_kwargs(prompt_integrator)
+        integrators, extra = _integrator_kwargs(prompt_integrator)
         pkg = _make_pkg_info(tmp_path)
         logger = MagicMock()
 
@@ -158,7 +162,8 @@ class TestMultiTargetCollapseRule:
                 ctx=_ctx(verbose=verbose),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=integrators,
+                **extra,
             )
 
         return _logger_lines(logger)
@@ -236,7 +241,7 @@ class TestAdoptedFileVisibility:
         target_pool = ["copilot", "claude", "cursor", "codex"]
         targets = [KNOWN_TARGETS[name] for name in target_pool[: len(files_per_target)]]
         integrator = _make_integrator_returning(files_per_target, adopted_per_target)
-        kwargs = _integrator_kwargs(integrator)
+        integrators, extra = _integrator_kwargs(integrator)
         pkg = _make_pkg_info(tmp_path)
         logger = MagicMock()
 
@@ -254,7 +259,8 @@ class TestAdoptedFileVisibility:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=integrators,
+                **extra,
             )
         return _logger_lines(logger)
 
@@ -304,7 +310,7 @@ class TestWarmCacheAnnotation:
 
         targets = [KNOWN_TARGETS["copilot"]]
         prompt_integrator = _make_integrator_returning([0])  # zero files
-        kwargs = _integrator_kwargs(prompt_integrator)
+        integrators, extra = _integrator_kwargs(prompt_integrator)
         pkg = _make_pkg_info(tmp_path)
         logger = MagicMock()
 
@@ -322,7 +328,8 @@ class TestWarmCacheAnnotation:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=integrators,
+                **extra,
             )
 
         lines = _logger_lines(logger)
@@ -333,7 +340,7 @@ class TestWarmCacheAnnotation:
 
         targets = [KNOWN_TARGETS["copilot"]]
         prompt_integrator = _make_integrator_returning([2])
-        kwargs = _integrator_kwargs(prompt_integrator)
+        integrators, extra = _integrator_kwargs(prompt_integrator)
         pkg = _make_pkg_info(tmp_path)
         logger = MagicMock()
 
@@ -351,7 +358,8 @@ class TestWarmCacheAnnotation:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=integrators,
+                **extra,
             )
 
         lines = _logger_lines(logger)
@@ -362,13 +370,13 @@ class TestWarmCacheAnnotation:
 
         targets = [KNOWN_TARGETS["copilot"]]
         prompt_integrator = _make_integrator_returning([0])
-        kwargs = _integrator_kwargs(prompt_integrator)
+        integrators, extra = _integrator_kwargs(prompt_integrator)
         # Override the skill integrator to report a skill was created.
         skill_result = MagicMock()
         skill_result.target_paths = []
         skill_result.skill_created = True
         skill_result.sub_skills_promoted = 0
-        kwargs["skill_integrator"].integrate_package_skill.return_value = skill_result
+        integrators.skill_integrator.integrate_package_skill.return_value = skill_result
         pkg = _make_pkg_info(tmp_path)
         logger = MagicMock()
 
@@ -386,7 +394,8 @@ class TestWarmCacheAnnotation:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=integrators,
+                **extra,
             )
 
         lines = _logger_lines(logger)
@@ -404,7 +413,7 @@ class TestAggregateCounterPreserved:
 
         targets = [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]]
         prompt_integrator = _make_integrator_returning([3, 4])
-        kwargs = _integrator_kwargs(prompt_integrator)
+        integrators, extra = _integrator_kwargs(prompt_integrator)
         pkg = _make_pkg_info(tmp_path)
         logger = MagicMock()
 
@@ -422,7 +431,8 @@ class TestAggregateCounterPreserved:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=integrators,
+                **extra,
             )
 
         assert result["agents"] == 7

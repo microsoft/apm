@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Hook integration functionality for APM packages.
 
 Integrates hook JSON files and their referenced scripts during package
@@ -70,6 +71,7 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         config_filename="settings.json",
         target_key="claude",
         require_dir=False,
+        schema_strict=True,
     ),
     "cursor": _MergeHookConfig(
         config_filename="hooks.json",
@@ -100,6 +102,69 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
     "gemini-hooks": {"gemini"},
     "windsurf-hooks": {"windsurf"},
 }
+
+
+def _build_hook_prefixes(source) -> tuple[str, ...]:
+    """Return the tuple of hook path prefixes for active targets."""
+    prefixes = []
+    for target in source:
+        if not target.supports("hooks"):
+            continue
+        mapping = target.primitives["hooks"]
+        effective_root = mapping.deploy_root or target.root_dir
+        prefixes.append(f"{effective_root}/hooks/")
+    return tuple(prefixes)
+
+
+def _remove_managed_hook_files(
+    self, managed_files, *, project_root: Path, hook_prefixes: tuple[str, ...]
+) -> dict[str, int]:
+    """Remove manifest-tracked hook files and clean empty parents."""
+    stats: dict[str, int] = {"files_removed": 0, "errors": 0}
+    deleted: list[Path] = []
+    for rel_path in managed_files:
+        normalized = rel_path.replace("\\", "/")
+        if not normalized.startswith(hook_prefixes) or ".." in rel_path:
+            continue
+        target_file = project_root / rel_path
+        if not (target_file.exists() and target_file.is_file()):
+            continue
+        try:
+            target_file.unlink()
+            stats["files_removed"] += 1
+            deleted.append(target_file)
+        except Exception:
+            stats["errors"] += 1
+    self.cleanup_empty_parents(deleted, stop_at=project_root)
+    return stats
+
+
+def _remove_legacy_hook_files(project_root: Path) -> dict[str, int]:
+    """Remove legacy `*-apm.json` hook files."""
+    stats: dict[str, int] = {"files_removed": 0, "errors": 0}
+    hooks_dir = project_root / ".github" / "hooks"
+    if not hooks_dir.exists():
+        return stats
+    for hook_file in hooks_dir.glob("*-apm.json"):
+        try:
+            hook_file.unlink()
+            stats["files_removed"] += 1
+        except Exception:
+            stats["errors"] += 1
+    return stats
+
+
+def _clean_merged_hook_configs(self, *, source, project_root: Path, stats: dict[str, int]) -> None:
+    """Remove APM-owned entries from shared hook config files."""
+    for target in source:
+        config = _MERGE_HOOK_TARGETS.get(target.name)
+        if config is None:
+            continue
+        json_path = project_root / target.root_dir / config.config_filename
+        if target.name == "claude":
+            _clean_claude_apm_hooks(json_path, stats)
+        else:
+            self._clean_apm_entries_from_json(json_path, stats)
 
 
 def find_hook_files(self, package_path: Path) -> list[Path]:
@@ -150,71 +215,21 @@ def sync_integration(
     managed_files: set | None = None,
     targets=None,
 ) -> dict:
-    """Remove APM-managed hook files.
-
-    Uses *managed_files* (relative paths) to surgically remove only
-    APM-tracked files.  Falls back to legacy ``*-apm.json`` glob when
-    *managed_files* is ``None``.
-
-    **Never** calls ``shutil.rmtree``.
-
-    Also cleans APM entries from merged-hook JSON files via the
-    ``_apm_source`` marker.
-    """
+    """Remove APM-managed hook files."""
     from ..targets import KNOWN_TARGETS
 
-    stats: dict[str, int] = {"files_removed": 0, "errors": 0}
-
-    # Derive hook prefixes dynamically from targets
+    del apm_package
     source = targets if targets is not None else list(KNOWN_TARGETS.values())
-    hook_prefixes = []
-    for t in source:
-        if t.supports("hooks"):
-            sm = t.primitives["hooks"]
-            effective_root = sm.deploy_root or t.root_dir
-            hook_prefixes.append(f"{effective_root}/hooks/")
-    hook_prefix_tuple = tuple(hook_prefixes)
-
     if managed_files is not None:
-        # Manifest-based removal -- only remove tracked files
-        deleted: list = []
-        for rel_path in managed_files:
-            normalized = rel_path.replace("\\", "/")
-            if not normalized.startswith(hook_prefix_tuple):
-                continue
-            if ".." in rel_path:
-                continue
-            target_file = project_root / rel_path
-            if target_file.exists() and target_file.is_file():
-                try:
-                    target_file.unlink()
-                    stats["files_removed"] += 1
-                    deleted.append(target_file)
-                except Exception:
-                    stats["errors"] += 1
-        # Batch parent cleanup -- single bottom-up pass
-        self.cleanup_empty_parents(deleted, stop_at=project_root)
+        stats = _remove_managed_hook_files(
+            self,
+            managed_files,
+            project_root=project_root,
+            hook_prefixes=_build_hook_prefixes(source),
+        )
     else:
-        # Legacy fallback  -- glob for old -apm suffix files
-        hooks_dir = project_root / ".github" / "hooks"
-        if hooks_dir.exists():
-            for hook_file in hooks_dir.glob("*-apm.json"):
-                try:
-                    hook_file.unlink()
-                    stats["files_removed"] += 1
-                except Exception:
-                    stats["errors"] += 1
-
-    # Clean APM entries from merged-hook JSON configs (uses _apm_source marker)
-    for t in source:
-        config = _MERGE_HOOK_TARGETS.get(t.name)
-        if config is not None:
-            json_path = project_root / t.root_dir / config.config_filename
-            if t.name == "claude":
-                _clean_claude_apm_hooks(json_path, stats)
-            else:
-                self._clean_apm_entries_from_json(json_path, stats)
-
+        stats = _remove_legacy_hook_files(project_root)
+    _clean_merged_hook_configs(self, source=source, project_root=project_root, stats=stats)
     return stats
 
 
@@ -224,12 +239,47 @@ def _clean_claude_apm_hooks(json_path: Path, stats: dict[str, int]) -> None:
     Handles Claude's nested matcher-group structure: filters out top-level
     matcher dicts that carry an ``_apm_source`` marker, then cleans up
     empty event arrays and the ``hooks`` key itself.
+
+    Because Claude uses ``schema_strict`` mode, ``_apm_source`` markers are
+    stored in a sidecar file (``apm-hooks.json``) rather than inline.  This
+    function loads the sidecar first, re-injects the markers into the
+    in-memory hooks, filters them out, writes back without markers, and
+    finally deletes the sidecar.
     """
     if not json_path.exists():
         return
     try:
         with open(json_path, encoding="utf-8") as f:
             settings = json.load(f)
+
+        # Load sidecar to restore _apm_source markers
+        from .merge_config import _APM_HOOKS_SIDECAR
+
+        sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
+        sidecar_data: dict = {}
+        if sidecar_path.exists():
+            try:
+                with open(sidecar_path, encoding="utf-8") as sf:
+                    _raw = json.load(sf)
+                if isinstance(_raw, dict):
+                    sidecar_data = _raw
+                else:
+                    _log.warning(
+                        "Sidecar file %s contains non-dict JSON; treating as empty.",
+                        sidecar_path,
+                    )
+            except (json.JSONDecodeError, OSError) as exc:
+                _log.warning(
+                    "Failed to read sidecar %s: %s; treating as empty.",
+                    sidecar_path,
+                    exc,
+                )
+
+        # Re-inject _apm_source from sidecar
+        if sidecar_data and "hooks" in settings:
+            from ._sidecar import _reinject_apm_source_from_sidecar
+
+            _reinject_apm_source_from_sidecar(settings["hooks"], sidecar_data)
 
         if "hooks" not in settings:
             return
@@ -253,6 +303,14 @@ def _clean_claude_apm_hooks(json_path: Path, stats: dict[str, int]) -> None:
                 json.dump(settings, f, indent=2)
                 f.write("\n")
             stats["files_removed"] += 1
+
+            # Clean up sidecar
+            if sidecar_path.exists():
+                sidecar_path.unlink()
+
+        # Remove stale sidecar when no hooks section remains
+        if sidecar_path.exists() and "hooks" not in settings:
+            sidecar_path.unlink()
     except (json.JSONDecodeError, OSError):
         stats["errors"] += 1
 

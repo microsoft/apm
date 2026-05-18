@@ -9,6 +9,7 @@ operations to it (Facade/Delegate pattern).
 
 import random
 import time
+from dataclasses import dataclass
 
 import requests
 
@@ -20,6 +21,46 @@ from ...utils.github_host import (
 )
 from ..host_backends import backend_for
 from .class_ import _debug
+
+
+def _check_rate_limited_by_403(response: requests.Response) -> bool:
+    """Return True if a 403 response signals primary-rate-limit exhaustion."""
+    if response.status_code != 403:
+        return False
+    try:
+        remaining = response.headers.get("X-RateLimit-Remaining")
+        if remaining is not None and int(remaining) == 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
+
+
+def _calc_rate_limit_wait(response: requests.Response, attempt: int) -> float:
+    """Compute how long to wait (seconds) when rate-limited."""
+    retry_after = response.headers.get("Retry-After")
+    reset_at = response.headers.get("X-RateLimit-Reset")
+    if retry_after:
+        try:
+            return min(float(retry_after), 60)
+        except (TypeError, ValueError):
+            pass
+    elif reset_at:
+        try:
+            return max(0, min(int(reset_at) - time.time(), 60))
+        except (TypeError, ValueError):
+            pass
+    return min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
+
+
+def _log_rate_limit_proximity(response: requests.Response) -> None:
+    """Log a debug warning when GitHub API quota is nearly exhausted."""
+    remaining = response.headers.get("X-RateLimit-Remaining")
+    try:
+        if remaining and int(remaining) < 10:
+            _debug(f"GitHub API rate limit low: {remaining} requests remaining")
+    except (TypeError, ValueError):
+        pass
 
 
 def resilient_get(
@@ -49,34 +90,13 @@ def resilient_get(
         try:
             response = requests.get(url, headers=headers, timeout=timeout)
 
-            # Handle rate limiting -- GitHub returns 429 for secondary limits
-            # and 403 with X-RateLimit-Remaining: 0 for primary limits.
             is_rate_limited = response.status_code in (429, 503)
-            if not is_rate_limited and response.status_code == 403:
-                try:
-                    remaining = response.headers.get("X-RateLimit-Remaining")
-                    if remaining is not None and int(remaining) == 0:
-                        is_rate_limited = True
-                except (TypeError, ValueError):
-                    pass
+            if not is_rate_limited:
+                is_rate_limited = _check_rate_limited_by_403(response)
 
             if is_rate_limited:
                 last_response = response
-                retry_after = response.headers.get("Retry-After")
-                reset_at = response.headers.get("X-RateLimit-Reset")
-                if retry_after:
-                    try:
-                        wait = min(float(retry_after), 60)
-                    except (TypeError, ValueError):
-                        # Retry-After may be an HTTP-date; fall back to exponential backoff
-                        wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
-                elif reset_at:
-                    try:
-                        wait = max(0, min(int(reset_at) - time.time(), 60))
-                    except (TypeError, ValueError):
-                        wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
-                else:
-                    wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
+                wait = _calc_rate_limit_wait(response, attempt)
                 _debug(
                     f"Rate limited ({response.status_code}), retry in "
                     f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
@@ -84,14 +104,7 @@ def resilient_get(
                 time.sleep(wait)
                 continue
 
-            # Log rate limit proximity
-            remaining = response.headers.get("X-RateLimit-Remaining")
-            try:
-                if remaining and int(remaining) < 10:
-                    _debug(f"GitHub API rate limit low: {remaining} requests remaining")
-            except (TypeError, ValueError):
-                pass
-
+            _log_rate_limit_proximity(response)
             return response
         except requests.exceptions.ConnectionError as e:
             last_exc = e
@@ -106,9 +119,6 @@ def resilient_get(
             if attempt < max_retries - 1:
                 _debug(f"Timeout, retrying (attempt {attempt + 1}/{max_retries})")
 
-    # If rate limiting exhausted all retries, return the last response so
-    # callers can inspect headers (e.g. X-RateLimit-Remaining) and raise
-    # an appropriate user-facing error.
     if last_response is not None:
         return last_response
 
@@ -117,36 +127,57 @@ def resilient_get(
     raise requests.exceptions.RequestException(f"All {max_retries} attempts failed for {url}")
 
 
-def _build_no_dep_ref_url(
-    host: str,
-    repo_ref: str,
-    use_ssh: bool,
-    is_insecure: bool,
-    is_github_family: bool,
-    effective_token: str | None,
-) -> str:
+@dataclass(frozen=True, slots=True)
+class _UrlOpts:
+    use_ssh: bool
+    is_insecure: bool
+    is_github_family: bool
+    effective_token: str | None = None
+
+
+def _build_no_dep_ref_url(host: str, repo_ref: str, opts: _UrlOpts) -> str:
     """Build clone URL for legacy callers that provide no dep_ref.
 
     Constructs the URL directly from *host* and *repo_ref*, preserving
     the behaviour of the original if/elif ladder.
     """
     port = None
-    if use_ssh:
+    if opts.use_ssh:
         return build_ssh_url(host, repo_ref, port=port)
-    if is_insecure:
+    if opts.is_insecure:
         return f"http://{host}/{repo_ref}.git"
-    if is_github_family and effective_token:
-        return build_https_clone_url(host, repo_ref, token=effective_token, port=port)
+    if opts.is_github_family and opts.effective_token:
+        return build_https_clone_url(host, repo_ref, token=opts.effective_token, port=port)
     return build_https_clone_url(host, repo_ref, token=None, port=port)
+
+
+@dataclass(frozen=True, slots=True)
+class _CloneConf:
+    use_ssh: bool = False
+    auth_scheme: str = "basic"
+
+
+def _resolve_effective_token(host_intf, token, backend, dep_ref) -> str | None:
+    """Resolve the effective clone token from the supplied overrides and backend config."""
+    if token == "":
+        return ""
+    if token is not None:
+        return token
+    if backend.kind == "ado":
+        return host_intf.ado_token
+    if backend.is_github_family:
+        return host_intf.github_token
+    if backend.kind == "gitlab" and dep_ref is not None:
+        return host_intf.auth_resolver.resolve_for_dep(dep_ref).token
+    return None
 
 
 def build_repo_url(
     self,
     repo_ref: str,
-    use_ssh: bool = False,
-    dep_ref: DependencyReference = None,
+    dep_ref: DependencyReference | None = None,
     token: str | None = None,
-    auth_scheme: str = "basic",
+    conf: _CloneConf | None = None,
 ) -> str:
     """Build the appropriate repository URL for cloning.
 
@@ -157,15 +188,16 @@ def build_repo_url(
     Args:
         repo_ref: Repository reference in format "owner/repo" or
             "org/project/repo" for ADO
-        use_ssh: Whether to use SSH URL for git operations
         dep_ref: Optional DependencyReference for ADO-specific URL building
         token: Optional per-dependency token override
-        auth_scheme: Auth scheme ("basic" or "bearer"). Bearer tokens are
-            injected via env vars, NOT embedded in the URL.
+        conf: Optional clone configuration (use_ssh, auth_scheme)
 
     Returns:
         str: Repository URL suitable for git clone operations
     """
+    use_ssh = conf.use_ssh if conf is not None else False
+    auth_scheme = conf.auth_scheme if conf is not None else "basic"
+
     # Resolve host (used for token-routing and as a fallback when
     # ``dep_ref`` is missing for legacy callers).
     if dep_ref and dep_ref.host:
@@ -185,25 +217,7 @@ def build_repo_url(
     is_ado = backend.kind == "ado"
     is_insecure = bool(getattr(dep_ref, "is_insecure", False)) if dep_ref is not None else False
 
-    # Resolve the effective token. ``token == ""`` is the explicit
-    # "suppress per-instance default" signal used by the
-    # TransportSelector for plain-HTTPS / SSH attempts.
-    if token == "":
-        effective_token: str | None = ""
-    elif token is not None:
-        effective_token = token
-    elif is_ado:
-        effective_token = self._host.ado_token
-    elif backend.is_github_family:
-        effective_token = self._host.github_token
-    elif backend.kind == "gitlab" and dep_ref is not None:
-        # GitLab tokens come from GITLAB_APM_PAT / GITLAB_TOKEN /
-        # credential helpers via the per-dep AuthResolver lookup.
-        effective_token = self._host.auth_resolver.resolve_for_dep(dep_ref).token
-    else:
-        # Generic hosts: backend never embeds tokens; pick None so the
-        # branch below produces the expected "no credential in URL" form.
-        effective_token = None
+    effective_token = _resolve_effective_token(self._host, token, backend, dep_ref)
 
     _debug(
         f"build_repo_url: host={host}, kind={backend.kind}, "
@@ -226,7 +240,14 @@ def build_repo_url(
         # Build URL directly from ``repo_ref`` + ``host`` since the
         # backends require a dep_ref to read host/port/etc.
         return _build_no_dep_ref_url(
-            host, repo_ref, use_ssh, is_insecure, backend.is_github_family, effective_token
+            host,
+            repo_ref,
+            _UrlOpts(
+                use_ssh=use_ssh,
+                is_insecure=is_insecure,
+                is_github_family=backend.is_github_family,
+                effective_token=effective_token,
+            ),
         )
 
     if use_ssh:

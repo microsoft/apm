@@ -1,5 +1,8 @@
 """Target resolution helpers for the compile command."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 
 from ...constants import APM_YML_FILENAME
@@ -182,9 +185,17 @@ def _emit_target_provenance(target, config_target, effective_target, detection_r
         )
 
 
-def _log_compile_strategy(
-    logger, config, target, config_target, effective_target, detection_reason
-) -> None:
+@dataclass(frozen=True, slots=True)
+class _CompileStrategyContext:
+    """Inputs required to describe the chosen compile target strategy."""
+
+    target: object
+    config_target: object
+    effective_target: object
+    detection_reason: str
+
+
+def _log_compile_strategy(logger, config, context: _CompileStrategyContext) -> None:
     """Render the target-aware compilation mode line."""
     from ...core.target_detection import (
         REASON_NO_TARGET_FOLDER,
@@ -197,11 +208,12 @@ def _log_compile_strategy(
     if config.strategy != "distributed" or config.single_agents:
         logger.progress("Using single-file compilation (legacy mode)", symbol="page")
         return
+    effective_target = context.effective_target
     if isinstance(effective_target, frozenset):
-        if isinstance(target, list):
-            target_label = f"--target {','.join(target)}"
-        elif isinstance(config_target, list):
-            target_label = f"apm.yml target: [{', '.join(config_target)}]"
+        if isinstance(context.target, list):
+            target_label = f"--target {','.join(context.target)}"
+        elif isinstance(context.config_target, list):
+            target_label = f"apm.yml target: [{', '.join(context.config_target)}]"
         else:
             target_label = "multi-target"
         parts = []
@@ -216,14 +228,14 @@ def _log_compile_strategy(
     if (
         isinstance(effective_target, str)
         and effective_target == "vscode"
-        and detection_reason == REASON_NO_TARGET_FOLDER
+        and context.detection_reason == REASON_NO_TARGET_FOLDER
     ):
-        logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
+        logger.progress(f"Compiling for AGENTS.md only ({context.detection_reason})")
         logger.progress(
             " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
             symbol="light_bulb",
         )
         return
     logger.progress(
-        f"Compiling for {get_target_description(effective_target)} - {detection_reason}"
+        f"Compiling for {get_target_description(effective_target)} - {context.detection_reason}"
     )

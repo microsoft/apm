@@ -221,96 +221,59 @@ def _check_skill_subset_consistency(
     )
 
 
-def _check_config_consistency(
-    manifest: APMPackage,
-    lock: LockFile,
-) -> CheckResult:
-    """Verify MCP server configs match lockfile baseline."""
-    from ..drift import detect_config_drift
-    from ..integration.mcp_integrator import MCPIntegrator
-
-    mcp_deps = manifest.get_mcp_dependencies()
-    current_configs = MCPIntegrator.get_server_configs(mcp_deps)
-    stored_configs = lock.mcp_configs or {}
-
-    # No MCP deps at all -- nothing to check
-    if not current_configs and not stored_configs:
-        return CheckResult(
-            name="config-consistency",
-            passed=True,
-            message="No MCP configs to check",
-        )
-
-    details: list[str] = []
-
-    # Detect drift on servers that exist in both sets
-    drifted = detect_config_drift(current_configs, stored_configs)
-    for name in sorted(drifted):
-        details.append(f"{name}: config differs from lockfile baseline")
-
-    # Servers in lockfile but not in manifest (orphaned MCP)
-    for name in sorted(stored_configs):
-        if name not in current_configs:
-            details.append(f"{name}: in lockfile but not in manifest")
-
-    # Servers in manifest but not in lockfile (new, not installed)
-    for name in sorted(current_configs):
-        if name not in stored_configs:
-            details.append(f"{name}: in manifest but not in lockfile")
-
-    if not details:
-        return CheckResult(
-            name="config-consistency",
-            passed=True,
-            message="MCP configs match lockfile baseline",
-        )
-    return CheckResult(
-        name="config-consistency",
-        passed=False,
-        message=(f"{len(details)} MCP config inconsistenc(ies) -- run 'apm install' to reconcile"),
-        details=details,
-    )
-
-
-def _check_includes_consent(
-    manifest: APMPackage,
-    lock: LockFile,
-) -> CheckResult:
-    """Advisory check: nudge toward declaring 'includes:' when local content is deployed.
-
-    This check never hard-fails -- it always returns ``passed=True``.  When
-    the lockfile records local content but the manifest does not declare an
-    ``includes:`` field, the result message advises the maintainer to add
-    ``includes: auto`` (or an explicit list) for governance clarity.  The
-    ``[+]`` rendered by the CI table is intentional: this is informational,
-    not a violation.  Use ``manifest.require_explicit_includes`` policy to
-    promote this to a hard block.
-    """
-    if not lock.local_deployed_files:
-        return CheckResult(
-            name="includes-consent",
-            passed=True,
-            message="No local content deployed -- includes consent check skipped",
-        )
-
-    if manifest.includes is None:
-        return CheckResult(
-            name="includes-consent",
-            passed=True,
-            message=(
-                "Local content deployed but 'includes:' not declared in "
-                "apm.yml -- consider adding 'includes: auto' for explicit consent"
-            ),
-        )
-
-    return CheckResult(
-        name="includes-consent",
-        passed=True,
-        message="'includes:' declared -- local content deployment is explicitly consented",
-    )
-
+from ._mcp_checks import _check_config_consistency, _check_includes_consent  # noqa: E402
 
 # -- Aggregate runner ----------------------------------------------
+
+
+def _load_lockfile_and_check(
+    project_root: Path,
+    apm_yml_path: Path,
+    result: CIAuditResult,
+    ci_mode: bool,
+):
+    """Load lockfile if exists or handle missing manifest case."""
+    from ..deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile_path = get_lockfile_path(project_root)
+
+    # Check for manifest-missing artifacts before running remaining checks
+    if not apm_yml_path.exists() or not lockfile_path.exists():
+        _check_missing_manifest(project_root, apm_yml_path, result, ci_mode)
+        return None
+
+    lock = LockFile.read(lockfile_path)
+    return lock
+
+
+def _run_baseline_check_suite(
+    project_root: Path,
+    manifest,
+    lock,
+    result: CIAuditResult,
+    fail_fast: bool,
+) -> None:
+    """Run the full suite of baseline checks."""
+
+    def _run(check: CheckResult) -> bool:
+        """Append check and return True if fail-fast should stop."""
+        result.checks.append(check)
+        return fail_fast and not check.passed
+
+    # Run remaining checks with fail-fast support
+    if _run(_check_ref_consistency(manifest, lock)):
+        return
+    if _run(_check_deployed_files_present(project_root, lock)):
+        return
+    if _run(_check_no_orphans(manifest, lock)):
+        return
+    if _run(_check_skill_subset_consistency(manifest, lock)):
+        return
+    if _run(_check_config_consistency(manifest, lock)):
+        return
+    if _run(_check_content_integrity(project_root, lock)):
+        return
+    _run(_check_includes_consent(manifest, lock))
 
 
 def run_baseline_checks(
@@ -327,95 +290,73 @@ def run_baseline_checks(
     failure (``passed=False``); otherwise it is an advisory warning only.
     Returns :class:`CIAuditResult` with individual check results.
     """
-    from ..deps.lockfile import LockFile, get_lockfile_path
-    from ._shared import _parse_apm_yml_safe
-
     result = CIAuditResult()
     apm_yml_path = project_root / "apm.yml"
 
     # Parse manifest ONCE -- this function owns parse-error handling.
-    manifest = None
-    if apm_yml_path.exists():
-        import yaml
-
-        try:
-            clear_apm_yml_cache()
-            manifest = APMPackage.from_apm_yml(apm_yml_path)
-        except (ValueError, yaml.YAMLError, OSError) as exc:
-            result.checks.append(
-                CheckResult(
-                    name="manifest-parse",
-                    passed=False,
-                    message=f"Cannot parse apm.yml: {exc} -- fix the YAML syntax error in apm.yml and re-run.",
-                )
-            )
-            return result
+    manifest = _parse_manifest(apm_yml_path, result)
+    if manifest is None and result.checks:
+        return result
 
     # Check 1: Lockfile exists (manifest already parsed, pass it in)
     result.checks.append(_check_lockfile_exists(project_root, manifest))
-
-    # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:
         return result
 
-    lockfile_path = get_lockfile_path(project_root)
-
-    # If there's no apm.yml or no lockfile, the first check already passed
-    # (no deps needed).  Skip remaining checks -- but warn if APM artifacts
-    # exist without a manifest (evidence of a deleted apm.yml).
-    if not apm_yml_path.exists() or not lockfile_path.exists():
-        if not apm_yml_path.exists():
-            apm_dir = project_root / ".apm"
-            lock_file = project_root / LOCKFILE_NAME
-            legacy_lock_file = project_root / LEGACY_LOCKFILE_NAME
-            if apm_dir.is_dir() or lock_file.exists() or legacy_lock_file.exists():
-                result.checks.append(
-                    CheckResult(
-                        name="manifest-missing",
-                        passed=not ci_mode,
-                        message=(
-                            "apm.yml is missing but APM artifacts"
-                            " (.apm/ or apm.lock.yaml or apm.lock) were found"
-                            " -- this may indicate a deleted manifest"
-                        ),
-                    )
-                )
-        return result
-
-    lock = LockFile.read(lockfile_path)
+    # Load lockfile or handle missing manifest
+    lock = _load_lockfile_and_check(project_root, apm_yml_path, result, ci_mode)
     if lock is None:
         return result
 
-    def _run(check: CheckResult) -> bool:
-        """Append check and return True if fail-fast should stop."""
-        result.checks.append(check)
-        return fail_fast and not check.passed
-
-    # Check 2: Ref consistency
-    if _run(_check_ref_consistency(manifest, lock)):
-        return result
-
-    # Check 3: Deployed files present
-    if _run(_check_deployed_files_present(project_root, lock)):
-        return result
-
-    # Check 4: No orphaned packages
-    if _run(_check_no_orphans(manifest, lock)):
-        return result
-
-    # Check 4.5: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock)):
-        return result
-
-    # Check 5: Config consistency (MCP)
-    if _run(_check_config_consistency(manifest, lock)):
-        return result
-
-    # Check 6: Content integrity
-    if _run(_check_content_integrity(project_root, lock)):
-        return result
-
-    # Check 7: Includes consent (advisory; never hard-fails)
-    _run(_check_includes_consent(manifest, lock))
+    # Run remaining checks
+    _run_baseline_check_suite(project_root, manifest, lock, result, fail_fast)
 
     return result
+
+
+def _parse_manifest(apm_yml_path: Path, result: CIAuditResult) -> APMPackage | None:
+    """Parse manifest and handle errors; returns None on failure."""
+    from ..models.apm_package import APMPackage, clear_apm_yml_cache
+
+    if not apm_yml_path.exists():
+        return None
+
+    import yaml
+
+    try:
+        clear_apm_yml_cache()
+        return APMPackage.from_apm_yml(apm_yml_path)
+    except (ValueError, yaml.YAMLError, OSError) as exc:
+        result.checks.append(
+            CheckResult(
+                name="manifest-parse",
+                passed=False,
+                message=f"Cannot parse apm.yml: {exc} -- fix the YAML syntax error in apm.yml and re-run.",
+            )
+        )
+        return None
+
+
+def _check_missing_manifest(
+    project_root: Path,
+    apm_yml_path: Path,
+    result: CIAuditResult,
+    ci_mode: bool,
+) -> None:
+    """Check for APM artifacts without manifest."""
+    if not apm_yml_path.exists():
+        apm_dir = project_root / ".apm"
+        lock_file = project_root / LOCKFILE_NAME
+        legacy_lock_file = project_root / LEGACY_LOCKFILE_NAME
+        if apm_dir.is_dir() or lock_file.exists() or legacy_lock_file.exists():
+            result.checks.append(
+                CheckResult(
+                    name="manifest-missing",
+                    passed=not ci_mode,
+                    message=(
+                        "apm.yml is missing but APM artifacts"
+                        " (.apm/ or apm.lock.yaml or apm.lock) were found"
+                        " -- this may indicate a deleted manifest"
+                    ),
+                )
+            )

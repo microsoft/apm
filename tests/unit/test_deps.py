@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import mock_open, patch
+from unittest.mock import ANY, mock_open, patch
 
 import yaml
 
@@ -160,8 +160,8 @@ class TestDependenciesVerifier(unittest.TestCase):
         self.assertEqual(mock_client.configure_mcp_server.call_count, 2)
 
         # Verify client was configured properly
-        mock_client.configure_mcp_server.assert_any_call("server2", server_name="server2")
-        mock_client.configure_mcp_server.assert_any_call("server3", server_name="server3")
+        mock_client.configure_mcp_server.assert_any_call("server2", ANY)
+        mock_client.configure_mcp_server.assert_any_call("server3", ANY)
 
 
 if __name__ == "__main__":

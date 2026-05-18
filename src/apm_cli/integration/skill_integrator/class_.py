@@ -232,15 +232,13 @@ class SkillIntegrator(BaseIntegrator):
         self,
         package_info,
         project_root: Path,
-        diagnostics=None,
-        managed_files=None,
-        force: bool = False,
-        logger=None,
-        targets=None,
+        opts: SkillOpts | None = None,
+        *,
+        targets: object = None,
     ) -> tuple[int, list[Path]]:
-        return _promotion._promote_sub_skills_standalone(
-            self, package_info, project_root, diagnostics, managed_files, force, logger, targets
-        )
+        if opts is None and targets is not None:
+            opts = SkillOpts(targets=targets)
+        return _promotion._promote_sub_skills_standalone(self, package_info, project_root, opts)
 
     def _integrate_native_skill(
         self,

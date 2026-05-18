@@ -26,10 +26,13 @@ APM only writes to ``opencode.json`` when the ``.opencode/`` directory
 already exists — OpenCode support is opt-in.
 """
 
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
 
+from .base import McpServerRequest
 from .copilot import CopilotClientAdapter
 
 
@@ -92,20 +95,30 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        request: McpServerRequest | None = None,
+        **legacy_kwargs,
     ):
         """Configure an MCP server in ``opencode.json``.
 
         Delegates to the parent for config formatting, then converts to
         OpenCode schema before writing.
         """
+        if isinstance(request, str):
+            legacy_kwargs.setdefault("server_name", request)
+            request = None
+        if request is None and legacy_kwargs:
+            _valid = McpServerRequest.__dataclass_fields__
+            request = McpServerRequest(**{k: v for k, v in legacy_kwargs.items() if k in _valid})
         if not server_url:
             print("Error: server_url cannot be empty")
             return False
+
+        req = request or McpServerRequest()
+        server_name = req.server_name
+        enabled = req.enabled
+        env_overrides = req.env_overrides
+        server_info_cache = req.server_info_cache
+        runtime_vars = req.runtime_vars
 
         opencode_dir = self.project_root / ".opencode"
         if not opencode_dir.is_dir():

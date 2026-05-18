@@ -10,6 +10,7 @@ from ....utils.github_host import (
     is_azure_devops_hostname,
     maybe_raise_bare_fqdn_github_gitlab_conflict,
     unsupported_host_error,
+    validate_ssh_user,
 )
 from ....utils.path_security import (
     validate_path_segments,
@@ -49,11 +50,19 @@ def _parse_ssh_protocol_url(url: str):
         ssh://git@host/owner/repo.git@alias
 
     Returns:
-        ``(host, port, repo_url, reference, alias)`` or ``None`` if the
-        input is not an ``ssh://`` URL.
+        ``(host, port, repo_url, reference, alias, ssh_user)`` or ``None``
+        if the input is not an ``ssh://`` URL.
     """
     if not url.startswith("ssh://"):
         return None
+
+    # SECURITY: reject percent-encoded characters in the netloc/userinfo
+    # section BEFORE urllib.parse.urlparse decodes them.  urlparse silently
+    # decodes ``%40`` to ``@``, ``%3A`` to ``:``, etc., which can produce a
+    # crafted second ``@`` that redirects the connection to a different host.
+    _netloc_match = re.match(r"ssh://([^/]*)", url)
+    if _netloc_match and "%" in _netloc_match.group(1):
+        raise ValueError("Percent-encoded characters are not allowed in SSH URL userinfo")
 
     parsed = urllib.parse.urlparse(url)
     host = parsed.hostname or ""
@@ -89,7 +98,10 @@ def _parse_ssh_protocol_url(url: str):
     # Security: reject traversal sequences in SSH repo paths
     validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
-    return host, port, repo_url, reference, alias
+    raw_user = parsed.username
+    ssh_user = validate_ssh_user(raw_user) if raw_user else "git"
+
+    return host, port, repo_url, reference, alias, ssh_user
 
 
 @staticmethod
@@ -104,7 +116,8 @@ def _parse_ssh_url(dependency_str: str):
     ``_parse_ssh_protocol_url``.
 
     Returns:
-        ``(host, port, repo_url, reference, alias)`` or *None* if not an SCP URL.
+        ``(host, port, repo_url, reference, alias, ssh_user)`` or *None*
+        if not an SCP URL.
     """
     ssh_match = SCP_LIKE_RE.match(dependency_str)
     if not ssh_match:
@@ -165,7 +178,9 @@ def _parse_ssh_url(dependency_str: str):
     # Security: reject traversal sequences in SSH repo paths
     validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
-    return host, None, repo_url, reference, alias
+    ssh_user = validate_ssh_user(user)
+
+    return host, None, repo_url, reference, alias, ssh_user
 
 
 @classmethod
@@ -239,6 +254,58 @@ def _parse_standard_url(
 
 
 @classmethod
+def _handle_local_path(cls, dependency_str: str) -> "DependencyReference":
+    """Handle local path dependencies."""
+    local = dependency_str.strip()
+    pkg_name = Path(local).name
+    if not pkg_name or pkg_name in (".", ".."):
+        raise ValueError(
+            f"Local path '{local}' does not resolve to a named directory. "
+            f"Use a path that ends with a directory name "
+            f"(e.g., './my-package' instead of './')."
+        )
+    return cls(
+        repo_url=f"_local/{pkg_name}",
+        is_local=True,
+        local_path=local,
+    )
+
+
+@classmethod
+def _parse_ssh_forms(
+    cls, dependency_str: str
+) -> tuple[str | None, int | None, str, str | None, str | None, str | None, str | None]:
+    """Parse SSH protocol and SCP shorthand URLs.
+
+    Returns:
+        (host, port, repo_url, reference, alias, ssh_user, explicit_scheme) or
+        (None, None, ..., None, None) if not an SSH URL.
+    """
+    ssh_proto_result = cls._parse_ssh_protocol_url(dependency_str)
+    if ssh_proto_result:
+        host, port, repo_url, reference, alias, ssh_user = ssh_proto_result
+        return host, port, repo_url, reference, alias, ssh_user, "ssh"
+
+    scp_result = cls._parse_ssh_url(dependency_str)
+    if scp_result:
+        host, port, repo_url, reference, alias, ssh_user = scp_result
+        return host, port, repo_url, reference, alias, ssh_user, "ssh"
+
+    return None, None, "", None, None, None, None
+
+
+@classmethod
+def _detect_explicit_scheme(cls, dependency_str: str) -> str | None:
+    """Detect explicit URL scheme from dependency string."""
+    _stripped = dependency_str.strip().lower()
+    if _stripped.startswith("https://"):
+        return "https"
+    if _stripped.startswith("http://"):
+        return "http"
+    return None
+
+
+@classmethod
 def parse(cls, dependency_str: str) -> "DependencyReference":
     """Parse a dependency string into a DependencyReference.
 
@@ -285,21 +352,8 @@ def parse(cls, dependency_str: str) -> "DependencyReference":
     if any(ord(c) < 32 for c in dependency_str):
         raise ValueError("Dependency string contains invalid control characters")
 
-    # --- Local path detection (must run before URL/host parsing) ---
     if cls.is_local_path(dependency_str):
-        local = dependency_str.strip()
-        pkg_name = Path(local).name
-        if not pkg_name or pkg_name in (".", ".."):
-            raise ValueError(
-                f"Local path '{local}' does not resolve to a named directory. "
-                f"Use a path that ends with a directory name "
-                f"(e.g., './my-package' instead of './')."
-            )
-        return cls(
-            repo_url=f"_local/{pkg_name}",
-            is_local=True,
-            local_path=local,
-        )
+        return cls._handle_local_path(dependency_str)
 
     if dependency_str.startswith("//"):
         raise ValueError(
@@ -308,34 +362,22 @@ def parse(cls, dependency_str: str) -> "DependencyReference":
 
     maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 
-    # Phase 1: detect virtual packages
     is_virtual_package, virtual_path, validated_host = cls._detect_virtual_package(dependency_str)
 
-    # Phase 2: parse SSH (ssh:// URL first -- it preserves port; then SCP
-    # shorthand), otherwise fall back to HTTPS/shorthand parsing.
-    explicit_scheme: str | None = None
-    ssh_proto_result = cls._parse_ssh_protocol_url(dependency_str)
-    if ssh_proto_result:
-        host, port, repo_url, reference, alias = ssh_proto_result
-        explicit_scheme = "ssh"
+    ssh_user: str | None = None
+    host, port, repo_url, reference, alias, ssh_user, ssh_scheme = cls._parse_ssh_forms(
+        dependency_str
+    )
+    if ssh_scheme:
+        explicit_scheme = ssh_scheme
     else:
-        scp_result = cls._parse_ssh_url(dependency_str)
-        if scp_result:
-            host, port, repo_url, reference, alias = scp_result
-            explicit_scheme = "ssh"
-        else:
-            host, port, repo_url, reference, alias, is_virtual_package, virtual_path = (
-                cls._parse_standard_url(
-                    dependency_str, is_virtual_package, virtual_path, validated_host
-                )
+        host, port, repo_url, reference, alias, is_virtual_package, virtual_path = (
+            cls._parse_standard_url(
+                dependency_str, is_virtual_package, virtual_path, validated_host
             )
-            _stripped = dependency_str.strip().lower()
-            if _stripped.startswith("https://"):
-                explicit_scheme = "https"
-            elif _stripped.startswith("http://"):
-                explicit_scheme = "http"
+        )
+        explicit_scheme = cls._detect_explicit_scheme(dependency_str)
 
-    # Phase 3: final validation and ADO field extraction
     ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(host, repo_url)
 
     if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
@@ -343,7 +385,6 @@ def parse(cls, dependency_str: str) -> "DependencyReference":
             f"Invalid alias: {alias}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
         )
 
-    # Extract Artifactory prefix from the original path if applicable
     is_ado_final = host and is_azure_devops_hostname(host)
     artifactory_prefix = None
     if host and not is_ado_final:
@@ -363,4 +404,5 @@ def parse(cls, dependency_str: str) -> "DependencyReference":
         ado_repo=ado_repo,
         artifactory_prefix=artifactory_prefix,
         is_insecure=urllib.parse.urlparse(dependency_str).scheme.lower() == "http",
+        ssh_user=ssh_user,
     )

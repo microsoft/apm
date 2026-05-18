@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.apm_cli.deps.lockfile import LockedDependency
+from src.apm_cli.deps.lockfile import LockedDependency, _DepResolutionInfo
 from src.apm_cli.models.apm_package import DependencyReference
 from src.apm_cli.utils.github_host import (
     build_https_clone_url,
@@ -314,7 +314,7 @@ class TestCustomPortParsing:
         """port survives to_dict()/from_dict()."""
         dep = DependencyReference.parse("ssh://git@bitbucket.domain.ext:7999/project/repo.git")
         locked = LockedDependency.from_dependency_ref(
-            dep, resolved_commit="abc123", depth=1, resolved_by=None
+            dep, _DepResolutionInfo(resolved_commit="abc123", depth=1, resolved_by=None)
         )
         assert locked.port == 7999
         restored = LockedDependency.from_dict(locked.to_dict())
@@ -324,7 +324,7 @@ class TestCustomPortParsing:
         """Default-port deps do not emit a ``port`` key (backwards compatibility)."""
         dep = DependencyReference.parse("https://bitbucket.domain.ext/project/repo.git")
         locked = LockedDependency.from_dependency_ref(
-            dep, resolved_commit="abc123", depth=1, resolved_by=None
+            dep, _DepResolutionInfo(resolved_commit="abc123", depth=1, resolved_by=None)
         )
         assert locked.port is None
         assert "port" not in locked.to_dict()

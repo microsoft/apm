@@ -1,9 +1,24 @@
 """Core operations for APM."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..factory import ClientFactory, PackageManagerFactory
 from .safe_installer import SafeMCPInstaller
+
+
+@dataclass(frozen=True, slots=True)
+class _InstallPackageOptions:
+    """Compatibility container for package-install options."""
+
+    version: str | None = None
+    shared_env_vars: dict | None = None
+    server_info_cache: dict | None = None
+    shared_runtime_vars: dict | None = None
+    project_root: Path | str | None = None
+    user_scope: bool = False
 
 
 def configure_client(
@@ -39,14 +54,7 @@ def configure_client(
 
 
 def install_package(
-    client_type,
-    package_name,
-    version=None,
-    shared_env_vars=None,
-    server_info_cache=None,
-    shared_runtime_vars=None,
-    project_root: Path | str | None = None,
-    user_scope: bool = False,
+    client_type, package_name, options: _InstallPackageOptions | None = None, **legacy_kwargs
 ):
     """Install an MCP package for a specific client type.
 
@@ -65,25 +73,29 @@ def install_package(
     Returns:
         dict: Result with 'success' (bool), 'installed' (bool), 'skipped' (bool) keys.
     """
+    if isinstance(options, str):
+        # Backward-compat: old API had version as 3rd positional arg
+        options = _InstallPackageOptions(version=options)
+    options = options or _InstallPackageOptions(**legacy_kwargs)
     try:
         # Use safe installer with conflict detection
         safe_installer = SafeMCPInstaller(
             client_type,
-            project_root=project_root,
-            user_scope=user_scope,
+            project_root=options.project_root,
+            user_scope=options.user_scope,
         )
 
         # Pass shared environment and runtime variables and server info cache if available
         if (
-            shared_env_vars is not None
-            or server_info_cache is not None
-            or shared_runtime_vars is not None
+            options.shared_env_vars is not None
+            or options.server_info_cache is not None
+            or options.shared_runtime_vars is not None
         ):
             summary = safe_installer.install_servers(
                 [package_name],
-                env_overrides=shared_env_vars,
-                server_info_cache=server_info_cache,
-                runtime_vars=shared_runtime_vars,
+                env_overrides=options.shared_env_vars,
+                server_info_cache=options.server_info_cache,
+                runtime_vars=options.shared_runtime_vars,
             )
         else:
             summary = safe_installer.install_servers([package_name])

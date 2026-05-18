@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """APM audit command -- content integrity scanning for prompt files.
 
 Scans installed APM packages (or arbitrary files) for hidden Unicode

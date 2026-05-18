@@ -37,7 +37,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
-from apm_cli.deps.lockfile import LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, _DepResolutionInfo
 from apm_cli.models.apm_package import DependencyReference
 
 _CRED_FILL_PATCH = patch(
@@ -167,9 +167,9 @@ class TestInstallFromGitLabIntegration:
         # Lockfile entry preserves host classification at install time
         locked = LockedDependency.from_dependency_ref(
             dep_ref=dep_ref,
-            resolved_commit=_GITLAB_RESOLVED_SHA,
-            depth=1,
-            resolved_by=None,
+            resolution=_DepResolutionInfo(
+                resolved_commit=_GITLAB_RESOLVED_SHA, depth=1, resolved_by=None
+            ),
         )
         assert locked.host == "gitlab.com"
         assert locked.repo_url == "acme/standards"

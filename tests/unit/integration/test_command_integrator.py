@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import frontmatter
 import pytest
 
+from apm_cli.install.services.primitives import _IntegratorSet
 from apm_cli.integration.command_integrator import (
     CommandIntegrator,
     _extract_input_names,
@@ -516,7 +517,14 @@ class TestIntegratePackagePrimitivesTargetGating:
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
-                **integrators,
+                integrators=_IntegratorSet(
+                    prompt_integrator=integrators["prompt_integrator"],
+                    agent_integrator=integrators["agent_integrator"],
+                    skill_integrator=integrators["skill_integrator"],
+                    instruction_integrator=integrators["instruction_integrator"],
+                ),
+                command_integrator=integrators["command_integrator"],
+                hook_integrator=integrators["hook_integrator"],
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_not_called()
@@ -546,7 +554,14 @@ class TestIntegratePackagePrimitivesTargetGating:
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
-                **integrators,
+                integrators=_IntegratorSet(
+                    prompt_integrator=integrators["prompt_integrator"],
+                    agent_integrator=integrators["agent_integrator"],
+                    skill_integrator=integrators["skill_integrator"],
+                    instruction_integrator=integrators["instruction_integrator"],
+                ),
+                command_integrator=integrators["command_integrator"],
+                hook_integrator=integrators["hook_integrator"],
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -575,7 +590,14 @@ class TestIntegratePackagePrimitivesTargetGating:
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
-                **integrators,
+                integrators=_IntegratorSet(
+                    prompt_integrator=integrators["prompt_integrator"],
+                    agent_integrator=integrators["agent_integrator"],
+                    skill_integrator=integrators["skill_integrator"],
+                    instruction_integrator=integrators["instruction_integrator"],
+                ),
+                command_integrator=integrators["command_integrator"],
+                hook_integrator=integrators["hook_integrator"],
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -624,10 +646,12 @@ class TestCursorCommandEndToEnd:
             pkg_info,
             temp_project,
             targets=[KNOWN_TARGETS["cursor"]],
-            prompt_integrator=PromptIntegrator(),
-            agent_integrator=AgentIntegrator(),
-            skill_integrator=SkillIntegrator(),
-            instruction_integrator=InstructionIntegrator(),
+            integrators=_IntegratorSet(
+                prompt_integrator=PromptIntegrator(),
+                agent_integrator=AgentIntegrator(),
+                skill_integrator=SkillIntegrator(),
+                instruction_integrator=InstructionIntegrator(),
+            ),
             command_integrator=CommandIntegrator(),
             hook_integrator=HookIntegrator(),
             force=False,
@@ -778,10 +802,12 @@ class TestInputToArgumentsEndToEnd:
             pkg_info,
             temp_project,
             targets=[KNOWN_TARGETS["claude"]],
-            prompt_integrator=PromptIntegrator(),
-            agent_integrator=AgentIntegrator(),
-            skill_integrator=SkillIntegrator(),
-            instruction_integrator=InstructionIntegrator(),
+            integrators=_IntegratorSet(
+                prompt_integrator=PromptIntegrator(),
+                agent_integrator=AgentIntegrator(),
+                skill_integrator=SkillIntegrator(),
+                instruction_integrator=InstructionIntegrator(),
+            ),
             command_integrator=CommandIntegrator(),
             hook_integrator=HookIntegrator(),
             force=False,

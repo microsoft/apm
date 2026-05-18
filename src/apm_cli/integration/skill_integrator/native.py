@@ -1,276 +1,12 @@
+# pylint: disable=duplicate-code
 """Skill integration functionality for APM packages (Claude Code & Cursor support)."""
 
-import shutil
 from pathlib import Path
 
+from ._native_helpers import _integrate_native_skill
 from .class_ import SkillIntegrationResult
-from .naming import normalize_skill_name, validate_skill_name
 from .opts import SkillOpts, SkillPromoteOpts
 from .typing_helpers import should_install_skill
-
-
-def _get_normalized_skill_name(raw_name: str, diagnostics, logger) -> str:
-    """Validate *raw_name* per agentskills.io spec; normalize and warn if invalid.
-
-    Returns the final skill name (validated as-is, or normalized).
-    """
-    is_valid, error_msg = validate_skill_name(raw_name)
-    if is_valid:
-        return raw_name
-    skill_name = normalize_skill_name(raw_name)
-    if diagnostics is not None:
-        diagnostics.warn(
-            f"Skill name '{raw_name}' normalized to '{skill_name}' ({error_msg})",
-            package=raw_name,
-        )
-    elif logger:
-        logger.warning(f"Skill name '{raw_name}' normalized to '{skill_name}' ({error_msg})")
-    else:
-        try:
-            from apm_cli.utils.console import _rich_warning
-
-            _rich_warning(f"Skill name '{raw_name}' normalized to '{skill_name}' ({error_msg})")
-        except ImportError:
-            pass  # CLI not available in tests
-    return skill_name
-
-
-def _warn_skill_collision(
-    self,
-    skill_name: str,
-    current_key: "str | None",
-    lockfile_native_owners: dict,
-    target_skill_dir: Path,
-    project_root: Path,
-    diagnostics,
-    logger,
-) -> None:
-    """Emit a collision warning when a skill dir is about to be overwritten.
-
-    Checks both the lockfile (previous runs) and the in-memory session map
-    (current run via ``self._native_skill_session_owners``) so same-manifest
-    collisions are caught before the lockfile has been written for this run.
-    """
-    prev_owner = lockfile_native_owners.get(skill_name) or self._native_skill_session_owners.get(
-        skill_name
-    )
-    is_self_overwrite = prev_owner is not None and prev_owner == current_key
-    if prev_owner is None or is_self_overwrite:
-        return
-    try:
-        rel_prefix = target_skill_dir.parent.relative_to(project_root).as_posix()
-    except ValueError:
-        # Dynamic-root targets (cowork): directory is outside the project tree.
-        rel_prefix = "skills"
-    rel_path = f"{rel_prefix}/{skill_name}"
-    detail = (
-        f"Skill '{skill_name}' from '{current_key}' replaced "
-        f"'{prev_owner}' -- remove one package to avoid this"
-    )
-    if diagnostics is not None:
-        diagnostics.overwrite(
-            path=rel_path,
-            package=current_key or skill_name,
-            detail=detail,
-        )
-    elif logger:
-        logger.warning(detail)
-    else:
-        # Reached when called without diagnostics or logger (e.g. uninstall sync).
-        from apm_cli.utils.console import _rich_warning
-
-        _rich_warning(detail)
-
-
-def _integrate_native_skill(
-    self,
-    package_info,
-    project_root: Path,
-    source_skill_md: Path,
-    opts: SkillOpts | None = None,
-) -> SkillIntegrationResult:
-    """Copy a native Skill (with existing SKILL.md) to all active targets.
-
-    For packages that already have a SKILL.md at their root (like those from
-    awesome-claude-skills), we copy the entire skill folder to every active
-    target that supports skills (driven by ``active_targets()``).
-
-    The skill folder name is the source folder name (e.g., ``mcp-builder``),
-    validated and normalized per the agentskills.io spec.
-
-    Source SKILL.md is copied verbatim -- no metadata injection. Orphan
-    detection uses apm.lock via directory name matching instead.
-
-    Copies:
-    - SKILL.md (required)
-    - scripts/ (optional)
-    - references/ (optional)
-    - assets/ (optional)
-    - Any other subdirectories the package contains
-
-    Args:
-        package_info: PackageInfo object with package metadata
-        project_root: Root directory of the project
-        source_skill_md: Path to the source SKILL.md file
-        opts: Optional :class:`SkillOpts` controlling diagnostics, force, etc.
-
-    Returns:
-        SkillIntegrationResult: Results of the integration operation
-    """
-    _opts = opts or SkillOpts()
-    diagnostics = _opts.diagnostics
-    managed_files = _opts.managed_files
-    force = _opts.force
-    logger = _opts.logger
-    targets = _opts.targets
-    package_path = package_info.install_path
-
-    # Use the source folder name as the skill name
-    # e.g., apm_modules/ComposioHQ/awesome-claude-skills/mcp-builder -> mcp-builder
-    raw_skill_name = package_path.name
-
-    # Validate skill name per agentskills.io spec; normalize if needed.
-    skill_name = _get_normalized_skill_name(raw_skill_name, diagnostics, logger)
-
-    # Deploy to all active targets that support skills.
-    # When *targets* is provided (from --target), use it directly.
-    # Otherwise auto-detect with copilot as the fallback.
-    if targets is None:
-        from apm_cli.integration.targets import active_targets
-
-        targets = active_targets(project_root)
-    skill_created = False
-    skill_updated = False
-    files_copied = 0
-    all_target_paths: list[Path] = []
-    primary_skill_md: Path | None = None
-
-    # Read lockfile once and derive both maps in a single pass.
-    owned_by, lockfile_native_owners = self._build_ownership_maps(project_root)
-    sub_skills_dir = package_path / ".apm" / "skills"
-
-    # Full unique key of the package currently being installed.
-    dep_ref = package_info.dependency_ref
-    current_key: str | None = dep_ref.get_unique_key() if dep_ref is not None else None
-
-    seen_skill_dirs: set[Path] = set()
-
-    for idx, target in enumerate(targets):
-        if not target.supports("skills"):
-            continue
-
-        is_primary = idx == 0  # first active target owns diagnostics
-        skills_mapping = target.primitives["skills"]
-        # Dynamic-root targets (cowork): use resolved_deploy_root.
-        if target.resolved_deploy_root is not None:
-            target_skill_dir = target.resolved_deploy_root / skill_name
-        else:
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skill_dir = project_root / effective_root / "skills" / skill_name
-
-        # Security: validate name + containment + symlink rejection.
-        from apm_cli.utils.path_security import (
-            PathTraversalError,
-            ensure_path_within,
-            validate_path_segments,
-        )
-
-        validate_path_segments(skill_name, context="skill name")
-        if target_skill_dir.is_symlink():
-            raise PathTraversalError(
-                f"Skill destination {target_skill_dir} is a symlink -- refusing to deploy"
-            )
-        if target.resolved_deploy_root is None:
-            ensure_path_within(target_skill_dir, project_root / effective_root / "skills")
-
-        # Dedup: skip if same resolved path already deployed.
-        resolved = target_skill_dir.resolve()
-        if resolved in seen_skill_dirs:
-            if logger:
-                logger.progress(
-                    f"{target_skill_dir} -- already deployed, skipping for {target.name}",
-                    symbol="info",
-                )
-            continue
-        seen_skill_dirs.add(resolved)
-
-        if is_primary:
-            skill_created = not target_skill_dir.exists()
-            skill_updated = not skill_created
-            primary_skill_md = target_skill_dir / "SKILL.md"
-
-        if target_skill_dir.exists():
-            if is_primary:
-                _warn_skill_collision(
-                    self,
-                    skill_name,
-                    current_key,
-                    lockfile_native_owners,
-                    target_skill_dir,
-                    project_root,
-                    diagnostics,
-                    logger,
-                )
-            shutil.rmtree(target_skill_dir)
-
-        target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-        from apm_cli.security.gate import ignore_non_content
-
-        _apm_filter = shutil.ignore_patterns(".apm")
-
-        def _ignore_non_content_and_apm(directory, contents, apm_filter=_apm_filter):
-            return list(
-                set(ignore_non_content(directory, contents)) | set(apm_filter(directory, contents))
-            )
-
-        shutil.copytree(package_path, target_skill_dir, ignore=_ignore_non_content_and_apm)
-        all_target_paths.append(target_skill_dir)
-
-        if is_primary:
-            files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
-
-        # Promote sub-skills for this target
-        if target.resolved_deploy_root is not None:
-            target_skills_root = target.resolved_deploy_root
-        else:
-            target_skills_root = project_root / effective_root / "skills"
-        _, sub_deployed = self._promote_sub_skills(
-            sub_skills_dir,
-            target_skills_root,
-            skill_name,
-            SkillPromoteOpts(
-                warn=is_primary,
-                owned_by=owned_by if is_primary else None,
-                diagnostics=diagnostics if is_primary else None,
-                managed_files=managed_files if is_primary else None,
-                force=force,
-                project_root=project_root,
-                logger=logger if is_primary else None,
-            ),
-        )
-        all_target_paths.extend(sub_deployed)
-
-    # Record ownership in the session map so subsequent packages installed in
-    # the same run can detect a collision even before the lockfile is written.
-    if current_key is not None:
-        self._native_skill_session_owners[skill_name] = current_key
-
-    # Count unique sub-skills from primary target only
-    primary_root = project_root / ".github" / "skills"
-    sub_skills_count = sum(
-        1 for p in all_target_paths if p.parent == primary_root and p.name != skill_name
-    )
-
-    return SkillIntegrationResult(
-        skill_created=skill_created,
-        skill_updated=skill_updated,
-        skill_skipped=False,
-        skill_path=primary_skill_md,
-        references_copied=files_copied,
-        links_resolved=0,
-        sub_skills_promoted=sub_skills_count,
-        target_paths=all_target_paths,
-    )
 
 
 def _integrate_skill_bundle(
@@ -415,11 +151,13 @@ def integrate_package_skill(
         sub_skills_count, sub_deployed = self._promote_sub_skills_standalone(
             package_info,
             project_root,
-            diagnostics=diagnostics,
-            managed_files=managed_files,
-            force=force,
-            logger=logger,
-            targets=targets,
+            SkillOpts(
+                diagnostics=diagnostics,
+                managed_files=managed_files,
+                force=force,
+                logger=logger,
+                targets=targets,
+            ),
         )
         return SkillIntegrationResult(
             skill_created=False,
@@ -482,11 +220,13 @@ def integrate_package_skill(
     sub_skills_count, sub_deployed = self._promote_sub_skills_standalone(
         package_info,
         project_root,
-        diagnostics=diagnostics,
-        managed_files=managed_files,
-        force=force,
-        logger=logger,
-        targets=targets,
+        SkillOpts(
+            diagnostics=diagnostics,
+            managed_files=managed_files,
+            force=force,
+            logger=logger,
+            targets=targets,
+        ),
     )
     return SkillIntegrationResult(
         skill_created=False,

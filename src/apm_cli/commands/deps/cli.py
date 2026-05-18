@@ -1,6 +1,9 @@
 """APM dependency management CLI commands."""
 
+from __future__ import annotations
+
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -22,6 +25,16 @@ from ._utils import (
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class _ScopeDisplayContext:
+    """Shared display dependencies for listing one install scope."""
+
+    logger: object
+    console: object
+    has_rich: bool
+    insecure_only: bool = False
+
+
 def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     return _deps_sections._resolve_scope_deps(apm_dir, logger, insecure_only)
 
@@ -32,10 +45,8 @@ def deps():
     pass
 
 
-def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
-    return _deps_sections._show_scope_deps(
-        scope_label, apm_dir, logger, console, has_rich, insecure_only
-    )
+def _show_scope_deps(scope_label, apm_dir, ctx: _ScopeDisplayContext):
+    return _deps_sections._show_scope_deps(scope_label, apm_dir, ctx)
 
 
 @deps.command(name="list", help="List installed APM dependencies")
@@ -81,44 +92,21 @@ def list_packages(global_, show_all, insecure_only):
     try:
         from ...core.scope import InstallScope, get_apm_dir
 
+        display_ctx = _ScopeDisplayContext(
+            logger=logger,
+            console=console,
+            has_rich=has_rich,
+            insecure_only=insecure_only,
+        )
         if show_all:
-            # Show both scopes
-            _show_scope_deps(
-                "Project",
-                get_apm_dir(InstallScope.PROJECT),
-                logger,
-                console,
-                has_rich,
-                insecure_only=insecure_only,
-            )
+            _show_scope_deps("Project", get_apm_dir(InstallScope.PROJECT), display_ctx)
             if console and has_rich:
                 console.print()  # spacing between tables
-            _show_scope_deps(
-                "Global",
-                get_apm_dir(InstallScope.USER),
-                logger,
-                console,
-                has_rich,
-                insecure_only=insecure_only,
-            )
+            _show_scope_deps("Global", get_apm_dir(InstallScope.USER), display_ctx)
         elif global_:
-            _show_scope_deps(
-                "Global",
-                get_apm_dir(InstallScope.USER),
-                logger,
-                console,
-                has_rich,
-                insecure_only=insecure_only,
-            )
+            _show_scope_deps("Global", get_apm_dir(InstallScope.USER), display_ctx)
         else:
-            _show_scope_deps(
-                "Project",
-                get_apm_dir(InstallScope.PROJECT),
-                logger,
-                console,
-                has_rich,
-                insecure_only=insecure_only,
-            )
+            _show_scope_deps("Project", get_apm_dir(InstallScope.PROJECT), display_ctx)
     except Exception as e:
         logger.error(f"Error listing dependencies: {e}")
         sys.exit(1)
@@ -196,10 +184,8 @@ def clean(dry_run: bool, yes: bool):
         "need per-client skill layouts."
     ),
 )
-def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
-    return _deps_sections.update(
-        packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths
-    )
+def update(packages, **params):
+    return _deps_sections.update(packages, **params)
 
 
 @deps.command(help="Show detailed package information")

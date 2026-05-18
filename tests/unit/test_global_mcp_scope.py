@@ -222,7 +222,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
                 user_scope=False,
             )
 
-        assert mock_install.call_args.kwargs["user_scope"] is True
+        assert mock_install.call_args.args[2].user_scope is True
 
     def test_scope_none_treated_as_project(self):
         """When scope is None, all runtimes are eligible (backward compat)."""

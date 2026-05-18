@@ -1,5 +1,7 @@
 """Helper functions for ``apm pack`` and ``apm unpack``."""
 
+from __future__ import annotations
+
 import json as json_mod
 from pathlib import Path
 
@@ -125,41 +127,42 @@ def _emit_pack_json(result, dry_run: bool) -> None:
     click.echo(json_mod.dumps(envelope, indent=2))
 
 
+def _log_path_mappings(logger, path_mappings, mapped_count: int, dry_run: bool) -> None:
+    if not mapped_count:
+        return
+    mapping_summary = _mapping_summary(path_mappings)
+    message = f"{'Would remap' if dry_run else 'Mapped'} {mapped_count} file(s){mapping_summary}"
+    if dry_run:
+        logger.dry_run_notice(message)
+    else:
+        logger.progress(message)
+    for mapped, original in path_mappings.items():
+        logger.verbose_detail(f"    {original} -> {mapped}")
+
+
+def _log_bundle_files(logger, pack_result, dry_run: bool) -> None:
+    message = f"{'Would pack' if dry_run else 'Packed'} {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
+    if dry_run:
+        logger.dry_run_notice(message)
+        for file_path in pack_result.files:
+            logger.tree_item(f"  {file_path}")
+        return
+    logger.success(message)
+    for file_path in pack_result.files:
+        logger.verbose_detail(f"    {file_path}")
+
+
 def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
     """Mirror the legacy ``apm pack`` output for the bundle producer."""
     if pack_result is None:
         return
-
-    mapping_summary = _mapping_summary(pack_result.path_mappings)
-    if dry_run:
-        if pack_result.mapped_count:
-            logger.dry_run_notice(
-                f"Would remap {pack_result.mapped_count} file(s){mapping_summary}"
-            )
-            for mapped, original in pack_result.path_mappings.items():
-                logger.verbose_detail(f"    {original} -> {mapped}")
-        if pack_result.files:
-            logger.dry_run_notice(
-                f"Would pack {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
-            )
-            for file_path in pack_result.files:
-                logger.tree_item(f"  {file_path}")
-        else:
-            _warn_empty(logger, target, pack_result)
-        return
-
-    if pack_result.mapped_count:
-        logger.progress(f"Mapped {pack_result.mapped_count} file(s){mapping_summary}")
-        for mapped, original in pack_result.path_mappings.items():
-            logger.verbose_detail(f"    {original} -> {mapped}")
-
+    _log_path_mappings(logger, pack_result.path_mappings, pack_result.mapped_count, dry_run)
     if not pack_result.files:
         _warn_empty(logger, target, pack_result)
         return
-
-    logger.success(f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}")
-    for file_path in pack_result.files:
-        logger.verbose_detail(f"    {file_path}")
+    _log_bundle_files(logger, pack_result, dry_run)
+    if dry_run:
+        return
     if fmt == "plugin":
         logger.progress(
             "Plugin bundle ready -- contains plugin.json plus "
@@ -172,7 +175,12 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
-    """Render the marketplace producer's report (one-liner summary)."""
+    """Render the marketplace producer's report.
+
+    Emits per-output success/dry-run lines first, then a vendor-neutral
+    catalog of artifact paths plus a single docs pointer. The catalog
+    block is suppressed in dry-run mode (no files were actually written).
+    """
     seen_warnings = set()
     for warn_msg in extra_warnings or []:
         seen_warnings.add(warn_msg)
@@ -184,6 +192,7 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, out
         logger.warning(warn_msg)
 
     output_reports = tuple(getattr(report, "outputs", ()) or ())
+    written: list[tuple[str | None, Path]] = []
     if not output_reports:
         package_count = len(getattr(report, "resolved", ()) or ()) if report is not None else None
         for output in outputs or []:
@@ -194,17 +203,48 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, out
                 logger.dry_run_notice(f"Would write {message}")
             else:
                 logger.success(f"Built {message}")
+                written.append((None, Path(output)))
+    else:
+        for output_report in output_reports:
+            message = (
+                f"marketplace.json [{output_report.profile}] "
+                f"({len(output_report.resolved)} package(s)) -> {output_report.output_path}"
+            )
+            if dry_run or output_report.dry_run:
+                logger.dry_run_notice(f"Would write {message}")
+            else:
+                logger.success(f"Built {message}")
+                written.append((output_report.profile, Path(output_report.output_path)))
+
+    if written and not dry_run:
+        _render_marketplace_catalog(logger, written)
+
+
+def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) -> None:
+    """Append a vendor-neutral catalog of marketplace artifacts.
+
+    Renders one ``[i]`` info header, one ``[i]`` two-column row per
+    artifact, and a single ``[i]`` pointer to the docs anchor that
+    enumerates per-assistant install commands.
+    """
+    from .pack import MARKETPLACE_DOCS_URL
+
+    info = getattr(logger, "info", None)
+    if info is None:
         return
 
-    for output_report in output_reports:
-        message = (
-            f"marketplace.json [{output_report.profile}] "
-            f"({len(output_report.resolved)} package(s)) -> {output_report.output_path}"
-        )
-        if dry_run or output_report.dry_run:
-            logger.dry_run_notice(f"Would write {message}")
-        else:
-            logger.success(f"Built {message}")
+    info("Marketplace artifacts ready:")
+    if any(profile for profile, _ in written):
+        label_width = max(len(profile or "") for profile, _ in written)
+        for profile, path in written:
+            tag = (profile or "").ljust(label_width)
+            info(f"  [{tag}] {path}")
+    else:
+        for _, path in written:
+            info(f"  {path}")
+
+    info("How consumers install from this marketplace varies by AI assistant.")
+    info(f"See: {MARKETPLACE_DOCS_URL}")
 
 
 def _log_unpack_file_list(result, logger):

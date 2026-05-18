@@ -1,5 +1,7 @@
 """OpenAI Codex CLI implementation of MCP client adapter."""
 
+from __future__ import annotations
+
 import logging
 import os
 from pathlib import Path
@@ -10,9 +12,43 @@ from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
 from . import _codex_env
-from .base import MCPClientAdapter
+from . import _codex_server_config as _csc
+from .base import MCPClientAdapter, McpServerRequest, _resolve_mcp_request
+from .copilot import arg_processing as _arg_processing
 
 _log = logging.getLogger(__name__)
+
+
+def _process_single_codex_arg(adapter, arg, resolved_env, runtime_vars):
+    """Process one argument object and return a list of string tokens."""
+    if isinstance(arg, str):
+        return [adapter._resolve_variable_placeholders(arg, resolved_env, runtime_vars)]
+    if not isinstance(arg, dict):
+        return []
+    arg_type = arg.get("type", "")
+    result = []
+    if arg_type == "positional":
+        value = arg.get("value", arg.get("default", ""))
+        if value:
+            result.append(
+                adapter._resolve_variable_placeholders(str(value), resolved_env, runtime_vars)
+            )
+    elif arg_type == "named":
+        flag_name = arg.get("value", "")
+        if flag_name:
+            result.append(flag_name)
+            additional_value = arg.get("name", "")
+            if (
+                additional_value
+                and additional_value != flag_name
+                and not additional_value.startswith("-")
+            ):
+                result.append(
+                    adapter._resolve_variable_placeholders(
+                        str(additional_value), resolved_env, runtime_vars
+                    )
+                )
+    return result
 
 
 class CodexClientAdapter(MCPClientAdapter):
@@ -117,11 +153,8 @@ class CodexClientAdapter(MCPClientAdapter):
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        request: McpServerRequest | None = None,
+        **legacy_kwargs,
     ):
         """Configure an MCP server in Codex CLI configuration.
 
@@ -130,18 +163,23 @@ class CodexClientAdapter(MCPClientAdapter):
 
         Args:
             server_url (str): URL or identifier of the MCP server.
-            server_name (str, optional): Name of the server. Defaults to None.
-            enabled (bool, optional): Ignored parameter, kept for API compatibility.
-            env_overrides (dict, optional): Pre-collected environment variable overrides.
-            server_info_cache (dict, optional): Pre-fetched server info to avoid duplicate registry calls.
-            runtime_vars (dict, optional): Runtime variable values. Defaults to None.
+            request: Optional McpServerRequest with server_name, env_overrides,
+                server_info_cache, and runtime_vars.
+            **legacy_kwargs: Deprecated -- pass individual fields through ``McpServerRequest`` instead.
 
         Returns:
             bool: True if successful, False otherwise.
         """
+        request = _resolve_mcp_request(request, legacy_kwargs)
         if not server_url:
             print("Error: server_url cannot be empty")
             return False
+
+        req = request or McpServerRequest()
+        server_name = req.server_name
+        env_overrides = req.env_overrides
+        server_info_cache = req.server_info_cache
+        runtime_vars = req.runtime_vars
 
         try:
             server_info = self._fetch_server_info(server_url, server_info_cache)
@@ -187,254 +225,69 @@ class CodexClientAdapter(MCPClientAdapter):
             print(f"Error configuring MCP server: {e}")
             return False
 
-    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
-        """Format server information into Codex CLI MCP configuration format.
-
-        Args:
-            server_info (dict): Server information from registry.
-            env_overrides (dict, optional): Pre-collected environment variable overrides.
-            runtime_vars (dict, optional): Runtime variable values.
-
-        Returns:
-            dict: Formatted server configuration for Codex CLI.
-        """
-        # Default configuration structure with registry ID for conflict detection
-        config = {
-            "command": "unknown",
-            "args": [],
-            "env": {},
-            "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
-        }
-
-        # Self-defined stdio deps carry raw command/args  -- use directly
-        raw = server_info.get("_raw_stdio")
-        if raw:
-            config["command"] = raw["command"]
-            config["args"] = [self.normalize_project_arg(arg) for arg in raw["args"]]
-            if raw.get("env"):
-                config["env"] = raw["env"]
-                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
-            return config
-
-        # Note: Remote servers (SSE type) are handled in configure_mcp_server and rejected early
-        # This method only handles local servers with packages
-
-        # Get packages from server info
-        packages = server_info.get("packages", [])
-
-        if not packages:
-            # If no packages are available, this indicates incomplete server configuration
-            # This should fail installation with a clear error message
-            raise ValueError(
-                f"MCP server has no package information available in registry. "
-                f"This appears to be a temporary registry issue or the server is remote-only. "
-                f"Server: {server_info.get('name', 'unknown')}"
-            )
-
-        if packages:
-            # Use the first package for configuration (prioritize npm, then docker, then others)
-            package = self._select_best_package(packages)
-
-            if package:
-                registry_name = self._infer_registry_name(package)
-                package_name = package.get("name", "")
-                runtime_hint = package.get("runtime_hint", "")
-                runtime_arguments = package.get("runtime_arguments", [])
-                package_arguments = package.get("package_arguments", [])
-                env_vars = package.get("environment_variables", [])
-
-                # Resolve environment variables first
-                resolved_env = self._process_environment_variables(env_vars, env_overrides)
-
-                # Process arguments to extract simple string values
-                processed_runtime_args = self._process_arguments(
-                    runtime_arguments, resolved_env, runtime_vars
-                )
-                processed_package_args = self._process_arguments(
-                    package_arguments, resolved_env, runtime_vars
-                )
-
-                # Generate command and args based on package type
-                if registry_name == "npm":
-                    config["command"] = runtime_hint or "npx"
-                    all_args = processed_runtime_args + processed_package_args
-                    if all_args:
-                        # If runtime_arguments already include the package (bare or
-                        # versioned), use them as-is — they are authoritative from
-                        # the registry and may carry a version pin.
-                        has_pkg = any(
-                            a == package_name or a.startswith(f"{package_name}@") for a in all_args
-                        )
-                        if has_pkg:
-                            config["args"] = all_args
-                        else:
-                            # Legacy: runtime_arguments don't mention the package,
-                            # prepend -y + bare name ourselves.
-                            extra_args = [a for a in all_args if a != "-y"]
-                            config["args"] = ["-y", package_name] + extra_args  # noqa: RUF005
-                    else:
-                        config["args"] = ["-y", package_name]
-                    # For NPM packages, also use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "docker":
-                    config["command"] = "docker"
-
-                    # For Docker packages in Codex TOML format:
-                    # - Ensure all environment variables from resolved_env are represented as -e flags in args
-                    # - Put actual environment variable values in separate [env] section
-                    config["args"] = self._ensure_docker_env_flags(
-                        processed_runtime_args + processed_package_args, resolved_env
-                    )
-
-                    # Environment variables go in separate env section for Codex TOML format
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "pypi":
-                    self._apply_pypi_homebrew_generic_config(
-                        config,
-                        registry_name,
-                        package_name,
-                        runtime_hint,
-                        processed_runtime_args,
-                        processed_package_args,
-                        resolved_env,
-                    )
-
-        return config
-
-    def _process_arguments(  # pylint: disable=duplicate-code  # structural similarity with copilot adapter is intentional
-        self, arguments, resolved_env=None, runtime_vars=None
+    def _codex_npm_config(
+        self,
+        package_name,
+        runtime_hint,
+        processed_runtime_args,
+        processed_package_args,
+        resolved_env,
     ):
-        """Process argument objects to extract simple string values with environment resolution.
+        """Delegate to _codex_server_config."""
+        return _csc._codex_npm_config(
+            self,
+            package_name,
+            runtime_hint,
+            processed_runtime_args,
+            processed_package_args,
+            resolved_env,
+        )
 
-        Args:
-            arguments (list): List of argument objects from registry.
-            resolved_env (dict): Resolved environment variables.
-            runtime_vars (dict): Runtime variable values.
+    def _codex_docker_config(self, processed_runtime_args, processed_package_args, resolved_env):
+        """Delegate to _codex_server_config."""
+        return _csc._codex_docker_config(
+            self, processed_runtime_args, processed_package_args, resolved_env
+        )
 
-        Returns:
-            list: List of processed argument strings.
-        """
-        if resolved_env is None:
-            resolved_env = {}
-        if runtime_vars is None:
-            runtime_vars = {}
+    def _codex_pypi_config(self, processed_runtime_args, processed_package_args, resolved_env):
+        """Delegate to _codex_server_config."""
+        return _csc._codex_pypi_config(
+            self, processed_runtime_args, processed_package_args, resolved_env
+        )
 
-        processed = []
+    def _codex_homebrew_config(self, processed_runtime_args, processed_package_args, resolved_env):
+        """Delegate to _codex_server_config."""
+        return _csc._codex_homebrew_config(
+            self, processed_runtime_args, processed_package_args, resolved_env
+        )
 
-        for arg in arguments:
-            if isinstance(arg, dict):
-                # Extract value from argument object
-                arg_type = arg.get("type", "")
-                if arg_type == "positional":
-                    value = arg.get("value", arg.get("default", ""))
-                    if value:
-                        # Resolve both environment and runtime variable placeholders with actual values
-                        processed_value = self._resolve_variable_placeholders(
-                            str(value), resolved_env, runtime_vars
-                        )
-                        processed.append(processed_value)
-                elif arg_type == "named":
-                    # For named arguments, the flag name is in the "value" field
-                    flag_name = arg.get("value", "")
-                    if flag_name:
-                        processed.append(flag_name)
-                        # Some named arguments might have additional values (rare)
-                        additional_value = arg.get("name", "")
-                        if (
-                            additional_value
-                            and additional_value != flag_name
-                            and not additional_value.startswith("-")
-                        ):
-                            processed_value = self._resolve_variable_placeholders(
-                                str(additional_value), resolved_env, runtime_vars
-                            )
-                            processed.append(processed_value)
-            elif isinstance(arg, str):
-                # Already a string, use as-is but resolve variable placeholders
-                processed_value = self._resolve_variable_placeholders(
-                    arg, resolved_env, runtime_vars
-                )
-                processed.append(processed_value)
+    def _codex_generic_config(self, processed_runtime_args, processed_package_args, resolved_env):
+        """Delegate to _codex_server_config."""
+        return _csc._codex_generic_config(
+            self, processed_runtime_args, processed_package_args, resolved_env
+        )
 
-        return processed
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        """Delegate to _codex_server_config."""
+        return _csc._format_server_config(self, server_info, env_overrides, runtime_vars)
 
     def _process_environment_variables(self, env_vars, env_overrides=None):
-        """Process environment variable definitions and resolve actual values.
-
-        Args:
-            env_vars (list): List of environment variable definitions.
-            env_overrides (dict, optional): Pre-collected environment variable overrides.
-
-        Returns:
-            dict: Dictionary of resolved environment variable values.
-        """
+        """Resolve environment-variable definitions for Codex."""
         return _codex_env.process_environment_variables(env_vars, env_overrides)
 
+    def _process_arguments(self, arguments, resolved_env=None, runtime_vars=None):
+        """Reuse the shared MCP argument processor."""
+        return _arg_processing._process_arguments(self, arguments, resolved_env, runtime_vars)
+
     def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
-        """Resolve both environment and runtime variable placeholders in values.
-
-        Args:
-            value (str): Value that may contain placeholders like <TOKEN_NAME> or {runtime_var}
-            resolved_env (dict): Dictionary of resolved environment variables.
-            runtime_vars (dict): Dictionary of resolved runtime variables.
-
-        Returns:
-            str: Processed value with actual variable values.
-        """
-        return _codex_env.resolve_variable_placeholders(value, resolved_env, runtime_vars)
-
-    def _resolve_env_placeholders(self, value, resolved_env):
-        """Legacy method for backward compatibility. Use _resolve_variable_placeholders instead."""
-        return _codex_env.resolve_variable_placeholders(value, resolved_env, {})
-
-    def _ensure_docker_env_flags(self, base_args, env_vars):
-        """Ensure all environment variables are represented as -e flags in Docker args.
-
-        For Codex TOML format, Docker args should contain -e flags for ALL environment variables
-        that will be available to the container, while actual values go in the [env] section.
-
-        Args:
-            base_args (list): Base Docker arguments from registry.
-            env_vars (dict): All environment variables that should be available.
-
-        Returns:
-            list: Docker arguments with -e flags for all environment variables.
-        """
-        return _codex_env.ensure_docker_env_flags(base_args, env_vars)
-
-    def _inject_docker_env_vars(self, args, env_vars):
-        """Inject environment variables into Docker arguments as -e flags.
-
-        Args:
-            args (list): Original Docker arguments.
-            env_vars (dict): Environment variables to inject.
-
-        Returns:
-            list: Updated arguments with environment variables injected as -e flags.
-        """
-        return _codex_env.inject_docker_env_vars(args, env_vars)
+        """Delegate placeholder expansion to the shared Copilot helper."""
+        return _arg_processing._resolve_variable_placeholders(
+            self,
+            value,
+            resolved_env,
+            runtime_vars,
+        )
 
     def _select_best_package(self, packages):
-        """Select the best package for installation from available packages.
-
-        Prioritizes packages in order: npm, docker, pypi, homebrew, others.
-        Uses ``_infer_registry_name`` so selection works even when the
-        registry API returns empty ``registry_name``.
-
-        Args:
-            packages (list): List of package dictionaries.
-
-        Returns:
-            dict: Best package to use, or None if no suitable package found.
-        """
-        priority_order = ["npm", "docker", "pypi", "homebrew"]
-
-        for target in priority_order:
-            for package in packages:
-                if self._infer_registry_name(package) == target:
-                    return package
-
-        # If no priority package found, return the first one
-        return packages[0] if packages else None
+        """Delegate package selection to the shared Copilot helper."""
+        return _arg_processing._select_best_package(self, packages)

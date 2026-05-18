@@ -1,8 +1,19 @@
 """Package reference resolution and validation helpers."""
 
+from __future__ import annotations
+
 import sys
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvePackageReferencesRequest:
+    """Shared options for package reference resolution."""
+
+    auth_resolver: object | None = None
+    logger: object | None = None
+    scope: object | None = None
+    allow_insecure: bool = False
 
 
 def _process_marketplace_ref(
@@ -156,149 +167,22 @@ def _check_scope_rejection(dep_ref, scope):
     return scope_reject
 
 
-@dataclass
-class _PackageAccessCtx:
-    """Bundled arguments for :func:`_validate_package_accessibility`."""
-
-    package: Any
-    dep_ref: Any
-    canonical: Any
-    identity: Any
-    already_in_deps: bool
-    validated_packages: list
-    existing_identities: Any
-    valid_outcomes: list
-    marketplace_provenance: Any
-    _marketplace_provenance: dict
-    _apm_yml_entries: dict
-    current_deps: Any
-    misconfig_risk: Any
-    auth_resolver: Any
-    logger: Any
-
-
-def _validate_package_accessibility(ctx: _PackageAccessCtx):
-    """Validate package exists and is accessible.
-
-    Returns tuple of (validation_success, dependencies_changed, error_reason).
-    """
-    from apm_cli.install.package_resolution import merge_structured_entry_into_current_deps
-
-    package = ctx.package
-    dep_ref = ctx.dep_ref
-    canonical = ctx.canonical
-    identity = ctx.identity
-    already_in_deps = ctx.already_in_deps
-    validated_packages = ctx.validated_packages
-    existing_identities = ctx.existing_identities
-    valid_outcomes = ctx.valid_outcomes
-    marketplace_provenance = ctx.marketplace_provenance
-    _marketplace_provenance = ctx._marketplace_provenance
-    _apm_yml_entries = ctx._apm_yml_entries
-    current_deps = ctx.current_deps
-    misconfig_risk = ctx.misconfig_risk
-    auth_resolver = ctx.auth_resolver
-    logger = ctx.logger
-    dependencies_changed = False
-
-    # Validate package exists and is accessible
-    verbose = bool(logger and logger.verbose)
-    if sys.modules["apm_cli.commands.install"]._validate_package_exists(
-        package,
-        verbose=verbose,
-        auth_resolver=auth_resolver,
-        logger=logger,
-        dep_ref=dep_ref,
-    ):
-        valid_outcomes.append((canonical, already_in_deps))
-        if logger:
-            logger.validation_pass(canonical, already_present=already_in_deps)
-
-        if not already_in_deps:
-            validated_packages.append(canonical)
-            existing_identities.add(identity)  # prevent duplicates within batch
-        elif canonical in _apm_yml_entries:
-            structured_entry = _apm_yml_entries[canonical]
-            merge_structured_entry_into_current_deps(
-                current_deps,
-                structured_entry,
-                identity,
-                canonical,
-                dependency_reference_cls=sys.modules[
-                    "apm_cli.commands.install"
-                ].DependencyReference,
-                logger=logger,
-            )
-            dependencies_changed = True
-        if marketplace_provenance:
-            _marketplace_provenance[identity] = marketplace_provenance
-        return True, dependencies_changed, None
-
-    # Validation failed - build error reason
-    reason = sys.modules["apm_cli.commands.install"]._local_path_failure_reason(dep_ref)
-    if not reason:
-        # Round-4 panel fix (devx-ux): name the four-step probe
-        # chain explicitly when the validator exhausted it
-        # (virtual subdirectory + explicit ref). Generic "not
-        # accessible" hides the failure mode for the precise
-        # case where the most diagnostics are available.
-        is_subdir_ref_chain = (
-            dep_ref.is_virtual and dep_ref.is_virtual_subdirectory() and bool(dep_ref.reference)
-        )
-        if is_subdir_ref_chain:
-            reason = (
-                "all probes failed (marker-file, Contents API, "
-                "git ls-remote, shallow-fetch) -- verify the path "
-                "and ref exist and that your credentials have "
-                "read access"
-            )
-            if not verbose:
-                reason += " (run with --verbose for the full probe log)"
-        else:
-            reason = "not accessible or doesn't exist"
-            if not verbose:
-                reason += " -- run with --verbose for auth details"
-
-    # #1305: when a cross-repo dict ``type: github`` source on an
-    # enterprise marketplace fails validation, the failure is most
-    # likely the silent auth mis-route (bare canonical fell back to
-    # ``github.com``). Surface the host-qualify hint inline so the
-    # operator can correct ``marketplace.json`` without rerunning
-    # under ``--verbose`` to decode the auth trace. ``logger.warning``
-    # is used (not ``info``) per the PR #1292 panel review's explicit
-    # guidance for this exact follow-up: a misconfiguration that
-    # voids ``apm install`` should be at warning level, not buried
-    # in info-level ambient output. The second clause acknowledges
-    # the legitimate cross-host alternative so operators whose
-    # github.com dep failed for a transient reason (rate limit,
-    # network, expired PAT) are not misdirected into adding an
-    # enterprise host prefix that would break a working config.
-    if misconfig_risk is not None and logger:
-        _mp_name, _plugin_name, _risk = misconfig_risk
-        logger.warning(
-            f"'{_plugin_name}@{_mp_name}' is registered on "
-            f"'{_risk.marketplace_host}' but the plugin's bare "
-            f"`repo: {_risk.bare_repo_field}` resolved to "
-            "'github.com'. If you meant the enterprise host, set "
-            "the plugin's `repo` field to "
-            f"'{_risk.suggested_qualified_repo}' in marketplace.json. "
-            "If this is intentionally a github.com dependency, "
-            "verify your github.com credentials and that the "
-            "repository is accessible."
-        )
-
-    return False, dependencies_changed, reason
+from ._access_checks import (
+    _build_inaccessible_reason,
+    _PackageAccessCtx,
+    _record_invalid_package,
+    _record_invalid_package_err,
+    _validate_package_accessibility,
+    _warn_misconfig_risk,
+)
 
 
 def _resolve_package_references(
     packages,
     current_deps,
     existing_identities,
-    *,
-    auth_resolver=None,
-    logger=None,
-    scope=None,
-    allow_insecure=False,
+    request: _ResolvePackageReferencesRequest | None = None,
+    **legacy_kwargs,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -312,6 +196,12 @@ def _resolve_package_references(
         Tuple of ``(valid_outcomes, invalid_outcomes, validated_packages,
         marketplace_provenance, apm_yml_entries, dependencies_changed)``.
     """
+    request = request or _ResolvePackageReferencesRequest(**legacy_kwargs)
+    auth_resolver = request.auth_resolver
+    logger = request.logger
+    scope = request.scope
+    allow_insecure = request.allow_insecure
+
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
@@ -330,9 +220,7 @@ def _resolve_package_references(
             )
         )
         if error:
-            invalid_outcomes.append((package, error))
-            if logger:
-                logger.validation_fail(package, error)
+            _record_invalid_package(package, error, invalid_outcomes, logger)
             continue
         if resolved_pkg:
             package = resolved_pkg
@@ -350,25 +238,19 @@ def _resolve_package_references(
             _apm_yml_entries,
         )
         if error:
-            invalid_outcomes.append((package, error))
-            if logger:
-                logger.validation_fail(package, error)
+            _record_invalid_package(package, error, invalid_outcomes, logger)
             continue
 
         # Check insecure dependency
         error = _check_insecure_dependency(dep_ref, allow_insecure, canonical, _apm_yml_entries)
         if error:
-            invalid_outcomes.append((package, error))
-            if logger:
-                logger.error(error)
+            _record_invalid_package_err(package, error, invalid_outcomes, logger)
             continue
 
         # Check scope rejection
         error = _check_scope_rejection(dep_ref, scope)
         if error:
-            invalid_outcomes.append((package, error))
-            if logger:
-                logger.validation_fail(package, error)
+            _record_invalid_package(package, error, invalid_outcomes, logger)
             continue
 
         # Check if package is already in dependencies (by identity)
@@ -396,9 +278,7 @@ def _resolve_package_references(
         )
 
         if not success:
-            invalid_outcomes.append((package, error))
-            if logger:
-                logger.validation_fail(package, error)
+            _record_invalid_package(package, error, invalid_outcomes, logger)
 
         if deps_changed:
             dependencies_changed = True

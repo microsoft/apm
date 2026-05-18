@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """GitHub package downloader for APM dependencies."""
 
 import contextlib

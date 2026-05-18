@@ -19,6 +19,7 @@ from ...utils.github_host import default_host
 # can still access ``_m.download_subdirectory_package`` without change.
 from ._subdir_package_ops import download_subdirectory_package  # noqa: F401
 from .class_ import _rmtree
+from .download_ops import ProgressCtx
 from .progress import GitProgressReporter
 
 _PROTOCOL_FALLBACK_DOCS_URL = (
@@ -30,8 +31,7 @@ def _dispatch_virtual_package(
     self,
     dep_ref: "DependencyReference",
     target_path: Path,
-    progress_task_id,
-    progress_obj,
+    ctx: "ProgressCtx",
     art_proxy,
 ) -> "PackageInfo":
     """Route a virtual package to the appropriate download backend.
@@ -42,29 +42,29 @@ def _dispatch_virtual_package(
     """
     if dep_ref.is_virtual_file():
         return self.download_virtual_file_package(
-            dep_ref, target_path, progress_task_id, progress_obj
+            dep_ref, target_path, ctx.progress_task_id, ctx.progress_obj
         )
     # SUBDIRECTORY (the only other virtual type after #1094 dropped
     # the `.collection.yml` form): includes Artifactory modes.
     if dep_ref.is_artifactory():
         proxy_info = (dep_ref.host, dep_ref.artifactory_prefix, "https")
         return self._download_subdirectory_from_artifactory(
-            dep_ref, target_path, proxy_info, progress_task_id, progress_obj
+            dep_ref, target_path, proxy_info, ctx.progress_task_id, ctx.progress_obj
         )
     if self._is_artifactory_only() and art_proxy:
         return self._download_subdirectory_from_artifactory(
-            dep_ref, target_path, art_proxy, progress_task_id, progress_obj
+            dep_ref, target_path, art_proxy, ctx.progress_task_id, ctx.progress_obj
         )
-    return self.download_subdirectory_package(dep_ref, target_path, progress_task_id, progress_obj)
+    return self.download_subdirectory_package(
+        dep_ref, target_path, ctx.progress_task_id, ctx.progress_obj
+    )
 
 
 def download_package(
     self,
     repo_ref: Union[str, "DependencyReference"],
     target_path: Path,
-    progress_task_id=None,
-    progress_obj=None,
-    verbose_callback=None,
+    ctx: "ProgressCtx | None" = None,
 ) -> PackageInfo:
     """Download a GitHub repository and validate it as an APM package.
 
@@ -76,9 +76,8 @@ def download_package(
             or a string (e.g., "user/repo#branch"). Passing the object
             directly avoids a lossy parse round-trip for generic git hosts.
         target_path: Local path where package should be downloaded
-        progress_task_id: Rich Progress task ID for progress updates
-        progress_obj: Rich Progress object for progress updates
-        verbose_callback: Optional callable for verbose logging (receives str messages)
+        ctx: Bundled progress/callback context (progress_task_id, progress_obj,
+            verbose_callback). Defaults to a no-op ProgressCtx when omitted.
 
     Returns:
         PackageInfo: Information about the downloaded package
@@ -87,6 +86,11 @@ def download_package(
         ValueError: If the repository reference is invalid
         RuntimeError: If download or validation fails
     """
+    if ctx is None:
+        ctx = ProgressCtx()
+    progress_task_id = ctx.progress_task_id
+    progress_obj = ctx.progress_obj
+    verbose_callback = ctx.verbose_callback
     # Accept both string and DependencyReference to avoid lossy round-trips
     if isinstance(repo_ref, DependencyReference):
         dep_ref = repo_ref
@@ -104,9 +108,7 @@ def download_package(
                 f"PROXY_REGISTRY_ONLY is set but no Artifactory proxy is configured for '{repo_ref}'. "
                 "Set PROXY_REGISTRY_URL or use explicit Artifactory FQDN syntax."
             )
-        return _dispatch_virtual_package(
-            self, dep_ref, target_path, progress_task_id, progress_obj, art_proxy
-        )
+        return _dispatch_virtual_package(self, dep_ref, target_path, ctx, art_proxy)
 
     # Artifactory download path (Mode 1: explicit FQDN, Mode 2: transparent proxy)
     use_artifactory = dep_ref.is_artifactory()

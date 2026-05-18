@@ -13,6 +13,55 @@ from . import marketplace
 from ._io import _check_gitignore_for_marketplace_json
 
 
+def _load_apm_yml_for_marketplace_init(apm_path: Path, logger: CommandLogger):
+    """Load and validate apm.yml for marketplace init, returning (rt, data)."""
+    from ruamel.yaml import YAML
+
+    try:
+        rt = YAML(typ="rt")
+        rt.preserve_quotes = True
+        rt.indent(mapping=2, sequence=4, offset=2)
+        data = rt.load(apm_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.error(f"Failed to parse apm.yml: {exc}", symbol="error")
+        sys.exit(1)
+
+    if data is None:
+        from ruamel.yaml.comments import CommentedMap
+
+        data = CommentedMap()
+    elif not isinstance(data, dict):
+        logger.error(
+            f"apm.yml must be a YAML mapping at the top level (got {type(data).__name__}).",
+            symbol="error",
+        )
+        sys.exit(1)
+
+    return rt, data
+
+
+def _show_marketplace_init_next_steps(logger: CommandLogger) -> None:
+    """Display next-step instructions after marketplace init."""
+    next_steps = [
+        "Edit the 'marketplace:' block in apm.yml to add your packages",
+        "Run 'apm pack' to generate .claude-plugin/marketplace.json",
+        "Add 'codex' to marketplace.outputs to also generate .agents/plugins/marketplace.json",
+        "Commit apm.yml and the generated marketplace file(s)",
+    ]
+    try:
+        from ...utils.console import _rich_panel
+
+        _rich_panel(
+            "\n".join(f"  {i}. {step}" for i, step in enumerate(next_steps, 1)),
+            title=" Next Steps",
+            style="cyan",
+        )
+    except (ImportError, NameError):
+        logger.progress("Next steps:")
+        for i, step in enumerate(next_steps, 1):
+            logger.tree_item(f"  {i}. {step}")
+
+
 @marketplace.command(help="Add a 'marketplace:' block to apm.yml (scaffolds apm.yml if missing)")
 @click.option(
     "--force",
@@ -29,8 +78,6 @@ from ._io import _check_gitignore_for_marketplace_json
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def init(force, no_gitignore_check, name, owner, verbose):
     """Scaffold a ``marketplace:`` block in apm.yml (creates apm.yml if absent)."""
-    from ruamel.yaml import YAML
-
     from ...marketplace.init_template import render_marketplace_block
 
     logger = CommandLogger("marketplace-init", verbose=verbose)
@@ -53,25 +100,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
         if verbose:
             logger.verbose_detail(f"    Path: {apm_path}")
 
-    try:
-        rt = YAML(typ="rt")
-        rt.preserve_quotes = True
-        rt.indent(mapping=2, sequence=4, offset=2)
-        data = rt.load(apm_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.error(f"Failed to parse apm.yml: {exc}", symbol="error")
-        sys.exit(1)
-
-    if data is None:
-        from ruamel.yaml.comments import CommentedMap
-
-        data = CommentedMap()
-    elif not isinstance(data, dict):
-        logger.error(
-            f"apm.yml must be a YAML mapping at the top level (got {type(data).__name__}).",
-            symbol="error",
-        )
-        sys.exit(1)
+    rt, data = _load_apm_yml_for_marketplace_init(apm_path, logger)
 
     if "marketplace" in data and data["marketplace"] is not None and not force:
         logger.warning(
@@ -103,23 +132,4 @@ def init(force, no_gitignore_check, name, owner, verbose):
     if not no_gitignore_check:
         _check_gitignore_for_marketplace_json(logger)
 
-    # Next steps panel
-    next_steps = [
-        "Edit the 'marketplace:' block in apm.yml to add your packages",
-        "Run 'apm pack' to generate .claude-plugin/marketplace.json",
-        "Add 'codex' to marketplace.outputs to also generate .agents/plugins/marketplace.json",
-        "Commit apm.yml and the generated marketplace file(s)",
-    ]
-
-    try:
-        from ...utils.console import _rich_panel
-
-        _rich_panel(
-            "\n".join(f"  {i}. {step}" for i, step in enumerate(next_steps, 1)),
-            title=" Next Steps",
-            style="cyan",
-        )
-    except (ImportError, NameError):
-        logger.progress("Next steps:")
-        for i, step in enumerate(next_steps, 1):
-            logger.tree_item(f"  {i}. {step}")
+    _show_marketplace_init_next_steps(logger)

@@ -176,6 +176,53 @@ _BACKEND_BY_KIND: dict[str, type] = {
 }
 
 
+def _resolve_fallback_cls_and_info(
+    host: str,
+    host_lower: str,
+    info: object,
+    port: int | None,
+) -> tuple[type, HostInfo]:
+    """Defensive fallback: route by hostname when classify_host returns no kind.
+
+    Used when ``_BACKEND_BY_KIND.get(info.kind)`` yields ``None`` (mocked or
+    future ``classify_host`` results that don't match a registered kind).
+    Returns ``(backend_cls, host_info)`` ready for instantiation.
+    """
+    if is_github_hostname(host):
+        if host_lower == "github.com":
+            cls: type = GitHubBackend
+            kind = "github"
+            api_base = "https://api.github.com"
+        elif host_lower.endswith(".ghe.com"):
+            cls = GHECloudBackend
+            kind = "ghe_cloud"
+            api_base = f"https://{host}/api/v3"
+        else:
+            cls = GHESBackend
+            kind = "ghes"
+            api_base = f"https://{host}/api/v3"
+        resolved_info: HostInfo = HostInfo(
+            host=host,
+            kind=kind,
+            has_public_repos=host_lower == "github.com",
+            api_base=api_base,
+            port=port,
+        )
+    else:
+        cls = GenericGitBackend
+        if isinstance(info, HostInfo):
+            resolved_info = info
+        else:
+            resolved_info = HostInfo(
+                host=host,
+                kind="generic",
+                has_public_repos=False,
+                api_base=f"https://{host}",
+                port=port,
+            )
+    return cls, resolved_info
+
+
 def backend_for(
     dep_ref: DependencyReference | None,
     auth_resolver: AuthResolver,
@@ -236,36 +283,7 @@ def backend_for(
         # results: route by hostname so callers that wire only a partial
         # mock (typical in unit tests) still get the right backend.
         host_lower = (host or "").lower()
-        if is_github_hostname(host):
-            if host_lower == "github.com":
-                cls = GitHubBackend
-                kind = "github"
-                api_base = "https://api.github.com"
-            elif host_lower.endswith(".ghe.com"):
-                cls = GHECloudBackend
-                kind = "ghe_cloud"
-                api_base = f"https://{host}/api/v3"
-            else:
-                cls = GHESBackend
-                kind = "ghes"
-                api_base = f"https://{host}/api/v3"
-            info = HostInfo(
-                host=host,
-                kind=kind,
-                has_public_repos=host_lower == "github.com",
-                api_base=api_base,
-                port=port,
-            )
-        else:
-            cls = GenericGitBackend
-            if not isinstance(info, HostInfo):
-                info = HostInfo(
-                    host=host,
-                    kind="generic",
-                    has_public_repos=False,
-                    api_base=f"https://{host}",
-                    port=port,
-                )
+        cls, info = _resolve_fallback_cls_and_info(host, host_lower, info, port)
     return cls(host_info=info)
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
@@ -18,6 +19,29 @@ GIT_PARENT_USER_SCOPE_ERROR = (
     "git: parent dependencies are not supported at user scope. "
     "Use project scope or specify explicit git URL."
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolveParsedOpts:
+    dependency_reference_cls: Any
+    try_resolve_gitlab_direct_shorthand: Callable[..., Any]
+    auth_resolver: Any
+    verbose: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _MergeStructuredOpts:
+    dependency_reference_cls: Any
+    logger: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PersistDependencyOpts:
+    apm_yml_path: Any
+    apm_yml_filename: str
+    logger: Any = None
+    rich_error: Any = None
+    sys_exit: Any = None
 
 
 def dependency_reference_to_yaml_entry(dep_ref: Any) -> dict:
@@ -36,10 +60,8 @@ def resolve_parsed_dependency_reference(
     package: str,
     marketplace_dep_ref: Any | None,
     *,
-    dependency_reference_cls: Any,
-    try_resolve_gitlab_direct_shorthand: Callable[..., Any],
-    auth_resolver: Any,
-    verbose: bool,
+    opts: _ResolveParsedOpts | None = None,
+    **kwargs,
 ) -> tuple[Any, bool]:
     """Parse or probe *package* into a ``DependencyReference``.
 
@@ -49,19 +71,22 @@ def resolve_parsed_dependency_reference(
     Raises:
         ValueError: When GitLab shorthand probing is required but fails to resolve.
     """
+    if opts is None:
+        opts = _ResolveParsedOpts(**kwargs)
+
     dep_ref = (
         marketplace_dep_ref
         if marketplace_dep_ref is not None
-        else dependency_reference_cls.parse(package)
+        else opts.dependency_reference_cls.parse(package)
     )
     if (
         marketplace_dep_ref is None
-        and dependency_reference_cls.needs_gitlab_direct_shorthand_probing(package, dep_ref)
+        and opts.dependency_reference_cls.needs_gitlab_direct_shorthand_probing(package, dep_ref)
     ):
-        resolved = try_resolve_gitlab_direct_shorthand(
+        resolved = opts.try_resolve_gitlab_direct_shorthand(
             package,
-            auth_resolver,
-            verbose=verbose,
+            opts.auth_resolver,
+            verbose=opts.verbose,
         )
         if resolved is None:
             raise ValueError(_GITLAB_DIRECT_SHORTHAND_UNRESOLVED)
@@ -105,17 +130,20 @@ def merge_structured_entry_into_current_deps(
     identity: str,
     canonical: str,
     *,
-    dependency_reference_cls: Any,
-    logger: Any = None,
+    opts: _MergeStructuredOpts | None = None,
+    **kwargs,
 ) -> None:
     """Replace or append *structured_entry* in *current_deps* by *identity*."""
+    if opts is None:
+        opts = _MergeStructuredOpts(**kwargs)
+
     replaced = False
     for idx, dep_entry in enumerate(current_deps):
         try:
             if isinstance(dep_entry, builtins.str):
-                existing_ref = dependency_reference_cls.parse(dep_entry)
+                existing_ref = opts.dependency_reference_cls.parse(dep_entry)
             elif isinstance(dep_entry, builtins.dict):
-                existing_ref = dependency_reference_cls.parse_from_dict(dep_entry)
+                existing_ref = opts.dependency_reference_cls.parse_from_dict(dep_entry)
             else:
                 continue
         except (ValueError, TypeError, AttributeError, KeyError):
@@ -123,8 +151,8 @@ def merge_structured_entry_into_current_deps(
         if existing_ref.get_identity() == identity:
             current_deps[idx] = structured_entry
             replaced = True
-            if logger:
-                logger.verbose_detail(
+            if opts.logger:
+                opts.logger.verbose_detail(
                     f"Updated existing dependency entry to structured git+path form: {canonical}"
                 )
             break
@@ -138,26 +166,28 @@ def persist_dependency_list_if_changed(
     data: dict,
     dep_section: str,
     current_deps: builtins.list,
-    apm_yml_path: Any,
-    apm_yml_filename: str,
-    logger: Any = None,
+    opts: _PersistDependencyOpts | None = None,
     **kwargs,
 ) -> None:
     """Write *apm.yml* when *current_deps* was updated without new packages."""
-    rich_error = kwargs.get("rich_error")
-    sys_exit = kwargs.get("sys_exit", __import__("sys").exit)
+    if opts is None:
+        opts = _PersistDependencyOpts(**kwargs)
+    rich_error = opts.rich_error
+    sys_exit = opts.sys_exit or __import__("sys").exit
     if not dependencies_changed:
         return
     data[dep_section]["apm"] = current_deps
     try:
         from apm_cli.utils.yaml_io import dump_yaml
 
-        dump_yaml(data, apm_yml_path)
-        if logger:
-            logger.success(f"Updated {apm_yml_filename} to preserve marketplace subdirectory entry")
+        dump_yaml(data, opts.apm_yml_path)
+        if opts.logger:
+            opts.logger.success(
+                f"Updated {opts.apm_yml_filename} to preserve marketplace subdirectory entry"
+            )
     except Exception as e:
-        if logger:
-            logger.error(f"Failed to write {apm_yml_filename}: {e}")
+        if opts.logger:
+            opts.logger.error(f"Failed to write {opts.apm_yml_filename}: {e}")
         elif rich_error:
-            rich_error(f"Failed to write {apm_yml_filename}: {e}")
+            rich_error(f"Failed to write {opts.apm_yml_filename}: {e}")
         sys_exit(1)

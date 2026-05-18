@@ -58,6 +58,182 @@ def _build_installed_skill_names(apm_package, project_root: Path) -> set[str]:
     return installed_skill_names
 
 
+def _empty_sync_stats() -> dict[str, int]:
+    """Return the default sync stats payload."""
+    return {"files_removed": 0, "errors": 0}
+
+
+def _resolve_sync_targets(targets):
+    """Return explicit targets or the known target registry."""
+    if targets is not None:
+        return targets
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return list(KNOWN_TARGETS.values())
+
+
+def _iter_managed_skill_paths(
+    managed_files: set[str], skill_prefix_tuple: tuple[str, ...]
+) -> list[str]:
+    """Return managed skill entries under the active target prefixes."""
+    return [
+        rel_path
+        for rel_path in managed_files
+        if rel_path.startswith(skill_prefix_tuple) and ".." not in rel_path
+    ]
+
+
+def _ensure_cowork_root(
+    cowork_root_resolved: bool,
+    cowork_root_cached: Path | None,
+) -> tuple[bool, Path | None]:
+    """Resolve the cowork skills root at most once."""
+    if cowork_root_resolved:
+        return cowork_root_resolved, cowork_root_cached
+    from apm_cli.integration.copilot_cowork_paths import resolve_copilot_cowork_skills_dir
+
+    return True, resolve_copilot_cowork_skills_dir()
+
+
+def _resolve_managed_skill_target(
+    rel_path: str,
+    project_root: Path,
+    cowork_root: Path | None,
+) -> tuple[Path | None, bool]:
+    """Resolve a managed skill path to a filesystem target."""
+    from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
+
+    if rel_path.startswith(COWORK_URI_SCHEME):
+        if cowork_root is None:
+            return None, True
+        from apm_cli.integration.copilot_cowork_paths import from_lockfile_path
+
+        return from_lockfile_path(rel_path, cowork_root), False
+
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+    target = project_root / rel_path
+    try:
+        ensure_path_within(target, project_root)
+    except PathTraversalError:
+        return None, False
+    return target, False
+
+
+def _remove_sync_target(target: Path) -> None:
+    """Remove a tracked file or directory."""
+    if target.is_dir():
+        shutil.rmtree(target)
+        return
+    target.unlink()
+
+
+def _warn_skipped_cowork_entries(cowork_skipped: int) -> None:
+    """Warn once when cowork cleanup is skipped for unresolved roots."""
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(
+        f"Cowork: skipping {cowork_skipped} skill "
+        f"{'entry' if cowork_skipped == 1 else 'entries'}"
+        " -- OneDrive path not detected.\n"
+        "Run: apm config set copilot-cowork-skills-dir <path>  "
+        "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
+        "to clean up these entries on the next install/uninstall.",
+        symbol="warning",
+    )
+
+
+def _cleanup_managed_skill_paths(
+    project_root: Path,
+    managed_files: set[str],
+    skill_prefix_tuple: tuple[str, ...],
+) -> dict[str, int]:
+    """Remove tracked skill paths from managed targets only."""
+    from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
+
+    stats = _empty_sync_stats()
+    cowork_root_resolved = False
+    cowork_root_cached: Path | None = None
+    cowork_skipped = 0
+
+    for rel_path in _iter_managed_skill_paths(managed_files, skill_prefix_tuple):
+        try:
+            if rel_path.startswith(COWORK_URI_SCHEME):
+                cowork_root_resolved, cowork_root_cached = _ensure_cowork_root(
+                    cowork_root_resolved,
+                    cowork_root_cached,
+                )
+            target, skipped = _resolve_managed_skill_target(
+                rel_path,
+                project_root,
+                cowork_root_cached,
+            )
+        except Exception:
+            stats["errors"] += 1
+            continue
+        if skipped:
+            cowork_skipped += 1
+            continue
+        if target is None or not target.exists():
+            continue
+        try:
+            _remove_sync_target(target)
+            stats["files_removed"] += 1
+        except Exception:
+            stats["errors"] += 1
+
+    if cowork_skipped > 0:
+        _warn_skipped_cowork_entries(cowork_skipped)
+    return stats
+
+
+def _resolve_target_skills_dir(target, project_root: Path) -> Path | None:
+    """Return the skills dir for *target*, if it should be cleaned."""
+    skills_mapping = target.primitives["skills"]
+    effective_root = skills_mapping.deploy_root or target.root_dir
+    if skills_mapping.deploy_root and not (project_root / target.root_dir).is_dir():
+        return None
+    return project_root / effective_root / "skills"
+
+
+def _cleanup_orphaned_target_skills(
+    self,
+    source,
+    project_root: Path,
+    installed_skill_names: set[str],
+) -> dict[str, int]:
+    """Run orphan cleanup across the active target skill directories."""
+    stats = _empty_sync_stats()
+    seen_cleanup_dirs: set[Path] = set()
+
+    for target in source:
+        if not target.supports("skills"):
+            continue
+        skills_dir = _resolve_target_skills_dir(target, project_root)
+        if skills_dir is None:
+            continue
+        resolved_skills = skills_dir.resolve()
+        if resolved_skills in seen_cleanup_dirs:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "%s -- already processed, skipping cleanup for %s", skills_dir, target.name
+            )
+            continue
+        seen_cleanup_dirs.add(resolved_skills)
+        if not skills_dir.exists():
+            continue
+        result = self._clean_orphaned_skills(
+            skills_dir,
+            installed_skill_names,
+            project_root=project_root,
+        )
+        stats["files_removed"] += result["files_removed"]
+        stats["errors"] += result["errors"]
+
+    return stats
+
+
 def sync_integration(
     self,
     apm_package,
@@ -86,125 +262,19 @@ def sync_integration(
     Returns:
         Dict with cleanup statistics
     """
-    from apm_cli.integration.targets import KNOWN_TARGETS
-
-    source = targets if targets is not None else list(KNOWN_TARGETS.values())
-
-    stats = {"files_removed": 0, "errors": 0}
-
-    # Build the set of valid skill prefixes from targets
+    source = _resolve_sync_targets(targets)
     skill_prefix_tuple = tuple(_build_skill_prefixes(source))
 
     if managed_files is not None:
-        # Manifest-based removal -- only remove tracked skill directories
-        project_root_resolved = project_root.resolve()
+        return _cleanup_managed_skill_paths(project_root, managed_files, skill_prefix_tuple)
 
-        # Lazy-resolve cowork root at most once per invocation
-        # (mirrors the pattern in cleanup.py and sync_remove_files).
-        _cowork_root_resolved: bool = False
-        _cowork_root_cached: Path | None = None
-        _cowork_skipped: int = 0
-
-        for rel_path in managed_files:
-            if not rel_path.startswith(skill_prefix_tuple):
-                continue
-            if ".." in rel_path:
-                continue
-
-            # ── Cowork:// paths ──────────────────────────────────
-            from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
-
-            if rel_path.startswith(COWORK_URI_SCHEME):
-                try:
-                    if not _cowork_root_resolved:
-                        from apm_cli.integration.copilot_cowork_paths import (
-                            resolve_copilot_cowork_skills_dir,
-                        )
-
-                        _cowork_root_cached = resolve_copilot_cowork_skills_dir()
-                        _cowork_root_resolved = True
-                    if _cowork_root_cached is None:
-                        _cowork_skipped += 1
-                        continue
-                    from apm_cli.integration.copilot_cowork_paths import from_lockfile_path
-
-                    target = from_lockfile_path(rel_path, _cowork_root_cached)
-                except Exception:
-                    stats["errors"] += 1
-                    continue
-            else:
-                target = project_root / rel_path
-                if not str(target.resolve()).startswith(str(project_root_resolved)):
-                    continue
-
-            if not target.exists():
-                continue
-
-            try:
-                if target.is_dir():
-                    shutil.rmtree(target)
-                else:
-                    target.unlink()
-                stats["files_removed"] += 1
-            except Exception:
-                stats["errors"] += 1
-
-        # One-time warning when cowork entries were skipped
-        # because the OneDrive path is unavailable.
-        if _cowork_skipped > 0:
-            from apm_cli.utils.console import _rich_warning
-
-            _rich_warning(
-                f"Cowork: skipping {_cowork_skipped} skill "
-                f"{'entry' if _cowork_skipped == 1 else 'entries'}"
-                " -- OneDrive path not detected.\n"
-                "Run: apm config set copilot-cowork-skills-dir <path>  "
-                "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                "to clean up these entries on the next install/uninstall.",
-                symbol="warning",
-            )
-
-        return stats
-
-    # Legacy fallback: npm-style orphan detection
-    # Build set of expected skill directory names from installed packages
     installed_skill_names = _build_installed_skill_names(apm_package, project_root)
-
-    # Clean all target skill directories dynamically
-    seen_cleanup_dirs: set[Path] = set()
-    for t in source:
-        if not t.supports("skills"):
-            continue
-        sm = t.primitives["skills"]
-        effective_root = sm.deploy_root or t.root_dir
-
-        # Special guard for cross-tool deploy_root (.agents/)
-        # Only clean if the owning target dir exists
-        if sm.deploy_root:
-            if not (project_root / t.root_dir).is_dir():
-                continue
-
-        skills_dir = project_root / effective_root / "skills"
-
-        # Dedup: skip if same resolved skills dir already cleaned.
-        resolved_skills = skills_dir.resolve()
-        if resolved_skills in seen_cleanup_dirs:
-            import logging
-
-            logging.getLogger(__name__).debug(
-                "%s -- already processed, skipping cleanup for %s", skills_dir, t.name
-            )
-            continue
-        seen_cleanup_dirs.add(resolved_skills)
-
-        if skills_dir.exists():
-            result = self._clean_orphaned_skills(
-                skills_dir, installed_skill_names, project_root=project_root
-            )
-            stats["files_removed"] += result["files_removed"]
-            stats["errors"] += result["errors"]
-
-    return stats
+    return _cleanup_orphaned_target_skills(
+        self,
+        source,
+        project_root,
+        installed_skill_names,
+    )
 
 
 def _clean_orphaned_skills(

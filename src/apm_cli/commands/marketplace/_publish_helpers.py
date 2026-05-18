@@ -24,6 +24,42 @@ list = builtins.list
 _ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
+def _validate_target_entry(idx: int, entry) -> tuple:
+    """Validate a single target entry; return ``(target, None)`` or ``(None, error_string)``."""
+    if not isinstance(entry, dict):
+        return None, f"targets[{idx}] must be a mapping."
+
+    repo = entry.get("repo")
+    if not repo or not isinstance(repo, str):
+        return None, f"targets[{idx}]: 'repo' is required (owner/name)."
+
+    parts = repo.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None, f"targets[{idx}]: 'repo' must be 'owner/name', got '{repo}'."
+
+    branch = entry.get("branch")
+    if not branch or not isinstance(branch, str):
+        return None, f"targets[{idx}]: 'branch' is required."
+
+    path_in_repo = entry.get("path_in_repo", "apm.yml")
+    if not isinstance(path_in_repo, str) or not path_in_repo.strip():
+        return None, f"targets[{idx}]: 'path_in_repo' must be a non-empty string."
+
+    try:
+        validate_path_segments(
+            path_in_repo,
+            context=f"targets[{idx}].path_in_repo",
+        )
+    except PathTraversalError as exc:
+        return None, str(exc)
+
+    return ConsumerTarget(
+        repo=repo.strip(),
+        branch=branch.strip(),
+        path_in_repo=path_in_repo.strip(),
+    ), None
+
+
 def _load_targets_file(path):
     """Load and validate a consumer-targets YAML file.
 
@@ -47,42 +83,10 @@ def _load_targets_file(path):
 
     targets = []
     for idx, entry in enumerate(raw_targets):
-        if not isinstance(entry, dict):
-            return None, f"targets[{idx}] must be a mapping."
-
-        repo = entry.get("repo")
-        if not repo or not isinstance(repo, str):
-            return None, f"targets[{idx}]: 'repo' is required (owner/name)."
-
-        # Validate repo format: owner/name
-        parts = repo.split("/")
-        if len(parts) != 2 or not parts[0] or not parts[1]:
-            return None, f"targets[{idx}]: 'repo' must be 'owner/name', got '{repo}'."
-
-        branch = entry.get("branch")
-        if not branch or not isinstance(branch, str):
-            return None, f"targets[{idx}]: 'branch' is required."
-
-        path_in_repo = entry.get("path_in_repo", "apm.yml")
-        if not isinstance(path_in_repo, str) or not path_in_repo.strip():
-            return None, f"targets[{idx}]: 'path_in_repo' must be a non-empty string."
-
-        # Path safety check
-        try:
-            validate_path_segments(
-                path_in_repo,
-                context=f"targets[{idx}].path_in_repo",
-            )
-        except PathTraversalError as exc:
-            return None, str(exc)
-
-        targets.append(
-            ConsumerTarget(
-                repo=repo.strip(),
-                branch=branch.strip(),
-                path_in_repo=path_in_repo.strip(),
-            )
-        )
+        target, error = _validate_target_entry(idx, entry)
+        if error:
+            return None, error
+        targets.append(target)
 
     return targets, None
 
@@ -138,6 +142,25 @@ def _render_publish_plan(logger, plan):
     console.print()
 
 
+def _render_summary_plain(logger, results, pr_by_repo, no_pr, dry_run):
+    """Render publish summary to plain-text (no Rich console) output."""
+    click.echo()
+    for r in results:
+        icon = _outcome_symbol(r.outcome)
+        pr_info = ""
+        if not no_pr:
+            pr_r = pr_by_repo.get(r.target.repo)
+            if pr_r:
+                pr_info = f"  PR: {pr_r.state.value}"
+                if pr_r.pr_number:
+                    pr_info += f" #{pr_r.pr_number}"
+        logger.tree_item(f"  {icon} {r.target.repo}: {r.outcome.value}{pr_info} -- {r.message}")
+    click.echo()
+    updated_count = sum(1 for r in results if r.outcome == PublishOutcome.UPDATED)
+    failed_count = sum(1 for r in results if r.outcome == PublishOutcome.FAILED)
+    _render_publish_footer(logger, updated_count, failed_count, len(results), dry_run)
+
+
 def _render_publish_summary(logger, results, pr_results, no_pr, dry_run):
     """Render the final publish summary table."""
     console = _get_console()
@@ -152,19 +175,7 @@ def _render_publish_summary(logger, results, pr_results, no_pr, dry_run):
     total = len(results)
 
     if not console:
-        click.echo()
-        for r in results:
-            icon = _outcome_symbol(r.outcome)
-            pr_info = ""
-            if not no_pr:
-                pr_r = pr_by_repo.get(r.target.repo)
-                if pr_r:
-                    pr_info = f"  PR: {pr_r.state.value}"
-                    if pr_r.pr_number:
-                        pr_info += f" #{pr_r.pr_number}"
-            logger.tree_item(f"  {icon} {r.target.repo}: {r.outcome.value}{pr_info} -- {r.message}")
-        click.echo()
-        _render_publish_footer(logger, updated_count, failed_count, total, dry_run)
+        _render_summary_plain(logger, results, pr_by_repo, no_pr, dry_run)
         return
 
     from rich.table import Table

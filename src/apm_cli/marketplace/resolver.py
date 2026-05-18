@@ -131,6 +131,130 @@ def parse_marketplace_ref(
     return None
 
 
+def _check_and_backfill_canonical_host(
+    plugin: MarketplacePlugin,
+    source: MarketplaceSource,
+    canonical: str,
+    **kwargs,
+) -> tuple[str, object | None]:
+    """Check for in-marketplace subdirectory and backfill host if needed.
+
+    Keyword Args:
+        dep_ref: Initial dependency reference (default: None).
+        plugin_root: Plugin root path.
+        version_spec: Optional version override.
+
+    Returns updated (canonical, dep_ref).
+    """
+    dep_ref = kwargs.get("dep_ref")
+    plugin_root = kwargs.get("plugin_root")
+    version_spec = kwargs.get("version_spec")
+
+    updated_canonical = canonical
+    updated_dep_ref = dep_ref
+
+    # GitLab in-marketplace subdirectory handling
+    if _marketplace_host_needs_explicit_git_path(source.host) and _is_in_marketplace_source(
+        plugin, source
+    ):
+        in_repo_path, path_ref = _extract_in_repo_path_and_ref(plugin, plugin_root=plugin_root)
+        if in_repo_path:
+            updated_dep_ref = _gitlab_in_marketplace_dependency_reference(
+                source, in_repo_path, version_spec or path_ref
+            )
+            updated_canonical = updated_dep_ref.to_canonical()
+
+    # Backfill host for enterprise GitHub-family hosts
+    if (
+        updated_dep_ref is None
+        and _is_in_marketplace_source(plugin, source)
+        and _needs_canonical_host_prefix(updated_canonical, source.host)
+    ):
+        updated_canonical = f"{source.host}/{updated_canonical}"
+        logger.debug(
+            "Backfilled marketplace host '%s' onto canonical (auth routing #1285)",
+            source.host,
+        )
+
+    return (updated_canonical, updated_dep_ref)
+
+
+def _apply_version_override(
+    canonical: str,
+    version_spec: str | None,
+    dep_ref: object | None,
+    plugin_name: str,
+    marketplace_name: str,
+) -> str:
+    """Apply version_spec override if provided and dep_ref is None."""
+    if version_spec and dep_ref is None:
+        base = canonical.split("#", 1)[0]
+        updated = f"{base}#{version_spec}"
+        logger.debug(
+            "Using raw git ref '%s' for %s@%s",
+            version_spec,
+            plugin_name,
+            marketplace_name,
+        )
+        return updated
+    return canonical
+
+
+def _check_ref_immutability(
+    canonical: str,
+    plugin: MarketplacePlugin,
+    marketplace_name: str,
+    plugin_name: str,
+    warning_callback: Callable[[str], None],
+) -> None:
+    """Check ref pin and warn if changed (immutability advisory)."""
+    current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
+    plugin_version = plugin.version or ""
+    if not current_ref:
+        return
+
+    from .version_pins import check_ref_pin, record_ref_pin
+
+    previous_ref = check_ref_pin(
+        marketplace_name,
+        plugin_name,
+        current_ref,
+        version=plugin_version,
+    )
+    if previous_ref is not None:
+        warning_callback(
+            f"Plugin {plugin_name}@{marketplace_name} ref changed: was '{previous_ref}', now '{current_ref}'. "
+            "This may indicate a ref swap attack."
+        )
+    record_ref_pin(
+        marketplace_name,
+        plugin_name,
+        current_ref,
+        version=plugin_version,
+    )
+
+
+def _detect_and_warn_shadows(
+    plugin_name: str,
+    marketplace_name: str,
+    auth_resolver: object | None,
+    warning_callback: Callable[[str], None],
+) -> None:
+    """Detect plugin shadows in other marketplaces (advisory)."""
+    try:
+        from .shadow_detector import detect_shadows
+
+        shadows = detect_shadows(plugin_name, marketplace_name, auth_resolver=auth_resolver)
+        for shadow in shadows:
+            warning_callback(
+                f"Plugin '{plugin_name}' also found in marketplace '{shadow.marketplace_name}'. "
+                "Verify you are installing from the intended source."
+            )
+    except Exception:
+        # Shadow detection must never break installation
+        logger.debug("Shadow detection failed", exc_info=True)
+
+
 def resolve_marketplace_plugin(
     plugin_name: str,
     marketplace_name: str,
@@ -194,92 +318,38 @@ def resolve_marketplace_plugin(
         plugin_root=manifest.plugin_root,
     )
 
-    dep_ref = None
-    if _marketplace_host_needs_explicit_git_path(source.host) and _is_in_marketplace_source(
-        plugin, source
-    ):
-        in_repo_path, path_ref = _extract_in_repo_path_and_ref(
-            plugin, plugin_root=manifest.plugin_root
-        )
-        if in_repo_path:
-            dep_ref = _gitlab_in_marketplace_dependency_reference(
-                source, in_repo_path, version_spec or path_ref
-            )
-            canonical = dep_ref.to_canonical()
+    # Check for in-marketplace subdirectory and backfill host if needed
+    canonical, dep_ref = _check_and_backfill_canonical_host(
+        plugin,
+        source,
+        canonical,
+        dep_ref=None,  # initial dep_ref
+        plugin_root=manifest.plugin_root,
+        version_spec=version_spec,
+    )
 
-    # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
-    # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)
-    # because there is no nested-group ambiguity to disambiguate, but the bare
-    # canonical drops the host that ``DependencyReference.parse`` needs to route auth
-    # at the enterprise host instead of falling back to ``github.com``. Backfill the
-    # host so the canonical self-routes, scoped to in-marketplace sources where the
-    # host is unambiguously the registered marketplace host (#1285).
-    if (
-        dep_ref is None
-        and _is_in_marketplace_source(plugin, source)
-        and _needs_canonical_host_prefix(canonical, source.host)
-    ):
-        canonical = f"{source.host}/{canonical}"
-        logger.debug(
-            "Backfilled marketplace host '%s' onto canonical for %s@%s (auth routing #1285)",
-            source.host,
-            plugin_name,
-            marketplace_name,
-        )
-
-    # ---- Cross-repo misconfig sentinel (#1305) ----
-    # PR #1292's host backfill only covers in-marketplace sources. A cross-repo
-    # dict ``type: github`` source with a bare ``repo`` on an enterprise
-    # marketplace cannot be safely backfilled here -- the bare syntax also
-    # legitimately means "a github.com open-source dep from this enterprise
-    # marketplace" -- so the canonical stays bare and downstream auth routes at
-    # github.com. Attach a sentinel so the install command can emit an
-    # actionable hint ONLY when the package subsequently fails validation; the
-    # legitimate cross-host path validates fine and never sees the hint.
+    # Cross-repo misconfig sentinel
     cross_repo_misconfig_risk = _compute_cross_repo_misconfig_risk(
         plugin, source, canonical, dep_ref
     )
 
-    # ---- Raw ref override ----
-    # When version_spec is provided it is treated as a raw git ref that
-    # overrides whatever ref came from the marketplace source field.
-    if version_spec and dep_ref is None:
-        base = canonical.split("#", 1)[0]
-        canonical = f"{base}#{version_spec}"
-        logger.debug(
-            "Using raw git ref '%s' for %s@%s",
-            version_spec,
-            plugin_name,
-            marketplace_name,
-        )
+    # Apply version override
+    canonical = _apply_version_override(
+        canonical,
+        version_spec,
+        dep_ref,
+        plugin_name,
+        marketplace_name,
+    )
 
-    # ---- Ref immutability check (advisory) ----
-    # Record the plugin -> ref mapping (scoped by version) and warn if
-    # it changed since the last install (potential ref-swap attack).
-    # Using the plugin's declared version field ensures legitimate
-    # version bumps never trigger false-positive warnings.
-    current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
-    plugin_version = plugin.version or ""
-    if current_ref:
-        from .version_pins import check_ref_pin, record_ref_pin
-
-        previous_ref = check_ref_pin(
-            marketplace_name,
-            plugin_name,
-            current_ref,
-            version=plugin_version,
-        )
-        if previous_ref is not None:
-            _emit_warning(
-                f"Plugin {plugin_name}@{marketplace_name} ref changed: was '{previous_ref}', now '{current_ref}'. "
-                "This may indicate a ref swap attack."
-            )
-        record_ref_pin(
-            marketplace_name,
-            plugin_name,
-            current_ref,
-            version=plugin_version,
-        )
+    # Check ref immutability
+    _check_ref_immutability(
+        canonical,
+        plugin,
+        marketplace_name,
+        plugin_name,
+        _emit_warning,
+    )
 
     logger.debug(
         "Resolved %s@%s -> %s",
@@ -288,23 +358,13 @@ def resolve_marketplace_plugin(
         canonical,
     )
 
-    # -- Shadow detection (advisory) --
-    # Warn when the same plugin name exists in other registered
-    # marketplaces.  This helps users notice potential name-squatting
-    # where an attacker publishes a same-named plugin in a secondary
-    # marketplace.
-    try:
-        from .shadow_detector import detect_shadows
-
-        shadows = detect_shadows(plugin_name, marketplace_name, auth_resolver=auth_resolver)
-        for shadow in shadows:
-            _emit_warning(
-                f"Plugin '{plugin_name}' also found in marketplace '{shadow.marketplace_name}'. "
-                "Verify you are installing from the intended source."
-            )
-    except Exception:
-        # Shadow detection must never break installation
-        logger.debug("Shadow detection failed", exc_info=True)
+    # Shadow detection
+    _detect_and_warn_shadows(
+        plugin_name,
+        marketplace_name,
+        auth_resolver,
+        _emit_warning,
+    )
 
     return MarketplacePluginResolution(
         canonical=canonical,

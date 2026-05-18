@@ -129,7 +129,8 @@ from .plugin import package  # noqa: E402
 
 marketplace.add_command(package)
 
-from ._consumer_cmds import add, browse, list_cmd, remove, search, update  # noqa: E402
+from ._consumer_cmds import add, browse, list_cmd, remove, update  # noqa: E402
+from ._search_cmd import search  # noqa: E402
 from .check import check  # noqa: E402
 from .doctor import doctor  # noqa: E402
 from .init import init  # noqa: E402

@@ -9,6 +9,8 @@ content-generation / stats helpers in ``_dc_content``.  All public names are re-
 from this module so external imports remain unchanged.
 """
 
+from __future__ import annotations
+
 import builtins
 from collections import defaultdict
 from pathlib import Path
@@ -16,6 +18,7 @@ from pathlib import Path
 from ..output.formatters import CompilationFormatter
 from ..output.models import CompilationResults
 from ..primitives.models import Instruction, PrimitiveCollection
+from . import _dc_generation as _dcg
 from ._dc_content import compile_distributed_stats, generate_agents_content, validate_coverage
 from ._dc_models import CompilationResult, DirectoryMap, PlacementResult
 from ._dc_orphans import (
@@ -64,6 +67,32 @@ class DistributedAgentsCompiler:
         self.link_resolver = UnifiedLinkResolver(self.base_dir)
         self.output_formatter = CompilationFormatter()
         self._placement_map = None
+
+    def _handle_orphaned_files_cleanup(
+        self, orphaned_files: list, dry_run: bool, clean_orphaned: bool
+    ) -> None:
+        """Emit warnings for orphaned files and run cleanup if configured."""
+        warning_messages = generate_orphan_warnings(orphaned_files, self.base_dir)
+        if warning_messages:
+            self.warnings.extend(warning_messages)
+        if not dry_run and clean_orphaned:
+            cleanup_messages = cleanup_orphaned_files(orphaned_files, self.base_dir, dry_run=False)
+            if cleanup_messages:
+                self.warnings.extend(cleanup_messages)
+
+    def _update_contexts_referenced_stat(self, placements: list, stats: dict) -> None:
+        """Scan placement files for context references and record the count."""
+        try:
+            all_files_to_scan = []
+            for placement in placements:
+                for instruction in placement.instructions:
+                    all_files_to_scan.append(instruction.file_path)
+                for agent in placement.agents:
+                    all_files_to_scan.append(agent.file_path)
+            referenced_contexts = self.link_resolver.get_referenced_contexts(all_files_to_scan)
+            stats["contexts_referenced"] = len(referenced_contexts)
+        except Exception:
+            stats["contexts_referenced"] = 0
 
     def compile_distributed(
         self, primitives: PrimitiveCollection, config: dict | None = None
@@ -139,18 +168,7 @@ class DistributedAgentsCompiler:
             orphaned_files = find_orphaned_agents_files(self.base_dir, generated_paths)
 
             if orphaned_files:
-                # Always show warnings about orphaned files
-                warning_messages = generate_orphan_warnings(orphaned_files, self.base_dir)
-                if warning_messages:
-                    self.warnings.extend(warning_messages)
-
-                # Only perform actual cleanup if not dry_run and clean_orphaned is True
-                if not dry_run and clean_orphaned:
-                    cleanup_messages = cleanup_orphaned_files(
-                        orphaned_files, self.base_dir, dry_run=False
-                    )
-                    if cleanup_messages:
-                        self.warnings.extend(cleanup_messages)
+                self._handle_orphaned_files_cleanup(orphaned_files, dry_run, clean_orphaned)
 
             # Phase 5: Validate coverage
             coverage_validation = validate_coverage(placements, primitives.instructions)
@@ -161,19 +179,7 @@ class DistributedAgentsCompiler:
             stats = compile_distributed_stats(placements, primitives, self.context_optimizer)
 
             # Optional: Get referenced contexts for reporting (doesn't copy)
-            try:
-                # Collect all files from placements for context reference scanning
-                all_files_to_scan = []
-                for placement in placements:
-                    for instruction in placement.instructions:
-                        all_files_to_scan.append(instruction.file_path)
-                    for agent in placement.agents:
-                        all_files_to_scan.append(agent.file_path)
-
-                referenced_contexts = self.link_resolver.get_referenced_contexts(all_files_to_scan)
-                stats["contexts_referenced"] = len(referenced_contexts)
-            except Exception:
-                stats["contexts_referenced"] = 0
+            self._update_contexts_referenced_stat(placements, stats)
 
             return CompilationResult(
                 success=len(self.errors) == 0,
@@ -318,166 +324,24 @@ class DistributedAgentsCompiler:
         primitives: PrimitiveCollection,
         source_attribution: bool = True,
     ) -> builtins.list[PlacementResult]:
-        """Generate distributed AGENTS.md file contents.
-
-        Args:
-            placement_map (Dict[Path, List[Instruction]]): Directory to instructions mapping.
-            primitives (PrimitiveCollection): Full primitive collection.
-            source_attribution (bool): Whether to include source attribution.
-
-        Returns:
-            List[PlacementResult]: List of placement results with content.
-        """
-        placements = []
-
-        # Special case: if no instructions but constitution exists, create root placement
-        if not placement_map:
-            from .constitution import find_constitution
-
-            constitution_path = find_constitution(Path(self.base_dir))
-            if constitution_path.exists():
-                # Create a root placement for constitution-only projects
-                root_path = Path(self.base_dir)
-                agents_path = root_path / "AGENTS.md"
-
-                placement = PlacementResult(
-                    agents_path=agents_path,
-                    instructions=[],  # No instructions, just constitution
-                    coverage_patterns=set(),  # No patterns since no instructions
-                    source_attribution={"constitution": "constitution.md"}
-                    if source_attribution
-                    else {},
-                )
-
-                placements.append(placement)
-        else:
-            # Normal case: create placements for each entry in placement_map
-            for dir_path, instructions in placement_map.items():
-                agents_path = dir_path / "AGENTS.md"
-
-                # Build source attribution map if enabled
-                source_map = {}
-                if source_attribution:
-                    for instruction in instructions:
-                        source_info = getattr(instruction, "source", "local")
-                        source_map[str(instruction.file_path)] = source_info
-
-                # Extract coverage patterns
-                patterns = set()
-                for instruction in instructions:
-                    if instruction.apply_to:
-                        patterns.add(instruction.apply_to)
-
-                placement = PlacementResult(
-                    agents_path=agents_path,
-                    instructions=instructions,
-                    coverage_patterns=patterns,
-                    source_attribution=source_map,
-                )
-
-                placements.append(placement)
-
-        return placements
-
-    def get_compilation_results_for_display(
-        self, is_dry_run: bool = False
-    ) -> CompilationResults | None:
-        """Get compilation results for CLI display integration.
-
-        Args:
-            is_dry_run: Whether this is a dry run.
-
-        Returns:
-            CompilationResults if available, None otherwise.
-        """
-        if self._placement_map:
-            # Generate fresh compilation results with correct dry run status
-            compilation_results = self.context_optimizer.get_compilation_results(
-                self._placement_map, is_dry_run=is_dry_run
-            )
-
-            # Merge distributed compiler's warnings (like orphan warnings) with optimizer warnings
-            all_warnings = compilation_results.warnings + self.warnings
-
-            # Create new compilation results with merged warnings
-            from ..output.models import CompilationResults
-
-            return CompilationResults(
-                project_analysis=compilation_results.project_analysis,
-                optimization_decisions=compilation_results.optimization_decisions,
-                placement_summaries=compilation_results.placement_summaries,
-                optimization_stats=compilation_results.optimization_stats,
-                warnings=all_warnings,
-                errors=compilation_results.errors + self.errors,
-                is_dry_run=is_dry_run,
-            )
-        return None
+        """Delegate to _dc_generation."""
+        return _dcg.generate_distributed_agents_files(
+            self, placement_map, primitives, source_attribution
+        )
 
     def _extract_directories_from_pattern(self, pattern: str) -> builtins.list[Path]:
-        """Extract potential directory paths from a file pattern.
-
-        Args:
-            pattern (str): File pattern like "src/**/*.py" or "docs/*.md"
-
-        Returns:
-            List[Path]: List of directory paths that could contain matching files.
-        """
-        directories = []
-
-        # Remove filename part and wildcards to get directory structure
-        # Examples:
-        # "src/**/*.py" -> ["src"]
-        # "docs/*.md" -> ["docs"]
-        # "**/*.py" -> ["."] (current directory)
-        # "*.py" -> ["."] (current directory)
-
-        if pattern.startswith("**/"):
-            # Global pattern - applies to all directories
-            directories.append(Path("."))
-        elif "/" in pattern:
-            # Extract directory part
-            dir_part = pattern.split("/")[0]
-            if not dir_part.startswith("*"):
-                directories.append(Path(dir_part))
-            else:
-                directories.append(Path("."))
-        else:
-            # No directory part - applies to current directory
-            directories.append(Path("."))
-
-        return directories
+        """Delegate to _dc_generation."""
+        return _dcg._extract_directories_from_pattern(self, pattern)
 
     def _find_best_directory(
         self, instruction: Instruction, directory_map: DirectoryMap, max_depth: int
     ) -> Path:
-        """Find the best directory for placing an instruction.
+        """Delegate to _dc_generation."""
+        return _dcg._find_best_directory(self, instruction, directory_map, max_depth)
 
-        Args:
-            instruction (Instruction): Instruction to place.
-            directory_map (DirectoryMap): Directory structure analysis.
-            max_depth (int): Maximum allowed depth.
-
-        Returns:
-            Path: Best directory path for the instruction.
-        """
-        if not instruction.apply_to:
-            return self.base_dir
-
-        pattern = instruction.apply_to
-        best_dir = self.base_dir
-        best_specificity = 0
-
-        for dir_path in directory_map.directories:
-            # Skip directories that are too deep
-            if directory_map.depth_map.get(dir_path, 0) > max_depth:
-                continue
-
-            # Check if this directory could contain files matching the pattern
-            if pattern in directory_map.directories[dir_path]:
-                # Prefer more specific (deeper) directories
-                specificity = directory_map.depth_map.get(dir_path, 0)
-                if specificity > best_specificity:
-                    best_specificity = specificity
-                    best_dir = dir_path
-
-        return best_dir
+    def get_compilation_results_for_display(self, is_dry_run: bool = False):
+        """Return formatted optimisation results for CLI display."""
+        return self.context_optimizer.get_compilation_results(
+            self._placement_map or {},
+            is_dry_run=is_dry_run,
+        )

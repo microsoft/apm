@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Main compilation orchestration for AGENTS.md generation.
 
 Timestamp generation removed in favor of deterministic Build ID handled after

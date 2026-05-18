@@ -18,6 +18,7 @@ from pathlib import Path
 import click
 
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.integration.mcp_integrator_install.opts import RuntimeDispatchOpts
 from apm_cli.utils import console as _console_utils
 from apm_cli.utils.console import (
     _rich_error,
@@ -25,6 +26,39 @@ from apm_cli.utils.console import (
 )
 
 _log = logging.getLogger(__name__)
+
+
+def _install_single_dependency(
+    runtime: str, dep: str, *, opts: RuntimeDispatchOpts, logger
+) -> bool:
+    """Install one MCP dependency for one runtime."""
+    from apm_cli.core.operations import install_package
+
+    result = install_package(
+        runtime,
+        dep,
+        shared_env_vars=opts.shared_env_vars,
+        server_info_cache=opts.server_info_cache,
+        shared_runtime_vars=opts.shared_runtime_vars,
+        project_root=opts.project_root,
+        user_scope=opts.user_scope,
+    )
+    if result["failed"]:
+        logger.error(f"  Failed to install {dep}")
+        return False
+    if runtime != "codex":
+        return True
+
+    from apm_cli.factory import ClientFactory
+
+    config_path = ClientFactory.create_client(
+        runtime,
+        project_root=opts.project_root,
+        user_scope=opts.user_scope,
+    ).get_config_path()
+    _log.debug("Codex config written to %s", config_path)
+    logger.verbose_detail(f"  Codex config: {config_path}")
+    return True
 
 
 def _echo_gate_message(message: str, *, level: str, symbol: str | None = None) -> None:
@@ -99,48 +133,30 @@ def _filter_runtimes(detected_runtimes: list[str]) -> list[str]:
 def _install_for_runtime(
     runtime: str,
     mcp_deps: list[str],
-    shared_env_vars: dict | None = None,  # noqa: RUF013
-    server_info_cache: dict | None = None,  # noqa: RUF013
-    shared_runtime_vars: dict | None = None,  # noqa: RUF013
-    project_root=None,
-    user_scope: bool = False,
-    logger=None,
+    opts: RuntimeDispatchOpts | None = None,
 ) -> bool:
     """Install MCP dependencies for a specific runtime.
 
     Returns True if all deps were configured successfully, False otherwise.
     """
+    resolved_opts = opts or RuntimeDispatchOpts()
+    logger = resolved_opts.logger
     if logger is None:
         logger = NullCommandLogger()
     try:
-        from apm_cli.core.operations import install_package
-
         all_ok = True
         for dep in mcp_deps:
             logger.verbose_detail(f"  Installing {dep}...")
             try:
-                result = install_package(
-                    runtime,
-                    dep,
-                    shared_env_vars=shared_env_vars,
-                    server_info_cache=server_info_cache,
-                    shared_runtime_vars=shared_runtime_vars,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                )
-                if result["failed"]:
-                    logger.error(f"  Failed to install {dep}")
-                    all_ok = False
-                elif logger and runtime == "codex":
-                    from apm_cli.factory import ClientFactory
-
-                    config_path = ClientFactory.create_client(
+                all_ok = (
+                    _install_single_dependency(
                         runtime,
-                        project_root=project_root,
-                        user_scope=user_scope,
-                    ).get_config_path()
-                    _log.debug("Codex config written to %s", config_path)
-                    logger.verbose_detail(f"  Codex config: {config_path}")
+                        dep,
+                        opts=resolved_opts,
+                        logger=logger,
+                    )
+                    and all_ok
+                )
             except Exception as install_error:
                 _log.debug(
                     "Failed to install MCP dep %s for runtime %s",

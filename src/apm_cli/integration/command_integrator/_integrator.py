@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """CommandIntegrator -- orchestrates prompt-to-command integration.
 
 Integrates ``.prompt.md`` files as commands for any target that supports the
@@ -14,13 +15,17 @@ import frontmatter
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
-from apm_cli.utils.path_security import (
-    PathTraversalError,
-    ensure_path_within,
-    validate_path_segments,
-)
-from apm_cli.utils.paths import portable_relpath
 
+from .._opts import IntegrateOpts, SyncRemoveOpts
+from ._cmd_helpers import (
+    _build_command_target_path,
+    _check_passthrough_notice,
+    _collect_command_security_messages,
+    _command_base_name,
+    _CommandTargetContext,
+    _emit_command_warnings,
+    _integrate_prompt_file,
+)
 from ._input_helpers import _PRESERVED_COMMAND_KEYS_DISPLAY
 from ._legacy import _LegacyCommandsMixin
 from ._transform import _transform_prompt_to_command
@@ -59,25 +64,12 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
         *,
         had_dropped_keys: bool,
     ) -> bool:
-        """Return True the first time *target_name* sees a passthrough deploy
-        in which at least one file actually had dropped keys.
-
-        Only fires for cursor-style targets that reuse the shared
-        ``claude_command`` transformer (and would benefit from the
-        cross-tool-compatibility explanation).  Returns False for
-        targets that have their own dedicated writer (e.g. Gemini),
-        and -- per review feedback -- returns False on the happy path
-        where no frontmatter keys were dropped (the notice would be
-        pure noise then).
-        """
-        if not had_dropped_keys:
-            return False
-        if format_id != "claude_command" or target_name == "claude":
-            return False
-        if target_name in self._passthrough_notified:
-            return False
-        self._passthrough_notified.add(target_name)
-        return True
+        return _check_passthrough_notice(
+            target_name,
+            format_id,
+            had_dropped_keys=had_dropped_keys,
+            notified=self._passthrough_notified,
+        )
 
     def find_prompt_files(self, package_path: Path) -> list[Path]:
         """Find all .prompt.md files in a package."""
@@ -88,10 +80,8 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
         source: Path,
         target: Path,
         package_info: Any,
-        original_path: Path,
-        *,
-        diagnostics: DiagnosticCollector | None = None,
-        target_name: str = "claude",
+        original_path_or_opts=None,
+        **legacy_kwargs,
     ) -> tuple[int, bool, bool]:
         """Integrate a prompt file as a slash command (verbatim copy with format conversion).
 
@@ -115,8 +105,8 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
             target: Target command file path (e.g. .claude/commands/foo.md
                     or .cursor/commands/foo.md).
             package_info: PackageInfo object with package metadata.
-            original_path: Original path to the prompt file.
-            diagnostics: Optional DiagnosticCollector for surfacing warnings.
+            original_path_or_opts: Original source path (legacy API) or
+                IntegrateOpts (new API). Ignored when it is a Path instance.
             target_name: Name of the deployment target (e.g. ``"claude"``,
                 ``"cursor"``, ``"opencode"``) so diagnostic messages stay
                 target-agnostic instead of always saying "Claude".
@@ -131,6 +121,14 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
             ``claude_command`` transformer; the dispatcher uses this to
             decide whether to surface the one-shot passthrough notice.
         """
+        _diagnostics = legacy_kwargs.get("diagnostics")
+        target_name: str = legacy_kwargs.get("target_name", "claude")
+        if isinstance(original_path_or_opts, IntegrateOpts):
+            opts = original_path_or_opts
+        else:
+            opts = IntegrateOpts(diagnostics=_diagnostics)
+        diagnostics = opts.diagnostics
+
         # Transform to command format.
         command_name, post, warnings, dropped_keys = _transform_prompt_to_command(source)
 
@@ -195,33 +193,9 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
             # Missing/tampered gate must not silently become a no-op.
             raise
         except (OSError, ValueError) as exc:
-            warnings.append(f"{target.name}: security scan skipped due to scan error: {exc}")
+            warnings.append(f"{target_name}: security scan skipped due to scan error: {exc}")
 
-        security_messages: list[tuple[str, str, str]] = []
-        if scan_verdict is not None:
-            if scan_verdict.has_critical:
-                security_messages.append(
-                    (
-                        f"Critical hidden characters in {target.name}",
-                        (
-                            f"{scan_verdict.critical_count} critical, "
-                            f"{scan_verdict.warning_count} warning(s) -- "
-                            f"run 'apm audit --file {target}' to inspect"
-                        ),
-                        "critical",
-                    )
-                )
-            elif scan_verdict.has_findings:
-                security_messages.append(
-                    (
-                        f"Hidden character warnings in {target.name}",
-                        (
-                            f"{scan_verdict.warning_count} warning(s) -- "
-                            f"run 'apm audit --file {target}' to inspect"
-                        ),
-                        "warning",
-                    )
-                )
+        security_messages = _collect_command_security_messages(scan_verdict, target)
 
         # Surface security findings via diagnostics.security() with correct severity.
         for message, detail, severity in security_messages:
@@ -238,14 +212,7 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
         # Surface non-security warnings (e.g. parse / scan-error / rejected
         # input names) via the general warning channel so they do not get
         # miscategorised as security findings.
-        for warning in warnings:
-            if diagnostics is not None:
-                diagnostics.warn(
-                    message=warning,
-                    package=pkg_name,
-                )
-            else:
-                logger.warning(warning)
+        _emit_command_warnings(warnings, diagnostics, logger, pkg_name)
 
         # Defence-in-depth skip: a critical post-transform finding must
         # not be deployed.  Surfaced as severity=critical above so the
@@ -271,10 +238,8 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
         target: TargetProfile,
         package_info,
         project_root: Path,
-        *,
-        force: bool = False,
-        managed_files: set | None = None,
-        diagnostics=None,
+        opts: IntegrateOpts | None = None,
+        **legacy_kwargs,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
 
@@ -282,6 +247,17 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
         mapping, applying the opt-in guard when ``auto_create`` is
         ``False``.
         """
+        if opts is None and legacy_kwargs:
+            opts = IntegrateOpts(
+                force=legacy_kwargs.get("force", False),
+                managed_files=legacy_kwargs.get("managed_files"),
+                diagnostics=legacy_kwargs.get("diagnostics"),
+            )
+        resolved_opts = opts or IntegrateOpts()
+        force = resolved_opts.force
+        managed_files = resolved_opts.managed_files
+        diagnostics = resolved_opts.diagnostics
+
         mapping = target.primitives.get("commands")
         if not mapping:
             return IntegrationResult(0, 0, 0, [], 0)
@@ -329,93 +305,29 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
         target_paths: list[Path] = []
         total_links_resolved = 0
         any_dropped_keys = False
+        ctx = _CommandTargetContext(
+            target=target,
+            mapping=mapping,
+            commands_dir=commands_dir,
+            package_info=package_info,
+            project_root=project_root,
+            managed_files=managed_files,
+            force=force,
+            diagnostics=diagnostics,
+            package_name=pkg_name,
+        )
 
         for prompt_file in prompt_files:
-            filename = prompt_file.name
-            if filename.endswith(".prompt.md"):
-                base_name = filename[: -len(".prompt.md")]
-            else:
-                base_name = prompt_file.stem
-
-            # Containment: reject base names containing path traversal
-            # sequences before joining into commands_dir.  A malicious
-            # package shipping ``../../evil.prompt.md`` would otherwise
-            # escape the target commands directory.
-            try:
-                validate_path_segments(base_name, context="command filename")
-            except PathTraversalError as exc:
-                if diagnostics is not None:
-                    diagnostics.warn(
-                        message=f"Rejected command filename: {exc}",
-                        package=pkg_name,
-                    )
-                files_skipped += 1
-                continue
-
-            target_path = commands_dir / f"{base_name}{mapping.extension}"
-
-            # Defence-in-depth: assert the resolved target stays inside
-            # the commands directory even if validate_path_segments was
-            # bypassed by a future regression.
-            try:
-                ensure_path_within(target_path, commands_dir)
-            except PathTraversalError as exc:
-                if diagnostics is not None:
-                    diagnostics.warn(
-                        message=f"Rejected command target path: {exc}",
-                        package=pkg_name,
-                    )
-                files_skipped += 1
-                continue
-
-            rel_path = portable_relpath(target_path, project_root)
-
-            if self.is_content_identical_to_source(target_path, prompt_file):
-                # Pre-existing file is byte-identical to source -- silently
-                # adopt.  See BaseIntegrator.is_content_identical_to_source.
-                target_paths.append(target_path)
-                files_adopted += 1
-                continue
-
-            if self.check_collision(
-                target_path,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                files_skipped += 1
-                continue
-
-            if mapping.format_id == "gemini_command":
-                _write_gemini_command_fn(prompt_file, target_path)
-                links_resolved = 0
-                written = True
-                had_dropped = False
-            else:
-                # Cursor reuses the shared claude_command transformer;
-                # pass target.name so diagnostic messages stay
-                # target-agnostic (no Claude branding for Cursor
-                # installs).  See the cursor-command-format TODO on
-                # KNOWN_TARGETS["cursor"]["commands"] in targets.py.
-                links_resolved, written, had_dropped = self.integrate_command(
-                    prompt_file,
-                    target_path,
-                    package_info,
-                    prompt_file,
-                    diagnostics=diagnostics,
-                    target_name=target.name,
-                )
-            if not written:
-                # Critical post-transform finding -- defence-in-depth
-                # skip already surfaced via diagnostics.security().
-                files_skipped += 1
-                continue
-            if had_dropped:
-                any_dropped_keys = True
-            files_integrated += 1
+            integrated, skipped, adopted, links_resolved, target_path, had_dropped = (
+                _integrate_prompt_file(self, prompt_file, ctx)
+            )
+            files_integrated += integrated
+            files_skipped += skipped
+            files_adopted += adopted
             total_links_resolved += links_resolved
-            target_paths.append(target_path)
+            any_dropped_keys = any_dropped_keys or had_dropped
+            if target_path is not None:
+                target_paths.append(target_path)
 
         # One-shot install-time notice for cursor-style targets that
         # actually dropped at least one frontmatter key in this batch.
@@ -467,10 +379,12 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
         return self.sync_remove_files(
             project_root,
             managed_files,
-            prefix=prefix,
-            legacy_glob_dir=legacy_dir,
-            legacy_glob_pattern="*-apm.md",
-            targets=[target],
+            prefix,
+            SyncRemoveOpts(
+                legacy_glob_dir=legacy_dir,
+                legacy_glob_pattern="*-apm.md",
+                targets=[target],
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -479,12 +393,5 @@ class CommandIntegrator(BaseIntegrator, _LegacyCommandsMixin):
 
     @staticmethod
     def _write_gemini_command(source: Path, target: Path) -> None:
-        """Transform a ``.prompt.md`` file to Gemini CLI ``.toml`` format.
-
-        Delegates to the standalone ``_write_gemini_command`` function in
-        ``_transform.py``.  Kept as a static method for backward
-        compatibility with call sites that use ``CommandIntegrator._write_gemini_command``.
-
-        Ref: https://geminicli.com/docs/cli/gemini-md/
-        """
+        """Transform ``.prompt.md`` to Gemini CLI ``.toml`` format (delegates to ``_transform``)."""
         _write_gemini_command_fn(source, target)

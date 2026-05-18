@@ -62,16 +62,16 @@ def _route_local_bundle_or_raise(**kwargs) -> bool:
 
         _bundle_info = _detect_lb(_probe)
         if _bundle_info is not None:
+            from ...install.local_bundle_handler import _InstallFlags as _IFlags
+
             _install_lb(
                 bundle_info=_bundle_info,
                 bundle_arg=packages[0],
                 target=target,
                 global_=global_,
-                force=force,
-                dry_run=dry_run,
+                install_flags=_IFlags(force=force, dry_run=dry_run, logger=logger),
                 verbose=verbose,
                 alias=alias,
-                logger=logger,
                 legacy_skill_paths=legacy_skill_paths,
                 # Rejected-flag context for consolidated UsageError:
                 rejected_flags={

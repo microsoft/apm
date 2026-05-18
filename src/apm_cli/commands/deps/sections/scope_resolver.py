@@ -1,5 +1,7 @@
 """Package dependency resolution for deps list command."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from ....constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
@@ -8,10 +10,53 @@ from ..._helpers import _expand_with_ancestors, _standalone_installed_packages
 from .._utils import _count_primitives, _deps_list_source_label, _is_nested_under_package
 
 
-def _load_declared_sources(apm_dir):
-    """Load declared dependencies from apm.yml and return declared_sources dict."""
+def _record_manifest_declared_source(declared_sources: dict, dep) -> None:
+    """Add one declared dependency source from apm.yml."""
+    repo_parts = dep.repo_url.split("/")
+    source = _deps_list_source_label(dep.host, is_local=dep.is_local)
+    if not dep.is_virtual:
+        if dep.is_azure_devops() and len(repo_parts) >= 3:
+            declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}"] = source
+        elif len(repo_parts) >= 2:
+            declared_sources[f"{repo_parts[0]}/{repo_parts[1]}"] = source
+        return
+    if dep.is_virtual_subdirectory() and dep.virtual_path:
+        if dep.is_azure_devops() and len(repo_parts) >= 3:
+            declared_sources[
+                f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}/{dep.virtual_path}"
+            ] = source
+        elif len(repo_parts) >= 2:
+            declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{dep.virtual_path}"] = source
+        return
+    package_name = dep.get_virtual_package_name()
+    if dep.is_azure_devops() and len(repo_parts) >= 3:
+        declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
+    elif len(repo_parts) >= 2:
+        declared_sources[f"{repo_parts[0]}/{package_name}"] = source
+
+
+def _load_lockfile_declared_sources(
+    apm_dir, declared_sources: dict, insecure_lock_deps: dict
+) -> None:
+    """Merge declared sources inferred from the lockfile."""
     from ....deps.lockfile import LockFile, get_lockfile_path
 
+    lockfile_path = get_lockfile_path(apm_dir)
+    if not lockfile_path.exists():
+        return
+    lockfile = LockFile.read(lockfile_path)
+    for dep in lockfile.dependencies.values():
+        dep_key = dep.get_unique_key()
+        if dep_key and dep_key not in declared_sources:
+            declared_sources[dep_key] = _deps_list_source_label(
+                dep.host, lockfile_source=dep.source
+            )
+        if getattr(dep, "is_insecure", False):
+            insecure_lock_deps[dep_key] = dep
+
+
+def _load_declared_sources(apm_dir):
+    """Load declared dependencies from apm.yml and return declared_sources dict."""
     declared_sources = {}  # dep_path -> 'github' | 'gitlab' | 'azure-devops' | 'local'
     insecure_lock_deps = {}
 
@@ -20,58 +65,12 @@ def _load_declared_sources(apm_dir):
         if apm_yml_path.exists():
             project_package = APMPackage.from_apm_yml(apm_yml_path)
             for dep in project_package.get_apm_dependencies():
-                # Build the expected installed package name
-                repo_parts = dep.repo_url.split("/")
-                source = _deps_list_source_label(dep.host, is_local=dep.is_local)
-                is_ado = dep.is_azure_devops() and len(repo_parts) >= 3
-                is_gh = len(repo_parts) >= 2
-
-                if not dep.is_virtual:
-                    # Regular package: use full repo_url path
-                    if is_ado:
-                        declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}"] = (
-                            source
-                        )
-                    elif is_gh:
-                        declared_sources[f"{repo_parts[0]}/{repo_parts[1]}"] = source
-                    continue
-
-                if dep.is_virtual_subdirectory() and dep.virtual_path:
-                    # Virtual subdirectory packages keep natural path structure.
-                    if is_ado:
-                        declared_sources[
-                            f"{repo_parts[0]}/{repo_parts[1]}/{repo_parts[2]}/{dep.virtual_path}"
-                        ] = source
-                    elif is_gh:
-                        declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{dep.virtual_path}"] = (
-                            source
-                        )
-                    continue
-
-                # Virtual file/collection packages are flattened.
-                package_name = dep.get_virtual_package_name()
-                if is_ado:
-                    declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
-                elif is_gh:
-                    declared_sources[f"{repo_parts[0]}/{package_name}"] = source
+                _record_manifest_declared_source(declared_sources, dep)
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
 
-    # Also load lockfile deps to avoid false orphan flags on transitive deps
     try:
-        lockfile_path = get_lockfile_path(apm_dir)
-        if lockfile_path.exists():
-            lockfile = LockFile.read(lockfile_path)
-            for dep in lockfile.dependencies.values():
-                # Lockfile keys match declared_sources format (owner/repo)
-                dep_key = dep.get_unique_key()
-                if dep_key and dep_key not in declared_sources:
-                    declared_sources[dep_key] = _deps_list_source_label(
-                        dep.host,
-                        lockfile_source=dep.source,
-                    )
-                if getattr(dep, "is_insecure", False):
-                    insecure_lock_deps[dep_key] = dep
+        _load_lockfile_declared_sources(apm_dir, declared_sources, insecure_lock_deps)
     except Exception:
         pass  # Continue without lockfile if it can't be read
 

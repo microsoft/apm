@@ -26,12 +26,15 @@ creates the directory if needed.
 Ref: https://geminicli.com/docs/reference/configuration/
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
 
 from ...core.docker_args import DockerArgsProcessor
 from ...utils.console import _rich_error, _rich_success
+from .base import McpServerRequest
 from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
@@ -113,88 +116,43 @@ class GeminiClientAdapter(CopilotClientAdapter):
             logger.warning("Could not read %s: %s", config_path, exc)
             return {}
 
-    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
-        """Format server info into Gemini CLI MCP configuration.
-
-        Gemini's schema differs from Copilot's:
-        - No ``type``, ``tools``, or ``id`` fields.
-        - Transport inferred from key: ``command`` (stdio), ``url`` (SSE),
-          ``httpUrl`` (streamable HTTP).
-        - Tool filtering via ``includeTools``/``excludeTools``.
-
-        Args:
-            server_info: Server information from registry.
-            env_overrides: Pre-collected environment variable overrides.
-            runtime_vars: Pre-collected runtime variable values.
-
-        Returns:
-            dict suitable for writing to ``.gemini/settings.json``.
-        """
-        if runtime_vars is None:
-            runtime_vars = {}
-
+    def _gemini_remote_config(self, server_info, remotes, env_overrides):
+        """Build Gemini config dict for a server with remote endpoints."""
         config: dict = {}
+        remote = self._select_remote_with_url(remotes) or remotes[0]
 
-        # --- raw stdio (self-defined deps) ---
-        raw = server_info.get("_raw_stdio")
-        if raw:
-            config["command"] = raw["command"]
-            config["args"] = raw["args"]
-            if raw.get("env"):
-                config["env"] = raw["env"]
-                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Gemini CLI")
-            return config
-
-        # --- remote endpoints ---
-        remotes = server_info.get("remotes", [])
-        if remotes:
-            remote = self._select_remote_with_url(remotes) or remotes[0]
-
-            transport = (remote.get("transport_type") or "").strip()
-            if not transport:
-                transport = "http"
-            elif transport not in ("sse", "http", "streamable-http"):
-                raise ValueError(
-                    f"Unsupported remote transport '{transport}' for Gemini. "
-                    f"Server: {server_info.get('name', 'unknown')}. "
-                    f"Supported transports: http, sse, streamable-http."
-                )
-
-            url = (remote.get("url") or "").strip()
-            if transport == "sse":
-                config["url"] = url
-            else:
-                config["httpUrl"] = url
-
-            # Registry-supplied headers
-            for header in remote.get("headers", []):
-                name = header.get("name", "")
-                value = header.get("value", "")
-                if name and value:
-                    config.setdefault("headers", {})[name] = self._resolve_env_variable(
-                        name, value, env_overrides
-                    )
-
-            if config.get("headers"):
-                self._warn_input_variables(
-                    config["headers"], server_info.get("name", ""), "Gemini CLI"
-                )
-
-            return config
-
-        # --- local packages ---
-        packages = server_info.get("packages", [])
-
-        if not packages:
+        transport = (remote.get("transport_type") or "").strip()
+        if not transport:
+            transport = "http"
+        elif transport not in ("sse", "http", "streamable-http"):
             raise ValueError(
-                f"MCP server has no package information or remote endpoints. "
-                f"Server: {server_info.get('name', 'unknown')}"
+                f"Unsupported remote transport '{transport}' for Gemini. "
+                f"Server: {server_info.get('name', 'unknown')}. "
+                f"Supported transports: http, sse, streamable-http."
             )
 
-        package = self._select_best_package(packages)
-        if not package:
-            return config
+        url = (remote.get("url") or "").strip()
+        if transport == "sse":
+            config["url"] = url
+        else:
+            config["httpUrl"] = url
 
+        for header in remote.get("headers", []):
+            name = header.get("name", "")
+            value = header.get("value", "")
+            if name and value:
+                config.setdefault("headers", {})[name] = self._resolve_env_variable(
+                    name, value, env_overrides
+                )
+
+        if config.get("headers"):
+            self._warn_input_variables(config["headers"], server_info.get("name", ""), "Gemini CLI")
+
+        return config
+
+    def _gemini_package_config(self, package, env_overrides, runtime_vars):
+        """Build Gemini config dict for a locally-installed package."""
+        config: dict = {}
         registry_name = self._infer_registry_name(package)
         package_name = package.get("name", "")
         runtime_hint = package.get("runtime_hint", "")
@@ -232,20 +190,75 @@ class GeminiClientAdapter(CopilotClientAdapter):
 
         return config
 
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        """Format server info into Gemini CLI MCP configuration.
+
+        Gemini's schema differs from Copilot's:
+        - No ``type``, ``tools``, or ``id`` fields.
+        - Transport inferred from key: ``command`` (stdio), ``url`` (SSE),
+          ``httpUrl`` (streamable HTTP).
+        - Tool filtering via ``includeTools``/``excludeTools``.
+
+        Args:
+            server_info: Server information from registry.
+            env_overrides: Pre-collected environment variable overrides.
+            runtime_vars: Pre-collected runtime variable values.
+
+        Returns:
+            dict suitable for writing to ``.gemini/settings.json``.
+        """
+        if runtime_vars is None:
+            runtime_vars = {}
+
+        config: dict = {}
+
+        # --- raw stdio (self-defined deps) ---
+        raw = server_info.get("_raw_stdio")
+        if raw:
+            config["command"] = raw["command"]
+            config["args"] = raw["args"]
+            if raw.get("env"):
+                config["env"] = raw["env"]
+                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Gemini CLI")
+            return config
+
+        # --- remote endpoints ---
+        remotes = server_info.get("remotes", [])
+        if remotes:
+            return self._gemini_remote_config(server_info, remotes, env_overrides)
+
+        # --- local packages ---
+        packages = server_info.get("packages", [])
+
+        if not packages:
+            raise ValueError(
+                f"MCP server has no package information or remote endpoints. "
+                f"Server: {server_info.get('name', 'unknown')}"
+            )
+
+        package = self._select_best_package(packages)
+        if not package:
+            return config
+
+        return self._gemini_package_config(package, env_overrides, runtime_vars)
+
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        request: McpServerRequest | None = None,
+        **legacy_kwargs,
     ):
         """Configure an MCP server in ``.gemini/settings.json``.
 
         Delegates to the parent for config formatting, then writes to
         the Gemini CLI settings file.
         """
+        if isinstance(request, str):
+            legacy_kwargs.setdefault("server_name", request)
+            request = None
+        if request is None and legacy_kwargs:
+            _valid = McpServerRequest.__dataclass_fields__
+            request = McpServerRequest(**{k: v for k, v in legacy_kwargs.items() if k in _valid})
         if not server_url:
             _rich_error("server_url cannot be empty", symbol="error")
             return False
@@ -256,6 +269,12 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 self._get_gemini_dir(),
             )
             return True
+
+        req = request or McpServerRequest()
+        server_name = req.server_name
+        env_overrides = req.env_overrides
+        server_info_cache = req.server_info_cache
+        runtime_vars = req.runtime_vars
 
         try:
             if server_info_cache and server_url in server_info_cache:

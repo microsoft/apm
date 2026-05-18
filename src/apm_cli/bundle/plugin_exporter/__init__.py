@@ -7,6 +7,7 @@ plugin hosts can consume directly.  The output contains plugin-spec artefacts
 under ``pack.bundle_files`` (issue #1098).
 """
 
+from ...utils.console import _rich_info
 from .collectors import (
     _rename_prompt,  # already private in collectors
 )
@@ -29,6 +30,7 @@ from .collectors import (
     collect_root_plugin_components as _collect_root_plugin_components,
 )
 from .exporter import (
+    ExportOptions,
     _rich_warning,
     _update_plugin_json_paths,
     export_plugin_bundle,
@@ -47,6 +49,7 @@ from .utils import (
 
 __all__ = [
     "_MAX_MERGE_DEPTH",
+    "ExportOptions",
     # private names re-exported for backward-compat / tests
     "_collect_apm_components",
     "_collect_bare_skill",
@@ -58,6 +61,7 @@ __all__ = [
     "_get_dev_dependency_urls",
     "_merge_file_map",
     "_rename_prompt",
+    "_rich_info",
     "_rich_warning",
     "_update_plugin_json_paths",
     "_validate_output_rel",

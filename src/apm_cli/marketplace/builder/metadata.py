@@ -31,6 +31,61 @@ logger = logging.getLogger(__name__)
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
+def _build_metadata_url(
+    self, pkg: ResolvedPackage, file_path: str
+) -> tuple[str, dict[str, str]] | None:
+    """Build metadata fetch URL and headers, or None if unsupported."""
+    host_kind = self._host_info.kind if self._host_info else "github"
+
+    if host_kind not in ("github", "ghe_cloud", "ghes"):
+        logger.debug(
+            "Skipping metadata fetch for %s (non-GitHub host: %s)",
+            pkg.name,
+            self._host,
+        )
+        return None
+
+    if host_kind == "ghe_cloud" and not self._github_token:
+        logger.debug(
+            "Skipping metadata fetch for %s (GHE Cloud requires auth)",
+            pkg.name,
+        )
+        return None
+
+    headers: dict[str, str] = {}
+    if self._github_token:
+        headers["Authorization"] = f"token {self._github_token}"
+
+    if self._host == "github.com":
+        # github.com -- use fast raw.githubusercontent.com CDN
+        url = f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
+    else:
+        # GHES / GHE Cloud -- use REST API
+        api_base = (
+            self._host_info.api_base if self._host_info else None
+        ) or f"https://{self._host}/api/v3"
+        url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
+        headers["Accept"] = "application/vnd.github.raw"
+
+    return (url, headers)
+
+
+def _parse_metadata_yaml(data: object) -> dict[str, str]:
+    """Extract description and version from loaded YAML, if present."""
+    if not isinstance(data, dict):
+        return {}
+    result: dict[str, str] = {}
+    desc = data.get("description")
+    if isinstance(desc, str) and desc:
+        result["description"] = desc
+    ver = data.get("version")
+    if ver is not None:
+        ver_str = str(ver).strip()
+        if ver_str:
+            result["version"] = ver_str
+    return result
+
+
 def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
     """Best-effort: fetch ``description`` and ``version`` from the
     package's remote ``apm.yml``.
@@ -52,56 +107,19 @@ def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
         path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
         file_path = f"{path_prefix}apm.yml"
 
-        # Determine URL strategy based on host kind
-        host_kind = self._host_info.kind if self._host_info else "github"
-
-        if host_kind not in ("github", "ghe_cloud", "ghes"):
-            # Non-GitHub hosts -- skip metadata enrichment
-            logger.debug(
-                "Skipping metadata fetch for %s (non-GitHub host: %s)",
-                pkg.name,
-                self._host,
-            )
+        url_info = _build_metadata_url(self, pkg, file_path)
+        if url_info is None:
             return None
+        url, headers = url_info
 
-        if host_kind == "ghe_cloud" and not self._github_token:
-            logger.debug(
-                "Skipping metadata fetch for %s (GHE Cloud requires auth)",
-                pkg.name,
-            )
-            return None
-
-        if self._host == "github.com":
-            # github.com -- use fast raw.githubusercontent.com CDN
-            url = f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
-            req = urllib.request.Request(url)  # noqa: S310
-            if self._github_token:
-                req.add_header("Authorization", f"token {self._github_token}")
-        else:
-            # GHES / GHE Cloud -- use REST API
-            api_base = (
-                self._host_info.api_base if self._host_info else None
-            ) or f"https://{self._host}/api/v3"
-            url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
-            req = urllib.request.Request(url)  # noqa: S310
-            req.add_header("Accept", "application/vnd.github.raw")
-            if self._github_token:
-                req.add_header("Authorization", f"token {self._github_token}")
+        req = urllib.request.Request(url)  # noqa: S310
+        for key, value in headers.items():
+            req.add_header(key, value)
 
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
             raw = resp.read().decode("utf-8")
         data = yaml.safe_load(raw)
-        if not isinstance(data, dict):
-            return None
-        result: dict[str, str] = {}
-        desc = data.get("description")
-        if isinstance(desc, str) and desc:
-            result["description"] = desc
-        ver = data.get("version")
-        if ver is not None:
-            ver_str = str(ver).strip()
-            if ver_str:
-                result["version"] = ver_str
+        result = _parse_metadata_yaml(data)
         if result:
             logger.debug(
                 "Fetched metadata for %s from remote apm.yml: %s",

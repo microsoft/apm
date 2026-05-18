@@ -76,7 +76,8 @@ class DownloadDelegate:
         token: str | None = None,
         auth_scheme: str = "basic",
     ) -> str:
-        return _strategy_base.build_repo_url(self, repo_ref, use_ssh, dep_ref, token, auth_scheme)
+        conf = _strategy_base._CloneConf(use_ssh=use_ssh, auth_scheme=auth_scheme)
+        return _strategy_base.build_repo_url(self, repo_ref, dep_ref, token, conf)
 
     # ------------------------------------------------------------------
     # Artifactory helpers
@@ -87,31 +88,17 @@ class DownloadDelegate:
 
     def download_artifactory_archive(
         self,
-        host: str,
-        prefix: str,
-        owner: str,
-        repo: str,
-        ref: str,
+        target: "_artifactory_strategy._ArtifactoryTarget",
         target_path: Path,
-        scheme: str = "https",
     ) -> None:
-        return _artifactory_strategy.download_artifactory_archive(
-            self, host, prefix, owner, repo, ref, target_path, scheme
-        )
+        return _artifactory_strategy.download_artifactory_archive(self, target, target_path)
 
     def download_file_from_artifactory(
         self,
-        host: str,
-        prefix: str,
-        owner: str,
-        repo: str,
+        target: "_artifactory_strategy._ArtifactoryTarget",
         file_path: str,
-        ref: str,
-        scheme: str = "https",
     ) -> bytes:
-        return _artifactory_strategy.download_file_from_artifactory(
-            self, host, prefix, owner, repo, file_path, ref, scheme
-        )
+        return _artifactory_strategy.download_file_from_artifactory(self, target, file_path)
 
     # ------------------------------------------------------------------
     # Raw / CDN download helper
@@ -164,12 +151,8 @@ class DownloadDelegate:
         repo: str,
         file_path: str,
         ref: str,
-        *,
-        is_github_host: bool | None = None,
     ) -> list[str]:
-        return _git_strategy._build_contents_api_urls(
-            host, owner, repo, file_path, ref, is_github_host=is_github_host
-        )
+        return _git_strategy._build_contents_api_urls(host, owner, repo, file_path, ref)
 
     @staticmethod
     @staticmethod
@@ -185,25 +168,8 @@ class DownloadDelegate:
 
     @staticmethod
     @staticmethod
-    def _build_unsupported_or_missing_error(
-        host: str,
-        repo_url: str,
-        file_path: str,
-        ref: str,
-        api_url_candidates: list[str],
-        *,
-        is_github_host: bool,
-        fallback_ref: str | None = None,
-    ) -> str:
-        return _git_strategy._build_unsupported_or_missing_error(
-            host,
-            repo_url,
-            file_path,
-            ref,
-            api_url_candidates,
-            is_github_host=is_github_host,
-            fallback_ref=fallback_ref,
-        )
+    def _build_unsupported_or_missing_error(ctx: "_git_strategy._MissingFileCtx") -> str:
+        return _git_strategy._build_unsupported_or_missing_error(ctx)
 
 
 from . import artifactory_strategy as _artifactory_strategy

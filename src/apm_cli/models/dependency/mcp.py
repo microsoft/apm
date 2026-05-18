@@ -143,15 +143,8 @@ class MCPDependency:
                 parts.append(f"command=<{type(self.command).__name__}>")
         return f"MCPDependency({', '.join(parts)})"
 
-    def validate(self, strict: bool = True) -> None:
-        """Validate the dependency. Raises ValueError on invalid state.
-
-        Universal hardening checks (name allowlist, URL scheme, header CRLF,
-        command path-traversal) always run. Self-defined-only checks
-        (transport required, stdio command-required, http/sse url required)
-        run only when ``strict=True``.
-        """
-        # ---- Universal hardening (always) ----
+    def _validate_name(self) -> None:
+        """Validate the name field (universal check)."""
         if not self.name:
             raise ValueError("MCP dependency 'name' must not be empty")
         if not _NAME_REGEX.match(self.name):
@@ -161,107 +154,136 @@ class MCPDependency:
                 f"only [a-zA-Z0-9._@/:=-] (max 128 chars). "
                 f"Example: 'io.github.acme/cool-server' or 'my-server'."
             )
-        # C2 (defense-in-depth): reject embedded ``..`` segments. The regex
-        # above allows ``a/../../../evil`` because '/', '.', '-' are all in
-        # the character class. Today no code path uses this name as a
-        # filesystem segment, but downstream consumers should be able to
-        # trust the name string.
         if ".." in self.name.split("/"):
             raise ValueError(
                 f"Invalid MCP dependency name '{self.name}': must not contain "
                 f"'..' path segments. "
                 f"Example: 'io.github.acme/cool-server' or 'my-server'."
             )
-        if self.url is not None:
-            scheme = urlparse(self.url).scheme.lower()
-            if scheme not in _ALLOWED_URL_SCHEMES:
-                raise ValueError(
-                    f"Invalid MCP url '{self.url}': scheme '{scheme}' "
-                    f"is not supported; use http:// or https://. "
-                    f"WebSocket URLs (ws/wss) are not supported for MCP transports."
-                )
-        if self.headers:
-            for k, v in self.headers.items():
-                k_str = str(k) if k is not None else ""
-                v_str = str(v) if v is not None else ""
-                if "\r" in k_str or "\n" in k_str or "\r" in v_str or "\n" in v_str:
-                    raise ValueError(
-                        f"Invalid header '{k_str}={v_str}': control characters "
-                        f"(CR/LF) not allowed in keys or values"
-                    )
-        if self.command is not None:
-            if not isinstance(self.command, str):
-                raise ValueError(
-                    f"MCP dependency '{self.name}': 'command' must be a string, "
-                    f"got {type(self.command).__name__}. "
-                    f"Use 'args' for the argument list."
-                )
-            try:
-                validate_path_segments(
-                    self.command,
-                    context="MCP command",
-                    allow_current_dir=True,
-                )
-            except PathTraversalError:
-                raise ValueError(
-                    f"Invalid MCP command '{self.command}': must not contain "
-                    f"'..' path segments. Use an absolute path or a command "
-                    f"name on PATH instead."
-                ) from None
 
-        if not strict:
+    def _validate_url(self) -> None:
+        """Validate the url field (universal check)."""
+        if self.url is None:
             return
+        scheme = urlparse(self.url).scheme.lower()
+        if scheme not in _ALLOWED_URL_SCHEMES:
+            raise ValueError(
+                f"Invalid MCP url '{self.url}': scheme '{scheme}' "
+                f"is not supported; use http:// or https://. "
+                f"WebSocket URLs (ws/wss) are not supported for MCP transports."
+            )
 
-        # ---- Self-defined-only checks (strict=True) ----
+    def _validate_headers(self) -> None:
+        """Validate the headers field (universal check)."""
+        if not self.headers:
+            return
+        for k, v in self.headers.items():
+            k_str = str(k) if k is not None else ""
+            v_str = str(v) if v is not None else ""
+            if "\r" in k_str or "\n" in k_str or "\r" in v_str or "\n" in v_str:
+                raise ValueError(
+                    f"Invalid header '{k_str}={v_str}': control characters "
+                    f"(CR/LF) not allowed in keys or values"
+                )
+
+    def _validate_command(self) -> None:
+        """Validate the command field (universal check)."""
+        if self.command is None:
+            return
+        if not isinstance(self.command, str):
+            raise ValueError(
+                f"MCP dependency '{self.name}': 'command' must be a string, "
+                f"got {type(self.command).__name__}. "
+                f"Use 'args' for the argument list."
+            )
+        try:
+            validate_path_segments(
+                self.command,
+                context="MCP command",
+                allow_current_dir=True,
+            )
+        except PathTraversalError:
+            raise ValueError(
+                f"Invalid MCP command '{self.command}': must not contain "
+                f"'..' path segments. Use an absolute path or a command "
+                f"name on PATH instead."
+            ) from None
+
+    def _validate_transport_type(self) -> None:
+        """Validate transport is within allowed set (strict-only)."""
         if self.transport and self.transport not in self._VALID_TRANSPORTS:
             raise ValueError(
                 f"MCP dependency '{self.name}' has unsupported transport "
                 f"'{self.transport}'. Valid values: {', '.join(sorted(self._VALID_TRANSPORTS))}"
             )
-        if self.registry is False:
-            if not self.transport:
-                raise ValueError(f"Self-defined MCP dependency '{self.name}' requires 'transport'")
-            if self.transport in ("http", "sse", "streamable-http") and not self.url:
-                raise ValueError(
-                    f"Self-defined MCP dependency '{self.name}' with transport "
-                    f"'{self.transport}' requires 'url'"
-                )
-            if self.transport == "stdio" and not self.command:
-                raise ValueError(
-                    f"Self-defined MCP dependency '{self.name}' with transport "
-                    f"'stdio' requires 'command'"
-                )
-            if (
-                self.transport == "stdio"
-                and isinstance(self.command, str)
-                and any(ch.isspace() for ch in self.command)
-                and self.args is None
-            ):
-                # Split on any whitespace (incl. tabs / multiple spaces) so the
-                # fix-it suggestion matches the validation trigger condition
-                # (any character.isspace()), not just literal U+0020.
-                # Note: `args is None` (not `not self.args`) so that an explicit
-                # `args: []` (e.g., paired with a path like '/opt/My App/server')
-                # is treated as a deliberate "no extra args" signal and accepted.
-                command_parts = self.command.strip().split(maxsplit=1)
-                if not command_parts:
-                    raise ValueError(
-                        f"Self-defined MCP dependency '{self.name}': "
-                        f"'command' is empty or whitespace-only. "
-                        f"Set 'command' to a binary path, e.g. command: npx"
-                    )
-                first = command_parts[0]
-                rest_tokens = command_parts[1].split() if len(command_parts) > 1 else []
-                suggested_args = "[" + ", ".join(f'"{tok}"' for tok in rest_tokens) + "]"
-                raise ValueError(
-                    "\n".join(
-                        [
-                            f"'command' contains whitespace in MCP dependency '{self.name}'.",
-                            "  Rule: 'command' must be a single binary path -- APM does not split on whitespace. Use 'args' for additional arguments.",
-                            f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
-                            f"  Fix:  command: {first}",
-                            f"        args: {suggested_args}",
-                            "  See:  https://microsoft.github.io/apm/guides/mcp-servers/",
-                        ]
-                    )
-                )
+
+    def _validate_self_defined_requirements(self) -> None:
+        """Validate self-defined (registry: false) requirements (strict-only)."""
+        if self.registry is not False:
+            return
+        if not self.transport:
+            raise ValueError(f"Self-defined MCP dependency '{self.name}' requires 'transport'")
+        if self.transport in ("http", "sse", "streamable-http") and not self.url:
+            raise ValueError(
+                f"Self-defined MCP dependency '{self.name}' with transport "
+                f"'{self.transport}' requires 'url'"
+            )
+        if self.transport == "stdio" and not self.command:
+            raise ValueError(
+                f"Self-defined MCP dependency '{self.name}' with transport "
+                f"'stdio' requires 'command'"
+            )
+
+    def _validate_stdio_command_args_split(self) -> None:
+        """Validate stdio command args are properly split (strict-only)."""
+        if self.registry is not False or self.transport != "stdio":
+            return
+        if not isinstance(self.command, str):
+            return
+        if not any(ch.isspace() for ch in self.command):
+            return
+        if self.args is not None:
+            return
+
+        command_parts = self.command.strip().split(maxsplit=1)
+        if not command_parts:
+            raise ValueError(
+                f"Self-defined MCP dependency '{self.name}': "
+                f"'command' is empty or whitespace-only. "
+                f"Set 'command' to a binary path, e.g. command: npx"
+            )
+        first = command_parts[0]
+        rest_tokens = command_parts[1].split() if len(command_parts) > 1 else []
+        suggested_args = "[" + ", ".join(f'"{tok}"' for tok in rest_tokens) + "]"
+        raise ValueError(
+            "\n".join(
+                [
+                    f"'command' contains whitespace in MCP dependency '{self.name}'.",
+                    "  Rule: 'command' must be a single binary path -- APM does not split on whitespace. Use 'args' for additional arguments.",
+                    f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
+                    f"  Fix:  command: {first}",
+                    f"        args: {suggested_args}",
+                    "  See:  https://microsoft.github.io/apm/guides/mcp-servers/",
+                ]
+            )
+        )
+
+    def validate(self, strict: bool = True) -> None:
+        """Validate the dependency. Raises ValueError on invalid state.
+
+        Universal hardening checks (name allowlist, URL scheme, header CRLF,
+        command path-traversal) always run. Self-defined-only checks
+        (transport required, stdio command-required, http/sse url required)
+        run only when ``strict=True``.
+        """
+        self._validate_name()
+        self._validate_url()
+        self._validate_headers()
+        self._validate_command()
+
+        if not strict:
+            return
+
+        self._validate_transport_type()
+        self._validate_self_defined_requirements()
+        self._validate_stdio_command_args_split()

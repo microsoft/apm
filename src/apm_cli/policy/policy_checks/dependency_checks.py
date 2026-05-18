@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Policy checks for organisational governance enforcement.
 
 These checks run WITH a policy file and validate that the project's manifest,
@@ -18,6 +19,7 @@ Implementations live in cohesive private sibling modules:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..models import CheckResult, CIAuditResult
@@ -55,6 +57,18 @@ from .class_ import (
 _INCLUDES_NOT_PROVIDED = object()
 
 
+@dataclass(frozen=True, slots=True)
+class PolicyCheckOpts:
+    """Options for run_dependency_policy_checks."""
+
+    lockfile: LockFile | None = None
+    mcp_deps: list | None = None
+    effective_target: str | None = None
+    fetch_outcome: str | None = None
+    fail_fast: bool = True
+    manifest_includes = _INCLUDES_NOT_PROVIDED
+
+
 # ---------------------------------------------------------------------------
 # Aggregate runners (delegate to policy_check_impl)
 # ---------------------------------------------------------------------------
@@ -62,16 +76,42 @@ _INCLUDES_NOT_PROVIDED = object()
 
 def run_dependency_policy_checks(
     deps_to_install,
-    *,
-    lockfile=None,
     policy: ApmPolicy,
-    mcp_deps=None,
-    effective_target: str | None = None,
-    fetch_outcome: str | None = None,
-    fail_fast: bool = True,
-    manifest_includes=_INCLUDES_NOT_PROVIDED,
+    opts: PolicyCheckOpts | None = None,
+    **kwargs,
 ) -> CIAuditResult:
-    kwargs = {
+    """Evaluate policy against a dependency set.
+
+    Parameters
+    ----------
+    deps_to_install:
+        Iterable of ``DependencyReference``.
+    policy:
+        The effective :class:`ApmPolicy` to enforce.
+    opts:
+        Optional dataclass with all other parameters. When provided,
+        kwargs are ignored.
+    **kwargs:
+        Backward-compatible parameters: lockfile, mcp_deps,
+        effective_target, fetch_outcome, fail_fast, manifest_includes.
+    """
+    # Resolve opts for backward compatibility
+    if opts is not None:
+        lockfile = opts.lockfile
+        mcp_deps = opts.mcp_deps
+        effective_target = opts.effective_target
+        fetch_outcome = opts.fetch_outcome
+        fail_fast = opts.fail_fast
+        manifest_includes = opts.manifest_includes
+    else:
+        lockfile = kwargs.get("lockfile")
+        mcp_deps = kwargs.get("mcp_deps")
+        effective_target = kwargs.get("effective_target")
+        fetch_outcome = kwargs.get("fetch_outcome")
+        fail_fast = kwargs.get("fail_fast", True)
+        manifest_includes = kwargs.get("manifest_includes", _INCLUDES_NOT_PROVIDED)
+
+    kwargs_dict = {
         "lockfile": lockfile,
         "policy": policy,
         "mcp_deps": mcp_deps,
@@ -80,8 +120,8 @@ def run_dependency_policy_checks(
         "fail_fast": fail_fast,
     }
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
-        kwargs["manifest_includes"] = manifest_includes
-    return _policy_check_impl.run_dependency_policy_checks(deps_to_install, **kwargs)
+        kwargs_dict["manifest_includes"] = manifest_includes
+    return _policy_check_impl.run_dependency_policy_checks(deps_to_install, **kwargs_dict)
 
 
 def run_policy_checks(

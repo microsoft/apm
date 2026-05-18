@@ -113,6 +113,66 @@ def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path | None = 
     shutil.copy2(source_file, target_path)
 
 
+def _map_commands(command_sources: list, apm_dir: Path) -> None:
+    """Copy command sources into ``.apm/prompts/``, normalizing ``.md`` -> ``.prompt.md``.
+
+    Extracted from :func:`_map_plugin_artifacts` to reduce its branch and
+    statement count within the configured Ruff thresholds.
+    """
+    target_prompts = apm_dir / "prompts"
+    if target_prompts.exists():
+        shutil.rmtree(target_prompts)
+    target_prompts.mkdir(parents=True, exist_ok=True)
+    for source in command_sources:
+        if source.is_file() and not source.is_symlink():
+            _copy_command_file(source, target_prompts)
+        elif source.is_dir():
+            for source_file in source.rglob("*"):
+                if not source_file.is_file() or source_file.is_symlink():
+                    continue
+                _copy_command_file(source_file, target_prompts, rel_to=source)
+
+
+def _map_hooks(
+    hooks_value: Any,
+    plugin_path: Path,
+    apm_dir: Path,
+    resolve_sources_fn: Any,
+    ignore_non_content: Any,
+) -> None:
+    """Map hooks from manifest to ``.apm/hooks/``.
+
+    Handles the three forms allowed by the spec: inline dict, config-file
+    path string, and directory path(s).  Extracted from
+    :func:`_map_plugin_artifacts` to reduce its branch and statement count
+    within the configured Ruff thresholds.
+    """
+    if isinstance(hooks_value, dict):
+        # Inline hooks object -> write as .apm/hooks/hooks.json
+        target_hooks = apm_dir / "hooks"
+        target_hooks.mkdir(parents=True, exist_ok=True)
+        (target_hooks / "hooks.json").write_text(json.dumps(hooks_value, indent=2))
+    elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
+        # Config file path (e.g. "hooks": "hooks.json")
+        src_file = plugin_path / hooks_value
+        if not src_file.is_symlink() and _is_within_plugin(
+            src_file, plugin_path, component="hooks"
+        ):
+            target_hooks = apm_dir / "hooks"
+            target_hooks.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, target_hooks / "hooks.json")
+    else:
+        # Directory path(s)  -- standard flow
+        hook_sources = resolve_sources_fn("hooks", "hooks")
+        if hook_sources:
+            target_hooks = apm_dir / "hooks"
+            if target_hooks.exists():
+                shutil.rmtree(target_hooks)
+            shutil.copytree(hook_sources[0], target_hooks, ignore=ignore_non_content)
+            for extra in hook_sources[1:]:
+                shutil.copytree(extra, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
+
+
 def _map_plugin_artifacts(
     plugin_path: Path, apm_dir: Path, manifest: dict[str, Any] | None = None
 ) -> None:
@@ -202,47 +262,12 @@ def _map_plugin_artifacts(
     # Map commands/ -> .apm/prompts/ (normalize .md -> .prompt.md)
     command_sources = _resolve_sources("commands", "commands")
     if command_sources:
-        target_prompts = apm_dir / "prompts"
-        if target_prompts.exists():
-            shutil.rmtree(target_prompts)
-        target_prompts.mkdir(parents=True, exist_ok=True)
-
-        for source in command_sources:
-            if source.is_file() and not source.is_symlink():
-                _copy_command_file(source, target_prompts)
-            elif source.is_dir():
-                for source_file in source.rglob("*"):
-                    if not source_file.is_file() or source_file.is_symlink():
-                        continue
-                    _copy_command_file(source_file, target_prompts, rel_to=source)
+        _map_commands(command_sources, apm_dir)
 
     # Map hooks/  -- the spec allows a directory path, a config file path,
     # or an inline object.  Handle all three forms.
     hooks_value = manifest.get("hooks")
-    if isinstance(hooks_value, dict):
-        # Inline hooks object -> write as .apm/hooks/hooks.json
-        target_hooks = apm_dir / "hooks"
-        target_hooks.mkdir(parents=True, exist_ok=True)
-        (target_hooks / "hooks.json").write_text(json.dumps(hooks_value, indent=2))
-    elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
-        # Config file path (e.g. "hooks": "hooks.json")
-        src_file = plugin_path / hooks_value
-        if src_file.is_symlink() or not _is_within_plugin(src_file, plugin_path, component="hooks"):
-            pass
-        else:
-            target_hooks = apm_dir / "hooks"
-            target_hooks.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_file, target_hooks / "hooks.json")
-    else:
-        # Directory path(s)  -- standard flow
-        hook_sources = _resolve_sources("hooks", "hooks")
-        if hook_sources:
-            target_hooks = apm_dir / "hooks"
-            if target_hooks.exists():
-                shutil.rmtree(target_hooks)
-            shutil.copytree(hook_sources[0], target_hooks, ignore=ignore_non_content)
-            for extra in hook_sources[1:]:
-                shutil.copytree(extra, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
+    _map_hooks(hooks_value, plugin_path, apm_dir, _resolve_sources, ignore_non_content)
 
     # Pass-through files required for MCP/LSP plugins to function
     for passthrough in (".mcp.json", ".lsp.json", "settings.json"):

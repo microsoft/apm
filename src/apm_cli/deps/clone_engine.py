@@ -24,6 +24,7 @@ import contextlib
 import os
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -64,6 +65,28 @@ def _rich_warning(message: str, *, symbol: str = "warning") -> None:
     from . import github_downloader as _gd
 
     _gd._rich_warning(message, symbol=symbol)
+
+
+@dataclass(frozen=True, slots=True)
+class _BearerCloneCtx:
+    """Grouping context for ADO bearer fallback clone parameters."""
+
+    dep_ref: DependencyReference | None
+    dep_host: str | None
+    verbose_callback: object
+
+
+def _build_clone_error_msg(e: Exception) -> str:
+    """Extract a clone-failure error message, appending decoded stderr if available."""
+    err_msg = str(e)
+    stderr_attr = getattr(e, "stderr", None)
+    if stderr_attr:
+        if isinstance(stderr_attr, bytes):
+            with contextlib.suppress(Exception):
+                err_msg += " " + stderr_attr.decode("utf-8", errors="replace")
+        else:
+            err_msg += " " + str(stderr_attr)
+    return err_msg
 
 
 class _DownloaderContext(Protocol):
@@ -139,11 +162,9 @@ class CloneEngine:
     def _try_ado_bearer_clone(
         self,
         repo_url_base: str,
-        dep_ref: DependencyReference | None,
-        dep_host: str | None,
         clone_action: Callable[[str, dict[str, str], Path], None],
         target_path: Path,
-        verbose_callback: object,
+        ctx: _BearerCloneCtx,
     ) -> bool:
         """Attempt ADO AAD-bearer fallback clone; return ``True`` on success.
 
@@ -165,7 +186,7 @@ class CloneEngine:
                 bearer_url = self._host._build_repo_url(
                     repo_url_base,
                     use_ssh=False,
-                    dep_ref=dep_ref,
+                    dep_ref=ctx.dep_ref,
                     token=None,
                     auth_scheme="bearer",
                 )
@@ -174,9 +195,9 @@ class CloneEngine:
                     **build_ado_bearer_git_env(bearer),
                 }
                 clone_action(bearer_url, bearer_env, target_path)
-                self._host.auth_resolver.emit_stale_pat_diagnostic(dep_host or "dev.azure.com")
-                if verbose_callback:
-                    verbose_callback("Cloned from: (sanitized) via AAD bearer fallback")
+                self._host.auth_resolver.emit_stale_pat_diagnostic(ctx.dep_host or "dev.azure.com")
+                if ctx.verbose_callback:
+                    ctx.verbose_callback("Cloned from: (sanitized) via AAD bearer fallback")
                 return True
             except (
                 AzureCliBearerError,
@@ -186,6 +207,66 @@ class CloneEngine:
                 return False
         except ImportError:
             return False
+
+    def _build_clone_attempt_env(
+        self,
+        attempt: TransportAttempt,
+        dep_auth_scheme: str,
+        dep_auth_ctx,
+    ) -> dict[str, str]:
+        """Build the git environment dict for a single transport attempt."""
+        host = self._host
+        if attempt.use_token:
+            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
+                return dep_auth_ctx.git_env
+            return host.git_env
+        if attempt.scheme == "http":
+            return host._build_noninteractive_git_env(
+                preserve_config_isolation=True,
+                suppress_credential_helpers=True,
+            )
+        return host._build_noninteractive_git_env()
+
+    def _emit_cross_protocol_warning(
+        self,
+        plan: TransportPlan,
+        dep_host: str | None,
+        dep_port,
+        repo_url_base: str,
+    ) -> None:
+        """Emit a user-visible warning when cross-protocol fallback may misbehave on custom ports."""
+        if (
+            plan.strict
+            or dep_port is None
+            or not any(a.scheme == "ssh" for a in plan.attempts)
+            or not any(a.scheme == "https" for a in plan.attempts)
+        ):
+            return
+        warn_key = (
+            dep_host.lower() if dep_host else dep_host,
+            repo_url_base,
+            dep_port,
+        )
+        _should_warn = False
+        with self._fallback_port_warned_lock:
+            if warn_key not in self._fallback_port_warned:
+                self._fallback_port_warned.add(warn_key)
+                _should_warn = True
+        if _should_warn:
+            initial_scheme = plan.attempts[0].scheme.upper()
+            fallback_scheme = next(
+                a.scheme.upper() for a in plan.attempts if a.scheme != plan.attempts[0].scheme
+            )
+            host_display = dep_host or "host"
+            _rich_warning(
+                f"Custom port {dep_port} on {host_display}/{repo_url_base}: "
+                f"if {initial_scheme} fails, APM will retry over "
+                f"{fallback_scheme} on the same port.\n"
+                f"    Pin the URL scheme, or drop "
+                f"--allow-protocol-fallback to fail fast.\n"
+                f"    See: {_PROTOCOL_FALLBACK_DOCS_URL}",
+                symbol="warning",
+            )
 
     def execute(
         self,
@@ -219,18 +300,6 @@ class CloneEngine:
             f"allow_fallback={self._allow_fallback}"
         )
 
-        def _env_for(attempt: TransportAttempt) -> dict[str, str]:
-            if attempt.use_token:
-                if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                    return dep_auth_ctx.git_env
-                return host.git_env
-            if attempt.scheme == "http":
-                return host._build_noninteractive_git_env(
-                    preserve_config_isolation=True,
-                    suppress_credential_helpers=True,
-                )
-            return host._build_noninteractive_git_env()
-
         plan: TransportPlan = self._transport_selector.select(
             dep_ref=dep_ref,
             cli_pref=self._protocol_pref,
@@ -245,40 +314,7 @@ class CloneEngine:
 
         # Cross-protocol fallback custom-port warning (#786).
         dep_port = getattr(dep_ref, "port", None) if dep_ref else None
-        if (
-            not plan.strict
-            and dep_port is not None
-            and any(a.scheme == "ssh" for a in plan.attempts)
-            and any(a.scheme == "https" for a in plan.attempts)
-        ):
-            warn_key = (
-                dep_host.lower() if dep_host else dep_host,
-                repo_url_base,
-                dep_port,
-            )
-            # Guard the check-then-add under the lock so two threads
-            # racing on the same warn_key cannot both pass the
-            # membership check before either calls add().
-            _should_warn = False
-            with self._fallback_port_warned_lock:
-                if warn_key not in self._fallback_port_warned:
-                    self._fallback_port_warned.add(warn_key)
-                    _should_warn = True
-            if _should_warn:
-                initial_scheme = plan.attempts[0].scheme.upper()
-                fallback_scheme = next(
-                    a.scheme.upper() for a in plan.attempts if a.scheme != plan.attempts[0].scheme
-                )
-                host_display = dep_host or "host"
-                _rich_warning(
-                    f"Custom port {dep_port} on {host_display}/{repo_url_base}: "
-                    f"if {initial_scheme} fails, APM will retry over "
-                    f"{fallback_scheme} on the same port.\n"
-                    f"    Pin the URL scheme, or drop "
-                    f"--allow-protocol-fallback to fail fast.\n"
-                    f"    See: {_PROTOCOL_FALLBACK_DOCS_URL}",
-                    symbol="warning",
-                )
+        self._emit_cross_protocol_warning(plan, dep_host, dep_port, repo_url_base)
 
         prev_label: str | None = None
         prev_scheme: str | None = None
@@ -308,20 +344,17 @@ class CloneEngine:
 
             try:
                 _debug(f"Attempting clone with {attempt.label} (URL sanitized)")
-                clone_action(url, _env_for(attempt), target_path)
+                clone_action(
+                    url,
+                    self._build_clone_attempt_env(attempt, dep_auth_scheme, dep_auth_ctx),
+                    target_path,
+                )
                 if verbose_callback:
                     display = host._sanitize_git_error(url) if attempt.use_token else url
                     verbose_callback(f"Cloned from: {display}")
                 return
             except (GitCommandError, subprocess.CalledProcessError) as e:
-                err_msg = str(e)
-                stderr_attr = getattr(e, "stderr", None)
-                if stderr_attr:
-                    if isinstance(stderr_attr, bytes):
-                        with contextlib.suppress(Exception):
-                            err_msg += " " + stderr_attr.decode("utf-8", errors="replace")
-                    else:
-                        err_msg += " " + str(stderr_attr)
+                err_msg = _build_clone_error_msg(e)
                 if (
                     is_ado
                     and attempt.use_token
@@ -329,7 +362,14 @@ class CloneEngine:
                     and has_token
                     and is_ado_auth_failure_signal(err_msg)
                 ) and self._try_ado_bearer_clone(
-                    repo_url_base, dep_ref, dep_host, clone_action, target_path, verbose_callback
+                    repo_url_base,
+                    clone_action,
+                    target_path,
+                    _BearerCloneCtx(
+                        dep_ref=dep_ref,
+                        dep_host=dep_host,
+                        verbose_callback=verbose_callback,
+                    ),
                 ):
                     return
                 last_error = e

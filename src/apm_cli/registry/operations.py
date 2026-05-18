@@ -1,12 +1,18 @@
 """MCP server operations and installation logic."""
 
 import logging
-import os
 from pathlib import Path
 
 import requests
 
-from ..core.token_manager import GitHubTokenManager
+from ._env_vars import (
+    _collect_env_vars_from_servers,
+    _collect_runtime_vars_from_servers,
+    _do_prompt_for_environment_variables,
+    _MCPServerOperations_extract_ids_from_codex_config,
+    _MCPServerOperations_extract_ids_from_mcp_servers,
+    _MCPServerOperations_extract_ids_from_vscode_config,
+)
 from .client import SimpleRegistryClient
 
 logger = logging.getLogger(__name__)
@@ -94,31 +100,13 @@ class MCPServerOperations:
 
         Each runtime uses a different config shape; this method normalises them.
         """
-        ids: set[str] = set()
         if runtime in ("copilot", "claude"):
-            # copilot: mcp-config.json -> mcpServers
-            # claude: .mcp.json / ~/.claude.json (normalised by adapter) -> mcpServers
-            for server_config in config.get("mcpServers", {}).values():
-                if isinstance(server_config, dict) and (sid := server_config.get("id")):
-                    ids.add(sid)
-        elif runtime == "codex":
-            # Codex: config.toml -> mcp_servers.{name} sections
-            for server_config in config.get("mcp_servers", {}).values():
-                if isinstance(server_config, dict) and (sid := server_config.get("id")):
-                    ids.add(sid)
-        elif runtime == "vscode":
-            # VS Code: .vscode/mcp.json -> servers (legacy fallback: mcpServers)
-            for key in ("servers", "mcpServers"):
-                for server_config in config.get(key, {}).values():
-                    if isinstance(server_config, dict):
-                        sid = (
-                            server_config.get("id")
-                            or server_config.get("serverId")
-                            or server_config.get("server_id")
-                        )
-                        if sid:
-                            ids.add(sid)
-        return ids
+            return _MCPServerOperations_extract_ids_from_mcp_servers(config)
+        if runtime == "codex":
+            return _MCPServerOperations_extract_ids_from_codex_config(config)
+        if runtime == "vscode":
+            return _MCPServerOperations_extract_ids_from_vscode_config(config)
+        return set()
 
     def _get_installed_server_ids(
         self,
@@ -254,39 +242,13 @@ class MCPServerOperations:
         Returns:
             Dictionary mapping runtime variable names to their values
         """
-        all_required_vars = {}  # var_name -> {description, required, etc.}
+        all_required_vars = {}
 
-        # Use cached server info if available, otherwise fetch on-demand
         if server_info_cache is None:
             server_info_cache = self.batch_fetch_server_info(server_references)
 
-        # Collect all unique runtime variables from runtime_arguments
-        for server_ref in server_references:
-            try:
-                server_info = server_info_cache.get(server_ref)
-                if not server_info:
-                    continue
+        _collect_runtime_vars_from_servers(server_references, server_info_cache, all_required_vars)
 
-                # Extract runtime variables from runtime_arguments
-                packages = server_info.get("packages", [])
-                for package in packages:
-                    if isinstance(package, dict):
-                        runtime_arguments = package.get("runtime_arguments", [])
-                        for arg in runtime_arguments:
-                            if isinstance(arg, dict) and "variables" in arg:
-                                variables = arg.get("variables", {})
-                                for var_name, var_info in variables.items():
-                                    if isinstance(var_info, dict):
-                                        all_required_vars[var_name] = {
-                                            "description": var_info.get("description", ""),
-                                            "required": var_info.get("is_required", True),
-                                        }
-
-            except Exception:  # noqa: S112
-                # Skip servers we can't analyze
-                continue
-
-        # Prompt user for each runtime variable
         if all_required_vars:
             return self._prompt_for_environment_variables(all_required_vars)
 
@@ -306,177 +268,18 @@ class MCPServerOperations:
         Returns:
             Dictionary mapping environment variable names to their values
         """
-        shared_env_vars = {}
-        all_required_vars = {}  # var_name -> {description, required, etc.}
+        all_required_vars: dict[str, dict] = {}
 
-        # Use cached server info if available, otherwise fetch on-demand
         if server_info_cache is None:
             server_info_cache = self.batch_fetch_server_info(server_references)
 
-        # Collect all unique environment variables needed
-        for server_ref in server_references:
-            try:
-                server_info = server_info_cache.get(server_ref)
-                if not server_info:
-                    continue
+        _collect_env_vars_from_servers(server_references, server_info_cache, all_required_vars)
 
-                # Extract environment variables from Docker args (legacy support)
-                if "docker" in server_info and "args" in server_info["docker"]:
-                    docker_args = server_info["docker"]["args"]
-                    if isinstance(docker_args, list):
-                        for arg in docker_args:
-                            if isinstance(arg, str) and arg.startswith("${") and arg.endswith("}"):
-                                var_name = arg[2:-1]  # Remove ${ and }
-                                if var_name not in all_required_vars:
-                                    all_required_vars[var_name] = {
-                                        "description": f"Environment variable for {server_info.get('name', server_ref)}",
-                                        "required": True,
-                                    }
-
-                # Check packages for environment variables (preferred method)
-                packages = server_info.get("packages", [])
-                for package in packages:
-                    if isinstance(package, dict):
-                        # Try both camelCase and snake_case field names
-                        env_vars = package.get("environmentVariables", []) or package.get(
-                            "environment_variables", []
-                        )
-                        for env_var in env_vars:
-                            if isinstance(env_var, dict) and "name" in env_var:
-                                var_name = env_var["name"]
-                                all_required_vars[var_name] = {
-                                    "description": env_var.get("description", ""),
-                                    "required": env_var.get("required", True),
-                                }
-
-            except Exception:  # noqa: S112
-                # Skip servers we can't analyze
-                continue
-
-        # Prompt user for each environment variable
         if all_required_vars:
-            shared_env_vars = self._prompt_for_environment_variables(all_required_vars)
+            return self._prompt_for_environment_variables(all_required_vars)
 
-        return shared_env_vars
+        return {}
 
     def _prompt_for_environment_variables(self, required_vars: dict[str, dict]) -> dict[str, str]:
-        """Prompt user for environment variables.
-
-        Args:
-            required_vars: Dictionary mapping var names to their metadata
-
-        Returns:
-            Dictionary mapping variable names to their values
-        """
-        env_vars = {}
-
-        # Check if we're in E2E test mode or CI environment - don't prompt interactively
-        is_e2e_tests = os.getenv("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
-        is_ci_environment = any(
-            os.getenv(var) for var in ["CI", "GITHUB_ACTIONS", "TRAVIS", "JENKINS_URL", "BUILDKITE"]
-        )
-
-        if is_e2e_tests or is_ci_environment:
-            # In E2E tests or CI, provide reasonable defaults instead of prompting
-            for var_name in sorted(required_vars.keys()):
-                var_info = required_vars[var_name]
-                existing_value = os.getenv(var_name)
-
-                if existing_value:
-                    env_vars[var_name] = existing_value
-                # Provide sensible defaults for known variables
-                elif var_name == "GITHUB_DYNAMIC_TOOLSETS":
-                    env_vars[var_name] = "1"  # Enable dynamic toolsets for GitHub MCP server
-                elif "token" in var_name.lower() or "key" in var_name.lower():
-                    # Map known token vars to appropriate purposes
-                    _tm = GitHubTokenManager()
-                    if "ado" in var_name.lower():
-                        env_vars[var_name] = _tm.get_token_for_purpose("ado_modules") or ""
-                    elif "copilot" in var_name.lower():
-                        env_vars[var_name] = _tm.get_token_for_purpose("copilot") or ""
-                    else:
-                        env_vars[var_name] = _tm.get_token_for_purpose("modules") or ""
-                else:
-                    # For other variables, use empty string or reasonable default
-                    env_vars[var_name] = ""
-
-            if is_e2e_tests:
-                print("E2E test mode detected")
-            else:
-                print("CI environment detected")
-
-            return env_vars
-
-        try:
-            # Try to use Rich for better prompts
-            from rich.console import Console
-            from rich.prompt import Prompt
-
-            console = Console()
-            console.print("Environment variables needed:", style="cyan")
-
-            for var_name in sorted(required_vars.keys()):
-                var_info = required_vars[var_name]
-                description = var_info.get("description", "")
-                required = var_info.get("required", True)
-
-                # Check if already set in environment
-                existing_value = os.getenv(var_name)
-
-                if existing_value:
-                    console.print(f"  [+] {var_name}: [dim]using existing value[/dim]")
-                    env_vars[var_name] = existing_value
-                else:
-                    # Determine if this looks like a password/secret
-                    is_sensitive = any(
-                        keyword in var_name.lower()
-                        for keyword in ["password", "secret", "key", "token", "api"]
-                    )
-
-                    prompt_text = f"  {var_name}"
-                    if description:
-                        prompt_text += f" ({description})"
-
-                    if required:
-                        value = Prompt.ask(prompt_text, password=is_sensitive)
-                    else:
-                        value = Prompt.ask(prompt_text, default="", password=is_sensitive)
-
-                    env_vars[var_name] = value
-
-            console.print()
-
-        except ImportError:
-            # Fallback to simple input
-            import click
-
-            click.echo("Environment variables needed:")
-
-            for var_name in sorted(required_vars.keys()):
-                var_info = required_vars[var_name]
-                description = var_info.get("description", "")
-
-                existing_value = os.getenv(var_name)
-
-                if existing_value:
-                    click.echo(f"  [+] {var_name}: using existing value")
-                    env_vars[var_name] = existing_value
-                else:
-                    prompt_text = f"  {var_name}"
-                    if description:
-                        prompt_text += f" ({description})"
-
-                    # Simple input for fallback
-                    is_sensitive = any(
-                        keyword in var_name.lower()
-                        for keyword in ["password", "secret", "key", "token", "api"]
-                    )
-
-                    value = click.prompt(
-                        prompt_text, hide_input=is_sensitive, default="", show_default=False
-                    )
-                    env_vars[var_name] = value
-
-            click.echo()
-
-        return env_vars
+        """Prompt user for environment variables."""
+        return _do_prompt_for_environment_variables(required_vars)

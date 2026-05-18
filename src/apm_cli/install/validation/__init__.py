@@ -91,7 +91,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
 
-        from ..deps.registry_proxy import is_enforce_only
+        from ...deps.registry_proxy import is_enforce_only
 
         virtual_subdir_repo_probe = (
             dep_ref.is_virtual
@@ -294,7 +294,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo_path):
             return False
 
-        from ..deps.registry_proxy import is_enforce_only
+        from ...deps.registry_proxy import is_enforce_only
 
         if is_enforce_only():
             # PROXY_REGISTRY_ONLY=1: skip the GitHub API fallback probe.

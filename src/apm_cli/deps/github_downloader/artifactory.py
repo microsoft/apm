@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """GitHub package downloader for APM dependencies."""
 
 import contextlib
@@ -14,6 +15,7 @@ from ...models.apm_package import (
 from ...utils.github_host import (
     is_github_hostname,
 )
+from ..download_strategies.artifactory_strategy import _ArtifactoryTarget
 
 # Public docs anchor for the cross-protocol fallback caveat surfaced by the
 # #786 warning. Lives under the dependencies guide, next to the canonical
@@ -58,45 +60,19 @@ class _ArtifactoryMixin:
 
     def _download_artifactory_archive(
         self,
-        host: str,
-        prefix: str,
-        owner: str,
-        repo: str,
-        ref: str,
+        target: "_ArtifactoryTarget",
         target_path: Path,
-        scheme: str = "https",
     ) -> None:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.download_artifactory_archive(
-            host,
-            prefix,
-            owner,
-            repo,
-            ref,
-            target_path,
-            scheme=scheme,
-        )
+        return self._strategies.download_artifactory_archive(target, target_path)
 
     def _download_file_from_artifactory(
         self,
-        host: str,
-        prefix: str,
-        owner: str,
-        repo: str,
+        target: "_ArtifactoryTarget",
         file_path: str,
-        ref: str,
-        scheme: str = "https",
     ) -> bytes:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.download_file_from_artifactory(
-            host,
-            prefix,
-            owner,
-            repo,
-            file_path,
-            ref,
-            scheme=scheme,
-        )
+        return self._strategies.download_file_from_artifactory(target, file_path)
 
     @staticmethod
     def _is_artifactory_only() -> bool:

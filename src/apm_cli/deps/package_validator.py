@@ -53,6 +53,44 @@ class PackageValidator:
             return False
         return True
 
+    def _scan_primitive_dirs(self, apm_dir: Path, result: ValidationResult) -> bool:
+        """Scan ``.apm/`` primitive subdirectories and validate each file.
+
+        Iterates over the four well-known primitive type directories
+        (``instructions``, ``chatmodes``, ``contexts``, ``prompts``) and
+        calls :meth:`_validate_primitive_file` for every ``*.md`` found.
+
+        Returns:
+            True if at least one primitive file was found.
+        """
+        primitive_types = ["instructions", "chatmodes", "contexts", "prompts"]
+        has_primitives = False
+        for primitive_type in primitive_types:
+            primitive_dir = apm_dir / primitive_type
+            if primitive_dir.exists() and primitive_dir.is_dir():
+                md_files = list(primitive_dir.glob("*.md"))
+                if md_files:
+                    has_primitives = True
+                    for md_file in md_files:
+                        self._validate_primitive_file(md_file, result)
+        return has_primitives
+
+    @staticmethod
+    def _scan_hooks_dirs(apm_dir: Path, package_path: Path) -> bool:
+        """Check whether any JSON hook files exist in hooks directories.
+
+        Looks in ``<apm_dir>/hooks/`` (APM-native) and
+        ``<package_path>/hooks/`` (Claude-native convention).
+
+        Returns:
+            True if at least one JSON hook file was found.
+        """
+        for hooks_dir in (apm_dir / "hooks", package_path / "hooks"):
+            if hooks_dir.exists() and hooks_dir.is_dir():
+                if list(hooks_dir.glob("*.json")):
+                    return True
+        return False
+
     def validate_package_structure(self, package_path: Path) -> ValidationResult:
         """Validate APM package directory structure.
 
@@ -99,33 +137,9 @@ class PackageValidator:
         # HYBRID and CLAUDE_SKILL layouts may ship without .apm/, so the
         # "no primitives" warning would be misleading for those shapes.
         if apm_dir.exists() and apm_dir.is_dir():
-            primitive_types = ["instructions", "chatmodes", "contexts", "prompts"]
-            has_primitives = False
-
-            for primitive_type in primitive_types:
-                primitive_dir = apm_dir / primitive_type
-                if primitive_dir.exists() and primitive_dir.is_dir():
-                    md_files = list(primitive_dir.glob("*.md"))
-                    if md_files:
-                        has_primitives = True
-                        # Validate each primitive file
-                        for md_file in md_files:
-                            self._validate_primitive_file(md_file, result)
-
-            # Check for hooks (JSON files, not markdown)
-            hooks_dir = apm_dir / "hooks"
-            if hooks_dir.exists() and hooks_dir.is_dir():
-                json_files = list(hooks_dir.glob("*.json"))
-                if json_files:
-                    has_primitives = True
-
-            # Also check hooks/ at package root (Claude-native convention)
-            hooks_root_dir = package_path / "hooks"
-            if hooks_root_dir.exists() and hooks_root_dir.is_dir():
-                json_files = list(hooks_root_dir.glob("*.json"))
-                if json_files:
-                    has_primitives = True
-
+            has_primitives = self._scan_primitive_dirs(apm_dir, result)
+            if not has_primitives:
+                has_primitives = self._scan_hooks_dirs(apm_dir, package_path)
             if not has_primitives:
                 result.add_warning("No primitive files found in .apm/ directory")
 

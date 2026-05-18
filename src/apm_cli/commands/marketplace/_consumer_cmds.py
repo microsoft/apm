@@ -8,21 +8,16 @@ import traceback
 import click
 
 from ...core.command_logger import CommandLogger
-from ...marketplace.errors import MarketplaceNotFoundError
 from ...utils.path_security import PathTraversalError
 from .._helpers import _get_console, _is_interactive
 from . import marketplace  # noqa: E402
 from ._add_helpers import (
-    _ALIAS_PATTERN,
-    _TRUSTED_MARKETPLACE_HOST_KINDS,
-    _marketplace_add_unsupported_host_error,
+    _check_trusted_host,
+    _is_valid_alias,
     _parse_marketplace_repo,
+    _resolve_display_name_for_add,
+    _resolve_host_for_add,
 )
-
-
-def _is_valid_alias(value: str) -> bool:
-    """Return True when ``value`` is a legal marketplace alias."""
-    return bool(value) and _ALIAS_PATTERN.match(value) is not None
 
 
 @marketplace.command(help="Register a marketplace")
@@ -38,7 +33,6 @@ def add(repo, name, branch, host, verbose):
         from ...marketplace.client import _auto_detect_path, fetch_marketplace
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
-        from ...utils.github_host import default_host, is_valid_fqdn
 
         try:
             owner, repo_name, embedded_host = _parse_marketplace_repo(repo, host)
@@ -54,37 +48,9 @@ def add(repo, name, branch, host, verbose):
 
         # Resolve the effective host: explicit --host wins, then host embedded
         # in the argument (HOST/... shorthand or HTTPS URL), then GITHUB_HOST.
-        if host is not None:
-            normalized_host = host.strip().lower()
-            if not is_valid_fqdn(normalized_host):
-                logger.error(
-                    f"Invalid host: '{host}'. Expected a valid host FQDN "
-                    f"(for example, 'github.com').",
-                    symbol="error",
-                )
-                sys.exit(1)
-            resolved_host = normalized_host
-        elif embedded_host is not None:
-            resolved_host = embedded_host
-        else:
-            resolved_host = default_host()
-        # Trusted-host gate. Routes through AuthResolver.classify_host so the
-        # registration-time guard and the fetch-time guard in client.py share a
-        # single classification implementation.
-        from ...core.auth import AuthResolver
-
-        host_info = AuthResolver.classify_host(resolved_host)
-        if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
-            import shlex as _shlex
-
-            quoted_repo = _shlex.quote(repo)
-            quoted_host = _shlex.quote(resolved_host)
-            logger.error(
-                _marketplace_add_unsupported_host_error(
-                    resolved_host, quoted_repo, quoted_host, host_info.kind
-                )
-            )
-            sys.exit(1)
+        resolved_host = _resolve_host_for_add(host, embedded_host, logger)
+        # Trusted-host gate.
+        _check_trusted_host(resolved_host, repo, logger)
 
         # Hard-fail if the user-supplied --name flag is malformed; the
         # manifest's name is validated softly below (publisher mistakes
@@ -132,27 +98,10 @@ def add(repo, name, branch, host, verbose):
         plugin_count = len(manifest.plugins)
 
         # Resolve final alias: --name flag > manifest.name (if valid) > repo name.
-        # Track which tier won so we can report it in verbose mode and emit a
-        # warning when a publisher-declared name had to be rejected.
         manifest_name = (manifest.name or "").strip()
-        if name is not None:
-            display_name = name
-            alias_source = "--name flag"
-        elif manifest_name and _is_valid_alias(manifest_name):
-            display_name = manifest_name
-            alias_source = f"manifest.name ('{manifest_name}')"
-        else:
-            display_name = repo_name
-            if manifest_name and not _is_valid_alias(manifest_name):
-                logger.warning(
-                    f"Manifest declares name '{manifest_name}' which is not a "
-                    f"valid alias (must match [a-zA-Z0-9._-]+). "
-                    f"Falling back to repo name.",
-                    symbol="warning",
-                )
-                alias_source = f"repo name (manifest.name '{manifest_name}' invalid)"
-            else:
-                alias_source = "repo name (manifest.name missing)"
+        display_name, alias_source = _resolve_display_name_for_add(
+            name, manifest_name, repo_name, logger
+        )
 
         # Defense-in-depth: repo names from GitHub already satisfy the alias
         # regex, so this invariant should always hold by the time we register.
@@ -400,101 +349,4 @@ def remove(name, yes, verbose):
         logger.error(f"Failed to remove marketplace: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
-        sys.exit(1)
-
-
-@click.command(
-    name="search",
-    help="Search plugins in a marketplace (QUERY@MARKETPLACE)",
-)
-@click.argument("expression", required=True, metavar="QUERY@MARKETPLACE")
-@click.option("--limit", default=20, show_default=True, help="Max results to show")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def search(expression, limit, verbose):
-    """Search for plugins in a specific marketplace.
-
-    Use QUERY@MARKETPLACE format, e.g.:  apm marketplace search security@skills
-    """
-    logger = CommandLogger("marketplace-search", verbose=verbose)
-    try:
-        from ...marketplace.client import search_marketplace
-        from ...marketplace.registry import get_marketplace_by_name
-
-        if "@" not in expression:
-            logger.error(
-                f"Invalid format: '{expression}'. "
-                "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
-            )
-            sys.exit(1)
-
-        query, marketplace_name = expression.rsplit("@", 1)
-        if not query or not marketplace_name:
-            logger.error(
-                "Both QUERY and MARKETPLACE are required. "
-                "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
-            )
-            sys.exit(1)
-
-        try:
-            source = get_marketplace_by_name(marketplace_name)
-        except MarketplaceNotFoundError:
-            logger.error(
-                f"Marketplace '{marketplace_name}' is not registered. "
-                "Use 'apm marketplace list' to see registered marketplaces."
-            )
-            sys.exit(1)
-
-        logger.start(f"Searching '{marketplace_name}' for '{query}'...", symbol="search")
-        results = search_marketplace(query, source)[:limit]
-
-        if not results:
-            logger.warning(
-                f"No plugins found matching '{query}' in '{marketplace_name}'. "
-                f"Try 'apm marketplace browse {marketplace_name}' to see all plugins."
-            )
-            return
-
-        console = _get_console()
-        if not console:
-            # Colorama fallback
-            logger.success(f"Found {len(results)} plugin(s):", symbol="check")
-            for p in results:
-                desc = f" -- {p.description}" if p.description else ""
-                logger.tree_item(f"  {p.name}@{marketplace_name}{desc}")
-            logger.progress(
-                f"Install: apm install <plugin-name>@{marketplace_name}",
-                symbol="info",
-            )
-            return
-
-        from rich.table import Table
-
-        table = Table(
-            title=f"Search Results: '{query}' in {marketplace_name}",
-            show_header=True,
-            header_style="bold cyan",
-            border_style="cyan",
-        )
-        table.add_column("Plugin", style="bold white", no_wrap=True)
-        table.add_column("Description", style="white", ratio=1)
-        table.add_column("Install", style="green")
-
-        for p in results:
-            desc = p.description or "--"
-            if len(desc) > 60:
-                desc = desc[:57] + "..."
-            table.add_row(p.name, desc, f"{p.name}@{marketplace_name}")
-
-        console.print()
-        console.print(table)
-        logger.progress(
-            f"Install: apm install <plugin-name>@{marketplace_name}",
-            symbol="info",
-        )
-
-    except SystemExit:
-        raise
-    except Exception as e:
-        logger.error(f"Search failed: {e}")
-        logger.verbose_detail(traceback.format_exc())
         sys.exit(1)

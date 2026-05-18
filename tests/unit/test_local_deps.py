@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile, _DepResolutionInfo
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 
 # ===========================================================================
@@ -197,14 +197,18 @@ class TestLockedDependencyLocal:
 
     def test_from_dependency_ref_local(self):
         dep_ref = DependencyReference.parse("./packages/my-skills")
-        locked = LockedDependency.from_dependency_ref(dep_ref, None, 1, None)
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref, _DepResolutionInfo(resolved_commit=None, depth=1, resolved_by=None)
+        )
         assert locked.source == "local"
         assert locked.local_path == "./packages/my-skills"
         assert locked.resolved_commit is None
 
     def test_from_dependency_ref_remote(self):
         dep_ref = DependencyReference.parse("owner/repo")
-        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref, _DepResolutionInfo(resolved_commit="abc123", depth=1, resolved_by=None)
+        )
         assert locked.source is None
         assert locked.local_path is None
         assert locked.resolved_commit == "abc123"

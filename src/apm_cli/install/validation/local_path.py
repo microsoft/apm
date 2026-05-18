@@ -15,6 +15,21 @@ from apm_cli.utils.console import _rich_echo, _rich_info
 __all__ = ["_local_path_failure_reason", "_local_path_no_markers_hint"]
 
 
+def _emit_package_hints(found, logger=None) -> None:
+    if logger:
+        logger.progress("  [i] Found installable package(s) inside this directory:")
+        for path in found[:5]:
+            logger.verbose_detail(f"      apm install {path}")
+        if len(found) > 5:
+            logger.verbose_detail(f"      ... and {len(found) - 5} more")
+        return
+    _rich_info("  [i] Found installable package(s) inside this directory:")
+    for path in found[:5]:
+        _rich_echo(f"      apm install {path}", color="dim")
+    if len(found) > 5:
+        _rich_echo(f"      ... and {len(found) - 5} more", color="dim")
+
+
 def _local_path_failure_reason(dep_ref):
     """Return a specific failure reason for local path deps, or None for remote."""
     if not (dep_ref.is_local and dep_ref.local_path):
@@ -52,18 +67,5 @@ def _local_path_no_markers_hint(local_dir, logger=None):
             ):
                 found.append(grandchild)
 
-    if not found:
-        return
-
-    if logger:
-        logger.progress("  [i] Found installable package(s) inside this directory:")
-        for p in found[:5]:
-            logger.verbose_detail(f"      apm install {p}")
-        if len(found) > 5:
-            logger.verbose_detail(f"      ... and {len(found) - 5} more")
-    else:
-        _rich_info("  [i] Found installable package(s) inside this directory:")
-        for p in found[:5]:
-            _rich_echo(f"      apm install {p}", color="dim")
-        if len(found) > 5:
-            _rich_echo(f"      ... and {len(found) - 5} more", color="dim")
+    if found:
+        _emit_package_hints(found, logger)

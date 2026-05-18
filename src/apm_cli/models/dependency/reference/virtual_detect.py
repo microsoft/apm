@@ -1,6 +1,7 @@
 """DependencyReference model  -- core dependency representation and parsing."""
 
 import urllib.parse
+from dataclasses import dataclass
 
 from ....utils.github_host import (
     is_artifactory_path,
@@ -22,6 +23,16 @@ from ...validation import InvalidVirtualPackageExtensionError
 # and error messages stay consistent regardless of how the user
 # spelled the URL.
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
+
+
+@dataclass(frozen=True, slots=True)
+class _HostTypeFlags:
+    """Flags describing the detected host type for virtual package detection."""
+
+    is_ado: bool
+    is_artifactory: bool
+    is_generic_host: bool
+    is_gitlab_host: bool
 
 
 @classmethod
@@ -48,39 +59,82 @@ def virtual_suffix_is_installable_shape(cls, virtual_path: str) -> bool:
     return "." not in last
 
 
-@classmethod
-def _compute_min_base_segments(
-    cls,
-    path_segments: list,
-    validated_host: "str | None",
-    is_ado: bool,
-    is_artifactory: bool,
-    is_generic_host: bool,
-    is_gitlab_host: bool,
-) -> int:
-    """Return the minimum path-segment count that forms the repo base address.
+def _parse_host_from_first_segment(check_str: str) -> tuple[str | None, str]:
+    """Parse and validate host from first path segment.
 
-    The virtual-package content begins immediately after the base, so the
-    minimum total segment count for a valid virtual path equals this value
-    plus one.  Extracted from :func:`_detect_virtual_package` to reduce its
-    McCabe complexity within the configured Ruff thresholds.
+    Returns:
+        (validated_host, remaining_check_str)
     """
+    if "/" not in check_str:
+        return None, check_str
+
+    first_segment = check_str.split("/")[0]
+    if "." not in first_segment:
+        if check_str.startswith("gh/"):
+            return None, "/".join(check_str.split("/")[1:])
+        return None, check_str
+
+    test_url = f"https://{check_str}"
+    try:
+        parsed = urllib.parse.urlparse(test_url)
+        hostname = parsed.hostname
+
+        if hostname and is_supported_git_host(hostname):
+            path_parts = parsed.path.lstrip("/").split("/")
+            if len(path_parts) >= 2:
+                return hostname, "/".join(check_str.split("/")[1:])
+        else:
+            raise ValueError(unsupported_host_error(hostname or first_segment))
+    except (ValueError, AttributeError) as e:
+        if isinstance(e, ValueError) and "Invalid Git host" in str(e):
+            raise
+        raise ValueError(unsupported_host_error(first_segment)) from e
+
+    return None, check_str
+
+
+def _validate_virtual_path_extension_rules(virtual_path: str, cls) -> None:
+    """Validate virtual path extension rules."""
+    if any(virtual_path.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+        raise ValueError(
+            f".collection.yml is no longer supported. "
+            f"Convert '{virtual_path}' to an apm.yml with a "
+            f"'dependencies' section. "
+            f"See: https://microsoft.github.io/apm/guides/dependencies/"
+        )
+
+    if any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+        return
+
+    last_segment = virtual_path.split("/")[-1]
+    if "." in last_segment:
+        raise InvalidVirtualPackageExtensionError(
+            f"Invalid virtual package path '{virtual_path}'. "
+            f"Individual files must end with one of: {', '.join(cls.VIRTUAL_FILE_EXTENSIONS)}. "
+            f"For subdirectory packages, the path should not have a file extension."
+        )
+
+
+def _compute_min_base_helper(
+    path_segments: list,
+    validated_host: str | None,
+    flags: _HostTypeFlags,
+    cls,
+) -> int:
+    """Helper that computes minimum base segments. Called by @classmethod wrapper."""
     min_base_segments = 2
-    if is_ado:
-        # *.visualstudio.com encodes org in the subdomain; path is proj/repo (2 parts).
-        # dev.azure.com encodes org as the first path segment; path is org/proj/repo (3 parts).
+    if flags.is_ado:
         min_base_segments = (
             2 if validated_host and is_visualstudio_legacy_hostname(validated_host) else 3
         )
-    elif is_artifactory:
-        # Artifactory: artifactory/{repo-key}/{owner}/{repo}
+    elif flags.is_artifactory:
         min_base_segments = 4
-    elif is_generic_host:
+    elif flags.is_generic_host:
         has_virtual_ext = any(
             any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS) for seg in path_segments
         )
         has_collection = "collections" in path_segments
-        if is_gitlab_host:
+        if flags.is_gitlab_host:
             min_base_segments = cls._gitlab_shorthand_repo_segment_count(
                 path_segments, has_virtual_ext, has_collection
             )
@@ -90,13 +144,23 @@ def _compute_min_base_segments(
 
 
 @classmethod
+def _compute_min_base_segments(
+    cls,
+    path_segments: list,
+    validated_host: str | None,
+    flags: _HostTypeFlags,
+) -> int:
+    """Return the minimum path-segment count that forms the repo base address."""
+    return _compute_min_base_helper(path_segments, validated_host, flags, cls)
+
+
+@classmethod
 def _detect_virtual_package(cls, dependency_str: str):
     """Detect whether *dependency_str* refers to a virtual package.
 
     Returns:
         (is_virtual_package, virtual_path, validated_host)
     """
-    # Temporarily remove reference for path segment counting
     temp_str = dependency_str
     if "#" in temp_str:
         temp_str = temp_str.rsplit("#", 1)[0]
@@ -108,85 +172,39 @@ def _detect_virtual_package(cls, dependency_str: str):
     if temp_str.lower().startswith(("git@", "https://", "http://", "ssh://")):
         return is_virtual_package, virtual_path, validated_host
 
-    check_str = temp_str
-
-    if "/" in check_str:
-        first_segment = check_str.split("/")[0]
-
-        if "." in first_segment:
-            test_url = f"https://{check_str}"
-            try:
-                parsed = urllib.parse.urlparse(test_url)
-                hostname = parsed.hostname
-
-                if hostname and is_supported_git_host(hostname):
-                    validated_host = hostname
-                    path_parts = parsed.path.lstrip("/").split("/")
-                    if len(path_parts) >= 2:
-                        check_str = "/".join(check_str.split("/")[1:])
-                else:
-                    raise ValueError(unsupported_host_error(hostname or first_segment))
-            except (ValueError, AttributeError) as e:
-                if isinstance(e, ValueError) and "Invalid Git host" in str(e):
-                    raise
-                raise ValueError(unsupported_host_error(first_segment)) from e
-        elif check_str.startswith("gh/"):
-            check_str = "/".join(check_str.split("/")[1:])
-
+    validated_host, check_str = _parse_host_from_first_segment(temp_str)
     path_segments = [seg for seg in check_str.split("/") if seg]
 
-    is_ado = validated_host is not None and is_azure_devops_hostname(validated_host)
-    is_generic_host = (
-        validated_host is not None
-        and not is_github_hostname(validated_host)
-        and not is_azure_devops_hostname(validated_host)
+    flags = _HostTypeFlags(
+        is_ado=validated_host is not None and is_azure_devops_hostname(validated_host),
+        is_generic_host=(
+            validated_host is not None
+            and not is_github_hostname(validated_host)
+            and not is_azure_devops_hostname(validated_host)
+        ),
+        is_gitlab_host=validated_host is not None and is_gitlab_hostname(validated_host),
+        is_artifactory=False,
     )
-    is_gitlab_host = validated_host is not None and is_gitlab_hostname(validated_host)
 
-    if is_ado and "_git" in path_segments:
+    if flags.is_ado and "_git" in path_segments:
         git_idx = path_segments.index("_git")
         path_segments = path_segments[:git_idx] + path_segments[git_idx + 1 :]
 
-    # Detect Artifactory VCS paths (artifactory/{repo-key}/{owner}/{repo})
-    is_artifactory = is_generic_host and is_artifactory_path(path_segments)
+    if flags.is_generic_host:
+        flags = _HostTypeFlags(
+            is_ado=flags.is_ado,
+            is_generic_host=flags.is_generic_host,
+            is_gitlab_host=flags.is_gitlab_host,
+            is_artifactory=is_artifactory_path(path_segments),
+        )
 
-    min_base_segments = cls._compute_min_base_segments(
-        path_segments, validated_host, is_ado, is_artifactory, is_generic_host, is_gitlab_host
-    )
-
+    min_base_segments = _compute_min_base_helper(path_segments, validated_host, flags, cls)
     min_virtual_segments = min_base_segments + 1
 
     if len(path_segments) >= min_virtual_segments:
         is_virtual_package = True
         virtual_path = "/".join(path_segments[min_base_segments:])
-
-        # Security: reject path traversal in virtual path
         validate_path_segments(virtual_path, context="virtual path")
-
-        # Reject removed `.collection.yml` extensions with a clear
-        # migration message (#1094). Curated dependency aggregators
-        # are now expressed as `apm.yml` with a `dependencies` block.
-        if any(virtual_path.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
-            raise ValueError(
-                f".collection.yml is no longer supported. "
-                f"Convert '{virtual_path}' to an apm.yml with a "
-                f"'dependencies' section. "
-                f"See: https://microsoft.github.io/apm/guides/dependencies/"
-            )
-
-        # Accept any path ending in a recognised virtual file
-        # extension. Reject other dotted final segments so typos like
-        # `prompts/file.txt` fail fast instead of silently
-        # mis-classifying as a subdirectory.
-        if any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
-            pass
-        else:
-            last_segment = virtual_path.split("/")[-1]
-            if "." in last_segment:
-                raise InvalidVirtualPackageExtensionError(
-                    f"Invalid virtual package path '{virtual_path}'. "
-                    f"Individual files must end with one of: {', '.join(cls.VIRTUAL_FILE_EXTENSIONS)}. "
-                    f"For subdirectory packages, the path should not have a file extension."
-                )
+        _validate_virtual_path_extension_rules(virtual_path, cls)
 
     return is_virtual_package, virtual_path, validated_host

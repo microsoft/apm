@@ -18,10 +18,12 @@ import click
 
 from ...core.command_logger import CommandLogger
 from ..audit import _AuditConfig
+from .ci_gate import _audit_ci_gate as _audit_ci_gate
 
 # Re-export the complex functions from their new homes
-from .ci_gate import _audit_ci_gate as _audit_ci_gate
+from .ci_gate import _CiGateRequest
 from .content_scan import _audit_content_scan as _audit_content_scan
+from .content_scan import _ContentScanRequest
 
 __all__ = ["_audit_ci_gate", "_audit_content_scan", "audit"]
 
@@ -109,7 +111,16 @@ def audit(
             logger.error("--ci does not support --format markdown. Use json or sarif.")
             sys.exit(1)
 
-        _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast, no_drift)
+        _audit_ci_gate(
+            cfg,
+            _CiGateRequest(
+                policy_source=policy_source,
+                no_cache=no_cache,
+                no_policy=no_policy,
+                no_fail_fast=no_fail_fast,
+                no_drift=no_drift,
+            ),
+        )
         return  # _audit_ci_gate calls sys.exit; return guards against fall-through
 
     # -- Content scan mode ------------------------------------------
@@ -119,4 +130,13 @@ def audit(
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
 
-    _audit_content_scan(cfg, package, file_path, strip, dry_run, no_drift)
+    _audit_content_scan(
+        cfg,
+        _ContentScanRequest(
+            package=package,
+            file_path=file_path,
+            strip=strip,
+            dry_run=dry_run,
+            no_drift=no_drift,
+        ),
+    )

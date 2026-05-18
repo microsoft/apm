@@ -17,6 +17,36 @@ from . import (
 )
 
 
+def _resolve_package_ref(logger, yml, name: str, ref: str | None, version: str | None):
+    """Resolve mutable refs to immutable SHAs for marketplace updates."""
+    if ref is None or _SHA_RE.match(ref):
+        return ref
+
+    from ....marketplace.yml_schema import load_marketplace_from_apm_yml, load_marketplace_yml
+
+    yml_data = (
+        load_marketplace_from_apm_yml(yml) if yml.name == "apm.yml" else load_marketplace_yml(yml)
+    )
+    for pkg in yml_data.packages:
+        if pkg.name.lower() == name.lower():
+            return _resolve_ref(logger, pkg.source, ref, version, no_verify=False)
+
+    logger.error(f"Package '{name}' not found", symbol="error")
+    sys.exit(2)
+
+
+def _build_update_fields(values: dict) -> dict:
+    """Collect only the explicitly requested field updates."""
+    fields = {}
+    for key in ("version", "ref", "subdir", "tag_pattern", "include_prerelease"):
+        value = values.get(key)
+        if value is not None:
+            fields[key] = value
+    if values.get("parsed_tags") is not None:
+        fields["tags"] = values["parsed_tags"]
+    return fields
+
+
 @package.command("set", help="Update a package entry in marketplace authoring config")
 @click.argument("name")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
@@ -35,19 +65,17 @@ from . import (
     help="Include prerelease versions",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def set_cmd(
-    name,
-    version,
-    ref,
-    subdir,
-    tag_pattern,
-    tags,
-    include_prerelease,
-    verbose,
-):
+def set_cmd(name, **params):
     """Update fields on an existing package entry."""
     from ....marketplace.yml_editor import update_plugin_entry
 
+    version = params["version"]
+    ref = params["ref"]
+    subdir = params["subdir"]
+    tag_pattern = params["tag_pattern"]
+    tags = params["tags"]
+    include_prerelease = params["include_prerelease"]
+    verbose = params["verbose"]
     logger = CommandLogger("marketplace-package-set", verbose=verbose)
     yml = _ensure_yml_exists(logger)
 
@@ -58,42 +86,18 @@ def set_cmd(
             "Use --version for semver ranges or --ref for git refs."
         )
 
-    # Resolve mutable refs to concrete SHAs.
-    if ref is not None and not _SHA_RE.match(ref):
-        from ....marketplace.yml_schema import (
-            load_marketplace_from_apm_yml,
-            load_marketplace_yml,
-        )
-
-        if yml.name == "apm.yml":
-            yml_data = load_marketplace_from_apm_yml(yml)
-        else:
-            yml_data = load_marketplace_yml(yml)
-        source = None
-        for pkg in yml_data.packages:
-            if pkg.name.lower() == name.lower():
-                source = pkg.source
-                break
-        if source is None:
-            logger.error(f"Package '{name}' not found", symbol="error")
-            sys.exit(2)
-        ref = _resolve_ref(logger, source, ref, version, no_verify=False)
-
+    ref = _resolve_package_ref(logger, yml, name, ref, version)
     parsed_tags = _parse_tags(tags)
-
-    fields = {}
-    if version is not None:
-        fields["version"] = version
-    if ref is not None:
-        fields["ref"] = ref
-    if subdir is not None:
-        fields["subdir"] = subdir
-    if tag_pattern is not None:
-        fields["tag_pattern"] = tag_pattern
-    if parsed_tags is not None:
-        fields["tags"] = parsed_tags
-    if include_prerelease is not None:
-        fields["include_prerelease"] = include_prerelease
+    fields = _build_update_fields(
+        {
+            "version": version,
+            "ref": ref,
+            "subdir": subdir,
+            "tag_pattern": tag_pattern,
+            "parsed_tags": parsed_tags,
+            "include_prerelease": include_prerelease,
+        }
+    )
 
     if not fields:
         logger.error(

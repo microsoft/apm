@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -84,11 +85,18 @@ def _confirm_publish(targets, yes: bool, dry_run: bool, logger) -> None:
         )
 
 
-def _build_pr_results(
-    pr: PrIntegrator | None, results, plan, *, dry_run: bool, draft: bool, no_pr: bool
-):
+@dataclass(frozen=True, slots=True)
+class _PrBuildOpts:
+    """Options controlling PR creation in :func:`_build_pr_results`."""
+
+    dry_run: bool
+    draft: bool
+    no_pr: bool
+
+
+def _build_pr_results(pr: PrIntegrator | None, results, plan, opts: _PrBuildOpts):
     """Build PR results for publish outcomes."""
-    if no_pr:
+    if opts.no_pr:
         return []
     if pr is None:
         pr = PrIntegrator()
@@ -102,8 +110,8 @@ def _build_pr_results(
                     result.target,
                     result,
                     no_pr=False,
-                    draft=draft,
-                    dry_run=dry_run,
+                    draft=opts.draft,
+                    dry_run=opts.dry_run,
                 )
             )
             continue

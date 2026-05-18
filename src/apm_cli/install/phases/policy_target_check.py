@@ -27,6 +27,23 @@ if TYPE_CHECKING:
 TARGET_CHECK_IDS = frozenset({"compilation-target"})
 
 
+def _process_target_check(ctx: InstallContext, check, enforcement: str, source) -> bool:
+    if check.name not in TARGET_CHECK_IDS or check.passed:
+        return False
+    severity = "block" if enforcement == "block" else "warn"
+    reason = check.message
+    if check.details:
+        reason = f"{check.message}: {', '.join(check.details[:5])}"
+    if ctx.logger:
+        ctx.logger.policy_violation(
+            dep_ref=check.name,
+            reason=reason,
+            severity=severity,
+            source=source,
+        )
+    return severity == "block"
+
+
 def run(ctx: InstallContext) -> None:
     """Run target-aware policy checks after the targets phase.
 
@@ -84,28 +101,9 @@ def run(ctx: InstallContext) -> None:
 
     enforcement = policy.enforcement
     has_blocking = False
-
+    source = getattr(getattr(ctx, "policy_fetch", None), "source", None)
     for check in audit_result.checks:
-        if check.name not in TARGET_CHECK_IDS:
-            continue  # already handled by policy_gate
-        if check.passed:
-            continue
-
-        severity = "block" if enforcement == "block" else "warn"
-        reason = check.message
-        if check.details:
-            reason = f"{check.message}: {', '.join(check.details[:5])}"
-
-        if ctx.logger:
-            ctx.logger.policy_violation(
-                dep_ref=check.name,
-                reason=reason,
-                severity=severity,
-                source=getattr(getattr(ctx, "policy_fetch", None), "source", None),
-            )
-
-        if severity == "block":
-            has_blocking = True
+        has_blocking = _process_target_check(ctx, check, enforcement, source) or has_blocking
 
     if has_blocking:
         raise PolicyViolationError(

@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """GitHub package downloader for APM dependencies."""
 
 import contextlib
@@ -9,10 +10,10 @@ from ...models.apm_package import (
     DependencyReference,
 )
 from ..bare_cache import (
-    bare_clone_with_fallback,
     fetch_sha_into_bare,
     materialize_from_bare,
 )
+from ..bare_cache._bare_clone import BareCloneOpts, bare_clone_with_fallback
 
 # Public docs anchor for the cross-protocol fallback caveat surfaced by the
 # #786 warning. Lives under the dependencies guide, next to the canonical
@@ -65,9 +66,7 @@ class _BareCloneMixin:
             self._execute_transport_plan,
             repo_url_base,
             bare_target,
-            dep_ref=dep_ref,
-            ref=ref,
-            is_commit_sha=is_commit_sha,
+            BareCloneOpts(dep_ref=dep_ref, ref=ref, is_commit_sha=is_commit_sha),
         )
 
     def _materialize_from_bare(

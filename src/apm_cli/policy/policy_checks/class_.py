@@ -138,25 +138,10 @@ def _check_unmanaged_files(
 def run_dependency_policy_checks(
     deps_to_install,
     *,
-    lockfile=None,
     policy: ApmPolicy,
-    mcp_deps=None,
-    effective_target: str | None = None,
-    fetch_outcome: str | None = None,
-    fail_fast: bool = True,
-    manifest_includes=_INCLUDES_NOT_PROVIDED,
+    **opts,
 ) -> CIAuditResult:
-    kwargs = {
-        "lockfile": lockfile,
-        "policy": policy,
-        "mcp_deps": mcp_deps,
-        "effective_target": effective_target,
-        "fetch_outcome": fetch_outcome,
-        "fail_fast": fail_fast,
-    }
-    if manifest_includes is not _INCLUDES_NOT_PROVIDED:
-        kwargs["manifest_includes"] = manifest_includes
-    return _dependency_checks.run_dependency_policy_checks(deps_to_install, **kwargs)
+    return _dependency_checks.run_dependency_policy_checks(deps_to_install, policy=policy, **opts)
 
 
 def run_policy_checks(

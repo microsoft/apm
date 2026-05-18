@@ -151,8 +151,25 @@ def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.az
         return f"ssh://git@{host}/{org}/{quoted_project}/_git/{repo}"
 
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class _AdoApiOpts:
+    """Options for Azure DevOps API URL building."""
+
+    ref: str = "main"
+    host: str = "dev.azure.com"
+
+
 def build_ado_api_url(
-    org: str, project: str, repo: str, path: str, ref: str = "main", host: str = "dev.azure.com"
+    org: str,
+    project: str,
+    repo: str,
+    path: str,
+    ref: str = "main",
+    *,
+    host: str = "dev.azure.com",
 ) -> str:
     """Build Azure DevOps REST API URL for file contents.
 

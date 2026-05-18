@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,15 @@ from .class_ import BuildReport, MarketplaceOutputReport, ResolvedPackage
 
 logger = logging.getLogger(__name__)
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+@dataclass(frozen=True, slots=True)
+class _WriteOutputOptions:
+    """Optional parameters for write_output."""
+
+    include_diff: bool = False
+    remote_metadata: dict[str, dict[str, Any]] | None = None
+    errors: tuple[tuple[str, str], ...] = ()
 
 
 def compose_marketplace_json(self, resolved: list[ResolvedPackage]) -> dict[str, Any]:
@@ -101,12 +111,19 @@ def write_output(
     profile: MarketplaceOutputProfile,
     resolved: tuple[ResolvedPackage, ...],
     output_path: Path,
-    *,
-    include_diff: bool = False,
-    remote_metadata: dict[str, dict[str, Any]] | None = None,
-    errors: tuple[tuple[str, str], ...] = (),
+    **kwargs,
 ) -> BuildReport:
-    """Write one marketplace output profile using already resolved packages."""
+    """Write one marketplace output profile using already resolved packages.
+
+    Keyword Args:
+        include_diff: Whether to compute diff statistics (default: False).
+        remote_metadata: Optional remote metadata dict.
+        errors: Optional tuple of error pairs.
+    """
+    include_diff = kwargs.get("include_diff", False)
+    remote_metadata = kwargs.get("remote_metadata")
+    errors = kwargs.get("errors", ())
+
     ensure_path_within(output_path, self._project_root)
     new_json, warnings, diagnostics = self.compose_output(
         profile,
@@ -139,6 +156,32 @@ def write_output(
     return BuildReport(outputs=(output_report,))
 
 
+def _extract_sha_from_source(src: Any) -> str:
+    """Extract SHA from source dict or string."""
+    sha = ""
+    if isinstance(src, dict):
+        # Accept both the new ``sha`` field (Claude-spec compliant)
+        # and the legacy ``commit`` field for backward-compatibility
+        # with marketplace.json files written before this PR.
+        sha = src.get("sha") or src.get("commit", "")
+    elif isinstance(src, str):
+        sha = src  # local-path packages: use the path string itself
+    return sha
+
+
+def _build_plugin_maps(
+    plugins: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Build a mapping of plugin name -> SHA from plugin list."""
+    result: dict[str, str] = {}
+    for p in plugins:
+        name = p.get("name", "")
+        src = p.get("source", {})
+        sha = _extract_sha_from_source(src)
+        result[name] = sha
+    return result
+
+
 def _compute_diff(
     old_json: dict[str, Any] | None,
     new_json: dict[str, Any],
@@ -150,30 +193,8 @@ def _compute_diff(
     if old_json is None:
         return (0, len(new_json.get("plugins", [])), 0, 0)
 
-    old_plugins: dict[str, str] = {}
-    for p in old_json.get("plugins", []):
-        name = p.get("name", "")
-        sha = ""
-        src = p.get("source", {})
-        if isinstance(src, dict):
-            # Accept both the new ``sha`` field (Claude-spec compliant)
-            # and the legacy ``commit`` field for backward-compatibility
-            # with marketplace.json files written before this PR.
-            sha = src.get("sha") or src.get("commit", "")
-        elif isinstance(src, str):
-            sha = src  # local-path packages: use the path string itself
-        old_plugins[name] = sha
-
-    new_plugins: dict[str, str] = {}
-    for p in new_json.get("plugins", []):
-        name = p.get("name", "")
-        sha = ""
-        src = p.get("source", {})
-        if isinstance(src, dict):
-            sha = src.get("sha") or src.get("commit", "")
-        elif isinstance(src, str):
-            sha = src
-        new_plugins[name] = sha
+    old_plugins = _build_plugin_maps(old_json.get("plugins", []))
+    new_plugins = _build_plugin_maps(new_json.get("plugins", []))
 
     unchanged = 0
     updated = 0

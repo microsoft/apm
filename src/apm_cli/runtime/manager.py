@@ -158,7 +158,6 @@ class RuntimeManager:
                 main_script.write_text(script_content, encoding="utf-8")
                 main_script.chmod(0o755)
 
-            # Execute script with environment that includes npm authentication
             try:
                 if self._is_windows:
                     ps_cmd = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
@@ -173,16 +172,8 @@ class RuntimeManager:
                 else:
                     cmd = ["bash", str(main_script)] + script_args  # noqa: RUF005
 
-                # Prepare environment with GitHub tokens for all authentication needs
                 env = os.environ.copy()
-
-                # Set up comprehensive GitHub token environment for all runtimes
-                # New token precedence:
-                # - GITHUB_APM_PAT: APM module access
-                # - GITHUB_TOKEN: User authentication for GitHub Models (Codex CLI)
-
-                # Setup GitHub tokens using centralized manager
-                env = setup_runtime_environment(env)  # Pass env to preserve CI tokens
+                env = setup_runtime_environment(env)  # Inject GitHub tokens; preserves CI tokens
 
                 result = subprocess.run(
                     cmd,
@@ -273,8 +264,7 @@ class RuntimeManager:
         for name, info in self.supported_runtimes.items():
             binary_name = info["binary"]
 
-            # Check different installation paths based on runtime type
-            # For all runtimes, check APM runtime directory first, then system PATH
+            # For all runtimes check APM runtime directory first, then system PATH
             binary_path = self.runtime_dir / binary_name
             if binary_path.exists():
                 installed = True

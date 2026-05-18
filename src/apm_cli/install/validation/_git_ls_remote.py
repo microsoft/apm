@@ -30,6 +30,70 @@ from apm_cli.utils.github_host import (
 __all__: list[str] = []
 
 
+def _build_validate_env(is_generic: bool, is_insecure: bool, ado_downloader, dep_ctx) -> dict:
+    """Build the subprocess environment for ``git ls-remote`` validation.
+
+    Generic hosts get a relaxed env (native credential helpers active);
+    managed hosts (GHES/ADO) merge the resolved dep-context git overrides.
+    """
+    if is_generic:
+        return ado_downloader._build_noninteractive_git_env(
+            preserve_config_isolation=is_insecure,
+            suppress_credential_helpers=is_insecure,
+        )
+    _ctx_git_env = getattr(dep_ctx, "git_env", {}) if dep_ctx else {}
+    return {**os.environ, **ado_downloader.git_env, **_ctx_git_env}
+
+
+def _try_ado_bearer_fallback(
+    dep_ref,
+    ado_downloader,
+    auth_resolver,
+    verbose_log,
+    package: str,
+) -> bool:
+    """Attempt an ADO az-cli bearer-token retry after a PAT rejection.
+
+    Returns ``True`` when the bearer retry succeeds (rc == 0); ``False``
+    (or silently) on any other outcome.  The ``ImportError`` guard allows
+    environments without ``apm_cli.core.azure_cli`` to skip silently.
+    """
+    try:
+        from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+
+        provider = get_bearer_provider()
+        if provider.is_available():
+            try:
+                bearer = provider.get_bearer_token()
+                bearer_url = ado_downloader._build_repo_url(
+                    dep_ref.repo_url,
+                    use_ssh=False,
+                    dep_ref=dep_ref,
+                    token=None,
+                    auth_scheme="bearer",
+                )
+                bearer_env = auth_resolver._build_git_env(bearer, scheme="bearer", host_kind="ado")
+                cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
+                bearer_result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=30,
+                    env=bearer_env,
+                )
+                if bearer_result.returncode == 0:
+                    auth_resolver.emit_stale_pat_diagnostic(dep_ref.host or "dev.azure.com")
+                    if verbose_log:
+                        verbose_log(f"git ls-remote rc=0 for {package} (via AAD bearer fallback)")
+                    return True
+            except AzureCliBearerError:
+                pass
+    except ImportError:
+        pass
+    return False
+
+
 def _validate_via_git_ls_remote(
     dep_ref,
     package: str,
@@ -115,25 +179,7 @@ def _validate_via_git_ls_remote(
     # the clone path honors) restores the legacy permissive chain.
     allow_fallback_env = is_fallback_allowed()
 
-    # For generic hosts (not GitHub, not ADO), relax the env so native
-    # credential helpers (macOS Keychain, credential-store,
-    # manager-core, SSH agent, etc.) can work.  Config isolation
-    # (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1) is only
-    # enforced for insecure plaintext HTTP connections where
-    # credential leakage is a real risk; HTTPS connections need
-    # access to user-configured helpers in ~/.gitconfig.  This
-    # matches _clone_with_fallback() and git_reference_resolver.
-    if is_generic:
-        validate_env = ado_downloader._build_noninteractive_git_env(
-            preserve_config_isolation=is_insecure,
-            suppress_credential_helpers=is_insecure,
-        )
-    else:
-        # #1015: merge _dep_ctx.git_env (bearer-aware GIT_CONFIG_*
-        # overrides) into the subprocess env so `git ls-remote`
-        # actually sends the Authorization header for AAD tokens.
-        _ctx_git_env = getattr(_dep_ctx, "git_env", {}) if _dep_ctx else {}
-        validate_env = {**os.environ, **ado_downloader.git_env, **_ctx_git_env}
+    validate_env = _build_validate_env(is_generic, is_insecure, ado_downloader, _dep_ctx)
 
     # Build the probe order. Non-generic hosts (GHES/ADO) always probe
     # a single authenticated URL. Generic hosts:
@@ -211,52 +257,8 @@ def _validate_via_git_ls_remote(
         and _url_token is not None  # we had a PAT
         and is_ado_auth_failure_signal(result.stderr or "")
     ):
-        try:
-            from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
-
-            provider = get_bearer_provider()
-            if provider.is_available():
-                try:
-                    bearer = provider.get_bearer_token()
-                    bearer_url = ado_downloader._build_repo_url(
-                        dep_ref.repo_url,
-                        use_ssh=False,
-                        dep_ref=dep_ref,
-                        token=None,
-                        auth_scheme="bearer",
-                    )
-                    # SECURITY: build a CLEAN env via _build_git_env(scheme="bearer")
-                    # rather than {**validate_env, **build_ado_bearer_git_env(bearer)}.
-                    # validate_env still carries the PAT-context GIT_CONFIG_*
-                    # entries from _ctx_git_env; merging the bearer env on top
-                    # would keep the rejected PAT visible in the child-process
-                    # env (visible in /proc/<pid>/environ on Linux). _build_git_env
-                    # explicitly skips GIT_TOKEN for scheme="bearer" and emits
-                    # only the bearer-specific GIT_CONFIG_* injection.
-                    bearer_env = auth_resolver._build_git_env(
-                        bearer, scheme="bearer", host_kind="ado"
-                    )
-                    cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
-                    bearer_result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        timeout=30,
-                        env=bearer_env,
-                    )
-                    if bearer_result.returncode == 0:
-                        # Emit deferred stale-PAT warning via resolver
-                        auth_resolver.emit_stale_pat_diagnostic(dep_ref.host or "dev.azure.com")
-                        if verbose_log:
-                            verbose_log(
-                                f"git ls-remote rc=0 for {package} (via AAD bearer fallback)"
-                            )
-                        return True
-                except AzureCliBearerError:
-                    pass
-        except ImportError:
-            pass
+        if _try_ado_bearer_fallback(dep_ref, ado_downloader, auth_resolver, verbose_log, package):
+            return True
 
     # Per-attempt verbose logging is emitted inside the probe loop
     # (and by the bearer-fallback branch above), so the result is

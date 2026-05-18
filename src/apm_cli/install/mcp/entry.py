@@ -11,19 +11,75 @@ opaque; see #938 for the regression that motivates this rule.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class _MCPEntryOpts:
+    transport: str | None = None
+    url: str | None = None
+    env: Mapping[str, str] | None = None
+    headers: Mapping[str, str] | None = None
+    version: str | None = None
+    command_argv: Sequence[str] | None = None
+    registry_url: str | None = None
+
+
+def _build_stdio_entry(name: str, argv: list[str], env: Mapping[str, str] | None) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "name": name,
+        "registry": False,
+        "transport": "stdio",
+        "command": argv[0],
+    }
+    if len(argv) > 1:
+        entry["args"] = argv[1:]
+    if env:
+        entry["env"] = dict(env)
+    return entry
+
+
+def _build_remote_entry(
+    name: str,
+    transport: str | None,
+    url: str,
+    headers: Mapping[str, str] | None,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "name": name,
+        "registry": False,
+        "transport": transport or "http",
+        "url": url,
+    }
+    if headers:
+        entry["headers"] = dict(headers)
+    return entry
+
+
+def _build_registry_entry(name: str, opts: _MCPEntryOpts) -> str | dict[str, Any]:
+    if opts.version:
+        entry: dict[str, Any] = {"name": name, "version": opts.version}
+        if opts.transport:
+            entry["transport"] = opts.transport
+        if opts.registry_url:
+            entry["registry"] = opts.registry_url
+        return entry
+    if opts.transport:
+        entry = {"name": name, "transport": opts.transport}
+        if opts.registry_url:
+            entry["registry"] = opts.registry_url
+        return entry
+    if opts.registry_url:
+        return {"name": name, "registry": opts.registry_url}
+    return name
 
 
 def build_mcp_entry(
     name: str,
     *,
-    transport: str | None,
-    url: str | None,
-    env: Mapping[str, str] | None,
-    headers: Mapping[str, str] | None,
-    version: str | None,
-    command_argv: Sequence[str] | None,
-    registry_url: str | None = None,
+    opts: _MCPEntryOpts | None = None,
+    **kwargs: Any,
 ) -> tuple[str | dict[str, Any], bool]:
     """Pure builder. Return ``(entry, is_self_defined)``.
 
@@ -42,63 +98,25 @@ def build_mcp_entry(
     """
     from ...models.dependency.mcp import MCPDependency
 
-    if command_argv:
-        # Self-defined stdio
-        argv = list(command_argv)
-        entry: dict[str, Any] = {
-            "name": name,
-            "registry": False,
-            "transport": "stdio",
-            "command": argv[0],
-        }
-        if len(argv) > 1:
-            entry["args"] = argv[1:]
-        if env:
-            entry["env"] = dict(env)
+    if opts is None:
+        opts = _MCPEntryOpts(**kwargs)
+
+    if opts.command_argv:
+        entry = _build_stdio_entry(name, list(opts.command_argv), opts.env)
         MCPDependency.from_dict(entry)
         return entry, True
 
-    if url:
-        # Self-defined remote
-        chosen_transport = transport or "http"
-        entry = {
-            "name": name,
-            "registry": False,
-            "transport": chosen_transport,
-            "url": url,
-        }
-        if headers:
-            entry["headers"] = dict(headers)
+    if opts.url:
+        entry = _build_remote_entry(name, opts.transport, opts.url, opts.headers)
         MCPDependency.from_dict(entry)
         return entry, True
 
-    # Registry shorthand
-    if version:
-        entry = {"name": name, "version": version}
-        if transport:
-            entry["transport"] = transport
-        if registry_url:
-            entry["registry"] = registry_url
+    entry = _build_registry_entry(name, opts)
+    if isinstance(entry, dict):
         MCPDependency.from_dict(entry)
-        return entry, False
-
-    if transport:
-        entry = {"name": name, "transport": transport}
-        if registry_url:
-            entry["registry"] = registry_url
-        MCPDependency.from_dict(entry)
-        return entry, False
-
-    if registry_url:
-        # No other overlays but a custom registry URL -- promote to dict
-        # form so the URL is captured in apm.yml.
-        entry = {"name": name, "registry": registry_url}
-        MCPDependency.from_dict(entry)
-        return entry, False
-
-    # Bare string registry shorthand -- no overlays at all.
-    MCPDependency.from_string(name)
-    return name, False
+    else:
+        MCPDependency.from_string(name)
+    return entry, False
 
 
 # Backward-compatibility alias for tests and legacy callers that imported

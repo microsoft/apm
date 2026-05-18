@@ -10,11 +10,37 @@ import click
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
 from ...marketplace.ref_resolver import RefResolver
-from ...marketplace.semver import satisfies_range
 from . import marketplace
 from ._check import _CheckResult, _render_check_table, _warn_duplicate_names
 from ._io import _load_config_or_exit
-from ._outdated import _extract_tag_versions
+
+
+def _check_entry_against_refs(entry, refs, yml) -> tuple[bool, bool, str]:
+    """Check a single entry against its remote refs.
+
+    Return ``(ref_ok, version_found, error_msg)``.  When *error_msg* is
+    non-empty the check failed and the caller should record a failure result.
+    """
+    from ...marketplace.semver import satisfies_range
+    from ._outdated import _extract_tag_versions
+
+    if entry.ref is not None:
+        for r in refs:
+            tag_name = r.name
+            if tag_name.startswith("refs/tags/"):
+                tag_name = tag_name[len("refs/tags/") :]
+            elif tag_name.startswith("refs/heads/"):
+                tag_name = tag_name[len("refs/heads/") :]
+            if entry.ref in (tag_name, r.name):
+                return True, True, ""
+        return False, False, f"Ref '{entry.ref}' not found"
+
+    tag_versions = _extract_tag_versions(refs, entry, yml, False)
+    version_range = entry.version or ""
+    matching = [(sv, tag) for sv, tag in tag_versions if satisfies_range(sv, version_range)]
+    if matching:
+        return True, True, ""
+    return False, len(tag_versions) > 0, f"No tag matching '{version_range}'"
 
 
 @marketplace.command(help="Validate marketplace entries are resolvable")
@@ -46,52 +72,19 @@ def check(offline, verbose):
                 # Attempt to resolve each entry
                 refs = resolver.list_remote_refs(entry.source)
 
-                # Check version/ref resolution
-                ref_ok = False
-                if entry.ref is not None:
-                    # Check the explicit ref exists
-                    for r in refs:
-                        tag_name = r.name
-                        if tag_name.startswith("refs/tags/"):
-                            tag_name = tag_name[len("refs/tags/") :]
-                        elif tag_name.startswith("refs/heads/"):
-                            tag_name = tag_name[len("refs/heads/") :]
-                        if entry.ref in (tag_name, r.name):
-                            ref_ok = True
-                            break
-                    if not ref_ok:
-                        results.append(
-                            _CheckResult(
-                                name=entry.name,
-                                reachable=True,
-                                version_found=False,
-                                ref_ok=False,
-                                error=f"Ref '{entry.ref}' not found",
-                            )
+                ref_ok, version_found, error_msg = _check_entry_against_refs(entry, refs, yml)
+                if error_msg:
+                    results.append(
+                        _CheckResult(
+                            name=entry.name,
+                            reachable=True,
+                            version_found=version_found,
+                            ref_ok=ref_ok,
+                            error=error_msg,
                         )
-                        failure_count += 1
-                        continue
-                else:
-                    # Version range -- check at least one tag satisfies
-                    tag_versions = _extract_tag_versions(refs, entry, yml, False)
-                    version_range = entry.version or ""
-                    matching = [
-                        (sv, tag) for sv, tag in tag_versions if satisfies_range(sv, version_range)
-                    ]
-                    if matching:
-                        ref_ok = True
-                    else:
-                        results.append(
-                            _CheckResult(
-                                name=entry.name,
-                                reachable=True,
-                                version_found=len(tag_versions) > 0,
-                                ref_ok=False,
-                                error=f"No tag matching '{version_range}'",
-                            )
-                        )
-                        failure_count += 1
-                        continue
+                    )
+                    failure_count += 1
+                    continue
 
                 results.append(
                     _CheckResult(

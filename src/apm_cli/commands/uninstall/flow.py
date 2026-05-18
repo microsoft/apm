@@ -1,9 +1,34 @@
 """Helper functions for the uninstall CLI flow."""
 
+from __future__ import annotations
+
 import builtins
 import sys
+from dataclasses import dataclass
 
 from ...models.apm_package import APMPackage
+
+
+@dataclass(frozen=True, slots=True)
+class _ManifestUpdateContext:
+    """Persistence dependencies for manifest updates."""
+
+    apm_yml_path: object
+    dump_yaml: object
+    logger: object
+
+
+@dataclass(frozen=True, slots=True)
+class _McpCleanupContext:
+    """Inputs required to reconcile MCP state after uninstall."""
+
+    lockfile: object
+    lockfile_path: object
+    pre_uninstall_mcp_servers: object
+    modules_dir: object
+    deploy_root: object
+    scope: object
+    logger: object
 
 
 def _load_manifest_data(apm_yml_path, logger):
@@ -24,18 +49,20 @@ def _load_manifest_data(apm_yml_path, logger):
 
 
 def _update_manifest_dependencies(
-    data, current_deps, packages_to_remove, apm_yml_path, dump_yaml, logger
+    data, current_deps, packages_to_remove, ctx: _ManifestUpdateContext
 ):
     """Remove packages from the manifest and persist the updated YAML."""
     for package in packages_to_remove:
         current_deps.remove(package)
-        logger.progress(f"Removed {package} from apm.yml")
+        ctx.logger.progress(f"Removed {package} from apm.yml")
     data["dependencies"]["apm"] = current_deps
     try:
-        dump_yaml(data, apm_yml_path)
-        logger.success(f"Updated {apm_yml_path} (removed {len(packages_to_remove)} package(s))")
+        ctx.dump_yaml(data, ctx.apm_yml_path)
+        ctx.logger.success(
+            f"Updated {ctx.apm_yml_path} (removed {len(packages_to_remove)} package(s))"
+        )
     except Exception as exc:
-        logger.error(f"Failed to write {apm_yml_path}: {exc}")
+        ctx.logger.error(f"Failed to write {ctx.apm_yml_path}: {exc}")
         sys.exit(1)
 
 
@@ -151,35 +178,29 @@ def _log_cleanup_counts(cleaned, logger):
         logger.verbose_detail(f"    Removed {count} deployed {label} file(s)")
 
 
-def _cleanup_mcp_state(
-    manifest_path,
-    lockfile,
-    lockfile_path,
-    pre_uninstall_mcp_servers,
-    modules_dir,
-    deploy_root,
-    scope,
-    logger,
-):
+def _cleanup_mcp_state(manifest_path, ctx: _McpCleanupContext):
     """Run best-effort MCP cleanup after uninstall."""
     from .engine import _cleanup_stale_mcp
+    from .engine import _McpCleanupContext as _EngineMcpCleanupContext
 
     try:
         from ...core.scope import InstallScope
 
         apm_package = APMPackage.from_apm_yml(manifest_path)
         _cleanup_stale_mcp(
-            apm_package,
-            lockfile,
-            lockfile_path,
-            pre_uninstall_mcp_servers,
-            modules_dir=modules_dir,
-            project_root=deploy_root,
-            user_scope=scope is InstallScope.USER,
-            scope=scope,
+            _EngineMcpCleanupContext(
+                apm_package=apm_package,
+                lockfile=ctx.lockfile,
+                lockfile_path=ctx.lockfile_path,
+                old_mcp_servers=ctx.pre_uninstall_mcp_servers,
+                modules_dir=ctx.modules_dir,
+                project_root=ctx.deploy_root,
+                user_scope=ctx.scope is InstallScope.USER,
+                scope=ctx.scope,
+            )
         )
     except Exception:
-        logger.warning("MCP cleanup during uninstall failed")
+        ctx.logger.warning("MCP cleanup during uninstall failed")
 
 
 def _summarise_uninstall(packages_to_remove, removed_from_modules, packages_not_found, logger):

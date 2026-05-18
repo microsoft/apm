@@ -9,6 +9,7 @@ from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.console import _rich_warning
 
 from . import _file_ops, _partition, _sync
+from ._opts import SyncRemoveOpts
 
 
 @dataclass
@@ -336,26 +337,30 @@ class BaseIntegrator:
         project_root: Path,
         managed_files: set[str] | None,
         prefix: str,
-        legacy_glob_dir: Path | None = None,
-        legacy_glob_pattern: str | None = None,
-        targets=None,
-        logger=None,
+        opts: SyncRemoveOpts | None = None,
+        **legacy_kwargs,
     ) -> dict[str, int]:
         """Remove APM-managed files matching *prefix* from *managed_files*.
 
         Falls back to a legacy glob when *managed_files* is ``None``.
         Full implementation in :func:`._sync.sync_remove_files`.
         """
-        return _sync.sync_remove_files(
-            project_root,
-            managed_files,
-            prefix,
-            legacy_glob_dir=legacy_glob_dir,
-            legacy_glob_pattern=legacy_glob_pattern,
-            targets=targets,
-            logger=logger,
-            _warn_fn=_rich_warning,
+        resolved_opts = opts or SyncRemoveOpts(
+            legacy_glob_dir=legacy_kwargs.get("legacy_glob_dir"),
+            legacy_glob_pattern=legacy_kwargs.get("legacy_glob_pattern"),
+            targets=legacy_kwargs.get("targets"),
+            logger=legacy_kwargs.get("logger"),
+            warn_fn=legacy_kwargs.get("warn_fn"),
         )
+        if resolved_opts.warn_fn is None:
+            resolved_opts = SyncRemoveOpts(
+                legacy_glob_dir=resolved_opts.legacy_glob_dir,
+                legacy_glob_pattern=resolved_opts.legacy_glob_pattern,
+                targets=resolved_opts.targets,
+                logger=resolved_opts.logger,
+                warn_fn=_rich_warning,
+            )
+        return _sync.sync_remove_files(project_root, managed_files, prefix, resolved_opts)
 
     # ------------------------------------------------------------------
     # File-discovery helpers (reusable globs)

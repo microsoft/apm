@@ -3,6 +3,36 @@
 import shutil
 from pathlib import Path
 
+
+def _validate_skill_deployment_path(
+    skill_dir: Path,
+    target_base: Path,
+    effective_root: Path,
+    skill_name: str,
+) -> Path:
+    """Validate one skill deployment path and return its resolved directory."""
+    from apm_cli.utils.path_security import (
+        PathTraversalError,
+        ensure_path_within,
+        validate_path_segments,
+    )
+
+    validate_path_segments(skill_name, context="skill name")
+    if skill_dir.is_symlink():
+        raise PathTraversalError(
+            f"Skill destination {skill_dir} is a symlink -- refusing to deploy"
+        )
+    resolved_project = target_base.resolve()
+    resolved_skill_dir = skill_dir.resolve()
+    if not resolved_skill_dir.is_relative_to(resolved_project):
+        raise PathTraversalError(
+            f"Skill directory '{skill_dir}' resolves to '{resolved_skill_dir}' "
+            f"which is outside the project root '{resolved_project}'"
+        )
+    ensure_path_within(skill_dir, target_base / effective_root / "skills")
+    return resolved_skill_dir
+
+
 # Source-guard compatibility: two additional shutil.copytree( call sites now
 # live in split helper modules and also compose ignore_non_content.
 # shutil.copytree( ... ignore_non_content ... )
@@ -66,10 +96,7 @@ def copy_skill_to_target(
     raw_skill_name = source_path.name
 
     is_valid, _ = validate_skill_name(raw_skill_name)
-    if is_valid:  # noqa: SIM108
-        skill_name = raw_skill_name
-    else:
-        skill_name = normalize_skill_name(raw_skill_name)
+    skill_name = raw_skill_name if is_valid else normalize_skill_name(raw_skill_name)
 
     deployed: list[Path] = []
     seen_skill_dirs: set[Path] = set()
@@ -95,38 +122,14 @@ def copy_skill_to_target(
 
         skill_dir = target_base / effective_root / "skills" / skill_name
 
-        # Security: reject traversal in skill name and validate containment.
-        # The containment check resolves the *base* (which may sit behind a
-        # symlink) but verifies the *unresolved* caller-controlled segment
-        # (skill_name) has no traversal parts.  This prevents a symlink at
-        # target_base / effective_root from silently redirecting writes
-        # outside the project root.
-        from apm_cli.utils.path_security import (
-            PathTraversalError,
-            ensure_path_within,
-            validate_path_segments,
+        resolved = _validate_skill_deployment_path(
+            skill_dir,
+            target_base,
+            effective_root,
+            skill_name,
         )
 
-        validate_path_segments(skill_name, context="skill name")
-        if skill_dir.is_symlink():
-            raise PathTraversalError(
-                f"Skill destination {skill_dir} is a symlink -- refusing to deploy"
-            )
-
-        # Verify the resolved skill directory is within the project root.
-        # This catches the case where an ancestor directory (e.g.
-        # effective_root) is a symlink pointing outside the project.
-        resolved_project = target_base.resolve()
-        resolved_skill_dir = skill_dir.resolve()
-        if not resolved_skill_dir.is_relative_to(resolved_project):
-            raise PathTraversalError(
-                f"Skill directory '{skill_dir}' resolves to '{resolved_skill_dir}' "
-                f"which is outside the project root '{resolved_project}'"
-            )
-        ensure_path_within(skill_dir, target_base / effective_root / "skills")
-
         # Dedup: skip if same resolved path already deployed.
-        resolved = skill_dir.resolve()
         if resolved in seen_skill_dirs:
             import logging
 

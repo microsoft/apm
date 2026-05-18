@@ -177,9 +177,14 @@ class GitHubPackageDownloader(
         progress_obj=None,
         verbose_callback=None,
     ) -> PackageInfo:
-        return _download_ops.download_package(
-            self, repo_ref, target_path, progress_task_id, progress_obj, verbose_callback
+        from .download_ops import ProgressCtx
+
+        ctx = ProgressCtx(
+            progress_task_id=progress_task_id,
+            progress_obj=progress_obj,
+            verbose_callback=verbose_callback,
         )
+        return _download_ops.download_package(self, repo_ref, target_path, ctx)
 
     def _get_clone_progress_callback(self):
         return _download_ops._get_clone_progress_callback(self)

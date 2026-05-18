@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..adapters.client.base import McpServerRequest
 from ..factory import ClientFactory
 from ..utils.console import _rich_error, _rich_success, _rich_warning
 from .conflict_detector import MCPConflictDetector
@@ -111,16 +112,14 @@ class SafeMCPInstaller:
                 continue
 
             try:
-                # Pass environment overrides, server info cache, and runtime variables if provided
-                kwargs = {}
-                if env_overrides is not None:
-                    kwargs["env_overrides"] = env_overrides
-                if server_info_cache is not None:
-                    kwargs["server_info_cache"] = server_info_cache
-                if runtime_vars is not None:
-                    kwargs["runtime_vars"] = runtime_vars
-
-                result = self.adapter.configure_mcp_server(server_ref, **kwargs)
+                result = self.adapter.configure_mcp_server(
+                    server_ref,
+                    McpServerRequest(
+                        env_overrides=env_overrides,
+                        server_info_cache=server_info_cache,
+                        runtime_vars=runtime_vars,
+                    ),
+                )
 
                 if result:
                     summary.add_installed(server_ref)

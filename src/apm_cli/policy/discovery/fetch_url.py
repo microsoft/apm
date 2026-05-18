@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -49,6 +50,18 @@ MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
 CACHE_SCHEMA_VERSION = "3"  # Bump when cache format changes to auto-invalidate
 
 
+@dataclass(frozen=True, slots=True)
+class ProcessPolicyOpts:
+    """Options for _process_fetched_policy helper."""
+
+    content: str
+    ref: str
+    source_label: str
+    cache_entry: _CacheEntry | None
+    expected_hash: str | None
+    project_root: Path
+
+
 def _fetch_from_url(
     url: str,
     project_root: Path,
@@ -58,9 +71,8 @@ def _fetch_from_url(
 ) -> PolicyFetchResult:
     """Fetch policy YAML from a direct URL."""
     source_label = f"url:{url}"
-    cache_entry: _CacheEntry | None = None
 
-    # Use URL as cache key
+    # Try cache first
     if not no_cache:
         cache_entry = _pkg()._read_cache_entry(url, project_root, expected_hash=expected_hash)
         if cache_entry is not None and not cache_entry.stale:
@@ -74,78 +86,96 @@ def _fetch_from_url(
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
             )
+    else:
+        cache_entry = None
 
-    fetch_error: str | None = None
-    content: str | None = None
-
-    try:
-        resp = _pkg().requests.get(url, timeout=10, allow_redirects=False)
-        if resp.status_code == 404:
-            return PolicyFetchResult(
-                source=source_label,
-                error="404: Policy file not found",
-                outcome="absent",
-            )
-        if 300 <= resp.status_code < 400:
-            # Redirects are refused: a malicious or compromised origin
-            # could otherwise bounce us to an attacker-controlled host
-            # (SSRF / Referer leakage). Treat as fetch failure.
-            location = resp.headers.get("Location", "<no Location header>")
-            fetch_error = f"Refusing HTTP redirect ({resp.status_code}) from {url} to {location}"
-        elif resp.status_code != 200:
-            fetch_error = f"HTTP {resp.status_code} fetching {url}"
-        else:
-            content = resp.text
-    except _pkg().requests.exceptions.Timeout:
-        fetch_error = f"Timeout fetching {url}"
-    except _pkg().requests.exceptions.ConnectionError:
-        fetch_error = f"Connection error fetching {url}"
-    except Exception as e:
-        fetch_error = f"Error fetching {url}: {e}"
-
+    # Fetch from URL
+    content, fetch_error = _fetch_url_content(url)
     if fetch_error:
         return _pkg()._stale_fallback_or_error(
             cache_entry, fetch_error, source_label, "cache_miss_fetch_fail"
         )
+    if content is None:
+        return PolicyFetchResult(
+            source=source_label,
+            error="404: Policy file not found",
+            outcome="absent",
+        )
 
-    # Garbage-response detection: body must be valid YAML mapping
-    garbage_result = _pkg()._detect_garbage(content, url, source_label, cache_entry)
+    # Verify and parse
+    return _process_fetched_policy(
+        ProcessPolicyOpts(
+            content=content,
+            ref=url,
+            source_label=source_label,
+            cache_entry=cache_entry,
+            expected_hash=expected_hash,
+            project_root=project_root,
+        )
+    )
+
+
+def _fetch_url_content(url: str) -> tuple[str | None, str | None]:
+    """Fetch content from URL; returns (content, error)."""
+    try:
+        resp = _pkg().requests.get(url, timeout=10, allow_redirects=False)
+        if resp.status_code == 404:
+            return None, None
+        if 300 <= resp.status_code < 400:
+            location = resp.headers.get("Location", "<no Location header>")
+            return None, f"Refusing HTTP redirect ({resp.status_code}) from {url} to {location}"
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code} fetching {url}"
+        return resp.text, None
+    except _pkg().requests.exceptions.Timeout:
+        return None, f"Timeout fetching {url}"
+    except _pkg().requests.exceptions.ConnectionError:
+        return None, f"Connection error fetching {url}"
+    except Exception as e:
+        return None, f"Error fetching {url}: {e}"
+
+
+def _process_fetched_policy(opts: ProcessPolicyOpts) -> PolicyFetchResult:
+    """Verify and parse fetched policy content."""
+    # Garbage-response detection
+    garbage_result = _pkg()._detect_garbage(
+        opts.content, opts.ref, opts.source_label, opts.cache_entry
+    )
     if garbage_result is not None:
         return garbage_result
 
-    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.
-    # A mismatch is a hard failure regardless of cache_entry availability:
-    # falling back to a "good" cache when the pin doesn't match would mask
-    # exactly the compromise this pin is designed to catch.
-    mismatch = _pkg()._verify_hash_pin(content, expected_hash, source_label)
+    # Hash pin verification
+    mismatch = _pkg()._verify_hash_pin(opts.content, opts.expected_hash, opts.source_label)
     if mismatch is not None:
         return mismatch
 
+    # Parse policy
     try:
-        policy, _warnings = load_policy(content)
+        policy, _warnings = load_policy(opts.content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
-            error=f"Invalid policy from {url}: {e}",
-            source=source_label,
+            error=f"Invalid policy from {opts.ref}: {e}",
+            source=opts.source_label,
             outcome="malformed",
         )
 
-    chain_refs = [url]
-    actual_hash = _pkg()._compute_hash_normalized(content, expected_hash)
+    # Cache and return
+    chain_refs = [opts.ref]
+    actual_hash = _pkg()._compute_hash_normalized(opts.content, opts.expected_hash)
     _pkg()._write_cache(
-        url,
+        opts.ref,
         policy,
-        project_root,
+        opts.project_root,
         chain_refs=chain_refs,
         raw_bytes_hash=actual_hash,
     )
     outcome = "empty" if _pkg()._is_policy_empty(policy) else "found"
     return PolicyFetchResult(
         policy=policy,
-        source=source_label,
+        source=opts.source_label,
         outcome=outcome,
         raw_bytes_hash=actual_hash,
-        expected_hash=expected_hash,
+        expected_hash=opts.expected_hash,
     )
 
 
@@ -161,8 +191,8 @@ def _fetch_from_repo(
     repo_ref format: "owner/.github" or "host/owner/.github"
     """
     source_label = f"org:{repo_ref}"
-    cache_entry: _CacheEntry | None = None
 
+    # Try cache first
     if not no_cache:
         cache_entry = _pkg()._read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
         if cache_entry is not None and not cache_entry.stale:
@@ -176,54 +206,30 @@ def _fetch_from_repo(
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
             )
+    else:
+        cache_entry = None
 
+    # Fetch from GitHub
     content, error = _pkg()._fetch_github_contents(repo_ref, "apm-policy.yml")
 
     if error:
-        # 404 = no policy, not an error
         if "404" in error:
             return PolicyFetchResult(source=source_label, outcome="absent")
-        # Fetch failed -- try stale cache fallback
         return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
     if content is None:
         return PolicyFetchResult(source=source_label, outcome="absent")
 
-    # Garbage-response detection
-    garbage_result = _pkg()._detect_garbage(content, repo_ref, source_label, cache_entry)
-    if garbage_result is not None:
-        return garbage_result
-
-    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.
-    mismatch = _pkg()._verify_hash_pin(content, expected_hash, source_label)
-    if mismatch is not None:
-        return mismatch
-
-    try:
-        policy, _warnings = load_policy(content)
-    except PolicyValidationError as e:
-        return PolicyFetchResult(
-            error=f"Invalid policy in {repo_ref}: {e}",
-            source=source_label,
-            outcome="malformed",
+    # Verify and parse
+    return _process_fetched_policy(
+        ProcessPolicyOpts(
+            content=content,
+            ref=repo_ref,
+            source_label=source_label,
+            cache_entry=cache_entry,
+            expected_hash=expected_hash,
+            project_root=project_root,
         )
-
-    chain_refs = [repo_ref]
-    actual_hash = _pkg()._compute_hash_normalized(content, expected_hash)
-    _pkg()._write_cache(
-        repo_ref,
-        policy,
-        project_root,
-        chain_refs=chain_refs,
-        raw_bytes_hash=actual_hash,
-    )
-    outcome = "empty" if _pkg()._is_policy_empty(policy) else "found"
-    return PolicyFetchResult(
-        policy=policy,
-        source=source_label,
-        outcome=outcome,
-        raw_bytes_hash=actual_hash,
-        expected_hash=expected_hash,
     )
 
 
@@ -235,8 +241,17 @@ def _fetch_github_contents(
 
     Returns (content_string, error_string). One will be None.
     """
+    # Parse and build API URL
+    api_url, error = _build_github_api_url(repo_ref, file_path)
+    if error:
+        return None, error
 
-    # Parse repo_ref: "owner/repo" or "host/owner/repo"
+    # Fetch from API
+    return _fetch_github_api(api_url, repo_ref)
+
+
+def _build_github_api_url(repo_ref: str, file_path: str) -> tuple[str | None, str | None]:
+    """Build GitHub API URL from repo ref; returns (url, error)."""
     parts = repo_ref.split("/")
     if len(parts) == 2:
         host = "github.com"
@@ -248,42 +263,58 @@ def _fetch_github_contents(
     else:
         return None, f"Invalid repo reference: {repo_ref}"
 
-    # Build API URL
     if host == "github.com":
         api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
     else:
         api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}"
 
+    return api_url, None
+
+
+def _fetch_github_api(api_url: str, repo_ref: str) -> tuple[str | None, str | None]:
+    """Fetch and decode content from GitHub API; returns (content, error)."""
     headers = {"Accept": "application/vnd.github.v3+json"}
-    token = _pkg()._get_token_for_host(host)
+    token = _pkg()._get_token_for_host(_extract_host(repo_ref))
     if token:
         headers["Authorization"] = f"token {token}"
 
     try:
         resp = _pkg().requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
-        if resp.status_code == 404:
-            return None, "404: Policy file not found"
-        if resp.status_code == 403:
-            return None, f"403: Access denied to {repo_ref}"
-        if 300 <= resp.status_code < 400:
-            location = resp.headers.get("Location", "<no Location header>")
-            return None, (
-                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
-            )
-        if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
-
-        data = resp.json()
-        if data.get("encoding") == "base64" and data.get("content"):
-            content = base64.b64decode(data["content"]).decode("utf-8")
-            return content, None
-        elif data.get("content"):
-            return data["content"], None
-        else:
-            return None, f"Unexpected response format from {repo_ref}"
+        return _handle_github_response(resp, api_url, repo_ref)
     except _pkg().requests.exceptions.Timeout:
         return None, f"Timeout fetching policy from {repo_ref}"
     except _pkg().requests.exceptions.ConnectionError:
         return None, f"Connection error fetching policy from {repo_ref}"
     except Exception as e:
         return None, f"Error fetching policy from {repo_ref}: {e}"
+
+
+def _extract_host(repo_ref: str) -> str:
+    """Extract host from repo_ref."""
+    parts = repo_ref.split("/")
+    return parts[0] if len(parts) >= 3 else "github.com"
+
+
+def _handle_github_response(
+    resp,
+    api_url: str,
+    repo_ref: str,
+) -> tuple[str | None, str | None]:
+    """Handle GitHub API response; returns (content, error)."""
+    if resp.status_code == 404:
+        return None, "404: Policy file not found"
+    if resp.status_code == 403:
+        return None, f"403: Access denied to {repo_ref}"
+    if 300 <= resp.status_code < 400:
+        location = resp.headers.get("Location", "<no Location header>")
+        return None, f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
+    if resp.status_code != 200:
+        return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
+
+    data = resp.json()
+    if data.get("encoding") == "base64" and data.get("content"):
+        content = base64.b64decode(data["content"]).decode("utf-8")
+        return content, None
+    if data.get("content"):
+        return data["content"], None
+    return None, f"Unexpected response format from {repo_ref}"

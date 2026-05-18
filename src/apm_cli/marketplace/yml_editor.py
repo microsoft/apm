@@ -170,37 +170,45 @@ def _validate_subdir(subdir: str) -> None:
 # -------------------------------------------------------------------
 
 
-def add_plugin_entry(
-    yml_path: Path,
-    spec: PluginEntrySpec | None = None,
-    **kwargs,
-) -> str:
-    """Append a new entry to ``packages[]``.
-
-    Returns the resolved package name.
-    """
+def _extract_entry_params(
+    spec: PluginEntrySpec | None,
+    kwargs: dict,
+) -> tuple[
+    str | None, str | None, str | None, str | None, str | None, str | None, list | None, bool
+]:
+    """Extract entry parameters from spec or kwargs."""
     if spec is not None:
-        source = spec.source
-        name = spec.name
-        version = spec.version
-        ref = spec.ref
-        subdir = spec.subdir
-        tag_pattern = spec.tag_pattern
-        tags = spec.tags
-        include_prerelease = spec.include_prerelease
-    else:
-        source = kwargs.get("source")
-        name = kwargs.get("name")
-        version = kwargs.get("version")
-        ref = kwargs.get("ref")
-        subdir = kwargs.get("subdir")
-        tag_pattern = kwargs.get("tag_pattern")
-        tags = kwargs.get("tags")
-        include_prerelease = kwargs.get("include_prerelease", False)
+        return (
+            spec.source,
+            spec.name,
+            spec.version,
+            spec.ref,
+            spec.subdir,
+            spec.tag_pattern,
+            spec.tags,
+            spec.include_prerelease,
+        )
+    return (
+        kwargs.get("source"),
+        kwargs.get("name"),
+        kwargs.get("version"),
+        kwargs.get("ref"),
+        kwargs.get("subdir"),
+        kwargs.get("tag_pattern"),
+        kwargs.get("tags"),
+        kwargs.get("include_prerelease", False),
+    )
 
+
+def _validate_entry_params(
+    source: str | None,
+    version: str | None,
+    ref: str | None,
+    subdir: str | None,
+) -> None:
+    """Validate entry parameters before adding."""
     if source is None:
         raise MarketplaceYmlError("'source' is required")
-    # --- input validation ---
     _validate_source(source)
 
     if version is not None and ref is not None:
@@ -211,29 +219,50 @@ def add_plugin_entry(
     if subdir is not None:
         _validate_subdir(subdir)
 
-    # Derive name from source repo if not provided.
-    if name is None:
-        name = source.split("/", 1)[1]
 
-    # --- load ---
-    data, original_text = _load_rt(yml_path)
-    container = _get_marketplace_container(data)
+def _ensure_packages_list(container: dict) -> list:
+    """Ensure packages list exists in container."""
     packages = container.get("packages")
     if packages is None:
         from ruamel.yaml.comments import CommentedSeq
 
         packages = CommentedSeq()
         container["packages"] = packages
+    return packages
 
-    # Duplicate check (case-insensitive).
+
+def _check_duplicate_entry(packages: list, name: str) -> None:
+    """Check for duplicate entry (case-insensitive)."""
     lower = name.lower()
     for entry in packages:
         entry_name = entry.get("name", "")
         if isinstance(entry_name, str) and entry_name.lower() == lower:
             raise MarketplaceYmlError(f"Package '{name}' already exists")
 
-    # --- build entry mapping ---
+
+def _build_new_entry(
+    name: str,
+    source: str,
+    **kwargs,
+) -> dict:
+    """Build new entry mapping.
+
+    Keyword Args:
+        version: Package version.
+        ref: Git ref.
+        subdir: Subdirectory path.
+        tag_pattern: Tag pattern for version extraction.
+        tags: List of tags.
+        include_prerelease: Whether to include prereleases.
+    """
     from ruamel.yaml.comments import CommentedMap
+
+    version = kwargs.get("version")
+    ref = kwargs.get("ref")
+    subdir = kwargs.get("subdir")
+    tag_pattern = kwargs.get("tag_pattern")
+    tags = kwargs.get("tags")
+    include_prerelease = kwargs.get("include_prerelease", False)
 
     new_entry = CommentedMap()
     new_entry["name"] = name
@@ -252,11 +281,85 @@ def add_plugin_entry(
     if tags is not None and len(tags) > 0:
         new_entry["tags"] = tags
 
+    return new_entry
+
+
+def add_plugin_entry(
+    yml_path: Path,
+    spec: PluginEntrySpec | None = None,
+    **kwargs,
+) -> str:
+    """Append a new entry to ``packages[]``.
+
+    Returns the resolved package name.
+    """
+    source, name, version, ref, subdir, tag_pattern, tags, include_prerelease = (
+        _extract_entry_params(spec, kwargs)
+    )
+
+    _validate_entry_params(source, version, ref, subdir)
+
+    # Derive name from source repo if not provided.
+    if name is None:
+        name = source.split("/", 1)[1]  # type: ignore[union-attr]
+
+    # --- load ---
+    data, original_text = _load_rt(yml_path)
+    container = _get_marketplace_container(data)
+    packages = _ensure_packages_list(container)
+
+    _check_duplicate_entry(packages, name)
+
+    new_entry = _build_new_entry(
+        name,
+        source,  # type: ignore[arg-type]
+        version=version,
+        ref=ref,
+        subdir=subdir,
+        tag_pattern=tag_pattern,
+        tags=tags,
+        include_prerelease=include_prerelease,
+    )
     packages.append(new_entry)
 
     # --- write + validate ---
     _write_and_validate(yml_path, data, original_text)
     return name
+
+
+def _update_version_or_ref(entry: dict, fields: dict) -> None:
+    """Update version or ref fields with mutual exclusion."""
+    has_version = "version" in fields and fields["version"] is not None
+    has_ref = "ref" in fields and fields["ref"] is not None
+
+    if has_version and has_ref:
+        raise MarketplaceYmlError("Cannot specify both 'version' and 'ref' -- pick one")
+
+    if has_version:
+        entry["version"] = fields["version"]
+        entry.pop("ref", None)
+
+    if has_ref:
+        entry["ref"] = fields["ref"]
+        entry.pop("version", None)
+
+
+def _update_simple_fields(entry: dict, fields: dict) -> None:
+    """Update simple scalar fields (subdir, tag_pattern)."""
+    _SIMPLE_FIELDS = ("subdir", "tag_pattern")
+    for key in _SIMPLE_FIELDS:
+        if key in fields and fields[key] is not None:
+            if key == "subdir":
+                _validate_subdir(fields[key])
+            entry[key] = fields[key]
+
+
+def _update_optional_fields(entry: dict, fields: dict) -> None:
+    """Update optional fields (include_prerelease, tags)."""
+    if "include_prerelease" in fields and fields["include_prerelease"] is not None:
+        entry["include_prerelease"] = fields["include_prerelease"]
+    if "tags" in fields and fields["tags"] is not None:
+        entry["tags"] = fields["tags"]
 
 
 def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
@@ -273,40 +376,9 @@ def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
     idx = _find_entry_index(packages, name)
     entry = packages[idx]
 
-    # Version / ref mutual exclusion: setting one clears the other.
-    has_version = "version" in fields and fields["version"] is not None
-    has_ref = "ref" in fields and fields["ref"] is not None
-
-    if has_version and has_ref:
-        raise MarketplaceYmlError("Cannot specify both 'version' and 'ref' -- pick one")
-
-    if has_version:
-        entry["version"] = fields["version"]
-        # Clear ref if present.
-        if "ref" in entry:
-            del entry["ref"]
-
-    if has_ref:
-        entry["ref"] = fields["ref"]
-        # Clear version if present.
-        if "version" in entry:
-            del entry["version"]
-
-    # Simple scalar fields.
-    _SIMPLE_FIELDS = ("subdir", "tag_pattern")
-    for key in _SIMPLE_FIELDS:
-        if key in fields and fields[key] is not None:
-            if key == "subdir":
-                _validate_subdir(fields[key])
-            entry[key] = fields[key]
-
-    # Boolean field: include_prerelease.
-    if "include_prerelease" in fields and fields["include_prerelease"] is not None:
-        entry["include_prerelease"] = fields["include_prerelease"]
-
-    # List field: tags.
-    if "tags" in fields and fields["tags"] is not None:
-        entry["tags"] = fields["tags"]
+    _update_version_or_ref(entry, fields)
+    _update_simple_fields(entry, fields)
+    _update_optional_fields(entry, fields)
 
     # --- write + validate ---
     _write_and_validate(yml_path, data, original_text)

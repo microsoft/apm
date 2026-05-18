@@ -1,9 +1,12 @@
+# pylint: disable=duplicate-code
 """GitHub Copilot CLI implementation of MCP client adapter.
 
 This adapter implements the Copilot CLI-specific handling of MCP server configuration,
 targeting the global ~/.copilot/mcp-config.json file as specified in the MCP installation
 architecture specification.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -12,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import ClassVar
 
-from ..base import _ENV_VAR_RE, MCPClientAdapter
+from ..base import _ENV_VAR_RE, MCPClientAdapter, McpServerRequest
 
 # Combined env-var placeholder regex covering all three syntaxes Copilot accepts:
 #   <VARNAME>          legacy APM (group 1, uppercase only)
@@ -225,24 +228,14 @@ class CopilotClientAdapter(MCPClientAdapter):
     def configure_mcp_server(
         self,
         server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        request: McpServerRequest | None = None,
     ):
         """Configure an MCP server in Copilot CLI configuration.
 
-        This method follows the Copilot CLI MCP configuration format with
-        mcpServers object containing server configurations.
-
         Args:
             server_url (str): URL or identifier of the MCP server.
-            server_name (str, optional): Name of the server. Defaults to None.
-            enabled (bool, optional): Ignored parameter, kept for API compatibility.
-            env_overrides (dict, optional): Pre-collected environment variable overrides.
-            server_info_cache (dict, optional): Pre-fetched server info to avoid duplicate registry calls.
-            runtime_vars (dict, optional): Pre-collected runtime variable values.
+            request: Optional McpServerRequest with server_name, env_overrides,
+                server_info_cache, and runtime_vars.
 
         Returns:
             bool: True if successful, False otherwise.
@@ -250,6 +243,12 @@ class CopilotClientAdapter(MCPClientAdapter):
         if not server_url:
             print("Error: server_url cannot be empty")
             return False
+
+        req = request or McpServerRequest()
+        server_name = req.server_name
+        env_overrides = req.env_overrides
+        server_info_cache = req.server_info_cache
+        runtime_vars = req.runtime_vars
 
         try:
             # Use cached server info if available, otherwise fetch from registry
@@ -301,21 +300,9 @@ class CopilotClientAdapter(MCPClientAdapter):
             self.update_config({config_key: server_config})
 
             # Aggregate diagnostics for the post-install summary.
-            if self._supports_runtime_env_substitution:
-                if self._last_legacy_angle_vars:
-                    self._legacy_angle_offenders_by_server[config_key] = set(
-                        self._last_legacy_angle_vars
-                    )
-                # Only flag a security upgrade when the previously baked keys
-                # actually overlap with what we are now placeholderizing -- OR
-                # when the previous on-disk state had baked HTTP header
-                # literals (which don't expose env-var names directly, so we
-                # surface every newly-placeholderised key for this server).
-                upgraded = previously_baked_keys & self._last_env_placeholder_keys
-                if previously_baked_headers and self._last_env_placeholder_keys:
-                    upgraded = upgraded | self._last_env_placeholder_keys
-                if upgraded:
-                    self._security_upgraded_keys.update(upgraded)
+            _apply_security_upgrade(
+                self, config_key, previously_baked_keys, previously_baked_headers
+            )
 
             # Per-server install line with env-var summary parenthetical.
             self._emit_install_summary(config_key, server_config)
@@ -332,11 +319,9 @@ class CopilotClientAdapter(MCPClientAdapter):
         return _summary_emit._emit_install_summary(self, config_key, server_config)
 
     @classmethod
-    @classmethod
     def emit_install_run_summary(cls):
         return _summary_emit.emit_install_run_summary(cls)
 
-    @classmethod
     @classmethod
     def reset_install_run_state(cls):
         return _summary_emit.reset_install_run_state(cls)
@@ -368,7 +353,6 @@ class CopilotClientAdapter(MCPClientAdapter):
         return _arg_processing._resolve_env_placeholders(self, value, resolved_env)
 
     @staticmethod
-    @staticmethod
     def _select_remote_with_url(remotes):
         return _arg_processing._select_remote_with_url(remotes)
 
@@ -377,6 +361,24 @@ class CopilotClientAdapter(MCPClientAdapter):
 
     def _is_github_server(self, server_name, url):
         return _arg_processing._is_github_server(self, server_name, url)
+
+
+def _apply_security_upgrade(self, config_key, previously_baked_keys, previously_baked_headers):
+    """Record security-upgrade diagnostics after writing a new server config.
+
+    Must be called after ``update_config`` so that
+    ``self._last_env_placeholder_keys`` reflects the newly written config.
+    Only does work when ``self._supports_runtime_env_substitution`` is True.
+    """
+    if not self._supports_runtime_env_substitution:
+        return
+    if self._last_legacy_angle_vars:
+        self._legacy_angle_offenders_by_server[config_key] = set(self._last_legacy_angle_vars)
+    upgraded = previously_baked_keys & self._last_env_placeholder_keys
+    if previously_baked_headers and self._last_env_placeholder_keys:
+        upgraded = upgraded | self._last_env_placeholder_keys
+    if upgraded:
+        self._security_upgraded_keys.update(upgraded)
 
 
 from . import arg_processing as _arg_processing

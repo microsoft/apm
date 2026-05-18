@@ -426,10 +426,7 @@ def sanitize_token_url_in_message(message: str, host: str | None = None) -> str:
     return re.sub(pattern, f"https://***@{host}", message)
 
 
-# ---------------------------------------------------------------------------
-# ADO helpers — imported from private module and re-exported for a stable
-# public API.  Callers should import from ``apm_cli.utils.github_host``.
-# ---------------------------------------------------------------------------
+# ADO helpers -- re-exported from _ado_utils for a stable public API.
 from apm_cli.utils._ado_utils import (
     _ADO_AUTH_FAILURE_SIGNALS,
     build_ado_api_url,
@@ -440,10 +437,7 @@ from apm_cli.utils._ado_utils import (
     is_ado_auth_failure_signal,
 )
 
-# ---------------------------------------------------------------------------
-# Artifactory helpers — imported from private module and re-exported for a
-# stable public API.  Callers should import from ``apm_cli.utils.github_host``.
-# ---------------------------------------------------------------------------
+# Artifactory helpers -- re-exported from _artifactory_utils for a stable public API.
 from apm_cli.utils._artifactory_utils import (
     build_artifactory_archive_url,
     is_artifactory_path,

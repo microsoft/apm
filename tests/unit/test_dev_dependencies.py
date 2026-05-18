@@ -10,7 +10,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.deps.dependency_graph import DependencyNode
-from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.lockfile import LockedDependency, LockFile, _DepResolutionInfo
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 from apm_cli.models.results import InstallResult
 
@@ -52,12 +52,17 @@ class TestLockedDependencyIsDev:
 
     def test_from_dependency_ref_passes_is_dev(self):
         dep_ref = DependencyReference(repo_url="owner/repo", host="github.com")
-        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None, is_dev=True)
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref,
+            _DepResolutionInfo(resolved_commit="abc123", depth=1, resolved_by=None, is_dev=True),
+        )
         assert locked.is_dev is True
 
     def test_from_dependency_ref_defaults_is_dev_false(self):
         dep_ref = DependencyReference(repo_url="owner/repo", host="github.com")
-        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref, _DepResolutionInfo(resolved_commit="abc123", depth=1, resolved_by=None)
+        )
         assert locked.is_dev is False
 
     def test_is_dev_round_trip_yaml(self, tmp_path):

@@ -84,6 +84,38 @@ def _substitute_plugin_root(
     return result
 
 
+def _dispatch_explicit_mcp_value(
+    mcp_value: Any,
+    plugin_path: Path,
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    """Resolve an explicit ``mcpServers`` manifest value to a server dict.
+
+    Handles all three value types allowed by the Claude Code spec:
+    - ``dict``  -> used directly as inline server definitions.
+    - ``str``   -> read that file path relative to plugin root.
+    - ``list``  -> read each file path and merge (last-wins on name conflict).
+    - anything else -> logged as warning, empty dict returned.
+
+    Extracted from :func:`_extract_mcp_servers` to reduce its McCabe
+    complexity within the configured Ruff thresholds.
+    """
+    if isinstance(mcp_value, dict):
+        return dict(mcp_value)
+    if isinstance(mcp_value, str):
+        return _read_mcp_file(plugin_path, mcp_value, logger)
+    if isinstance(mcp_value, list):
+        servers: dict[str, Any] = {}
+        for entry in mcp_value:
+            if isinstance(entry, str):
+                servers.update(_read_mcp_file(plugin_path, entry, logger))
+            else:
+                logger.warning("Ignoring non-string entry in mcpServers array: %s", entry)
+        return servers
+    logger.warning("Unsupported mcpServers type %s; ignoring", type(mcp_value).__name__)
+    return {}
+
+
 def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     """Extract MCP server definitions from a plugin manifest.
 
@@ -114,20 +146,7 @@ def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
 
     if mcp_value is not None:
         # Manifest explicitly defines mcpServers
-        if isinstance(mcp_value, dict):
-            servers = dict(mcp_value)
-        elif isinstance(mcp_value, str):
-            servers = _read_mcp_file(plugin_path, mcp_value, logger)
-        elif isinstance(mcp_value, list):
-            servers = {}
-            for entry in mcp_value:
-                if isinstance(entry, str):
-                    servers.update(_read_mcp_file(plugin_path, entry, logger))
-                else:
-                    logger.warning("Ignoring non-string entry in mcpServers array: %s", entry)
-        else:
-            logger.warning("Unsupported mcpServers type %s; ignoring", type(mcp_value).__name__)
-            return {}
+        servers = _dispatch_explicit_mcp_value(mcp_value, plugin_path, logger)
     else:
         # Fall back to auto-discovery: .mcp.json then .github/.mcp.json
         servers = {}

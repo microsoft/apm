@@ -6,6 +6,7 @@ from .class_ import MarketplaceCodexConfig as MarketplaceCodexConfig  # noqa: F4
 from .class_ import MarketplaceConfig as MarketplaceConfig  # noqa: F401
 from .class_ import MarketplaceOutputSpec as MarketplaceOutputSpec  # noqa: F401
 from .class_ import MarketplaceOwner as MarketplaceOwner  # noqa: F401
+from .class_ import MarketplaceVersioning as MarketplaceVersioning  # noqa: F401
 from .class_ import MarketplaceYml as MarketplaceYml  # noqa: F401
 from .class_ import MarketplaceYmlError as MarketplaceYmlError  # noqa: F401
 from .class_ import PackageEntry as PackageEntry  # noqa: F401
@@ -24,6 +25,7 @@ __all__ = [
     "MarketplaceConfig",
     "MarketplaceOutputSpec",
     "MarketplaceOwner",
+    "MarketplaceVersioning",
     "MarketplaceYml",
     "MarketplaceYmlError",
     "PackageEntry",

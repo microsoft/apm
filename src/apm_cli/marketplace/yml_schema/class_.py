@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Dataclasses, loader, and validation for marketplace authoring config.
 
 The marketplace publisher configuration may live in two places:
@@ -187,6 +188,24 @@ class MarketplaceCodexConfig:
 
 
 @dataclass(frozen=True)
+class MarketplaceVersioning:
+    """Release-time versioning strategy for the marketplace.
+
+    Controls how ``apm pack --check-versions`` verifies per-package
+    version alignment across local-path packages:
+
+    * ``lockstep`` (default) -- every local package's top-level
+      ``version`` must equal the marketplace's top-level ``version``.
+    * ``tag_pattern`` -- each rendered tag must be unique across all
+      local packages; missing ``version`` still fails.
+    * ``per_package`` -- only requires that each local package declare
+      a ``version``; equality is not enforced.
+    """
+
+    strategy: str = "lockstep"
+
+
+@dataclass(frozen=True)
 class PackageEntry:
     """A single entry in the ``packages`` list.
 
@@ -273,6 +292,7 @@ class MarketplaceConfig:
     codex: MarketplaceCodexConfig = field(default_factory=MarketplaceCodexConfig)
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
+    versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
     packages: tuple[PackageEntry, ...] = ()
     output_specs: tuple[MarketplaceOutputSpec, ...] = ()
     warnings: tuple[str, ...] = ()

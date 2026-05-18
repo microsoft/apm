@@ -4,6 +4,8 @@ Provides ``apm experimental list|enable|disable|reset`` to manage
 opt-in feature flags stored in ``~/.apm/config.json``.
 """
 
+from __future__ import annotations
+
 import json
 import sys
 
@@ -46,7 +48,7 @@ def _resolve_verbose(ctx: click.Context, local_verbose: bool) -> bool:
     return ctx.obj.get("verbose", False) if ctx.obj else False
 
 
-def _print_list_footer(flags_shown: list, logger: "CommandLogger") -> None:
+def _print_list_footer(flags_shown: list, logger: CommandLogger) -> None:
     """Print the footer hint and stale-key note after the flag listing.
 
     Shared by both the Rich table and plain-text rendering paths.
@@ -281,6 +283,56 @@ def disable_flag(ctx, name: str, verbose: bool):
     logger.success(f"Disabled experimental feature: {display_name(normalised)}", symbol="check")
 
 
+def _reset_single_flag(name: str, logger: CommandLogger) -> None:
+    normalised = normalise_flag_name(name)
+    if normalised not in FLAGS:
+        _handle_unknown_flag(normalised, logger)
+        return
+    reset_result = _reset_flags(normalised)
+    default_label = "enabled" if FLAGS[normalised].default else "disabled"
+    if reset_result > 0:
+        logger.success(
+            f"Reset {display_name(normalised)} to default ({default_label})",
+            symbol="check",
+        )
+        return
+    logger.progress(
+        f"{display_name(normalised)} is already at its default ({default_label}). Nothing to do."
+    )
+
+
+def _confirm_bulk_reset(
+    logger: CommandLogger, overridden: dict, stale: list[str], malformed: list[str]
+) -> bool:
+    lines = []
+    for flag_name, value in overridden.items():
+        current = "enabled" if value else "disabled"
+        default = "enabled" if FLAGS[flag_name].default else "disabled"
+        suffix = (
+            "redundant override - removing"
+            if current == default
+            else f"currently {current} -> {default}"
+        )
+        lines.append(f"  {display_name(flag_name)} ({suffix})")
+    for key in stale:
+        lines.append(f"  {display_name(key)} (unknown, will be removed)")
+    for key in malformed:
+        lines.append(f"  {display_name(key)} (malformed value, will be removed)")
+    total = len(overridden) + len(stale) + len(malformed)
+    noun = "feature" if total == 1 else "features"
+    pronoun = "its" if total == 1 else "their"
+    default_word = "default" if total == 1 else "defaults"
+    logger.progress(f"This will reset {total} experimental {noun} to {pronoun} {default_word}:")
+    for line in lines:
+        logger.progress(line)
+    try:
+        from rich.prompt import Confirm
+
+        return Confirm.ask("Proceed?", default=False)
+    except ImportError:
+        return click.confirm("Proceed?", default=False)
+
+
 @experimental.command("reset", help="Reset experimental features to defaults")
 @click.argument("name", required=False, default=None)
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
@@ -296,67 +348,17 @@ def reset_flags(ctx, name: str | None, yes: bool, verbose: bool):
     logger.verbose_detail(f"Config file: {CONFIG_FILE}")
 
     if name is not None:
-        # Single-flag reset
-        normalised = normalise_flag_name(name)
-        if normalised not in FLAGS:
-            _handle_unknown_flag(normalised, logger)
-            return
-
-        reset_result = _reset_flags(normalised)
-        default_label = "enabled" if FLAGS[normalised].default else "disabled"
-        if reset_result > 0:
-            logger.success(
-                f"Reset {display_name(normalised)} to default ({default_label})",
-                symbol="check",
-            )
-        else:
-            logger.progress(
-                f"{display_name(normalised)} is already at its default ({default_label}). Nothing to do."
-            )
+        _reset_single_flag(name, logger)
         return
 
-    # Bulk reset -- collect overrides (known bool, stale, and malformed)
     overridden = get_overridden_flags()
     stale = get_stale_config_keys()
     malformed = get_malformed_flag_keys()
-
     if not overridden and not stale and not malformed:
         logger.progress("All features already at default settings. Nothing to reset.")
         return
-
-    # Build confirmation listing
-    if not yes:
-        lines = []
-        for flag_name, value in overridden.items():
-            current = "enabled" if value else "disabled"
-            default = "enabled" if FLAGS[flag_name].default else "disabled"
-            if current == default:
-                lines.append(f"  {display_name(flag_name)} (redundant override - removing)")
-            else:
-                lines.append(f"  {display_name(flag_name)} (currently {current} -> {default})")
-        for key in stale:
-            lines.append(f"  {display_name(key)} (unknown, will be removed)")
-        for key in malformed:
-            lines.append(f"  {display_name(key)} (malformed value, will be removed)")
-
-        total = len(overridden) + len(stale) + len(malformed)
-        noun = "feature" if total == 1 else "features"
-        pronoun = "its" if total == 1 else "their"
-        default_word = "default" if total == 1 else "defaults"
-        logger.progress(f"This will reset {total} experimental {noun} to {pronoun} {default_word}:")
-        for line in lines:
-            logger.progress(line)
-
-        try:
-            from rich.prompt import Confirm
-
-            confirmed = Confirm.ask("Proceed?", default=False)
-        except ImportError:
-            confirmed = click.confirm("Proceed?", default=False)
-
-        if not confirmed:
-            logger.progress("Operation cancelled")
-            return
-
+    if not yes and not _confirm_bulk_reset(logger, overridden, stale, malformed):
+        logger.progress("Operation cancelled")
+        return
     _reset_flags(None)
     logger.success("Reset all experimental features to defaults", symbol="check")

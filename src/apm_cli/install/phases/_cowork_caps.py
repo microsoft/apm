@@ -20,6 +20,34 @@ _COWORK_MAX_SKILL_SIZE: int = 1_048_576  # 1 MB
 """Warn when any source SKILL.md exceeds this size in bytes."""
 
 
+def _warn_cowork_issue(ctx: InstallContext, message: str) -> None:
+    if ctx.logger:
+        ctx.logger.warning(message, symbol="warning")
+    if ctx.diagnostics:
+        ctx.diagnostics.warn(message, package="cowork")
+
+
+def _emit_cowork_count_warning(ctx: InstallContext, skill_dirs: list) -> None:
+    if len(skill_dirs) <= _COWORK_MAX_SKILLS:
+        return
+    _warn_cowork_issue(
+        ctx,
+        f"Cowork skills directory contains {len(skill_dirs)} skills "
+        f"(cap: {_COWORK_MAX_SKILLS}). Consider removing unused skills.",
+    )
+
+
+def _emit_cowork_skill_size_warning(ctx: InstallContext, skill_dir, size: int) -> None:
+    if size <= _COWORK_MAX_SKILL_SIZE:
+        return
+    size_mb = size / (1024 * 1024)
+    _warn_cowork_issue(
+        ctx,
+        f"Skill '{skill_dir.name}/SKILL.md' is {size_mb:.1f} MB "
+        "(cap: 1 MB). Large skills may degrade Copilot performance.",
+    )
+
+
 def _check_cowork_caps(ctx: InstallContext) -> None:
     """Emit warn-only diagnostics for cowork skill count and size caps.
 
@@ -44,31 +72,12 @@ def _check_cowork_caps(ctx: InstallContext) -> None:
         d for d in cowork_root.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
     )
 
-    # --- count cap ---
-    if len(skill_dirs) > _COWORK_MAX_SKILLS:
-        msg = (
-            f"Cowork skills directory contains {len(skill_dirs)} skills "
-            f"(cap: {_COWORK_MAX_SKILLS}). Consider removing unused skills."
-        )
-        if ctx.logger:
-            ctx.logger.warning(msg, symbol="warning")
-        if ctx.diagnostics:
-            ctx.diagnostics.warn(msg, package="cowork")
+    _emit_cowork_count_warning(ctx, skill_dirs)
 
-    # --- per-file size cap ---
     for skill_dir in skill_dirs:
         skill_md = skill_dir / "SKILL.md"
         try:
             size = skill_md.stat().st_size
         except OSError:
             continue
-        if size > _COWORK_MAX_SKILL_SIZE:
-            size_mb = size / (1024 * 1024)
-            msg = (
-                f"Skill '{skill_dir.name}/SKILL.md' is {size_mb:.1f} MB "
-                f"(cap: 1 MB). Large skills may degrade Copilot performance."
-            )
-            if ctx.logger:
-                ctx.logger.warning(msg, symbol="warning")
-            if ctx.diagnostics:
-                ctx.diagnostics.warn(msg, package="cowork")
+        _emit_cowork_skill_size_warning(ctx, skill_dir, size)

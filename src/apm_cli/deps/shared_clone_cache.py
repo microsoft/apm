@@ -28,9 +28,24 @@ import shutil
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 _log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _RepoCoords:
+    """Immutable repo identity tuple passed to :meth:`SharedCloneCache.get_or_clone`.
+
+    Bundles ``host``, ``owner``, and ``repo`` into a single argument so
+    :meth:`get_or_clone` stays within the five-argument limit enforced by
+    PLR0913.
+    """
+
+    host: str
+    owner: str
+    repo: str
 
 
 class SharedCloneCache:
@@ -67,9 +82,7 @@ class SharedCloneCache:
 
     def get_or_clone(
         self,
-        host: str,
-        owner: str,
-        repo: str,
+        coords: _RepoCoords,
         ref: str | None,
         clone_fn: Callable[[Path], None],
         fetch_fn: Callable[[Path, str], bool] | None = None,
@@ -77,9 +90,7 @@ class SharedCloneCache:
         """Return a path to a shared clone, cloning on first access.
 
         Args:
-            host: Git host (e.g. "github.com").
-            owner: Repository owner.
-            repo: Repository name.
+            coords: Repository identity (host, owner, repo).
             ref: Git ref (branch/tag/sha) or None for default branch.
             clone_fn: Callable that performs the clone into the given
                 directory.  Called at most once per unique key.  Must
@@ -96,7 +107,7 @@ class SharedCloneCache:
         Raises:
             Whatever ``clone_fn`` raises on failure.
         """
-        key = (host, owner, repo, ref)
+        key = (coords.host, coords.owner, coords.repo, ref)
         entry = self._get_or_create_entry(key)
 
         with entry.lock:
@@ -112,38 +123,15 @@ class SharedCloneCache:
             # when a transitive dep pins a SHA that is missing only because
             # the initial shallow bare did not include that commit.
             if ref and fetch_fn:
-                existing_bare = self._find_repo_bare(host, owner, repo)
-                if existing_bare is not None:
-                    # Acquire a per-bare lock so concurrent Tier-0 fetches
-                    # into the same bare are serialised (git pack-file writes
-                    # are not concurrent-safe).
-                    with self._lock:
-                        if existing_bare not in self._bare_fetch_locks:
-                            self._bare_fetch_locks[existing_bare] = threading.Lock()
-                        bare_lock = self._bare_fetch_locks[existing_bare]
-                    try:
-                        with bare_lock:
-                            if fetch_fn(existing_bare, ref):
-                                entry.path = existing_bare
-                                with self._lock:
-                                    repo_key = (host, owner, repo)
-                                    if repo_key not in self._repo_bares:
-                                        self._repo_bares[repo_key] = []
-                                    self._repo_bares[repo_key].append((ref, existing_bare))
-                                return existing_bare
-                    except Exception:
-                        _log.info(
-                            "Bare fetch miss for %s/%s/%s ref=%s, falling back to fresh clone",
-                            host,
-                            owner,
-                            repo,
-                            ref,
-                        )
+                tier0_path = self._try_tier0_fetch(coords, ref, fetch_fn)
+                if tier0_path is not None:
+                    entry.path = tier0_path
+                    return tier0_path
 
             # First caller (or retry after failure): perform the clone.
             temp_dir = tempfile.mkdtemp(
                 dir=str(self._base_dir) if self._base_dir else None,
-                prefix=f"apm_shared_{owner}_{repo}_",
+                prefix=f"apm_shared_{coords.owner}_{coords.repo}_",
             )
             clone_path = Path(temp_dir) / "bare"
             with self._lock:
@@ -168,7 +156,7 @@ class SharedCloneCache:
                         )
                 entry.path = clone_path
                 with self._lock:
-                    repo_key = (host, owner, repo)
+                    repo_key = (coords.host, coords.owner, coords.repo)
                     if repo_key not in self._repo_bares:
                         self._repo_bares[repo_key] = []
                     self._repo_bares[repo_key].append((ref, clone_path))
@@ -176,6 +164,45 @@ class SharedCloneCache:
             except Exception as exc:
                 entry.error = exc
                 raise
+
+    def _try_tier0_fetch(
+        self,
+        coords: _RepoCoords,
+        ref: str,
+        fetch_fn: Callable[[Path, str], bool],
+    ) -> Path | None:
+        """Attempt to fetch *ref* into an existing bare for the same repo.
+
+        Returns the bare path on success, or ``None`` when no suitable bare
+        is registered or the fetch fails.  Acquires a per-bare lock so
+        concurrent Tier-0 fetches into the same bare are serialised (git
+        pack-file writes are not concurrent-safe).
+        """
+        existing_bare = self._find_repo_bare(coords.host, coords.owner, coords.repo)
+        if existing_bare is None:
+            return None
+        with self._lock:
+            if existing_bare not in self._bare_fetch_locks:
+                self._bare_fetch_locks[existing_bare] = threading.Lock()
+            bare_lock = self._bare_fetch_locks[existing_bare]
+        try:
+            with bare_lock:
+                if fetch_fn(existing_bare, ref):
+                    with self._lock:
+                        repo_key = (coords.host, coords.owner, coords.repo)
+                        if repo_key not in self._repo_bares:
+                            self._repo_bares[repo_key] = []
+                        self._repo_bares[repo_key].append((ref, existing_bare))
+                    return existing_bare
+        except Exception:
+            _log.info(
+                "Bare fetch miss for %s/%s/%s ref=%s, falling back to fresh clone",
+                coords.host,
+                coords.owner,
+                coords.repo,
+                ref,
+            )
+        return None
 
     def _find_repo_bare(self, host: str, owner: str, repo: str) -> Path | None:
         """Return an existing bare path for the same repo (any ref), or None.

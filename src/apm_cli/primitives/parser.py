@@ -193,58 +193,54 @@ def _extract_primitive_name(file_path: Path) -> str:
     Returns:
         str: Extracted primitive name.
     """
-    # Normalize path
     path_parts = file_path.parts
 
-    # Check if it's in a structured directory (.apm/ or .github/)
     if ".apm" in path_parts or ".github" in path_parts:
-        try:
-            # Find the base directory index
-            if ".apm" in path_parts:
-                base_idx = path_parts.index(".apm")
-            else:
-                base_idx = path_parts.index(".github")
+        name = _extract_from_structured_directory(file_path, path_parts)
+        if name:
+            return name
 
-            # For structured directories like .apm/chatmodes/name.chatmode.md
-            if base_idx + 2 < len(path_parts) and path_parts[base_idx + 1] in [
-                "chatmodes",
-                "instructions",
-                "context",
-                "memory",
-                "agents",
-            ]:
-                basename = file_path.name
-                # Remove the double extension (.chatmode.md, .instructions.md, .agent.md, etc.)
-                if basename.endswith(".chatmode.md"):
-                    return basename.replace(".chatmode.md", "")
-                elif basename.endswith(".instructions.md"):
-                    return basename.replace(".instructions.md", "")
-                elif basename.endswith(".context.md"):
-                    return basename.replace(".context.md", "")
-                elif basename.endswith(".memory.md"):
-                    return basename.replace(".memory.md", "")
-                elif basename.endswith(".agent.md"):
-                    return basename.replace(".agent.md", "")
-                elif basename.endswith(".md"):
-                    return basename.replace(".md", "")
-        except (ValueError, IndexError):
-            pass
+    return _extract_from_filename(file_path)
 
-    # Fallback: extract from filename
-    basename = file_path.name
-    if basename.endswith(".chatmode.md"):
-        return basename.replace(".chatmode.md", "")
-    elif basename.endswith(".instructions.md"):
-        return basename.replace(".instructions.md", "")
-    elif basename.endswith(".context.md"):
-        return basename.replace(".context.md", "")
-    elif basename.endswith(".memory.md"):
-        return basename.replace(".memory.md", "")
-    elif basename.endswith(".md"):
-        return basename.replace(".md", "")
 
-    # Final fallback: use filename without extension
-    return file_path.stem
+def _extract_from_structured_directory(file_path: Path, path_parts: tuple) -> str | None:
+    """Extract primitive name from structured .apm or .github directory."""
+    try:
+        base_idx = path_parts.index(".apm") if ".apm" in path_parts else path_parts.index(".github")
+
+        if base_idx + 2 < len(path_parts) and path_parts[base_idx + 1] in [
+            "chatmodes",
+            "instructions",
+            "context",
+            "memory",
+            "agents",
+        ]:
+            return _strip_extension(file_path.name)
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def _strip_extension(basename: str) -> str:
+    """Strip double extension from primitive filename."""
+    extension_map = {
+        ".chatmode.md": "",
+        ".instructions.md": "",
+        ".context.md": "",
+        ".memory.md": "",
+        ".agent.md": "",
+        ".md": "",
+    }
+    for ext, replacement in extension_map.items():
+        if basename.endswith(ext):
+            return basename.replace(ext, replacement)
+    return basename
+
+
+def _extract_from_filename(file_path: Path) -> str:
+    """Fallback: extract primitive name from filename."""
+    name = _strip_extension(file_path.name)
+    return name if name else file_path.stem
 
 
 def _is_context_file(file_path: Path) -> bool:

@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 import builtins
-from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
 
 from .lockfile_finalize import _finalize_lockfile
-from .opts import MCPInstallOpts, _ResolveRuntimesOpts
+from .opts import MCPInstallOpts, RegistryInstallRequest, _ResolveRuntimesOpts
 from .registry_split import _split_registry_self_defined
 from .runtime_install import RuntimeInstallContext, _install_registry_deps, _install_self_defined
 from .runtime_resolve import _resolve_runtimes
-
-if TYPE_CHECKING:
-    from apm_cli.core.scope import InstallScope
 
 
 def _print_mcp_header(console, logger, dep_count: int) -> None:
@@ -92,12 +88,14 @@ def run_mcp_install(mcp_deps: list, opts: MCPInstallOpts) -> int:
     )
     configured_count = _install_registry_deps(
         install_ctx,
-        registry_deps=registry_deps,
-        registry_dep_names=registry_dep_names,
-        registry_dep_map=registry_dep_map,
-        stored_mcp_configs=stored_mcp_configs,
-        servers_to_update=servers_to_update,
-        successful_updates=successful_updates,
+        RegistryInstallRequest(
+            registry_deps=registry_deps,
+            registry_dep_names=registry_dep_names,
+            registry_dep_map=registry_dep_map,
+            stored_mcp_configs=stored_mcp_configs,
+            servers_to_update=servers_to_update,
+            successful_updates=successful_updates,
+        ),
     )
     configured_count += _install_self_defined(
         install_ctx,

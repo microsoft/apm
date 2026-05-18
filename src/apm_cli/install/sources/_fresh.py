@@ -8,6 +8,7 @@ cached on disk.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from typing import Any
 
 from apm_cli.install.sources._base import (
@@ -17,6 +18,14 @@ from apm_cli.install.sources._base import (
 )
 from apm_cli.utils.console import _rich_error, _rich_success
 from apm_cli.utils.short_sha import format_short_sha
+
+
+@dataclass(frozen=True, slots=True)
+class _FreshSourceExtras:
+    resolved_ref: Any
+    dep_locked_chk: Any
+    ref_changed: bool
+    progress: Any = None
 
 
 class FreshDependencySource(DependencySource):
@@ -36,16 +45,13 @@ class FreshDependencySource(DependencySource):
         dep_ref: Any,
         install_path: Any,
         dep_key: str,
-        resolved_ref: Any,
-        dep_locked_chk: Any,
-        ref_changed: bool,
-        progress: Any = None,
+        extras: _FreshSourceExtras,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
-        self.resolved_ref = resolved_ref
-        self.dep_locked_chk = dep_locked_chk
-        self.ref_changed = ref_changed
-        self.progress = progress
+        self.resolved_ref = extras.resolved_ref
+        self.dep_locked_chk = extras.dep_locked_chk
+        self.ref_changed = extras.ref_changed
+        self.progress = extras.progress
 
     # ------------------------------------------------------------------
     # Private helpers -- each encapsulates one logical concern so that

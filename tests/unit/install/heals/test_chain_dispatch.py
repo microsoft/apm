@@ -12,7 +12,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from apm_cli.install.heals.base import HealContext, HealMessage, HealMessageLevel
-from apm_cli.install.phases.heal import run_heal_chain
+from apm_cli.install.phases.heal import _HealChainOpts, run_heal_chain
 
 
 class _FakeHeal:
@@ -66,7 +66,7 @@ def _make_ctx_and_dep(*, package_key: str = "github.com/owner/repo"):
     return ctx, dep_ref
 
 
-def _kwargs(**overrides):
+def _kwargs(**overrides) -> _HealChainOpts:
     base = dict(
         resolved_ref=MagicMock(),
         existing_lockfile=MagicMock(),
@@ -76,14 +76,14 @@ def _kwargs(**overrides):
         ref_changed=False,
     )
     base.update(overrides)
-    return base
+    return _HealChainOpts(**base)
 
 
 class TestNoHealsFire:
     def test_passthrough_returns_inputs_unchanged(self):
         ctx, dep_ref = _make_ctx_and_dep()
         with patch("apm_cli.install.phases.heal.HEAL_CHAIN", ()):
-            result = run_heal_chain(ctx, dep_ref, **_kwargs(lockfile_match=True, ref_changed=False))
+            result = run_heal_chain(ctx, dep_ref, _kwargs(lockfile_match=True, ref_changed=False))
         assert result == (True, False)
         assert ctx.expected_hash_change_deps == set()
         ctx.diagnostics.warn.assert_not_called()
@@ -100,7 +100,7 @@ class TestSingleHealFires:
             emits=HealMessageLevel.INFO,
         )
         with patch("apm_cli.install.phases.heal.HEAL_CHAIN", (h,)):
-            lockfile_match, ref_changed = run_heal_chain(ctx, dep_ref, **_kwargs())
+            lockfile_match, ref_changed = run_heal_chain(ctx, dep_ref, _kwargs())
         assert (lockfile_match, ref_changed) == (False, True)
         ctx.logger.verbose_detail.assert_called_once()
         ctx.diagnostics.warn.assert_not_called()
@@ -117,7 +117,7 @@ class TestSingleHealFires:
             emits=HealMessageLevel.WARN,
         )
         with patch("apm_cli.install.phases.heal.HEAL_CHAIN", (h,)):
-            run_heal_chain(ctx, dep_ref, **_kwargs())
+            run_heal_chain(ctx, dep_ref, _kwargs())
         ctx.diagnostics.warn.assert_called_once()
         ctx.logger.progress.assert_called_once()
         ctx.logger.verbose_detail.assert_not_called()
@@ -141,7 +141,7 @@ class TestExclusiveGroup:
             emits=HealMessageLevel.WARN,
         )
         with patch("apm_cli.install.phases.heal.HEAL_CHAIN", (h1, h2)):
-            run_heal_chain(ctx, dep_ref, **_kwargs())
+            run_heal_chain(ctx, dep_ref, _kwargs())
         assert h1.execute_calls == 1
         # Second heal in same group must be skipped without even calling .applies()
         assert h2.applies_calls == 0
@@ -166,7 +166,7 @@ class TestExclusiveGroup:
             emits=HealMessageLevel.WARN,
         )
         with patch("apm_cli.install.phases.heal.HEAL_CHAIN", (h1, h2)):
-            run_heal_chain(ctx, dep_ref, **_kwargs())
+            run_heal_chain(ctx, dep_ref, _kwargs())
         assert h1.execute_calls == 1
         assert h2.execute_calls == 1
 
@@ -179,7 +179,7 @@ class TestExclusiveGroup:
             name="second", order=20, exclusive_group=None, applies_result=True, emits=None
         )
         with patch("apm_cli.install.phases.heal.HEAL_CHAIN", (h1, h2)):
-            run_heal_chain(ctx, dep_ref, **_kwargs())
+            run_heal_chain(ctx, dep_ref, _kwargs())
         assert h1.execute_calls == 1
         assert h2.execute_calls == 1
 
@@ -190,7 +190,7 @@ class TestApplicabilityFilter:
         h = _FakeHeal(name="skip", order=10, exclusive_group=None, applies_result=False, emits=None)
         with patch("apm_cli.install.phases.heal.HEAL_CHAIN", (h,)):
             lockfile_match, ref_changed = run_heal_chain(
-                ctx, dep_ref, **_kwargs(lockfile_match=True, ref_changed=False)
+                ctx, dep_ref, _kwargs(lockfile_match=True, ref_changed=False)
             )
         assert h.applies_calls == 1
         assert h.execute_calls == 0

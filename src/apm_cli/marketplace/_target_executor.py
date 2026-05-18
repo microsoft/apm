@@ -17,6 +17,7 @@ import logging
 import os
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -29,6 +30,17 @@ from .resolver import parse_marketplace_ref
 from .semver import parse_semver
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _CommitContext:
+    """Bundle git commit/push parameters for _commit_and_push."""
+
+    run_git: object
+    target: ConsumerTarget
+    plan: PublishPlan
+    clone_dir: Path
+    tmpdir: str
 
 
 def _check_update_guards(
@@ -142,11 +154,7 @@ def _write_apm_yml_atomic(apm_yml_path: Path, data: dict) -> None:
 
 
 def _commit_and_push(
-    run_git: object,
-    target: ConsumerTarget,
-    plan: PublishPlan,
-    clone_dir: Path,
-    tmpdir: str,
+    ctx: _CommitContext,
     dry_run: bool,
 ) -> TargetResult | None:
     """Git add + commit + optional push; return TargetResult on failure, None on success.
@@ -156,39 +164,39 @@ def _commit_and_push(
     Ruff thresholds.
     """
     try:
-        run_git(
-            ["git", "add", target.path_in_repo],
-            cwd=str(clone_dir),
+        ctx.run_git(
+            ["git", "add", ctx.target.path_in_repo],
+            cwd=str(ctx.clone_dir),
         )
-        msg_file = Path(tmpdir) / "commit-msg.txt"
-        msg_file.write_text(plan.commit_message, encoding="utf-8")
-        run_git(
+        msg_file = Path(ctx.tmpdir) / "commit-msg.txt"
+        msg_file.write_text(ctx.plan.commit_message, encoding="utf-8")
+        ctx.run_git(
             ["git", "commit", "-F", str(msg_file)],
-            cwd=str(clone_dir),
+            cwd=str(ctx.clone_dir),
         )
     except subprocess.CalledProcessError as exc:
         return TargetResult(
-            target=target,
+            target=ctx.target,
             outcome=PublishOutcome.FAILED,
             message=("Commit failed: " + _redact_token(str(exc))),
         )
 
     if not dry_run:
         try:
-            run_git(
+            ctx.run_git(
                 [
                     "git",
                     "push",
                     "-u",
                     "origin",
-                    plan.branch_name,
+                    ctx.plan.branch_name,
                 ],
-                cwd=str(clone_dir),
+                cwd=str(ctx.clone_dir),
             )
         except subprocess.CalledProcessError as exc:
             stderr = _redact_token(exc.stderr or "")
             return TargetResult(
-                target=target,
+                target=ctx.target,
                 outcome=PublishOutcome.FAILED,
                 message=f"Push failed: {stderr}",
             )
@@ -355,7 +363,14 @@ def _process_single_target(
 
         first_old_ref, updated_count = _apply_dep_updates(apm_deps, matches, new_ref)
         _write_apm_yml_atomic(apm_yml_path, data)
-        push_result = _commit_and_push(self._run_git, target, plan, clone_dir, tmpdir, dry_run)
+        commit_ctx = _CommitContext(
+            run_git=self._run_git,
+            target=target,
+            plan=plan,
+            clone_dir=clone_dir,
+            tmpdir=tmpdir,
+        )
+        push_result = _commit_and_push(commit_ctx, dry_run)
         if push_result is not None:
             return push_result
 

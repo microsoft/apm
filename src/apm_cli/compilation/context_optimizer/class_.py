@@ -221,7 +221,7 @@ class ContextOptimizer:
         instruction: Instruction,
         verbose: bool = False,
     ) -> builtins.list[Path]:
-        return _placement._optimize_single_point_placement(
+        return _placement_strategies._optimize_single_point_placement(
             self, matching_directories, instruction, verbose
         )
 
@@ -231,7 +231,7 @@ class ContextOptimizer:
         instruction: Instruction,
         verbose: bool = False,
     ) -> builtins.list[Path]:
-        return _placement._optimize_distributed_placement(
+        return _placement_strategies._optimize_distributed_placement(
             self, matching_directories, instruction, verbose
         )
 
@@ -241,19 +241,21 @@ class ContextOptimizer:
         instruction: Instruction,
         verbose: bool = False,
     ) -> builtins.list[Path]:
-        return _placement._optimize_selective_placement(
+        return _placement_strategies._optimize_selective_placement(
             self, matching_directories, instruction, verbose
         )
 
     def _generate_all_candidates(
         self, matching_directories: builtins.set[Path], instruction: Instruction
     ) -> builtins.list[PlacementCandidate]:
-        return _placement._generate_all_candidates(self, matching_directories, instruction)
+        return _placement_strategies._generate_all_candidates(
+            self, matching_directories, instruction
+        )
 
     def _find_minimal_coverage_placement(
         self, matching_directories: builtins.set[Path]
     ) -> Path | None:
-        return _placement._find_minimal_coverage_placement(self, matching_directories)
+        return _placement_strategies._find_minimal_coverage_placement(self, matching_directories)
 
     def _calculate_hierarchical_coverage(
         self, placements: builtins.list[Path], target_directories: builtins.set[Path]
@@ -275,7 +277,7 @@ class ContextOptimizer:
     def _select_clean_separation_placements(
         self, candidates: builtins.list[PlacementCandidate], pattern: str
     ) -> builtins.list[Path]:
-        return _placement._select_clean_separation_placements(self, candidates, pattern)
+        return _placement_strategies._select_clean_separation_placements(self, candidates, pattern)
 
     def _get_inheritance_chain(self, working_directory: Path) -> builtins.list[Path]:
         return _analysis._get_inheritance_chain(self, working_directory)
@@ -290,6 +292,7 @@ class ContextOptimizer:
     # for professional output formatting via CompilationResults
 
 
+from . import _placement_strategies
 from . import analysis as _analysis
 from . import glob_cache as _glob_cache
 from . import placement as _placement

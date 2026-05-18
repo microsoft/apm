@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from git.exc import GitCommandError
 
@@ -52,42 +52,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-class _DownloaderContext(Protocol):
-    """The slice of :class:`GitHubPackageDownloader` the resolver needs.
-
-    Kept duck-typed (``Protocol``) so tests can inject a minimal stub
-    without instantiating the full downloader.
-    """
-
-    auth_resolver: AuthResolver
-    git_env: dict
-    shared_clone_cache: object | None
-
-    def _resolve_dep_token(self, dep_ref: DependencyReference | None = ...) -> str | None: ...
-    def _resolve_dep_auth_ctx(self, dep_ref: DependencyReference | None = ...): ...
-    def _build_noninteractive_git_env(
-        self,
-        *,
-        preserve_config_isolation: bool = ...,
-        suppress_credential_helpers: bool = ...,
-    ) -> dict: ...
-    def _build_repo_url(
-        self,
-        repo_url_base: str,
-        *,
-        use_ssh: bool = ...,
-        dep_ref: DependencyReference | None = ...,
-        token: str | None = ...,
-        auth_scheme: str = ...,
-    ) -> str: ...
-    def _clone_with_fallback(self, *args, **kwargs): ...
-    def _sanitize_git_error(self, error_message: str) -> str: ...
-    def _resilient_get(self, url: str, headers: dict, timeout: int = ...): ...
-    def _parse_ls_remote_output(self, output: str) -> list[RemoteRef]: ...
-    def _sort_remote_refs(self, refs: list[RemoteRef]) -> list[RemoteRef]: ...
-    def _parse_artifactory_base_url(self) -> tuple | None: ...
-    def _should_use_artifactory_proxy(self, dep_ref: DependencyReference) -> bool: ...
-
+from ._downloader_protocol import _DownloaderContext  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Resolver
@@ -121,16 +86,7 @@ class GitReferenceResolver:
 
         repo_url_base = dep_ref.repo_url
 
-        if dep_token:
-            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
-                ls_env = dep_auth_ctx.git_env
-            else:
-                ls_env = host.git_env
-        else:
-            ls_env = host._build_noninteractive_git_env(
-                preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
-                suppress_credential_helpers=bool(getattr(dep_ref, "is_insecure", False)),
-            )
+        ls_env = self._build_ls_remote_env(dep_ref, dep_token, dep_auth_ctx)
 
         remote_url = host._build_repo_url(
             repo_url_base,
@@ -193,9 +149,44 @@ class GitReferenceResolver:
 
         e = outcome[1]
         dep_host = dep_ref.host
+        error_msg = self._format_list_refs_error(
+            e, dep_ref, dep_host, repo_url_base, ado_bearer_also_failed
+        )
+        raise RuntimeError(error_msg) from e
+
+    # -- list_remote_refs helpers ------------------------------------
+
+    def _build_ls_remote_env(
+        self,
+        dep_ref: DependencyReference,
+        dep_token: str | None,
+        dep_auth_ctx: object,
+    ) -> dict:
+        """Return the git environment dict for ``git ls-remote``."""
+        host = self._host
+        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
+        if dep_token:
+            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
+                return dep_auth_ctx.git_env
+            return host.git_env
+        return host._build_noninteractive_git_env(
+            preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
+            suppress_credential_helpers=bool(getattr(dep_ref, "is_insecure", False)),
+        )
+
+    def _format_list_refs_error(
+        self,
+        exc: Exception,
+        dep_ref: DependencyReference,
+        dep_host: str | None,
+        repo_url_base: str,
+        ado_also_failed: bool,
+    ) -> str:
+        """Build the error message string when ``git ls-remote`` fails."""
+        host = self._host
+        is_ado = dep_ref.is_azure_devops()
         is_github = is_github_hostname(dep_host) if dep_host else True
         is_generic = not is_ado and not is_github
-
         error_msg = f"Failed to list remote refs for {repo_url_base}. "
         if is_generic:
             if dep_host:
@@ -217,12 +208,11 @@ class GitReferenceResolver:
                 org=org,
                 port=dep_ref.port if dep_ref else None,
                 dep_url=dep_ref.repo_url if dep_ref else None,
-                bearer_also_failed=ado_bearer_also_failed,
+                bearer_also_failed=ado_also_failed,
             )
-
-        sanitized = host._sanitize_git_error(str(e))
+        sanitized = host._sanitize_git_error(str(exc))
         error_msg += f" Last error: {sanitized}"
-        raise RuntimeError(error_msg) from e
+        return error_msg
 
     # -- resolve_commit_sha_for_ref ------------------------------------
 
@@ -258,6 +248,18 @@ class GitReferenceResolver:
         if api_url is None:
             return None
 
+        return self._fetch_sha_from_api(api_url, target_host, dep_ref)
+
+    # -- resolve_commit_sha_for_ref helper ---------------------------
+
+    def _fetch_sha_from_api(
+        self,
+        api_url: str,
+        target_host: str,
+        dep_ref: DependencyReference,
+    ) -> str | None:
+        """Perform the HTTP call and parse the 40-char SHA from the response."""
+        host = self._host
         org = None
         parts = dep_ref.repo_url.split("/")
         if parts:
@@ -267,11 +269,9 @@ class GitReferenceResolver:
             token = file_ctx.token
         except Exception:
             token = None
-
         headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
         if token:
             headers["Authorization"] = f"token {token}"
-
         try:
             response = host._resilient_get(api_url, headers=headers, timeout=10)
             if response.status_code != 200:
@@ -323,90 +323,16 @@ class GitReferenceResolver:
             temp_dir = Path(tempfile.mkdtemp(dir=get_apm_temp_dir()))
 
             if is_likely_commit:
-                try:
-                    repo = host._clone_with_fallback(
-                        dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
-                    )
-                    commit = repo.commit(ref)
-                    ref_type = GitReferenceType.COMMIT
-                    resolved_commit = commit.hexsha
-                    ref_name = ref
-                except Exception as e:
-                    sanitized_error = host._sanitize_git_error(str(e))
-                    raise ValueError(  # noqa: B904
-                        f"Could not resolve commit '{ref}' in repository "
-                        f"{dep_ref.repo_url}: {sanitized_error}"
-                    )
+                ref_type, resolved_commit, ref_name = self._resolve_as_commit(
+                    dep_ref, ref, temp_dir
+                )
             else:
-                try:
-                    clone_kwargs = {"depth": 1}
-                    if ref:
-                        clone_kwargs["branch"] = ref
-                    repo = host._clone_with_fallback(
-                        dep_ref.repo_url,
-                        temp_dir,
-                        progress_reporter=None,
-                        dep_ref=dep_ref,
-                        **clone_kwargs,
-                    )
-                    ref_type = GitReferenceType.BRANCH
-                    resolved_commit = repo.head.commit.hexsha
-                    ref_name = ref if ref else repo.active_branch.name
-
-                except GitCommandError:
-                    try:
-                        repo = host._clone_with_fallback(
-                            dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
-                        )
-
-                        try:
-                            try:
-                                branch = repo.refs[f"origin/{ref}"]
-                                ref_type = GitReferenceType.BRANCH
-                                resolved_commit = branch.commit.hexsha
-                                ref_name = ref
-                            except IndexError:
-                                try:
-                                    tag = repo.tags[ref]
-                                    ref_type = GitReferenceType.TAG
-                                    resolved_commit = tag.commit.hexsha
-                                    ref_name = ref
-                                except IndexError:
-                                    raise ValueError(  # noqa: B904
-                                        f"Reference '{ref}' not found in repository "
-                                        f"{dep_ref.repo_url}"
-                                    )
-
-                        except Exception as e:
-                            sanitized_error = host._sanitize_git_error(str(e))
-                            raise ValueError(  # noqa: B904
-                                f"Could not resolve reference '{ref}' in repository "
-                                f"{dep_ref.repo_url}: {sanitized_error}"
-                            )
-
-                    except GitCommandError as e:
-                        if "Authentication failed" in str(
-                            e
-                        ) or "remote: Repository not found" in str(e):
-                            error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
-                            target_host = dep_ref.host or default_host()
-                            org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url else None
-                            error_msg += host.auth_resolver.build_error_context(
-                                target_host,
-                                "resolve reference",
-                                org=org,
-                                port=dep_ref.port,
-                                dep_url=dep_ref.repo_url,
-                            )
-                            raise RuntimeError(error_msg)  # noqa: B904
-                        else:
-                            sanitized_error = host._sanitize_git_error(str(e))
-                            raise RuntimeError(  # noqa: B904
-                                f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
-                            )
+                ref_type, resolved_commit, ref_name = self._resolve_as_branch_or_tag(
+                    dep_ref, ref, temp_dir
+                )
 
         finally:
-            if temp_dir and temp_dir.exists():
+            if temp_dir is not None:
                 _rmtree(temp_dir)
 
         return ResolvedReference(
@@ -415,3 +341,43 @@ class GitReferenceResolver:
             resolved_commit=resolved_commit,
             ref_name=ref_name,
         )
+
+    # -- resolve helpers -----------------------------------------------
+
+    def _resolve_as_commit(
+        self,
+        dep_ref: DependencyReference,
+        ref: str,
+        temp_dir: Path,
+    ) -> tuple:
+        """Clone the repo and resolve *ref* as a commit SHA.
+
+        Returns ``(ref_type, resolved_commit, ref_name)``.
+        """
+        host = self._host
+        try:
+            repo = host._clone_with_fallback(
+                dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
+            )
+            commit = repo.commit(ref)
+            return GitReferenceType.COMMIT, commit.hexsha, ref
+        except Exception as e:
+            sanitized_error = host._sanitize_git_error(str(e))
+            raise ValueError(  # noqa: B904
+                f"Could not resolve commit '{ref}' in repository "
+                f"{dep_ref.repo_url}: {sanitized_error}"
+            )
+
+    def _resolve_as_branch_or_tag(
+        self,
+        dep_ref: DependencyReference,
+        ref: str | None,
+        temp_dir: Path,
+    ) -> tuple:
+        """Clone the repo (shallow first, full fallback) and resolve *ref*.
+
+        Returns ``(ref_type, resolved_commit, ref_name)``.
+        """
+        from ._clone_resolver import _resolve_branch_or_tag
+
+        return _resolve_branch_or_tag(self._host, dep_ref, ref, temp_dir)

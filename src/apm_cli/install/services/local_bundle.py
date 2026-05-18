@@ -33,6 +33,28 @@ class LocalBundleOpts:
     logger: Any = None
     scope: Any = None
     alias: str | None = None
+    force: bool = False
+    dry_run: bool = False
+
+
+from ._local_deploy_helpers import (  # noqa: E402
+    _compute_bundle_record,
+    _deploy_file,
+    _DeployFlags,
+    _stage_instruction_dest,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _BundleDeployCtx:
+    """Immutable per-deploy context for local-bundle helpers."""
+
+    pack_files: Any
+    bundle_dir: Any
+    slug: Any
+    project_root: Any
+    scope: Any
+    flags: _DeployFlags
 
 
 # ---------------------------------------------------------------------------
@@ -81,157 +103,100 @@ def _build_pack_files(bundle_info: Any, bundle_dir: Path) -> dict[str, str]:
     return filtered
 
 
-def _stage_instruction_dest(
-    rel: str,
-    slug: Any,
-    project_root: Path,
-    logger: InstallLogger | None,
-) -> tuple[Path, Path] | None:
-    """Resolve stage dest for a bundled instruction on a compile-only target.
-
-    Called when the current target lacks the ``"instructions"`` primitive
-    (e.g. opencode, codex, gemini) so the file must be staged under
-    ``apm_modules/<slug>/.apm/instructions/`` for ``apm compile`` to pick
-    up later.
-
-    Performs strict slug validation before constructing any filesystem path.
-
-    Returns ``(dest, stage_root)`` on success, or ``None`` when the slug
-    is invalid (the caller should increment *skipped* and ``continue``).
-    """
-    from apm_cli.utils.path_security import (
-        PathTraversalError,
-        ensure_path_within,
-        validate_path_segments,
-    )
-
-    _slug_str = str(slug)
-    # CR1.5 (#1217 review): ASCII-only validation — str.isalnum() accepts
-    # non-Latin Unicode chars which would slip past [A-Za-z0-9._-].
-    _ALLOWED = builtins.set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
-    _slug_ok = (
-        bool(_slug_str)
-        and all(c in _ALLOWED for c in _slug_str)
-        and not _slug_str.startswith(".")
-        and not _slug_str.endswith(".")
-        and ".." not in _slug_str
-    )
-    if not _slug_ok:
-        if logger is not None:
-            logger.warning(
-                f"Skipped instruction staging for unsafe slug {_slug_str!r}: "
-                "slug must match [A-Za-z0-9._-]+ with no leading/trailing dot, no '..'"
-            )
-        return None
-    try:
-        validate_path_segments(_slug_str, context="bundle slug")
-    except PathTraversalError as exc:
-        if logger is not None:
-            logger.warning(f"Skipped instruction staging for unsafe slug {_slug_str!r}: {exc}")
-        return None
-    stage_root = project_root / "apm_modules" / slug / ".apm" / "instructions"
-    try:
-        ensure_path_within(stage_root, project_root / "apm_modules")
-    except PathTraversalError as exc:
-        if logger is not None:
-            logger.warning(f"Skipped unsafe stage root for {slug!r}: {exc}")
-        return None
-    # PR #1217 review: preserve nested subdirs under ``instructions/`` so
-    # two files with the same basename do not collide at the staged location.
-    _rel_under_instructions = rel.split("/", 1)[1] if "/" in rel else Path(rel).name
-    dest = stage_root / _rel_under_instructions
-    return dest, stage_root
-
-
-def _compute_bundle_record(
-    dest: Path,
-    project_root: Path,
-    scope: Any,
-) -> str:
-    """Return the lockfile key string for a deployed bundle file.
-
-    User-scope installs use absolute paths; project-scope installs use
-    ``project_root``-relative POSIX paths (with absolute fallback when
-    *dest* is outside *project_root*).
-    """
-    from apm_cli.core.scope import InstallScope
-
-    try:
-        if scope == InstallScope.USER:
-            return dest.as_posix()
-        else:
-            return (
-                dest.relative_to(project_root).as_posix()
-                if dest.is_relative_to(project_root)
-                else dest.as_posix()
-            )
-    except ValueError:
-        return dest.as_posix()
-
-
-def _deploy_file(
-    src: Path,
-    dest: Path,
-    record: str,
-    expected_hash: str,
-    force: bool,
-    dry_run: bool,
-    diagnostics: DiagnosticCollector | None,
-    logger: InstallLogger | None,
-) -> tuple[str | None, str | None, bool]:
-    """Deploy a single bundle file to *dest*.
-
-    Handles dry-run (no writes), collision detection (skip when content
-    differs and *force* is False), and the actual copy + hash.
-
-    Returns ``(record, file_hash, was_skipped)``:
-
-    * On dry-run: ``(record, "sha256:<hex>", False)``
-    * On skip:    ``(None, None, True)``
-    * On deploy:  ``(record, "sha256:<hex>", False)``
-    """
-    from apm_cli.utils.content_hash import compute_file_hash
-
-    if dry_run:
-        if logger:
-            logger.verbose_detail(f"[dry-run] would deploy {record}")
-        # Normalize to "sha256:<hex>" so the dry-run lockfile preview matches
-        # the format written by ``compute_file_hash`` on the real deploy path.
-        return record, f"sha256:{expected_hash}", False
-
-    # Collision handling: skip if file exists with different content (unless
-    # --force).  Idempotent (same-content) writes are allowed through.
-    if dest.exists() and not force:
-        try:
-            existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
-        except OSError:
-            existing_hash = None
-        if existing_hash and existing_hash != expected_hash:
-            msg = (
-                f"Skipped {record}: file exists with different "
-                "content. Re-run with --force to overwrite."
-            )
-            if diagnostics is not None:
-                diagnostics.warn(msg)
-            elif logger is not None:
-                logger.warning(msg)
-            return None, None, True
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest, follow_symlinks=False)
-    # IM4: hash the deployed file (post-copy) rather than trusting the source
-    # bundle's expected_hash.  Today the integrator is a raw copy so the
-    # values match, but documenting deployed-file provenance now keeps the
-    # lockfile honest if future transforms mutate content during deploy.
-    file_hash = compute_file_hash(dest)
-    if logger:
-        logger.verbose_detail(f"deployed {record}")
-    return record, file_hash, False
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def _prepare_target_roots(target, project_root: Path) -> tuple[Path, dict]:
+    """Return ``(default_deploy_root, primitive_roots)`` for *target*."""
+    resolved_root = getattr(target, "resolved_deploy_root", None)
+    if resolved_root is not None:
+        default_deploy_root = Path(resolved_root)
+    else:
+        default_deploy_root = project_root / target.root_dir
+    _primitive_roots: builtins.dict[str, Path] = {}
+    for prim_name, prim_mapping in (target.primitives or {}).items():
+        if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
+            _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
+    return default_deploy_root, _primitive_roots
+
+
+def _resolve_dest(
+    rel: str,
+    bundle_ctx: _BundleDeployCtx,
+    target,
+    default_deploy_root: Path,
+    primitive_roots: dict,
+) -> tuple[Path, Path] | None:
+    """Resolve ``(dest, deploy_root)`` for *rel* within *target*.
+
+    Returns ``None`` when the path is unsafe or when instruction staging
+    fails.  The caller should increment *skipped* and ``continue``.
+    """
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+    _first_seg = rel.split("/", 1)[0] if "/" in rel else ""
+    if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
+        _stage = _stage_instruction_dest(
+            rel, bundle_ctx.slug, bundle_ctx.project_root, bundle_ctx.flags.logger
+        )
+        if _stage is None:
+            return None
+        dest, deploy_root = _stage
+    else:
+        deploy_root = primitive_roots.get(_first_seg, default_deploy_root)
+        dest = deploy_root / rel
+    try:
+        ensure_path_within(dest, deploy_root)
+    except PathTraversalError as exc:
+        if bundle_ctx.flags.logger is not None:
+            bundle_ctx.flags.logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+        return None
+    return dest, deploy_root
+
+
+def _deploy_for_target(
+    target,
+    bundle_ctx: _BundleDeployCtx,
+) -> tuple[builtins.list, builtins.dict, int]:
+    """Deploy all *bundle_ctx.pack_files* for *target*.
+
+    Returns ``(deployed_files, deployed_hashes, skipped)`` for this target.
+    """
+    from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
+    default_deploy_root, _primitive_roots = _prepare_target_roots(target, bundle_ctx.project_root)
+    deployed_files: builtins.list[str] = []
+    deployed_hashes: builtins.dict[str, str] = {}
+    skipped = 0
+    for rel, expected_hash in sorted(bundle_ctx.pack_files.items()):
+        try:
+            validate_path_segments(str(rel), context="bundle_files key")
+        except PathTraversalError as exc:
+            if bundle_ctx.flags.logger is not None:
+                bundle_ctx.flags.logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+            skipped += 1
+            continue
+        src = bundle_ctx.bundle_dir / rel
+        if not src.is_file() or src.is_symlink():
+            skipped += 1
+            continue
+        result = _resolve_dest(rel, bundle_ctx, target, default_deploy_root, _primitive_roots)
+        if result is None:
+            skipped += 1
+            continue
+        dest, _deploy_root = result
+        record = _compute_bundle_record(dest, bundle_ctx.project_root, bundle_ctx.scope)
+        deployed_record, file_hash, was_skipped = _deploy_file(
+            src, dest, record, expected_hash, bundle_ctx.flags
+        )
+        if was_skipped:
+            skipped += 1
+        elif deployed_record:
+            deployed_files.append(deployed_record)
+            deployed_hashes[deployed_record] = file_hash  # type: ignore[assignment]
+    return deployed_files, deployed_hashes, skipped
 
 
 def integrate_local_bundle(
@@ -239,8 +204,6 @@ def integrate_local_bundle(
     project_root: Path,
     *,
     targets: Any,
-    force: bool = False,
-    dry_run: bool = False,
     opts: LocalBundleOpts | None = None,
     **kwargs,
 ) -> dict:
@@ -276,16 +239,15 @@ def integrate_local_bundle(
         per-primitive counters (``skills``, ``agents``, ``commands``, ...).
     """
     _opts = opts or LocalBundleOpts(
+        force=kwargs.get("force", False),
+        dry_run=kwargs.get("dry_run", False),
         diagnostics=kwargs.get("diagnostics"),
         logger=kwargs.get("logger"),
         scope=kwargs.get("scope"),
         alias=kwargs.get("alias"),
     )
-    diagnostics = _opts.diagnostics
     logger = _opts.logger
-    scope = _opts.scope
     alias = _opts.alias
-    from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
 
     bundle_dir: Path = bundle_info.source_dir
     pack_files = _build_pack_files(bundle_info, bundle_dir)
@@ -316,85 +278,29 @@ def integrate_local_bundle(
     # opaque files keyed by ``pack.bundle_files`` rather than a primitive
     # tree.  Revisit when local-bundle install needs to share collision /
     # link-resolution logic with the dependency-resolver pipeline.
+    _flags = _DeployFlags(
+        force=_opts.force,
+        dry_run=_opts.dry_run,
+        diagnostics=_opts.diagnostics,
+        logger=logger,
+    )
+    _bundle_ctx = _BundleDeployCtx(
+        pack_files=pack_files,
+        bundle_dir=bundle_dir,
+        slug=slug,
+        project_root=project_root,
+        scope=_opts.scope,
+        flags=_flags,
+    )
     deployed_files: builtins.list[str] = []
     deployed_hashes: builtins.dict[str, str] = {}
     skipped = 0
 
     for target in targets:
-        # Resolve deploy root for this target.  Cowork targets can return
-        # a dynamically-resolved path; fall back to root_dir under
-        # project_root otherwise.
-        resolved_root = getattr(target, "resolved_deploy_root", None)
-        if resolved_root is not None:
-            default_deploy_root = Path(resolved_root)
-        else:
-            default_deploy_root = project_root / target.root_dir
-
-        # Build a primitive→deploy_root lookup so bundle entries that fall
-        # under a primitive with an explicit ``deploy_root`` (e.g.
-        # skills→.agents) are routed to the converged directory rather than
-        # the per-client ``target.root_dir``.
-        _primitive_roots: builtins.dict[str, Path] = {}
-        for prim_name, prim_mapping in (target.primitives or {}).items():
-            if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
-                _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
-
-        for rel, expected_hash in sorted(pack_files.items()):
-            # CR1: bundle_files keys come from untrusted lockfile YAML inside
-            # the bundle.  Reject traversal sequences before constructing any
-            # filesystem path, then assert the resolved destination stays
-            # inside ``deploy_root``.
-            try:
-                validate_path_segments(str(rel), context="bundle_files key")
-            except PathTraversalError as exc:
-                if logger is not None:
-                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
-                skipped += 1
-                continue
-            src = bundle_dir / rel
-            if not src.is_file() or src.is_symlink():
-                skipped += 1
-                continue
-
-            # Issue #1207 D2.b: for compile-only targets (opencode, codex,
-            # gemini -- no ``instructions`` primitive in their profile),
-            # bundle ``instructions/*.md`` files must be staged under
-            # ``apm_modules/<slug>/.apm/instructions/`` so ``apm compile``
-            # can merge them into the target's output file.
-            _first_seg = rel.split("/", 1)[0] if "/" in rel else ""
-            if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
-                _stage = _stage_instruction_dest(rel, slug, project_root, logger)
-                if _stage is None:
-                    skipped += 1
-                    continue
-                dest, deploy_root = _stage
-            else:
-                # Route the file to the correct deploy root.  If the first
-                # path segment matches a primitive with an explicit
-                # ``deploy_root`` (e.g. ``skills/`` -> ``.agents/``), use the
-                # converged directory.  Otherwise fall back to the default.
-                deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
-                dest = deploy_root / rel
-
-            try:
-                from apm_cli.utils.path_security import ensure_path_within
-
-                ensure_path_within(dest, deploy_root)
-            except PathTraversalError as exc:
-                if logger is not None:
-                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
-                skipped += 1
-                continue
-
-            record = _compute_bundle_record(dest, project_root, scope)
-            deployed_record, file_hash, was_skipped = _deploy_file(
-                src, dest, record, expected_hash, force, dry_run, diagnostics, logger
-            )
-            if was_skipped:
-                skipped += 1
-            elif deployed_record:
-                deployed_files.append(deployed_record)
-                deployed_hashes[deployed_record] = file_hash  # type: ignore[assignment]
+        _t_files, _t_hashes, _t_skipped = _deploy_for_target(target, _bundle_ctx)
+        deployed_files.extend(_t_files)
+        deployed_hashes.update(_t_hashes)
+        skipped += _t_skipped
 
     return {
         "deployed_files": deployed_files,
