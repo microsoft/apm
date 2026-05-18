@@ -21,6 +21,7 @@ import click  # noqa: F401
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401  -- module attribute; patched by tests and used via re-export
     _rich_error,
@@ -836,7 +837,7 @@ class MCPIntegrator:
             except ImportError:
                 available = []
                 for rt in mcp_compatible:
-                    if shutil.which(rt):
+                    if find_runtime_binary(rt):
                         available.append(rt)
                 return available
 
@@ -847,7 +848,7 @@ class MCPIntegrator:
             mcp_compatible = [
                 rt for rt in detected_runtimes if rt in ClientFactory.supported_clients()
             ]
-            return [rt for rt in mcp_compatible if shutil.which(rt)]
+            return [rt for rt in mcp_compatible if find_runtime_binary(rt)]
 
     # ------------------------------------------------------------------
     # Per-runtime installation
