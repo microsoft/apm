@@ -215,6 +215,9 @@ jobs:
           ROW_KIND: ${{ matrix.group.kind }}
           ROW_INDEX: ${{ matrix.group.index }}
         run: |
+          # SECURITY: mirrors the production shared/apm.md hardenings.
+          # Never `set -x` or echo $pk; ::add-mask:: registers the whole PEM
+          # as one substring and will not mask individual lines.
           set -euo pipefail
           case "$ROW_KIND" in
             legacy)
@@ -238,15 +241,19 @@ jobs:
             echo "::error::failed to resolve credentials for row kind=$ROW_KIND index=$ROW_INDEX"
             exit 1
           fi
-          # Defence in depth: re-mask the resolved PK before writing it
-          # to $GITHUB_ENV. The masker is run-scoped per-job, so this is
-          # mostly belt-and-suspenders, but matches production shape.
+          # Normalise trailing newline so legacy (direct env) and apps
+          # (jq + $(...) which strips trailing \n) produce byte-identical
+          # ROW_PRIVATE_KEY values, removing the asymmetry at the source.
+          pk="${pk%$'\n'}"
           echo "::add-mask::$pk"
+          # Random heredoc delimiter per https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#multiline-strings
+          # which warns against fixed delimiters for arbitrary multi-line values.
+          delim="APMPK_$(openssl rand -hex 16)"
           {
             echo "ROW_APP_ID=$app_id"
-            echo "ROW_PRIVATE_KEY<<APMPK"
+            printf 'ROW_PRIVATE_KEY<<%s\n' "$delim"
             printf '%s\n' "$pk"
-            echo "APMPK"
+            printf '%s\n' "$delim"
           } >> "$GITHUB_ENV"
       - name: Assert ROW_PRIVATE_KEY round-tripped intact
         env:
@@ -262,13 +269,12 @@ jobs:
             echo "::error::ROW_PRIVATE_KEY was not set by the resolver step"
             exit 1
           fi
-          # Normalise trailing newlines before hashing so both resolution
-          # paths (direct env-var read for legacy preserves trailing \n;
-          # jq + command substitution for apps strips it) converge on the
-          # same SHA. Matches the normalisation in b-fix-prep.
-          pk_trim="$ROW_PRIVATE_KEY"
-          while [ "${pk_trim: -1}" = $'\n' ]; do pk_trim=${pk_trim%$'\n'}; done
-          got_sha=$(printf '%s' "$pk_trim" | sha256sum | cut -d' ' -f1)
+          # No normalisation needed here: the resolver now strips trailing
+          # newlines uniformly before the heredoc, and the $GITHUB_ENV
+          # heredoc parser strips exactly one trailing \n before the
+          # delimiter (per FileCommandManager). Both paths converge on the
+          # same byte sequence -- assert directly.
+          got_sha=$(printf '%s' "$ROW_PRIVATE_KEY" | sha256sum | cut -d' ' -f1)
           if [ "$got_sha" != "$EXPECTED_SHA" ]; then
             echo "::error::ROW_PRIVATE_KEY SHA mismatch (got=$got_sha expected=$EXPECTED_SHA)"
             echo "::error::The env-relay corrupted the PEM body. Check newline/heredoc handling."

@@ -291,6 +291,10 @@ jobs:
           ROW_KIND: ${{ matrix.group.kind }}
           ROW_INDEX: ${{ matrix.group.index }}
         run: |
+          # SECURITY: never `set -x` or `echo "$pk"` in this step. ::add-mask::
+          # registers the PEM as a single multi-line substring; the masker will
+          # not match individual PEM lines printed in isolation, so any future
+          # debug echo of $pk line-by-line would leak the key body in clear text.
           set -euo pipefail
           case "$ROW_KIND" in
             legacy)
@@ -311,16 +315,27 @@ jobs:
             echo "::error::missing app-id or private-key for apm row kind=$ROW_KIND index=$ROW_INDEX"
             exit 1
           fi
+          # Normalise trailing newline. Bash $(jq ...) strips ALL trailing
+          # newlines from PEMs read out of the apps[] JSON, while a direct
+          # env-var assignment preserves them. Stripping any tail and adding
+          # exactly one makes the legacy and apps paths produce byte-identical
+          # ROW_PRIVATE_KEY values so downstream tolerance is irrelevant.
+          pk="${pk%$'\n'}"
           # Defence in depth: the PK is already masked because it came from
           # a ${{ secrets.* }} reference at compile time, but registering it
           # again here makes the contract explicit and survives any future
           # gh-aw template churn that might lose the secret tag.
           echo "::add-mask::$pk"
+          # Use a random heredoc delimiter to eliminate any chance of a PEM
+          # line collision terminating the value early. The official docs
+          # explicitly warn against fixed delimiters for arbitrary multi-line
+          # values: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#multiline-strings
+          delim="APMPK_$(openssl rand -hex 16)"
           {
             echo "ROW_APP_ID=$app_id"
-            echo "ROW_PRIVATE_KEY<<APMPK"
+            printf 'ROW_PRIVATE_KEY<<%s\n' "$delim"
             printf '%s\n' "$pk"
-            echo "APMPK"
+            printf '%s\n' "$delim"
           } >> "$GITHUB_ENV"
       - name: Mint installation token
         id: token
