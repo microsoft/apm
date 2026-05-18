@@ -67,7 +67,7 @@ jobs:
           # Any subsequent step output OR job output containing this
           # substring will be subject to the runner's masking / stripping.
           while IFS= read -r line; do
-            [ -n "$line" ] && echo "::add-mask::$line"
+            if [ -n "$line" ]; then echo "::add-mask::$line"; fi
           done <<< "$SYNTHETIC_PEM"
           # Pass through as a step output (step outputs are NOT subject
           # to the cross-job redaction filter; only job outputs are).
@@ -133,7 +133,7 @@ jobs:
           # masking because the JSON value does not contain the PEM
           # substring. This is the core property the fix relies on.
           while IFS= read -r line; do
-            [ -n "$line" ] && echo "::add-mask::$line"
+            if [ -n "$line" ]; then echo "::add-mask::$line"; fi
           done <<< "$SYNTHETIC_PEM"
       - name: Emit secret-free matrix + non-secret expected_sha
         id: emit
@@ -196,7 +196,7 @@ jobs:
         run: |
           set -euo pipefail
           while IFS= read -r line; do
-            [ -n "$line" ] && echo "::add-mask::$line"
+            if [ -n "$line" ]; then echo "::add-mask::$line"; fi
           done <<< "$SYNTHETIC_PEM"
       - name: Resolve credentials for this matrix row (env-relay)
         env:
