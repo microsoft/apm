@@ -32,6 +32,25 @@ from .types import VirtualPackageType
 # spelled the URL.
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 
+# Allowed character set for a single repository path segment.
+#
+# ADO accepts spaces (project / repo names can contain them) but NOT tilde --
+# tilde has no meaning on Azure DevOps URLs and keeping it out preserves the
+# asymmetry that protects the ADO surface from inadvertent regressions.
+#
+# Non-ADO hosts accept tilde because Bitbucket Data Center / Server (and
+# Sourcehut) use ``~username`` path segments for personal repositories
+# (e.g. ``/scm/~jdoe/repo.git``). ``~`` is RFC 3986 unreserved, has no
+# POSIX path-traversal meaning, and all subprocess calls in APM use
+# list-form ``argv`` so there is no shell-expansion vector.
+_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
+_NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
+
+
+def _path_segment_pattern(is_ado_host: bool) -> str:
+    """Return the allowed-character regex for a single repo path segment."""
+    return _ADO_PATH_SEGMENT_RE if is_ado_host else _NON_ADO_PATH_SEGMENT_RE
+
 
 @dataclass
 class DependencyReference:
@@ -1089,7 +1108,7 @@ class DependencyReference:
         elif len(uparts) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
 
-        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        allowed_pattern = _path_segment_pattern(is_ado_host)
         validate_path_segments("/".join(uparts), context="repository path")
         for part in uparts:
             if not re.match(allowed_pattern, part.rstrip(".git")):
@@ -1202,7 +1221,7 @@ class DependencyReference:
                         f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
                     )
 
-        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        allowed_pattern = _path_segment_pattern(is_ado_host)
         validate_path_segments(
             "/".join(path_parts),
             context="repository URL path",
@@ -1309,7 +1328,7 @@ class DependencyReference:
         segments = repo_url.split("/")
         if len(segments) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
-        if not all(re.match(r"^[a-zA-Z0-9._-]+$", s) for s in segments):
+        if not all(re.match(_NON_ADO_PATH_SEGMENT_RE, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
         validate_path_segments(repo_url, context="repository path")
         for seg in segments:

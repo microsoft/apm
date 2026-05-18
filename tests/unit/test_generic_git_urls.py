@@ -463,6 +463,43 @@ class TestSecurityWithGenericHosts:
         with pytest.raises(ValueError, match="Invalid repository path component"):
             DependencyReference.parse("https://gitlab.com/user/repo$bad")
 
+    def test_bitbucket_personal_repo_tilde_url(self):
+        """Bitbucket Data Center personal repos use ``~username`` path segments."""
+        dep = DependencyReference.parse("https://example.com/scm/~myuser/my-apm-repo.git")
+        assert dep.host == "example.com"
+        assert dep.repo_url == "scm/~myuser/my-apm-repo"
+        assert dep.is_virtual is False
+
+    def test_bitbucket_personal_repo_tilde_shorthand(self):
+        """Tilde-prefixed user segment is also valid in FQDN shorthand form."""
+        dep = DependencyReference.parse("example.com/scm/~myuser/my-apm-repo")
+        assert dep.host == "example.com"
+        assert dep.repo_url == "scm/~myuser/my-apm-repo"
+
+    def test_ado_rejects_tilde_in_repo_path(self):
+        """ADO URLs MUST reject ``~`` in path segments.
+
+        Regression trap for the secure_by_default asymmetry between the ADO
+        and non-ADO path-component whitelists. Tilde has no meaning on
+        Azure DevOps URLs; keeping it out preserves the strict ADO surface
+        even though Bitbucket DC accepts it.
+        """
+        with pytest.raises(ValueError, match="Invalid repository path component"):
+            DependencyReference.parse("https://dev.azure.com/myorg/myproj/_git/~bad")
+
+    def test_bitbucket_personal_repo_tilde_scp_form(self):
+        """SCP shorthand (``git@host:path``) carries Bitbucket DC personal repos too."""
+        dep = DependencyReference.parse("git@bitbucket.example.com:~jdoe/ml-utils.git")
+        assert dep.host == "bitbucket.example.com"
+        assert dep.repo_url == "~jdoe/ml-utils"
+
+    def test_bitbucket_personal_repo_tilde_ssh_url(self):
+        """``ssh://`` URL form with custom port carries Bitbucket DC personal repos."""
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/~jdoe/ml-utils.git")
+        assert dep.host == "bitbucket.example.com"
+        assert dep.port == 7999
+        assert dep.repo_url == "~jdoe/ml-utils"
+
 
 class TestFQDNVirtualPaths:
     """Test FQDN shorthand with virtual paths on generic hosts.

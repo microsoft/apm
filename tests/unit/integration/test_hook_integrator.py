@@ -490,9 +490,9 @@ class TestClaudeIntegration:
         sidecar = json.loads(sidecar_path.read_text())
         assert sidecar["PreToolUse"][0]["_apm_source"] == "hookify"
 
-        # Verify rewritten paths
+        # Verify rewritten paths (normalize separators for cross-platform compare)
         cmd = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        assert ".claude/hooks/hookify/hooks/pretooluse.py" in cmd
+        assert ".claude/hooks/hookify/hooks/pretooluse.py" in cmd.replace("\\", "/")
 
     def test_integrate_learning_output_style_claude(self, temp_project):
         """Test Claude integration of learning-output-style plugin."""
@@ -844,8 +844,8 @@ class TestClaudeIntegration:
         # Verify rewritten command in settings.json
         settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
         cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
-        assert ".claude/hooks/lint-hooks/scripts/lint.sh" in cmd
-        assert "./" not in cmd
+        assert ".claude/hooks/lint-hooks/scripts/lint.sh" in cmd.replace("\\", "/")
+        assert "./" not in cmd.replace("\\", "/")
 
         # Verify script was copied to Claude target location
         copied_script = temp_project / ".claude" / "hooks" / "lint-hooks" / "scripts" / "lint.sh"
@@ -1177,9 +1177,9 @@ class TestCursorIntegration:
         # Check APM source marker for cleanup
         assert config["hooks"]["PreToolUse"][0]["_apm_source"] == "hookify"
 
-        # Verify rewritten paths point to .cursor/hooks/
+        # Verify rewritten paths point to .cursor/hooks/ (normalize separators)
         cmd = config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        assert ".cursor/hooks/hookify/hooks/pretooluse.py" in cmd
+        assert ".cursor/hooks/hookify/hooks/pretooluse.py" in cmd.replace("\\", "/")
 
     def test_skips_when_no_cursor_dir(self, temp_project):
         """Test that Cursor integration is skipped when .cursor/ doesn't exist."""
@@ -3293,7 +3293,7 @@ class TestIssue1007Fixes:
         assert cmd.startswith(str(deploy_root.resolve())), (
             f"Command must be absolute path under deploy_root; got {cmd}"
         )
-        assert cmd.endswith(".claude/hooks/my-pkg/hooks/run.sh"), (
+        assert cmd.replace("\\", "/").endswith(".claude/hooks/my-pkg/hooks/run.sh"), (
             f"Command must end with .claude/hooks/my-pkg/hooks/run.sh; got {cmd}"
         )
 
