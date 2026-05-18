@@ -107,14 +107,16 @@ marketplace:
   build:
     tagPattern: "v{{version}}"
 
-  # Output targets (map form). Claude is enabled by default.
+  # Output targets (map form). 'claude' is enabled by default;
+  # uncomment 'codex' below to publish the Codex artifact too.
+  # Each output writes to its profile default path; add 'path:'
+  # under a key to override.
   outputs:
     claude: {{}}
-    # Uncomment to also build the Codex marketplace artifact:
-    # codex:
-    #   path: .agents/plugins/marketplace.json
-    # NOTE: codex output requires every package to declare 'category:'
-    # in apm.yml -- see the packages section below.
+    # codex: {{}}
+    #
+    # Note: enabling codex requires every package below to declare
+    # 'category:' (e.g. category: Productivity).
 
   # CI tip: build one or all formats with a machine-readable manifest:
   #   apm pack --marketplace=claude,codex --json | jq -r '.marketplace.outputs[].path'
@@ -128,7 +130,10 @@ marketplace:
       # category: Productivity
       # Optional overrides:
       # subdir: path/inside/repo
-      # tagPattern: "example-package-v{{version}}"
+      # Per-package version tag (recommended for monorepos so each
+      # package can be released independently). Leave commented for
+      # repo-wide lockstep tagging.
+      # tag_pattern: "{{name}}-v{{version}}"
       # include_prerelease: false
       # ref: main  # pin to an explicit ref instead of a version range
 
@@ -137,6 +142,7 @@ marketplace:
     #   source: ./packages/local-tool
     #   description: A locally vendored tool
     #   version: 0.1.0
+    #   # tag_pattern: "{{name}}-v{{version}}"
 """
 
 

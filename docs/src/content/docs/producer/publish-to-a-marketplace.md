@@ -206,6 +206,33 @@ access to every target -- it is targeted at internal/org marketplaces
 where you control both sides. Public marketplaces should rely on
 consumers running `apm install --update` on their own cadence.
 
+## Consume from any assistant
+
+APM is vendor-agnostic, and so is the marketplace artifact you ship.
+The same `marketplace.json` your `apm pack` produced can be consumed
+by every AI assistant whose CLI understands the `.claude-plugin/`
+or `.agents/plugins/` schema. The install command depends on the
+consumer's assistant, not on APM.
+
+| Consumer assistant | Recommended install path | Reads which artifact |
+|---|---|---|
+| **APM-aware consumer** (any harness) | `apm marketplace add <owner>/<repo>` then `apm install <package>@<marketplace>` | whichever artifact is enabled for their target |
+| **Claude Code / GitHub Copilot CLI** | the assistant's native marketplace add + plugin install commands -- see [Anthropic plugin marketplaces](https://docs.claude.com/en/docs/claude-code/plugin-marketplaces) | `.claude-plugin/marketplace.json` |
+| **OpenAI Codex CLI** | the assistant's native marketplace metadata flow -- see [Codex marketplace metadata](https://developers.openai.com/codex/plugins/build#marketplace-metadata) | `.agents/plugins/marketplace.json` |
+| **Cursor, Continue, Cline, ...** | follow the assistant's own marketplace docs; most read the Anthropic schema | `.claude-plugin/marketplace.json` |
+
+> [!TIP]
+> The simplest install path for any consumer is `apm marketplace add`
+> followed by `apm install`. `apm install --target <name>` then
+> renders the right on-disk shape (`.claude/`, `.codex/`,
+> `.cursor/`, ...) for whichever assistant they actually run. This
+> lets producers ship one marketplace and reach every ecosystem.
+
+Producers who want maximum reach should enable every format their
+audience uses. The `apm marketplace doctor` `format coverage` row
+flags formats you are not yet publishing, and `apm pack
+--marketplace=claude,codex` lets CI build them in a single run.
+
 ## Pitfalls
 
 - **`packages:` not `plugins:`** in the `apm.yml` source. The

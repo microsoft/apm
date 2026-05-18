@@ -296,3 +296,119 @@ class TestMarketplaceNone:
             data = json.loads(result.output)
             assert data["ok"] is True
             assert data["marketplace"]["outputs"] == []
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 (#1348): vendor-neutral catalog + docs URL + no spurious warning
+# ---------------------------------------------------------------------------
+
+
+def _mock_build_result_with_outputs(profiles=("claude",), dry_run_flags=None):
+    """Build a mock result whose marketplace report lists `profiles` written
+    artifacts. `dry_run_flags` is a per-profile dry-run flag list aligned with
+    `profiles` (defaults to all False)."""
+    from apm_cli.core.build_orchestrator import BuildResult, OutputKind, ProducerResult
+    from apm_cli.marketplace.builder import (
+        BuildReport,
+        MarketplaceOutputReport,
+    )
+
+    if dry_run_flags is None:
+        dry_run_flags = [False] * len(profiles)
+    path_map = {
+        "claude": Path(".claude-plugin/marketplace.json"),
+        "codex": Path(".codex/plugins/marketplace.json"),
+    }
+    outputs = []
+    for profile, dry in zip(profiles, dry_run_flags, strict=True):
+        outputs.append(
+            MarketplaceOutputReport(
+                profile=profile,
+                resolved=(),
+                errors=(),
+                warnings=(),
+                output_path=path_map.get(profile, Path(f".{profile}/marketplace.json")),
+                added_count=1,
+                updated_count=0,
+                unchanged_count=0,
+                removed_count=0,
+                dry_run=dry,
+            )
+        )
+    return BuildResult(
+        outputs=[],
+        warnings=[],
+        producer_results=[
+            ProducerResult(
+                kind=OutputKind.MARKETPLACE,
+                outputs=[],
+                warnings=[],
+                payload=BuildReport(outputs=tuple(outputs)),
+            )
+        ],
+    )
+
+
+class TestVendorNeutralCatalog:
+    """Wave 2 G3+B: post-pack hint lists artifacts and a single docs pointer,
+    and never names a vendor CLI."""
+
+    def test_catalog_lists_both_profiles_with_docs_pointer(self, tmp_path):
+        _setup_project(tmp_path)
+        mock_result = _mock_build_result_with_outputs(profiles=("claude", "codex"))
+
+        with patch("apm_cli.commands.pack.BuildOrchestrator") as MockOrch:
+            MockOrch.return_value.run.return_value = mock_result
+            runner = CliRunner()
+            result = runner.invoke(pack_cmd, [], catch_exceptions=False)
+
+        out = result.output
+        assert "[claude]" in out
+        assert "[codex" in out  # ljust-padded to align with [claude]
+        assert ".claude-plugin/marketplace.json" in out
+        assert ".codex/plugins/marketplace.json" in out
+        # Single docs pointer, no per-vendor install commands.
+        assert "publish-to-a-marketplace" in out
+        for forbidden in (
+            "copilot plugin install",
+            "claude plugin install",
+            "codex plugin install",
+            "cursor plugin install",
+        ):
+            assert forbidden not in out, f"vendor CLI string leaked: {forbidden!r}"
+
+    def test_dry_run_suppresses_catalog(self, tmp_path):
+        _setup_project(tmp_path)
+        # All outputs marked dry-run -> catalog must not appear.
+        mock_result = _mock_build_result_with_outputs(
+            profiles=("claude", "codex"), dry_run_flags=[True, True]
+        )
+        with patch("apm_cli.commands.pack.BuildOrchestrator") as MockOrch:
+            MockOrch.return_value.run.return_value = mock_result
+            runner = CliRunner()
+            result = runner.invoke(pack_cmd, ["--dry-run"], catch_exceptions=False)
+
+        # Catalog has a dedicated header; that header is what we suppress.
+        assert "Marketplace artifacts ready" not in result.output
+        # Docs pointer is part of the catalog; also suppressed.
+        assert "publish-to-a-marketplace" not in result.output
+
+
+class TestNoSpuriousPluginJsonWarning:
+    """Wave 2 G2: marketplace-publishing projects must NOT emit the misleading
+    'No plugin.json found' warning."""
+
+    def test_marketplace_only_project_no_plugin_json_warning(self, tmp_path):
+        """A project with a marketplace: block and no dependencies should not
+        surface a plugin.json warning at the CLI surface."""
+        _setup_project(tmp_path)
+        mock_result = _mock_build_result_with_outputs(profiles=("claude",))
+
+        with patch("apm_cli.commands.pack.BuildOrchestrator") as MockOrch:
+            MockOrch.return_value.run.return_value = mock_result
+            runner = CliRunner()
+            result = runner.invoke(pack_cmd, [], catch_exceptions=False)
+
+        # The misleading legacy warning must not appear in CLI output.
+        assert "No plugin.json" not in result.output
+        assert "no plugin.json" not in result.output.lower()

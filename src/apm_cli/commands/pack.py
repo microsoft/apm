@@ -17,6 +17,10 @@ from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
 from ..utils.console import set_console_stderr
 
+MARKETPLACE_DOCS_URL = (
+    "https://microsoft.github.io/apm/producer/publish-to-a-marketplace/#consume-from-any-assistant"
+)
+
 _PACK_HELP = """\
 Pack distributable artifacts from your APM project.
 
@@ -371,7 +375,12 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
-    """Render the marketplace producer's report (one-liner summary)."""
+    """Render the marketplace producer's report.
+
+    Emits per-output success/dry-run lines first, then a vendor-neutral
+    catalog of artifact paths plus a single docs pointer. The catalog
+    block is suppressed in dry-run mode (no files were actually written).
+    """
     seen_warnings = set()
     for warn_msg in extra_warnings or []:
         seen_warnings.add(warn_msg)
@@ -383,6 +392,7 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, out
         logger.warning(warn_msg)
 
     output_reports = tuple(getattr(report, "outputs", ()) or ())
+    written: list[tuple[str | None, Path]] = []
     if not output_reports:
         package_count = len(getattr(report, "resolved", ()) or ()) if report is not None else None
         for output in outputs or []:
@@ -393,17 +403,48 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, out
                 logger.dry_run_notice(f"Would write {message}")
             else:
                 logger.success(f"Built {message}")
+                written.append((None, Path(output)))
+    else:
+        for output_report in output_reports:
+            message = (
+                f"marketplace.json [{output_report.profile}] "
+                f"({len(output_report.resolved)} package(s)) -> {output_report.output_path}"
+            )
+            if dry_run or output_report.dry_run:
+                logger.dry_run_notice(f"Would write {message}")
+            else:
+                logger.success(f"Built {message}")
+                written.append((output_report.profile, Path(output_report.output_path)))
+
+    if written and not dry_run:
+        _render_marketplace_catalog(logger, written)
+
+
+def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) -> None:
+    """Append a vendor-neutral catalog of marketplace artifacts.
+
+    Renders one ``[i]`` info header, one ``[i]`` two-column row per
+    artifact, and a single ``[i]`` pointer to the docs anchor that
+    enumerates per-assistant install commands. Never names a vendor CLI
+    surface inline -- APM is vendor-agnostic and the install command
+    varies by AI assistant.
+    """
+    info = getattr(logger, "info", None)
+    if info is None:
         return
 
-    for output_report in output_reports:
-        message = (
-            f"marketplace.json [{output_report.profile}] "
-            f"({len(output_report.resolved)} package(s)) -> {output_report.output_path}"
-        )
-        if dry_run or output_report.dry_run:
-            logger.dry_run_notice(f"Would write {message}")
-        else:
-            logger.success(f"Built {message}")
+    info("Marketplace artifacts ready:")
+    if any(profile for profile, _ in written):
+        label_width = max(len(profile or "") for profile, _ in written)
+        for profile, path in written:
+            tag = (profile or "").ljust(label_width)
+            info(f"  [{tag}] {path}")
+    else:
+        for _, path in written:
+            info(f"  {path}")
+
+    info("How consumers install from this marketplace varies by AI assistant.")
+    info(f"See: {MARKETPLACE_DOCS_URL}")
 
 
 @click.command(
