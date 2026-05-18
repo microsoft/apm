@@ -487,6 +487,19 @@ class TestSecurityWithGenericHosts:
         with pytest.raises(ValueError, match="Invalid repository path component"):
             DependencyReference.parse("https://dev.azure.com/myorg/myproj/_git/~bad")
 
+    def test_bitbucket_personal_repo_tilde_scp_form(self):
+        """SCP shorthand (``git@host:path``) carries Bitbucket DC personal repos too."""
+        dep = DependencyReference.parse("git@bitbucket.example.com:~jdoe/ml-utils.git")
+        assert dep.host == "bitbucket.example.com"
+        assert dep.repo_url == "~jdoe/ml-utils"
+
+    def test_bitbucket_personal_repo_tilde_ssh_url(self):
+        """``ssh://`` URL form with custom port carries Bitbucket DC personal repos."""
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/~jdoe/ml-utils.git")
+        assert dep.host == "bitbucket.example.com"
+        assert dep.port == 7999
+        assert dep.repo_url == "~jdoe/ml-utils"
+
 
 class TestFQDNVirtualPaths:
     """Test FQDN shorthand with virtual paths on generic hosts.
