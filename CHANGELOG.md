@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [{format, path, ...}]}}`); all logs move to stderr so downstream tooling can `jq` the output safely. (#1317)
 - `marketplace.outputs` in `apm.yml` now accepts a map form keyed by format name (`outputs: {claude: {}, codex: {path: ...}}`), replacing the deprecated list form; the list form still parses with a one-cycle deprecation warning. (#1317)
 - `apm marketplace init` now scaffolds the explicit map-form `outputs: {claude: {}}` so the default state is observable in the manifest. (#1317)
+- `apm pack --check-versions` validates per-package versions against a declared `marketplace.versioning.strategy` (`lockstep` / `tag_pattern` / `per_package`); exits `3` on misalignment. Reports per-package status in console output and in the `--json` envelope under `version_alignment`. (#1348)
+- `apm pack --check-clean` regenerates `marketplace.json` into a temp dir and diffs against the committed copy per configured output format; exits `4` on drift. Never writes to the working tree. Reports per-format status under `--json` key `drift`. When both gates fail, exit `3` wins over exit `4`. (#1348)
+- `apm.yml` schema: new optional block `marketplace.versioning: { strategy: lockstep | tag_pattern | per_package }` (default `lockstep`); strict key set. Additive -- existing manifests are unaffected. (#1348)
+- `apm marketplace doctor` adds a `version alignment` row surfacing the same logic as `--check-versions` (informational, no exit-code change). (#1348)
 
 ### Changed
 
