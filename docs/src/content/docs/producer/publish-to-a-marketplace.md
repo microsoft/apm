@@ -206,6 +206,48 @@ access to every target -- it is targeted at internal/org marketplaces
 where you control both sides. Public marketplaces should rely on
 consumers running `apm install --update` on their own cadence.
 
+## Consume from any assistant
+
+APM is vendor-agnostic, and so is the marketplace artifact you ship.
+The same `marketplace.json` your `apm pack` produced can be consumed
+either through APM (the recommended path) or through each
+assistant's own native marketplace command.
+
+> [!TIP]
+> **Recommended: `apm install`.** Installing through APM is the
+> only path that gives consumers a committed `apm.lock.yaml`,
+> content-hash pinning, transitive-dependency resolution, the
+> security scan, and `apm audit --ci` drift detection -- the
+> guarantees described in
+> [Install packages](../../consumer/install-packages/) and
+> [Lockfile spec](../../reference/lockfile-spec/). `apm install
+> --target <name>` then renders the right on-disk shape
+> (`.claude/`, `.codex/`, `.cursor/`, ...) for whichever assistant
+> the consumer actually runs, so producers ship one marketplace and
+> reach every ecosystem with the same governance posture.
+
+```bash
+apm marketplace add <owner>/<repo>
+apm install <package>@<marketplace>
+```
+
+If a consumer hasn't adopted APM, your published artifacts still
+work directly with each assistant's native marketplace command --
+there is no APM-only lock-in on the producer side. They simply
+trade away the lockfile, drift detection, and unified
+multi-harness install:
+
+| Native fallback | Reads which artifact | Native command reference |
+|---|---|---|
+| Claude Code / GitHub Copilot CLI | `.claude-plugin/marketplace.json` | [Anthropic plugin marketplaces](https://docs.claude.com/en/docs/claude-code/plugin-marketplaces) |
+| OpenAI Codex CLI | `.agents/plugins/marketplace.json` | [Codex marketplace metadata](https://developers.openai.com/codex/plugins/build#marketplace-metadata) |
+| Cursor, Continue, Cline, ... | `.claude-plugin/marketplace.json` (most read the Anthropic schema) | the assistant's own marketplace docs |
+
+Producers who want maximum reach should enable every format their
+audience uses. The `apm marketplace doctor` `format coverage` row
+flags formats you are not yet publishing, and `apm pack
+--marketplace=claude,codex` lets CI build them in a single run.
+
 ## Pitfalls
 
 - **`packages:` not `plugins:`** in the `apm.yml` source. The

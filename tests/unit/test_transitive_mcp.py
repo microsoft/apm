@@ -28,6 +28,19 @@ def _bypass_target_gate():
         yield
 
 
+@pytest.fixture
+def _isolated_targets():
+    """Decouple MCPIntegrator.install tests from cwd-based harness
+    detection. PR #1336 made the install gate call resolve_targets(cwd)
+    and fail closed with NoHarnessError when cwd lacks harness markers.
+    Under pytest-xdist worksteal scheduling, sibling tests can leave a
+    worker in a tmp cwd, so any test that relies on the install path
+    reaching _install_for_runtime must stub the resolver."""
+    with patch("apm_cli.core.target_detection.resolve_targets") as mock_resolve:
+        mock_resolve.return_value = MagicMock(targets=["copilot"])
+        yield mock_resolve
+
+
 # ---------------------------------------------------------------------------
 # APMPackage – MCP dict parsing
 # ---------------------------------------------------------------------------
@@ -648,7 +661,7 @@ class TestInstallMCPDependencies:
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     @patch("apm_cli.registry.operations.MCPServerOperations")
     def test_counts_only_newly_configured_registry_servers(
-        self, mock_ops_cls, _console, mock_install_runtime
+        self, mock_ops_cls, _console, mock_install_runtime, _isolated_targets
     ):
         mock_ops = mock_ops_cls.return_value
         mock_ops.validate_servers_exist.return_value = (
@@ -668,7 +681,7 @@ class TestInstallMCPDependencies:
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.registry.operations.MCPServerOperations")
     def test_mixed_registry_servers_show_already_configured_and_count_only_new(
-        self, mock_ops_cls, mock_install_runtime
+        self, mock_ops_cls, mock_install_runtime, _isolated_targets
     ):
         mock_console = MagicMock()
         mock_ops = mock_ops_cls.return_value
@@ -839,7 +852,9 @@ class TestInstallSelfDefinedSkipLogic:
     )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
-    def test_new_self_defined_server_installed(self, _console, mock_install_runtime, mock_check):
+    def test_new_self_defined_server_installed(
+        self, _console, mock_install_runtime, mock_check, _isolated_targets
+    ):
         """Self-defined servers NOT already configured should be installed."""
         mock_check.return_value = ["atlassian"]
         mock_install_runtime.return_value = True
@@ -859,7 +874,9 @@ class TestInstallSelfDefinedSkipLogic:
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
     )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
-    def test_mixed_self_defined_shows_already_configured(self, mock_install_runtime, mock_check):
+    def test_mixed_self_defined_shows_already_configured(
+        self, mock_install_runtime, mock_check, _isolated_targets
+    ):
         """Mix of new and existing self-defined servers: only new ones installed, existing shown as configured."""
         mock_check.return_value = ["new-srv"]
         mock_install_runtime.return_value = True
@@ -1053,7 +1070,9 @@ class TestDiffAwareSelfDefinedInstall:
     )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
-    def test_config_drift_triggers_reinstall(self, _console, mock_install_runtime, mock_check):
+    def test_config_drift_triggers_reinstall(
+        self, _console, mock_install_runtime, mock_check, _isolated_targets
+    ):
         """Self-defined server with config drift should be re-installed."""
         # Server is already configured (check returns empty)
         mock_check.return_value = []
@@ -1120,7 +1139,7 @@ class TestDiffAwareSelfDefinedInstall:
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
     )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
-    def test_drift_shows_updated_label(self, mock_install_runtime, mock_check):
+    def test_drift_shows_updated_label(self, mock_install_runtime, mock_check, _isolated_targets):
         """Config-drifted server should show 'updated' in CLI output."""
         mock_check.return_value = []
         mock_install_runtime.return_value = True
@@ -1169,6 +1188,7 @@ class TestDiffAwareSelfDefinedInstall:
         mock_install_runtime,
         mock_check,
         mock_rich_success,
+        _isolated_targets,
     ):
         """Without stored configs (first install), behavior unchanged."""
         mock_check.return_value = []
