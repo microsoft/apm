@@ -626,8 +626,14 @@ class GitHubPackageDownloader:
     ) -> ResolvedReference:
         """Resolve a Git reference (branch/tag/commit) to a specific commit SHA.
 
-        Delegates to :class:`GitReferenceResolver`.
+        Delegates to :class:`TieredRefResolver` when one is attached
+        (per-run, by the install resolve phase or outdated command) for
+        the #1369 fast-path; falls through to the legacy
+        :class:`GitReferenceResolver` otherwise.
         """
+        tiered = getattr(self, "_tiered_resolver", None)
+        if tiered is not None:
+            return tiered.resolve(repo_ref)
         return self._refs.resolve(repo_ref)
 
     def _resolve_commit_sha_for_ref(self, dep_ref: DependencyReference, ref: str) -> str | None:
