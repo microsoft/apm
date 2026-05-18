@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm compile --watch` now honors `targets: [claude, cursor]` (and every other multi-target / single-target configuration) on every recompile. Previously the watch path bypassed the resolver the one-shot path uses and let `CompilationConfig.from_apm_yml` fall back to the all-families default, silently regenerating `GEMINI.md` after every file edit. The watch path now resolves the effective target via the same helper the one-shot path uses and forwards it as `target=` into both the initial compile and every debounced recompile. (#1345)
 - Fixed hook commands using relative paths that break for Claude target (#1310)
 - Fixed target not propagating to intermediate CompilationConfig during compilation (#765)
 - Fixed direct GitHub API and ADO/GHES `git ls-remote` calls not respecting `PROXY_REGISTRY_ONLY` mode; all four validation code paths (virtual package, GitHub.com API, ADO/GHES git, and parse-failure fallback) now skip outbound network probes and return `True` when proxy-only mode is active. (#615)
@@ -26,11 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added APM-managed runtime binary resolution before PATH lookup; `find_runtime_binary()` now includes path-traversal security guards via `validate_path_segments` and `ensure_path_within`. (#605)
 - Added codex >= v0.116 compatibility warning for GitHub Models in `setup-codex.sh` and `setup-codex.ps1`. (#605)
 - Added `LAST_COMPAT_VERSION_MINOR` constant to both Codex setup scripts so the compatibility boundary is defined once. (#605)
+- `apm uninstall` now accepts the same marketplace notation as `apm install` (e.g. `my-plugin@official`) -- no more `owner/repo` lookup before removing a plugin you installed by name. Refs resolve via lockfile first (offline), then registry fallback, with a supply-chain guard that refuses any registry-returned canonical not already in the lockfile. ([#1323](https://github.com/microsoft/apm/issues/1323))
+- Added `--target/-t` option to `apm update` command to specify agent target (#1297)
 - `apm pack --marketplace=FORMATS` filters which marketplace formats are built in a single run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
 - `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. Env var overrides (`APM_MARKETPLACE_<FORMAT>_PATH`) are planned for v0.15. (#1317)
 - `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [{format, path, ...}]}}`); all logs move to stderr so downstream tooling can `jq` the output safely. (#1317)
 - `marketplace.outputs` in `apm.yml` now accepts a map form keyed by format name (`outputs: {claude: {}, codex: {path: ...}}`), replacing the deprecated list form; the list form still parses with a one-cycle deprecation warning. (#1317)
 - `apm marketplace init` now scaffolds the explicit map-form `outputs: {claude: {}}` so the default state is observable in the manifest. (#1317)
+- `apm pack --check-versions` validates per-package versions against a declared `marketplace.versioning.strategy` (`lockstep` / `tag_pattern` / `per_package`); exits `3` on misalignment. Reports per-package status in console output and in the `--json` envelope under `version_alignment`. (#1348)
+- `apm pack --check-clean` regenerates `marketplace.json` into a temp dir and diffs against the committed copy per configured output format; exits `4` on drift. Never writes to the working tree. Reports per-format status under `--json` key `drift`. When both gates fail, exit `3` wins over exit `4`. (#1348)
+- `apm.yml` schema: new optional block `marketplace.versioning: { strategy: lockstep | tag_pattern | per_package }` (default `lockstep`); strict key set. Additive -- existing manifests are unaffected. (#1348)
+- `apm marketplace doctor` adds a `version alignment` row surfacing the same logic as `--check-versions` (informational, no exit-code change). (#1348)
 
 ### Changed
 

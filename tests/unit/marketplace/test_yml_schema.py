@@ -45,6 +45,7 @@ def _minimal_yml(**overrides: object) -> str:
     packages = fields.pop("packages", None)
     build = fields.pop("build", None)
     metadata = fields.pop("metadata", None)
+    versioning = fields.pop("versioning", None)
 
     lines = []
     for k, v in fields.items():
@@ -61,6 +62,9 @@ def _minimal_yml(**overrides: object) -> str:
 
     if build is not None:
         lines.append(build)
+
+    if versioning is not None:
+        lines.append(versioning)
 
     if packages is None:
         lines.append("packages:")
@@ -833,3 +837,65 @@ class TestNewPassthroughFields:
         yml = _write_yml(tmp_path, content)
         result = load_marketplace_yml(yml)
         assert len(result.packages[0].tags) == 50
+
+
+# ---------------------------------------------------------------------------
+# Wave 4: marketplace.versioning block
+# ---------------------------------------------------------------------------
+
+
+class TestVersioningBlock:
+    """Verify parsing of the ``marketplace.versioning`` block (Wave 4)."""
+
+    def test_default_strategy_when_block_absent(self, tmp_path: Path):
+        yml = _write_yml(tmp_path, _minimal_yml())
+        result = load_marketplace_yml(yml)
+        assert result.versioning.strategy == "lockstep"
+
+    def test_lockstep_explicit(self, tmp_path: Path):
+        yml = _write_yml(
+            tmp_path,
+            _minimal_yml(versioning="versioning:\n  strategy: lockstep"),
+        )
+        result = load_marketplace_yml(yml)
+        assert result.versioning.strategy == "lockstep"
+
+    def test_tag_pattern_strategy(self, tmp_path: Path):
+        yml = _write_yml(
+            tmp_path,
+            _minimal_yml(versioning="versioning:\n  strategy: tag_pattern"),
+        )
+        result = load_marketplace_yml(yml)
+        assert result.versioning.strategy == "tag_pattern"
+
+    def test_per_package_strategy(self, tmp_path: Path):
+        yml = _write_yml(
+            tmp_path,
+            _minimal_yml(versioning="versioning:\n  strategy: per_package"),
+        )
+        result = load_marketplace_yml(yml)
+        assert result.versioning.strategy == "per_package"
+
+    def test_invalid_strategy_rejected(self, tmp_path: Path):
+        yml = _write_yml(
+            tmp_path,
+            _minimal_yml(versioning="versioning:\n  strategy: floating"),
+        )
+        with pytest.raises(MarketplaceYmlError, match=r"strategy"):
+            load_marketplace_yml(yml)
+
+    def test_unknown_key_rejected(self, tmp_path: Path):
+        yml = _write_yml(
+            tmp_path,
+            _minimal_yml(versioning="versioning:\n  strategy: lockstep\n  unknown: x"),
+        )
+        with pytest.raises(MarketplaceYmlError, match=r"unknown"):
+            load_marketplace_yml(yml)
+
+    def test_non_mapping_rejected(self, tmp_path: Path):
+        yml = _write_yml(
+            tmp_path,
+            _minimal_yml(versioning="versioning: 42"),
+        )
+        with pytest.raises(MarketplaceYmlError, match=r"versioning"):
+            load_marketplace_yml(yml)

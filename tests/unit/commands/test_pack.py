@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import textwrap as _tw
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.pack import _render_marketplace_result, pack_cmd
@@ -204,3 +206,120 @@ def test_post_pack_catalog_aligns_profiles_in_columns() -> None:
     # Both rows have an aligned label width (e.g. "[claude]" and "[codex] ")
     label_lengths = {line.split("]")[0] for line in catalog_rows}
     assert len(label_lengths) == 2  # both profiles present
+
+
+# ---------------------------------------------------------------------------
+# Wave 4: release-gate integration tests
+# ---------------------------------------------------------------------------
+
+
+_APM_GATE = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  packages:
+    - name: local-tool
+      source: ./packages/local-tool
+      description: Tool.
+      version: 1.0.0
+"""
+
+
+def _scaffold(tmp_path: Path, *, pkg_version: str = "1.0.0") -> Path:
+    (tmp_path / "apm.yml").write_text(_tw.dedent(_APM_GATE), encoding="utf-8")
+    pkg = tmp_path / "packages" / "local-tool"
+    pkg.mkdir(parents=True)
+    pkg.joinpath("apm.yml").write_text(
+        f"name: local-tool\ndescription: Tool.\nversion: {pkg_version}\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+class TestPackReleaseGatesIntegration:
+    """End-to-end gate behaviour: BuildOrchestrator + gates compose cleanly."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_console_state(self):
+        """Reset global console singleton to avoid --json polluting later tests."""
+        from apm_cli.utils.console import _reset_console
+
+        yield
+        _reset_console()
+
+    def test_no_gate_flags_returns_no_gate_keys_in_json(self, tmp_path: Path, monkeypatch) -> None:
+        import json as _json
+
+        _scaffold(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--dry-run", "--offline", "--json"])
+        data = _json.loads(result.output)
+        # Envelope always carries the keys; both should be null when not requested.
+        assert data["version_alignment"] is None
+        assert data["drift"] is None
+
+    def test_check_versions_only_payload_shape(self, tmp_path: Path, monkeypatch) -> None:
+        import json as _json
+
+        _scaffold(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--check-versions", "--dry-run", "--offline", "--json"]
+        )
+        data = _json.loads(result.output)
+        assert data["version_alignment"] is not None
+        assert data["version_alignment"]["strategy"] == "lockstep"
+        assert isinstance(data["version_alignment"]["packages"], list)
+
+    def test_check_clean_only_payload_shape(self, tmp_path: Path, monkeypatch) -> None:
+        import json as _json
+
+        _scaffold(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline", "--json"])
+        data = _json.loads(result.output)
+        assert data["drift"] is not None
+        assert isinstance(data["drift"]["outputs"], list)
+
+    def test_version_gate_passes_drift_gate_fails_exit_4(self, tmp_path: Path, monkeypatch) -> None:
+        _scaffold(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        # No marketplace.json on disk -> drift "missing" -> exit 4.
+        result = CliRunner().invoke(
+            pack_cmd,
+            ["--check-versions", "--check-clean", "--dry-run", "--offline"],
+        )
+        assert result.exit_code == 4
+
+    def test_version_gate_fails_drift_gate_passes_exit_3(self, tmp_path: Path, monkeypatch) -> None:
+        _scaffold(tmp_path, pkg_version="0.5.0")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-versions", "--dry-run", "--offline"])
+        assert result.exit_code == 3
+
+    def test_gate_errors_appear_in_json_envelope(self, tmp_path: Path, monkeypatch) -> None:
+        import json as _json
+
+        _scaffold(tmp_path, pkg_version="0.5.0")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--check-versions", "--dry-run", "--offline", "--json"]
+        )
+        data = _json.loads(result.output)
+        codes = {e["code"] for e in data.get("errors", [])}
+        assert "version_misaligned" in codes
+        assert data["ok"] is False
+
+    def test_gate_with_no_marketplace_block_does_not_fail(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # apm.yml without a marketplace block -> both gates skip cleanly.
+        (tmp_path / "apm.yml").write_text(
+            "name: x\ndescription: y\nversion: 1.0.0\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-versions", "--check-clean", "--dry-run"])
+        assert result.exit_code not in (3, 4)
