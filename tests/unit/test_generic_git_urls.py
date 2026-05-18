@@ -476,6 +476,17 @@ class TestSecurityWithGenericHosts:
         assert dep.host == "example.com"
         assert dep.repo_url == "scm/~myuser/my-apm-repo"
 
+    def test_ado_rejects_tilde_in_repo_path(self):
+        """ADO URLs MUST reject ``~`` in path segments.
+
+        Regression trap for the secure_by_default asymmetry between the ADO
+        and non-ADO path-component whitelists. Tilde has no meaning on
+        Azure DevOps URLs; keeping it out preserves the strict ADO surface
+        even though Bitbucket DC accepts it.
+        """
+        with pytest.raises(ValueError, match="Invalid repository path component"):
+            DependencyReference.parse("https://dev.azure.com/myorg/myproj/_git/~bad")
+
 
 class TestFQDNVirtualPaths:
     """Test FQDN shorthand with virtual paths on generic hosts.
