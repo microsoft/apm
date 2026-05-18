@@ -115,12 +115,12 @@ def _resolve_marketplace_packages(
                         dep.marketplace_plugin_name == plugin_name
                         and dep.discovered_via != marketplace_name
                     ):
+                        canonical = dep.get_unique_key()
                         logger.warning(
                             f"{plugin_name}@{marketplace_name} not found; "
                             f"package was installed via {dep.discovered_via}. "
-                            "Proceeding with uninstall."
+                            f"Proceeding with uninstall of {canonical}."
                         )
-                        canonical = dep.get_unique_key()
                         break
 
         # Stage 2: Registry fallback (silent, mirrors install behaviour)
@@ -142,23 +142,41 @@ def _resolve_marketplace_packages(
                     canonical = resolution.canonical
                     # Supply-chain guard: refuse registry canonicals not present in lockfile
                     if lockfile is not None and canonical not in lockfile.dependencies:
-                        logger.verbose_detail(
+                        logger.warning(
                             f"Registry resolved {plugin_name}@{marketplace_name} to "
-                            f"{canonical}, but it is not in the lockfile -- refusing."
+                            f"{canonical}, but it is not recorded in apm.lock.yaml. "
+                            "Refusing as a supply-chain precaution; use "
+                            f"`apm uninstall {canonical}` directly if this is correct."
                         )
                         canonical = None
+                    elif lockfile is None:
+                        # No lockfile means no offline integrity anchor; behaviour is
+                        # accepted today but tracked as a supply-chain follow-up.
+                        logger.verbose_detail(
+                            f"No lockfile present; trusting registry canonical "
+                            f"{canonical} for {plugin_name}@{marketplace_name}."
+                        )
                 except Exception as exc:
-                    logger.verbose_detail(
-                        f"Registry fallback for {plugin_name}@{marketplace_name} failed: {exc}"
+                    logger.warning(
+                        f"Registry lookup for {plugin_name}@{marketplace_name} failed: "
+                        f"{exc}. Falling back to apm.yml match."
                     )
 
         # Stage 3: Not found in either source -- surface a clear error
         if canonical is None:
-            logger.error(
-                f"{plugin_name}@{marketplace_name} could not be resolved -- "
-                "use owner/repo format to uninstall directly, or run "
-                "`apm list` to find the canonical name."
-            )
+            if dry_run:
+                logger.warning(
+                    f"{plugin_name}@{marketplace_name} could not be resolved in dry-run "
+                    "(registry fallback skipped). Re-run without --dry-run, or use "
+                    "owner/repo notation to preview directly."
+                )
+            else:
+                logger.error(
+                    f"{plugin_name}@{marketplace_name} could not be resolved -- "
+                    "use owner/repo format to uninstall directly, or run "
+                    "`apm list` to find the owner/repo canonical name "
+                    "then use `apm uninstall owner/repo` directly."
+                )
 
         resolved[package] = canonical
 
@@ -196,11 +214,15 @@ def _validate_uninstall_packages(
         *packages_not_found* contains unresolved or unmatched package strings.
     """
     # Pre-resolve any marketplace refs before the main validation loop
-    mkt_refs = [p for p in packages if _is_marketplace_ref(p)]
+    mkt_refs_set = {p for p in packages if _is_marketplace_ref(p)}
     mkt_resolved: dict[str, str | None] = {}
-    if mkt_refs:
+    if mkt_refs_set:
         mkt_resolved = _resolve_marketplace_packages(
-            mkt_refs, lockfile, logger, auth_resolver=auth_resolver, dry_run=dry_run
+            list(mkt_refs_set),
+            lockfile,
+            logger,
+            auth_resolver=auth_resolver,
+            dry_run=dry_run,
         )
 
     packages_to_remove = []
@@ -208,15 +230,21 @@ def _validate_uninstall_packages(
 
     for package in packages:
         if "/" not in package:
-            if _is_marketplace_ref(package):
+            if package in mkt_refs_set:
                 canonical = mkt_resolved.get(package)
                 if canonical is None:
-                    # Error already logged by _resolve_marketplace_packages
+                    # Error already logged by _resolve_marketplace_packages;
+                    # surface in packages_not_found so caller counts are accurate.
+                    packages_not_found.append(package)
                     continue
                 canonical_for_match = canonical
                 display_label = package
             else:
-                logger.error(f"Invalid package format: {package}. Use 'owner/repo' format.")
+                logger.error(
+                    f"Invalid package format: {package}. "
+                    "Use 'owner/repo' or 'plugin-name@marketplace' format."
+                )
+                packages_not_found.append(package)
                 continue
         else:
             canonical_for_match = package

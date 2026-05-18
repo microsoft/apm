@@ -110,7 +110,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 1: Validate packages
         from ...core.auth import AuthResolver
 
-        auth_resolver = AuthResolver()
+        # Lazy: only construct the resolver when we will actually call the registry.
+        auth_resolver = None if dry_run else AuthResolver()
         packages_to_remove, packages_not_found = _validate_uninstall_packages(
             packages, current_deps, logger, lockfile, auth_resolver=auth_resolver, dry_run=dry_run
         )

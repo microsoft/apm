@@ -29,7 +29,7 @@ The command only deletes files tracked in the lockfile's `deployed_files` manife
 
 | Option | Description |
 |---|---|
-| `--dry-run` | Show what would be removed without touching disk. |
+| `--dry-run` | Show what would be removed without touching disk. Registry fallback for marketplace notation is skipped. |
 | `-v, --verbose` | Show detailed removal information. |
 | `-g, --global` | Remove from the user scope (`~/.apm/`) instead of the current project. |
 
@@ -88,7 +88,19 @@ If a name passed on the command line is not found in `apm.yml`, the command warn
 
 If a marketplace ref cannot be resolved (neither the lockfile nor the registry has a matching entry), APM logs an error and skips that package. Use `owner/repo` notation to uninstall directly, or run `apm list` to find the canonical name.
 
-`--dry-run` runs steps 1-3 in memory and prints the plan; nothing is written. Registry fallback is also skipped in dry-run mode.
+### Supply-chain guard
+
+When marketplace notation (`name@marketplace`) falls through to the registry (Stage 2), APM refuses any canonical the registry returns that is not already recorded in `apm.lock.yaml`. The refusal is reported as a warning naming the resolved canonical so you can decide whether to re-run with `apm uninstall owner/repo` directly. This prevents a poisoned marketplace registry from coercing APM into removing an unrelated installed package.
+
+### `#ref` is not meaningful for `uninstall`
+
+`apm install` accepts an optional `#ref` fragment (`apm install NAME@MKT#ref`) to pin a specific revision. `apm uninstall` identifies packages by canonical name only, so any `#ref` fragment supplied with marketplace notation (e.g. `my-plugin@official#v1.0.0`) is ignored.
+
+### No-lockfile behavior
+
+If `apm.lock.yaml` is not present, marketplace notation has no offline anchor: Stage 1 finds nothing, and the supply-chain guard cannot cross-check the registry result. APM still attempts registry resolution and proceeds if the canonical matches an entry in `apm.yml`, but this path has weaker integrity guarantees. Prefer `owner/repo` form when there is no lockfile, or run `apm install` to regenerate the lockfile first.
+
+`--dry-run` runs steps 1-3 in memory and prints the plan; nothing is written. Registry fallback is also skipped in dry-run mode, so marketplace refs not already in the lockfile cannot be previewed; use `owner/repo` notation or re-run without `--dry-run`.
 
 ## Related
 

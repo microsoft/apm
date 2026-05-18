@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm uninstall` now accepts marketplace notation (`name@marketplace`) in addition to canonical `owner/repo` form; refs are resolved via lockfile first (offline), then registry fallback, with a supply-chain guard that refuses any registry-returned canonical not already in the lockfile. (#1323)
+- `apm uninstall` now accepts the same marketplace notation as `apm install` (e.g. `my-plugin@official`) -- no more `owner/repo` lookup before removing a plugin you installed by name. Refs resolve via lockfile first (offline), then registry fallback, with a supply-chain guard that refuses any registry-returned canonical not already in the lockfile. ([#1323](https://github.com/microsoft/apm/issues/1323))
 - Added `--target/-t` option to `apm update` command to specify agent target (#1297)
 - `apm pack --marketplace=FORMATS` filters which marketplace formats are built in a single run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
 - `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. Env var overrides (`APM_MARKETPLACE_<FORMAT>_PATH`) are planned for v0.15. (#1317)

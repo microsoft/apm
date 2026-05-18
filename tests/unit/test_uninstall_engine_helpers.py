@@ -102,11 +102,11 @@ class TestValidateUninstallPackages:
         logger.warning.assert_called_once()
 
     def test_invalid_format_no_slash_logs_error(self):
-        """Package without slash is rejected with an error message."""
+        """Package without slash is rejected with an error message and tracked in not_found."""
         logger = _make_logger()
         to_remove, not_found = _validate_uninstall_packages(["badpackage"], ["org/repo"], logger)
         assert to_remove == []
-        assert not_found == []
+        assert "badpackage" in not_found
         logger.error.assert_called_once()
 
     def test_multiple_packages_partial_match(self):
@@ -693,14 +693,17 @@ class TestResolveMarketplacePackages:
 
         mock_resolve.assert_not_called()
         assert result["my-plugin@official"] is None
-        # Error is logged (no lockfile, no registry)
-        logger.error.assert_called_once()
+        # Dry-run emits a warning (not error) since no operation was attempted.
+        logger.warning.assert_called_once()
+        warn_msg = logger.warning.call_args[0][0]
+        assert "dry-run" in warn_msg.lower()
+        logger.error.assert_not_called()
 
     def test_supply_chain_guard_refuses_canonical_not_in_lockfile(self):
         """Registry canonical absent from lockfile is refused; result is None."""
         from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
 
-        lockfile = LockFile()  # empty — registry result won't be present
+        lockfile = LockFile()  # empty -- registry result won't be present
         logger = _make_logger()
 
         with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
@@ -708,9 +711,11 @@ class TestResolveMarketplacePackages:
             result = _resolve_marketplace_packages(["injected-plugin@official"], lockfile, logger)
 
         assert result["injected-plugin@official"] is None
-        # verbose_detail must mention the refused canonical
-        verbose_calls = [str(c) for c in logger.verbose_detail.call_args_list]
-        assert any("injected-plugin" in msg for msg in verbose_calls)
+        # Warning (not verbose_detail) must surface the refusal at normal verbosity.
+        logger.warning.assert_called_once()
+        warn_msg = logger.warning.call_args[0][0]
+        assert "acme/injected-plugin" in warn_msg
+        assert "apm.lock.yaml" in warn_msg
         logger.error.assert_called_once()
 
     def test_provenance_mismatch_warns_and_resolves(self):
@@ -791,7 +796,7 @@ class TestValidateUninstallPackagesMarketplace:
         assert "acme/my-plugin" in warning_msg
 
     def test_marketplace_ref_resolution_fails_is_skipped(self):
-        """When resolution returns None, the package is skipped (error already logged)."""
+        """When resolution returns None, the package is recorded as not_found."""
         logger = _make_logger()
 
         with patch(
@@ -803,8 +808,9 @@ class TestValidateUninstallPackagesMarketplace:
             )
 
         assert to_remove == []
-        assert not_found == []
-        # Error must have been logged by _resolve_marketplace_packages
+        # Unresolvable marketplace refs MUST appear in packages_not_found so callers
+        # report accurate "N package(s) not found" counts (API contract).
+        assert "my-plugin@official" in not_found
         logger.error.assert_called_once()
 
     def test_canonical_ref_behaviour_unchanged(self):
@@ -826,9 +832,13 @@ class TestValidateUninstallPackagesMarketplace:
         to_remove, not_found = _validate_uninstall_packages(["badpackage"], ["org/repo"], logger)
 
         assert to_remove == []
-        assert not_found == []
+        # Invalid-format inputs MUST appear in packages_not_found (API contract).
+        assert "badpackage" in not_found
         logger.error.assert_called_once()
-        assert "owner/repo" in logger.error.call_args[0][0]
+        err_msg = logger.error.call_args[0][0]
+        assert "owner/repo" in err_msg
+        # Error must surface marketplace notation symmetrically with install.
+        assert "plugin-name@marketplace" in err_msg
 
     def test_mixed_canonical_and_marketplace_refs(self):
         """Batch mixing canonical and marketplace refs processes both correctly."""

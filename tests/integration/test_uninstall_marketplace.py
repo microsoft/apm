@@ -150,3 +150,41 @@ def test_uninstall_marketplace_dry_run_no_changes(apm_command, tmp_path):
     # apm_modules must still exist
     pkg_dir = project / "apm_modules" / "owner" / "my-plugin"
     assert pkg_dir.exists(), "Expected apm_modules to be untouched after dry-run"
+
+
+def test_uninstall_marketplace_dry_run_no_lockfile_warns(apm_command, tmp_path):
+    """``apm uninstall name@marketplace --dry-run`` without a lockfile warns and skips.
+
+    Stage 1 (lockfile lookup) finds nothing because no lockfile exists, and Stage 2
+    (registry fallback) is skipped under ``--dry-run``. The CLI must surface a
+    user-visible warning that the ref could not be resolved in dry-run mode,
+    rather than silently exiting or emitting a misleading error.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+
+    canonical = "owner/my-plugin"
+    config = {
+        "name": "uninstall-no-lockfile-test",
+        "version": "1.0.0",
+        "dependencies": {"apm": [canonical], "mcp": []},
+    }
+    (project / "apm.yml").write_text(yaml.dump(config, default_flow_style=False), encoding="utf-8")
+    # Deliberately do NOT seed apm.lock.yaml -- this is the no-lockfile path.
+
+    result = _run_apm(
+        apm_command,
+        ["uninstall", "my-plugin@official", "--dry-run"],
+        project,
+    )
+
+    combined = result.stdout + result.stderr
+    assert "could not be resolved" in combined or "dry-run" in combined.lower(), (
+        f"Expected dry-run resolution warning in output. "
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    # apm.yml must be untouched regardless of the warning.
+    data = yaml.safe_load((project / "apm.yml").read_text())
+    assert canonical in (data.get("dependencies", {}).get("apm") or []), (
+        "Expected apm.yml unchanged after dry-run"
+    )
