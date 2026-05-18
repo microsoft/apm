@@ -1,13 +1,23 @@
 """APM compile watch mode."""
 
+from __future__ import annotations
+
 import time
+from typing import TYPE_CHECKING, Any
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 
+if TYPE_CHECKING:
+    from ...core.target_detection import CompileTargetType
 
-def _format_target_label(effective_target, target_label_user, target_label_config):
+
+def _format_target_label(
+    effective_target: CompileTargetType | None,
+    target_label_user: str | list[str] | None,
+    target_label_config: str | list[str] | None,
+) -> str | None:
     """Render a one-shot-parity 'Compiling for ...' label for the watch path.
 
     Mirrors the family-aware label the one-shot compile path emits so the
@@ -51,23 +61,23 @@ class APMFileHandler:
 
     def __init__(
         self,
-        output,
-        chatmode,
-        no_links,
-        dry_run,
-        logger,
-        effective_target=None,
-    ):
+        output: str,
+        chatmode: str | None,
+        no_links: bool,
+        dry_run: bool,
+        logger: CommandLogger,
+        effective_target: CompileTargetType | None = None,
+    ) -> None:
         self.output = output
         self.chatmode = chatmode
         self.no_links = no_links
         self.dry_run = dry_run
         self.logger = logger
         self.effective_target = effective_target
-        self.last_compile = 0
+        self.last_compile = 0.0
         self.debounce_delay = 1.0  # 1 second debounce
 
-    def on_modified(self, event):
+    def on_modified(self, event: Any) -> None:
         if getattr(event, "is_directory", False):
             return
         src_path = getattr(event, "src_path", "")
@@ -79,7 +89,7 @@ class APMFileHandler:
         self.last_compile = current_time
         self._recompile(src_path)
 
-    def _recompile(self, changed_file):
+    def _recompile(self, changed_file: str) -> None:
         """Recompile after a file change, honoring the resolved target."""
         try:
             self.logger.progress(f"File changed: {changed_file}", symbol="eyes")
@@ -111,15 +121,15 @@ class APMFileHandler:
 
 
 def _watch_mode(
-    output,
-    chatmode,
-    no_links,
-    dry_run,
-    verbose=False,
-    effective_target=None,
-    target_label_user=None,
-    target_label_config=None,
-):
+    output: str,
+    chatmode: str | None,
+    no_links: bool,
+    dry_run: bool,
+    verbose: bool = False,
+    effective_target: CompileTargetType | None = None,
+    target_label_user: str | list[str] | None = None,
+    target_label_config: str | list[str] | None = None,
+) -> None:
     """Watch for changes in .apm/ directories and auto-recompile.
 
     ``effective_target`` is the compiler-understood target resolved by

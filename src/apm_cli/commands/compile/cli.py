@@ -1,9 +1,15 @@
 """APM compile command CLI."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from ...core.target_detection import CompileTargetType
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
@@ -252,7 +258,9 @@ def _resolve_compile_target(target):
     return target  # single string pass-through
 
 
-def _resolve_effective_target(target):
+def _resolve_effective_target(
+    target: str | list[str] | None,
+) -> tuple[CompileTargetType, str, str | list[str] | None]:
     """Resolve the CLI --target arg to the compiler-understood effective target.
 
     Mirrors the resolution the one-shot compile path performs (load
