@@ -46,6 +46,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..models.apm_package import (
@@ -57,8 +58,8 @@ from ..utils.github_host import default_host
 
 if TYPE_CHECKING:
     from ..cache.git_cache import GitCache
-    from ..cache.http_cache import HttpCache
-    from ..core.auth import AuthResolver
+    from ..deps.git_reference_resolver import GitReferenceResolver
+    from ..deps.github_downloader import GitHubPackageDownloader
 
 _log = logging.getLogger(__name__)
 
@@ -143,25 +144,22 @@ class L0PerRunCache:
 class L1CommitsAPI:
     """Resolve via the GitHub-family commits API.
 
-    Reuses :meth:`GitReferenceResolver.resolve_commit_sha_for_ref` -- the
-    cheap-path helper that already does the dispatch through
-    ``host_backends.build_commits_api_url`` and ``host._resilient_get``.
-    Adds an :class:`HttpCache` ETag pass when the request is
-    UNauthenticated (per ``http_cache`` auth-scoping rule, line 16-19:
-    cached responses must not leak across auth identities).
+    Delegates to :meth:`GitReferenceResolver.resolve_commit_sha_for_ref` --
+    the cheap-path helper that already dispatches through
+    ``host_backends.build_commits_api_url`` and ``host._resilient_get``,
+    inheriting that helper's auth + retry behavior. Returns ``None`` for
+    hosts whose backend has no cheap commits endpoint (e.g. ADO today);
+    the caller then falls through to L2/L3.
+
+    Future: an explicit :class:`HttpCache` ETag pass could be added here
+    for unauthenticated requests (the underlying helper does not yet
+    integrate with the on-disk HTTP cache). Out of scope for #1369.
     """
 
     name = "commits_api"
 
-    def __init__(
-        self,
-        host: object,
-        http_cache: HttpCache | None = None,
-        auth_resolver: AuthResolver | None = None,
-    ) -> None:
+    def __init__(self, host: object) -> None:
         self._host = host
-        self._http_cache = http_cache
-        self._auth_resolver = auth_resolver
 
     def try_resolve(self, dep_ref: DependencyReference, ref: str) -> str | None:
         if _SHA_RE.match(ref or ""):
@@ -241,7 +239,7 @@ class L2BareRevParse:
         return self._rev_parse(bare_dir, ref)
 
     @staticmethod
-    def _rev_parse(bare_dir, ref: str) -> str | None:
+    def _rev_parse(bare_dir: Path, ref: str) -> str | None:
         import subprocess
 
         from ..utils.git_env import get_git_executable, git_subprocess_env
@@ -287,7 +285,7 @@ class L3LegacyClone:
 
     name = "legacy_clone"
 
-    def __init__(self, legacy_resolver) -> None:
+    def __init__(self, legacy_resolver: GitReferenceResolver) -> None:
         self._legacy = legacy_resolver
 
     def try_resolve(self, dep_ref: DependencyReference, ref: str) -> str | None:
@@ -460,10 +458,8 @@ class TieredRefResolver:
 
 def build_tiered_ref_resolver(
     *,
-    downloader,
-    http_cache: HttpCache | None = None,
+    downloader: GitHubPackageDownloader,
     git_cache: GitCache | None = None,
-    auth_resolver: AuthResolver | None = None,
 ) -> TieredRefResolver | None:
     """Construct the production tier stack, or ``None`` if disabled.
 
@@ -487,7 +483,7 @@ def build_tiered_ref_resolver(
 
     tiers: list[RefResolutionTier] = [
         L0PerRunCache(cache=cache),
-        L1CommitsAPI(host=downloader, http_cache=http_cache, auth_resolver=auth_resolver),
+        L1CommitsAPI(host=downloader),
         L2BareRevParse(git_cache=git_cache),
         legacy,
     ]

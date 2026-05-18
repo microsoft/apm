@@ -347,14 +347,19 @@ def outdated(global_, verbose, parallel_checks):
                 pass
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
-            http_cache=None,
             git_cache=_git_cache,
-            auth_resolver=auth_resolver,
         )
         if _tiered is not None:
             downloader._tiered_resolver = _tiered
-    except Exception:  # pragma: no cover - never block outdated on resolver wiring
-        pass
+    except Exception as exc:  # pragma: no cover - never block outdated on resolver wiring
+        # Non-blocking, but log so --verbose surfaces wiring failures.
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "Tiered ref resolver wiring skipped for outdated (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
 
     # Filter to checkable deps (skip local + Artifactory)
     checkable = []

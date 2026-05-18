@@ -136,15 +136,20 @@ def run(ctx: InstallContext) -> None:
 
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
-            http_cache=None,
             git_cache=getattr(downloader, "persistent_git_cache", None),
-            auth_resolver=ctx.auth_resolver,
         )
         if _tiered is not None:
             downloader._tiered_resolver = _tiered
             ctx.ref_resolver = _tiered
-    except Exception:  # pragma: no cover - defensive: never block resolve phase
-        pass
+    except Exception as exc:  # pragma: no cover - defensive: never block resolve phase
+        # Keep non-blocking behavior, but make it diagnosable in --verbose.
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "Tiered ref resolver wiring skipped (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
 
     # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)

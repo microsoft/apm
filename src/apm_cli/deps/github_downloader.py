@@ -218,6 +218,14 @@ class GitHubPackageDownloader:
         # Set by the install pipeline; None disables persistent caching.
         self.persistent_git_cache = None
 
+        # #1369: tiered ref resolver. Attached by resolve.py / outdated.py
+        # after construction via ``build_tiered_ref_resolver``. When set,
+        # :meth:`resolve_git_reference` delegates to it before falling
+        # through to ``self._refs.resolve``. Declared here so the
+        # attribute is part of the documented downloader surface rather
+        # than a monkey-patched field.
+        self._tiered_resolver = None
+
     def _git_env_dict(self) -> dict[str, str]:
         """Return a sanitized git env dict for cache-layer subprocess calls.
 
