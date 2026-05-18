@@ -317,7 +317,7 @@ def _mock_build_result_with_outputs(profiles=("claude",), dry_run_flags=None):
         dry_run_flags = [False] * len(profiles)
     path_map = {
         "claude": Path(".claude-plugin/marketplace.json"),
-        "codex": Path(".codex/plugins/marketplace.json"),
+        "codex": Path(".agents/plugins/marketplace.json"),
     }
     outputs = []
     for profile, dry in zip(profiles, dry_run_flags, strict=True):
@@ -366,9 +366,20 @@ class TestVendorNeutralCatalog:
         assert "[claude]" in out
         assert "[codex" in out  # ljust-padded to align with [claude]
         assert ".claude-plugin/marketplace.json" in out
-        assert ".codex/plugins/marketplace.json" in out
-        # Single docs pointer, no per-vendor install commands.
-        assert "publish-to-a-marketplace" in out
+        assert ".agents/plugins/marketplace.json" in out
+        # Single docs pointer with the expected hostname + anchor path.
+        # Rich may line-wrap the URL in the CLI output; assert on canonical
+        # host + path (fragment is verified in the unit-level catalog test
+        # where Rich does not wrap).
+        from urllib.parse import urlparse
+
+        urls = [tok.strip("(),.;'\"") for tok in out.split() if "://" in tok.strip("(),.;'\"")]
+        docs_urls = [u for u in urls if "publish-to-a-marketplace" in urlparse(u).path]
+        assert len(docs_urls) == 1, f"expected exactly one docs URL, got {docs_urls!r}"
+        parsed = urlparse(docs_urls[0])
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "microsoft.github.io"
+        assert parsed.path == "/apm/producer/publish-to-a-marketplace/"
         for forbidden in (
             "copilot plugin install",
             "claude plugin install",

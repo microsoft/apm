@@ -90,7 +90,9 @@ def test_marketplace_fallback_renders_report_warnings_without_extra_warnings() -
 # ---------------------------------------------------------------------------
 
 
-def _build_report_with_outputs(profiles_paths):
+def _build_report_with_outputs(
+    profiles_paths: list[tuple[str, str]],
+) -> BuildReport:
     """Helper: build a BuildReport with N MarketplaceOutputReport entries."""
     return BuildReport(
         outputs=tuple(
@@ -109,6 +111,8 @@ def _build_report_with_outputs(profiles_paths):
 def test_post_pack_catalog_emits_artifacts_and_docs_url() -> None:
     """G3+B: after per-output success lines, render a catalog and a
     single docs pointer that consumers can follow."""
+    from urllib.parse import urlparse
+
     logger = _RecordingLogger()
     report = _build_report_with_outputs(
         [
@@ -126,11 +130,21 @@ def test_post_pack_catalog_emits_artifacts_and_docs_url() -> None:
     assert any(line.startswith("Marketplace artifacts ready:") for line in logger.infos)
     # Two indented artifact rows
     assert sum(1 for line in logger.infos if line.startswith("  ")) == 2
-    # Single docs pointer URL line
-    assert any(
-        "publish-to-a-marketplace" in line and "consume-from-any-assistant" in line
-        for line in logger.infos
-    )
+    # Single docs pointer URL line -- parsed, not substring-matched.
+    docs_urls: list[str] = []
+    for line in logger.infos:
+        for token in line.split():
+            cleaned = token.strip("(),.;'\"")
+            if "://" not in cleaned:
+                continue
+            if "publish-to-a-marketplace" in urlparse(cleaned).path:
+                docs_urls.append(cleaned)
+    assert len(docs_urls) == 1, f"expected exactly one docs URL, got {docs_urls!r}"
+    parsed = urlparse(docs_urls[0])
+    assert parsed.scheme == "https"
+    assert parsed.hostname == "microsoft.github.io"
+    assert parsed.path == "/apm/producer/publish-to-a-marketplace/"
+    assert parsed.fragment == "consume-from-any-assistant"
 
 
 def test_post_pack_catalog_suppressed_in_dry_run() -> None:
