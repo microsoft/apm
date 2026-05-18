@@ -1,6 +1,6 @@
 ---
 title: Repo shapes for marketplace producers
-description: Three layouts for shipping APM plugins -- single-plugin, aggregator, and monorepo-hybrid -- and the noun-verb commands that scaffold each.
+description: Two primitive producer postures -- single-plugin and aggregator -- plus the hybrid composition that runs both in one repo, and the noun-verb commands that scaffold each.
 sidebar:
   order: 5
 ---
@@ -10,15 +10,17 @@ A marketplace producer repo is just an `apm.yml` (or several) plus a
 mode: every layout below emerges from the same two commands,
 `apm plugin init` and `apm marketplace init`, composed differently.
 
-Pick the shape that matches how the source code is already
-organised. You can migrate later by moving directories and re-running
-the same commands.
+Two primitive postures cover most repos -- you ship your own plugin,
+or you curate others' plugins into a marketplace. The third row in
+the table is what happens when one repo does both at once. Pick the
+shape that matches how the source code is already organised; you can
+migrate later by moving directories and re-running the same commands.
 
 | Shape            | Source files                                      | When                                                |
 |------------------|---------------------------------------------------|-----------------------------------------------------|
 | Single-plugin    | One `apm.yml` at the repo root                    | One plugin per repo. Smallest surface, fewest gotchas. |
 | Aggregator       | One `apm.yml` at the root, N remote `packages:`   | You curate other repos into a marketplace.          |
-| Monorepo-hybrid  | Root `apm.yml` plus per-plugin `apm.yml` subdirs  | Many plugins live alongside the marketplace in one repo. |
+| Monorepo-hybrid (advanced) | Root `apm.yml` plus per-plugin `apm.yml` subdirs | Many plugins live alongside the marketplace in one repo. Composition of the two postures above. |
 
 When the layout is ready, ship it with the recipe in
 [Releasing from any CI](../releasing-from-any-ci/).
@@ -99,6 +101,8 @@ writes `marketplace.json` only. No bundle is produced because there
 is no `dependencies:` block.
 
 ## Monorepo-hybrid
+
+> **Advanced.** Most first-time authors should start with single-plugin or aggregator. Reach for hybrid when you're shipping your own plugin *and* curating others (e.g., `zava-agent-configs`).
 
 One repo, many plugins under `packages/`, one marketplace at the root
 that lists them as local-path entries. Each plugin gets its own
