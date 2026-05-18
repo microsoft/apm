@@ -25,7 +25,7 @@ from ..deps.lockfile import (
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
-from ..utils.console import _rich_info, _rich_warning  # noqa: F401
+from ..utils.console import _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
 
@@ -335,9 +335,18 @@ def _get_dev_dependency_urls(apm_yml_path: Path) -> set[tuple[str, str]]:
 def _find_or_synthesize_plugin_json(
     project_root: Path,
     apm_yml_path: Path,
+    *,
+    suppress_missing_warning: bool = False,
     logger=None,
 ) -> dict:
-    """Locate an existing ``plugin.json`` or synthesise one from ``apm.yml``."""
+    """Locate an existing ``plugin.json`` or synthesise one from ``apm.yml``.
+
+    ``suppress_missing_warning`` silences the "no plugin.json on disk"
+    message when the caller knows synthesis is the expected path -- for
+    example a marketplace-publishing run that happens to have
+    ``dependencies:`` for local dev. Genuine parse errors on an existing
+    file are always surfaced.
+    """
     from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
     from ..utils.helpers import find_plugin_json
 
@@ -355,15 +364,28 @@ def _find_or_synthesize_plugin_json(
             else:
                 _rich_warning(_warn_msg)
 
-    else:
-        _warn_msg = (
-            "No plugin.json found. Synthesizing from apm.yml. Consider running 'apm init --plugin'."
+    elif not suppress_missing_warning:
+        # Demoted from warning to info: synthesis from apm.yml is the
+        # APM-native happy path for plugin authoring, not a defect.
+        _info_msg = (
+            "No plugin.json on disk; deriving it from apm.yml (the APM-native source of truth)."
         )
         if logger:
-            logger.warning(_warn_msg)
+            logger.info(_info_msg)
         else:
-            _rich_warning(_warn_msg)
+            _rich_info(_info_msg)
     return synthesize_plugin_json_from_apm_yml(apm_yml_path)
+
+
+def _has_marketplace_block(apm_yml_path: Path) -> bool:
+    """Return True if apm.yml declares a non-empty ``marketplace:`` block."""
+    try:
+        import yaml
+
+        data = yaml.safe_load(apm_yml_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    return bool(data.get("marketplace"))
 
 
 def _update_plugin_json_paths(plugin_json: dict, output_files: list[str], logger=None) -> dict:
@@ -464,7 +486,12 @@ def export_plugin_bundle(
             )
 
     # 3. Find or synthesize plugin.json
-    plugin_json = _find_or_synthesize_plugin_json(project_root, apm_yml_path, logger=logger)
+    plugin_json = _find_or_synthesize_plugin_json(
+        project_root,
+        apm_yml_path,
+        suppress_missing_warning=_has_marketplace_block(apm_yml_path),
+        logger=logger,
+    )
 
     # 4. devDependencies filtering
     dev_dep_urls = _get_dev_dependency_urls(apm_yml_path)

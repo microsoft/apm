@@ -178,6 +178,52 @@ Use type hints in Python code.
         assert result.output_path, "codex target must route to a compiler, not return empty"
         assert "AGENTS.md" in result.output_path
 
+    def test_codex_single_agents_no_claude_preview_issue_765_cli(self, temp_project):
+        """Regression for issue #765: CLI --target codex --single-agents must not append Claude preview text.
+
+        Issue: When target='codex' and single_agents=True were used via CLI, the intermediate_config
+        constructor in the single-file path was missing target=config.target, causing target
+        to default to "all". This caused _compile_claude_md() to run and append preview text
+        to AGENTS output.
+
+        Fix: Added target=config.target to CompilationConfig(...) constructor in single-file path
+        in src/apm_cli/commands/compile/cli.py (lines 699-707).
+
+        This CLI-level test exercises the fixed code path that was actually buggy.
+        """
+        original_dir = os.getcwd()
+        runner = CliRunner()
+        try:
+            os.chdir(temp_project)
+            result = runner.invoke(
+                cli,
+                [
+                    "compile",
+                    "--target",
+                    "codex",
+                    "--single-agents",
+                    "--dry-run",
+                ],
+            )
+
+            # Must succeed
+            assert result.exit_code == 0, (
+                f"CLI exited with code {result.exit_code}:\n{result.output}"
+            )
+            # Output must reference AGENTS.md generation
+            assert "AGENTS.md" in result.output, (
+                f"Expected AGENTS.md reference in output:\n{result.output}"
+            )
+            # CRITICAL: No Claude preview text appended (the regression)
+            assert "CLAUDE.md Preview" not in result.output, (
+                f"BUG: Claude preview text found in output:\n{result.output}"
+            )
+            assert "CLAUDE.md Preview: Would generate" not in result.output, (
+                f"BUG: Claude preview-generate artifacts found in output:\n{result.output}"
+            )
+        finally:
+            os.chdir(original_dir)
+
     def test_target_opencode_generates_agents_md(self, temp_project, sample_primitives):
         """target='opencode' must route to AGENTS.md (same universal format as codex)."""
         config = CompilationConfig(

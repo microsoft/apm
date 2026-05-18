@@ -52,7 +52,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ class _MergeHookConfig:
     config_filename: str  # e.g. "settings.json" or "hooks.json"
     target_key: str  # target name passed to _rewrite_hooks_data
     require_dir: bool  # True = skip if target dir doesn't exist
+    schema_strict: bool = False  # True = strip _apm_source before writing to disk
 
 
 # Per-target hook event name mapping.  Packages are authored with
@@ -156,6 +158,7 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         config_filename="settings.json",
         target_key="claude",
         require_dir=False,
+        schema_strict=True,
     ),
     "cursor": _MergeHookConfig(
         config_filename="hooks.json",
@@ -178,6 +181,47 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         require_dir=True,
     ),
 }
+
+_APM_HOOKS_SIDECAR = "apm-hooks.json"
+
+
+def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
+    """Restore _apm_source markers from sidecar into in-memory hook entries.
+
+    Schema-strict targets (e.g. Claude) do not persist ``_apm_source`` in
+    their settings file.  Instead, ownership metadata is stored in a
+    sidecar file.  This helper re-injects those markers so the rest of
+    the integration logic can work with them as normal.
+
+    Each sidecar entry is consumed at most once to prevent falsely claiming
+    user-owned hooks that happen to have identical content to an APM hook.
+
+    Args:
+        hooks: The ``"hooks"`` dict loaded from the target config file
+            (mutated in-place).
+        sidecar_data: The dict loaded from the sidecar file.
+    """
+    for event_name, sidecar_entries in sidecar_data.items():
+        if event_name not in hooks or not isinstance(sidecar_entries, list):
+            continue
+        # Build a consumable pool of (normalised-content, source) pairs.
+        # Each entry is popped on first match so identical content shared
+        # between APM and the user is only claimed once.
+        pool: list[tuple[dict, str]] = []
+        for sc_entry in sidecar_entries:
+            if isinstance(sc_entry, dict) and "_apm_source" in sc_entry:
+                cmp = {k: v for k, v in sorted(sc_entry.items()) if k != "_apm_source"}
+                pool.append((cmp, sc_entry["_apm_source"]))
+
+        for disk_entry in hooks[event_name]:
+            if not isinstance(disk_entry, dict) or "_apm_source" in disk_entry:
+                continue
+            disk_cmp = {k: v for k, v in sorted(disk_entry.items()) if k != "_apm_source"}
+            for i, (sc_cmp, source) in enumerate(pool):
+                if disk_cmp == sc_cmp:
+                    disk_entry["_apm_source"] = source
+                    pool.pop(i)
+                    break
 
 
 # Mapping from hook-file stem suffix to the set of target keys that
@@ -328,6 +372,7 @@ class HookIntegrator(BaseIntegrator):
         target: str,
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
+        deploy_root: Path | None = None,
     ) -> tuple[str, list[tuple[Path, str]]]:
         """Rewrite a hook command to use installed script paths.
 
@@ -343,6 +388,11 @@ class HookIntegrator(BaseIntegrator):
             target: "vscode" or "claude"
             hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
             root_dir: Override root directory (e.g. ".copilot" for user scope)
+            deploy_root: Absolute root of the deployment directory.  When provided,
+                rewritten script paths are resolved to absolute paths under this
+                root so the target (e.g. Claude Code) can execute them regardless
+                of the working directory.  When *None*, rewritten paths stay
+                relative (backward-compatible behaviour).
 
         Returns:
             Tuple of (rewritten_command, list of (source_file, relative_target_path))
@@ -370,7 +420,7 @@ class HookIntegrator(BaseIntegrator):
         # Match both forward-slash and backslash separators (Windows hook JSON
         # may use backslashes: ${CLAUDE_PLUGIN_ROOT}\scripts\scan.ps1)
         plugin_root_pattern = (
-            r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}([\\/][^\s]+)"
+            r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}([\\/][^\s\"']+)"
         )
         for match in re.finditer(plugin_root_pattern, command):
             full_var = match.group(0)
@@ -378,14 +428,24 @@ class HookIntegrator(BaseIntegrator):
             # (on Unix, Path treats backslashes as literal filename chars)
             rel_path = match.group(1).replace("\\", "/").lstrip("/")
 
-            source_file = (package_path / rel_path).resolve()
-            # Reject path traversal outside the package directory
-            if not source_file.is_relative_to(package_path.resolve()):
+            try:
+                source_file = ensure_path_within(package_path / rel_path, package_path)
+            except PathTraversalError:
                 continue
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                new_command = new_command.replace(full_var, target_rel)
+                resolved_cmd = (
+                    str((deploy_root / target_rel).resolve())
+                    if deploy_root is not None
+                    else target_rel
+                )
+                new_command = new_command.replace(full_var, resolved_cmd)
+            elif deploy_root is not None:
+                # File absent: resolve to absolute source path so Claude Code
+                # gets a clear "file not found" rather than an unexpanded variable.
+                _rich_warning(f"Hook script not found: {source_file}")
+                new_command = new_command.replace(full_var, str(source_file))
 
         # Handle relative ./path and .\path references (safe to run after
         # ${CLAUDE_PLUGIN_ROOT} substitution since replacements produce paths
@@ -394,20 +454,30 @@ class HookIntegrator(BaseIntegrator):
         # may use backslashes: .\scripts\scan.ps1)
         # Resolve from hook file's directory if available, else fall back to package root
         resolve_base = hook_file_dir if hook_file_dir else package_path
-        rel_pattern = r"(\.[\\/][^\s]+)"
+        rel_pattern = r"(\.[\\/][^\s\"']+)"
         for match in re.finditer(rel_pattern, new_command):
             rel_ref = match.group(1)
             # Normalize to forward slashes for path resolution
             rel_path = rel_ref[2:].replace("\\", "/")
 
-            source_file = (resolve_base / rel_path).resolve()
-            # Reject path traversal outside the package directory
-            if not source_file.is_relative_to(package_path.resolve()):
+            try:
+                source_file = ensure_path_within(resolve_base / rel_path, package_path)
+            except PathTraversalError:
                 continue
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
                 scripts_to_copy.append((source_file, target_rel))
-                new_command = new_command.replace(rel_ref, target_rel)
+                resolved_cmd = (
+                    str((deploy_root / target_rel).resolve())
+                    if deploy_root is not None
+                    else target_rel
+                )
+                new_command = new_command.replace(rel_ref, resolved_cmd)
+            elif deploy_root is not None:
+                # File absent: resolve to absolute source path so the target
+                # gets a clear "file not found" rather than a bare relative ref.
+                _rich_warning(f"Hook script not found: {source_file}")
+                new_command = new_command.replace(rel_ref, str(source_file))
 
         return new_command, scripts_to_copy
 
@@ -419,6 +489,7 @@ class HookIntegrator(BaseIntegrator):
         target: str,
         hook_file_dir: Path | None = None,
         root_dir: str | None = None,
+        deploy_root: Path | None = None,
     ) -> tuple[dict, list[tuple[Path, str]]]:
         """Rewrite all command paths in a hooks JSON structure.
 
@@ -431,6 +502,10 @@ class HookIntegrator(BaseIntegrator):
             target: "vscode" or "claude"
             hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
             root_dir: Override root directory (e.g. ".copilot" for user scope)
+            deploy_root: Absolute root of the deployment directory.  When provided,
+                all rewritten script paths are resolved to absolute paths so the
+                target can locate scripts regardless of the working directory.
+                When *None*, paths remain relative (backward-compatible behaviour).
 
         Returns:
             Tuple of (rewritten_data_copy, list of (source_file, target_rel_path))
@@ -458,6 +533,7 @@ class HookIntegrator(BaseIntegrator):
                             target,
                             hook_file_dir=hook_file_dir,
                             root_dir=root_dir,
+                            deploy_root=deploy_root,
                         )
                         if scripts:
                             _log.debug(
@@ -484,6 +560,7 @@ class HookIntegrator(BaseIntegrator):
                                 target,
                                 hook_file_dir=hook_file_dir,
                                 root_dir=root_dir,
+                                deploy_root=deploy_root,
                             )
                             if scripts:
                                 _log.debug(
@@ -683,6 +760,29 @@ class HookIntegrator(BaseIntegrator):
             except (json.JSONDecodeError, OSError):
                 json_config = {}
 
+        # Load sidecar ownership metadata (schema-strict targets)
+        sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+        sidecar_data: dict = {}
+        if config.schema_strict and sidecar_path.exists():
+            try:
+                with open(sidecar_path, encoding="utf-8") as f:
+                    _raw = json.load(f)
+                if isinstance(_raw, dict):
+                    sidecar_data = _raw
+                else:
+                    _log.warning(
+                        "Sidecar file %s contains non-dict JSON; treating as empty.",
+                        sidecar_path,
+                    )
+                    sidecar_data = {}
+            except (json.JSONDecodeError, OSError) as exc:
+                _log.warning("Failed to read sidecar %s: %s; treating as empty.", sidecar_path, exc)
+                sidecar_data = {}
+
+            # Re-inject _apm_source from sidecar into matching in-memory entries
+            if sidecar_data and "hooks" in json_config:
+                _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
+
         if "hooks" not in json_config:
             json_config["hooks"] = {}
 
@@ -699,6 +799,7 @@ class HookIntegrator(BaseIntegrator):
                 config.target_key,
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
+                deploy_root=project_root,
             )
 
             # Merge hooks into config (additive)
@@ -808,6 +909,37 @@ class HookIntegrator(BaseIntegrator):
         # Don't track the config file in target_paths -- it's a shared
         # file cleaned via _apm_source markers, not file-level deletion
         json_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if config.schema_strict:
+            # Build sidecar from entries that have _apm_source
+            sidecar_out: dict = {}
+            for event_name, entries_list in json_config.get("hooks", {}).items():
+                if not isinstance(entries_list, list):
+                    continue
+                owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
+                if owned:
+                    sidecar_out[event_name] = [dict(e) for e in owned]
+
+            # Strip _apm_source from entries before writing to disk
+            for entries_list in json_config.get("hooks", {}).values():
+                if isinstance(entries_list, list):
+                    for entry in entries_list:
+                        if isinstance(entry, dict):
+                            entry.pop("_apm_source", None)
+
+            # Write sidecar
+            sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+            if sidecar_out:
+                try:
+                    with open(sidecar_path, "w", encoding="utf-8") as f:
+                        json.dump(sidecar_out, f, indent=2)
+                        f.write("\n")
+                except OSError as exc:
+                    _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
+            elif sidecar_path.exists():
+                sidecar_path.unlink()
+
+        # Write the (now schema-clean) config
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(json_config, f, indent=2)
             f.write("\n")
@@ -1011,6 +1143,33 @@ class HookIntegrator(BaseIntegrator):
                             with open(json_path, encoding="utf-8") as f:
                                 settings = json.load(f)
 
+                            # Load sidecar to restore _apm_source markers
+                            sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
+                            sidecar_data: dict = {}
+                            if sidecar_path.exists():
+                                try:
+                                    with open(sidecar_path, encoding="utf-8") as sf:
+                                        _raw = json.load(sf)
+                                    if isinstance(_raw, dict):
+                                        sidecar_data = _raw
+                                    else:
+                                        _log.warning(
+                                            "Sidecar file %s contains non-dict JSON; treating as empty.",
+                                            sidecar_path,
+                                        )
+                                        sidecar_data = {}
+                                except (json.JSONDecodeError, OSError) as exc:
+                                    _log.warning(
+                                        "Failed to read sidecar %s: %s; treating as empty.",
+                                        sidecar_path,
+                                        exc,
+                                    )
+                                    sidecar_data = {}
+
+                            # Re-inject _apm_source from sidecar
+                            if sidecar_data and "hooks" in settings:
+                                _reinject_apm_source_from_sidecar(settings["hooks"], sidecar_data)
+
                             if "hooks" in settings:
                                 modified = False
                                 for event_name in list(settings["hooks"].keys()):
@@ -1035,6 +1194,14 @@ class HookIntegrator(BaseIntegrator):
                                         json.dump(settings, f, indent=2)
                                         f.write("\n")
                                     stats["files_removed"] += 1
+
+                                    # Clean up sidecar
+                                    if sidecar_path.exists():
+                                        sidecar_path.unlink()
+
+                                # Remove stale sidecar when no hooks section remains
+                                if sidecar_path.exists() and "hooks" not in settings:
+                                    sidecar_path.unlink()
                         except (json.JSONDecodeError, OSError):
                             stats["errors"] += 1
                 else:
