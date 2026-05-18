@@ -15,21 +15,9 @@ apm init [PROJECT_NAME] [OPTIONS]
 
 Creates a minimal `apm.yml` in the current directory or in a new
 `PROJECT_NAME` subdirectory. Auto-detects name, author, and description
-so you can start running `apm install` immediately.
-
-`apm init` is the **consumer** entry point. To scaffold a plugin or a
-marketplace, prefer the noun-verb subcommands:
-
-| Goal | Run |
-|---|---|
-| Consume packages | `apm init` |
-| Author a plugin | [`apm plugin init`](../../../producer/repo-shapes/) |
-| Publish a marketplace | [`apm marketplace init`](../../../producer/publish-to-a-marketplace/) |
-
-The `--plugin` and `--marketplace` flags on `apm init` are kept for
-backward compatibility and **will be removed in v0.16**. They print a
-one-line deprecation warning naming the replacement command and then
-do the right thing, so existing scripts keep working.
+so you can start running `apm install` immediately. Use `--plugin` to
+also scaffold `plugin.json` for a publishable plugin, or `--marketplace`
+to seed an authoring block for a marketplace.
 
 ## Arguments
 
