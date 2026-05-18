@@ -1,6 +1,6 @@
 ---
 title: Installing from marketplaces
-description: Five ways consumers install APM-published plugins -- through APM, VS Code, Cursor, Copilot CLI, Claude Code, and Codex -- and the auth and cache layout of each.
+description: Six ways consumers install APM-published plugins -- through APM, VS Code, Cursor, Copilot CLI, Claude Code, and Codex -- and the auth and cache layout of each.
 sidebar:
   order: 2
 ---
