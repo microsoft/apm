@@ -239,6 +239,37 @@ def doctor(verbose):
                 )
             )
 
+    # Check 8: version alignment (informational; only when config is present)
+    if yml_obj is not None and hasattr(yml_obj, "versioning"):
+        from ...marketplace.version_check import check_version_alignment
+
+        va_report = check_version_alignment(yml_obj, Path.cwd())
+        total = len(va_report.packages)
+        aligned = sum(1 for p in va_report.packages if p.ok)
+        if total == 0:
+            va_detail = f"strategy={va_report.strategy}, no local packages to align"
+            va_passed = True
+        elif va_report.ok:
+            va_detail = f"strategy={va_report.strategy}, {aligned}/{total} packages aligned"
+            va_passed = True
+        else:
+            misaligned = [p.path for p in va_report.packages if not p.ok]
+            misaligned_count = len(misaligned)
+            va_detail = (
+                f"strategy={va_report.strategy}, "
+                f"{misaligned_count}/{total} packages misaligned: "
+                f"{misaligned[0]}"
+            )
+            va_passed = False
+        checks.append(
+            _DoctorCheck(
+                name="version alignment",
+                passed=va_passed,
+                detail=va_detail,
+                informational=True,
+            )
+        )
+
     _render_doctor_table(logger, checks)
 
     # Exit: 0 if checks 1-2 pass; config checks are informational
