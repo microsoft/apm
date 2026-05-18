@@ -925,7 +925,7 @@ def run_policy_checks(
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from ..models.apm_package import APMPackage, clear_apm_yml_cache
+    from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
 
@@ -934,20 +934,8 @@ def run_policy_checks(
     if not apm_yml_path.exists():
         return result
 
-    import yaml
-
-    try:
-        clear_apm_yml_cache()
-        manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, yaml.YAMLError, OSError) as exc:
-        result.checks.append(
-            CheckResult(
-                name="manifest-parse",
-                passed=False,
-                message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run."  # noqa: UP031
-                % exc,
-            )
-        )
+    manifest = _parse_apm_yml_safe(apm_yml_path, result)
+    if manifest is None:
         return result
 
     # Load lockfile (optional -- some checks work without it)

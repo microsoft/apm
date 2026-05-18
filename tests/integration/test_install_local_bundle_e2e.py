@@ -1013,10 +1013,14 @@ class TestBundleMcpWiringE2E:
         names = sorted(d.name for d in captured["deps"])
         assert names == ["filesystem", "github"]
 
-        # Resolved targets reach the integrator as a CSV in
-        # ``explicit_target``.  Both copilot and claude must appear.
-        target_csv = captured["kwargs"].get("explicit_target") or ""
-        target_set = {t.strip() for t in target_csv.split(",") if t.strip()}
+        # Resolved targets reach the integrator via ``explicit_target``,
+        # which accepts either a CSV string or a list of canonical names.
+        # Both copilot and claude must appear.
+        explicit = captured["kwargs"].get("explicit_target") or ""
+        if isinstance(explicit, str):
+            target_set = {t.strip() for t in explicit.split(",") if t.strip()}
+        else:
+            target_set = {t.strip() for t in explicit if t and t.strip()}
         assert "copilot" in target_set
         assert "claude" in target_set
 

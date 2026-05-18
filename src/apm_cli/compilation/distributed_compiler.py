@@ -22,6 +22,7 @@ from .context_optimizer import ContextOptimizer
 from .link_resolver import UnifiedLinkResolver
 from .template_builder import (  # noqa: F401
     TemplateData,
+    build_attributed_instructions,
     find_chatmode_by_name,
     render_instructions_block,
 )
@@ -539,21 +540,11 @@ class DistributedAgentsCompiler:
 
         sections.append("")
 
-        def _emit(instruction: Instruction) -> builtins.list[str]:
-            lines: builtins.list[str] = []
-            if placement.source_attribution:
-                source = placement.source_attribution.get(str(instruction.file_path), "local")
-                rel_path = portable_relpath(instruction.file_path, self.base_dir)
-                lines.append(f"<!-- Source: {source} {rel_path} -->")
-            lines.append(instruction.content.strip())
-            lines.append("")
-            return lines
-
         sections.extend(
-            render_instructions_block(
+            build_attributed_instructions(
                 placement.instructions,
-                base_dir=self.base_dir,
-                emit_instruction=_emit,
+                placement.source_attribution,
+                self.base_dir,
             )
         )
 

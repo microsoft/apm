@@ -1622,25 +1622,10 @@ class GitHubPackageDownloader:
             raise
 
         # Validate the downloaded package
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            # Clean up on validation failure
-            if target_path.exists():
-                _rmtree(target_path)
-
-            error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
-            for error in validation_result.errors:
-                error_msg += f"  - {error}\n"
-            raise RuntimeError(error_msg.strip())
-
-        # Load the APM package metadata
-        if not validation_result.package:
-            raise RuntimeError(
-                f"Package validation succeeded but no package metadata found for {dep_ref.repo_url}"
-            )
-
-        package = validation_result.package
-        package.source = dep_ref.to_github_url()
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
         package.resolved_commit = resolved_ref.resolved_commit
 
         # For plugins without an explicit version, use the short commit SHA so the

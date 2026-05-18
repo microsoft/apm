@@ -550,21 +550,14 @@ class CommandIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.is_content_identical_to_source(target_path, prompt_file):
-                # Pre-existing file is byte-identical to source -- silently
-                # adopt. See BaseIntegrator.is_content_identical_to_source.
-                target_paths.append(target_path)
-                files_adopted += 1
-                continue
-
-            if self.check_collision(
-                target_path,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                files_skipped += 1
+            skip, adopted = self._check_adopt_or_skip(
+                target_path, prompt_file, rel_path, managed_files, force, diagnostics, target_paths
+            )
+            if skip:
+                if adopted:
+                    files_adopted += 1
+                else:
+                    files_skipped += 1
                 continue
 
             if mapping.format_id == "gemini_command":
@@ -723,7 +716,12 @@ class CommandIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration(self, apm_package, project_root: Path, managed_files: set = None) -> dict:  # noqa: RUF013
+    def sync_integration(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict:
         """Remove APM-managed command files from .claude/commands/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -767,7 +765,7 @@ class CommandIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(
+    def sync_integration_opencode(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,

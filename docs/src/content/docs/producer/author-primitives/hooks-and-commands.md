@@ -76,6 +76,14 @@ Copilot hook files are namespaced with the source package name to avoid
 collisions across installed deps; bundled scripts land alongside under
 `.github/hooks/scripts/<pkg>/`.
 
+Claude's `settings.json` uses `additionalProperties: false` in its JSON
+schema, which rejects any unknown keys (including APM's internal
+`_apm_source` ownership marker).  APM therefore writes a companion sidecar
+file `.claude/apm-hooks.json` that stores the ownership metadata separately.
+This sidecar is created and cleaned up automatically alongside
+`settings.json`; it is an APM implementation detail and should not be edited
+by hand.
+
 Verified against `src/apm_cli/integration/targets.py` and
 `src/apm_cli/integration/hook_integrator.py`.
 
@@ -143,6 +151,13 @@ agent a procedure" fits a skill -- and reaches every harness.
 - **Script paths.** Use `${PLUGIN_ROOT}` (or the harness-specific
   alias) for scripts that ship inside the package. Plain absolute
   paths break on consumers' machines.
+- **Claude target path resolution.** When installing for the Claude
+  target, `apm install` rewrites `${PLUGIN_ROOT}` and relative `./`
+  references to absolute paths so Claude Code can execute scripts
+  regardless of the working directory.  Scripts that are missing at
+  install time are replaced with their expected absolute path and a
+  warning is emitted — the hook is written, but the script will fail
+  at runtime until the file is present.
 - **Same `.prompt.md` is two primitives.** A single
   `.apm/prompts/foo.prompt.md` becomes Copilot's prompt and Claude's
   `/foo` command in the same install. Name files with both surfaces

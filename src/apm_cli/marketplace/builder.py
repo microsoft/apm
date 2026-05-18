@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 from ..utils.github_host import default_host
 from ..utils.path_security import ensure_path_within
 from ._io import atomic_write
+from ._shared import iter_semver_tags
 from .diagnostics import BuildDiagnostic
 from .errors import (
     BuildError,
@@ -553,18 +554,7 @@ class MarketplaceBuilder:
 
         # Filter tags matching the pattern and extract versions
         candidates: list[tuple[SemVer, str, str]] = []  # (semver, tag_name, sha)
-        for remote_ref in refs:
-            if not remote_ref.name.startswith("refs/tags/"):
-                continue
-            tag_name = remote_ref.name[len("refs/tags/") :]
-            m = tag_rx.match(tag_name)
-            if not m:
-                continue
-            version_str = m.group("version")
-            sv = parse_semver(version_str)
-            if sv is None:
-                continue
-
+        for sv, tag_name, sha in iter_semver_tags(refs, tag_rx):
             # Prerelease filter
             include_pre = entry.include_prerelease or self._options.include_prerelease
             if sv.is_prerelease and not include_pre:
@@ -572,7 +562,7 @@ class MarketplaceBuilder:
 
             # Range filter
             if satisfies_range(sv, version_range):
-                candidates.append((sv, tag_name, remote_ref.sha))
+                candidates.append((sv, tag_name, sha))
 
         if not candidates:
             raise NoMatchingVersionError(
