@@ -145,10 +145,15 @@ jobs:
             {id:"legacy",   kind:"legacy", index:0, "has-app":"true", owner:"", repositories:"", packages:[]},
             {id:"acme-app", kind:"apps",   index:0, "has-app":"true", owner:"acme", repositories:"", packages:[]}
           ]}')
-          # SHA-256 of the PEM. A SHA is not a substring of the PEM, so
-          # the masker leaves it alone. Downstream rows recompute the
-          # SHA of their resolved ROW_PRIVATE_KEY and compare.
-          sha=$(printf '%s' "$SYNTHETIC_PEM" | sha256sum | cut -d' ' -f1)
+          # SHA-256 of the PEM, computed AFTER stripping trailing newlines
+          # so the legacy and apps[] rows in b-fix-consume can converge on
+          # the same hash regardless of whether their resolution path went
+          # through bash command substitution (which strips trailing \n)
+          # or direct env-var read (which preserves them). A SHA is not a
+          # substring of the PEM, so the masker leaves it alone.
+          pem_trim="$SYNTHETIC_PEM"
+          while [ "${pem_trim: -1}" = $'\n' ]; do pem_trim=${pem_trim%$'\n'}; done
+          sha=$(printf '%s' "$pem_trim" | sha256sum | cut -d' ' -f1)
           {
             echo "matrix=$matrix"
             echo "expected_sha=$sha"
@@ -257,7 +262,13 @@ jobs:
             echo "::error::ROW_PRIVATE_KEY was not set by the resolver step"
             exit 1
           fi
-          got_sha=$(printf '%s' "$ROW_PRIVATE_KEY" | sha256sum | cut -d' ' -f1)
+          # Normalise trailing newlines before hashing so both resolution
+          # paths (direct env-var read for legacy preserves trailing \n;
+          # jq + command substitution for apps strips it) converge on the
+          # same SHA. Matches the normalisation in b-fix-prep.
+          pk_trim="$ROW_PRIVATE_KEY"
+          while [ "${pk_trim: -1}" = $'\n' ]; do pk_trim=${pk_trim%$'\n'}; done
+          got_sha=$(printf '%s' "$pk_trim" | sha256sum | cut -d' ' -f1)
           if [ "$got_sha" != "$EXPECTED_SHA" ]; then
             echo "::error::ROW_PRIVATE_KEY SHA mismatch (got=$got_sha expected=$EXPECTED_SHA)"
             echo "::error::The env-relay corrupted the PEM body. Check newline/heredoc handling."
