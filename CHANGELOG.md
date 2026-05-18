@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-18
+
 ### Fixed
 
 - `apm compile --watch` now honors `targets: [claude, cursor]` (and every other multi-target / single-target configuration) on every recompile. Previously the watch path bypassed the resolver the one-shot path uses and let `CompilationConfig.from_apm_yml` fall back to the all-families default, silently regenerating `GEMINI.md` after every file edit. The watch path now resolves the effective target via the same helper the one-shot path uses and forwards it as `target=` into both the initial compile and every debounced recompile. (#1345)
