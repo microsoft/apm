@@ -224,6 +224,33 @@ class TestTagPatternStrategy:
         assert len(bad) == 2
         assert all(r.reason.startswith("duplicate_tag:other=") for r in bad)
 
+    def test_three_way_collision_blames_nearest_sibling(self, tmp_path: Path):
+        """With 3+ colliding packages, each blames its nearest previously-seen sibling."""
+        _write_pkg(tmp_path, "plugins/a", "1.0.0")
+        _write_pkg(tmp_path, "plugins/b", "1.0.0")
+        _write_pkg(tmp_path, "plugins/c", "1.0.0")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(
+                market_version="9.9.9",
+                project_version="9.9.9",
+                strategy="tag_pattern",
+                packages=[
+                    {"name": "a", "source": "./plugins/a", "tag_pattern": "v{version}"},
+                    {"name": "b", "source": "./plugins/b", "tag_pattern": "v{version}"},
+                    {"name": "c", "source": "./plugins/c", "tag_pattern": "v{version}"},
+                ],
+            ),
+        )
+        report = _load(tmp_path)
+        assert not report.ok
+        bad = {r.path: r for r in report.packages if not r.ok}
+        assert len(bad) == 3
+        # 'c' is the most recent; it blames its nearest previous collider 'b'
+        # (not the original 'a'). 'a' and 'b' still blame each other.
+        assert bad["plugins/c"].reason == "duplicate_tag:other=plugins/b"
+        assert bad["plugins/b"].reason == "duplicate_tag:other=plugins/a"
+
     def test_missing_version_fails(self, tmp_path: Path):
         _write_pkg(tmp_path, "plugins/a", None)
         _write_apm_yml(
@@ -244,6 +271,30 @@ class TestTagPatternStrategy:
         report = _load(tmp_path)
         assert not report.ok
         assert report.packages[0].reason == "missing_version"
+
+    def test_invalid_yaml_distinct_from_missing_version(self, tmp_path: Path):
+        """A malformed apm.yml surfaces as 'invalid_yaml', not 'missing_version'."""
+        pkg_dir = tmp_path / "plugins" / "a"
+        pkg_dir.mkdir(parents=True)
+        # Unbalanced bracket -> yaml.YAMLError at safe_load time.
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: [1.0.0\n", encoding="utf-8")
+        _write_apm_yml(
+            tmp_path,
+            _build_apm_yml(
+                market_version="9.9.9",
+                project_version="9.9.9",
+                strategy="tag_pattern",
+                packages=[{"name": "a", "source": "./plugins/a", "tag_pattern": "v{version}"}],
+            ),
+        )
+        report = _load(tmp_path)
+        assert not report.ok
+        assert report.packages[0].reason == "invalid_yaml"
+        # The human-readable error must point at the parse failure, not a missing key.
+        msgs = report.error_messages()
+        assert len(msgs) == 1
+        assert "malformed YAML" in msgs[0]
+        assert "missing 'version'" not in msgs[0]
 
     def test_default_pattern_inherited(self, tmp_path: Path):
         _write_pkg(tmp_path, "plugins/a", "1.0.0")

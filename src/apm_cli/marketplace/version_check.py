@@ -66,6 +66,8 @@ class VersionAlignmentReport:
                 continue
             if row.reason == "missing_version":
                 msgs.append(f"{row.path}: missing 'version' in apm.yml")
+            elif row.reason == "invalid_yaml":
+                msgs.append(f"{row.path}: malformed YAML in apm.yml (failed to parse)")
             elif row.reason == "no_apm_yml":
                 msgs.append(f"{row.path}: no apm.yml found")
             elif row.reason.startswith("drift:expected="):
@@ -102,8 +104,9 @@ def _read_local_version(project_root: Path, rel_source: str) -> tuple[str | None
 
     * ``"ok"`` when a non-empty string version was found
     * ``"no_apm_yml"`` when the file does not exist
-    * ``"missing_version"`` when the file exists but has no usable
-      ``version`` scalar
+    * ``"invalid_yaml"`` when the file exists but does not parse as YAML
+    * ``"missing_version"`` when the file parses as a mapping but has no
+      usable ``version`` scalar
     """
     pkg_yml = project_root / rel_source / "apm.yml"
     if not pkg_yml.is_file():
@@ -111,9 +114,9 @@ def _read_local_version(project_root: Path, rel_source: str) -> tuple[str | None
     try:
         raw = yaml.safe_load(pkg_yml.read_text(encoding="utf-8"))
     except yaml.YAMLError:
-        return None, "missing_version"
+        return None, "invalid_yaml"
     if not isinstance(raw, dict):
-        return None, "missing_version"
+        return None, "invalid_yaml"
     version = raw.get("version")
     if not isinstance(version, str) or not version.strip():
         return None, "missing_version"
@@ -147,6 +150,9 @@ def check_version_alignment(
         version, status = _read_local_version(project_root, rel)
         if status == "no_apm_yml":
             rows.append(PackageVersionRow(path=rel, version=None, ok=False, reason="no_apm_yml"))
+            continue
+        if status == "invalid_yaml":
+            rows.append(PackageVersionRow(path=rel, version=None, ok=False, reason="invalid_yaml"))
             continue
         if status == "missing_version":
             rows.append(
@@ -204,6 +210,9 @@ def check_version_alignment(
                             rendered_tag=prev.rendered_tag,
                         )
                         break
+                # Track the most recent colliding entry so a 3rd+ collision
+                # blames its nearest sibling instead of the original one.
+                rendered[tag] = rel
             else:
                 rendered[tag] = rel
                 rows.append(
