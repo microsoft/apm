@@ -253,7 +253,7 @@ symbol_index:
     "apm install": [docs/src/content/docs/consumer/install.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
     "apm compile": [docs/src/content/docs/producer/compile.md]
     "apm pack": [docs/src/content/docs/producer/pack-a-bundle.md, docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
-    "apm plugin init": [docs/src/content/docs/producer/repo-shapes.md]
+    "apm plugin init": [docs/src/content/docs/producer/repo-shapes.md, docs/src/content/docs/reference/cli/plugin.md]
     "apm marketplace add": [docs/src/content/docs/consumer/installing-from-marketplaces.md]
     "apm marketplace init": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
     "apm marketplace check": [docs/src/content/docs/producer/publish-to-a-marketplace.md]

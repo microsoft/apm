@@ -285,7 +285,7 @@ plugin-native layout. Convention dirs (`agents/`, `skills/`, `commands/`,
 `plugin.json` does not list them.
 
 If you know up front that you want to ship a plugin, you can scaffold with
-`apm init --plugin team-skills`, which adds `plugin.json` next to `apm.yml`
+`apm plugin init team-skills`, which adds `plugin.json` next to `apm.yml`
 from day one. APM still gives you dependency management, the lockfile, and
 audit while you author; pack produces the plugin bundle when you ship.
 
