@@ -227,3 +227,87 @@ packages:
         # Critical checks (git, network) pass -> exit 0
         assert result.exit_code == 0
         assert "Traceback" not in result.output
+
+
+class TestDoctorFormatCoverage:
+    """Wave 2 (#1348 G7): format coverage row appears when apm.yml ships a
+    marketplace: block, and lists configured vs. missing supported outputs."""
+
+    _APM_YML_CLAUDE_ONLY = """\
+name: test-project
+version: 0.1.0
+marketplace:
+  name: test-marketplace
+  description: Test
+  version: 1.0.0
+  owner:
+    name: Test
+    email: test@example.com
+    url: https://example.com
+  packages:
+    - name: my-skill
+      description: A test skill
+      source: acme/my-skill
+      version: "1.0.0"
+      category: testing
+  outputs:
+    claude: {}
+"""
+
+    _APM_YML_BOTH = """\
+name: test-project
+version: 0.1.0
+marketplace:
+  name: test-marketplace
+  description: Test
+  version: 1.0.0
+  owner:
+    name: Test
+    email: test@example.com
+    url: https://example.com
+  packages:
+    - name: my-skill
+      description: A test skill
+      source: acme/my-skill
+      version: "1.0.0"
+      category: testing
+  outputs:
+    claude: {}
+    codex: {}
+"""
+
+    def test_partial_coverage_lists_missing_formats(self, tmp_path: Path):
+        runner = CliRunner()
+        (tmp_path / "apm.yml").write_text(self._APM_YML_CLAUDE_ONLY, encoding="utf-8")
+        with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
+            import shutil
+
+            shutil.copy(str(tmp_path / "apm.yml"), cwd + "/apm.yml")
+            with patch("subprocess.run", side_effect=_fake_git_ok):
+                result = runner.invoke(doctor, [], catch_exceptions=False)
+        assert "format coverage" in result.output.lower()
+        # codex should be flagged as missing/available format
+        assert "codex" in result.output.lower()
+        # Informational only - exit 0 (network OK + git OK).
+        assert result.exit_code == 0
+
+    def test_full_coverage_passes_cleanly(self, tmp_path: Path):
+        runner = CliRunner()
+        (tmp_path / "apm.yml").write_text(self._APM_YML_BOTH, encoding="utf-8")
+        with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
+            import shutil
+
+            shutil.copy(str(tmp_path / "apm.yml"), cwd + "/apm.yml")
+            with patch("subprocess.run", side_effect=_fake_git_ok):
+                result = runner.invoke(doctor, [], catch_exceptions=False)
+        assert "format coverage" in result.output.lower()
+        assert result.exit_code == 0
+
+    def test_no_marketplace_block_skips_row(self, tmp_path: Path):
+        runner = CliRunner()
+        # No apm.yml -> no marketplace block -> no format coverage row.
+        with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+            with patch("subprocess.run", side_effect=_fake_git_ok):
+                result = runner.invoke(doctor, [], catch_exceptions=False)
+        assert "format coverage" not in result.output.lower()
+        assert result.exit_code == 0

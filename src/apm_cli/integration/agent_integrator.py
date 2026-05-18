@@ -152,23 +152,14 @@ class AgentIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.is_content_identical_to_source(target_path, source_file):
-                # Pre-existing file is byte-identical to source -- silently
-                # adopt so deployed_files reflects reality. See
-                # BaseIntegrator.is_content_identical_to_source for the
-                # full rationale (catch-22 fix).
-                target_paths.append(target_path)
-                files_adopted += 1
-                continue
-
-            if self.check_collision(
-                target_path,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                files_skipped += 1
+            skip, adopted = self._check_adopt_or_skip(
+                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
+            )
+            if skip:
+                if adopted:
+                    files_adopted += 1
+                else:
+                    files_skipped += 1
                 continue
 
             if mapping.format_id == "codex_agent":
@@ -619,7 +610,7 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def sync_integration_cursor(
+    def sync_integration_cursor(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,
@@ -657,7 +648,7 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(
+    def sync_integration_opencode(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,

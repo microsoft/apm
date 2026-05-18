@@ -12,6 +12,7 @@ from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
 from ...marketplace.git_stderr import translate_git_stderr
 from ...marketplace.migration import ConfigSource, detect_config_source
+from ...marketplace.output_profiles import known_output_names
 from ...marketplace.yml_schema import (
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
@@ -190,7 +191,33 @@ def doctor(verbose):
         )
     )
 
-    # Check 6: duplicate package names (defence-in-depth)
+    # Check 6: format coverage (informational; only when config is present)
+    if yml_obj is not None:
+        configured = frozenset(getattr(yml_obj, "outputs", ()) or ())
+        supported = known_output_names()
+        missing = sorted(supported - configured)
+        configured_sorted = sorted(configured)
+        if not missing:
+            fc_detail = f"Publishing for all known formats: {', '.join(configured_sorted)}."
+            fc_passed = True
+        else:
+            fc_detail = (
+                f"Configured: {', '.join(configured_sorted) or '(none)'}. "
+                f"Also supported: {', '.join(missing)}. "
+                f"Add e.g. '{missing[0]}: {{}}' under 'marketplace.outputs' "
+                "in apm.yml to publish for more consumers."
+            )
+            fc_passed = True  # informational; never fails
+        checks.append(
+            _DoctorCheck(
+                name="format coverage",
+                passed=fc_passed,
+                detail=fc_detail,
+                informational=True,
+            )
+        )
+
+    # Check 7: duplicate package names (defence-in-depth)
     if yml_obj is not None:
         dup_detail = _find_duplicate_names(yml_obj)
         if dup_detail:

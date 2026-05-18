@@ -281,6 +281,20 @@ If your changes affect how users interact with the project, update the documenta
 
 ## Extending APM
 
+### Adding or modifying an MCP client adapter
+
+The MCP client adapters (`src/apm_cli/adapters/client/`) inherit shared
+utilities from `MCPClientAdapter` in `base.py`.  When adding a new adapter
+or modifying an existing one:
+
+- Inherit from `MCPClientAdapter` and reuse the shared helpers
+  (`_apply_pypi_homebrew_generic_config`, `_apply_auth_and_headers_impl`,
+  `_resolve_env_vars_with_prompting`).
+- Do **not** copy-paste logic from sibling adapters -- the pylint R0801
+  similarity threshold is 10 lines and CI will fail on duplicated blocks.
+- For marketplace tag-parsing, use `marketplace._shared.iter_semver_tags`
+  rather than re-implementing the refs-iteration loop.
+
 ### How to add an experimental feature flag
 
 Use an experimental flag to de-risk rollout of a user-visible behavioural change that may need early adopter feedback. Do not add a flag for a bug fix, internal refactor, or any change that should simply ship as the default behaviour.

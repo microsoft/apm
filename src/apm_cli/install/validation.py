@@ -183,6 +183,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
 
+        from ..deps.registry_proxy import is_enforce_only
+
         virtual_subdir_repo_probe = (
             dep_ref.is_virtual
             and dep_ref.is_virtual_subdirectory()
@@ -194,6 +196,15 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         # the virtual path is a subdirectory on a non-GitHub host. Those should
         # validate the clone root with git, preserving SSH/credential-helper flows.
         if dep_ref.is_virtual and not virtual_subdir_repo_probe:
+            if is_enforce_only():
+                # PROXY_REGISTRY_ONLY=1: skip virtual package validation probe.
+                # The download step will surface a proxy 404 if the package is absent.
+                if logger:
+                    logger.info(
+                        "Skipping virtual package validation for"
+                        f" {dep_ref.host or 'remote'}: proxy-only mode is active"
+                    )
+                return True
             ctx = auth_resolver.resolve_for_dep(dep_ref)
             host = dep_ref.host or default_host()
             org = (
@@ -260,6 +271,16 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             or dep_ref.is_azure_devops()
             or (dep_ref.host and dep_ref.host != "github.com")
         ):
+            if is_enforce_only():
+                # PROXY_REGISTRY_ONLY=1: skip direct git ls-remote probe for ADO/GHES.
+                # The download step will surface a proxy 404 if the package is absent.
+                if logger:
+                    logger.info(
+                        "Skipping direct git ls-remote for"
+                        f" {dep_ref.host or 'remote'}: proxy-only mode is active"
+                    )
+                return True
+
             # Determine host type before building the URL so we know whether to
             # embed a token.  Generic (non-GitHub, non-ADO) hosts are excluded
             # from APM-managed auth; they rely on git credential helpers via the
@@ -509,6 +530,16 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         )
         host_info = auth_resolver.classify_host(host, port=port)
 
+        if is_enforce_only():
+            # PROXY_REGISTRY_ONLY=1: skip the GitHub API probe.
+            # Marketplace/lockfile resolution already ran through the proxy;
+            # the download step will surface a proxy 404 if absent.
+            if logger:
+                logger.info(
+                    f"Skipping direct GitHub API probe for {host}: proxy-only mode is active"
+                )
+            return True
+
         if verbose_log:
             ctx = auth_resolver.resolve(host, org=org, port=port)
             verbose_log(
@@ -595,6 +626,18 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         # dot, underscore, hyphen.
         if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo_path):
             return False
+
+        from ..deps.registry_proxy import is_enforce_only
+
+        if is_enforce_only():
+            # PROXY_REGISTRY_ONLY=1: skip the GitHub API fallback probe.
+            # The download step will surface a proxy 404 if the package is absent.
+            if logger:
+                logger.info(
+                    f"Skipping direct GitHub API fallback probe for {host}:"
+                    " proxy-only mode is active"
+                )
+            return True
 
         def _check_repo_fallback(token, git_env):
             host_info = auth_resolver.classify_host(host)

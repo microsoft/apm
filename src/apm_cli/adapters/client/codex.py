@@ -143,16 +143,8 @@ class CodexClientAdapter(MCPClientAdapter):
             return False
 
         try:
-            # Use cached server info if available, otherwise fetch from registry
-            if server_info_cache and server_url in server_info_cache:
-                server_info = server_info_cache[server_url]
-            else:
-                # Fallback to registry lookup if not cached
-                server_info = self.registry_client.find_server_by_reference(server_url)
-
-            # Fail if server is not found in registry - security requirement
-            if not server_info:
-                print(f"Error: MCP server '{server_url}' not found in registry")
+            server_info = self._fetch_server_info(server_url, server_info_cache)
+            if server_info is None:
                 return False
 
             # Check for remote servers early - Codex doesn't support remote/SSE servers
@@ -299,33 +291,21 @@ class CodexClientAdapter(MCPClientAdapter):
                     if resolved_env:
                         config["env"] = resolved_env
                 elif registry_name == "pypi":
-                    config["command"] = runtime_hint or "uvx"
-                    config["args"] = (
-                        [package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
+                    self._apply_pypi_homebrew_generic_config(
+                        config,
+                        registry_name,
+                        package_name,
+                        runtime_hint,
+                        processed_runtime_args,
+                        processed_package_args,
+                        resolved_env,
                     )
-                    # For PyPI packages, use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "homebrew":
-                    # For homebrew packages, assume the binary name is the command
-                    config["command"] = (
-                        package_name.split("/")[-1] if "/" in package_name else package_name
-                    )
-                    config["args"] = processed_runtime_args + processed_package_args
-                    # For Homebrew packages, use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
-                else:
-                    # Generic package handling
-                    config["command"] = runtime_hint or package_name
-                    config["args"] = processed_runtime_args + processed_package_args
-                    # For generic packages, use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
 
         return config
 
-    def _process_arguments(self, arguments, resolved_env=None, runtime_vars=None):
+    def _process_arguments(  # pylint: disable=duplicate-code  # structural similarity with copilot adapter is intentional
+        self, arguments, resolved_env=None, runtime_vars=None
+    ):
         """Process argument objects to extract simple string values with environment resolution.
 
         Args:
@@ -390,76 +370,8 @@ class CodexClientAdapter(MCPClientAdapter):
         Returns:
             dict: Dictionary of resolved environment variable values.
         """
-        import os
-        import sys
-
-        from rich.prompt import Prompt
-
-        resolved = {}
-        env_overrides = env_overrides or {}
-
-        # If env_overrides is provided, it means the CLI has already handled environment variable collection
-        # In this case, we should NEVER prompt for additional variables
-        skip_prompting = bool(env_overrides)
-
-        # Check for CI/automated environment via APM_E2E_TESTS flag (more reliable than TTY detection)
-        if os.getenv("APM_E2E_TESTS") == "1":
-            skip_prompting = True
-            print(f" APM_E2E_TESTS detected, will skip environment variable prompts")  # noqa: F541
-
-        # Also skip prompting if we're in a non-interactive environment (fallback)
-        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
-        if not is_interactive:
-            skip_prompting = True
-
-        # Add default GitHub MCP server environment variables for essential functionality first
-        # This ensures variables have defaults when user provides empty values or they're optional
         default_github_env = {"GITHUB_TOOLSETS": "context", "GITHUB_DYNAMIC_TOOLSETS": "1"}
-
-        # Track which variables were explicitly provided with empty values (user wants defaults)
-        empty_value_vars = set()
-        if env_overrides:
-            for key, value in env_overrides.items():
-                if key in env_overrides and (not value or not value.strip()):
-                    empty_value_vars.add(key)
-
-        for env_var in env_vars:
-            if isinstance(env_var, dict):
-                name = env_var.get("name", "")
-                description = env_var.get("description", "")
-                required = env_var.get("required", True)
-
-                if name:
-                    # First check overrides, then environment
-                    value = env_overrides.get(name) or os.getenv(name)
-
-                    # Only prompt if not provided in overrides or environment AND it's required AND we're not in managed override mode
-                    if not value and required and not skip_prompting:
-                        # Only prompt if not provided in overrides
-                        prompt_text = f"Enter value for {name}"
-                        if description:
-                            prompt_text += f" ({description})"
-                        value = Prompt.ask(
-                            prompt_text,
-                            password=True  # noqa: SIM210
-                            if "token" in name.lower() or "key" in name.lower()
-                            else False,
-                        )
-
-                    # Add variable if it has a value OR if user explicitly provided empty and we have a default
-                    if value and value.strip():
-                        resolved[name] = value
-                    elif name in empty_value_vars and name in default_github_env:
-                        # User provided empty value and we have a default - use default
-                        resolved[name] = default_github_env[name]
-                    elif not required and name in default_github_env:
-                        # Variable is optional and we have a default - use default
-                        resolved[name] = default_github_env[name]
-                    elif skip_prompting and name in default_github_env:
-                        # Non-interactive environment and we have a default - use default
-                        resolved[name] = default_github_env[name]
-
-        return resolved
+        return self._resolve_env_vars_with_prompting(env_vars, env_overrides, default_github_env)
 
     def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
         """Resolve both environment and runtime variable placeholders in values.

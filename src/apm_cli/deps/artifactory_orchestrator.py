@@ -220,20 +220,10 @@ class ArtifactoryOrchestrator:
             raise
         self._progress(progress_obj, progress_task_id, completed=70)
 
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            if target_path.exists():
-                _rmtree(target_path)
-            error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
-            for error in validation_result.errors:
-                error_msg += f"  - {error}\n"
-            raise RuntimeError(error_msg.strip())
-        if not validation_result.package:
-            raise RuntimeError(
-                f"Package validation succeeded but no package metadata found for {dep_ref.repo_url}"
-            )
-        package = validation_result.package
-        package.source = dep_ref.to_github_url()
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
         package.resolved_commit = None
         resolved_ref = ResolvedReference(
             original_ref=f"{dep_ref.repo_url}#{ref}",
