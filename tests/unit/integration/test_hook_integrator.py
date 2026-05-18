@@ -21,6 +21,7 @@ from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,  # noqa: F401
     HookIntegrator,
     _filter_hook_files_for_target,
+    _reinject_apm_source_from_sidecar,
 )
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
@@ -481,8 +482,13 @@ class TestClaudeIntegration:
         assert "Stop" in settings["hooks"]
         assert "UserPromptSubmit" in settings["hooks"]
 
-        # Check APM source marker for cleanup
-        assert settings["hooks"]["PreToolUse"][0]["_apm_source"] == "hookify"
+        # _apm_source must NOT be in settings.json (schema compliance)
+        assert "_apm_source" not in settings["hooks"]["PreToolUse"][0]
+        # _apm_source must be in the sidecar
+        sidecar_path = temp_project / ".claude" / "apm-hooks.json"
+        assert sidecar_path.exists(), "apm-hooks.json sidecar must exist"
+        sidecar = json.loads(sidecar_path.read_text())
+        assert sidecar["PreToolUse"][0]["_apm_source"] == "hookify"
 
         # Verify rewritten paths
         cmd = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -527,6 +533,31 @@ class TestClaudeIntegration:
         assert "Stop" in settings["hooks"]
         cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
         assert "ralph-loop" in cmd
+
+    def test_schema_strict_strips_apm_source_from_settings(self, temp_project):
+        """settings.json never contains _apm_source for Claude (schema compliance)."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+
+        settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
+        # No hook entry should contain _apm_source in settings.json
+        for event_name, entries in settings.get("hooks", {}).items():
+            for entry in entries:
+                if isinstance(entry, dict):
+                    assert "_apm_source" not in entry, (
+                        f"_apm_source leaked into settings.json hooks.{event_name}"
+                    )
+
+        # Sidecar must exist with ownership info
+        sidecar_path = temp_project / ".claude" / "apm-hooks.json"
+        assert sidecar_path.exists(), "apm-hooks.json sidecar must exist"
+        sidecar = json.loads(sidecar_path.read_text())
+        assert len(sidecar) > 0, "sidecar must contain at least one event"
+        for event_name, entries in sidecar.items():
+            for entry in entries:
+                assert "_apm_source" in entry, f"sidecar entry for {event_name} missing _apm_source"
+                assert entry["_apm_source"] == "hookify"
 
     def test_merge_into_existing_settings(self, temp_project):
         """Test that hooks are merged into existing settings.json without clobbering."""
@@ -619,7 +650,10 @@ class TestClaudeIntegration:
 
         settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
         assert len(settings["hooks"]["Stop"]) == 1
-        assert settings["hooks"]["Stop"][0]["_apm_source"] == "ralph-loop"
+        # _apm_source no longer in settings.json (schema-strict for Claude)
+        assert "_apm_source" not in settings["hooks"]["Stop"][0]
+        sidecar = json.loads((temp_project / ".claude" / "apm-hooks.json").read_text())
+        assert sidecar["Stop"][0]["_apm_source"] == "ralph-loop"
         assert (temp_project / ".claude" / "settings.json").read_text() == first
 
     def test_reinstall_heals_preexisting_duplicates(self, temp_project):
@@ -663,19 +697,25 @@ class TestClaudeIntegration:
         integrator.integrate_package_hooks_claude(pkg_info, temp_project)
 
         settings = json.loads(settings_path.read_text())
-        apm_entries = [
-            e
-            for e in settings["hooks"]["Stop"]
-            if isinstance(e, dict) and e.get("_apm_source") == "ralph-loop"
+        # After schema-strict migration, settings.json has no _apm_source
+        # All entries are clean (no _apm_source field)
+        assert len(settings["hooks"]["Stop"]) == 2  # 1 user + 1 APM-owned
+        for entry in settings["hooks"]["Stop"]:
+            if isinstance(entry, dict):
+                assert "_apm_source" not in entry, "settings.json must not contain _apm_source"
+
+        # Check user entry survived
+        user_cmds = [
+            e["hooks"][0]["command"] for e in settings["hooks"]["Stop"] if isinstance(e, dict)
         ]
-        user_entries = [
-            e for e in settings["hooks"]["Stop"] if not (isinstance(e, dict) and "_apm_source" in e)
-        ]
-        assert len(apm_entries) == 1
-        # Stale command replaced with the freshly rewritten one.
+        assert "user-owned" in user_cmds, "user-owned entry must be preserved"
+
+        # Check sidecar has the APM ownership info
+        sidecar = json.loads((temp_project / ".claude" / "apm-hooks.json").read_text())
+        apm_entries = sidecar.get("Stop", [])
+        assert len(apm_entries) == 1, "sidecar must have exactly 1 ralph-loop entry"
+        assert apm_entries[0]["_apm_source"] == "ralph-loop"
         assert "stop-hook.sh" in apm_entries[0]["hooks"][0]["command"]
-        assert len(user_entries) == 1
-        assert user_entries[0]["hooks"][0]["command"] == "user-owned"
 
     def test_reinstall_preserves_multiple_hook_files_same_event(self, temp_project):
         """A package can contribute to one event from several hook files.
@@ -719,13 +759,18 @@ class TestClaudeIntegration:
 
         def extract_commands(text: str) -> set:
             stop = json.loads(text)["hooks"]["Stop"]
-            assert all(e["_apm_source"] == "multi-stop-pkg" for e in stop)
+            # _apm_source is no longer in settings.json for Claude (schema-strict)
+            assert all("_apm_source" not in e for e in stop)
             return {h["command"] for entry in stop for h in entry["hooks"]}
 
         assert extract_commands(first) == {
             ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh",
             ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh",
         }
+
+        # Verify sidecar has the ownership info
+        sidecar = json.loads((temp_project / ".claude" / "apm-hooks.json").read_text())
+        assert all(e["_apm_source"] == "multi-stop-pkg" for e in sidecar.get("Stop", []))
 
         # Re-run twice more — both entries must survive and the file must
         # be byte-identical each time (idempotent across hook files too).
@@ -803,6 +848,279 @@ class TestClaudeIntegration:
         copied_script = temp_project / ".claude" / "hooks" / "lint-hooks" / "scripts" / "lint.sh"
         assert copied_script.exists()
         assert copied_script.read_text() == "#!/bin/bash\necho lint"
+
+    def test_identical_user_hook_not_claimed_by_apm(self, temp_project):
+        """Regression: User-owned hook identical to APM hook must survive reinstall.
+
+        When a user manually adds a hook identical to one from an APM package,
+        reinstalling the package should NOT delete the user hook. Both versions
+        should coexist: the user hook (no _apm_source) and the APM hook (_apm_source
+        in sidecar).
+        """
+        # Create user-owned Stop hook in settings.json
+        user_hook = {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "echo 'user stop hook'",
+                    "timeout": 5,
+                }
+            ]
+        }
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {"Stop": [user_hook]}}))
+
+        # Create APM package with identical Stop hook
+        pkg_dir = temp_project / "apm_modules" / "test-org" / "stop-hook-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+
+        apm_hook_data = {
+            "hooks": {
+                "Stop": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "echo 'user stop hook'",
+                                "timeout": 5,
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        (hooks_dir / "hooks.json").write_text(json.dumps(apm_hook_data))
+
+        # Integrate the APM package
+        pkg_info = _make_package_info(pkg_dir, "stop-hook-pkg")
+        integrator = HookIntegrator()
+        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        assert result.files_integrated == 1
+
+        # Verify settings.json has both user hook and APM hook (no _apm_source in settings.json)
+        settings = json.loads(settings_path.read_text())
+        assert "Stop" in settings["hooks"]
+        stop_hooks = settings["hooks"]["Stop"]
+        assert len(stop_hooks) == 2  # Both user and APM hooks
+
+        # Verify neither hook has _apm_source in settings.json (schema_strict strips it)
+        assert all("_apm_source" not in h for h in stop_hooks)
+
+        # Verify sidecar has the APM hook ownership info
+        sidecar = json.loads((temp_project / ".claude" / "apm-hooks.json").read_text())
+        assert "Stop" in sidecar
+        assert len(sidecar["Stop"]) == 1
+        assert sidecar["Stop"][0]["_apm_source"] == "stop-hook-pkg"
+
+        # Now call sync_integration to simulate uninstall
+        integrator.sync_integration(None, temp_project)
+
+        # Verify user hook survives and APM hook is removed
+        settings = json.loads(settings_path.read_text())
+        assert "Stop" in settings["hooks"]
+        stop_hooks = settings["hooks"]["Stop"]
+        assert len(stop_hooks) == 1  # Only user hook remains
+        assert "_apm_source" not in stop_hooks[0]
+
+        # Verify sidecar is cleaned (no Stop hooks left in sidecar)
+        if (temp_project / ".claude" / "apm-hooks.json").exists():
+            sidecar = json.loads((temp_project / ".claude" / "apm-hooks.json").read_text())
+            assert "Stop" not in sidecar or sidecar.get("Stop") == []
+
+    def test_stale_sidecar_removed_on_sync(self, temp_project):
+        """Regression: Stale sidecar is cleaned when settings.json has no hooks.
+
+        When all APM hooks are removed from settings.json via sync_integration,
+        and no other hooks remain, the sidecar file should be deleted.
+        This prevents leftover sidecar files that are no longer referenced.
+        """
+        # Create settings.json with a single APM-owned hook (without _apm_source)
+        apm_matcher = {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "echo 'apm hook'",
+                    "timeout": 5,
+                }
+            ]
+        }
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {"Stop": [apm_matcher]}}))
+
+        # Create sidecar file with matching ownership info (_apm_source included)
+        sidecar_path = temp_project / ".claude" / "apm-hooks.json"
+        sidecar_matcher = {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "echo 'apm hook'",
+                    "timeout": 5,
+                }
+            ],
+            "_apm_source": "test-pkg",
+        }
+        sidecar_path.write_text(json.dumps({"Stop": [sidecar_matcher]}))
+
+        # Verify sidecar exists
+        assert sidecar_path.exists()
+
+        # Call sync_integration to remove APM entries
+        integrator = HookIntegrator()
+        integrator.sync_integration(None, temp_project)
+
+        # Verify APM hook was removed from settings.json
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+            assert "hooks" not in settings or not settings["hooks"]
+
+        # Verify stale sidecar was removed
+        assert not sidecar_path.exists(), "Sidecar should be deleted when no hooks remain"
+
+
+# ─── Sidecar robustness tests ────────────────────────────────────────────────
+
+
+class TestSidecarRobustness:
+    """Tests for sidecar file robustness: corrupt data, isinstance guards, and reinject."""
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        project = Path(temp_dir)
+        (project / ".claude").mkdir()
+        yield project
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_corrupt_sidecar_degrades_gracefully_on_install(self, temp_project):
+        """Corrupt sidecar JSON must not crash integrate_package_hooks_claude.
+
+        When .claude/apm-hooks.json contains invalid JSON, the integrator
+        must degrade gracefully: skip the sidecar, treat ownership metadata
+        as empty, and complete the install successfully without raising.
+        """
+        # Write a valid settings.json with an existing hook
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {"Stop": []}}))
+
+        # Write invalid JSON to the sidecar
+        sidecar_path = temp_project / ".claude" / "apm-hooks.json"
+        sidecar_path.write_text("{this is: not valid json!!!")
+
+        # Create a minimal APM package with a Stop hook
+        pkg_dir = temp_project / "apm_modules" / "test-org" / "my-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook_data = {
+            "hooks": {
+                "Stop": [{"hooks": [{"type": "command", "command": "echo stop", "timeout": 5}]}]
+            }
+        }
+        (hooks_dir / "hooks.json").write_text(json.dumps(hook_data))
+
+        pkg_info = _make_package_info(pkg_dir, "my-pkg")
+        integrator = HookIntegrator()
+
+        # Must not raise
+        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        assert result.files_integrated == 1
+
+        # settings.json must have the new hook (install succeeded)
+        settings = json.loads(settings_path.read_text())
+        assert "Stop" in settings["hooks"]
+
+    def test_corrupt_sidecar_degrades_gracefully_on_sync(self, temp_project):
+        """Corrupt sidecar JSON must not crash sync_integration (uninstall path).
+
+        When .claude/apm-hooks.json contains a JSON array instead of a dict,
+        the sync path must treat ownership metadata as empty and not crash.
+        """
+        # Write settings.json with an APM-owned hook (no _apm_source in settings)
+        apm_matcher = {"hooks": [{"type": "command", "command": "echo apm", "timeout": 5}]}
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {"Stop": [apm_matcher]}}))
+
+        # Write non-dict JSON (array) to the sidecar
+        sidecar_path = temp_project / ".claude" / "apm-hooks.json"
+        sidecar_path.write_text(json.dumps([{"_apm_source": "my-pkg"}]))
+
+        # Must not raise
+        integrator = HookIntegrator()
+        integrator.sync_integration(None, temp_project)
+
+        # settings.json should still be readable (no crash)
+        assert settings_path.exists()
+
+    def test_reinject_apm_source_happy_path(self):
+        """_reinject_apm_source_from_sidecar correctly merges ownership into hooks.
+
+        When the sidecar has valid data with _apm_source markers, and the
+        settings.json hooks contain matching entries (same content, no _apm_source),
+        the function must inject _apm_source back into the matching hook entries.
+        """
+        # Simulate what's on disk in settings.json hooks (no _apm_source)
+        hooks = {
+            "Stop": [{"hooks": [{"type": "command", "command": "echo stop", "timeout": 5}]}],
+            "PreToolUse": [
+                {"hooks": [{"type": "command", "command": "echo pretool", "timeout": 10}]}
+            ],
+        }
+
+        # Simulate the sidecar data (includes _apm_source)
+        sidecar_data = {
+            "Stop": [
+                {
+                    "hooks": [{"type": "command", "command": "echo stop", "timeout": 5}],
+                    "_apm_source": "my-pkg",
+                }
+            ]
+        }
+
+        _reinject_apm_source_from_sidecar(hooks, sidecar_data)
+
+        # The Stop hook must have _apm_source injected
+        assert hooks["Stop"][0]["_apm_source"] == "my-pkg"
+
+        # The PreToolUse hook has no matching sidecar entry — must remain untouched
+        assert "_apm_source" not in hooks["PreToolUse"][0]
+
+    def test_reinject_does_not_claim_user_hook_when_content_identical(self):
+        """_reinject_apm_source_from_sidecar claims each sidecar entry at most once.
+
+        When a user hook has identical content to an APM hook, only the first
+        matching live entry gets claimed; the second stays user-owned.
+        """
+        # Two identical hooks on disk
+        entry_a = {"hooks": [{"type": "command", "command": "echo hi", "timeout": 5}]}
+        entry_b = {"hooks": [{"type": "command", "command": "echo hi", "timeout": 5}]}
+        hooks = {"Stop": [entry_a, entry_b]}
+
+        # Sidecar claims exactly one
+        sidecar_data = {
+            "Stop": [
+                {
+                    "hooks": [{"type": "command", "command": "echo hi", "timeout": 5}],
+                    "_apm_source": "my-pkg",
+                }
+            ]
+        }
+
+        _reinject_apm_source_from_sidecar(hooks, sidecar_data)
+
+        claimed = [e for e in hooks["Stop"] if "_apm_source" in e]
+        unclaimed = [e for e in hooks["Stop"] if "_apm_source" not in e]
+        assert len(claimed) == 1, "exactly one entry should be claimed by APM"
+        assert len(unclaimed) == 1, "the other entry must remain user-owned"
+        assert claimed[0]["_apm_source"] == "my-pkg"
+
+    def test_reinject_empty_sidecar_is_noop(self):
+        """_reinject_apm_source_from_sidecar with empty sidecar leaves hooks unchanged."""
+        hooks = {"Stop": [{"hooks": [{"type": "command", "command": "echo stop", "timeout": 5}]}]}
+        original_stop = [dict(e) for e in hooks["Stop"]]
+
+        _reinject_apm_source_from_sidecar(hooks, {})
+
+        assert hooks["Stop"] == original_stop
 
 
 # ─── Cursor integration tests ────────────────────────────────────────────────
@@ -3088,9 +3406,16 @@ class TestIssue1007Fixes:
 
         hooks = self._read_claude_settings(temp_project).get("hooks", {})
         entries = hooks.get("PostToolUse", [])
-        sources = {e.get("_apm_source") for e in entries if isinstance(e, dict)}
-        assert "pkg-alpha" in sources, "pkg-alpha entry must be retained"
-        assert "pkg-beta" in sources, "pkg-beta entry must be retained"
+        # settings.json no longer has _apm_source (schema-strict)
+        assert all("_apm_source" not in e for e in entries if isinstance(e, dict))
+        # Check sidecar for ownership
+        sidecar_path = temp_project / ".claude" / "apm-hooks.json"
+        sidecar = json.loads(sidecar_path.read_text())
+        sidecar_sources = {
+            e.get("_apm_source") for e in sidecar.get("PostToolUse", []) if isinstance(e, dict)
+        }
+        assert "pkg-alpha" in sidecar_sources, "pkg-alpha entry must be retained"
+        assert "pkg-beta" in sidecar_sources, "pkg-beta entry must be retained"
         assert len(entries) == 2, (
             f"Cross-package identical entries must both be present; got {len(entries)}"
         )

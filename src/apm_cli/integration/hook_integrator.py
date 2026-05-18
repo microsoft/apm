@@ -85,6 +85,7 @@ class _MergeHookConfig:
     config_filename: str  # e.g. "settings.json" or "hooks.json"
     target_key: str  # target name passed to _rewrite_hooks_data
     require_dir: bool  # True = skip if target dir doesn't exist
+    schema_strict: bool = False  # True = strip _apm_source before writing to disk
 
 
 # Per-target hook event name mapping.  Packages are authored with
@@ -156,6 +157,7 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         config_filename="settings.json",
         target_key="claude",
         require_dir=False,
+        schema_strict=True,
     ),
     "cursor": _MergeHookConfig(
         config_filename="hooks.json",
@@ -178,6 +180,47 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         require_dir=True,
     ),
 }
+
+_APM_HOOKS_SIDECAR = "apm-hooks.json"
+
+
+def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
+    """Restore _apm_source markers from sidecar into in-memory hook entries.
+
+    Schema-strict targets (e.g. Claude) do not persist ``_apm_source`` in
+    their settings file.  Instead, ownership metadata is stored in a
+    sidecar file.  This helper re-injects those markers so the rest of
+    the integration logic can work with them as normal.
+
+    Each sidecar entry is consumed at most once to prevent falsely claiming
+    user-owned hooks that happen to have identical content to an APM hook.
+
+    Args:
+        hooks: The ``"hooks"`` dict loaded from the target config file
+            (mutated in-place).
+        sidecar_data: The dict loaded from the sidecar file.
+    """
+    for event_name, sidecar_entries in sidecar_data.items():
+        if event_name not in hooks or not isinstance(sidecar_entries, list):
+            continue
+        # Build a consumable pool of (normalised-content, source) pairs.
+        # Each entry is popped on first match so identical content shared
+        # between APM and the user is only claimed once.
+        pool: list[tuple[dict, str]] = []
+        for sc_entry in sidecar_entries:
+            if isinstance(sc_entry, dict) and "_apm_source" in sc_entry:
+                cmp = {k: v for k, v in sorted(sc_entry.items()) if k != "_apm_source"}
+                pool.append((cmp, sc_entry["_apm_source"]))
+
+        for disk_entry in hooks[event_name]:
+            if not isinstance(disk_entry, dict) or "_apm_source" in disk_entry:
+                continue
+            disk_cmp = {k: v for k, v in sorted(disk_entry.items()) if k != "_apm_source"}
+            for i, (sc_cmp, source) in enumerate(pool):
+                if disk_cmp == sc_cmp:
+                    disk_entry["_apm_source"] = source
+                    pool.pop(i)
+                    break
 
 
 # Mapping from hook-file stem suffix to the set of target keys that
@@ -683,6 +726,29 @@ class HookIntegrator(BaseIntegrator):
             except (json.JSONDecodeError, OSError):
                 json_config = {}
 
+        # Load sidecar ownership metadata (schema-strict targets)
+        sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+        sidecar_data: dict = {}
+        if config.schema_strict and sidecar_path.exists():
+            try:
+                with open(sidecar_path, encoding="utf-8") as f:
+                    _raw = json.load(f)
+                if isinstance(_raw, dict):
+                    sidecar_data = _raw
+                else:
+                    _log.warning(
+                        "Sidecar file %s contains non-dict JSON; treating as empty.",
+                        sidecar_path,
+                    )
+                    sidecar_data = {}
+            except (json.JSONDecodeError, OSError) as exc:
+                _log.warning("Failed to read sidecar %s: %s; treating as empty.", sidecar_path, exc)
+                sidecar_data = {}
+
+            # Re-inject _apm_source from sidecar into matching in-memory entries
+            if sidecar_data and "hooks" in json_config:
+                _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
+
         if "hooks" not in json_config:
             json_config["hooks"] = {}
 
@@ -808,6 +874,37 @@ class HookIntegrator(BaseIntegrator):
         # Don't track the config file in target_paths -- it's a shared
         # file cleaned via _apm_source markers, not file-level deletion
         json_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if config.schema_strict:
+            # Build sidecar from entries that have _apm_source
+            sidecar_out: dict = {}
+            for event_name, entries_list in json_config.get("hooks", {}).items():
+                if not isinstance(entries_list, list):
+                    continue
+                owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
+                if owned:
+                    sidecar_out[event_name] = [dict(e) for e in owned]
+
+            # Strip _apm_source from entries before writing to disk
+            for entries_list in json_config.get("hooks", {}).values():
+                if isinstance(entries_list, list):
+                    for entry in entries_list:
+                        if isinstance(entry, dict):
+                            entry.pop("_apm_source", None)
+
+            # Write sidecar
+            sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+            if sidecar_out:
+                try:
+                    with open(sidecar_path, "w", encoding="utf-8") as f:
+                        json.dump(sidecar_out, f, indent=2)
+                        f.write("\n")
+                except OSError as exc:
+                    _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
+            elif sidecar_path.exists():
+                sidecar_path.unlink()
+
+        # Write the (now schema-clean) config
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(json_config, f, indent=2)
             f.write("\n")
@@ -1011,6 +1108,33 @@ class HookIntegrator(BaseIntegrator):
                             with open(json_path, encoding="utf-8") as f:
                                 settings = json.load(f)
 
+                            # Load sidecar to restore _apm_source markers
+                            sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
+                            sidecar_data: dict = {}
+                            if sidecar_path.exists():
+                                try:
+                                    with open(sidecar_path, encoding="utf-8") as sf:
+                                        _raw = json.load(sf)
+                                    if isinstance(_raw, dict):
+                                        sidecar_data = _raw
+                                    else:
+                                        _log.warning(
+                                            "Sidecar file %s contains non-dict JSON; treating as empty.",
+                                            sidecar_path,
+                                        )
+                                        sidecar_data = {}
+                                except (json.JSONDecodeError, OSError) as exc:
+                                    _log.warning(
+                                        "Failed to read sidecar %s: %s; treating as empty.",
+                                        sidecar_path,
+                                        exc,
+                                    )
+                                    sidecar_data = {}
+
+                            # Re-inject _apm_source from sidecar
+                            if sidecar_data and "hooks" in settings:
+                                _reinject_apm_source_from_sidecar(settings["hooks"], sidecar_data)
+
                             if "hooks" in settings:
                                 modified = False
                                 for event_name in list(settings["hooks"].keys()):
@@ -1035,6 +1159,14 @@ class HookIntegrator(BaseIntegrator):
                                         json.dump(settings, f, indent=2)
                                         f.write("\n")
                                     stats["files_removed"] += 1
+
+                                    # Clean up sidecar
+                                    if sidecar_path.exists():
+                                        sidecar_path.unlink()
+
+                                # Remove stale sidecar when no hooks section remains
+                                if sidecar_path.exists() and "hooks" not in settings:
+                                    sidecar_path.unlink()
                         except (json.JSONDecodeError, OSError):
                             stats["errors"] += 1
                 else:
