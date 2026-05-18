@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Direct GitHub API and ADO/GHES `git ls-remote` calls now respect `PROXY_REGISTRY_ONLY` mode; all four validation paths skip outbound network probes. (#1357, closes #615)
 - Target propagation no longer drops mid-pipeline at the intermediate `CompilationConfig` stage. (#1355, closes #765)
 - `apm pack` and `apm install` now warn when `apm.yml` is missing but APM artifacts exist on disk. (#1255, closes #1056)
+- `apm install` accepts Bitbucket Data Center / Server personal-repo URLs containing `~` (e.g. `https://example.com/scm/~user/repo.git`); the path-component whitelist on non-ADO hosts now includes `~` (RFC 3986 unreserved). Sourcehut `~user` paths are incidentally unblocked too. (#1377, closes #1375)
 
 ## [0.13.0] - 2026-05-11
 
