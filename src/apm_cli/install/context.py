@@ -74,6 +74,7 @@ class InstallContext:
     lockfile_path: Path | None = None  # resolve
     apm_modules_dir: Path | None = None  # resolve
     downloader: Any = None  # resolve (GitHubPackageDownloader)
+    ref_resolver: Any = None  # resolve (TieredRefResolver | None) -- #1369 fast-path
     callback_downloaded: dict[str, Any] = field(default_factory=dict)  # resolve
     callback_failures: set[str] = field(default_factory=set)  # resolve
     transitive_failures: list[tuple[str, str]] = field(default_factory=list)  # resolve
