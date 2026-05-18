@@ -1,5 +1,6 @@
 """Tests for transitive MCP dependency collection and deduplication."""
 
+from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,6 +9,23 @@ import yaml
 
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage, MCPDependency
+
+
+@dataclass(frozen=True)
+class _FakeResolvedTargets:
+    """Lightweight stand-in for ResolvedTargets used in unit tests."""
+
+    targets: list
+    source: str = "--target flag"
+    auto_create: bool = True
+
+
+@pytest.fixture(autouse=False)
+def _bypass_target_gate():
+    """Mock resolve_targets so tests don't need harness marker files on disk."""
+    fake = _FakeResolvedTargets(targets=["copilot"])
+    with patch("apm_cli.core.target_detection.resolve_targets", return_value=fake):
+        yield
 
 
 @pytest.fixture
@@ -626,6 +644,7 @@ class TestDeduplicateMCPDeps:
 # ---------------------------------------------------------------------------
 # _install_mcp_dependencies
 # ---------------------------------------------------------------------------
+@pytest.mark.usefixtures("_bypass_target_gate")
 class TestInstallMCPDependencies:
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     @patch("apm_cli.registry.operations.MCPServerOperations")
@@ -801,6 +820,7 @@ class TestCheckSelfDefinedServersNeeding:
 # ---------------------------------------------------------------------------
 # _install_mcp_dependencies – self-defined skip logic
 # ---------------------------------------------------------------------------
+@pytest.mark.usefixtures("_bypass_target_gate")
 class TestInstallSelfDefinedSkipLogic:
     @patch(
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
@@ -1043,6 +1063,7 @@ class TestGetServerConfigs:
 # ---------------------------------------------------------------------------
 # Diff-aware install — self-defined servers with config drift
 # ---------------------------------------------------------------------------
+@pytest.mark.usefixtures("_bypass_target_gate")
 class TestDiffAwareSelfDefinedInstall:
     @patch(
         "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"

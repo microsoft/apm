@@ -86,6 +86,46 @@ def render_instructions_block(
     return sections
 
 
+def build_attributed_instructions(
+    instructions: list[Instruction],
+    source_attribution: dict | None,
+    base_dir: Path,
+) -> list[str]:
+    """Render an instructions block with optional source-attribution comments.
+
+    Convenience wrapper around :func:`render_instructions_block` that bundles
+    the common attribution-header ``_emit`` closure used by both
+    :class:`~apm_cli.compilation.claude_formatter.ClaudeFormatter` and
+    :class:`~apm_cli.compilation.distributed_compiler.DistributedCompiler`.
+
+    Args:
+        instructions: Instructions to render.
+        source_attribution: Optional ``{str(file_path): source_label}`` map.
+            When provided, each instruction is prefixed with a
+            ``<!-- Source: <label> <rel_path> -->`` comment.
+        base_dir: Directory used as anchor for stable sort keys.
+
+    Returns:
+        Lines ready to be joined or extended into a parent ``sections`` list.
+    """
+
+    def _emit(instruction: Instruction) -> list[str]:
+        lines: list[str] = []
+        if source_attribution:
+            source = source_attribution.get(str(instruction.file_path), "local")
+            rel_path = portable_relpath(instruction.file_path, base_dir)
+            lines.append(f"<!-- Source: {source} {rel_path} -->")
+        lines.append(instruction.content.strip())
+        lines.append("")
+        return lines
+
+    return render_instructions_block(
+        instructions,
+        base_dir=base_dir,
+        emit_instruction=_emit,
+    )
+
+
 def build_conditional_sections(instructions: list[Instruction]) -> str:
     """Build sections grouped by applyTo patterns.
 

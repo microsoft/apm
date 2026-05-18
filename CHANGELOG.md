@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refactored duplicate code blocks across MCP client adapters and marketplace modules: extracted shared helpers `_apply_pypi_homebrew_generic_config`, `_apply_auth_and_headers_impl`, and `_resolve_env_vars_with_prompting` into `MCPClientAdapter` base class; extracted `iter_semver_tags` into `marketplace._shared`; fixed homebrew formula slash-stripping, `Authorization` header skip-only-when-injected logic, and CI-aware prompting guard (`CI`/`APM_E2E_TESTS` env vars now suppress interactive prompts). (#1360)
 - `apm pack` now appends a vendor-neutral catalog after per-output success lines listing each marketplace artifact and a single docs anchor (`producer/publish-to-a-marketplace/#consume-from-any-assistant`); the block never names a vendor CLI surface and is suppressed in dry-run. (#1348)
 - `apm marketplace init` now scaffolds the outputs map as a single-line `# codex: {}` commented toggle (replacing the verbose multi-line block); flipping one line enables Codex output. (#1348)
 - `apm marketplace doctor` adds an informational `format coverage` row when a `marketplace:` block is present, listing configured and missing supported outputs; informational only and skipped when there is no marketplace config. (#1348)
