@@ -399,6 +399,95 @@ class TestDoctorYmlCheck:
 
 
 # ---------------------------------------------------------------------------
+# G7: format coverage row
+# ---------------------------------------------------------------------------
+
+
+_APM_YML_CLAUDE_ONLY = textwrap.dedent("""\
+    name: demo
+    description: d
+    version: 0.1.0
+    marketplace:
+      owner: {name: acme}
+      outputs:
+        claude: {}
+      packages:
+        - name: pkg
+          source: acme/pkg
+          version: "^1.0.0"
+""")
+
+_APM_YML_BOTH_FORMATS = textwrap.dedent("""\
+    name: demo
+    description: d
+    version: 0.1.0
+    marketplace:
+      owner: {name: acme}
+      outputs:
+        claude: {}
+        codex: {}
+      packages:
+        - name: pkg
+          source: acme/pkg
+          version: "^1.0.0"
+          category: Productivity
+""")
+
+
+class TestDoctorFormatCoverage:
+    """G7: doctor flags which marketplace output profiles are configured
+    vs. supported, never failing -- just informational guidance."""
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_partial_coverage_lists_missing_formats(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(_APM_YML_CLAUDE_ONLY, encoding="utf-8")
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "format coverage" in result.output
+        # Surfaces what's configured and what's available
+        assert "claude" in result.output
+        assert "codex" in result.output
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_full_coverage_passes_silently(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(_APM_YML_BOTH_FORMATS, encoding="utf-8")
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "format coverage" in result.output
+        assert "all known formats" in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_no_config_skips_format_coverage_row(self, mock_run, runner, tmp_path, monkeypatch):
+        """When apm.yml has no marketplace block, doctor must NOT
+        synthesize a coverage row -- format coverage is meaningful only
+        for projects that publish a marketplace."""
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "format coverage" not in result.output
+
+
+# ---------------------------------------------------------------------------
 # Exit code logic (check 4 never blocks)
 # ---------------------------------------------------------------------------
 
