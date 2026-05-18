@@ -482,20 +482,31 @@ _ADO_AUTH_FAILURE_SIGNALS = (
     "could not read username",
 )
 
-# SSH-specific auth/connectivity failure signals from OpenSSH stderr.
+# SSH-specific auth failure signals from OpenSSH stderr.
 # Covers: missing key, agent has no identities, host key mismatch, and
 # explicit server rejection ("no more authentication methods to try" is the
 # final line OpenSSH emits after exhausting all auth methods).
+# NOTE: connectivity errors ("could not resolve hostname", "connection refused")
+# are intentionally NOT listed here -- those are transient network/firewall
+# failures, not auth failures, and must defer to the real download phase.
 _SSH_AUTH_FAILURE_SIGNALS = (
     "permission denied",
     "publickey",
     "no more authentication methods",
     "host key verification failed",
-    "could not resolve hostname",
-    "connection refused",
     "no supported authentication methods",
     "too many authentication failures",
     "agent refused operation",
+)
+
+# SSH connectivity failure signals -- network/firewall errors that are NOT
+# auth failures.  The preflight probe defers these (continues) so the real
+# download phase can surface them with full diagnostics.
+_SSH_CONNECTIVITY_SIGNALS = (
+    "could not resolve hostname",
+    "connection refused",
+    "network is unreachable",
+    "connection timed out",
 )
 
 
@@ -517,16 +528,19 @@ def is_ado_auth_failure_signal(text: str | None) -> bool:
 
 
 def is_ssh_auth_failure_signal(text: str | None) -> bool:
-    """Return True if ``text`` matches an SSH auth/connectivity failure signal.
+    """Return True if ``text`` matches an SSH auth failure signal.
 
     Accepts raw stderr from ``subprocess.run`` (git ls-remote over SSH).
     Matches case-insensitively.
 
     Covers OpenSSH error messages for: missing or rejected public key,
-    exhausted authentication methods, host key mismatch, unreachable host,
-    and refused connections.  Does NOT cover transient network errors that
-    are not auth-related (e.g. packet loss) -- those are left to the real
-    download phase to surface.
+    exhausted authentication methods, and host key mismatch.
+
+    Does NOT match connectivity/network errors such as DNS resolution
+    failures ("could not resolve hostname") or firewall blocks
+    ("connection refused") -- those are transient network conditions, not
+    auth failures, and must be left to the real download phase to surface.
+    See ``_SSH_CONNECTIVITY_SIGNALS`` for the complementary set.
     """
     if not text:
         return False

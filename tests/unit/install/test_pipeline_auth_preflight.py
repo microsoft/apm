@@ -351,3 +351,133 @@ class TestAdoBearerFallback:
         assert "GIT_TOKEN" not in bearer_env, (
             "Stale PAT leaked into bearer env -- _build_git_env was bypassed"
         )
+
+
+# ---------------------------------------------------------------------------
+# SSH preflight path (_use_ssh=True)
+# ---------------------------------------------------------------------------
+
+
+def _make_ssh_dep(host="git.corp.internal", repo_url="org/repo"):
+    """Mock dep for a generic SSH-only host (no token, no explicit scheme)."""
+    dep = MagicMock()
+    dep.host = host
+    dep.repo_url = repo_url
+    dep.port = None
+    dep.is_azure_devops.return_value = False
+    dep.explicit_scheme = None
+    dep.is_insecure = False
+    return dep
+
+
+def _make_ssh_resolver(token=None, git_env=None):
+    """Resolver with no token -- triggers _use_ssh=True for generic hosts."""
+    resolver = MagicMock()
+    dep_ctx = MagicMock()
+    dep_ctx.token = token  # None => SSH path
+    dep_ctx.auth_scheme = "ssh"
+    dep_ctx.git_env = git_env or {}
+    resolver.resolve_for_dep.return_value = dep_ctx
+    resolver.build_error_context.return_value = "    Diagnostic payload"
+    return resolver
+
+
+class TestSshPreflightAuthRejection:
+    """_preflight_auth_check raises AuthenticationError on SSH auth rejection."""
+
+    @patch("subprocess.run")
+    def test_permission_denied_raises(self, mock_run):
+        """'Permission denied (publickey)' is an SSH auth failure -> raises."""
+        mock_run.return_value = MagicMock(
+            returncode=128,
+            stderr="git@git.corp.internal: Permission denied (publickey).",
+            stdout="",
+        )
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        ctx = _make_ctx(deps=[_make_ssh_dep()])
+        resolver = _make_ssh_resolver()
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            _preflight_auth_check(ctx, resolver, verbose=False)
+
+        assert "SSH authentication failed" in str(exc_info.value)
+        assert "ssh-agent" in exc_info.value.diagnostic_context
+        assert "No files were modified" in exc_info.value.diagnostic_context
+
+    @patch("subprocess.run")
+    def test_no_more_auth_methods_raises(self, mock_run):
+        """'no more authentication methods to try' is a hard SSH auth rejection."""
+        mock_run.return_value = MagicMock(
+            returncode=128,
+            stderr="Permission denied (publickey).\nfatal: Could not read from remote repository.",
+            stdout="",
+        )
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        ctx = _make_ctx(deps=[_make_ssh_dep()])
+        resolver = _make_ssh_resolver()
+
+        with pytest.raises(AuthenticationError):
+            _preflight_auth_check(ctx, resolver, verbose=False)
+
+
+class TestSshPreflightConnectivityDeferred:
+    """Connectivity errors on SSH path must NOT raise AuthenticationError."""
+
+    @patch("subprocess.run")
+    def test_connection_refused_defers(self, mock_run):
+        """'connection refused' is a network error, not an auth failure -- must defer."""
+        mock_run.return_value = MagicMock(
+            returncode=255,
+            stderr="ssh: connect to host git.corp.internal port 22: Connection refused",
+            stdout="",
+        )
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        ctx = _make_ctx(deps=[_make_ssh_dep()])
+        resolver = _make_ssh_resolver()
+
+        # Must NOT raise; defer to the real clone phase
+        _preflight_auth_check(ctx, resolver, verbose=False)
+
+    @patch("subprocess.run")
+    def test_dns_failure_defers(self, mock_run):
+        """'could not resolve hostname' is a DNS failure, not an auth failure -- must defer."""
+        mock_run.return_value = MagicMock(
+            returncode=255,
+            stderr="ssh: Could not resolve hostname git.corp.internal: nodename nor servname provided",
+            stdout="",
+        )
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        ctx = _make_ctx(deps=[_make_ssh_dep()])
+        resolver = _make_ssh_resolver()
+
+        # Must NOT raise; defer to the real clone phase
+        _preflight_auth_check(ctx, resolver, verbose=False)
+
+
+class TestSshPreflightExplicitScheme:
+    """Deps with explicit ssh:// scheme use SSH probe even when a token is present."""
+
+    @patch("subprocess.run")
+    def test_explicit_ssh_scheme_uses_ssh_path(self, mock_run):
+        """ssh:// scheme forces _use_ssh=True regardless of token presence."""
+        mock_run.return_value = MagicMock(
+            returncode=128,
+            stderr="git@git.corp.internal: Permission denied (publickey).",
+            stdout="",
+        )
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        dep = _make_ssh_dep()
+        dep.explicit_scheme = "ssh"
+        ctx = _make_ctx(deps=[dep])
+        # Token is present, but explicit_scheme=ssh forces SSH path
+        resolver = _make_ssh_resolver(token="some-token")
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            _preflight_auth_check(ctx, resolver, verbose=False)
+
+        assert "SSH authentication failed" in str(exc_info.value)

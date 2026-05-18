@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. User values are validated against a strict allowlist before composing the clone URL. (#1385, closes #1383)
+- `apm install --update` now works correctly on generic Git hosts (Gitea, Forgejo, self-hosted GitHub instances) that use SSH-only remotes: the preflight auth probe selects the SSH transport when an explicit `ssh://` scheme is declared (mirroring the transport `TransportSelector` would have chosen anyway), validates the key via `git ls-remote` over SSH, and raises a clear `AuthenticationError` (with `ssh-add -l` guidance) only on genuine key rejection -- DNS failures and firewall blocks (`could not resolve hostname`, `connection refused`) are correctly deferred to the real download phase rather than misclassified as auth failures. (#1303, closes #1293)
 
 ## [0.14.0] - 2026-05-18
 
