@@ -26,6 +26,7 @@ from typing import Any
 from apm_cli.marketplace.builder import MarketplaceBuilder, ResolveResult
 from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS, MarketplaceOutputProfile
 from apm_cli.marketplace.yml_schema import MarketplaceConfig
+from apm_cli.utils.paths import portable_relpath
 
 _MAX_DIFFS_RENDERED = 20
 
@@ -180,7 +181,7 @@ def check_marketplace_drift(
             continue
         out_path = _output_path_for_profile(config, profile, project_root)
         rel_display = (
-            str(out_path.relative_to(project_root))
+            portable_relpath(out_path, project_root)
             if out_path.is_relative_to(project_root)
             else str(out_path)
         )
