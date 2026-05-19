@@ -605,7 +605,7 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | REQUIRED | Package identifier as it appears in the marketplace. |
-| `source` | `string` | REQUIRED | `<owner>/<repo>` (remote) or `./<path>` (local). Must match the source pattern; path traversal (`..`) is refused. |
+| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), or `./<path>` (local). Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
 | `subdir` | `string` | OPTIONAL | Subdirectory inside the source repo. Path-traversal-validated. Ignored for local sources. |
 | `version` | `string` | Conditional | Semver range (e.g. `^1.0.0`, `~2.1.0`, `>=3.0`). Stored as a string; resolution happens at pack time. REQUIRED for remote packages unless `ref` is given. |
 | `ref` | `string` | Conditional | Explicit git ref (SHA, tag, or branch). Overrides `version` range when both are present. REQUIRED for remote packages unless `version` is given. |
@@ -620,6 +620,10 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | `repository` | `string` | OPTIONAL | Pass-through. |
 
 Remote packages MUST declare at least one of `version` or `ref`. Local packages (sources beginning with `./`) skip git resolution and have no version requirement.
+
+The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
+
+Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
 
 ### 7.6. Complete Marketplace Block
 
@@ -653,6 +657,14 @@ marketplace:
     - name: local-tool                       # local-path package
       source: ./packages/local-tool
       description: Vendored tool
+
+    - name: enterprise-agents                # GHE shorthand
+      source: ghe.corp.example.com/platform/agents
+      version: "^0.3.0"
+
+    - name: gitlab-helper                    # full URL form
+      source: https://gitlab.corp.example.com/team/helper.git
+      ref: v1.2.0
 ```
 
 The legacy standalone `marketplace.yml` (top-level keys, no `marketplace:` wrapper) is still loadable but deprecated; new repositories SHOULD use the in-`apm.yml` form scaffolded by `apm marketplace init`.
