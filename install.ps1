@@ -275,28 +275,38 @@ function Get-Sha256Hex {
 }
 
 function Test-AccessDeniedError {
-    # AppLocker / WDAC / App Control for Business denies CreateProcess on EXEs
-    # under user-writable paths (e.g. %TEMP%, %LOCALAPPDATA%\Temp) with HRESULT
-    # 0x80070005 (E_ACCESSDENIED), surfaced by PowerShell as "Access is denied".
+    # AppLocker / WDAC / App Control for Business / SRP / Group Policy deny
+    # CreateProcess on EXEs under user-writable paths (e.g. %TEMP%,
+    # %LOCALAPPDATA%\Temp) with one of:
+    #   0x80070005 (E_ACCESSDENIED, Win32 5)         -> "Access is denied"
+    #   0x800704EC (ERROR_ACCESS_DISABLED_BY_POLICY, -> "This program is
+    #               Win32 1260)                          blocked by group policy"
+    # Both belong in the AppControl/AppLocker guidance bucket.
     param([string]$Text)
     if (-not $Text) { return $false }
-    return ($Text -match 'Access is denied' -or $Text -match '0x80070005')
+    return (
+        $Text -match 'Access is denied' -or
+        $Text -match 'blocked by group policy' -or
+        $Text -match '0x80070005' -or
+        $Text -match '0x800704EC'
+    )
 }
 
 function Test-AntivirusBlockError {
     # Defender / 3rd-party AV real-time protection blocks CreateProcess on
-    # binaries it flags with HRESULT 0x800700E1 (ERROR_VIRUS_INFECTED) or
-    # 0x800704EC (ERROR_VIRUS_DELETED). PowerShell surfaces these as
-    # "Operation did not complete successfully because the file contains a
-    # virus or potentially unwanted software". Our PyInstaller-built apm.exe
-    # is unsigned, which routinely trips false-positive heuristics.
+    # binaries it flags with HRESULT 0x800700E1 (ERROR_VIRUS_INFECTED,
+    # Win32 225) or 0x800700E2 (ERROR_VIRUS_DELETED, Win32 226). PowerShell
+    # surfaces these as "Operation did not complete successfully because
+    # the file contains a virus or potentially unwanted software". Our
+    # PyInstaller-built apm.exe is unsigned, which routinely trips
+    # false-positive heuristics.
     param([string]$Text)
     if (-not $Text) { return $false }
     return (
         $Text -match 'contains a virus' -or
         $Text -match 'potentially unwanted software' -or
         $Text -match '0x800700E1' -or
-        $Text -match '0x800704EC'
+        $Text -match '0x800700E2'
     )
 }
 
@@ -333,24 +343,33 @@ function Write-AntivirusGuidance {
     )
     Write-Host ""
     Write-ErrorText "An antivirus product blocked execution of $Path."
-    Write-Host "Windows Defender (or another real-time scanner) flagged the binary as"
-    Write-Host "potentially unwanted software. The apm.exe release is built with"
-    Write-Host "PyInstaller and is currently unsigned, which routinely trips false-"
-    Write-Host "positive heuristics. The file is not actually malicious."
+    Write-Host "Windows Defender (or another real-time scanner) flagged the binary."
+    Write-Host "The apm.exe release is built with PyInstaller and is currently"
+    Write-Host "unsigned, which routinely trips false-positive heuristics on"
+    Write-Host "unsigned binaries. Most blocks of apm.exe are false positives, but"
+    Write-Host "you should verify integrity before excluding it:"
     Write-Host ""
-    Write-Info "Options to unblock:"
+    Write-Host "  1. Verify the SHA256 of apm.exe against the published .sha256"
+    Write-Host "     sidecar on the release page before adding any AV exclusion."
+    Write-Host "     Do not exclude a binary whose checksum you have not verified."
+    Write-Host ""
+    Write-Info "If the checksum matches, options to unblock:"
     if ($TargetInstallDir) {
-        Write-Host "  1. Add a Defender exclusion for the install directory (run in an"
-        Write-Host "     elevated PowerShell, then rerun this installer):"
-        Write-Host "       Add-MpPreference -ExclusionPath '$TargetInstallDir'"
+        # Single-quote-escape the path so the printed command stays valid
+        # even if the install directory contains a "'" character (rare but
+        # possible in usernames).
+        $escapedDir = $TargetInstallDir -replace "'", "''"
+        Write-Host "  a. Add a Defender exclusion for the install directory (run in"
+        Write-Host "     an elevated PowerShell, then rerun this installer):"
+        Write-Host "       Add-MpPreference -ExclusionPath '$escapedDir'"
     } else {
-        Write-Host "  1. Add a Defender exclusion for apm.exe (run in an elevated"
+        Write-Host "  a. Add a Defender exclusion for apm.exe (run in an elevated"
         Write-Host "     PowerShell, then rerun this installer):"
         Write-Host "       Add-MpPreference -ExclusionProcess 'apm.exe'"
     }
-    Write-Host "  2. Install via pip into your user site (avoids the binary entirely):"
+    Write-Host "  b. Install via pip into your user site (avoids the binary entirely):"
     Write-Host "       pip install --user apm-cli"
-    Write-Host "  3. Help us get the false positive cleared by submitting the binary"
+    Write-Host "  c. Help us get the false positive cleared by submitting the binary"
     Write-Host "     to Microsoft: https://www.microsoft.com/en-us/wdsi/filesubmission"
     Write-Host ""
 }

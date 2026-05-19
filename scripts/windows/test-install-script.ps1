@@ -83,7 +83,7 @@ Remove-Module Microsoft.PowerShell.Utility -Force -ErrorAction SilentlyContinue
 $($match.Value)
 Write-Output (Get-Sha256Hex -Path '$tempFile')
 "@
-        $childScriptPath = [System.IO.Path]::GetTempFileName() + ".ps1"
+        $childScriptPath = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName() + ".ps1")
         Set-Content -Path $childScriptPath -Value $childScript -Encoding UTF8
         try {
             $actual = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $childScriptPath 2>&1
@@ -176,34 +176,55 @@ $($accessMatch.Value)
 `$defenderMsg = "Program 'apm.exe' failed to run: Operation did not complete successfully because the file contains a virus or potentially unwanted softwareAt C:\\Users\\X\\AppData\\Local\\Temp\\tmpfoo.ps1:639 char:23"
 `$puaMsg      = "blocked: potentially unwanted software detected"
 `$hresultMsg  = "CreateProcess failed with 0x800700E1"
+`$deletedMsg  = "Operation failed with 0x800700E2 (file removed by antivirus)"
 `$accessMsg   = "Program 'apm.exe' failed to run: Access is denied"
+`$gpoMsg      = "This program is blocked by group policy. For more information, contact your system administrator. (0x800704EC)"
 `$benignMsg   = "exit code 1 - apm: command not found"
 
 `$results = @{
     defender_match = (Test-AntivirusBlockError -Text `$defenderMsg)
     pua_match      = (Test-AntivirusBlockError -Text `$puaMsg)
     hresult_match  = (Test-AntivirusBlockError -Text `$hresultMsg)
+    deleted_match  = (Test-AntivirusBlockError -Text `$deletedMsg)
     access_no_av   = (-not (Test-AntivirusBlockError -Text `$accessMsg))
+    gpo_no_av      = (-not (Test-AntivirusBlockError -Text `$gpoMsg))
     benign_no_av   = (-not (Test-AntivirusBlockError -Text `$benignMsg))
     empty_no_av    = (-not (Test-AntivirusBlockError -Text ''))
-    # Cross-check: the Defender message must NOT be classified as AppLocker.
+    # Cross-class: AppLocker/SRP/GPO must NOT be misclassified as AV.
     defender_not_access = (-not (Test-AccessDeniedError -Text `$defenderMsg))
+    # GPO/SRP block (0x800704EC) belongs in the AppControl bucket, not AV.
+    gpo_is_access  = (Test-AccessDeniedError -Text `$gpoMsg)
+    access_is_access = (Test-AccessDeniedError -Text `$accessMsg)
 }
-`$results | ConvertTo-Json -Compress
+Write-Output '---APM-JSON-BEGIN---'
+Write-Output (`$results | ConvertTo-Json -Compress)
+Write-Output '---APM-JSON-END---'
 "@
 
-    $tempScript = [System.IO.Path]::GetTempFileName() + ".ps1"
+    # Use GetRandomFileName so we don't leak the GetTempFileName-created
+    # zero-byte .tmp companion file every run.
+    $tempScript = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName() + ".ps1")
     try {
         Set-Content -Path $tempScript -Value $childScript -Encoding UTF8
-        $json = & pwsh -NoProfile -NonInteractive -File $tempScript 2>&1 | Select-Object -Last 1
+        $raw = & pwsh -NoProfile -NonInteractive -File $tempScript 2>&1
+        $lines = ($raw | Out-String) -split "`r?`n"
+        $begin = [Array]::IndexOf($lines, '---APM-JSON-BEGIN---')
+        $end   = [Array]::IndexOf($lines, '---APM-JSON-END---')
+        Assert-True (($begin -ge 0) -and ($end -gt $begin)) "Located JSON sentinels in child output"
+        if (($begin -lt 0) -or ($end -le $begin)) { return }
+        $json = ($lines[($begin + 1)..($end - 1)] -join '').Trim()
         $r = $json | ConvertFrom-Json
         Assert-True ([bool]$r.defender_match)      "Matches real Defender 'contains a virus' message"
         Assert-True ([bool]$r.pua_match)           "Matches 'potentially unwanted software' message"
-        Assert-True ([bool]$r.hresult_match)       "Matches HRESULT 0x800700E1"
+        Assert-True ([bool]$r.hresult_match)       "Matches HRESULT 0x800700E1 (ERROR_VIRUS_INFECTED)"
+        Assert-True ([bool]$r.deleted_match)       "Matches HRESULT 0x800700E2 (ERROR_VIRUS_DELETED)"
         Assert-True ([bool]$r.access_no_av)        "Does not misclassify 'Access is denied' as AV block"
+        Assert-True ([bool]$r.gpo_no_av)           "Does not misclassify GPO/SRP block (0x800704EC) as AV"
         Assert-True ([bool]$r.benign_no_av)        "Does not misclassify benign failure text as AV block"
         Assert-True ([bool]$r.empty_no_av)         "Does not match empty input"
         Assert-True ([bool]$r.defender_not_access) "Defender message is not classified as AppLocker/WDAC"
+        Assert-True ([bool]$r.gpo_is_access)       "GPO/SRP block (0x800704EC) routes to AppControl guidance"
+        Assert-True ([bool]$r.access_is_access)    "'Access is denied' still routes to AppControl guidance"
     } finally {
         Remove-Item -Path $tempScript -Force -ErrorAction SilentlyContinue
     }
