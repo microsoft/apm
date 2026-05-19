@@ -263,3 +263,90 @@ class TestCopilotAppDeployUninstall:
                 assert row[0] == 0, "deployed workflows must start disabled"
             finally:
                 conn.close()
+
+    def test_install_local_pkg_then_uninstall_deletes_db_row(
+        self,
+        tmp_path: Path,
+        fake_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Regression: ``apm uninstall`` must DELETE the workflows row.
+
+        Reproduces the bug where uninstall removed the package from apm.yml
+        and apm_modules/ but left the DB row orphaned. Models real usage:
+        ``apm install <local-path> --target copilot-app -g`` followed by
+        ``apm uninstall <local-path> -g``.
+        """
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(
+            _conf,
+            "_config_cache",
+            {"experimental": {"copilot_app": True}},
+        )
+        db = _seed_db(fake_home / "data.db")
+        monkeypatch.setenv("APM_COPILOT_APP_DB", str(db))
+
+        pkg_dir = tmp_path / "uninstall-pkg"
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            textwrap.dedent(
+                """\
+                name: uninstall-pkg
+                description: regression test
+                version: 0.0.1
+                """
+            ),
+            encoding="ascii",
+        )
+        (prompts_dir / "daily-digest.prompt.md").write_text(
+            textwrap.dedent(
+                """\
+                ---
+                name: Daily Digest
+                schedule:
+                  interval: daily
+                  schedule_hour: 9
+                  schedule_day: 1
+                ---
+                Summarise yesterday's commits.
+                """
+            ),
+            encoding="ascii",
+        )
+
+        from apm_cli.integration import copilot_app_db as cdb
+
+        runner = CliRunner()
+        install_result = runner.invoke(
+            cli,
+            ["install", str(pkg_dir), "--target", "copilot-app", "--global"],
+            env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
+            catch_exceptions=False,
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        # Lockfile must encode the copilot-app URI with the scheme prefix so
+        # uninstall can find and delete the row.
+        lockfile_text = (fake_home / ".apm" / "apm.lock.yaml").read_text(encoding="utf-8")
+        assert "copilot-app-db://workflows/apm--" in lockfile_text, lockfile_text
+
+        ids_after_install = cdb.list_managed_workflow_ids(db)
+        assert len(ids_after_install) == 1, (
+            f"install should write exactly one row, got {ids_after_install}"
+        )
+        assert ids_after_install[0].startswith("apm--"), ids_after_install[0]
+
+        uninstall_result = runner.invoke(
+            cli,
+            ["uninstall", str(pkg_dir), "--global"],
+            env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
+            catch_exceptions=False,
+        )
+        assert uninstall_result.exit_code == 0, uninstall_result.output
+
+        ids_after_uninstall = cdb.list_managed_workflow_ids(db)
+        assert ids_after_uninstall == [], (
+            f"uninstall must delete the DB row, but {ids_after_uninstall} remain"
+        )

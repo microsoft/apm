@@ -56,20 +56,33 @@ def _deployed_path_entry(
         If the path is outside the project tree and cannot be
         translated to a ``cowork://`` URI via any available target.
     """
+    if targets:
+        for _t in targets:
+            if _t.resolved_deploy_root is None:
+                continue
+            try:
+                target_path.relative_to(_t.resolved_deploy_root)
+            except ValueError:
+                continue
+            if _t.name == "copilot-app":
+                from apm_cli.integration.copilot_app_db import to_lockfile_uri
+
+                return to_lockfile_uri(target_path.name)
+            from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+
+            return to_lockfile_path(target_path, _t.resolved_deploy_root)
     try:
         return target_path.relative_to(project_root).as_posix()
     except ValueError:
-        # Path is outside the project tree -- must be a dynamic-root
-        # target.  Find the matching target and translate.
+        # Path is outside the project tree and no dynamic-root target
+        # contained it. Fall through to the legacy cowork translation
+        # which security-validates against deploy_root and raises
+        # PathTraversalError when out of bounds.
         if targets:
             for _t in targets:
                 if _t.resolved_deploy_root is None:
                     continue
                 if _t.name == "copilot-app":
-                    # Copilot App rows have no real file on disk.  The
-                    # integrator synthesises ``<root>/workflows/<id>``
-                    # as the addressing token; encode it as a
-                    # ``copilot-app-db://`` URI.
                     from apm_cli.integration.copilot_app_db import to_lockfile_uri
 
                     return to_lockfile_uri(target_path.name)

@@ -515,7 +515,11 @@ def _sync_integrations_after_uninstall(
                 continue
             _effective_root = _mapping.deploy_root or _target.root_dir
             _deploy_dir = project_root / _effective_root / _mapping.subdir
-            if not _deploy_dir.exists():
+            # Dynamic-root targets (e.g. copilot-app) have no filesystem
+            # deploy dir; their managed files are URIs that the integrator
+            # resolves internally.  Skip the dir-exists guard for them.
+            _is_dynamic = _target.resolved_deploy_root is not None
+            if not _is_dynamic and not _deploy_dir.exists():
                 continue
             _managed_subset = None
             if _buckets is not None:
@@ -578,6 +582,37 @@ def _sync_integrations_after_uninstall(
             targets=_sync_targets,
         )
         counts["skills"] = result.get("files_removed", 0)
+
+    # Scan sync_managed DIRECTLY for copilot-app-db:// entries.
+    # The copilot-app target is opt-in: resolve_targets() excludes it from the
+    # default user-scope set unless --target copilot-app was passed at install
+    # time and recorded on apm_package.target.  Without this scan, prompts
+    # deployed to ~/.copilot/data.db would never be deleted on uninstall
+    # because the per-target loop above does not iterate copilot-app.
+    if sync_managed:
+        from ...integration.copilot_app_db import COPILOT_APP_LOCKFILE_PREFIX
+
+        _copilot_app_files = {p for p in sync_managed if p.startswith(COPILOT_APP_LOCKFILE_PREFIX)}
+        if _copilot_app_files:
+            # Find or synthesise a user-scope copilot-app TargetProfile.
+            from ...integration.targets import KNOWN_TARGETS
+
+            _ca_target = next(
+                (t for t in _resolved_targets if t.name == "copilot-app"),
+                None,
+            )
+            if _ca_target is None:
+                _ca_static = KNOWN_TARGETS.get("copilot-app")
+                if _ca_static is not None:
+                    _ca_target = _ca_static.for_scope(user_scope=True)
+            if _ca_target is not None:
+                result = _integrators["prompts"].sync_for_target(
+                    _ca_target,
+                    apm_package,
+                    project_root,
+                    managed_files=_copilot_app_files,
+                )
+                counts["prompts"] += result.get("files_removed", 0)
 
     # Hooks (multi-target sync_integration handles all targets)
     result = _integrators["hooks"].sync_integration(
