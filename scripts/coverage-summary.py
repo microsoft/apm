@@ -41,7 +41,7 @@ def _build_markdown(data: dict, title: str) -> str:
     pct = totals.get("percent_covered_display", "N/A")
     stmts = totals.get("num_statements", 0)
     miss = totals.get("missing_lines", 0)
-    covered = stmts - miss
+    covered = totals.get("covered_lines", stmts - miss)
 
     lines: list[str] = []
     lines.append(f"## {title}")
