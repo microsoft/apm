@@ -62,6 +62,8 @@ def _build_placement_distribution_lines(self, results: CompilationResults) -> li
         if self.use_color
         else "Placement Distribution",
     ]
+    if not results.placement_summaries:
+        return lines
     last_summary = results.placement_summaries[-1]
     for summary in results.placement_summaries:
         rel_path = str(summary.get_relative_path(Path.cwd()))
