@@ -137,6 +137,7 @@ parallel = true
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
+fail_under = 75
 # Exclude lines that are not meant to be covered
 exclude_lines = [
     "pragma: no cover",

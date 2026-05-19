@@ -265,6 +265,8 @@ jobs:
             coverage combine coverage-shards/
             coverage json -o coverage.json
             python3 scripts/coverage-summary.py coverage.json --title "Integration Test Coverage"
+            # Phase 3: add integration coverage gate here once baseline
+            # is established. Use: coverage report --fail-under=<target>
           else
             echo "No coverage shard files found; skipping integration coverage summary."
           fi
