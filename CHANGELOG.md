@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm compile --watch` picks up mid-session edits to `apm.yml`'s `target:` / `targets:` on the next file event instead of caching the resolved target until the watcher is restarted; previously the value resolved at startup was reused on every recompile. Follow-up to #1349.
-- `apm compile --watch --clean` prints an explicit `[!]` warning that `--clean` is ignored in watch mode and continues; previously the flag was silently dropped. Run `apm compile --clean` separately between watch sessions to remove orphaned outputs.
+- `apm compile --watch` picks up mid-session edits to `apm.yml`'s `target:` / `targets:` on the next file event instead of caching the resolved target until the watcher is restarted; previously the value resolved at startup was reused on every recompile. Follow-up to #1349. (#1403)
+- `apm compile --watch --clean` prints an explicit `[!]` warning that `--clean` is ignored in watch mode and continues; previously the flag was silently dropped. Run `apm compile --clean` separately between watch sessions to remove orphaned outputs. (#1403)
 
 ## [0.14.0] - 2026-05-18
 

@@ -135,6 +135,69 @@ def test_recompile_on_instruction_file_change_uses_snapshot(fake_logger):
     assert mock_from_apm_yml.call_args.kwargs["target"] == snapshot
 
 
+def test_apm_yml_change_persists_fresh_target_for_subsequent_events(fake_logger):
+    """After an apm.yml-driven re-resolve, the fresh target must persist.
+
+    Without persistence, the sequence ``apm.yml edit -> instructions edit``
+    looks like this: the apm.yml event correctly emits the new family set,
+    but the *next* instructions event uses the original startup snapshot
+    again and silently reverts to the wrong family set.  Outputs written
+    by the apm.yml-event recompile become stale and the user sees an
+    inconsistent state with no error.
+
+    This test toggles the failure mode directly: the apm.yml event flips
+    the snapshot from ``"claude"`` to ``frozenset({"claude", "gemini"})``;
+    the immediately-following instructions event must reuse the new
+    value, not the original.
+    """
+    initial_snapshot = "claude"
+    fresh = frozenset({"claude", "gemini"})
+
+    handler = APMFileHandler(
+        output="AGENTS.md",
+        chatmode=None,
+        no_links=False,
+        dry_run=False,
+        logger=fake_logger,
+        effective_target=initial_snapshot,
+        cli_target=None,
+    )
+
+    with (
+        patch(
+            "apm_cli.commands.compile.cli._resolve_effective_target",
+            return_value=(fresh, "apm.yml target", ["claude", "gemini"]),
+        ),
+        patch(
+            "apm_cli.commands.compile.watcher.CompilationConfig.from_apm_yml"
+        ) as mock_from_apm_yml,
+        patch("apm_cli.commands.compile.watcher.AgentsCompiler") as mock_compiler_cls,
+    ):
+        mock_from_apm_yml.return_value = MagicMock()
+        mock_compiler_cls.return_value.compile.return_value = SimpleNamespace(
+            success=True, output_path="AGENTS.md", errors=[]
+        )
+
+        # 1. apm.yml edit triggers re-resolve with the fresh value.
+        handler._recompile("apm.yml")
+        # 2. Subsequent instructions edit must reuse the fresh value,
+        #    NOT revert to the initial snapshot.
+        handler._recompile(".apm/instructions/style.instructions.md")
+
+    assert mock_from_apm_yml.call_count == 2
+    first_target = mock_from_apm_yml.call_args_list[0].kwargs["target"]
+    second_target = mock_from_apm_yml.call_args_list[1].kwargs["target"]
+    assert first_target == fresh, "First recompile (apm.yml event) must use the fresh value."
+    assert second_target == fresh, (
+        "Second recompile (instructions event) must reuse the fresh value persisted "
+        "from the prior apm.yml event; reverting to the startup snapshot leaves "
+        "AGENTS.md / GEMINI.md stale until the next apm.yml edit."
+    )
+    assert handler.effective_target == fresh, (
+        "self.effective_target must be updated in-place after re-resolution."
+    )
+
+
 def test_recompile_on_lookalike_filename_does_not_reresolve(fake_logger):
     """A file named ``backup_apm.yml`` must NOT trigger re-resolution.
 

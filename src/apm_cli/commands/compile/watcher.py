@@ -104,11 +104,11 @@ class APMFileHandler:
 
             # When apm.yml itself was the trigger, re-resolve so a
             # mid-session edit to ``target:`` / ``targets:`` takes
-            # effect on this recompile.  For instruction-file edits
-            # the startup snapshot remains correct, so we skip the
-            # extra resolver round-trip.  Match on basename rather
-            # than ``endswith`` so a stray ``backup_apm.yml`` cannot
-            # masquerade as the project root manifest.
+            # effect on this recompile, then persist the fresh value
+            # so subsequent instruction-file edits do not silently
+            # revert to the startup snapshot.  Match on basename
+            # rather than ``endswith`` so a stray ``backup_apm.yml``
+            # cannot masquerade as the project root manifest.
             effective_target = self.effective_target
             if os.path.basename(changed_file) == APM_YML_FILENAME:
                 from .cli import _resolve_effective_target
@@ -116,6 +116,7 @@ class APMFileHandler:
                 effective_target, _reason, _config_target = _resolve_effective_target(
                     self.cli_target
                 )
+                self.effective_target = effective_target
 
             config = CompilationConfig.from_apm_yml(
                 output_path=self.output if self.output != AGENTS_MD_FILENAME else None,
