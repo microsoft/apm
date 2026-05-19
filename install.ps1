@@ -612,7 +612,13 @@ try {
     try {
         Move-Item -Path $packageDir -Destination $stagingDir -Force
     } catch {
-        Write-ErrorText "Failed to stage release at ${stagingDir}: $_"
+        $stageError = "$_"
+        Write-ErrorText "Failed to stage release at ${stagingDir}: $stageError"
+        if (Test-AccessDeniedError -Text $stageError) {
+            Write-AppControlGuidance -Path $stagingDir -TargetInstallDir $releaseDir
+        }
+        Write-Info "Attempting automatic fallback to pip..."
+        if (Install-ViaPip) { exit 0 }
         Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
         exit 1
     }
@@ -650,8 +656,12 @@ try {
         exit 1
     }
 
-    # Promote: replace any existing release atomically (rename the old one
-    # aside first so concurrent shim invocations can't see a missing dir).
+    # Promote: rename the existing release aside, then rename the staged
+    # tree into place. Win32 has no truly atomic directory replacement, so
+    # there is still a small gap where neither path exists; doing it this
+    # way minimizes that gap and lets us roll back if the second rename
+    # fails. Concurrent apm invocations during that window will fail and
+    # need a retry — acceptable for an install/self-update operation.
     $backupDir = $null
     if (Test-Path $releaseDir) {
         $backupDir = "$releaseDir.old-" + [System.Guid]::NewGuid().ToString("N")

@@ -101,14 +101,43 @@ Write-Output (Get-Sha256Hex -Path '$tempFile')
 function Test-MoveThenTestOrdering {
     Write-Step "Test 2: install.ps1 moves bundle out of temp before running binary test"
 
-    $content = Get-Content $InstallScript -Raw
+    # Parse the script via the PowerShell AST so the assertion is robust to
+    # whitespace, line wrapping, added parameters, or quoting changes.
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($InstallScript, [ref]$tokens, [ref]$errors)
+    Assert-True ((-not $errors) -or ($errors.Count -eq 0)) "install.ps1 parses cleanly"
+    if ($errors -and $errors.Count -gt 0) { return }
 
-    $stageIdx = $content.IndexOf("Move-Item -Path `$packageDir -Destination `$stagingDir")
-    $testIdx  = $content.IndexOf("& `$stagedExe --version")
+    # Find every Move-Item invocation that mentions $packageDir and $stagingDir
+    # (either as -Path/-Destination args or as positional values) — that's our
+    # staging move.
+    $moveCalls = $ast.FindAll({
+        param($n)
+        if ($n -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
+        $cmdName = $n.GetCommandName()
+        if ($cmdName -ne 'Move-Item') { return $false }
+        $text = $n.Extent.Text
+        return ($text -match '\$packageDir' -and $text -match '\$stagingDir')
+    }, $true)
 
-    Assert-True ($stageIdx -gt 0) "Found staging Move-Item in install.ps1"
-    Assert-True ($testIdx  -gt 0) "Found binary smoke test in install.ps1"
-    Assert-True (($stageIdx -gt 0) -and ($testIdx -gt 0) -and ($stageIdx -lt $testIdx)) "Binary test runs AFTER bundle is moved out of temp"
+    # Find the smoke test invocation: any call expression that invokes
+    # $stagedExe with --version.
+    $smokeCalls = $ast.FindAll({
+        param($n)
+        if ($n -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
+        $text = $n.Extent.Text
+        return ($text -match '\$stagedExe' -and $text -match '--version')
+    }, $true)
+
+    Assert-True ($moveCalls.Count -ge 1) "AST: found Move-Item staging call referencing \$packageDir + \$stagingDir"
+    Assert-True ($smokeCalls.Count -ge 1) "AST: found smoke-test invocation of \$stagedExe --version"
+
+    if ($moveCalls.Count -ge 1 -and $smokeCalls.Count -ge 1) {
+        $firstStageOffset = ($moveCalls | ForEach-Object { $_.Extent.StartOffset } | Sort-Object | Select-Object -First 1)
+        $firstSmokeOffset = ($smokeCalls | ForEach-Object { $_.Extent.StartOffset } | Sort-Object | Select-Object -First 1)
+        Assert-True ($firstStageOffset -lt $firstSmokeOffset) "Binary smoke test runs AFTER bundle is moved out of temp ($firstStageOffset < $firstSmokeOffset)"
+    }
 }
 
 # ---------------------------------------------------------------------------

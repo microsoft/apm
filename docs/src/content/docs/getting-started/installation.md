@@ -256,7 +256,7 @@ apm install <package>
 
 If the installer (or `apm self-update`) fails at the `Testing binary...` step with `Access is denied` / HRESULT `0x80070005`, an enterprise application control policy ([AppLocker](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/applocker/applocker-overview) or [App Control for Business / WDAC](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/)) is blocking execution of `apm.exe` from a user-writable path.
 
-Starting in this release, the installer stages the binary under `%LOCALAPPDATA%\Programs\apm\releases\<tag>` **before** invoking it, so a single allow-list rule for that path is enough.
+The installer stages the binary under `%LOCALAPPDATA%\Programs\apm\releases\<tag>` **before** invoking it, so a single allow-list rule for that path is enough.
 
 Ask your endpoint admin to add one of:
 
