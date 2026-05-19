@@ -621,8 +621,13 @@ class HookIntegrator(BaseIntegrator):
                     manifest_name = self._safe_source_name(data.get("name"))
                     if manifest_name != "_local":
                         return manifest_name
-            except (OSError, ValueError, yaml.YAMLError):
-                pass
+            except (OSError, ValueError, yaml.YAMLError) as exc:
+                _log.debug(
+                    "Hook integrator: apm.yml manifest unreadable for %s (%s), "
+                    "falling back to install_path basename",
+                    project_root,
+                    exc.__class__.__name__,
+                )
 
         package = getattr(package_info, "package", None)
         package_name = self._safe_source_name(getattr(package, "name", None))
@@ -1108,9 +1113,10 @@ class HookIntegrator(BaseIntegrator):
                 remove_current_source = event_name not in cleared_events
                 if remove_current_source or heal_stale_root_source:
                     # Clear from the normalised event
-                    json_config["hooks"][event_name] = [
+                    prior_entries = json_config["hooks"][event_name]
+                    kept_entries = [
                         e
-                        for e in json_config["hooks"][event_name]
+                        for e in prior_entries
                         if not self._should_remove_prior_merged_entry(
                             e,
                             source_marker=source_marker,
@@ -1120,6 +1126,25 @@ class HookIntegrator(BaseIntegrator):
                             remove_current_source=remove_current_source,
                         )
                     ]
+                    if heal_stale_root_source:
+                        healed = sum(
+                            1
+                            for e in prior_entries
+                            if isinstance(e, dict)
+                            and e.get("_apm_source")
+                            and e.get("_apm_source") != source_marker
+                            and e.get("_apm_source") not in dependency_sources
+                            and e not in kept_entries
+                        )
+                        if healed:
+                            _log.debug(
+                                "Hook integrator: healed %d stale same-content "
+                                "merged hook entries for source %s in event %s",
+                                healed,
+                                source_marker,
+                                event_name,
+                            )
+                    json_config["hooks"][event_name] = kept_entries
                     # Also clear from any alias events that map to
                     # this normalised name (handles migration from
                     # corrupted installs with mixed-case event keys).

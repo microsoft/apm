@@ -3073,6 +3073,39 @@ class TestIssue1007Fixes:
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def _read_claude_sidecar(self, project: Path) -> dict:
+        """Return parsed .claude/apm-hooks.json sidecar (or empty dict if absent)."""
+        path = project / ".claude" / "apm-hooks.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _claude_sources(self, project: Path, event: str) -> list[str]:
+        """Return _apm_source markers for an event, ordered by settings.json entries.
+
+        Schema-strict Claude stores ownership in apm-hooks.json sidecar; match each
+        settings.json entry by content to its sidecar twin so order is preserved.
+        """
+        entries = self._read_claude_settings(project).get("hooks", {}).get(event, [])
+        sidecar_entries = self._read_claude_sidecar(project).get(event, [])
+        pool = list(sidecar_entries)
+        sources: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            cmp = {k: v for k, v in entry.items() if k != "_apm_source"}
+            match_idx = None
+            for idx, sc in enumerate(pool):
+                if not isinstance(sc, dict):
+                    continue
+                sc_cmp = {k: v for k, v in sc.items() if k != "_apm_source"}
+                if sc_cmp == cmp:
+                    match_idx = idx
+                    break
+            if match_idx is not None:
+                sources.append(pool.pop(match_idx).get("_apm_source"))
+        return sources
+
     def _read_cursor_hooks(self, project: Path) -> dict:
         """Return parsed .cursor/hooks.json (or empty dict if absent)."""
         path = project / ".cursor" / "hooks.json"
@@ -3610,8 +3643,8 @@ class TestIssue1007Fixes:
 
         HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
 
-        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
-        assert entries[0]["_apm_source"] == f"_local/{manifest_name}"
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == [f"_local/{manifest_name}"]
 
     def test_root_local_heals_stale_source_in_claude_settings(
         self,
@@ -3650,11 +3683,12 @@ class TestIssue1007Fixes:
         HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
 
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
-        managed = [e for e in entries if isinstance(e, dict) and "_apm_source" in e]
-        user_owned = [e for e in entries if isinstance(e, dict) and "_apm_source" not in e]
-        assert [e["_apm_source"] for e in managed] == ["_local/sample-project"]
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["_local/sample-project"]
+        # settings.json must retain both the managed entry and the user-owned hook
+        assert len(entries) == 2
+        user_owned = [e for e in entries if e["hooks"][0]["command"] == "echo user-owned"]
         assert len(user_owned) == 1
-        assert user_owned[0]["hooks"][0]["command"] == "echo user-owned"
 
     def test_root_local_heals_stale_source_in_codex_hooks(
         self,
@@ -3739,8 +3773,7 @@ class TestIssue1007Fixes:
 
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
-        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
-        sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
+        sources = self._claude_sources(temp_project, "PreToolUse")
         assert sources == ["dep-hooks", "_local/sample-project"]
 
     @pytest.mark.parametrize(
@@ -3807,8 +3840,7 @@ class TestIssue1007Fixes:
 
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
-        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
-        sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
+        sources = self._claude_sources(temp_project, "PreToolUse")
         assert sources == ["dep-hooks", "_local/sample-project"]
 
     def test_dependency_hook_sources_uses_lockfile_paths(
@@ -3925,8 +3957,7 @@ class TestIssue1007Fixes:
 
         HookIntegrator().integrate_package_hooks_claude(root_info, temp_project)
 
-        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
-        sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
+        sources = self._claude_sources(temp_project, "PreToolUse")
         assert sources == ["_local/sample-project"]
 
     def test_bounded_dependency_scan_ignores_unrecognized_nested_markers(
@@ -4001,8 +4032,7 @@ class TestIssue1007Fixes:
         integrator.integrate_package_hooks_claude(dep_info, temp_project)
         integrator.integrate_package_hooks_claude(root_info, temp_project)
 
-        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
-        sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
+        sources = self._claude_sources(temp_project, "PreToolUse")
         assert sources == ["matching-dep", "_local/matching-dep"]
 
     def test_root_local_heals_stale_source_for_multiple_hook_files_same_event(
@@ -4062,7 +4092,7 @@ class TestIssue1007Fixes:
 
         entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
         commands = [e["hooks"][0]["command"] for e in entries if isinstance(e, dict)]
-        sources = [e["_apm_source"] for e in entries if isinstance(e, dict)]
+        sources = self._claude_sources(temp_project, "PreToolUse")
         assert commands == ["echo first", "echo second"]
         assert sources == ["_local/sample-project", "_local/sample-project"]
 
