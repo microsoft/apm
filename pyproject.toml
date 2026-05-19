@@ -129,6 +129,23 @@ python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 
+[tool.coverage.run]
+source = ["src/apm_cli"]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+# Exclude lines that are not meant to be covered
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]
+
 [tool.pytest.ini_options]
 addopts = "-m 'not benchmark and not live'"
 markers = [

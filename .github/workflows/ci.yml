@@ -106,8 +106,69 @@ jobs:
     - name: Install dependencies
       run: uv sync --extra dev --extra build
 
-    - name: Run tests
-      run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
+    - name: Run tests with coverage
+      run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal --cov --cov-report=term-missing:skip-covered --cov-report=json:coverage.json
+
+    - name: Coverage summary
+      if: always()
+      run: |
+        if [ -f coverage.json ]; then
+          python3 << 'PYEOF'
+import json, pathlib
+
+data = json.loads(pathlib.Path("coverage.json").read_text())
+totals = data.get("totals", {})
+pct = totals.get("percent_covered_display", "N/A")
+stmts = totals.get("num_statements", 0)
+miss = totals.get("missing_lines", 0)
+covered = stmts - miss
+
+lines = []
+lines.append("## Code Coverage Report")
+lines.append("")
+lines.append(f"**Overall: {pct}%** ({covered:,}/{stmts:,} statements)")
+lines.append("")
+lines.append("| Metric | Value |")
+lines.append("|--------|-------|")
+lines.append(f"| Statements | {stmts:,} |")
+lines.append(f"| Covered | {covered:,} |")
+lines.append(f"| Missed | {miss:,} |")
+lines.append(f"| Coverage | {pct}% |")
+lines.append("")
+
+files = data.get("files", {})
+ranked = sorted(
+    files.items(),
+    key=lambda kv: kv[1].get("summary", {}).get("percent_covered", 100),
+)
+bottom = [
+    (f, d)
+    for f, d in ranked
+    if d.get("summary", {}).get("percent_covered", 100) < 80
+][:10]
+if bottom:
+    lines.append("<details><summary>Lowest-coverage files (below 80%)</summary>")
+    lines.append("")
+    lines.append("| File | Stmts | Miss | Cover |")
+    lines.append("|------|-------|------|-------|")
+    for fpath, fdata in bottom:
+        s = fdata.get("summary", {})
+        short = fpath.replace("src/apm_cli/", "")
+        fp = s.get("percent_covered_display", "?")
+        lines.append(
+            f"| `{short}` | {s.get('num_statements',0)}"
+            f" | {s.get('missing_lines',0)} | {fp}% |"
+        )
+    lines.append("")
+    lines.append("</details>")
+
+pathlib.Path("coverage-summary.md").write_text("\n".join(lines) + "\n")
+print("\n".join(lines))
+PYEOF
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            cat coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+        fi
 
     - name: Install UPX
       run: |
