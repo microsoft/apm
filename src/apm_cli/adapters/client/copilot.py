@@ -732,17 +732,18 @@ class CopilotClientAdapter(MCPClientAdapter):
             return resolved
 
         if isinstance(env_vars, dict):
-            resolved = {}
-            for name, value in env_vars.items():
-                if not name:
-                    continue
-                if isinstance(value, str):
-                    resolved[name] = self._resolve_env_variable(
-                        name, value, env_overrides=env_overrides
-                    )
-                elif value is not None:
-                    resolved[name] = _stringify_env_literal(value)
-            return resolved
+            # Mirror the base-class dict-shape branch but coerce non-string
+            # scalars through Copilot's hardened ``_stringify_env_literal``
+            # helper so booleans/ints land as the strings Copilot CLI expects.
+            return {
+                name: (
+                    self._resolve_env_variable(name, value, env_overrides=env_overrides)
+                    if isinstance(value, str)
+                    else _stringify_env_literal(value)
+                )
+                for name, value in env_vars.items()
+                if name and value is not None
+            }
 
         return self._resolve_env_vars_with_prompting(env_vars, env_overrides, default_github_env)
 
