@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** `copilot-app` target deploys prompts (with optional `schedule:` frontmatter) directly into the GitHub Copilot desktop App's `~/.copilot/data.db` workflows table. Gated behind `apm config set experimental.copilot_app true`; user-scope only (`--global`). Workflows always install disabled (`enabled = 0`); user opts in from the App. No new CLI surface — `apm install / update / uninstall / list` cover the lifecycle. See [Copilot App integration](https://microsoft.github.io/apm/integrations/copilot-app/).
+
 ### Fixed
 
 - `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. User values are validated against a strict allowlist before composing the clone URL. (#1385, closes #1383)
