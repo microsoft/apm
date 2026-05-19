@@ -105,7 +105,7 @@ class BaseIntegrator:
             diagnostics.skip(rel_path)
         else:
             _rich_warning(
-                f"Skipping {rel_path} — local file exists (not managed by APM). "
+                f"Skipping {rel_path} -- local file exists (not managed by APM). "
                 f"Use 'apm install --force' to overwrite."
             )
         return True
@@ -159,7 +159,7 @@ class BaseIntegrator:
             target_paths: Mutable list; *target_path* is appended on adopt.
 
         Returns:
-            ``(skip, adopted)`` — when ``skip`` is ``True`` the caller must
+            ``(skip, adopted)`` -- when ``skip`` is ``True`` the caller must
             ``continue`` (or otherwise skip writing this file); ``adopted``
             is ``True`` only when the existing file was byte-identical and
             has been silently adopted.

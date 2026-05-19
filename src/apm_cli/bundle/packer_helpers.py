@@ -59,7 +59,7 @@ def validate_package_metadata(
         for dep_ref in package.get_apm_dependencies():
             if dep_ref.is_local:
                 raise ValueError(
-                    f"Cannot pack — apm.yml contains local path dependency: "
+                    f"Cannot pack -- apm.yml contains local path dependency: "
                     f"{dep_ref.local_path}\n"
                     f"Local dependencies are for development only. Replace them with "
                     f"remote references (e.g., 'owner/repo') before packing."
@@ -167,7 +167,7 @@ def scan_bundle_security(
     if scan_findings_total:
         warn_msg = (
             f"Bundle contains {scan_findings_total} hidden character(s) across source files "
-            f"— run 'apm audit' to inspect before publishing"
+            f"-- run 'apm audit' to inspect before publishing"
         )
         if logger:
             logger.warning(warn_msg)

@@ -7,7 +7,6 @@ second ``ctx.tui.__enter__()`` / try-finally block.
 
 from __future__ import annotations
 
-import builtins
 import sys
 
 from ..models.results import InstallResult
@@ -17,13 +16,6 @@ from ..utils.path_security import PathTraversalError
 from ._phase_runner import _run_phase
 from ._preflight import _preflight_auth_check
 from .errors import AuthenticationError, DirectDependencyError
-
-# CRITICAL: Shadow Python builtins that share names with Click commands.
-# The parent ``commands/install`` module does this; we must do the same
-# to avoid NameError when using ``set()``, ``list()``, ``dict()`` below.
-set = builtins.set
-list = builtins.list
-dict = builtins.dict
 
 
 def _init_diagnostics(ctx) -> DiagnosticCollector:
@@ -54,7 +46,7 @@ def _check_registry_enforcement(existing_lockfile, registry_config, diagnostics)
     # Conflict: registry-only mode requires all locked deps to route through
     # the configured proxy. Deps locked to direct VCS sources are incompatible.
     conflicts = registry_config.validate_lockfile_deps(
-        builtins.list(existing_lockfile.dependencies.values())
+        list(existing_lockfile.dependencies.values())
     )
     if conflicts:
         _rich_error(
@@ -74,9 +66,7 @@ def _check_registry_enforcement(existing_lockfile, registry_config, diagnostics)
         sys.exit(1)
     # Supply chain warning: registry-proxy entries without a content_hash
     # cannot be verified on re-install.
-    missing = registry_config.find_missing_hashes(
-        builtins.list(existing_lockfile.dependencies.values())
-    )
+    missing = registry_config.find_missing_hashes(list(existing_lockfile.dependencies.values()))
     if missing:
         diagnostics.warn(
             "The following registry-proxy dependencies have no "
@@ -109,9 +99,9 @@ def _build_phase_environment(ctx, diagnostics):
     from ..deps.registry_proxy import RegistryConfig
     from ..integration.base_integrator import BaseIntegrator
 
-    installed_packages: builtins.list[InstalledPackage] = []
+    installed_packages: list[InstalledPackage] = []
     registry_config = RegistryConfig.from_env()
-    managed_files: builtins.set[str] = builtins.set()
+    managed_files: set[str] = set()
     existing_lockfile = LockFile.read(get_lockfile_path(ctx.apm_dir)) if ctx.apm_dir else None
     if existing_lockfile:
         for dep in existing_lockfile.dependencies.values():
@@ -219,7 +209,7 @@ def _run_phases(ctx) -> InstallResult:
 
         _run_phase("cleanup", _cleanup_phase, ctx)
 
-        # Phase: Skill path auto-migration (#737) — skip when opt-out flag set
+        # Phase: Skill path auto-migration (#737) -- skip when opt-out flag set
         _maybe_migrate_skill_paths(ctx)
 
         # Generate apm.lock for reproducible installs (T4: lockfile generation)

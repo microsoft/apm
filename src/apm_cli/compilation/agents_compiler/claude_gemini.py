@@ -72,7 +72,7 @@ def _write_claude_files(
                     critical_security_found = True
                 all_warnings.append(
                     f"CLAUDE.md contains {actionable} hidden character(s) "
-                    f"— run 'apm audit --file {claude_path}' to inspect"
+                    f"-- run 'apm audit --file {claude_path}' to inspect"
                 )
 
             writer.write(claude_path, final_content)

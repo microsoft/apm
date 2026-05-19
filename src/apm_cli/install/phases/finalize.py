@@ -73,13 +73,13 @@ def _emit_unpinned_warning(ctx: InstallContext) -> None:
 
 def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
-    from apm_cli.commands import install as _install_mod
     from apm_cli.models.results import InstallResult
+    from apm_cli.utils.console import _rich_success
 
     _emit_verbose_stats(ctx)
 
     if not ctx.logger:
-        _install_mod._rich_success(f"Installed {ctx.installed_count} APM dependencies")
+        _rich_success(f"Installed {ctx.installed_count} APM dependencies")
 
     _emit_unpinned_warning(ctx)
 

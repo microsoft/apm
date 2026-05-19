@@ -10,6 +10,8 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
 
+from apm_cli.utils.console import _get_console
+
 from .models import CompilationResults, OptimizationDecision, PlacementStrategy
 
 
@@ -23,7 +25,7 @@ class CompilationFormatter:
             use_color: Whether to use colors and rich formatting.
         """
         self.use_color = use_color and RICH_AVAILABLE
-        self.console = Console() if self.use_color else None
+        self.console = _get_console() if self.use_color else None
         self._target_name = "AGENTS.md"  # Default, updated per format call
 
     def format_default(self, results: CompilationResults) -> str:
