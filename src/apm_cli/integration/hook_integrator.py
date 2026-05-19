@@ -1009,6 +1009,18 @@ class HookIntegrator(BaseIntegrator):
         if config.require_dir and not target_dir.exists():
             return _empty
 
+        # Absolutize hook commands only for user-scope deploys.  Claude
+        # Code (and the Codex/Cursor/Gemini equivalents) reads
+        # ``~/.claude/settings.json`` without a fixed cwd and does not
+        # expand ``${CLAUDE_PLUGIN_ROOT}`` in that file (see #1310 / #1354),
+        # so user-scope deploys must write absolute paths.  Project-scope
+        # ``<repo>/.claude/settings.json`` is typically checked in and runs
+        # with cwd at the repo root, where repo-relative paths resolve
+        # correctly -- baking absolute machine paths into checked-in config
+        # breaks portability across clones, contributors, and CI (#1394).
+        _is_user_scope = project_root.resolve() == Path.home().resolve()
+        _deploy_root_for_rewrite = project_root if _is_user_scope else None
+
         hook_files = self.find_hook_files(package_info.install_path)
         hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
         if not hook_files:
@@ -1079,7 +1091,7 @@ class HookIntegrator(BaseIntegrator):
                 config.target_key,
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
-                deploy_root=project_root,
+                deploy_root=_deploy_root_for_rewrite,
             )
 
             # Merge hooks into config (additive)
