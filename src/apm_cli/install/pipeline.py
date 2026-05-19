@@ -89,8 +89,9 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     same creds. See #1212.
 
     For generic hosts, the probe uses the same transport the real clone
-    would use: SSH when the dep carries an explicit ``ssh://`` scheme or
-    has no token (ssh-agent auth), HTTPS otherwise (token-authenticated).
+    would use, mirroring :meth:`TransportSelector.select`: SSH only when
+    the dep carries an explicit ``ssh://`` scheme; otherwise HTTPS (token
+    embedded when available, plain HTTPS for anonymous public deps).
     SSH failures are detected via :func:`is_ssh_auth_failure_signal`;
     HTTPS failures via :func:`is_ado_auth_failure_signal`.
 
@@ -136,15 +137,16 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         _dl.github_host = host
         is_generic = not is_github_hostname(host) and not is_azure_devops_hostname(host)
 
-        # For generic hosts, determine whether the actual clone transport is SSH.
-        # A dep uses SSH when it carries an explicit ssh:// scheme OR when no
-        # auth token is available (in which case TransportSelector defaults to
-        # SSH for generic hosts).  In both cases the probe must use the SSH URL
-        # so we validate the right transport; an HTTPS probe against an SSH-only
-        # server would either produce a false auth-failure or silently succeed
-        # against a different auth surface.
+        # For generic hosts, mirror TransportSelector.select() when picking
+        # the probe transport: SSH only when the dep carries an explicit
+        # ssh:// scheme. Shorthand deps (no explicit scheme) default to
+        # HTTPS regardless of token presence -- TransportSelector's default
+        # is plain HTTPS without a token and authenticated HTTPS with one.
+        # Forcing SSH on tokenless generic hosts would break anonymous
+        # access to public Gitea/Forgejo deps that have neither an HTTPS
+        # token nor a configured SSH key.
         _explicit_scheme = (getattr(dep, "explicit_scheme", None) or "").lower()
-        _use_ssh = is_generic and (_explicit_scheme == "ssh" or not dep_ctx.token)
+        _use_ssh = is_generic and _explicit_scheme == "ssh"
 
         probe_url = _dl._build_repo_url(
             dep.repo_url,

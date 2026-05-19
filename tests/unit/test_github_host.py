@@ -379,8 +379,7 @@ class TestIsSshAuthFailureSignal:
 
     def test_no_more_authentication_methods(self):
         assert github_host.is_ssh_auth_failure_signal(
-            "Permission denied (publickey).\r\n"
-            "fatal: Could not read from remote repository."
+            "Permission denied (publickey).\r\nfatal: Could not read from remote repository."
         )
 
     def test_host_key_verification_failed(self):

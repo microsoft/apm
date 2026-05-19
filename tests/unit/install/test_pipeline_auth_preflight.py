@@ -358,23 +358,30 @@ class TestAdoBearerFallback:
 # ---------------------------------------------------------------------------
 
 
-def _make_ssh_dep(host="git.corp.internal", repo_url="org/repo"):
-    """Mock dep for a generic SSH-only host (no token, no explicit scheme)."""
+def _make_ssh_dep(host="git.corp.internal", repo_url="org/repo", explicit_scheme="ssh"):
+    """Mock dep for a generic SSH-only host. Defaults to explicit ssh:// scheme.
+
+    Note: as of the fix for #1293, ``_preflight_auth_check`` only routes through
+    the SSH probe when ``dep.explicit_scheme == "ssh"`` -- mirroring
+    :meth:`TransportSelector.select`. Tokenless shorthand deps now use the HTTPS
+    probe so anonymous public Gitea/Forgejo deps keep working.
+    """
     dep = MagicMock()
     dep.host = host
     dep.repo_url = repo_url
     dep.port = None
     dep.is_azure_devops.return_value = False
-    dep.explicit_scheme = None
+    dep.explicit_scheme = explicit_scheme
     dep.is_insecure = False
+    dep.ssh_user = None
     return dep
 
 
 def _make_ssh_resolver(token=None, git_env=None):
-    """Resolver with no token -- triggers _use_ssh=True for generic hosts."""
+    """Resolver for the SSH probe path. Pair with an ``explicit_scheme="ssh"`` dep."""
     resolver = MagicMock()
     dep_ctx = MagicMock()
-    dep_ctx.token = token  # None => SSH path
+    dep_ctx.token = token
     dep_ctx.auth_scheme = "ssh"
     dep_ctx.git_env = git_env or {}
     resolver.resolve_for_dep.return_value = dep_ctx
@@ -481,3 +488,81 @@ class TestSshPreflightExplicitScheme:
             _preflight_auth_check(ctx, resolver, verbose=False)
 
         assert "SSH authentication failed" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Heuristic alignment with TransportSelector (regression traps for #1293 fix)
+#
+# Pre-fix, the heuristic forced SSH on any tokenless generic host, which
+# diverges from TransportSelector.select(): for shorthand (no explicit
+# scheme) the selector defaults to plain HTTPS without a token. The traps
+# below assert the corrected heuristic so any future regression of
+# ``_use_ssh = is_generic and (... or not dep_ctx.token)`` is caught.
+# ---------------------------------------------------------------------------
+
+
+def _probe_url_from_call(mock_run):
+    """Extract the URL passed to the first git ls-remote subprocess call."""
+    args = mock_run.call_args[0][0]
+    # ["git", "ls-remote", "--heads", "--exit-code", URL]
+    return args[-1]
+
+
+class TestPreflightTransportMirrorsSelector:
+    """Probe transport must mirror what TransportSelector.select() would choose."""
+
+    @patch("subprocess.run")
+    def test_tokenless_generic_shorthand_probes_https(self, mock_run):
+        """Tokenless public Gitea/Forgejo (no scheme, no token) -> plain HTTPS probe.
+
+        Regression trap: pre-fix this took the SSH path, breaking anonymous
+        access to public dependencies on generic Git hosts that have no
+        configured SSH key. TransportSelector for shorthand without a token
+        returns ``[_PLAIN_HTTPS]`` (transport_selection.py:315-316), so the
+        preflight must do the same.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+
+        dep = _make_generic_dep(host="gitea.public.example", repo_url="org/repo")
+        # Shorthand: no explicit scheme.
+        assert dep.explicit_scheme is None
+        ctx = _make_ctx(deps=[dep])
+        # Anonymous: no token.
+        resolver = _make_resolver(token=None)
+
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        _preflight_auth_check(ctx, resolver, verbose=False)
+
+        probe_url = _probe_url_from_call(mock_run)
+        assert probe_url.startswith("https://"), (
+            f"Tokenless shorthand must probe HTTPS to mirror TransportSelector; got: {probe_url}"
+        )
+        assert not probe_url.startswith("ssh://"), (
+            "Tokenless shorthand must NOT probe SSH -- would break anonymous public deps."
+        )
+
+    @patch("subprocess.run")
+    def test_tokened_generic_shorthand_probes_https(self, mock_run):
+        """Token-present generic shorthand -> authenticated HTTPS probe (baseline).
+
+        Regression trap for any future change that flips the heuristic back
+        to SSH when the URL has no explicit scheme. TransportSelector for
+        shorthand with a token returns ``[_AUTH_HTTPS]`` -- the preflight
+        must match.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+
+        dep = _make_generic_dep(host="gitea.corp.example", repo_url="org/repo")
+        assert dep.explicit_scheme is None
+        ctx = _make_ctx(deps=[dep])
+        resolver = _make_resolver(token="some-token")
+
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        _preflight_auth_check(ctx, resolver, verbose=False)
+
+        probe_url = _probe_url_from_call(mock_run)
+        assert probe_url.startswith("https://"), (
+            f"Tokened shorthand must probe HTTPS, not SSH; got: {probe_url}"
+        )
