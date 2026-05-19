@@ -402,6 +402,106 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.assertEqual(figma["id"], "ab12cd34-0000-0000-0000-000000000000")
         self.assertEqual(figma["http_headers"], {"Authorization": "Bearer ghp_xxx"})
 
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_format_server_config_streamable_http_rejects_empty_url(self, mock_warn):
+        """Empty / whitespace-only remote URLs are rejected with a clear message."""
+        for empty_value in ("", "   ", None):
+            with self.subTest(url=empty_value):
+                mock_warn.reset_mock()
+                server_info = {
+                    "name": "broken-remote",
+                    "id": "broken-id",
+                    "remotes": [
+                        {
+                            "url": empty_value,
+                            "transport_type": "streamable-http",
+                        }
+                    ],
+                }
+                result = self.adapter._format_server_config(server_info)
+                self.assertIsNone(result)
+                mock_warn.assert_called_once()
+                msg = mock_warn.call_args[0][0]
+                self.assertIn("broken-remote", msg)
+                # Message must explicitly mention that the URL is empty/missing
+                # rather than the misleading "no scheme" wording urlparse would
+                # produce for an empty string.
+                self.assertTrue(
+                    "empty" in msg.lower() or "missing" in msg.lower() or "no url" in msg.lower(),
+                    f"Expected empty/missing URL wording; got: {msg!r}",
+                )
+
+    @patch("apm_cli.adapters.client.codex._rich_success")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_streamable_http_emits_rich_success(
+        self, mock_find_server, mock_success
+    ):
+        """Successful streamable-HTTP registration emits a green _rich_success line."""
+        mock_find_server.return_value = {
+            "name": "figma",
+            "id": "ab12cd34-0000-0000-0000-000000000000",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                }
+            ],
+        }
+        result = self.adapter.configure_mcp_server("figma/figma")
+        self.assertTrue(result)
+        mock_success.assert_called_once()
+        msg = mock_success.call_args[0][0]
+        self.assertIn("figma", msg)
+        self.assertIn("Codex CLI", msg)
+
+    @patch("apm_cli.adapters.client.codex._rich_success")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_stdio_emits_rich_success(self, mock_find_server, mock_success):
+        """stdio registrations also emit _rich_success (not bare print)."""
+        mock_find_server.return_value = {
+            "id": "test-id",
+            "name": "test-server",
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "test-package",
+                    "version": "1.0.0",
+                    "arguments": [],
+                }
+            ],
+            "environment_variables": [],
+        }
+        result = self.adapter.configure_mcp_server("test-server", "my_server")
+        self.assertTrue(result)
+        mock_success.assert_called_once()
+
+    @patch("apm_cli.adapters.client.codex._log")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_hybrid_logs_precedence(self, mock_find_server, mock_log):
+        """Hybrid servers (remotes + packages) log that packages win for Codex."""
+        mock_find_server.return_value = {
+            "id": "hybrid-server-id",
+            "name": "hybrid-server",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://example.com/mcp"}],
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "hybrid-package",
+                    "version": "1.0.0",
+                    "arguments": [],
+                }
+            ],
+            "environment_variables": [],
+        }
+        result = self.adapter.configure_mcp_server("hybrid-server", "hybrid")
+        self.assertTrue(result)
+        # At least one debug call must mention the precedence decision.
+        debug_messages = [str(call) for call in mock_log.debug.call_args_list]
+        self.assertTrue(
+            any("hybrid" in m and "package" in m.lower() for m in debug_messages),
+            f"Expected a debug log about packages-win precedence; got: {debug_messages}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
