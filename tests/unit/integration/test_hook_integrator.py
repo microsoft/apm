@@ -13,7 +13,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -833,13 +833,14 @@ class TestClaudeIntegration:
         )
 
     def test_user_scope_still_writes_absolute_hook_paths(self, temp_project):
-        """User-scope (project_root == Path.home()) must still absolutize hook
-        commands -- ``~/.claude/settings.json`` runs without a fixed cwd, so
-        relative paths cannot resolve (#1310 / #1354).
+        """User-scope deploys must still absolutize hook commands --
+        ``~/.claude/settings.json`` runs without a fixed cwd, so relative
+        paths cannot resolve (#1310 / #1354).
 
-        This test patches Path.home() to equal the temp project root so the
-        scope check inside _integrate_merged_hooks treats this deploy as user
-        scope without touching the real $HOME.
+        ``user_scope=True`` is the explicit signal the production dispatch
+        (``services.integrate_package_primitives``) computes from the
+        ``InstallScope`` enum, kept independent of deploy-root layout in
+        ``core/scope.py``.
         """
         pkg_dir = temp_project / "scope-pkg"
         hooks_dir = pkg_dir / "hooks"
@@ -866,8 +867,7 @@ class TestClaudeIntegration:
 
         pkg_info = _make_package_info(pkg_dir, "scope-pkg")
         integrator = HookIntegrator()
-        with patch("pathlib.Path.home", return_value=temp_project):
-            integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        integrator.integrate_package_hooks_claude(pkg_info, temp_project, user_scope=True)
 
         settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
         cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]

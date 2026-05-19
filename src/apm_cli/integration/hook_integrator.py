@@ -988,6 +988,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks by merging into a target-specific JSON config.
 
@@ -1018,8 +1019,9 @@ class HookIntegrator(BaseIntegrator):
         # with cwd at the repo root, where repo-relative paths resolve
         # correctly -- baking absolute machine paths into checked-in config
         # breaks portability across clones, contributors, and CI (#1394).
-        _is_user_scope = project_root.resolve() == Path.home().resolve()
-        _deploy_root_for_rewrite = project_root if _is_user_scope else None
+        # ``user_scope`` is threaded from the caller's ``InstallScope`` so
+        # the gate is explicit rather than inferred from deploy-root shape.
+        _deploy_root_for_rewrite = project_root if user_scope else None
 
         hook_files = self.find_hook_files(package_info.install_path)
         hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
@@ -1295,6 +1297,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .claude/settings.json.
 
@@ -1307,6 +1311,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     def integrate_package_hooks_cursor(
@@ -1316,6 +1321,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .cursor/hooks.json.
 
@@ -1328,6 +1335,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     def integrate_package_hooks_codex(
@@ -1337,6 +1345,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .codex/hooks.json.
 
@@ -1349,6 +1359,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     # ------------------------------------------------------------------
@@ -1365,12 +1376,19 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         scope=None,
+        user_scope: bool = False,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
         Copilot uses individual JSON files (genuinely different pattern).
         All other merge-based targets are dispatched via the
         ``_MERGE_HOOK_TARGETS`` registry.
+
+        ``user_scope`` controls whether merged-hook ``command`` paths are
+        rewritten to absolute paths (required when deploying to
+        ``~/.claude/settings.json`` -- see #1310 / #1354) or left
+        repo-relative so checked-in project-scope configs stay portable
+        across clones, contributors, and CI runners (#1394).
         """
         if target.name == "copilot":
             return self.integrate_package_hooks(
@@ -1392,6 +1410,7 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+                user_scope=user_scope,
             )
 
         return HookIntegrationResult(
