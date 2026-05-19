@@ -194,7 +194,7 @@ schedule:
   interval: daily         # manual | hourly | daily | weekly
   schedule_hour: 9        # 0-23 (UTC); ignored for manual / hourly
   schedule_day: 1         # 0-6 (weekly only)
-  mode: interactive       # interactive | plan | autopilot
+  mode: interactive       # interactive | plan
   model: claude-opus-4.7  # optional
   reasoning_effort: high  # optional
 ---
@@ -203,8 +203,10 @@ schedule:
 Rows are always inserted with `enabled = 0`; the user opts in from the
 App. Prompts without a `schedule:` block are skipped at the
 `copilot-app` target (they still deploy normally to file-based targets).
-`autopilot` mode is policy-blocked for third-party packages by default
-until package signing ships.
+The App also defines an `autopilot` mode, but APM intentionally does
+not accept it via this target -- a third-party package could otherwise
+auto-run the moment the user enables the row. Users who want autopilot
+can still set it themselves per-row from the App UI after install.
 
 ### 5. Agent (`*.agent.md`)
 

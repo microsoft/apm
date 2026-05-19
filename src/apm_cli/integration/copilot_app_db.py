@@ -432,13 +432,18 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                 (row.id,),
             ).fetchone()
             if existing is None:
+                # INSERT always writes enabled=0 regardless of row.enabled.
+                # The user must opt in via the App UI -- a third-party package
+                # cannot auto-run on install even if a future caller passes
+                # enabled=1 to this writer. Defence in depth alongside the
+                # caller-side enforcement in PromptIntegrator.
                 conn.execute(
                     """
                     INSERT INTO workflows (
                         id, name, prompt, model, reasoning_effort,
                         interval, schedule_hour, schedule_day,
                         enabled, mode
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                     """,
                     (
                         row.id,
@@ -449,7 +454,6 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                         row.interval,
                         row.schedule_hour,
                         row.schedule_day,
-                        row.enabled,
                         row.mode,
                     ),
                 )

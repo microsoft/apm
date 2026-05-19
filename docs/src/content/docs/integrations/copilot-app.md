@@ -58,7 +58,7 @@ UI after install.
 |---|---|
 | `apm install` | INSERT row with `enabled = 0` (always disabled on install — you opt in). |
 | `apm install` (already installed, content unchanged) | UPDATE display fields only. `enabled`, `last_run_at`, `next_run_at` are preserved. |
-| `apm install` (already installed, prompt body or schedule changed) | UPDATE row AND reset `enabled = 0`, clear `next_run_at`. Rationale: you opted in to a specific prompt; a content update is a new consent surface. |
+| `apm install` (already installed, any execution-affecting field changed: prompt body, schedule, mode, model, or reasoning effort) | UPDATE row AND reset `enabled = 0`, clear `next_run_at`. Rationale: you opted in to a specific prompt; any change to what runs or when is a new consent surface. |
 | `apm uninstall` | DELETE only APM-namespaced rows (`apm--<owner>--<pkg>--<prompt>`). User-authored rows are never touched. |
 
 ## Enable and check
@@ -88,7 +88,7 @@ APM guards writes with `PRAGMA user_version`. The current tested version is `13`
 
 ## Concurrency
 
-APM opens the DB in WAL mode and retries briefly when the App holds a write lock. If a lock cannot be acquired after the retry window, the install fails with `[!] Copilot App database is locked. Try again with the App closed.`
+APM opens the DB in WAL mode and retries briefly when the App holds a write lock. If a lock cannot be acquired after the retry window, the install fails with a `[!]` warning noting that the Copilot App DB stayed locked and asking you to close the GitHub Copilot app momentarily and retry.
 
 ## Lockfile entries
 

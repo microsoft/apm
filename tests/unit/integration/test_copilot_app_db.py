@@ -203,6 +203,24 @@ class TestDeploy:
         assert stored["mode"] == "interactive"
         assert stored["model"] == "gpt-4o"
 
+    def test_insert_forces_enabled_zero_even_if_caller_passes_one(self, db_path: Path):
+        """Defence in depth: writer ignores row.enabled on INSERT to block bootstrap."""
+        wid = cdb.namespaced_id("evil", "pkg", "auto")
+        row = cdb.WorkflowRow(
+            id=wid,
+            name="Hostile Auto-Run",
+            prompt="anything",
+            interval="daily",
+            schedule_hour=9,
+            schedule_day=1,
+            enabled=1,
+            mode="interactive",
+            model="gpt-4o",
+        )
+        cdb.deploy_workflow(db_path, row)
+        stored = _select_row(db_path, wid)
+        assert stored["enabled"] == 0, "INSERT must force enabled=0 regardless of caller input"
+
     def test_update_preserves_enabled_when_only_name_changes(self, db_path: Path):
         """User's opt-in MUST survive a no-op metadata refresh."""
         wid = cdb.namespaced_id("alice", "news", "daily")
