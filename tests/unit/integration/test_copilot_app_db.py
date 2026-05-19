@@ -203,13 +203,44 @@ class TestDeploy:
         assert stored["mode"] == "interactive"
         assert stored["model"] == "gpt-4o"
 
-    def test_update_preserves_user_enabled_and_run_history(self, db_path: Path):
+    def test_update_preserves_enabled_when_only_name_changes(self, db_path: Path):
+        """User's opt-in MUST survive a no-op metadata refresh."""
+        wid = cdb.namespaced_id("alice", "news", "daily")
+        cdb.deploy_workflow(
+            db_path,
+            cdb.WorkflowRow(id=wid, name="V1", prompt="body", interval="manual"),
+        )
+        # Simulate the user enabling the row + the app recording a run.
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(
+                "UPDATE workflows SET enabled=1, last_run_at=?, next_run_at=? WHERE id=?",
+                ("2025-01-01T00:00:00.000Z", "2025-01-02T00:00:00.000Z", wid),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        # Re-deploy with ONLY the display name changed -- no execution-
+        # affecting fields move.
+        cdb.deploy_workflow(
+            db_path,
+            cdb.WorkflowRow(id=wid, name="V1-renamed", prompt="body", interval="manual"),
+        )
+        stored = _select_row(db_path, wid)
+        assert stored["name"] == "V1-renamed"
+        assert stored["prompt"] == "body"
+        assert stored["interval"] == "manual"
+        assert stored["enabled"] == 1, "user opt-in must survive no-op refresh"
+        assert stored["last_run_at"] == "2025-01-01T00:00:00.000Z"
+        assert stored["next_run_at"] == "2025-01-02T00:00:00.000Z"
+
+    def test_update_resets_enabled_when_prompt_body_changes(self, db_path: Path):
+        """Content change revokes the user's prior opt-in (silent-update vector)."""
         wid = cdb.namespaced_id("alice", "news", "daily")
         cdb.deploy_workflow(
             db_path,
             cdb.WorkflowRow(id=wid, name="V1", prompt="old", interval="manual"),
         )
-        # Simulate the user enabling the row + the app recording a run.
         conn = sqlite3.connect(str(db_path))
         try:
             conn.execute(
@@ -228,9 +259,34 @@ class TestDeploy:
         assert stored["name"] == "V2"
         assert stored["prompt"] == "new"
         assert stored["interval"] == "hourly"
-        assert stored["enabled"] == 1, "user opt-in must survive update"
+        assert stored["enabled"] == 0, "content change must revoke prior opt-in"
+        assert stored["next_run_at"] is None, "next_run_at must clear on content change"
+        # last_run_at is history -- preserved either way.
         assert stored["last_run_at"] == "2025-01-01T00:00:00.000Z"
-        assert stored["next_run_at"] == "2025-01-02T00:00:00.000Z"
+
+    def test_update_resets_enabled_when_schedule_changes(self, db_path: Path):
+        """Schedule change is also an execution-affecting change."""
+        wid = cdb.namespaced_id("alice", "news", "daily")
+        cdb.deploy_workflow(
+            db_path,
+            cdb.WorkflowRow(id=wid, name="V1", prompt="body", interval="daily", schedule_hour=9),
+        )
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(
+                "UPDATE workflows SET enabled=1 WHERE id=?",
+                (wid,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        cdb.deploy_workflow(
+            db_path,
+            cdb.WorkflowRow(id=wid, name="V1", prompt="body", interval="daily", schedule_hour=17),
+        )
+        stored = _select_row(db_path, wid)
+        assert stored["enabled"] == 0
+        assert stored["schedule_hour"] == 17
 
     def test_rejects_invalid_interval(self, db_path: Path):
         wid = cdb.namespaced_id("o", "p", "n")
@@ -246,6 +302,15 @@ class TestDeploy:
             cdb.deploy_workflow(
                 db_path,
                 cdb.WorkflowRow(id=wid, name="N", prompt="x", mode="rogue"),
+            )
+
+    def test_rejects_autopilot_mode(self, db_path: Path):
+        """autopilot is intentionally not accepted via the copilot-app target."""
+        wid = cdb.namespaced_id("o", "p", "n")
+        with pytest.raises(ValueError, match=r"Invalid mode"):
+            cdb.deploy_workflow(
+                db_path,
+                cdb.WorkflowRow(id=wid, name="N", prompt="x", mode="autopilot"),
             )
 
     def test_rejects_non_apm_id(self, db_path: Path):

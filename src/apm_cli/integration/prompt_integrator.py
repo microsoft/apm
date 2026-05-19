@@ -421,7 +421,10 @@ class PromptIntegrator(BaseIntegrator):
 from dataclasses import dataclass  # noqa: E402
 
 _VALID_SCHEDULE_INTERVALS: frozenset[str] = frozenset({"manual", "hourly", "daily", "weekly"})
-_VALID_SCHEDULE_MODES: frozenset[str] = frozenset({"interactive", "plan", "autopilot"})
+_VALID_SCHEDULE_MODES: frozenset[str] = frozenset({"interactive", "plan"})
+"""Mirror of ``copilot_app_db._VALID_MODES``.  ``autopilot`` is
+deliberately omitted -- see that module's docstring for the
+secure-by-default rationale."""
 
 
 @dataclass(frozen=True)

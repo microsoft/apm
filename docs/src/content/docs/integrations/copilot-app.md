@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::caution[Frontier preview]
-This integration is experimental and off by default. You must enable the `copilot_app` flag before using it.
+This integration is experimental and off by default. You must enable the `copilot-app` flag before using it.
 
 ```bash
 apm experimental enable copilot-app
@@ -17,7 +17,7 @@ Until the flag is enabled, the `copilot-app` target stays inert: it is hidden fr
 
 ## What it does
 
-When `copilot_app` is enabled and a package ships a prompt with a `schedule:` frontmatter block, `apm install --target copilot-app --global` inserts the prompt as a row in the GitHub Copilot desktop App's SQLite store at `~/.copilot/data.db`. The App reads new rows on next launch (or refresh) and lists them under Workflows.
+When `copilot-app` is enabled and a package ships a prompt with a `schedule:` frontmatter block, `apm install --target copilot-app --global` inserts the prompt as a row in the GitHub Copilot desktop App's SQLite store at `~/.copilot/data.db`. The App reads new rows on next launch (or refresh) and lists them under Workflows.
 
 Prompts that do not carry `schedule:` are skipped silently at this target — they continue to deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) without changes.
 
@@ -36,7 +36,7 @@ schedule:
   interval: daily         # one of: manual, hourly, daily, weekly
   schedule_hour: 9        # 0-23, UTC; ignored for manual / hourly
   schedule_day: 1         # 0-6 (weekly only)
-  mode: interactive       # one of: interactive, plan, autopilot
+  mode: interactive       # one of: interactive, plan
   model: claude-opus-4.7  # optional
   reasoning_effort: high  # optional
 ---
@@ -44,16 +44,22 @@ schedule:
 Summarise yesterday's commits across all open PRs ...
 ```
 
-`autopilot` mode is policy-blocked for third-party packages by default — third-party packages cannot auto-run anything on your machine without you flipping the App-side toggle.
+The Copilot App also defines an `autopilot` mode, but APM intentionally
+does NOT accept it via this target. Until package signing ships, a
+third-party package could declare `mode: autopilot` and have the App
+auto-run the prompt the moment you flip the in-App enable toggle.
+Refusing autopilot at the writer is the secure-by-default behaviour;
+you can still set autopilot yourself on a per-row basis from the App
+UI after install.
 
 ## Lifecycle
 
 | `apm` action | Effect on `~/.copilot/data.db` |
 |---|---|
 | `apm install` | INSERT row with `enabled = 0` (always disabled on install — you opt in). |
-| `apm install` (already installed) | UPDATE prompt text / schedule / mode. `enabled`, `last_run_at`, `next_run_at` are preserved. |
+| `apm install` (already installed, content unchanged) | UPDATE display fields only. `enabled`, `last_run_at`, `next_run_at` are preserved. |
+| `apm install` (already installed, prompt body or schedule changed) | UPDATE row AND reset `enabled = 0`, clear `next_run_at`. Rationale: you opted in to a specific prompt; a content update is a new consent surface. |
 | `apm uninstall` | DELETE only APM-namespaced rows (`apm--<owner>--<pkg>--<prompt>`). User-authored rows are never touched. |
-| `apm list` | Reports APM-managed workflows alongside other primitives. |
 
 ## Enable and check
 
@@ -90,6 +96,6 @@ Deployed rows are tracked in the project / user lockfile under the `copilot-app-
 
 ## Out of scope (today)
 
-- Package signing for `mode: autopilot` (planned).
+- Package signing (would unlock additional trust-gated capabilities such as `mode: autopilot`).
 - Scheduled-execution-on-install (deliberately not implemented — first-run is always manual).
 - `gh-aw` outer-loop target (separate roadmap).

@@ -97,9 +97,16 @@ _NAMESPACE_PREFIX: str = "apm--"
 _VALID_INTERVALS: frozenset[str] = frozenset({"manual", "hourly", "daily", "weekly"})
 """App-enforced ``CHECK (interval IN (...))`` constraint mirror."""
 
-_VALID_MODES: frozenset[str] = frozenset({"interactive", "plan", "autopilot"})
-"""Modes accepted by the app's workflow runner.  ``autopilot`` is policy-
-gated for third-party packages until package signing arrives (v3)."""
+_VALID_MODES: frozenset[str] = frozenset({"interactive", "plan"})
+"""Modes accepted via the ``copilot-app`` target.
+
+The Copilot App's runtime also defines an ``autopilot`` mode, but APM
+intentionally does NOT accept it here: until package signing ships
+(v3), a third-party package could declare ``mode: autopilot`` and have
+the App auto-run its prompt the moment a user flips the in-App enable
+toggle.  Refusing autopilot at the writer is the secure-by-default
+behaviour; users who want autopilot can still set it themselves in the
+App UI on a per-row basis."""
 
 
 # ---------------------------------------------------------------------------
@@ -381,9 +388,19 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
     """Insert or update a single workflow row owned by APM.
 
     On INSERT the row arrives with whatever the caller passed.  On
-    UPDATE the user-controlled fields ``enabled``, ``last_run_at``,
-    ``next_run_at`` are preserved from whatever the app last wrote --
-    APM never overwrites the user's enable toggle or run history.
+    UPDATE behaviour depends on whether execution-affecting fields
+    changed:
+
+    * If ``prompt``, ``mode``, ``interval``, ``schedule_hour``,
+      ``schedule_day``, ``model``, or ``reasoning_effort`` differs from
+      the row already in the DB, the user's ``enabled`` opt-in is
+      revoked (``enabled = 0``) and the App's ``next_run_at`` is
+      cleared.  Rationale: the user opted in to a specific prompt body
+      and schedule; a content update is a NEW consent surface.
+      Preserving ``enabled`` across content changes would be a silent
+      malicious-update vector.
+    * Otherwise (e.g. only ``name`` changed), ``enabled``,
+      ``last_run_at``, and ``next_run_at`` are preserved.
 
     Returns the lockfile URI for the deployed row.
 
@@ -397,8 +414,8 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
     if not db_path.is_file():
         raise CopilotAppDbMissingError(
             f"Copilot App database not found at {db_path}. "
-            f"Install the GitHub Copilot desktop app, or remove "
-            f"'--target copilot-app' from this install."
+            f"Install the GitHub Copilot desktop app, or omit "
+            f"'--target copilot-app'."
         )
 
     conn = _connect(db_path)
@@ -407,7 +424,11 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
         _begin_immediate_with_retry(conn)
         try:
             existing = conn.execute(
-                "SELECT enabled, last_run_at, next_run_at FROM workflows WHERE id = ?",
+                """
+                SELECT prompt, mode, interval, schedule_hour, schedule_day,
+                       model, reasoning_effort
+                  FROM workflows WHERE id = ?
+                """,
                 (row.id,),
             ).fetchone()
             if existing is None:
@@ -433,32 +454,54 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                     ),
                 )
             else:
-                conn.execute(
-                    """
-                    UPDATE workflows
-                       SET name = ?,
-                           prompt = ?,
-                           model = ?,
-                           reasoning_effort = ?,
-                           interval = ?,
-                           schedule_hour = ?,
-                           schedule_day = ?,
-                           mode = ?,
-                           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-                     WHERE id = ?
-                    """,
-                    (
-                        row.name,
-                        row.prompt,
-                        row.model,
-                        row.reasoning_effort,
-                        row.interval,
-                        row.schedule_hour,
-                        row.schedule_day,
-                        row.mode,
-                        row.id,
-                    ),
+                execution_changed = (
+                    existing["prompt"] != row.prompt
+                    or existing["mode"] != row.mode
+                    or existing["interval"] != row.interval
+                    or existing["schedule_hour"] != row.schedule_hour
+                    or existing["schedule_day"] != row.schedule_day
+                    or existing["model"] != row.model
+                    or existing["reasoning_effort"] != row.reasoning_effort
                 )
+                if execution_changed:
+                    conn.execute(
+                        """
+                        UPDATE workflows
+                           SET name = ?,
+                               prompt = ?,
+                               model = ?,
+                               reasoning_effort = ?,
+                               interval = ?,
+                               schedule_hour = ?,
+                               schedule_day = ?,
+                               mode = ?,
+                               enabled = 0,
+                               next_run_at = NULL,
+                               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                         WHERE id = ?
+                        """,
+                        (
+                            row.name,
+                            row.prompt,
+                            row.model,
+                            row.reasoning_effort,
+                            row.interval,
+                            row.schedule_hour,
+                            row.schedule_day,
+                            row.mode,
+                            row.id,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE workflows
+                           SET name = ?,
+                               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                         WHERE id = ?
+                        """,
+                        (row.name, row.id),
+                    )
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

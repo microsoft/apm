@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Experimental:** `copilot-app` target deploys prompts (with optional `schedule:` frontmatter) directly into the GitHub Copilot desktop App's `~/.copilot/data.db` workflows table. Gated behind `apm config set experimental.copilot_app true`; user-scope only (`--global`). Workflows always install disabled (`enabled = 0`); user opts in from the App. No new CLI surface — `apm install / update / uninstall / list` cover the lifecycle. See [Copilot App integration](https://microsoft.github.io/apm/integrations/copilot-app/).
+- **Experimental:** `copilot-app` target deploys prompts (with optional `schedule:` frontmatter) directly into the GitHub Copilot desktop App's `~/.copilot/data.db` workflows table. Gated behind `apm experimental enable copilot-app`; user-scope only (`--global`). Workflows always install disabled (`enabled = 0`); user opts in from the App. No new CLI surface — `apm install / update / uninstall / list` cover the lifecycle. See [Copilot App integration](https://microsoft.github.io/apm/integrations/copilot-app/).
 
 ### Fixed
 
