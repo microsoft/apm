@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. User values are validated against a strict allowlist before composing the clone URL. (#1385, closes #1383)
+
 ## [0.14.0] - 2026-05-18
 
 ### Breaking
