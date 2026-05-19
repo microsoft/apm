@@ -202,7 +202,7 @@ jobs:
           # --dist loadgroup is required: it is the only xdist scheduler
           # that honors pytest.mark.xdist_group, which we use to keep
           # HOME-mutating tests serialized on a single worker.
-          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov --cov-report=json:coverage.json"
+          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -210,12 +210,20 @@ jobs:
         # headroom for the slowest shard (HOME-group tests).
         timeout-minutes: 15
 
+      - name: Rename coverage data for shard
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            mv .coverage .coverage.shard-${{ matrix.shard }}
+          fi
+
       - name: Upload coverage data
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: integration-coverage-shard-${{ matrix.shard }}
-          path: coverage.json
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
           retention-days: 7
           if-no-files-found: ignore
 
@@ -228,6 +236,40 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     steps:
+      # Coverage summary runs first (with if: always()) so we get
+      # observability even when some shards fail. The shard-result
+      # gate runs last so it can still fail the job.
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install coverage
+        run: pip install "coverage[toml]"
+
+      - name: Download shard coverage
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: integration-coverage-shard-*
+          path: coverage-shards/
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Combine and summarise coverage
+        if: always()
+        run: |
+          if find coverage-shards -type f -name '.coverage*' 2>/dev/null | grep -q .; then
+            coverage combine coverage-shards/
+            coverage json -o coverage.json
+            python3 scripts/coverage-summary.py coverage.json --title "Integration Test Coverage"
+          else
+            echo "No coverage shard files found; skipping integration coverage summary."
+          fi
+        continue-on-error: true
+
       - name: Aggregate shard results
         run: |
           if [[ "${{ needs.integration-tests-shard.result }}" != "success" ]]; then
@@ -235,54 +277,6 @@ jobs:
             exit 1
           fi
           echo "All integration test shards passed."
-
-      - name: Download shard coverage
-        if: success()
-        uses: actions/download-artifact@v4
-        with:
-          pattern: integration-coverage-shard-*
-          path: coverage-shards/
-
-      - name: Integration coverage summary
-        if: success()
-        shell: bash
-        run: |
-          python3 - coverage-shards "$GITHUB_STEP_SUMMARY" << 'PYEOF'
-          import json, pathlib, os, sys
-          shards_dir = pathlib.Path(sys.argv[1])
-          summary_path = sys.argv[2] if len(sys.argv) > 2 else ""
-          if not shards_dir.exists():
-              print("No coverage data found"); raise SystemExit(0)
-          shard_files = sorted(shards_dir.rglob("coverage.json"))
-          if not shard_files:
-              print("No coverage.json found"); raise SystemExit(0)
-          total_stmts = total_miss = 0
-          for sf in shard_files:
-              data = json.loads(sf.read_text())
-              t = data.get("totals", {})
-              total_stmts += t.get("num_statements", 0)
-              total_miss += t.get("missing_lines", 0)
-          covered = total_stmts - total_miss
-          pct = round(covered / total_stmts * 100, 1) if total_stmts else 0
-          md = [
-              "## Integration Test Coverage",
-              f"*{len(shard_files)} shards aggregated*",
-              "",
-              f"**Overall: {pct}%** ({covered:,}/{total_stmts:,} statements)",
-              "",
-              "| Metric | Value |",
-              "|--------|-------|",
-              f"| Statements | {total_stmts:,} |",
-              f"| Covered | {covered:,} |",
-              f"| Missed | {total_miss:,} |",
-              f"| Coverage | {pct}% |",
-          ]
-          out = "\n".join(md) + "\n"
-          print(out)
-          if summary_path:
-              with open(summary_path, "a") as f:
-                  f.write(out)
-          PYEOF
 
   release-validation:
     name: Release Validation (Linux)
