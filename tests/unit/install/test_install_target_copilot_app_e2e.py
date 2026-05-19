@@ -424,6 +424,12 @@ class TestCopilotAppDeployUninstall:
             catch_exceptions=False,
         )
         assert install_result.exit_code == 0, install_result.output
+        # Lock the user-facing contract: contributors see the prompts
+        # integrated line AND the enable-in-Copilot-App hint, so a
+        # project-scope teammate isn't left wondering why their
+        # workflow never fires (see devx-ux-expert finding on PR #1405).
+        assert "prompts integrated" in install_result.output, install_result.output
+        assert "enable from the Copilot App" in install_result.output, install_result.output
 
         # Lockfile must live in the PROJECT (not user-home) and carry
         # the copilot-app URI so uninstall can locate the DB row.

@@ -352,6 +352,16 @@ def integrate_package_primitives(
                 _log_integration(line)
         else:
             _log_integration(f"  |-- {_verb_phrase} -> {_suffix}")
+        # Emit a one-line "next step" hint when copilot-app workflows
+        # were integrated: the row lands enabled=0 and the user has to
+        # flip the toggle in the Copilot App's Workflows tab before the
+        # schedule fires. This is the "failure mode is the product"
+        # surface for project-scope ride-along installs where a
+        # contributor may not have read the integration doc.
+        if any(p.startswith("copilot-app/") for p in _info["paths"]) and _info["files"] > 0:
+            _log_integration(
+                "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab"
+            )
 
     skill_result = skill_integrator.integrate_package_skill(
         package_info,

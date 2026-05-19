@@ -62,7 +62,9 @@ list before `compile` or `install`.
 | windsurf | `.windsurf/` directory                        |
 
 `agent-skills`, `copilot-cowork`, and `copilot-app` are never
-auto-detected. Select them explicitly with `--target`.
+auto-detected. Select them explicitly with `--target`, or list them in
+a project's `apm.yml` `targets:` field so contributors running plain
+`apm install` pick them up automatically.
 
 ## copilot
 
