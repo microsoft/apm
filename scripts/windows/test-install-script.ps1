@@ -146,6 +146,70 @@ function Test-MoveThenTestOrdering {
 }
 
 # ---------------------------------------------------------------------------
+# Test 2b: Test-AntivirusBlockError detects Windows Defender / AV signatures.
+# Issue: Defender flags the unsigned PyInstaller binary as PUA (HRESULT
+# 0x800700E1), and the installer must distinguish that from AppLocker /
+# WDAC denial so it can emit the right guidance (exclusion + pip fallback,
+# not allow-list rule).
+# ---------------------------------------------------------------------------
+
+function Test-AntivirusDetector {
+    Write-Step "Test 2b: Test-AntivirusBlockError matches Defender PUA signatures"
+
+    $content = Get-Content $InstallScript -Raw
+    $pattern = '(?s)function Test-AntivirusBlockError\s*\{.*?\n\}'
+    $match = [regex]::Match($content, $pattern)
+    Assert-True $match.Success "Extracted Test-AntivirusBlockError from install.ps1"
+    if (-not $match.Success) { return }
+
+    $accessPattern = '(?s)function Test-AccessDeniedError\s*\{.*?\n\}'
+    $accessMatch = [regex]::Match($content, $accessPattern)
+    Assert-True $accessMatch.Success "Extracted Test-AccessDeniedError from install.ps1"
+    if (-not $accessMatch.Success) { return }
+
+    $childScript = @"
+`$ErrorActionPreference = 'Stop'
+$($match.Value)
+$($accessMatch.Value)
+
+# Real Defender failure text from issue #1389 follow-up:
+`$defenderMsg = "Program 'apm.exe' failed to run: Operation did not complete successfully because the file contains a virus or potentially unwanted softwareAt C:\\Users\\X\\AppData\\Local\\Temp\\tmpfoo.ps1:639 char:23"
+`$puaMsg      = "blocked: potentially unwanted software detected"
+`$hresultMsg  = "CreateProcess failed with 0x800700E1"
+`$accessMsg   = "Program 'apm.exe' failed to run: Access is denied"
+`$benignMsg   = "exit code 1 - apm: command not found"
+
+`$results = @{
+    defender_match = (Test-AntivirusBlockError -Text `$defenderMsg)
+    pua_match      = (Test-AntivirusBlockError -Text `$puaMsg)
+    hresult_match  = (Test-AntivirusBlockError -Text `$hresultMsg)
+    access_no_av   = (-not (Test-AntivirusBlockError -Text `$accessMsg))
+    benign_no_av   = (-not (Test-AntivirusBlockError -Text `$benignMsg))
+    empty_no_av    = (-not (Test-AntivirusBlockError -Text ''))
+    # Cross-check: the Defender message must NOT be classified as AppLocker.
+    defender_not_access = (-not (Test-AccessDeniedError -Text `$defenderMsg))
+}
+`$results | ConvertTo-Json -Compress
+"@
+
+    $tempScript = [System.IO.Path]::GetTempFileName() + ".ps1"
+    try {
+        Set-Content -Path $tempScript -Value $childScript -Encoding UTF8
+        $json = & pwsh -NoProfile -NonInteractive -File $tempScript 2>&1 | Select-Object -Last 1
+        $r = $json | ConvertFrom-Json
+        Assert-True ([bool]$r.defender_match)      "Matches real Defender 'contains a virus' message"
+        Assert-True ([bool]$r.pua_match)           "Matches 'potentially unwanted software' message"
+        Assert-True ([bool]$r.hresult_match)       "Matches HRESULT 0x800700E1"
+        Assert-True ([bool]$r.access_no_av)        "Does not misclassify 'Access is denied' as AV block"
+        Assert-True ([bool]$r.benign_no_av)        "Does not misclassify benign failure text as AV block"
+        Assert-True ([bool]$r.empty_no_av)         "Does not match empty input"
+        Assert-True ([bool]$r.defender_not_access) "Defender message is not classified as AppLocker/WDAC"
+    } finally {
+        Remove-Item -Path $tempScript -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Test 3: Run install.ps1 end-to-end into an isolated prefix.
 # ---------------------------------------------------------------------------
 
@@ -392,6 +456,7 @@ Write-Host ""
 
 Test-Sha256Fallback
 Test-MoveThenTestOrdering
+Test-AntivirusDetector
 Test-EndToEndInstall
 Test-CrossVersionUpgrade
 Test-SameVersionReinstall

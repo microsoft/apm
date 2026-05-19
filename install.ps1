@@ -283,6 +283,23 @@ function Test-AccessDeniedError {
     return ($Text -match 'Access is denied' -or $Text -match '0x80070005')
 }
 
+function Test-AntivirusBlockError {
+    # Defender / 3rd-party AV real-time protection blocks CreateProcess on
+    # binaries it flags with HRESULT 0x800700E1 (ERROR_VIRUS_INFECTED) or
+    # 0x800704EC (ERROR_VIRUS_DELETED). PowerShell surfaces these as
+    # "Operation did not complete successfully because the file contains a
+    # virus or potentially unwanted software". Our PyInstaller-built apm.exe
+    # is unsigned, which routinely trips false-positive heuristics.
+    param([string]$Text)
+    if (-not $Text) { return $false }
+    return (
+        $Text -match 'contains a virus' -or
+        $Text -match 'potentially unwanted software' -or
+        $Text -match '0x800700E1' -or
+        $Text -match '0x800704EC'
+    )
+}
+
 function Write-AppControlGuidance {
     param(
         [string]$Path,
@@ -306,6 +323,35 @@ function Write-AppControlGuidance {
     Write-Host "       `$env:APM_TEMP_DIR = `"`$env:LOCALAPPDATA\Programs\apm\tmp`""
     Write-Host "  3. Install via pip into your user site:"
     Write-Host "       pip install --user apm-cli"
+    Write-Host ""
+}
+
+function Write-AntivirusGuidance {
+    param(
+        [string]$Path,
+        [string]$TargetInstallDir
+    )
+    Write-Host ""
+    Write-ErrorText "An antivirus product blocked execution of $Path."
+    Write-Host "Windows Defender (or another real-time scanner) flagged the binary as"
+    Write-Host "potentially unwanted software. The apm.exe release is built with"
+    Write-Host "PyInstaller and is currently unsigned, which routinely trips false-"
+    Write-Host "positive heuristics. The file is not actually malicious."
+    Write-Host ""
+    Write-Info "Options to unblock:"
+    if ($TargetInstallDir) {
+        Write-Host "  1. Add a Defender exclusion for the install directory (run in an"
+        Write-Host "     elevated PowerShell, then rerun this installer):"
+        Write-Host "       Add-MpPreference -ExclusionPath '$TargetInstallDir'"
+    } else {
+        Write-Host "  1. Add a Defender exclusion for apm.exe (run in an elevated"
+        Write-Host "     PowerShell, then rerun this installer):"
+        Write-Host "       Add-MpPreference -ExclusionProcess 'apm.exe'"
+    }
+    Write-Host "  2. Install via pip into your user site (avoids the binary entirely):"
+    Write-Host "       pip install --user apm-cli"
+    Write-Host "  3. Help us get the false positive cleared by submitting the binary"
+    Write-Host "     to Microsoft: https://www.microsoft.com/en-us/wdsi/filesubmission"
     Write-Host ""
 }
 
@@ -645,8 +691,11 @@ try {
 
     if ($testFailure) {
         $denied = Test-AccessDeniedError -Text $testFailure
+        $avBlocked = Test-AntivirusBlockError -Text $testFailure
         Write-ErrorText "Downloaded binary failed to run: $testFailure"
-        if ($denied) {
+        if ($avBlocked) {
+            Write-AntivirusGuidance -Path $stagedExe -TargetInstallDir $releaseDir
+        } elseif ($denied) {
             Write-AppControlGuidance -Path $stagedExe -TargetInstallDir $releaseDir
         }
         Remove-Item -Recurse -Force $stagingDir -ErrorAction SilentlyContinue
