@@ -116,6 +116,14 @@ class GitHubPackageDownloader(
         self._refs = GitReferenceResolver(host=self)
         self._clone_engine = CloneEngine(host=self)
 
+        # #1369: tiered ref resolver. Attached by resolve.py / outdated.py
+        # after construction via ``build_tiered_ref_resolver``. When set,
+        # :meth:`resolve_git_reference` delegates to it before falling
+        # through to ``self._refs.resolve``. Declared here so the
+        # attribute is part of the documented downloader surface rather
+        # than a monkey-patched field.
+        self._tiered_resolver = None
+
         # WS2a (#1116): per-run shared clone cache for subdirectory dep
         # deduplication.  Set by the install pipeline before resolution
         # starts; None means no dedup (each subdir dep clones independently).
