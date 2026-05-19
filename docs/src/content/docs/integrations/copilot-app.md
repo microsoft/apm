@@ -17,32 +17,37 @@ Until the flag is enabled, the `copilot-app` target stays inert: it is hidden fr
 
 ## What it does
 
-When `copilot-app` is enabled and a package ships a prompt with a `schedule:` frontmatter block, `apm install --target copilot-app` inserts the prompt as a row in the GitHub Copilot desktop App's SQLite store at `~/.copilot/data.db`. Add `--global` to install from a user-scope `~/.apm/apm.yml`, or omit it to install from a project's `apm.yml` (typical for team-shared scheduled prompts). The App reads new rows on next launch (or refresh) and lists them under Workflows.
+When `copilot-app` is enabled and a package ships a prompt with workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day` at the top level), `apm install --target copilot-app` inserts the prompt as a row in the GitHub Copilot desktop App's SQLite store at `~/.copilot/data.db`. Add `--global` to install from a user-scope `~/.apm/apm.yml`, or omit it to install from a project's `apm.yml` (typical for team-shared scheduled prompts). The App reads new rows on next launch (or refresh) and lists them under Workflows.
 
-Prompts that do not carry `schedule:` are skipped silently at this target — they continue to deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) without changes.
+Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) and APM hard-errors with an actionable diagnostic if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface — whichever its frontmatter shape selects.
 
 ## Why a new target
 
 The `copilot` target writes prompts as files (`.github/prompts/<name>.prompt.md`) for Copilot in IDEs. The desktop App stores workflows in a SQLite database, not on disk. They are different surfaces; `copilot-app` exists so that one APM install can serve both without leakage.
 
-## Authoring a scheduled prompt
+## Authoring a workflow prompt
 
-Add a `schedule:` block to any `.prompt.md` file in your package's `.apm/prompts/` folder:
+Add workflow frontmatter (flat top-level keys) to any `.prompt.md` file in your package's `.apm/prompts/` folder:
 
 ```markdown
 ---
 name: Daily Digest
-schedule:
-  interval: daily         # one of: manual, hourly, daily, weekly
-  schedule_hour: 9        # 0-23, UTC; ignored for manual / hourly
-  schedule_day: 1         # 0-6 (weekly only)
-  mode: interactive       # one of: interactive, plan
-  model: claude-opus-4.7  # optional
-  reasoning_effort: high  # optional
+interval: daily            # one of: manual, hourly, daily, weekly
+schedule_hour: 9           # 0-23, UTC; ignored for manual / hourly
+schedule_day: 1            # 0-6 (weekly only)
+mode: interactive          # one of: interactive, plan
+model: claude-opus-4.7     # optional
+reasoning_effort: high     # optional
 ---
 
 Summarise yesterday's commits across all open PRs ...
 ```
+
+Manual-only workflows omit `schedule_hour` / `schedule_day` and set
+`interval: manual` (the default when any other execution-shape key is
+present). The Copilot App provides a "run now" affordance for every
+workflow, so manual-only is a useful shape — no schedule, just a
+named, parameterised prompt the user can fire from the App UI.
 
 The Copilot App also defines an `autopilot` mode, but APM intentionally
 does NOT accept it via this target. Until package signing ships, a

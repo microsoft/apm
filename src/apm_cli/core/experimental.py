@@ -75,7 +75,8 @@ FLAGS: dict[str, ExperimentalFlag] = {
         description="Deploy prompts as workflows into the GitHub Copilot desktop App.",
         default=False,
         hint=(
-            "Add 'schedule:' frontmatter to any .prompt.md, then install "
+            "Add workflow frontmatter (e.g. 'interval: manual') to any "
+            ".prompt.md, then install "
             "with '--target copilot-app' (project or '--global' user scope). "
             "Workflows arrive disabled; enable them from the Copilot app's "
             "Workflows tab."

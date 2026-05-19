@@ -601,8 +601,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         requires_flag="copilot_cowork",
     ),
     # GitHub Copilot desktop App -- experimental, user-scope only.
-    # Prompts with ``schedule:`` frontmatter are installed as rows in the
-    # app's ``workflows`` table at ``~/.copilot/data.db``.  No files are
+    # Prompts whose frontmatter carries workflow-shape keys (``interval``,
+    # ``schedule_hour``, ``schedule_day``) are installed as rows in the
+    # app's ``workflows`` table at ``~/.copilot/data.db``.  ``mode`` /
+    # ``model`` / ``reasoning_effort`` are optional fields on a workflow
+    # but do NOT mark a plain prompt as a workflow (they overload with
+    # plain VSCode / Copilot slash-command prompts).  No files are
     # written under the deploy root; the synthetic root is only used so
     # the existing target machinery can address rows via the
     # ``copilot-app-db://workflows/<id>`` lockfile URI scheme.

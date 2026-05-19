@@ -27,19 +27,17 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 
 SCHEDULED_PROMPT = """---
 name: Daily Digest
-schedule:
-  interval: daily
-  schedule_hour: 9
-  mode: interactive
+interval: daily
+schedule_hour: 9
+mode: interactive
 ---
 Summarise yesterday's commits.
 """
 
 SCHEDULED_PROMPT_2 = """---
 name: Hourly Heartbeat
-schedule:
-  interval: hourly
-  mode: interactive
+interval: hourly
+mode: interactive
 ---
 Hourly heartbeat body.
 """
@@ -219,3 +217,108 @@ class TestDeployErrorSurfacing:
         assert result.files_integrated == 0
         assert result.files_skipped == 0
         assert diags.warns == []
+
+
+# ---------------------------------------------------------------------------
+# Option B: dispatch-by-shape regression tests
+# ---------------------------------------------------------------------------
+
+PLAIN_PROMPT = """---
+name: Plain Hello
+description: A regular slash-command prompt with no execution metadata.
+---
+Say hello.
+"""
+
+
+class TestDispatchByShape:
+    def test_plain_prompt_at_copilot_app_warns_hard(
+        self,
+        copilot_app_target,
+        fake_db,
+        tmp_path,
+        monkeypatch,
+    ):
+        """A .prompt.md with NO workflow-shape keys, sent to --target
+        copilot-app, must surface an actionable diagnostic explaining
+        what to add or where to send it instead -- not silently skip."""
+        pkg_dir = tmp_path / "pkg"
+        prompts = pkg_dir / ".apm" / "prompts"
+        prompts.mkdir(parents=True)
+        (prompts / "plain.prompt.md").write_text(PLAIN_PROMPT)
+        pkg = SimpleNamespace(
+            install_path=pkg_dir,
+            package=SimpleNamespace(
+                name="demo-pkg",
+                source="github:acme-org/demo-pkg",
+                author=None,
+            ),
+        )
+        diags = _CapturingDiagnostics()
+
+        result = PromptIntegrator().integrate_prompts_for_target(
+            copilot_app_target,
+            pkg,
+            project_root=tmp_path,
+            diagnostics=diags,
+        )
+
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert len(diags.warns) == 1
+        msg = diags.warns[0]["message"]
+        # Diagnostic must name the shape requirement and the workaround.
+        assert "no workflow frontmatter" in msg
+        assert "interval" in msg
+        assert "copilot-app" in msg
+
+    def test_workflow_shape_skipped_by_slash_command_integrator(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """The slash-command leak regression: a workflow-shape .prompt.md
+        (interval/mode/etc) must NOT ship to .claude/commands/,
+        .cursor/commands/, .copilot/prompts/, .gemini/commands/.  Without
+        the shape-based skip in CommandIntegrator, a single source file
+        used to deploy to 4 slash-command surfaces in addition to the
+        Copilot App DB row."""
+        from apm_cli.integration.command_integrator import CommandIntegrator
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_dir = tmp_path / "pkg"
+        prompts = pkg_dir / ".apm" / "prompts"
+        prompts.mkdir(parents=True)
+        (prompts / "scheduled.prompt.md").write_text(SCHEDULED_PROMPT)
+        (prompts / "plain.prompt.md").write_text(PLAIN_PROMPT)
+        pkg = SimpleNamespace(
+            install_path=pkg_dir,
+            package=SimpleNamespace(
+                name="demo-pkg",
+                source="github:acme-org/demo-pkg",
+                author=None,
+            ),
+        )
+        # Probe every file-based command target that should observe the
+        # skip.  The integrator must deploy ONLY the plain prompt to
+        # each; the workflow-shape one must be skipped.
+        for target_name in ("claude", "cursor", "gemini"):
+            profile = KNOWN_TARGETS.get(target_name)
+            if profile is None or profile.primitives.get("prompts") is None:
+                continue
+            project_root = tmp_path / f"proj-{target_name}"
+            project_root.mkdir()
+            # Some targets are auto_create=False; create the dir so we
+            # exercise the dispatch logic rather than the early-return.
+            (project_root / profile.root_dir).mkdir(parents=True, exist_ok=True)
+            result = CommandIntegrator().integrate_commands_for_target(
+                profile,
+                pkg,
+                project_root=project_root,
+                diagnostics=_CapturingDiagnostics(),
+            )
+            target_filenames = [p.name for p in result.target_paths]
+            assert not any("scheduled" in n for n in target_filenames), (
+                f"target {target_name!r} should NOT receive workflow-shape "
+                f"prompt; got {target_filenames}"
+            )

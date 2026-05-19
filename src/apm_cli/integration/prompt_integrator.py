@@ -141,18 +141,20 @@ class PromptIntegrator(BaseIntegrator):
         force: bool,
         diagnostics,
     ) -> IntegrationResult:
-        """Deploy ``schedule:``-bearing prompts as Copilot App workflow rows.
+        """Deploy workflow-shape prompts as Copilot App workflow rows.
 
-        Prompts WITHOUT a ``schedule:`` block are silently skipped at
-        the copilot-app target -- the target is opt-in via frontmatter
-        so unscheduled prompts continue to deploy to file-based targets
-        (``copilot``, ``vscode``, ...) without surprising side effects
-        here.
+        Workflow-shape (per ``_is_workflow_shape``) prompts deploy here.
+        Plain-shape prompts (no execution-affecting frontmatter keys)
+        are a hard error at this target: the user explicitly opted into
+        ``copilot-app`` for this package, and a plain prompt cannot
+        possibly be a workflow.  Surfacing the mismatch loudly beats
+        silently skipping the file and leaving the user wondering why
+        nothing landed in the App.
 
-        The DB module enforces ``enabled = 0`` on insert; the source
-        ``schedule.enabled`` field, if present, is ignored.  This is a
-        hard contract: third-party packages cannot auto-run anything on
-        the user's machine.
+        The DB module enforces ``enabled = 0`` on insert; any frontmatter
+        ``enabled`` field, if present, is ignored.  This is a hard
+        contract: third-party packages cannot auto-run anything on the
+        user's machine.
         """
         import frontmatter
 
@@ -166,9 +168,6 @@ class PromptIntegrator(BaseIntegrator):
 
         db_path = resolve_copilot_app_db_path()
         if db_path is None:
-            # Surfaced as an actionable error by install/phases/targets.py
-            # when --target copilot-app was explicit; here we are
-            # defensive in case the resolver returns None mid-run.
             return IntegrationResult(0, 0, 0, [])
 
         owner = _derive_package_owner(package_info)
@@ -189,16 +188,29 @@ class PromptIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
             post = frontmatter.load(str(source_file))
-            schedule_block = post.metadata.get("schedule")
-            if schedule_block is None:
+            if not _is_workflow_shape(post.metadata):
+                # Plain prompt at copilot-app target -- hard error.
+                # Authors who want a workflow add an execution-shape
+                # key (e.g. ``interval: manual``); a plain prompt has
+                # no business in the App's workflows table.
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=(
+                            f"Copilot App: {source_file.name} has no workflow frontmatter "
+                            "(missing one of: interval, schedule_hour, schedule_day). "
+                            "Add `interval: manual` to deploy it as a manual-trigger "
+                            "workflow, or unset --target copilot-app."
+                        ),
+                        package=pkg_name,
+                    )
                 files_skipped += 1
                 continue
             try:
-                schedule = _parse_schedule(schedule_block)
+                schedule = _parse_workflow_frontmatter(post.metadata)
             except ValueError as exc:
                 if diagnostics is not None:
                     diagnostics.warn(
-                        message=f"Invalid schedule in {source_file.name}: {exc}",
+                        message=f"Invalid workflow frontmatter in {source_file.name}: {exc}",
                         package=pkg_name,
                     )
                 files_skipped += 1
@@ -229,9 +241,6 @@ class PromptIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
             files_integrated += 1
-            # Synthetic path used purely for lockfile encoding -- the
-            # services._deployed_path_entry copilot-app branch will
-            # convert this to a ``copilot-app-db://`` URI.
             target_paths.append(synthetic_root / wf_id)
 
         return IntegrationResult(
@@ -345,7 +354,23 @@ class PromptIntegrator(BaseIntegrator):
         target_paths = []
         total_links_resolved = 0
 
+        import frontmatter as _fm
+
         for source_file in prompt_files:
+            # Skip workflow-shape prompts at file-based targets: an
+            # author who added execution metadata (interval, mode, ...)
+            # meant the Copilot App workflows table, NOT a slash command
+            # in .github/prompts/.  Without this guard, the same source
+            # file ships to both surfaces and the App-only metadata
+            # leaks into a slash-command users would not expect.
+            try:
+                _meta = _fm.load(str(source_file)).metadata
+            except Exception:
+                _meta = {}
+            if _is_workflow_shape(_meta):
+                files_skipped += 1
+                continue
+
             target_filename = self.get_target_filename(source_file, package_info.package.name)
             target_path = prompts_dir / target_filename
             # Defense-in-depth: target_filename is derived from source
@@ -426,14 +451,52 @@ _VALID_SCHEDULE_MODES: frozenset[str] = frozenset({"interactive", "plan"})
 deliberately omitted -- see that module's docstring for the
 secure-by-default rationale."""
 
+# Top-level frontmatter keys that mark a ``.prompt.md`` as a "workflow"
+# (i.e. a prompt with execution metadata, destined for the Copilot App
+# DB rather than slash-command file targets).  Touching ANY of these
+# keys at the top level of the frontmatter flips the dispatch shape.
+#
+# This is the Option B "dispatch by shape" predicate -- one folder
+# (``.apm/prompts/``), one extension (``.prompt.md``), one integrator.
+# A file with these keys ships to ``copilot-app`` and is skipped by
+# slash-command targets; a file without them ships to slash-command
+# targets and hard-errors at ``copilot-app``.
+_WORKFLOW_SHAPE_KEYS: frozenset[str] = frozenset({"interval", "schedule_hour", "schedule_day"})
+
+
+def _is_workflow_shape(frontmatter_meta: dict) -> bool:
+    """Return True iff *frontmatter_meta* declares Copilot App execution metadata.
+
+    Used to decide which target(s) a ``.prompt.md`` file is destined
+    for.  The check is intentionally a SHAPE check rather than a flag
+    -- authors do not opt in with a sentinel; the presence of an
+    execution-affecting key is the opt-in.
+
+    Only ``interval``, ``schedule_hour``, ``schedule_day`` are
+    unambiguous workflow markers.  ``mode``, ``model``, and
+    ``reasoning_effort`` are deliberately EXCLUDED because they overload
+    with plain slash-command prompts: VSCode / Copilot prompts use
+    ``mode: agent|ask|edit``, can pin a ``model``, and can hint
+    ``reasoning_effort``.  Treating those keys as workflow markers
+    would mis-route ordinary slash commands to the App DB.  Authors who
+    want a manual-only workflow opt in with the explicit
+    ``interval: manual``.
+    """
+    if not isinstance(frontmatter_meta, dict):
+        return False
+    return any(k in frontmatter_meta for k in _WORKFLOW_SHAPE_KEYS)
+
 
 @dataclass(frozen=True)
 class Schedule:
-    """Validated representation of a prompt's ``schedule:`` frontmatter.
+    """Validated representation of a prompt's workflow frontmatter.
 
     All fields are pre-validated against the same constraints the
     Copilot App's ``workflows`` schema enforces, so deploy time never
     surfaces a raw SQLite ``CHECK`` violation to the user.
+
+    Sourced from top-level frontmatter keys (Option B: flat dispatch
+    shape), not from a nested ``schedule:`` block.
     """
 
     interval: str = "manual"
@@ -444,41 +507,56 @@ class Schedule:
     reasoning_effort: str | None = None
 
 
-def _parse_schedule(block) -> Schedule:
-    """Validate a frontmatter ``schedule:`` mapping and return a ``Schedule``.
+def _parse_workflow_frontmatter(meta: dict) -> Schedule:
+    """Validate top-level workflow frontmatter keys and return a ``Schedule``.
+
+    Reads ``interval``, ``schedule_hour``, ``schedule_day``, ``mode``,
+    ``model``, ``reasoning_effort`` directly from the prompt's
+    frontmatter.  ``interval`` defaults to ``"manual"`` when any other
+    execution-shape key is present but ``interval`` is omitted -- a
+    manual-only workflow is the conservative default given the Copilot
+    App's universal "run now" affordance.
 
     Raises ``ValueError`` (with a human-readable message) on any
-    out-of-range or wrong-type field.  The caller turns the message
-    into a diagnostic warning and skips the prompt.
+    out-of-range or wrong-type field.  ``mode: autopilot`` is rejected
+    here with a targeted diagnostic before it can hit the DB layer's
+    generic CHECK violation -- third-party packages cannot ship
+    autopilot prompts; the user must opt in from the App UI.
     """
-    if not isinstance(block, dict):
-        raise ValueError("'schedule' must be a mapping")
+    if not isinstance(meta, dict):
+        raise ValueError("frontmatter must be a mapping")
 
-    interval = str(block.get("interval", "manual"))
+    interval = str(meta.get("interval", "manual"))
     if interval not in _VALID_SCHEDULE_INTERVALS:
         raise ValueError(
             f"interval must be one of {sorted(_VALID_SCHEDULE_INTERVALS)}, got {interval!r}"
         )
 
-    hour = block.get("schedule_hour", 9)
+    hour = meta.get("schedule_hour", 9)
     if not isinstance(hour, int) or not (0 <= hour <= 23):
         raise ValueError(f"schedule_hour must be int 0..23, got {hour!r}")
 
-    day = block.get("schedule_day", 1)
+    day = meta.get("schedule_day", 1)
     if not isinstance(day, int) or not (0 <= day <= 6):
         raise ValueError(f"schedule_day must be int 0..6, got {day!r}")
 
-    mode = block.get("mode")
+    mode = meta.get("mode")
     if mode is not None:
         mode = str(mode)
+        if mode == "autopilot":
+            raise ValueError(
+                "mode 'autopilot' is not accepted via apm install -- "
+                "APM does not deploy workflows on autopilot. "
+                "Set autopilot manually in the Copilot App after enabling the row."
+            )
         if mode not in _VALID_SCHEDULE_MODES:
             raise ValueError(f"mode must be one of {sorted(_VALID_SCHEDULE_MODES)}, got {mode!r}")
 
-    model = block.get("model")
+    model = meta.get("model")
     if model is not None and not isinstance(model, str):
         raise ValueError(f"model must be a string, got {model!r}")
 
-    reasoning_effort = block.get("reasoning_effort")
+    reasoning_effort = meta.get("reasoning_effort")
     if reasoning_effort is not None and not isinstance(reasoning_effort, str):
         raise ValueError(f"reasoning_effort must be a string, got {reasoning_effort!r}")
 
@@ -490,6 +568,11 @@ def _parse_schedule(block) -> Schedule:
         model=model,
         reasoning_effort=reasoning_effort,
     )
+
+
+# Back-compat alias retained for test imports; new code should use
+# ``_parse_workflow_frontmatter`` directly.
+_parse_schedule = _parse_workflow_frontmatter
 
 
 def _derive_package_owner(package_info) -> str:

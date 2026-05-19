@@ -211,11 +211,10 @@ class TestCopilotAppDeployUninstall:
                 """\
                 ---
                 name: Daily Digest
-                schedule:
-                  interval: daily
-                  schedule_hour: 9
-                  schedule_day: 1
-                  mode: interactive
+                interval: daily
+                schedule_hour: 9
+                schedule_day: 1
+                mode: interactive
                 ---
                 Summarise yesterday's commits.
                 """
@@ -310,10 +309,9 @@ class TestCopilotAppDeployUninstall:
                 """\
                 ---
                 name: Daily Digest
-                schedule:
-                  interval: daily
-                  schedule_hour: 9
-                  schedule_day: 1
+                interval: daily
+                schedule_hour: 9
+                schedule_day: 1
                 ---
                 Summarise yesterday's commits.
                 """
@@ -396,10 +394,9 @@ class TestCopilotAppDeployUninstall:
                 """\
                 ---
                 name: Weekly Report
-                schedule:
-                  interval: weekly
-                  schedule_hour: 10
-                  schedule_day: 1
+                interval: weekly
+                schedule_hour: 10
+                schedule_day: 1
                 ---
                 Summarise the week.
                 """

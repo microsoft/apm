@@ -2,8 +2,12 @@
 
 The Copilot desktop App stores its scheduled workflows in
 ``~/.copilot/data.db`` (SQLite, WAL journal mode).  APM deploys prompts
-with ``schedule:`` frontmatter as rows in that ``workflows`` table so the
-app surfaces them in its Workflows tab.  This module is the I/O boundary:
+whose frontmatter carries workflow-shape keys (``interval``,
+``schedule_hour``, ``schedule_day``) as rows in that ``workflows`` table
+so the app surfaces them in its Workflows tab.  ``mode`` / ``model`` /
+``reasoning_effort`` remain optional fields on a workflow but are not
+shape markers (they overload with plain VSCode / Copilot slash-command
+prompts).  This module is the I/O boundary:
 
 1. **Resolution** -- locate ``~/.copilot/data.db`` on the current machine
    (override with ``APM_COPILOT_APP_DB`` for tests or non-standard layouts).
@@ -375,6 +379,13 @@ def _validate_row(row: WorkflowRow) -> None:
             f"Invalid interval {row.interval!r}; expected one of {sorted(_VALID_INTERVALS)}"
         )
     if row.mode is not None and row.mode not in _VALID_MODES:
+        if row.mode == "autopilot":
+            raise ValueError(
+                "APM does not deploy workflows on autopilot mode -- "
+                "a third-party package could otherwise auto-run the moment "
+                "the user enables the row.  Users who want autopilot must "
+                "set it themselves per-row from the Copilot App UI."
+            )
         raise ValueError(f"Invalid mode {row.mode!r}; expected one of {sorted(_VALID_MODES)}")
     if not (0 <= row.schedule_hour <= 23):
         raise ValueError(f"Invalid schedule_hour {row.schedule_hour}; expected 0..23")

@@ -325,7 +325,7 @@ class TestDeploy:
     def test_rejects_autopilot_mode(self, db_path: Path):
         """autopilot is intentionally not accepted via the copilot-app target."""
         wid = cdb.namespaced_id("o", "p", "n")
-        with pytest.raises(ValueError, match=r"Invalid mode"):
+        with pytest.raises(ValueError, match=r"autopilot"):
             cdb.deploy_workflow(
                 db_path,
                 cdb.WorkflowRow(id=wid, name="N", prompt="x", mode="autopilot"),
