@@ -205,15 +205,16 @@ def run(ctx: InstallContext) -> None:
                     ctx.logger.error(_app_msg, symbol="cross")
                 raise SystemExit(1)
 
-    if not _is_user:
-        _copilot_app_in_set = any(t.name == "copilot-app" for t in _targets)
-        if _copilot_app_in_set:
-            if ctx.logger:
-                ctx.logger.error(
-                    "The 'copilot-app' target requires --global (user scope). "
-                    "Run: apm install --target copilot-app --global"
-                )
-            raise SystemExit(1)
+    # NOTE: copilot-app intentionally has no project-scope gate. The DB
+    # at ~/.copilot/data.db is a single user-scoped resource, but the
+    # *intent* to deploy can legitimately come from a project's apm.yml
+    # (a team-shared scheduled prompt belongs in the project that owns
+    # the prompt, not in every developer's user-scope manifest). The
+    # experimental flag (machine-level opt-in) is the consent envelope;
+    # the package-namespaced row id (apm--<owner>--<pkg>--<prompt>)
+    # prevents collisions across projects sharing the same package.
+    # Rows always arrive enabled=0; users grant the second consent in
+    # the App's Workflows tab before anything runs on a schedule.
 
     # ------------------------------------------------------------------
     # v2 resolution (#1154): signal-based provenance and strict errors.

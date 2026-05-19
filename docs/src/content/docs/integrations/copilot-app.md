@@ -17,7 +17,7 @@ Until the flag is enabled, the `copilot-app` target stays inert: it is hidden fr
 
 ## What it does
 
-When `copilot-app` is enabled and a package ships a prompt with a `schedule:` frontmatter block, `apm install --target copilot-app --global` inserts the prompt as a row in the GitHub Copilot desktop App's SQLite store at `~/.copilot/data.db`. The App reads new rows on next launch (or refresh) and lists them under Workflows.
+When `copilot-app` is enabled and a package ships a prompt with a `schedule:` frontmatter block, `apm install --target copilot-app` inserts the prompt as a row in the GitHub Copilot desktop App's SQLite store at `~/.copilot/data.db`. Add `--global` to install from a user-scope `~/.apm/apm.yml`, or omit it to install from a project's `apm.yml` (typical for team-shared scheduled prompts). The App reads new rows on next launch (or refresh) and lists them under Workflows.
 
 Prompts that do not carry `schedule:` are skipped silently at this target — they continue to deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) without changes.
 

@@ -183,9 +183,10 @@ placeholders. An `argument-hint` is auto-generated unless one is already set.
 #### Optional `schedule:` block (GitHub Copilot App, experimental)
 
 When the `copilot_app` experimental flag is enabled and the package is
-installed with `apm install --target copilot-app --global`, prompts
-that include a `schedule:` block in frontmatter are deployed as rows in
-the desktop App's SQLite store at `~/.copilot/data.db`.
+installed with `apm install --target copilot-app` (project scope) or
+`apm install --target copilot-app --global` (user scope), prompts that
+include a `schedule:` block in frontmatter are deployed as rows in the
+desktop App's SQLite store at `~/.copilot/data.db`.
 
 ```yaml
 ---

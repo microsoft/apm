@@ -1,15 +1,15 @@
-"""E2E regression tests for ``apm install --target copilot-app --global``.
+"""E2E regression tests for ``apm install --target copilot-app``.
 
-Three scenarios mirror the cowork suite (test_install_target_copilot_cowork_e2e.py):
+Parser scenarios:
 
   1. Flag OFF                -> enable-hint printed, exit 0.
   2. Flag ON, no ``data.db`` -> "Copilot App not detected" error, exit 1.
-  3. Project scope           -> "requires --global" error, exit 1.
+  3. Project scope           -> supported (v1.1); no --global required.
 
-A fourth happy-path test exercises the full deploy + uninstall cycle
-against a temp SQLite DB seeded with the live workflows schema, proving
-that ``apm install`` -> ``apm uninstall`` actually writes and removes
-APM-namespaced rows.
+Two happy-path tests exercise the full deploy + uninstall cycle against
+a temp SQLite DB seeded with the live workflows schema, proving that
+``apm install`` -> ``apm uninstall`` actually writes and removes
+APM-namespaced rows in BOTH user (``--global``) and project scope.
 """
 
 from __future__ import annotations
@@ -136,10 +136,16 @@ class TestCopilotAppParserE2E:
             result.output
         )
 
-    def test_project_scope_requires_global(
+    def test_project_scope_now_supported(
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Without --global, copilot-app must error with --global hint."""
+        """Project-scope install is supported (v1.1): no --global required.
+
+        The experimental flag is the consent envelope; project-scope intent
+        is legitimate (a team-shared scheduled prompt belongs in the project
+        that owns it). Verifies the parser + gate succeed without --global
+        and the flag-on + DB-present path reaches the integrator.
+        """
         import apm_cli.config as _conf
 
         monkeypatch.setattr(
@@ -147,8 +153,6 @@ class TestCopilotAppParserE2E:
             "_config_cache",
             {"experimental": {"copilot_app": True}},
         )
-        # Point env override at a real DB so resolver succeeds and we reach
-        # the project-scope gate (not the missing-db gate).
         db = _seed_db(fake_home / "data.db")
         monkeypatch.setenv("APM_COPILOT_APP_DB", str(db))
 
@@ -159,9 +163,10 @@ class TestCopilotAppParserE2E:
             env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
             catch_exceptions=True,
         )
-        assert result.exit_code != 0, result.output
-        normalized = " ".join((result.output or "").split())
-        assert "requires --global" in normalized, result.output
+        # Must NOT error with the legacy --global gate.
+        assert "requires --global" not in (result.output or ""), result.output
+        # Empty project apm.yml means zero deps to deploy; install succeeds.
+        assert result.exit_code == 0, result.output
 
 
 class TestCopilotAppDeployUninstall:
@@ -349,4 +354,99 @@ class TestCopilotAppDeployUninstall:
         ids_after_uninstall = cdb.list_managed_workflow_ids(db)
         assert ids_after_uninstall == [], (
             f"uninstall must delete the DB row, but {ids_after_uninstall} remain"
+        )
+
+    def test_install_project_scope_then_uninstall_deletes_db_row(
+        self,
+        tmp_path: Path,
+        fake_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """v1.1 regression: project-scope install+uninstall round-trips
+        the DB row without --global. Mirror of the user-scope roundtrip
+        test above but exercises the project apm.yml path: a team-shared
+        scheduled prompt is declared in a project's apm.yml and deploys
+        to the developer's Copilot App DB on install.
+        """
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(
+            _conf,
+            "_config_cache",
+            {"experimental": {"copilot_app": True}},
+        )
+        db = _seed_db(fake_home / "data.db")
+        monkeypatch.setenv("APM_COPILOT_APP_DB", str(db))
+
+        pkg_dir = tmp_path / "project-scope-pkg"
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            textwrap.dedent(
+                """\
+                name: project-scope-pkg
+                description: project-scope roundtrip
+                version: 0.0.1
+                """
+            ),
+            encoding="ascii",
+        )
+        (prompts_dir / "weekly-report.prompt.md").write_text(
+            textwrap.dedent(
+                """\
+                ---
+                name: Weekly Report
+                schedule:
+                  interval: weekly
+                  schedule_hour: 10
+                  schedule_day: 1
+                ---
+                Summarise the week.
+                """
+            ),
+            encoding="ascii",
+        )
+
+        # Project consumer lives in a separate directory; CliRunner runs
+        # in cwd, so we change into it for the install + uninstall calls.
+        consumer_dir = tmp_path / "consumer-project"
+        consumer_dir.mkdir()
+        (consumer_dir / "apm.yml").write_text(_MINIMAL_APM_YML, encoding="ascii")
+        monkeypatch.chdir(consumer_dir)
+
+        from apm_cli.integration import copilot_app_db as cdb
+
+        runner = CliRunner()
+        install_result = runner.invoke(
+            cli,
+            ["install", str(pkg_dir), "--target", "copilot-app"],
+            env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
+            catch_exceptions=False,
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        # Lockfile must live in the PROJECT (not user-home) and carry
+        # the copilot-app URI so uninstall can locate the DB row.
+        project_lock = consumer_dir / "apm.lock.yaml"
+        assert project_lock.exists(), "project lockfile not written"
+        lock_text = project_lock.read_text(encoding="utf-8")
+        assert "copilot-app-db://workflows/apm--" in lock_text, lock_text
+
+        ids_after_install = cdb.list_managed_workflow_ids(db)
+        assert len(ids_after_install) == 1, (
+            f"project-scope install should write exactly one row, got {ids_after_install}"
+        )
+        assert ids_after_install[0].startswith("apm--"), ids_after_install[0]
+
+        uninstall_result = runner.invoke(
+            cli,
+            ["uninstall", str(pkg_dir)],
+            env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
+            catch_exceptions=False,
+        )
+        assert uninstall_result.exit_code == 0, uninstall_result.output
+
+        ids_after_uninstall = cdb.list_managed_workflow_ids(db)
+        assert ids_after_uninstall == [], (
+            f"project-scope uninstall must delete the DB row, but {ids_after_uninstall} remain"
         )

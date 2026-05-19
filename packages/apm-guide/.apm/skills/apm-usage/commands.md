@@ -141,7 +141,7 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 
 Use `apm experimental enable copilot-cowork` to turn on Microsoft 365 Copilot Cowork skill deployment. Once enabled, deploy skills with `apm install --target copilot-cowork --global`.
 
-Use `apm experimental enable copilot-app` to turn on GitHub Copilot desktop App workflow deployment. Once enabled, prompts that carry a `schedule:` frontmatter block can be deployed to the App's SQLite store at `~/.copilot/data.db` with `apm install --target copilot-app --global`. Rows always start `enabled = 0` -- you opt in from the App. `apm install / update / uninstall` preserve user state (`enabled`, `last_run_at`, schedule overrides). Override the database path with `APM_COPILOT_APP_DB=<abs-path>`.
+Use `apm experimental enable copilot-app` to turn on GitHub Copilot desktop App workflow deployment. Once enabled, prompts that carry a `schedule:` frontmatter block can be deployed to the App's SQLite store at `~/.copilot/data.db` with `apm install --target copilot-app` (project scope) or `--target copilot-app --global` (user scope). Rows always start `enabled = 0` -- you opt in from the App. `apm install / update / uninstall` preserve user state (`enabled`, `last_run_at`, schedule overrides). Override the database path with `APM_COPILOT_APP_DB=<abs-path>`.
 
 ### Cross-client skills (`agent-skills`)
 

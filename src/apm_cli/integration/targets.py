@@ -123,6 +123,20 @@ class TargetProfile:
     in ``KNOWN_TARGETS`` for tooling introspection.
     """
 
+    scope_invariant_resolver: bool = False
+    """When True, ``user_root_resolver`` runs in BOTH project and user
+    scope (the resolved deploy root does not depend on install intent).
+
+    Set this for targets whose deploy root is a user-machine resource
+    that exists regardless of who triggered the install -- e.g.
+    ``copilot-app`` (the GitHub Copilot desktop App's SQLite DB at
+    ``~/.copilot/data.db`` is the same path whether a team-shared
+    workflow comes in via project ``apm.yml`` or user-scope ``--global``).
+
+    Contrast with cowork, where the OneDrive deploy root only makes
+    sense at user scope; project-scope cowork is intentionally rejected.
+    """
+
     generated_files: tuple[str, ...] = ()
     """Additional generated files associated with this target.
 
@@ -248,6 +262,19 @@ class TargetProfile:
         All downstream code reads ``target.root_dir`` directly.
         """
         if not user_scope:
+            # Most targets have no project-scope resolver work to do.
+            # The scope_invariant_resolver opt-in lets a target whose
+            # deploy root is a user-machine resource (e.g. copilot-app's
+            # ~/.copilot/data.db) populate resolved_deploy_root even when
+            # the install intent is project-scope. Downstream lockfile
+            # enrichment then routes via the dynamic-root URI path.
+            if self.scope_invariant_resolver and self.user_root_resolver is not None:
+                resolved_root = self.user_root_resolver()
+                if resolved_root is None:
+                    return None
+                from dataclasses import replace
+
+                return replace(self, resolved_deploy_root=resolved_root)
             return self
 
         from dataclasses import replace
@@ -594,6 +621,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_resolver=lambda: _resolve_copilot_app_root(),
         requires_flag="copilot_app",
+        scope_invariant_resolver=True,
     ),
 }
 
