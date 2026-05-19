@@ -1141,7 +1141,13 @@ class TestExplicitTargetDirCreation:
 
 
 class TestContentHashFallback:
-    """Verify the install pipeline uses content-hash fallback when .git is removed (#763)."""
+    """Verify the install pipeline uses content-hash fallback when .git is removed (#763).
+
+    These tests exercise the production helper ``_should_skip_redownload`` directly
+    (the same one called from both ``phases/integrate.py`` and ``phases/download.py``).
+    Mutation-break: deleting the guard contents in ``_should_skip_redownload``
+    (forcing ``return False`` or ``return True``) MUST fail these tests.
+    """
 
     def test_hash_match_skips_redownload(self):
         """Content hash verification on real files returns True for unmodified content."""
@@ -1166,58 +1172,55 @@ class TestContentHashFallback:
 
             assert verify_package_hash(pkg_dir, "sha256:badhash") is False
 
-    def test_integrate_skips_when_content_hash_matches(self):
-        """Exercise the actual fallback guard shape from install/phases/integrate.py."""
-        from apm_cli.utils import content_hash as ch_mod
+    def test_should_skip_redownload_true_when_hash_matches_and_dir_exists(self):
+        """Production helper returns True when content_hash matches an existing dir."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
+        from apm_cli.utils.content_hash import compute_package_hash
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pkg = Path(tmpdir) / "pkg"
             pkg.mkdir()
             (pkg / "f.txt").write_text("data")
-            content_hash = ch_mod.compute_package_hash(pkg)
 
-            class FakeLockedDep:
-                pass
+            locked_dep = types.SimpleNamespace(content_hash=compute_package_hash(pkg))
 
-            locked_dep = FakeLockedDep()
-            locked_dep.content_hash = content_hash
+            assert _should_skip_redownload(locked_dep, pkg) is True
 
-            install_path = pkg
-            skip_redownload = False
-            if locked_dep.content_hash and install_path.is_dir():
-                if ch_mod.verify_package_hash(install_path, locked_dep.content_hash):
-                    skip_redownload = True
-
-            assert skip_redownload is True
-
-    def test_missing_content_hash_skips_fallback(self, monkeypatch):
-        """When locked dep has no content_hash, the guard skips verify_package_hash."""
-        from apm_cli.utils import content_hash as ch_mod
-
-        calls = []
-        original_verify = ch_mod.verify_package_hash
-
-        def tracking_verify(path, h):
-            calls.append((path, h))
-            return original_verify(path, h)
-
-        monkeypatch.setattr(ch_mod, "verify_package_hash", tracking_verify)
+    def test_should_skip_redownload_false_when_content_hash_is_none(self):
+        """Production helper returns False when locked dep has no content_hash."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pkg_dir = Path(tmpdir) / "pkg"
-            pkg_dir.mkdir()
-            (pkg_dir / "file.txt").write_text("data")
+            pkg = Path(tmpdir) / "pkg"
+            pkg.mkdir()
+            (pkg / "f.txt").write_text("data")
 
-            class FakeLockedDep:
-                pass
+            locked_dep = types.SimpleNamespace(content_hash=None)
 
-            locked_dep = FakeLockedDep()
-            locked_dep.content_hash = None
+            assert _should_skip_redownload(locked_dep, pkg) is False
 
-            if locked_dep.content_hash and pkg_dir.is_dir():
-                ch_mod.verify_package_hash(pkg_dir, locked_dep.content_hash)
+    def test_should_skip_redownload_false_when_install_path_not_a_dir(self):
+        """Production helper returns False when install_path is missing/not a dir."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
 
-            assert calls == [], "verify_package_hash must not be called when content_hash is None"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing = Path(tmpdir) / "does-not-exist"
+            locked_dep = types.SimpleNamespace(content_hash="sha256:abc")
+
+            assert _should_skip_redownload(locked_dep, missing) is False
+
+    def test_should_skip_redownload_false_when_hash_mismatch(self):
+        """Production helper returns False when content_hash does not match on-disk."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "pkg"
+            pkg.mkdir()
+            (pkg / "f.txt").write_text("data")
+
+            locked_dep = types.SimpleNamespace(content_hash="sha256:badhash")
+
+            assert _should_skip_redownload(locked_dep, pkg) is False
 
 
 class TestAllowInsecureFlag:

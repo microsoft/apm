@@ -89,11 +89,10 @@ def run(ctx: InstallContext) -> None:
                 # Git check failed (e.g. .git removed after download).
                 # Fall back to content-hash verification so correctly
                 # installed packages are not re-downloaded every run (#763).
-                if _pd_locked_chk.content_hash and _pd_path.is_dir():
-                    from apm_cli.utils.content_hash import verify_package_hash as _pd_verify_hash
+                from apm_cli.install.phases._redownload import _should_skip_redownload
 
-                    if _pd_verify_hash(_pd_path, _pd_locked_chk.content_hash):
-                        continue
+                if _should_skip_redownload(_pd_locked_chk, _pd_path):
+                    continue
         # Build download ref (use locked commit for reproducibility).
         # build_download_ref() uses the manifest ref when ref_changed is True.
         _pd_dlref = build_download_ref(
