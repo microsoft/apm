@@ -278,17 +278,67 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{file_path}"
 
 
-def build_ssh_url(host: str, repo_ref: str, port: int | None = None) -> str:
+_SSH_USER_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$")
+_SSH_USER_MAX_LEN = 64
+
+
+def validate_ssh_user(user: str) -> str:
+    """Validate an SSH username; return it unchanged or raise ``ValueError``.
+
+    Allowlist policy (deliberately strict):
+
+    - First character must be alphanumeric or underscore. This blocks
+      SSH option injection vectors like ``-oProxyCommand=...`` from ever
+      reaching ``git clone`` argv as a userinfo segment.
+    - Remaining characters are letters, digits, ``.``, ``+``, ``-``, ``_``.
+      This forbids ``/`` (path escape), ``@`` (double-userinfo confusion
+      in ``ssh://user@host``), ``:`` (port confusion), and any whitespace
+      or control character (log/ANSI injection).
+    - Maximum length 64 bytes: long enough for any legitimate username
+      and short enough to bound log size and reject buffer-abuse payloads.
+
+    The shape matches the ``user`` group in ``SCP_LIKE_RE``
+    (``cache/url_normalize.py``) so SCP-shorthand inputs that parsed
+    successfully never fail this validation, while ``ssh://`` URLs (whose
+    userinfo is percent-decoded by ``urllib.parse``) are still gated.
+    """
+    if not user:
+        raise ValueError("SSH user must be a non-empty string")
+    if len(user) > _SSH_USER_MAX_LEN:
+        raise ValueError(f"SSH user is too long ({len(user)} > {_SSH_USER_MAX_LEN} chars)")
+    if not _SSH_USER_RE.match(user):
+        # Do NOT echo the raw user value -- a hostile apm.yml could embed
+        # control characters that survive log emission. Show only the length.
+        raise ValueError(
+            f"Invalid SSH user (length {len(user)}). "
+            "Allowed: alphanumerics, '.', '+', '-', '_'; "
+            "must not start with '-'."
+        )
+    return user
+
+
+def build_ssh_url(
+    host: str,
+    repo_ref: str,
+    port: int | None = None,
+    user: str = "git",
+) -> str:
     """Build an SSH clone URL for the given host and repo_ref (owner/repo).
 
     When ``port`` is set, emit the explicit ``ssh://`` form because SCP
     shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
     separator. Without a port, keep the compact SCP shorthand (no behavioural
     change for the common case).
+
+    ``user`` defaults to ``"git"`` for backward compatibility with public
+    GitHub / GitLab / Bitbucket which all expect that fixed account name.
+    Non-default usernames (EMU SSH accounts, self-hosted servers with a
+    different bot user) are passed through after ``validate_ssh_user``.
     """
+    safe_user = validate_ssh_user(user)
     if port:
-        return f"ssh://git@{host}:{port}/{repo_ref}.git"
-    return f"git@{host}:{repo_ref}.git"
+        return f"ssh://{safe_user}@{host}:{port}/{repo_ref}.git"
+    return f"{safe_user}@{host}:{repo_ref}.git"
 
 
 def build_https_clone_url(

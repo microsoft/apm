@@ -17,6 +17,7 @@ from ...utils.github_host import (
     maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
     unsupported_host_error,
+    validate_ssh_user,
 )
 from ...utils.path_security import (
     PathTraversalError,
@@ -87,6 +88,14 @@ class DependencyReference:
 
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
+
+    # SSH username for SCP-shorthand or ``ssh://`` dependencies. ``None`` for
+    # non-SSH inputs. Defaults to ``"git"`` whenever an SSH form was parsed
+    # without an explicit user. Carried as auth/transport context, NOT
+    # baked into ``to_canonical()`` / ``get_identity()`` so dependency
+    # identity stays user-agnostic (lockfile pinning + dedup work the same
+    # whether a project uses ``git@`` or an EMU/custom SSH account).
+    ssh_user: str | None = None
 
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
@@ -424,11 +433,26 @@ class DependencyReference:
             ssh://git@host/owner/repo.git@alias
 
         Returns:
-            ``(host, port, repo_url, reference, alias)`` or ``None`` if the
-            input is not an ``ssh://`` URL.
+            ``(host, port, repo_url, reference, alias, user)`` or ``None`` if
+            the input is not an ``ssh://`` URL. ``user`` defaults to ``"git"``
+            when no userinfo is present.
         """
         if not url.startswith("ssh://"):
             return None
+
+        # SECURITY: reject percent-encoded userinfo BEFORE urlparse decodes it.
+        # ``urlparse('ssh://%2DoProxyCommand=evil@host/repo').username`` returns
+        # ``-oProxyCommand=evil`` which would smuggle SSH options past the
+        # allowlist in validate_ssh_user. We inspect the raw substring between
+        # ``ssh://`` and the first ``@`` (which terminates the userinfo per
+        # RFC 3986) and reject any ``%`` there. There is no legitimate need for
+        # percent-encoding in a real SSH username.
+        userinfo_match = re.match(r"^ssh://([^@/?#]+)@", url)
+        if userinfo_match and "%" in userinfo_match.group(1):
+            raise ValueError(
+                "Percent-encoded characters are not allowed in SSH userinfo. "
+                "Use the literal username (e.g. 'ssh://myuser@host/...')."
+            )
 
         parsed = urllib.parse.urlparse(url)
         host = parsed.hostname or ""
@@ -438,6 +462,12 @@ class DependencyReference:
             port = None
         path = parsed.path.lstrip("/")
         fragment = parsed.fragment
+
+        # Userinfo: validate or default to "git". urlparse exposes ``username``
+        # already percent-decoded; the pre-check above guarantees no decoding
+        # actually happened, so what we see equals what was on the wire.
+        raw_user = parsed.username
+        ssh_user = validate_ssh_user(raw_user) if raw_user else "git"
 
         reference: str | None = None
         alias: str | None = None
@@ -464,7 +494,7 @@ class DependencyReference:
         # Security: reject traversal sequences in SSH repo paths
         validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
-        return host, port, repo_url, reference, alias
+        return host, port, repo_url, reference, alias, ssh_user
 
     @staticmethod
     def _normalize_parent_repo_decl_path(raw: str) -> str:
@@ -972,7 +1002,8 @@ class DependencyReference:
         # Security: reject traversal sequences in SSH repo paths
         validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
-        return host, None, repo_url, reference, alias
+        ssh_user = validate_ssh_user(user)
+        return host, None, repo_url, reference, alias, ssh_user
 
     @classmethod
     def _resolve_virtual_shorthand_repo(cls, repo_url, validated_host, virtual_path=None):
@@ -1435,14 +1466,15 @@ class DependencyReference:
         # Phase 2: parse SSH (ssh:// URL first -- it preserves port; then SCP
         # shorthand), otherwise fall back to HTTPS/shorthand parsing.
         explicit_scheme: str | None = None
+        ssh_user: str | None = None
         ssh_proto_result = cls._parse_ssh_protocol_url(dependency_str)
         if ssh_proto_result:
-            host, port, repo_url, reference, alias = ssh_proto_result
+            host, port, repo_url, reference, alias, ssh_user = ssh_proto_result
             explicit_scheme = "ssh"
         else:
             scp_result = cls._parse_ssh_url(dependency_str)
             if scp_result:
-                host, port, repo_url, reference, alias = scp_result
+                host, port, repo_url, reference, alias, ssh_user = scp_result
                 explicit_scheme = "ssh"
             else:
                 host, port, repo_url, reference, alias, is_virtual_package, virtual_path = (
@@ -1484,6 +1516,7 @@ class DependencyReference:
             ado_repo=ado_repo,
             artifactory_prefix=artifactory_prefix,
             is_insecure=urllib.parse.urlparse(dependency_str).scheme.lower() == "http",
+            ssh_user=ssh_user,
         )
 
     def to_apm_yml_entry(self):

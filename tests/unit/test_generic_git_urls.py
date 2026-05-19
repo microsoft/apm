@@ -393,6 +393,41 @@ class TestCloneURLBuilding:
         url = build_https_clone_url("bitbucket.domain.ext", "team/repo", port=8443)
         assert url == "https://bitbucket.domain.ext:8443/team/repo"
 
+    def test_ssh_clone_url_with_custom_user(self):
+        """Custom SSH usernames (e.g. EMU accounts) are preserved in the SCP shorthand."""
+        url = build_ssh_url("github.com", "acme/repo", user="myuser")
+        assert url == "myuser@github.com:acme/repo.git"
+
+    def test_ssh_clone_url_with_custom_user_and_port(self):
+        """Custom SSH user + port emits the explicit ssh:// form."""
+        url = build_ssh_url("bitbucket.domain.ext", "team/repo", port=7999, user="myuser")
+        assert url == "ssh://myuser@bitbucket.domain.ext:7999/team/repo.git"
+
+    def test_ssh_clone_url_default_user_unchanged(self):
+        """Omitting the user keeps the historical ``git@`` default."""
+        url = build_ssh_url("github.com", "acme/repo")
+        assert url == "git@github.com:acme/repo.git"
+
+    def test_ssh_clone_url_rejects_option_injection_user(self):
+        """A leading ``-`` would be interpreted as an SSH option flag by OpenSSH; reject it."""
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid SSH user"):
+            build_ssh_url("github.com", "acme/repo", user="-oProxyCommand=evil")
+
+    def test_ssh_clone_url_rejects_user_with_at_sign(self):
+        """A ``@`` in the user would split the userinfo and shift the host."""
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid SSH user"):
+            build_ssh_url("github.com", "acme/repo", user="user@other-host")
+
+    def test_ssh_clone_url_rejects_empty_user(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="non-empty"):
+            build_ssh_url("github.com", "acme/repo", user="")
+
     def test_https_clone_url_with_token_and_port(self):
         url = build_https_clone_url("bitbucket.domain.ext", "team/repo", token="pat-xxx", port=8443)
         assert url == "https://x-access-token:pat-xxx@bitbucket.domain.ext:8443/team/repo.git"
