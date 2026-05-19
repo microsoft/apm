@@ -167,7 +167,7 @@ function Invoke-InstallScript {
         $env:APM_TEMP_DIR    = $TmpDir
         Remove-Item Env:APM_SKIP_CHECKSUM -ErrorAction SilentlyContinue
 
-        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $InstallScript
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $InstallScript | Out-Host
         return $LASTEXITCODE
     } finally {
         if ($null -ne $savedVersion)      { $env:VERSION = $savedVersion }            else { Remove-Item Env:VERSION -ErrorAction SilentlyContinue }
