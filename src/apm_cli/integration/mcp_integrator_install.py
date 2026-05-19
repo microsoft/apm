@@ -7,11 +7,11 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
 
 if TYPE_CHECKING:
@@ -188,7 +188,7 @@ def run_mcp_install(  # noqa: PLR0915
                         # adapter from writing to ~/.claude.json on hosts
                         # where Claude Code was never installed.
                         if (project_root_path / ".claude").is_dir() or (
-                            shutil.which("claude") is not None
+                            find_runtime_binary("claude") is not None
                         ):
                             ClientFactory.create_client(runtime_name)
                             installed_runtimes.append(runtime_name)
@@ -199,7 +199,9 @@ def run_mcp_install(  # noqa: PLR0915
                 except (ValueError, ImportError):
                     continue
         except ImportError:
-            installed_runtimes = [rt for rt in ["copilot", "codex"] if shutil.which(rt) is not None]
+            installed_runtimes = [
+                rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None
+            ]
             # VS Code: check binary on PATH or .vscode/ directory presence
             if _is_vscode_available(project_root=project_root_path):
                 installed_runtimes.append("vscode")
@@ -216,7 +218,9 @@ def run_mcp_install(  # noqa: PLR0915
             if (project_root_path / ".windsurf").is_dir():
                 installed_runtimes.append("windsurf")
             # Claude Code: directory-presence OR binary-on-PATH
-            if (project_root_path / ".claude").is_dir() or (shutil.which("claude") is not None):
+            if (project_root_path / ".claude").is_dir() or (
+                find_runtime_binary("claude") is not None
+            ):
                 installed_runtimes.append("claude")
 
         # Step 2: Get runtimes referenced in apm.yml scripts

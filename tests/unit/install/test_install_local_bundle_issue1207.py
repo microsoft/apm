@@ -538,8 +538,12 @@ class TestBundleMcpWiring:
             logger=logger,
         )
         assert count == 1
-        assert captured["kwargs"]["explicit_target"] == "copilot,opencode"
-        assert captured["kwargs"]["apm_config"]["target"] == "copilot,opencode"
+        # Per scsec N1 (PR #1336): the bundle wiring forwards canonical
+        # plural shape -- explicit_target as list, apm_config["targets"]
+        # as list -- so the gate's CSV-normalization branch becomes pure
+        # backward-compat instead of load-bearing for this path.
+        assert captured["kwargs"]["explicit_target"] == ["copilot", "opencode"]
+        assert captured["kwargs"]["apm_config"]["targets"] == ["copilot", "opencode"]
         assert captured["kwargs"]["user_scope"] is False
         assert {d.name for d in captured["deps"]} == {"a"}
 

@@ -23,6 +23,10 @@ dependencies:
     - ssh://git@bitbucket.example.com:7999/project/repo.git
     - https://git.internal:8443/team/repo.git
 
+    # Bitbucket Data Center personal repos (~user) and Sourcehut
+    - https://bitbucket.example.com/scm/~jdoe/ml-utils.git
+    - https://git.sr.ht/~jdoe/dotfiles
+
     # FQDN shorthand (non-GitHub hosts keep the domain)
     - gitlab.com/acme/coding-standards
     - gitlab.com/group/subgroup/repo

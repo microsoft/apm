@@ -32,6 +32,7 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 | `--yes`, `-y` | off | Skip the interactive prompt and accept the plan. Required for non-interactive use. |
 | `--dry-run` | off | Compute and print the plan without prompting and without writing the lockfile or filesystem. |
 | `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
+| `--target TARGET`, `-t TARGET` | auto-detect | Agent harness(es) to update for. Accepts a single value (`claude`, `copilot`, `cursor`, `windsurf`, `codex`, `opencode`, `gemini`) or comma-separated list (`--target claude,cursor`). Overrides `apm.yml targets:` and auto-detection. |
 
 ## Examples
 

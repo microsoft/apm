@@ -75,7 +75,7 @@ jobs:
       run: |
         uv run --extra dev python -m pylint \
           --disable=all --enable=R0801 \
-          --min-similarity-lines=50 \
+          --min-similarity-lines=10 \
           --fail-on=R0801 \
           src/apm_cli/
 

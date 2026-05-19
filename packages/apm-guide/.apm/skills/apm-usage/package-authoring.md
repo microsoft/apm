@@ -268,6 +268,8 @@ marketplace:
   owner:
     name: acme-org
     url: https://github.com/acme-org
+  versioning:                  # optional; used by `apm pack --check-versions`
+    strategy: lockstep         # lockstep | tag_pattern | per_package
   build:                       # APM-only, stripped at compile time
     tagPattern: "v{version}"
   metadata:                    # pass-through, copied verbatim
@@ -295,6 +297,13 @@ Schema rules:
 - `ref` takes precedence over `version`.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
+- `versioning.strategy` is optional. When present, it is consumed by
+  the `apm pack --check-versions` release gate to enforce alignment
+  between each local package's `version:` field and the marketplace
+  version: `lockstep` (all packages match `marketplace.version`),
+  `tag_pattern` (each package renders a unique tag via `tagPattern`),
+  or `per_package` (each package versions independently, gate only
+  checks that `version:` is present). Omit entirely to skip the gate.
 - Unknown keys raise a schema error -- do not invent fields.
 
 ### Build semantics

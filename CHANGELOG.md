@@ -14,29 +14,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --target claude` now preserves self-defined stdio MCP `env` values from `apm.yml` and writes non-string values such as `PORT: 3000` and `DEBUG: false` as MCP-compatible strings. (#1222)
 - Non-skill integrators (agent, instruction, prompt, command, hook script-copy) silently adopt byte-identical pre-existing files so a degraded `deployed_files=[]` lockfile no longer permanently blocks installs gated by `required-packages-deployed`. (#1313)
 - `apm audit` drift check now returns skip-with-info (`passed=True`) when the install cache is cold, instead of failing the audit; bare `apm audit` surfaces the skip reason on stderr so CI pipelines that have not yet run `apm install` are not incorrectly red-marked. (#1289)
+- `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. User values are validated against a strict allowlist before composing the clone URL. (#1385, closes #1383)
+
+## [0.14.0] - 2026-05-18
+
+### Breaking
+
+- **MCP Registry v0.1**: self-hosted registries must serve `/v0.1/` paths (legacy `/v0/`-only registries return 404). `api.mcp.github.com` and `registry.modelcontextprotocol.io` are unaffected. Python API: `get_server_info(uuid)` -> `get_server(server_name, version)`; old name remains one minor as `DeprecationWarning`. Thanks @fassmus for the report. (#1337, closes #1210)
 
 ### Added
 
-- `apm pack --marketplace=FORMATS` filters which marketplace formats are built in a single run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
-- `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. Env var overrides (`APM_MARKETPLACE_<FORMAT>_PATH`) are planned for v0.15. (#1317)
-- `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [{format, path, ...}]}}`); all logs move to stderr so downstream tooling can `jq` the output safely. (#1317)
-- `marketplace.outputs` in `apm.yml` now accepts a map form keyed by format name (`outputs: {claude: {}, codex: {path: ...}}`), replacing the deprecated list form; the list form still parses with a one-cycle deprecation warning. (#1317)
-- `apm marketplace init` now scaffolds the explicit map-form `outputs: {claude: {}}` so the default state is observable in the manifest. (#1317)
+- `apm plugin init` is the canonical noun-verb command for scaffolding a plugin project; composes with `apm marketplace init` so single-plugin, aggregator, and hybrid repo shapes emerge from verb composition (no `--shape` flag). New docs: [Repo shapes](https://microsoft.github.io/apm/producer/repo-shapes/), [Releasing from any CI](https://microsoft.github.io/apm/producer/releasing-from-any-ci/), [Versioning strategies](https://microsoft.github.io/apm/producer/versioning-strategies/). (#1370)
+- `apm init` prints a "Next steps" panel surfacing both `apm plugin init` and `apm marketplace init` alongside consumer commands, teaching the noun-verb taxonomy at zero migration cost. (#1370)
+- `apm pack --check-versions` validates per-package versions against `marketplace.versioning.strategy` (`lockstep` / `tag_pattern` / `per_package`); exits `3` on misalignment. (#1365)
+- `apm pack --check-clean` regenerates each `marketplace.json` into a temp dir and diffs against the committed copy; exits `4` on drift. Never writes to the working tree. (#1365)
+- `apm.yml` schema: new optional `marketplace.versioning: { strategy: ... }` block (default `lockstep`); existing manifests unaffected. (#1365)
+- `apm marketplace doctor` adds `format coverage` and `version alignment` rows surfacing missing supported outputs and per-package drift. (#1362, #1365)
+- `apm pack --marketplace=FORMATS` filters which marketplace formats build in a run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
+- `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific format at invocation time. (#1317)
+- `apm pack --json` emits a stable JSON contract on stdout; all logs move to stderr so tooling can `jq` the output safely. (#1317)
+- `marketplace.outputs` in `apm.yml` accepts map form `outputs: {claude: {}, codex: {path: ...}}` (the deprecated list form still parses with warning). (#1317)
+- `apm uninstall` accepts marketplace notation (`my-plugin@official`), symmetric with `apm install`; offline-first via lockfile with registry fallback guarded against canonical injection. (#1325)
+- `apm update` adds `--target/-t` to scope refresh to a single agent. (#1358)
+- `install.ps1` accepts air-gapped / GHES env vars (`VERSION`, `GITHUB_URL`, `APM_REPO`, `APM_INSTALL_DIR`, `APM_SKIP_CHECKSUM`) for Windows pinned installs, matching `install.sh`. (#1246)
+- Prefer APM-managed runtime binaries over system PATH; warn at setup time on Codex >= v0.116 + GitHub Models incompatibility instead of failing silently later. (#1356)
 
 ### Changed
 
-- `--marketplace-output PATH` is now hidden from `--help` and emits a stderr deprecation warning; it auto-translates to `--marketplace-path claude=PATH`. Removal tracked in #1318. (#1317)
-- `extends: org` now correctly layers `dependencies.require` and `dependencies.deny` from the parent policy when the child omits the `dependencies:` block entirely; `None` signals "no opinion" (transparent) while `[]` signals explicit override. (#1290)
-- CI self-check job now uses `setup-only: true` + `apm audit --ci --no-drift` so managed files are not overwritten by `apm install` before `content-integrity` runs; documented the audit-only CI pattern and the install-before-audit blind spot in the enterprise and CI/CD guides. (#1291)
-- Pin `Path.home()` under unit tests via a session-scoped autouse conftest fixture, fixing 56 Windows runner failures on the new `windows-2025-vs2026` GitHub-hosted image where `USERPROFILE`/`HOMEDRIVE`+`HOMEPATH` are not seeded for pytest workers; also patch the `_check_and_notify_updates` import binding in the disabled-self-update test so it no longer races on the version-check cache. (#1270)
-- `apm install` now works on macOS git 2.53.0 (Homebrew): bare-cache commands switch to `--git-dir` to satisfy the `safe.bareRepository=explicit` default; fetched SHAs are pinned as synthetic refs so `git clone --local --shared` no longer silently omits them. (#1268)
-- Set the unit-test hermetic HOME at conftest import time so a single xdist worker on the `windows-2025-vs2026` runner can no longer race fixture setup and re-trigger the 53 `Path.home()` failures the session-scoped autouse fixture was supposed to prevent. (#1271)
-- Override `Path.home()` itself in the root test conftest so the 46 remaining Windows `RuntimeError: Could not determine home directory` failures on xdist worker `gw2` cannot recur regardless of which conftest the worker imports first; per-test `monkeypatch.setenv("HOME", ...)` continues to work because the override consults env vars before falling back to the hermetic tmp dir. (#1272)
-- Retry the `apm mcp search` and `apm mcp show` integration tests on the documented "Could not reach MCP registry" transient (with backoff and a final skip) so a brief `api.mcp.github.com` outage no longer red-marks the Windows integration job. (#1274)
-- Also wrap `Path.expanduser()` in the root test conftest so the `windows-2025-vs2026` runner cannot raise `RuntimeError("Could not determine home directory.")` from `ntpath.expanduser` when production code (e.g. `install.package_resolution.user_scope_rejection_reason`) calls `Path("~/pkg").expanduser()`. Falls back to the hermetic tmp dir; assertions about `~/pkg` being absolute still hold. (#1276)
-- `apm install` from marketplaces registered on `*.ghe.com` (GHE Cloud) hosts now routes auth at the registered enterprise host instead of silently defaulting to `github.com` and failing with 401; the marketplace resolver backfills the enterprise host onto the canonical so downstream `DependencyReference.parse` recovers it, and the resulting `apm.yml` entry records the correct enterprise `git:` URL instead of `https://github.com/...`. (#1292)
-- `apm install` from `*.ghe.com` (GHE Cloud) marketplaces now surfaces a warning-level hint when a cross-repo dict `type: github` plugin source with a bare `repo` field fails validation, naming the marketplace's enterprise host and the exact host-qualified `repo` value to set in `marketplace.json`; the resolver attaches a typed misconfig sentinel that the install command consults at the validation-failure boundary, so the legitimate cross-host path (validation succeeds) emits no hint and the suggestion does not pollute working configs. (#1319)
-- `apm view --help` and the `view` row in `apm --help` now render in release binaries; PyInstaller's `optimize=2` was stripping `__doc__` from every Click command, and `view` was the only command that relied on its docstring instead of the explicit `help=` kwarg every other command defensively sets. Lowered the spec to `optimize=1` so asserts are still removed but docstrings survive, restoring Click's documented help-from-docstring fallback for all current and future commands. (#1298)
+- **`apm update` is roughly two orders of magnitude faster on multi-dep manifests**: a four-tier resolver (in-memory cache -> GitHub commits API -> bare `rev-parse` -> legacy clone) collapses redundant `git clone --depth=1` calls. Same wiring benefits install, outdated, and publish. (#1376, closes #1369)
+- `shared/apm.md` gh-aw workflow no longer fails with `no apm bundles found` for form-2 (single-app) and form-3 (`apps[]`) consumers: GitHub Actions was silently stripping the private-key PEM from the `apm-prep` job's matrix output as a secret leak. (#1373)
+- `apm pack` appends a vendor-neutral catalog after per-output success listing each marketplace artifact and a single docs anchor; never names a vendor CLI surface. (#1362)
+- `apm marketplace init` scaffolds map-form `outputs: {claude: {}}` with a single-line `# codex: {}` commented toggle; flip one line to enable Codex output. (#1362)
+- `apm install` from `*.ghe.com` (GHE Cloud) marketplaces routes auth at the registered enterprise host instead of silently defaulting to `github.com` and 401'ing; the resulting `apm.yml` records the correct enterprise `git:` URL. (#1292)
+- `apm install` from `*.ghe.com` marketplaces surfaces a warning-level hint when a bare-`repo` cross-repo plugin source fails validation, naming the enterprise host and the host-qualified `repo` value to set. (#1319)
+- `extends: org` correctly layers `dependencies.require` / `dependencies.deny` and `unmanaged_files` when the child omits the block entirely (`None` = transparent, `[]` = explicit override). (#1290, #1248)
+- `--marketplace-output PATH` is hidden from `--help` and emits a stderr deprecation warning; auto-translates to `--marketplace-path claude=PATH`. (#1317)
+- `apm view --help` and the `view` row in `apm --help` render in release binaries again; PyInstaller `optimize=2` was stripping `__doc__` from every Click command. (#1307)
+
+### Deprecated
+
+- `apm init --plugin` and `apm init --marketplace` are deprecated in favor of `apm plugin init` and `apm marketplace init`; legacy flags still work and print a one-line stderr warning, **removal in v0.16**. (#1370)
+
+### Fixed
+
+- `apm compile --watch` honors `targets: [...]` on every recompile instead of silently regenerating all-target outputs. (#1349, closes #1345)
+- `apm install` no longer permanently blocks installs gated by `required-packages-deployed` after a degraded `deployed_files=[]` lockfile: non-skill integrators silently adopt byte-identical pre-existing files. (#1313)
+- `apm audit` drift check returns skip-with-info (`passed=True`) when the install cache is cold, instead of failing the audit; CI pipelines that have not yet run `apm install` are not incorrectly red-marked. (#1289)
+- `apm pack` no longer prints a misleading "No plugin.json found" warning for marketplace-publishing projects. (#1362)
+- `apm marketplace init` scaffolds the snake_case `tag_pattern: "{name}-v{version}"` example instead of the schema-invalid camelCase `tagPattern`. (#1362)
+- `apm install` respects the `targets:` whitelist for MCP servers exactly like skills, dropping non-listed runtimes even when their on-disk signal exists; greenfield projects (no `targets:`, no `--target`, no signals) now error consistently between `apm install` and MCP-only invocations. (#1336, closes #1335)
+- Gemini CLI: `apm install -g --mcp NAME` writes to `~/.gemini/settings.json` (user scope); project-scope writes land at `<project_root>/.gemini/settings.json` instead of `cwd`. (#1306, closes #1299)
+- Claude target: hook commands with relative paths now resolve to absolute paths in `settings.json`. (#1354, closes #1310)
+- Claude target: hook ownership metadata is stored in a `.claude/apm-hooks.json` sidecar so APM can track owned hooks without violating the Claude `additionalProperties` schema. (#1359, closes #1279)
+- Claude target: `apm install` preserves self-defined stdio MCP `env` values from `apm.yml` and stringifies non-string values like `PORT: 3000` for MCP compatibility. (#1224, closes #1222)
+- Direct GitHub API and ADO/GHES `git ls-remote` calls now respect `PROXY_REGISTRY_ONLY` mode; all four validation paths skip outbound network probes. (#1357, closes #615)
+- Target propagation no longer drops mid-pipeline at the intermediate `CompilationConfig` stage. (#1355, closes #765)
+- `apm pack` and `apm install` now warn when `apm.yml` is missing but APM artifacts exist on disk. (#1255, closes #1056)
+- `apm install` accepts Bitbucket Data Center / Server personal-repo URLs containing `~` (e.g. `https://example.com/scm/~user/repo.git`); the path-component whitelist on non-ADO hosts now includes `~` (RFC 3986 unreserved). Sourcehut `~user` paths are incidentally unblocked too. (#1377, closes #1375)
 
 ## [0.13.0] - 2026-05-11
 

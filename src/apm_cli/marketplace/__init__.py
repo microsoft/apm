@@ -1,5 +1,7 @@
 """Marketplace integration for plugin discovery and governance."""
 
+# pylint: disable=duplicate-code  # __all__ re-exports intentionally mirror commands/marketplace surface
+
 from .builder import (
     BuildOptions,
     BuildReport,

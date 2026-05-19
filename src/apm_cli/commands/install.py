@@ -978,7 +978,12 @@ def _handle_mcp_install(
     "mcp_name",
     default=None,
     metavar="NAME",
-    help="Add an MCP server entry to apm.yml. Use with --transport, --url, --env, --header, --mcp-version, or post-- stdio command.",
+    help=(
+        "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, "
+        "--header, --mcp-version, or a stdio command after `--`. Resolves active "
+        "targets the same way `apm install` does (--target > apm.yml targets: > "
+        "auto-detect); writes only for active targets, skips others with [i]."
+    ),
 )
 @click.option(
     "--transport",
@@ -1792,10 +1797,18 @@ def _install_apm_packages(ctx, outcome):
     # Continue with MCP installation (existing logic)
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
-    mcp_apm_config = {
-        "target": apm_package.target,
-        "scripts": apm_package.scripts or {},
-    }
+    # Forward only the targets-key the user actually declared so parse_targets_field
+    # in the gate sees the same dict shape it sees from raw apm.yml. Including a
+    # `targets: None` placeholder when the user wrote `target:` (singular) would
+    # falsely trip the conflict-mutex check (see core.apm_yml.parse_targets_field).
+    # This restores parity with `apm install` for users on the modern `targets:`
+    # plural form -- without this, `targets:` was silently dropped at the call
+    # site and the gate fell back to permissive directory detection (#1335).
+    mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
+    if apm_package.targets is not None:
+        mcp_apm_config["targets"] = apm_package.targets
+    elif apm_package.target is not None:
+        mcp_apm_config["target"] = apm_package.target
     if should_install_mcp and mcp_deps:
         mcp_count = MCPIntegrator.install(
             mcp_deps,

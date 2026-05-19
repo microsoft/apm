@@ -29,6 +29,10 @@ Flags
 * ``--dry-run``    -- render the plan and exit without prompting.
 * ``--verbose``/``-v`` -- show unchanged deps in the plan and pipeline
   diagnostics.
+* ``--target``/``-t`` -- agent harness(es) to deploy to (e.g.
+  ``claude``, ``copilot``, ``cursor``, ``windsurf``, ``codex``,
+  ``opencode``, ``gemini``); comma-separated for multiple targets.
+  Overrides ``apm.yml targets:`` and auto-detection.
 
 Other ``apm install`` flags are NOT mirrored here on purpose -- the
 update command stays focused on the refresh-and-confirm loop.
@@ -43,6 +47,7 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import InstallLogger
+from ..core.target_detection import TargetParamType
 from ..install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -121,6 +126,19 @@ def _stdin_is_tty() -> bool:
     help="(Deprecated) Forwarded to 'apm self-update --check' when run outside an apm.yml project; rejected inside a project.",
     hidden=True,
 )
+@click.option(
+    "--target",
+    "-t",
+    type=TargetParamType(),
+    default=None,
+    help=(
+        "Agent target(s) to update for "
+        "(e.g. claude, copilot, cursor, windsurf, codex, opencode, gemini). "
+        "Comma-separated for multiple: --target claude,cursor. "
+        "Highest-priority entry in the resolution chain "
+        "(--target > apm.yml targets: > auto-detect)."
+    ),
+)
 @click.pass_context
 def update(
     ctx: click.Context,
@@ -128,6 +146,7 @@ def update(
     dry_run: bool,
     verbose: bool,
     check_only: bool,
+    target: str | list[str] | None,
 ) -> None:
     """Refresh APM dependencies to the latest matching refs.
 
@@ -145,6 +164,12 @@ def update(
         # the release after this one.
         from apm_cli.commands.self_update import self_update as _self_update_cmd
 
+        if target is not None:
+            _rich_warning(
+                "--target is ignored when forwarding to 'apm self-update' "
+                "(no apm.yml found). Use 'apm self-update' directly.",
+                symbol="warning",
+            )
         _rich_warning(
             "'apm update' refreshes APM dependencies. To update the CLI binary, "
             "use 'apm self-update'. Forwarding for back-compat (deprecated).",
@@ -156,6 +181,12 @@ def update(
     if check_only:
         from apm_cli.commands.self_update import self_update as _self_update_cmd
 
+        if target is not None:
+            _rich_warning(
+                "--target is ignored when forwarding to 'apm self-update --check'. "
+                "Use 'apm update --dry-run' to preview dependency changes.",
+                symbol="warning",
+            )
         _rich_warning(
             "'apm update --check' is the deprecated self-updater shim. "
             "Use 'apm update --dry-run' to preview dependency changes, "
@@ -178,6 +209,7 @@ def update(
         dry_run=dry_run,
         verbose=verbose,
         project_root=project_root,
+        target=target,
     )
 
 
@@ -187,6 +219,7 @@ def _run_dep_update(
     dry_run: bool,
     verbose: bool,
     project_root: Path | None = None,
+    target: str | list[str] | None = None,
 ) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
@@ -282,6 +315,7 @@ def _run_dep_update(
             scope=InstallScope.PROJECT,
             logger=logger,
             plan_callback=_plan_callback,
+            target=target,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))

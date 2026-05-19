@@ -318,6 +318,24 @@ class TargetProfile:
 
 
 # ------------------------------------------------------------------
+# Runtime -> canonical target alias map
+# ------------------------------------------------------------------
+#
+# Several runtime identifiers used at the MCP-config layer (e.g. ``vscode``,
+# ``agents``) emit configuration that lands inside the ``copilot`` target's
+# tree.  The MCP gate (``mcp_integrator._gate_project_scoped_runtimes``) and
+# the explicit-target resolution branch in :func:`active_targets` both need
+# to map runtime -> canonical-target name in the same way.  Hold the table
+# in one place to prevent the two sites drifting -- a silent drift would
+# strip a runtime even when its canonical target is active (the same class
+# of bug as #1335).
+RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
+    "vscode": "copilot",
+    "agents": "copilot",
+}
+
+
+# ------------------------------------------------------------------
 # Known targets
 # ------------------------------------------------------------------
 
@@ -700,7 +718,7 @@ def active_targets_user_scope(
         profiles: list = []
         seen: set = set()
         for t in raw:
-            canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
+            canonical = RUNTIME_TO_CANONICAL_TARGET.get(t, t)
             if canonical == "all":
                 from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
 
@@ -773,7 +791,7 @@ def active_targets(
         profiles: list = []
         seen: set = set()
         for t in raw:
-            canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
+            canonical = RUNTIME_TO_CANONICAL_TARGET.get(t, t)
             if canonical == "all":
                 # Exclude explicit-only targets (agent-skills) -- they must
                 # be requested individually.
