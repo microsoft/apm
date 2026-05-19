@@ -47,6 +47,12 @@ Use lockstep when:
 - Consumers expect a single coherent version across the bundle.
 - You run a small monorepo where independent versions add no value.
 
+Worked example: [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config)
+ships 7 plugins on lockstep. Its [`apm.yml`](https://github.com/DevExpGbb/zava-agent-config/blob/main/apm.yml)
+omits `versioning.strategy:` (lockstep is the default), declares one
+top-level `version:`, and uses `build.tagPattern: "v{version}"` so a
+single repo-wide tag (`v6.1.2`) cuts all 7 tarballs together.
+
 ## tag_pattern
 
 Each rendered tag must be unique across local packages, and every

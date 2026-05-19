@@ -102,7 +102,7 @@ is no `dependencies:` block.
 
 ## Monorepo-hybrid
 
-> **Advanced.** Most first-time authors should start with single-plugin or aggregator. Reach for hybrid when you're shipping your own plugin *and* curating others (e.g., `zava-agent-configs`).
+> **Advanced.** Most first-time authors should start with single-plugin or aggregator. Reach for hybrid when you're shipping your own plugin *and* curating others. [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config) is the live reference: 7 plugins under `plugins/`, one root `apm.yml`, releases via [microsoft/apm-action@v1](https://github.com/microsoft/apm-action) `mode: release`.
 
 One repo, many plugins under `packages/`, one marketplace at the root
 that lists them as local-path entries. Each plugin gets its own

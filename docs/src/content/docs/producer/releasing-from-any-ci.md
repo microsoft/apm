@@ -66,7 +66,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: microsoft/apm-action@v1
         with:
           mode: release
@@ -81,6 +81,14 @@ sequence above. It installs the CLI, runs `apm pack
 calls `gh release create` against the pushed tag. Use it when you
 want one less script to maintain; use the raw `run:` form below when
 you need to customise any step.
+
+> **Reference deployment.** [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config)
+> runs this exact pipeline. The
+> [v6.1.2 release](https://github.com/DevExpGbb/zava-agent-config/releases/tag/v6.1.2)
+> attaches 7 per-plugin tarballs + their `.sha256` companions +
+> `marketplace-6.1.2.json` (15 assets total) via the workflow in
+> [`.github/workflows/release.yml`](https://github.com/DevExpGbb/zava-agent-config/blob/main/.github/workflows/release.yml).
+> Apm `0.14.0` and apm-action `v1.9.1` or newer required.
 
 ```yaml
       - uses: actions/setup-python@v5
