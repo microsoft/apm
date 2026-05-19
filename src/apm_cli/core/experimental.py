@@ -70,6 +70,16 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "See https://microsoft.github.io/apm/integrations/copilot-cowork/"
         ),
     ),
+    "copilot_app": ExperimentalFlag(
+        name="copilot_app",
+        description="Deploy prompts as workflows into the GitHub Copilot desktop App.",
+        default=False,
+        hint=(
+            "Add 'schedule:' frontmatter to any .prompt.md and install with "
+            "'--target copilot-app --global'. Workflows arrive disabled; "
+            "enable them from the Copilot app's Workflows tab."
+        ),
+    ),
 }
 
 

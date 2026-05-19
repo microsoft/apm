@@ -573,6 +573,28 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_resolver=lambda: _resolve_copilot_cowork_root(),
         requires_flag="copilot_cowork",
     ),
+    # GitHub Copilot desktop App -- experimental, user-scope only.
+    # Prompts with ``schedule:`` frontmatter are installed as rows in the
+    # app's ``workflows`` table at ``~/.copilot/data.db``.  No files are
+    # written under the deploy root; the synthetic root is only used so
+    # the existing target machinery can address rows via the
+    # ``copilot-app-db://workflows/<id>`` lockfile URI scheme.
+    "copilot-app": TargetProfile(
+        name="copilot-app",
+        root_dir="copilot-app",  # display grouping placeholder only
+        primitives={
+            "prompts": PrimitiveMapping(
+                "workflows",
+                ".prompt.md",
+                "prompt_standard",
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_resolver=lambda: _resolve_copilot_app_root(),
+        requires_flag="copilot_app",
+    ),
 }
 
 
@@ -625,6 +647,19 @@ def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821
     from apm_cli.integration.copilot_cowork_paths import resolve_copilot_cowork_skills_dir
 
     return resolve_copilot_cowork_skills_dir()
+
+
+def _resolve_copilot_app_root() -> Path | None:  # noqa: F821
+    """Thin wrapper around ``copilot_app_db.resolve_copilot_app_root()``.
+
+    Used as the ``user_root_resolver`` callable for the ``copilot-app``
+    target.  Returns ``~/.copilot/`` only when the app's SQLite DB is
+    present, so the target is invisible on machines without the app
+    installed.
+    """
+    from apm_cli.integration.copilot_app_db import resolve_copilot_app_root
+
+    return resolve_copilot_app_root()
 
 
 def _is_flag_enabled(flag_name: str) -> bool:

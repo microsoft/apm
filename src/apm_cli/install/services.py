@@ -63,10 +63,19 @@ def _deployed_path_entry(
         # target.  Find the matching target and translate.
         if targets:
             for _t in targets:
-                if _t.resolved_deploy_root is not None:
-                    from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+                if _t.resolved_deploy_root is None:
+                    continue
+                if _t.name == "copilot-app":
+                    # Copilot App rows have no real file on disk.  The
+                    # integrator synthesises ``<root>/workflows/<id>``
+                    # as the addressing token; encode it as a
+                    # ``copilot-app-db://`` URI.
+                    from apm_cli.integration.copilot_app_db import to_lockfile_uri
 
-                    return to_lockfile_path(target_path, _t.resolved_deploy_root)
+                    return to_lockfile_uri(target_path.name)
+                from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+
+                return to_lockfile_path(target_path, _t.resolved_deploy_root)
         raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
