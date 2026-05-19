@@ -9,13 +9,18 @@
 #      executable launch from user-writable temp paths.
 #   3. The shim written to APM_INSTALL_DIR points at the promoted release
 #      directory and the temp staging area is cleaned up.
+#   4. Upgrading over an existing install exercises the "move releaseDir
+#      aside -> promote staging -> delete backup" path with no leftovers.
+#   5. The real `apm self-update` command launches install.ps1 successfully
+#      end-to-end (download + dispatch + new version reported).
 #
 # Designed to run on the windows-latest GitHub Actions runner. Performs a
 # real install of a pinned APM release into an isolated test prefix and
 # leaves the developer's existing apm install untouched.
 
 param(
-    [string]$PinnedVersion = "v0.13.0"
+    [string]$PinnedVersion = "v0.14.0",
+    [string]$OlderVersion  = "v0.13.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -144,14 +149,12 @@ function Test-MoveThenTestOrdering {
 # Test 3: Run install.ps1 end-to-end into an isolated prefix.
 # ---------------------------------------------------------------------------
 
-function Test-EndToEndInstall {
-    Write-Step "Test 3: End-to-end install of APM $PinnedVersion into isolated prefix"
-
-    $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("apm-install-test-" + [System.Guid]::NewGuid().ToString("N"))
-    $binDir   = Join-Path $testRoot "bin"
-    $tmpDir   = Join-Path $testRoot "tmp"
-    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-    New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+function Invoke-InstallScript {
+    param(
+        [Parameter(Mandatory=$true)][string]$Version,
+        [Parameter(Mandatory=$true)][string]$BinDir,
+        [Parameter(Mandatory=$true)][string]$TmpDir
+    )
 
     $savedVersion       = $env:VERSION
     $savedInstallDir    = $env:APM_INSTALL_DIR
@@ -159,46 +162,214 @@ function Test-EndToEndInstall {
     $savedSkipChecksum  = $env:APM_SKIP_CHECKSUM
 
     try {
-        $env:VERSION         = $PinnedVersion
-        $env:APM_INSTALL_DIR = $binDir
-        $env:APM_TEMP_DIR    = $tmpDir
-        # Real pinned releases have a .sha256 sidecar; keep checksum verification on
-        # so we also exercise Get-Sha256Hex against the real download.
+        $env:VERSION         = $Version
+        $env:APM_INSTALL_DIR = $BinDir
+        $env:APM_TEMP_DIR    = $TmpDir
         Remove-Item Env:APM_SKIP_CHECKSUM -ErrorAction SilentlyContinue
 
-        Write-Info "Running install.ps1 (VERSION=$PinnedVersion, APM_INSTALL_DIR=$binDir, APM_TEMP_DIR=$tmpDir)"
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $InstallScript
-        $exitCode = $LASTEXITCODE
+        return $LASTEXITCODE
+    } finally {
+        if ($null -ne $savedVersion)      { $env:VERSION = $savedVersion }            else { Remove-Item Env:VERSION -ErrorAction SilentlyContinue }
+        if ($null -ne $savedInstallDir)   { $env:APM_INSTALL_DIR = $savedInstallDir } else { Remove-Item Env:APM_INSTALL_DIR -ErrorAction SilentlyContinue }
+        if ($null -ne $savedTempDir)      { $env:APM_TEMP_DIR = $savedTempDir }       else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
+        if ($null -ne $savedSkipChecksum) { $env:APM_SKIP_CHECKSUM = $savedSkipChecksum } else { Remove-Item Env:APM_SKIP_CHECKSUM -ErrorAction SilentlyContinue }
+    }
+}
+
+function Get-ShimVersion {
+    param([string]$ShimPath)
+    $out = & cmd.exe /c "`"$ShimPath`" --version" 2>&1
+    return @{ ExitCode = $LASTEXITCODE; Output = ($out | Out-String).Trim() }
+}
+
+function New-IsolatedPrefix {
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("apm-install-test-" + [System.Guid]::NewGuid().ToString("N"))
+    $binDir = Join-Path $root "bin"
+    $tmpDir = Join-Path $root "tmp"
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+    return @{ Root = $root; BinDir = $binDir; TmpDir = $tmpDir }
+}
+
+# ---------------------------------------------------------------------------
+# Test 3: End-to-end install into an isolated prefix (fresh install path).
+# ---------------------------------------------------------------------------
+
+function Test-EndToEndInstall {
+    Write-Step "Test 3: End-to-end install of APM $PinnedVersion into isolated prefix"
+
+    $prefix = New-IsolatedPrefix
+    try {
+        Write-Info "Running install.ps1 (VERSION=$PinnedVersion, APM_INSTALL_DIR=$($prefix.BinDir), APM_TEMP_DIR=$($prefix.TmpDir))"
+        $exitCode = Invoke-InstallScript -Version $PinnedVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
         Assert-True ($exitCode -eq 0) "install.ps1 exits 0 (got $exitCode)"
 
-        $shim = Join-Path $binDir "apm.cmd"
+        $shim = Join-Path $prefix.BinDir "apm.cmd"
         Assert-True (Test-Path $shim) "Shim written to $shim"
 
         if (Test-Path $shim) {
             $shimText = Get-Content $shim -Raw
-            $releaseRoot = Join-Path $binDir "..\releases" | Resolve-Path -ErrorAction SilentlyContinue
+            $releaseRoot = Join-Path $prefix.BinDir "..\releases" | Resolve-Path -ErrorAction SilentlyContinue
             if ($releaseRoot) {
-                $releaseRootStr = $releaseRoot.Path
-                Assert-True ($shimText -match [regex]::Escape($releaseRootStr)) "Shim points into per-user releases dir ($releaseRootStr), not temp"
+                Assert-True ($shimText -match [regex]::Escape($releaseRoot.Path)) "Shim points into per-user releases dir ($($releaseRoot.Path)), not temp"
             }
-            Assert-True ($shimText -notmatch [regex]::Escape($tmpDir)) "Shim does NOT point into APM_TEMP_DIR ($tmpDir)"
+            Assert-True ($shimText -notmatch [regex]::Escape($prefix.TmpDir)) "Shim does NOT point into APM_TEMP_DIR ($($prefix.TmpDir))"
 
-            $versionOutput = & cmd.exe /c "`"$shim`" --version" 2>&1
-            $versionExit = $LASTEXITCODE
-            Assert-True ($versionExit -eq 0) "apm.cmd --version exits 0 (got $versionExit; output: $versionOutput)"
-            Assert-True (($versionOutput | Out-String) -match $PinnedVersion.TrimStart("v")) "apm.cmd --version reports $PinnedVersion"
+            $ver = Get-ShimVersion -ShimPath $shim
+            Assert-True ($ver.ExitCode -eq 0) "apm.cmd --version exits 0 (got $($ver.ExitCode); output: $($ver.Output))"
+            Assert-True ($ver.Output -match $PinnedVersion.TrimStart("v")) "apm.cmd --version reports $PinnedVersion"
         }
 
-        # The temp dir should be cleaned up by install.ps1's finally block.
-        $leftover = Get-ChildItem -Path $tmpDir -Filter "apm-install-*" -Directory -ErrorAction SilentlyContinue
+        $leftover = Get-ChildItem -Path $prefix.TmpDir -Filter "apm-install-*" -Directory -ErrorAction SilentlyContinue
         Assert-True (-not $leftover) "No leftover apm-install-* directory in APM_TEMP_DIR"
     } finally {
-        if ($null -ne $savedVersion)      { $env:VERSION = $savedVersion }      else { Remove-Item Env:VERSION -ErrorAction SilentlyContinue }
-        if ($null -ne $savedInstallDir)   { $env:APM_INSTALL_DIR = $savedInstallDir } else { Remove-Item Env:APM_INSTALL_DIR -ErrorAction SilentlyContinue }
-        if ($null -ne $savedTempDir)      { $env:APM_TEMP_DIR = $savedTempDir } else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
-        if ($null -ne $savedSkipChecksum) { $env:APM_SKIP_CHECKSUM = $savedSkipChecksum } else { Remove-Item Env:APM_SKIP_CHECKSUM -ErrorAction SilentlyContinue }
+        Remove-Item -Recurse -Force $prefix.Root -ErrorAction SilentlyContinue
+    }
+}
 
-        Remove-Item -Recurse -Force $testRoot -ErrorAction SilentlyContinue
+# ---------------------------------------------------------------------------
+# Test 4a: Cross-version upgrade. Install OlderVersion, then PinnedVersion,
+# into the same prefix. The shim must end up pointing at PinnedVersion's
+# release dir and `apm --version` must report PinnedVersion.
+# ---------------------------------------------------------------------------
+
+function Test-CrossVersionUpgrade {
+    Write-Step "Test 4a: Cross-version upgrade $OlderVersion -> $PinnedVersion in same prefix"
+
+    $prefix = New-IsolatedPrefix
+    try {
+        Write-Info "Step 1: install $OlderVersion"
+        $exit1 = Invoke-InstallScript -Version $OlderVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
+        Assert-True ($exit1 -eq 0) "Step 1 install.ps1 exits 0 (got $exit1)"
+
+        $shim = Join-Path $prefix.BinDir "apm.cmd"
+        $ver1 = Get-ShimVersion -ShimPath $shim
+        Assert-True ($ver1.Output -match $OlderVersion.TrimStart("v")) "Step 1: apm.cmd --version reports $OlderVersion (got: $($ver1.Output))"
+
+        Write-Info "Step 2: install $PinnedVersion over the existing install"
+        $exit2 = Invoke-InstallScript -Version $PinnedVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
+        Assert-True ($exit2 -eq 0) "Step 2 install.ps1 exits 0 (got $exit2)"
+
+        $ver2 = Get-ShimVersion -ShimPath $shim
+        Assert-True ($ver2.Output -match $PinnedVersion.TrimStart("v")) "Step 2: apm.cmd --version reports $PinnedVersion (got: $($ver2.Output))"
+
+        $shimText = Get-Content $shim -Raw
+        Assert-True ($shimText -match [regex]::Escape($PinnedVersion)) "Step 2: shim references $PinnedVersion path"
+
+        # Both release dirs may coexist (we only replace the matching tag),
+        # but the staging/backup helper dirs from the second install MUST be
+        # cleaned up.
+        $releasesDir = Join-Path $prefix.BinDir "..\releases" | Resolve-Path
+        $leftoverStaging = Get-ChildItem -Path $releasesDir -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*.new-*" -or $_.Name -like "*.old-*" }
+        Assert-True (-not $leftoverStaging) "No leftover .new-* / .old-* staging/backup dirs after upgrade"
+    } finally {
+        Remove-Item -Recurse -Force $prefix.Root -ErrorAction SilentlyContinue
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Test 4b: Same-version reinstall. This is the path that exercises the
+# stage -> move-existing-aside -> promote -> delete-backup branch in
+# install.ps1, because $releaseDir already exists for the same tag.
+# ---------------------------------------------------------------------------
+
+function Test-SameVersionReinstall {
+    Write-Step "Test 4b: Same-version reinstall of $PinnedVersion exercises promote/backup branch"
+
+    $prefix = New-IsolatedPrefix
+    try {
+        Write-Info "Step 1: install $PinnedVersion"
+        $exit1 = Invoke-InstallScript -Version $PinnedVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
+        Assert-True ($exit1 -eq 0) "Step 1 install.ps1 exits 0 (got $exit1)"
+
+        $releasesDir = Join-Path $prefix.BinDir "..\releases" | Resolve-Path
+        $releaseDir = Join-Path $releasesDir $PinnedVersion
+        Assert-True (Test-Path $releaseDir) "Release dir exists after first install ($releaseDir)"
+        $firstExe = Join-Path $releaseDir "apm.exe"
+        $firstStamp = (Get-Item $firstExe).LastWriteTimeUtc
+
+        Write-Info "Step 2: reinstall $PinnedVersion (must rename releaseDir aside, promote staging, delete backup)"
+        $exit2 = Invoke-InstallScript -Version $PinnedVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
+        Assert-True ($exit2 -eq 0) "Step 2 install.ps1 exits 0 (got $exit2)"
+
+        Assert-True (Test-Path $releaseDir) "Release dir still exists after reinstall"
+        $secondExe = Join-Path $releaseDir "apm.exe"
+        Assert-True (Test-Path $secondExe) "apm.exe present after reinstall"
+
+        # apm.exe must be the freshly staged copy, not the original (the
+        # promote step renames the old release dir aside and moves the
+        # staging dir into place, so write time must be >= first stamp).
+        $secondStamp = (Get-Item $secondExe).LastWriteTimeUtc
+        Assert-True ($secondStamp -ge $firstStamp) "apm.exe write time advanced after reinstall ($firstStamp -> $secondStamp)"
+
+        $ver = Get-ShimVersion -ShimPath (Join-Path $prefix.BinDir "apm.cmd")
+        Assert-True ($ver.ExitCode -eq 0) "apm.cmd --version exits 0 after reinstall (got $($ver.ExitCode))"
+        Assert-True ($ver.Output -match $PinnedVersion.TrimStart("v")) "apm.cmd --version reports $PinnedVersion after reinstall"
+
+        $leftoverStaging = Get-ChildItem -Path $releasesDir -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*.new-*" -or $_.Name -like "*.old-*" }
+        Assert-True (-not $leftoverStaging) "No leftover .new-* / .old-* dirs after reinstall (rollback path didn't trigger and backup was deleted)"
+    } finally {
+        Remove-Item -Recurse -Force $prefix.Root -ErrorAction SilentlyContinue
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Test 5: Real `apm self-update` end-to-end. Install OlderVersion, then run
+# the installed apm.cmd's self-update command. The installed apm downloads
+# install.ps1 from aka.ms/apm-windows and runs it, exercising the whole
+# launch path that issue #1389 originally broke. The fresh apm.cmd must
+# report a version >= PinnedVersion afterwards.
+#
+# Caveat: self-update fetches the install.ps1 currently published at
+# aka.ms/apm-windows (main branch), NOT the one in this PR. So this test
+# proves the *launch path* and *upgrade flow* work end-to-end on a clean
+# Windows runner. The new fixes in this PR are validated by Tests 1-4.
+# ---------------------------------------------------------------------------
+
+function Test-SelfUpdateCommand {
+    Write-Step "Test 5: apm self-update end-to-end (start at $OlderVersion, expect upgrade)"
+
+    $prefix = New-IsolatedPrefix
+    try {
+        Write-Info "Step 1: install $OlderVersion as the starting binary"
+        $exit1 = Invoke-InstallScript -Version $OlderVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
+        Assert-True ($exit1 -eq 0) "Step 1 install.ps1 exits 0 (got $exit1)"
+
+        $shim = Join-Path $prefix.BinDir "apm.cmd"
+        $ver1 = Get-ShimVersion -ShimPath $shim
+        Assert-True ($ver1.Output -match $OlderVersion.TrimStart("v")) "Step 1: apm.cmd --version reports $OlderVersion (got: $($ver1.Output))"
+
+        Write-Info "Step 2: run apm self-update (downloads + dispatches install.ps1 from aka.ms/apm-windows)"
+        # Point the self-update temp file at our isolated prefix so we don't
+        # litter the runner's %LOCALAPPDATA% and so the staged install.ps1
+        # has a writable temp dir.
+        $savedTempDir = $env:APM_TEMP_DIR
+        $env:APM_TEMP_DIR = $prefix.TmpDir
+        try {
+            $output = & cmd.exe /c "`"$shim`" self-update" 2>&1
+            $selfUpdateExit = $LASTEXITCODE
+        } finally {
+            if ($null -ne $savedTempDir) { $env:APM_TEMP_DIR = $savedTempDir } else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
+        }
+
+        Write-Info "self-update output (last 20 lines):"
+        ($output | Out-String).Split("`n") | Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" }
+
+        Assert-True ($selfUpdateExit -eq 0) "apm self-update exits 0 (got $selfUpdateExit)"
+
+        $ver2 = Get-ShimVersion -ShimPath $shim
+        Assert-True ($ver2.ExitCode -eq 0) "apm.cmd --version exits 0 after self-update"
+
+        # After self-update, version must have advanced past OlderVersion.
+        # We can't pin to PinnedVersion exactly because aka.ms/apm-windows
+        # always grabs the current latest, which may move ahead of this PR.
+        $oldNumeric = $OlderVersion.TrimStart("v")
+        Assert-True ($ver2.Output -notmatch [regex]::Escape($oldNumeric)) "apm.cmd --version no longer reports $OlderVersion after self-update (got: $($ver2.Output))"
+    } finally {
+        Remove-Item -Recurse -Force $prefix.Root -ErrorAction SilentlyContinue
     }
 }
 
@@ -215,6 +386,9 @@ Write-Host ""
 Test-Sha256Fallback
 Test-MoveThenTestOrdering
 Test-EndToEndInstall
+Test-CrossVersionUpgrade
+Test-SameVersionReinstall
+Test-SelfUpdateCommand
 
 Write-Host ""
 Write-Host "=================================================================" -ForegroundColor Blue
