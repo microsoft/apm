@@ -180,6 +180,32 @@ When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
 
+#### Optional `schedule:` block (GitHub Copilot App, experimental)
+
+When the `copilot_app` experimental flag is enabled and the package is
+installed with `apm install --target copilot-app --global`, prompts
+that include a `schedule:` block in frontmatter are deployed as rows in
+the desktop App's SQLite store at `~/.copilot/data.db`.
+
+```yaml
+---
+name: "Daily Digest"
+schedule:
+  interval: daily         # manual | hourly | daily | weekly
+  schedule_hour: 9        # 0-23 (UTC); ignored for manual / hourly
+  schedule_day: 1         # 0-6 (weekly only)
+  mode: interactive       # interactive | plan | autopilot
+  model: claude-opus-4.7  # optional
+  reasoning_effort: high  # optional
+---
+```
+
+Rows are always inserted with `enabled = 0`; the user opts in from the
+App. Prompts without a `schedule:` block are skipped at the
+`copilot-app` target (they still deploy normally to file-based targets).
+`autopilot` mode is policy-blocked for third-party packages by default
+until package signing ships.
+
 ### 5. Agent (`*.agent.md`)
 
 Agent persona and behavior definition.
