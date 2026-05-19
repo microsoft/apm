@@ -346,13 +346,20 @@ function Test-SelfUpdateCommand {
         # Point the self-update temp file at our isolated prefix so we don't
         # litter the runner's %LOCALAPPDATA% and so the staged install.ps1
         # has a writable temp dir.
-        $savedTempDir = $env:APM_TEMP_DIR
-        $env:APM_TEMP_DIR = $prefix.TmpDir
+        # Install.ps1 honours APM_INSTALL_DIR and APM_TEMP_DIR; setting both
+        # here ensures the downloaded installer reuses our isolated prefix
+        # instead of writing to %LOCALAPPDATA%\Programs\apm. self-update's
+        # subprocess inherits these via os.environ -> external_process_env().
+        $savedTempDir    = $env:APM_TEMP_DIR
+        $savedInstallDir = $env:APM_INSTALL_DIR
+        $env:APM_TEMP_DIR    = $prefix.TmpDir
+        $env:APM_INSTALL_DIR = $prefix.BinDir
         try {
             $output = & cmd.exe /c "`"$shim`" self-update" 2>&1
             $selfUpdateExit = $LASTEXITCODE
         } finally {
-            if ($null -ne $savedTempDir) { $env:APM_TEMP_DIR = $savedTempDir } else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
+            if ($null -ne $savedTempDir)    { $env:APM_TEMP_DIR = $savedTempDir }       else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
+            if ($null -ne $savedInstallDir) { $env:APM_INSTALL_DIR = $savedInstallDir } else { Remove-Item Env:APM_INSTALL_DIR -ErrorAction SilentlyContinue }
         }
 
         Write-Info "self-update output (last 20 lines):"
