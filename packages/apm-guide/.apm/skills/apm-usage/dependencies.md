@@ -199,6 +199,48 @@ dependencies:
       url: "https://mcp.internal.example.com"
 ```
 
+## LSP dependency formats
+
+LSP (Language Server Protocol) servers give Claude Code real-time code
+intelligence. LSP integration currently targets Claude Code only. See
+the [Claude Code Plugins reference](https://code.claude.com/docs/en/plugins-reference)
+for the LSP specification.
+
+```yaml
+dependencies:
+  lsp:
+    # String reference (name only)
+    - gopls
+
+    # Full object
+    - name: pyright
+      command: pyright-langserver
+      args: ["--stdio"]
+      extensionToLanguage:
+        ".py": python
+        ".pyi": python
+      transport: stdio                          # stdio (default) | socket
+      env:
+        PYTHONPATH: "./src"
+      startupTimeout: 10000
+
+    - name: rust-analyzer
+      command: rust-analyzer
+      extensionToLanguage:
+        ".rs": rust
+      restartOnCrash: true
+      maxRestarts: 3
+```
+
+Required fields (object form): `name`, `command`, `extensionToLanguage`.
+
+Optional fields: `args`, `transport`, `env`, `initializationOptions`,
+`settings`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`,
+`restartOnCrash`, `maxRestarts`.
+
+`apm install` writes LSP config to `.lsp.json` (project scope) or
+`~/.claude.json` `lspServers` section (user scope with `-g`).
+
 ## Version pinning
 
 | Strategy | Syntax | When to use |
