@@ -229,7 +229,17 @@ def _validate_uninstall_packages(
     packages_not_found = []
 
     for package in packages:
-        if "/" not in package:
+        # A package arg is either: (a) a marketplace single-token slug, (b)
+        # an `owner/repo` slug, or (c) a local filesystem path. The legacy
+        # check below only allowed (a) when there is no `/`, but Windows
+        # absolute paths use backslashes (e.g. `C:\Users\...\my-pkg`) and
+        # therefore have no `/` either -- they would be wrongly rejected
+        # as "Invalid package format" and the DB row for any deployed
+        # copilot-app workflow would leak. Use the canonical local-path
+        # detector instead so paths fall through to DependencyReference
+        # parsing on every platform.
+        is_local = DependencyReference.is_local_path(package)
+        if "/" not in package and not is_local:
             if package in mkt_refs_set:
                 canonical = mkt_resolved.get(package)
                 if canonical is None:

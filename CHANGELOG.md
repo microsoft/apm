@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-05-20
+
+### Fixed
+
+- `apm uninstall <local-path>` on Windows no longer rejects absolute paths (`C:\...\my-pkg`) as "Invalid package format" and silently leaves deployed copilot-app workflow DB rows behind. Local paths are now detected on every platform, so install/uninstall round-trips cleanly. Surfaces real cleanup errors instead of swallowing them. (#1413)
+
 ## [0.14.1] - 2026-05-20
 
 ### Added

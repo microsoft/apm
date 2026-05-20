@@ -148,6 +148,31 @@ class TestValidateUninstallPackages:
         assert ref in to_remove
         assert not_found == []
 
+    def test_windows_absolute_path_not_rejected_as_invalid_format(self):
+        r"""Regression for v0.14.1 Windows release failure (PR #1413).
+
+        Pre-fix, ``_validate_uninstall_packages`` rejected any package arg
+        that did not contain a forward slash with "Invalid package format".
+        Windows absolute paths like ``C:\Users\runner\AppData\...\my-pkg``
+        have no ``/`` and were silently dropped, so the corresponding
+        copilot-app DB row leaked across uninstall. Both Windows-style and
+        relative ``.\`` paths must round-trip through the validator without
+        triggering the marketplace-format error.
+        """
+        logger = _make_logger()
+        win_path = r"C:\Users\runneradmin\AppData\Local\Temp\my-pkg"
+        rel_win = r".\local-pkg"
+        # Deps list is empty so we only assert the validator does NOT
+        # mistake the path for a malformed marketplace ref.
+        to_remove, not_found = _validate_uninstall_packages([win_path, rel_win], [], logger)
+        assert to_remove == []
+        # Both arguments are reported "not found in apm.yml" (warning) rather
+        # than "Invalid package format" (error). The latter would leave the
+        # copilot-app integration cleanup with nothing to clean.
+        logger.error.assert_not_called()
+        assert win_path in not_found
+        assert rel_win in not_found
+
 
 # ===========================================================================
 # _remove_packages_from_disk
