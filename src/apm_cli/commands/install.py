@@ -1858,6 +1858,23 @@ def _install_apm_packages(ctx, outcome):
         # mcp_servers.  Restore the previous set so it is not lost.
         MCPIntegrator.update_lockfile(old_mcp_servers, _lock_path, mcp_configs=old_mcp_configs)
 
+    # -------------------------------------------------------------------------
+    # LSP integration (extracted to install/lsp/integration.py)
+    # -------------------------------------------------------------------------
+    from apm_cli.install.lsp import run_lsp_integration
+
+    run_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=_lock_path,
+        existing_lock=_existing_lock,
+        project_root=ctx.project_root,
+        user_scope=(ctx.scope is InstallScope.USER),
+        should_install=should_install_mcp,
+        logger=logger,
+        diagnostics=apm_diagnostics,
+    )
+
     # Local .apm/ content integration is now handled inside the
     # install pipeline (phases/integrate.py + phases/post_deps_local.py,
     # refactor F3).  The duplicate target resolution, integrator
