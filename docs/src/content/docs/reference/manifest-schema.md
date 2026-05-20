@@ -5,11 +5,11 @@ sidebar:
   order: 1
 ---
 
-> **Normative reference:** this page documents the v0.2 working-draft manifest schema as implemented by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 4 (Manifest)](/apm/specs/openapm-v01/) and published as JSON Schema at [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json).
+> **Normative reference:** this page documents the v0.3 working-draft manifest schema as implemented by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 4 (Manifest)](/apm/specs/openapm-v01/) and published as JSON Schema at [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json).
 
 <dl>
-<dt>Version</dt><dd>0.2 (Working Draft)</dd>
-<dt>Date</dt><dd>2026-05-10</dd>
+<dt>Version</dt><dd>0.3 (Working Draft)</dd>
+<dt>Date</dt><dd>2026-05-20</dd>
 <dt>Editors</dt><dd>Daniel Meppiel (Microsoft)</dd>
 <dt>Repository</dt><dd>https://github.com/microsoft/apm</dd>
 <dt>Format</dt><dd>YAML 1.2</dd>
@@ -56,9 +56,11 @@ registries:    <map<string, RegistryEntry> & {default?: <string>}>
 dependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
+  lsp:         <list<LspDependency>>
 devDependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
+  lsp:         <list<LspDependency>>
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
 marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
@@ -291,9 +293,9 @@ For full client semantics — auth, lockfile fields, and routing rules — see t
 |---|---|
 | **Type** | `object` |
 | **Required** | OPTIONAL |
-| **Known keys** | `apm`, `mcp` |
+| **Known keys** | `apm`, `mcp`, `lsp` |
 
-Contains two OPTIONAL lists: `apm` for agent primitive packages and `mcp` for MCP servers. Each list entry is either a string shorthand or a typed object. Additional keys MAY be present for future dependency types; conforming resolvers MUST ignore unknown keys for resolution but MUST preserve them when reading and rewriting manifests.
+Contains three OPTIONAL lists: `apm` for agent primitive packages, `mcp` for MCP servers, and `lsp` for LSP servers. Each list entry is either a string shorthand or a typed object. Additional keys MAY be present for future dependency types; conforming resolvers MUST ignore unknown keys for resolution but MUST preserve them when reading and rewriting manifests.
 
 ---
 
@@ -536,13 +538,84 @@ dependencies:
 
 ---
 
+### 4.3. `dependencies.lsp` -- `list<LspDependency>`
+
+LSP (Language Server Protocol) server dependencies give Claude Code real-time code intelligence -- diagnostics, go-to-definition, and type information. LSP integration currently targets Claude Code only; see the [Plugins reference](https://code.claude.com/docs/en/plugins-reference) for Claude Code's LSP specification.
+
+Each element MUST be one of two forms: **string** or **object**.
+
+#### 4.3.1. String Form
+
+A plain server name reference: `gopls`. String-form entries carry only a name and are resolved from transitive packages or plugin `.lsp.json` files. They bypass strict validation (no `command` or `extensionToLanguage` required).
+
+#### 4.3.2. Object Form
+
+| Field | Type | Required | Constraint | Description |
+|---|---|---|---|---|
+| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments | Server identifier. |
+| `command` | `string` | REQUIRED | No `..` path segments | Binary to execute (must be on `$PATH` or a relative path). |
+| `extensionToLanguage` | `map<string, string>` | REQUIRED | Non-empty dict | Maps file extensions to LSP language identifiers (e.g. `".go": "go"`). |
+| `args` | `list<string>` | OPTIONAL | | Command-line arguments for the server. |
+| `transport` | `enum<string>` | OPTIONAL | `stdio`, `socket` | Communication transport. Defaults to `stdio`. |
+| `env` | `map<string, string>` | OPTIONAL | | Environment variables set when starting the server. |
+| `initializationOptions` | `any` | OPTIONAL | | Options passed to the server during LSP initialization. |
+| `settings` | `any` | OPTIONAL | | Settings passed via `workspace/didChangeConfiguration`. |
+| `workspaceFolder` | `string` | OPTIONAL | | Workspace folder path for the server. |
+| `startupTimeout` | `int` | OPTIONAL | | Max time (ms) to wait for server startup. |
+| `shutdownTimeout` | `int` | OPTIONAL | | Max time (ms) to wait for graceful shutdown. |
+| `restartOnCrash` | `bool` | OPTIONAL | | Whether to automatically restart on crash. |
+| `maxRestarts` | `int` | OPTIONAL | | Maximum restart attempts before giving up. |
+
+Both `command` and `extensionToLanguage` are REQUIRED in the object form. A missing or empty value for either is a validation error.
+
+#### 4.3.3. Validation Rules
+
+1. `name` MUST match the pattern above and MUST NOT contain `..` path segments.
+2. `command` MUST be a string and MUST NOT contain `..` path traversal.
+3. `transport`, when present, MUST be `stdio` or `socket`.
+4. `extensionToLanguage` MUST be a non-empty dict mapping string keys to string values.
+
+Manifest keys use camelCase (`extensionToLanguage`, `initializationOptions`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`, `restartOnCrash`, `maxRestarts`). Snake_case aliases are accepted on input for ergonomics but camelCase is canonical.
+
+```yaml
+dependencies:
+  lsp:
+    # String form
+    - gopls
+
+    # Object form
+    - name: pyright
+      command: pyright-langserver
+      args: ["--stdio"]
+      extensionToLanguage:
+        ".py": python
+        ".pyi": python
+      transport: stdio
+      env:
+        PYTHONPATH: "./src"
+      startupTimeout: 10000
+
+    - name: rust-analyzer
+      command: rust-analyzer
+      extensionToLanguage:
+        ".rs": rust
+      restartOnCrash: true
+      maxRestarts: 3
+```
+
+#### 4.3.4. What Gets Written
+
+`apm install` writes LSP server configs to `.lsp.json` at the project root (project scope) or to the `lspServers` section of `~/.claude.json` (user scope with `-g`). See [Install LSP servers](../../consumer/install-lsp-servers/) for the output format and lifecycle details.
+
+---
+
 ## 5. devDependencies
 
 | | |
 |---|---|
 | **Type** | `object` |
 | **Required** | OPTIONAL |
-| **Known keys** | `apm`, `mcp` |
+| **Known keys** | `apm`, `mcp`, `lsp` |
 
 Development-only dependencies installed locally but excluded from plugin bundles produced by [`apm pack`](./cli/pack/) (plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
 
@@ -816,6 +889,13 @@ dependencies:
       command: ./bin/my-server
       env:
         API_KEY: ${{ secrets.KEY }}
+  lsp:
+    - name: pyright
+      command: pyright-langserver
+      args: ["--stdio"]
+      extensionToLanguage:
+        ".py": python
+        ".pyi": python
 
 devDependencies:
   apm:
@@ -851,3 +931,4 @@ marketplace:
 |---|---|---|
 | 0.1 | 2026-03-06 | Initial Working Draft. |
 | 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to reference CLI paths. ASCII-only enforcement. |
+| 0.3 | 2026-05-20 | Added Section 4.3 (`dependencies.lsp`). LSP servers as a third dependency kind (Claude Code only). Updated document structure, devDependencies known keys, and Appendix A. |
