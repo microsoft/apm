@@ -216,8 +216,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger,
                 user_scope=scope is InstallScope.USER,
             )
-        except Exception:
-            pass  # Best effort cleanup
+        except Exception as _sync_err:
+            # Surface why integration cleanup failed instead of swallowing
+            # silently. Previously a bare `except: pass` here masked
+            # Windows-only failures where the DB row was never deleted on
+            # `apm uninstall --target copilot-app`.
+            logger.warning(f"Integration cleanup skipped: {type(_sync_err).__name__}: {_sync_err}")
+            logger.verbose_detail(
+                "Some integrated files may remain. Run `apm install --force` to resync."
+            )
 
         for label, count in cleaned.items():
             if count > 0:
