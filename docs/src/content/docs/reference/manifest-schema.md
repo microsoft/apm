@@ -358,6 +358,20 @@ Monorepo sibling reference (`git: parent`):
 
 The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. `ref` and `alias` overrides are accepted; when `ref` is omitted the parent's resolved ref is inherited.
 
+Marketplace dependency (resolved at install time):
+
+```yaml
+- name: sec-check
+  marketplace: acme-plugins
+```
+
+| Field | Type | Required | Pattern / Constraint | Description |
+|---|---|---|---|---|
+| `name` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Plugin identifier within the marketplace. |
+| `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
+
+The `marketplace` key is mutually exclusive with `git` and `path`; combining them raises a parse error. During dependency resolution the resolver calls `resolve_marketplace_plugin()` to look up the plugin in the marketplace's `marketplace.json` and replace the entry with a concrete git reference (owner/repo, ref, and optional virtual path). The lockfile records the **resolved** coordinates, not the marketplace placeholder. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
+
 #### 4.1.3. Virtual Packages
 
 A dependency MAY target a subdirectory or a file within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:

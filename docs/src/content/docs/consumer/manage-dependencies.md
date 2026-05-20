@@ -64,16 +64,26 @@ parser. The supported forms:
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
 | Object form | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Marketplace dict | `{ name: <plugin>, marketplace: <mkt> }` | Install a plugin from a registered marketplace. Resolved to a concrete git ref at install time. |
 
-Object form in YAML:
+Object form in YAML — three mutually exclusive keys select the variant
+(`git`, `path`, or `marketplace`):
 
 ```yaml
 dependencies:
   apm:
+    # Remote: git URL + optional sub-path, ref, alias
     - git: https://gitlab.com/acme/coding-standards.git
       path: instructions/security
       ref: v2.0
       alias: security
+
+    # Local: filesystem path (development only)
+    - path: ./packages/shared-skills
+
+    # Marketplace: resolved to a concrete git ref at install time
+    - name: sec-check
+      marketplace: acme-plugins
 ```
 
 For private repos and non-GitHub hosts, see
