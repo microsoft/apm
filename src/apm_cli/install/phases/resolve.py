@@ -729,6 +729,7 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,
+        auth_resolver=ctx.auth_resolver,
     )
 
     # Resolver reads ``<anchor>/apm.yml``. Preserve the original

@@ -62,6 +62,7 @@ class APMDependencyResolver:
         apm_modules_dir: Path | None = None,
         download_callback: DownloadCallback | None = None,
         max_parallel: int | None = None,
+        auth_resolver: object | None = None,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -78,6 +79,7 @@ class APMDependencyResolver:
                 ``_DEFAULT_RESOLVE_PARALLEL`` (4). Set to ``1`` ONLY
                 for parity-testing against the legacy sequential path
                 -- this is a diagnostic knob, not a user toggle.
+            auth_resolver: Optional auth resolver for marketplace dependency resolution.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
@@ -111,6 +113,7 @@ class APMDependencyResolver:
         # acquires the lock -- the overhead is negligible and the
         # symmetry simplifies reasoning.
         self._download_lock = threading.Lock()
+        self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
 
     @staticmethod
@@ -274,6 +277,29 @@ class APMDependencyResolver:
             local_path=None,
         )
 
+    def _resolve_marketplace_dep(
+        self, dep_ref: DependencyReference
+    ) -> DependencyReference | None:
+        """Resolve a marketplace dependency to a concrete DependencyReference."""
+        try:
+            from apm_cli.marketplace.resolver import resolve_marketplace_plugin
+
+            resolution = resolve_marketplace_plugin(
+                dep_ref.marketplace_plugin_name,
+                dep_ref.marketplace_name,
+                auth_resolver=self._auth_resolver,
+            )
+            canonical_str, _ = resolution
+            return DependencyReference.parse(canonical_str)
+        except Exception as exc:
+            _logger.warning(
+                "Marketplace resolution failed for %s@%s: %s",
+                dep_ref.marketplace_plugin_name,
+                dep_ref.marketplace_name,
+                exc,
+            )
+            return None
+
     def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
         """
         Build complete tree of all dependencies and sub-dependencies.
@@ -322,6 +348,12 @@ class APMDependencyResolver:
                     "specify an explicit repository URL. "
                     "The git: parent form is only valid for transitive dependencies."
                 )
+            if dep_ref.is_marketplace:
+                resolved = self._resolve_marketplace_dep(dep_ref)
+                if resolved is not None:
+                    dep_ref = resolved
+                else:
+                    continue
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_unique_key())
 
@@ -334,6 +366,12 @@ class APMDependencyResolver:
                     "specify an explicit repository URL. "
                     "The git: parent form is only valid for transitive dependencies."
                 )
+            if dep_ref.is_marketplace:
+                resolved = self._resolve_marketplace_dep(dep_ref)
+                if resolved is not None:
+                    dep_ref = resolved
+                else:
+                    continue
             key = dep_ref.get_unique_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
@@ -467,6 +505,12 @@ class APMDependencyResolver:
                     for sub_dep in sub_dependencies:
                         if sub_dep.is_parent_repo_inheritance:
                             sub_dep = self.expand_parent_repo_decl(node.dependency_ref, sub_dep)
+                        if sub_dep.is_marketplace:
+                            resolved = self._resolve_marketplace_dep(sub_dep)
+                            if resolved is not None:
+                                sub_dep = resolved
+                            else:
+                                continue
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
                         if sub_dep.get_unique_key() not in queued_keys:

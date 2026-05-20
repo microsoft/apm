@@ -104,6 +104,7 @@ class DependencyReference:
     # whether a project uses ``git@`` or an EMU/custom SSH account).
     ssh_user: str | None = None
 
+<<<<<<< HEAD
     # Registry resolver fields (optional; default to None/git semantics)
     # source: which resolver should fetch this dep. None and "git" are equivalent
     # (legacy default). Set to "registry" by the parser when an entry routes to
@@ -151,6 +152,12 @@ class DependencyReference:
         if _is_valid_registry_semver_range(self.reference):
             return "semver"
         return "literal"
+=======
+    # Marketplace dependency fields (parsed from plugin.json dict format)
+    is_marketplace: bool = False
+    marketplace_name: str | None = None
+    marketplace_plugin_name: str | None = None
+>>>>>>> 2f09117b (feat(deps): support marketplace dependencies in plugin.json)
 
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
@@ -409,6 +416,12 @@ class DependencyReference:
         Returns:
             Path: Absolute path to the package installation directory
         """
+        if self.is_marketplace:
+            raise ValueError(
+                f"Cannot compute install path for unresolved marketplace dependency "
+                f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
+            )
+
         if self.is_local and self.local_path:
             pkg_dir_name = Path(self.local_path).name
             validate_path_segments(
@@ -589,6 +602,7 @@ class DependencyReference:
         Raises:
             ValueError: If the entry is missing required fields or has invalid format
         """
+<<<<<<< HEAD
         # Object-form registry package — design §3.2.
         # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
         # optional when a ``registries.default:`` is configured).  Mutually
@@ -600,6 +614,38 @@ class DependencyReference:
                     "keys — choose one resolver."
                 )
             return cls._parse_registry_object_entry(entry)
+=======
+        # Support marketplace dependencies: { name: X, marketplace: Y }
+        if "marketplace" in entry:
+            if "git" in entry or "path" in entry:
+                raise ValueError(
+                    "Ambiguous dependency: 'marketplace' cannot be combined with 'git' or 'path'"
+                )
+            name = entry.get("name")
+            marketplace = entry["marketplace"]
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Marketplace dependency must have a non-empty 'name' field")
+            if not isinstance(marketplace, str) or not marketplace.strip():
+                raise ValueError("'marketplace' field must be a non-empty string")
+            name = name.strip()
+            marketplace = marketplace.strip()
+            if not re.match(r"^[a-zA-Z0-9._-]+$", name):
+                raise ValueError(
+                    f"Invalid marketplace plugin name: '{name}'. "
+                    "Names can only contain letters, numbers, dots, underscores, and hyphens"
+                )
+            if not re.match(r"^[a-zA-Z0-9._-]+$", marketplace):
+                raise ValueError(
+                    f"Invalid marketplace name: '{marketplace}'. "
+                    "Names can only contain letters, numbers, dots, underscores, and hyphens"
+                )
+            return cls(
+                repo_url=f"_marketplace/{marketplace}/{name}",
+                is_marketplace=True,
+                marketplace_name=marketplace,
+                marketplace_plugin_name=name,
+            )
+>>>>>>> 2f09117b (feat(deps): support marketplace dependencies in plugin.json)
 
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
@@ -1777,6 +1823,11 @@ class DependencyReference:
         Returns:
             str or dict: String for simple deps; dict for HTTP or skill-subset deps.
         """
+        if self.is_marketplace:
+            raise ValueError(
+                f"Cannot serialize unresolved marketplace dependency "
+                f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
+            )
         if self.is_insecure:
             host = self.host or default_host()
             entry = {"git": f"http://{host}/{self.repo_url}"}

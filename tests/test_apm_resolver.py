@@ -607,3 +607,93 @@ class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
                 local_dep.get_unique_key(),
                 resolver._rejected_remote_local_keys,
             )
+
+
+class TestMarketplaceResolution(unittest.TestCase):
+    """Tests for marketplace dependency resolution in the BFS resolver."""
+
+    def _make_marketplace_dep(self, name="gopls-lsp", marketplace="claude-plugins-official"):
+        return DependencyReference(
+            repo_url=f"_marketplace/{marketplace}/{name}",
+            is_marketplace=True,
+            marketplace_name=marketplace,
+            marketplace_plugin_name=name,
+        )
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_success(self, mock_resolve):
+        mock_resolve.return_value = ("acme/gopls-lsp#main", {"name": "gopls-lsp"})
+        resolver = APMDependencyResolver()
+        dep = self._make_marketplace_dep()
+        result = resolver._resolve_marketplace_dep(dep)
+        assert result is not None
+        assert result.repo_url == "acme/gopls-lsp"
+        assert result.reference == "main"
+        assert not result.is_marketplace
+        mock_resolve.assert_called_once_with("gopls-lsp", "claude-plugins-official", auth_resolver=None)
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_failure_returns_none(self, mock_resolve):
+        mock_resolve.side_effect = RuntimeError("no such plugin")
+        resolver = APMDependencyResolver()
+        dep = self._make_marketplace_dep()
+        result = resolver._resolve_marketplace_dep(dep)
+        assert result is None
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_passes_auth_resolver(self, mock_resolve):
+        mock_resolve.return_value = ("acme/gopls-lsp#main", {})
+        auth = Mock()
+        resolver = APMDependencyResolver(auth_resolver=auth)
+        dep = self._make_marketplace_dep()
+        resolver._resolve_marketplace_dep(dep)
+        mock_resolve.assert_called_once_with("gopls-lsp", "claude-plugins-official", auth_resolver=auth)
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_deps_resolved_in_tree(self, mock_resolve):
+        mock_resolve.return_value = ("acme/gopls-lsp#main", {})
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: gopls-lsp\n      marketplace: claude-plugins-official\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.flattened_dependencies.total_dependencies() == 1
+            assert "acme/gopls-lsp" in result.flattened_dependencies.dependencies
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_dep_failure_skipped_in_tree(self, mock_resolve):
+        mock_resolve.side_effect = RuntimeError("not found")
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: bad-plugin\n      marketplace: fake-marketplace\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.flattened_dependencies.total_dependencies() == 0
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_mixed_with_git_deps(self, mock_resolve):
+        mock_resolve.return_value = ("acme/gopls-lsp#main", {})
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - user/other-dep\n"
+                "    - name: gopls-lsp\n      marketplace: claude-plugins-official\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.flattened_dependencies.total_dependencies() == 2
+            assert "user/other-dep" in result.flattened_dependencies.dependencies
+            assert "acme/gopls-lsp" in result.flattened_dependencies.dependencies
