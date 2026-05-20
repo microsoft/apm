@@ -27,7 +27,7 @@ uv sync --extra dev --extra build
 uv run apm --version
 ```
 
-## Before Opening A PR
+## Before Opening a PR
 
 - Run focused tests for the files you changed first.
 - For code changes, run the CI lint mirror before pushing:
@@ -52,7 +52,7 @@ uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 - Keep source files and CLI output printable ASCII. Do not add emoji, box drawing, curly quotes, or en/em dashes.
 - Do not write YAML with direct `yaml.dump()` or `yaml.safe_dump()` calls to file handles outside `src/apm_cli/utils/yaml_io.py`; use `yaml_io.dump_yaml()`.
 - Do not use `str(path.relative_to(base))`; use `portable_relpath()` from `apm_cli.utils.paths`.
-- Keep new Python source files below the current CI file-length guardrail.
+- Keep new Python source files below the CI file-length guardrail in `.github/workflows/ci.yml` (`MAX_LINES=2450` at time of writing).
 - Avoid duplicated code blocks; CI runs pylint `R0801` with a 10-line similarity threshold.
 - For CLI output paths, use `CommandLogger` or the established Rich helper layer and `STATUS_SYMBOLS`; avoid raw `print()` in command paths.
 
