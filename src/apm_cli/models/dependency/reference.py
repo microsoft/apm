@@ -104,7 +104,6 @@ class DependencyReference:
     # whether a project uses ``git@`` or an EMU/custom SSH account).
     ssh_user: str | None = None
 
-<<<<<<< HEAD
     # Registry resolver fields (optional; default to None/git semantics)
     # source: which resolver should fetch this dep. None and "git" are equivalent
     # (legacy default). Set to "registry" by the parser when an entry routes to
@@ -117,6 +116,11 @@ class DependencyReference:
     # lockfile (the lockfile uses URL-based identity per design §6.1).
     source: str | None = None
     registry_name: str | None = None
+
+    # Marketplace dependency fields (parsed from plugin.json dict format)
+    is_marketplace: bool = False
+    marketplace_name: str | None = None
+    marketplace_plugin_name: str | None = None
 
     @property
     def ref_kind(self) -> str | None:
@@ -152,12 +156,6 @@ class DependencyReference:
         if _is_valid_registry_semver_range(self.reference):
             return "semver"
         return "literal"
-=======
-    # Marketplace dependency fields (parsed from plugin.json dict format)
-    is_marketplace: bool = False
-    marketplace_name: str | None = None
-    marketplace_plugin_name: str | None = None
->>>>>>> 2f09117b (feat(deps): support marketplace dependencies in plugin.json)
 
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
@@ -608,24 +606,13 @@ class DependencyReference:
         Raises:
             ValueError: If the entry is missing required fields or has invalid format
         """
-<<<<<<< HEAD
-        # Object-form registry package — design §3.2.
-        # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
-        # optional when a ``registries.default:`` is configured).  Mutually
-        # exclusive with ``git:``.
-        if "registry" in entry or "id" in entry:
-            if "git" in entry:
-                raise ValueError(
-                    "Object-style dependency cannot mix 'registry:'/'id:' and 'git:' "
-                    "keys — choose one resolver."
-                )
-            return cls._parse_registry_object_entry(entry)
-=======
         # Support marketplace dependencies: { name: X, marketplace: Y }
         if "marketplace" in entry:
-            if "git" in entry or "path" in entry:
+            source_keys = {"git", "path", "registry", "id"}.intersection(entry)
+            if source_keys:
+                joined = "', '".join(sorted(source_keys))
                 raise ValueError(
-                    "Ambiguous dependency: 'marketplace' cannot be combined with 'git' or 'path'"
+                    f"Ambiguous dependency: 'marketplace' cannot be combined with '{joined}'"
                 )
             name = entry.get("name")
             marketplace = entry["marketplace"]
@@ -651,7 +638,18 @@ class DependencyReference:
                 marketplace_name=marketplace,
                 marketplace_plugin_name=name,
             )
->>>>>>> 2f09117b (feat(deps): support marketplace dependencies in plugin.json)
+
+        # Object-form registry package — design §3.2.
+        # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
+        # optional when a ``registries.default:`` is configured).  Mutually
+        # exclusive with ``git:``.
+        if "registry" in entry or "id" in entry:
+            if "git" in entry:
+                raise ValueError(
+                    "Object-style dependency cannot mix 'registry:'/'id:' and 'git:' "
+                    "keys — choose one resolver."
+                )
+            return cls._parse_registry_object_entry(entry)
 
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:

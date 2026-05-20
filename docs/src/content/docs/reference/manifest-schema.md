@@ -400,6 +400,20 @@ Monorepo sibling reference (`git: parent`):
 
 The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. `ref` and `alias` overrides are accepted; when `ref` is omitted the parent's resolved ref is inherited.
 
+Marketplace dependency (resolved at install time):
+
+```yaml
+- name: sec-check
+  marketplace: acme-plugins
+```
+
+| Field | Type | Required | Pattern / Constraint | Description |
+|---|---|---|---|---|
+| `name` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Plugin identifier within the marketplace. |
+| `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
+
+The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. During dependency resolution the resolver calls `resolve_marketplace_plugin()` to look up the plugin in the marketplace's `marketplace.json` and replace the entry with a concrete git reference (owner/repo, ref, and optional virtual path). Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
+
 Registry dependency (whole package or virtual sub-path):
 
 ```yaml
@@ -408,19 +422,19 @@ Registry dependency (whole package or virtual sub-path):
   version: ^2.0.0
 
 # Whole package routed to a named registry
-- registry: jf-skills              # OPTIONAL — defaults to the effective default registry
-  id: acme/toolkit                 # REQUIRED — owner/repo identity at the registry
-  version: ^2.0.0                  # REQUIRED — opaque version selector (semver when supported)
+- registry: jf-skills              # OPTIONAL - defaults to the effective default registry
+  id: acme/toolkit                 # REQUIRED - owner/repo identity at the registry
+  version: ^2.0.0                  # REQUIRED - opaque version selector (semver when supported)
 
 # Virtual package (sub-path inside a published package)
 - registry: jf-skills
   id: acme/prompt-pack
-  path: prompts/review.prompt.md   # OPTIONAL — omit to install the whole package
+  path: prompts/review.prompt.md   # OPTIONAL - omit to install the whole package
   version: 1.4.0
   alias: review                    # OPTIONAL
 ```
 
-`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string — opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. When `registry:` is omitted, a default registry MUST be configured — in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
+`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string - opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. When `registry:` is omitted, a default registry MUST be configured - in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
 
 #### 4.1.3. Virtual Packages
 

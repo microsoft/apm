@@ -65,25 +65,34 @@ parser. The supported forms:
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
 | Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Marketplace dict | `{ name: <plugin>, marketplace: <mkt> }` | Install a plugin from a registered marketplace. Resolved to a concrete git ref at install time. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
 | Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
 
-Object form in YAML:
+Object form in YAML — three mutually exclusive keys select the variant
+(`git`, `path`, or `marketplace`):
 
 ```yaml
 dependencies:
   apm:
-    # Git dep with sub-path
+    # Remote: git URL + optional sub-path, ref, alias
     - git: https://gitlab.com/acme/coding-standards.git
       path: instructions/security
       ref: v2.0
       alias: security
 
-    # Registry dep (experimental) — whole package via default registry
+    # Local: filesystem path (development only)
+    - path: ./packages/shared-skills
+
+    # Marketplace: resolved to a concrete git ref at install time
+    - name: sec-check
+      marketplace: acme-plugins
+
+    # Registry dep (experimental): whole package via default registry
     - id: acme/code-review-prompts
       version: ^2.0.0
 
-    # Registry dep — named registry, virtual sub-path
+    # Registry dep (experimental): named registry, virtual sub-path
     - registry: corp-main
       id: acme/prompt-library
       path: prompts/review.prompt.md
