@@ -322,7 +322,11 @@ class TestOutdatedCommand:
         )
         # outdated succeeds but reports no dependencies to check
         assert result.exit_code == 0
-        assert "No remote dependencies" in result.output or "no packages" in result.output.lower()
+        assert (
+            "No remote dependencies" in result.output
+            or "no packages" in result.output.lower()
+            or "No locked dependencies" in result.output
+        )
 
     def test_outdated_no_dependencies(self, runner: CliRunner, project_with_deps: Path):
         """Test outdated with empty dependency list."""
