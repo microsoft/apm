@@ -61,7 +61,6 @@ docs/wip/
 *.log
 .env.local
 .env.*.local
-AGENTS.md
 PRD.md
 PRD*.md
 WIP/
