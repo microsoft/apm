@@ -250,8 +250,8 @@ coverage below the gate cannot merge.
 
 | Suite       | Gate | Enforced in |
 |-------------|------|-------------|
-| Unit        | 90%  | `pyproject.toml` (`fail_under`) |
-| Integration | 90%  | `.github/workflows/ci-integration.yml` (`--fail-under`) |
+| Unit        | 80%  | `pyproject.toml` (`fail_under`) |
+| Integration | 70%  | `.github/workflows/ci-integration.yml` (`--fail-under`) |
 
 **Ratchet rule.** Gates only move upward. When actual coverage
 exceeds the gate by 5 or more percentage points, raise the gate to

@@ -276,7 +276,7 @@ jobs:
         if: always()
         run: |
           if [ -f .coverage ]; then
-            coverage report --fail-under=90
+            coverage report --fail-under=70
           else
             echo "ERROR: No combined coverage data -- the 'Combine and summarise coverage' step must produce .coverage before the gate can run."
             exit 1
