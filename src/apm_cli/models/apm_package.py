@@ -17,6 +17,7 @@ from ..core.target_detection import parse_target_field
 from .dependency import (
     DependencyReference,
     GitReferenceType,
+    LSPDependency,
     MCPDependency,
     RemoteRef,
     ResolvedReference,
@@ -36,6 +37,7 @@ __all__ = [  # noqa: RUF022
     # Backward-compatible re-exports from .dependency
     "DependencyReference",
     "GitReferenceType",
+    "LSPDependency",
     "MCPDependency",
     "RemoteRef",
     "ResolvedReference",
@@ -289,6 +291,19 @@ class APMPackage:
                         except ValueError as e:
                             raise ValueError(f"Invalid {label}MCP dependency: {e}")  # noqa: B904
                 parsed[dep_type] = parsed_mcp
+            elif dep_type == "lsp":
+                from .dependency.lsp import LSPDependency as LSPDep
+
+                parsed_lsp: list = []
+                for dep in dep_list:
+                    if isinstance(dep, str):
+                        parsed_lsp.append(LSPDep.from_string(dep))
+                    elif isinstance(dep, dict):
+                        try:
+                            parsed_lsp.append(LSPDep.from_dict(dep))
+                        except ValueError as e:
+                            raise ValueError(f"Invalid {label}LSP dependency: {e}")  # noqa: B904
+                parsed[dep_type] = parsed_lsp
             else:
                 parsed[dep_type] = [dep for dep in dep_list if isinstance(dep, (str, dict))]
         return parsed
@@ -503,6 +518,24 @@ class APMPackage:
             dep
             for dep in (self.dev_dependencies.get("mcp") or [])
             if isinstance(dep, MCPDependency)
+        ]
+
+    def get_lsp_dependencies(self) -> list["LSPDependency"]:
+        """Get list of LSP dependencies."""
+        if not self.dependencies or "lsp" not in self.dependencies:
+            return []
+        return [
+            dep for dep in (self.dependencies.get("lsp") or []) if isinstance(dep, LSPDependency)
+        ]
+
+    def get_dev_lsp_dependencies(self) -> list["LSPDependency"]:
+        """Get list of dev LSP dependencies."""
+        if not self.dev_dependencies or "lsp" not in self.dev_dependencies:
+            return []
+        return [
+            dep
+            for dep in (self.dev_dependencies.get("lsp") or [])
+            if isinstance(dep, LSPDependency)
         ]
 
 

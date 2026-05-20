@@ -573,6 +573,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # can enforce MCP allow/deny rules on them (S2 fix).
         ctx.direct_mcp_deps = apm_package.get_mcp_dependencies()
 
+        # Populate direct LSP deps from the manifest for LSP integration.
+        ctx.direct_lsp_deps = apm_package.get_lsp_dependencies()
+
         from .phases import policy_gate as _policy_gate_phase
         from .phases.policy_gate import PolicyViolationError
 

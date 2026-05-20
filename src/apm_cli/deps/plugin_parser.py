@@ -197,6 +197,13 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
         if mcp_deps:
             manifest["_mcp_deps"] = mcp_deps
 
+    # Extract LSP servers from plugin and convert to dependency format
+    lsp_servers = _extract_lsp_servers(plugin_path, manifest)
+    if lsp_servers:
+        lsp_deps = _lsp_servers_to_apm_deps(lsp_servers, plugin_path)
+        if lsp_deps:
+            manifest["_lsp_deps"] = lsp_deps
+
     # Generate apm.yml from plugin metadata
     apm_yml_content = _generate_apm_yml(manifest)
     apm_yml_path = plugin_path / "apm.yml"
@@ -397,6 +404,150 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
         except (ValueError, Exception) as exc:
             _surface_warning(
                 f"Skipping invalid MCP server '{name}' from plugin '{plugin_path.name}': {exc}",
+                logger,
+            )
+            continue
+
+        deps.append(dep)
+
+    return deps
+
+
+def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    """Extract LSP server definitions from a plugin manifest.
+
+    Resolves ``lspServers`` by type (per Claude Code spec):
+    - ``str``  -> read that file path relative to plugin root, parse JSON.
+    - ``dict`` -> use directly as inline server definitions.
+
+    When ``lspServers`` is absent and ``.lsp.json`` exists at plugin root,
+    read it as the default (matches Claude Code auto-discovery).
+
+    Security: symlinks are skipped, JSON parse errors are logged as warnings.
+
+    ``${CLAUDE_PLUGIN_ROOT}`` in string values is replaced with the absolute
+    plugin path.
+
+    Args:
+        plugin_path: Root of the plugin directory.
+        manifest: Parsed plugin.json dict.
+
+    Returns:
+        dict mapping server name -> server config.  Empty on failure.
+    """
+    logger = logging.getLogger("apm")
+    lsp_value = manifest.get("lspServers")
+
+    if lsp_value is not None:
+        if isinstance(lsp_value, dict):
+            servers = dict(lsp_value)
+        elif isinstance(lsp_value, str):
+            servers = _read_lsp_file(plugin_path, lsp_value, logger)
+        else:
+            logger.warning("Unsupported lspServers type %s; ignoring", type(lsp_value).__name__)
+            return {}
+    else:
+        # Fall back to auto-discovery: .lsp.json
+        servers = {}
+        candidate = plugin_path / ".lsp.json"
+        if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
+            servers = _read_lsp_json(candidate, logger)
+
+    # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
+    if servers:
+        abs_root = str(plugin_path.resolve())
+        servers = _substitute_plugin_root(servers, abs_root, logger)
+
+    return servers
+
+
+def _read_lsp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> dict[str, Any]:
+    """Read a JSON file relative to *plugin_path* and return its LSP server dict."""
+    target = (plugin_path / rel_path).resolve()
+    try:
+        target.relative_to(plugin_path.resolve())
+    except ValueError:
+        logger.warning("LSP file path escapes plugin root: %s", rel_path)
+        return {}
+    candidate = plugin_path / rel_path
+    if not candidate.exists() or not candidate.is_file():
+        logger.warning("LSP file not found: %s", candidate)
+        return {}
+    if candidate.is_symlink():
+        logger.warning("Skipping symlinked LSP file: %s", candidate)
+        return {}
+    return _read_lsp_json(candidate, logger)
+
+
+def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
+    """Parse a JSON file and return the LSP servers mapping.
+
+    Unlike .mcp.json which has a wrapper key, .lsp.json uses server names
+    as top-level keys directly.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read LSP config %s: %s", path, exc)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return dict(data)
+
+
+def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
+    """Convert raw LSP server configs to ``dependencies.lsp`` dicts.
+
+    Required fields per Claude Code spec:
+    - ``command``: binary to run
+    - ``extensionToLanguage``: mapping of file extensions to language IDs
+
+    All resulting entries are routed through ``LSPDependency.from_dict()``
+    for validation. Entries that fail validation are skipped with a warning.
+
+    Args:
+        servers: Mapping of server name -> server config dict.
+        plugin_path: Plugin root (used for log context only).
+
+    Returns:
+        List of dicts consumable by ``LSPDependency.from_dict()``.
+    """
+    from ..models.dependency.lsp import LSPDependency
+
+    logger = logging.getLogger("apm")
+    deps: list[dict[str, Any]] = []
+
+    for name, cfg in servers.items():
+        if not isinstance(cfg, dict):
+            logger.warning("Skipping non-dict LSP server config '%s'", name)
+            continue
+
+        dep: dict[str, Any] = {"name": name}
+
+        # Copy all recognized fields
+        for key in (
+            "command",
+            "args",
+            "extensionToLanguage",
+            "transport",
+            "env",
+            "initializationOptions",
+            "settings",
+            "workspaceFolder",
+            "startupTimeout",
+            "shutdownTimeout",
+            "restartOnCrash",
+            "maxRestarts",
+        ):
+            if key in cfg:
+                dep[key] = cfg[key]
+
+        # Route through the validation chokepoint
+        try:
+            LSPDependency.from_dict(dep)
+        except Exception as exc:
+            _surface_warning(
+                f"Skipping invalid LSP server '{name}' from plugin '{plugin_path.name}': {exc}",
                 logger,
             )
             continue
@@ -653,6 +804,11 @@ def _generate_apm_yml(manifest: dict[str, Any]) -> str:
     mcp_deps = manifest.get("_mcp_deps")
     if mcp_deps:
         apm_package.setdefault("dependencies", {})["mcp"] = mcp_deps
+
+    # Inject LSP deps extracted from plugin lspServers / .lsp.json
+    lsp_deps = manifest.get("_lsp_deps")
+    if lsp_deps:
+        apm_package.setdefault("dependencies", {})["lsp"] = lsp_deps
 
     # Install behavior is driven by file presence (SKILL.md, etc.), not this
     # field.  Default to hybrid so the standard pipeline handles all components.

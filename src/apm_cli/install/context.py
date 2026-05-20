@@ -157,6 +157,7 @@ class InstallContext:
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     early_lockfile: Any = None  # LockFile read before pipeline phases (avoids re-read)
     direct_mcp_deps: list[Any] | None = None  # Direct MCP deps from apm.yml for policy gate
+    direct_lsp_deps: list[Any] | None = None  # Direct LSP deps from apm.yml for LSP integration
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)
