@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. (#1385, closes #1383)
 - Windows installer and `apm self-update` detect Windows Defender / antivirus blocks (HRESULT `0x800700E1`, PUA messages) and surface three actionable recovery options (`Add-MpPreference -ExclusionPath`, `pip --user`, false-positive submission URL) instead of falling through to a generic "failed to run" and a pip fallback that itself dies on unsupported Python. (#1408)
 - Windows installer and `apm self-update` survive AppLocker / App Control for Business (WDAC) policies by staging the release into the allow-listed per-user install root before running the `apm.exe --version` smoke test, and emit AppLocker-specific guidance on `0x80070005` Access Denied instead of silently falling back to pip. (#1390, closes #1389)
+- `apm uninstall <local-path>` on Windows no longer rejects absolute paths (`C:\...\my-pkg`) as "Invalid package format" and silently leaves deployed copilot-app workflow DB rows behind. Local paths are now detected on every platform, so install/uninstall round-trips cleanly. (#1413)
 
 ## [0.14.0] - 2026-05-18
 

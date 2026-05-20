@@ -343,16 +343,25 @@ class TestCopilotAppDeployUninstall:
 
         uninstall_result = runner.invoke(
             cli,
-            ["uninstall", str(pkg_dir), "--global"],
+            ["uninstall", str(pkg_dir), "--global", "-v"],
             env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
             catch_exceptions=False,
         )
         assert uninstall_result.exit_code == 0, uninstall_result.output
 
         ids_after_uninstall = cdb.list_managed_workflow_ids(db)
-        assert ids_after_uninstall == [], (
-            f"uninstall must delete the DB row, but {ids_after_uninstall} remain"
-        )
+        if ids_after_uninstall:
+            _lock = (
+                (fake_home / ".apm" / "apm.lock.yaml").read_text(encoding="utf-8")
+                if (fake_home / ".apm" / "apm.lock.yaml").exists()
+                else "<no lockfile>"
+            )
+            raise AssertionError(
+                f"uninstall must delete the DB row, but {ids_after_uninstall} remain\n"
+                f"--- install output ---\n{install_result.output}\n"
+                f"--- uninstall output ---\n{uninstall_result.output}\n"
+                f"--- post-uninstall lockfile ---\n{_lock}\n"
+            )
 
     def test_install_project_scope_then_uninstall_deletes_db_row(
         self,
@@ -443,13 +452,23 @@ class TestCopilotAppDeployUninstall:
 
         uninstall_result = runner.invoke(
             cli,
-            ["uninstall", str(pkg_dir)],
+            ["uninstall", str(pkg_dir), "-v"],
             env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
             catch_exceptions=False,
         )
         assert uninstall_result.exit_code == 0, uninstall_result.output
 
         ids_after_uninstall = cdb.list_managed_workflow_ids(db)
-        assert ids_after_uninstall == [], (
-            f"project-scope uninstall must delete the DB row, but {ids_after_uninstall} remain"
-        )
+        if ids_after_uninstall:
+            _lock = (
+                (consumer_dir / "apm.lock.yaml").read_text(encoding="utf-8")
+                if (consumer_dir / "apm.lock.yaml").exists()
+                else "<no lockfile>"
+            )
+            raise AssertionError(
+                f"project-scope uninstall must delete the DB row, "
+                f"but {ids_after_uninstall} remain\n"
+                f"--- install output ---\n{install_result.output}\n"
+                f"--- uninstall output ---\n{uninstall_result.output}\n"
+                f"--- post-uninstall lockfile ---\n{_lock}\n"
+            )
