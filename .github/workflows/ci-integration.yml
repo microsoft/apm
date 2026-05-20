@@ -270,13 +270,16 @@ jobs:
           fi
         continue-on-error: true
 
+      # Integration coverage gate -- raise this floor when baseline improves.
+      # Current floor: 55% (actual ~71%, 16pt margin for community PRs).
       - name: Enforce integration coverage gate
         if: always()
         run: |
           if [ -f .coverage ]; then
             coverage report --fail-under=55
           else
-            echo "No combined coverage data; skipping gate."
+            echo "ERROR: No combined coverage data -- the 'Combine and summarise coverage' step must produce .coverage before the gate can run."
+            exit 1
           fi
 
       - name: Aggregate shard results

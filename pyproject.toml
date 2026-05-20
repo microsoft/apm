@@ -137,7 +137,7 @@ parallel = true
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
-fail_under = 80
+fail_under = 80  # Unit gate; current ~88%, 8pt margin for community PRs
 # Exclude lines that are not meant to be covered
 exclude_lines = [
     "pragma: no cover",
