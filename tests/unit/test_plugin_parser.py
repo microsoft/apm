@@ -967,3 +967,159 @@ class TestPathTraversalProtection:
         assert not agents_dir.exists() or not list(agents_dir.iterdir()), (
             "Symlinked default component dir must not be copied"
         )
+
+
+class TestMapPluginArtifactsPrePositioned:
+    """Regression: when plugin.json points to paths already inside .apm/,
+    _map_plugin_artifacts must NOT destroy the source before copying.
+
+    This reproduces the bug where APM packages with both apm.yml and
+    .claude-plugin/plugin.json had their .apm/agents/ and .apm/skills/
+    directories deleted during validate_apm_package -> normalize_plugin_directory.
+    """
+
+    def test_agents_inside_apm_are_preserved(self, tmp_path):
+        """Manifest agents pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Pre-position agents inside .apm/ (APM package layout)
+        apm_dir = plugin_dir / ".apm"
+        agents_dir = apm_dir / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "my-agent.agent.md").write_text("# Agent")
+
+        # Manifest points into .apm/
+        manifest = {"name": "test", "agents": [".apm/agents/my-agent.agent.md"]}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (agents_dir / "my-agent.agent.md").exists(), (
+            ".apm/agents/ content destroyed by _map_plugin_artifacts"
+        )
+        assert (agents_dir / "my-agent.agent.md").read_text() == "# Agent"
+
+    def test_skills_inside_apm_are_preserved(self, tmp_path):
+        """Manifest skills pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        skill_dir = apm_dir / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Skill")
+
+        manifest = {"name": "test", "skills": [".apm/skills/my-skill"]}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (skill_dir / "SKILL.md").exists(), (
+            ".apm/skills/ content destroyed by _map_plugin_artifacts"
+        )
+        assert (skill_dir / "SKILL.md").read_text() == "# Skill"
+
+    def test_commands_inside_apm_are_preserved(self, tmp_path):
+        """Manifest commands pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        prompts_dir = apm_dir / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (prompts_dir / "run.prompt.md").write_text("# Run")
+
+        manifest = {"name": "test", "commands": [".apm/prompts"]}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (prompts_dir / "run.prompt.md").exists(), (
+            ".apm/prompts/ content destroyed by _map_plugin_artifacts"
+        )
+
+    def test_hooks_inside_apm_are_preserved(self, tmp_path):
+        """Manifest hooks pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        hooks_dir = apm_dir / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "pre-commit.json").write_text("{}")
+
+        manifest = {"name": "test", "hooks": ".apm/hooks"}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (hooks_dir / "pre-commit.json").exists(), (
+            ".apm/hooks/ content destroyed by _map_plugin_artifacts"
+        )
+
+    def test_hooks_config_file_inside_apm_is_preserved(self, tmp_path):
+        """Manifest `hooks: ".apm/hooks/hooks.json"` (config-file form)
+        must not raise SameFileError when src and dst are the same path."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        hooks_dir = apm_dir / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "hooks.json").write_text('{"on": "pre-commit"}')
+
+        manifest = {"name": "test", "hooks": ".apm/hooks/hooks.json"}
+        # Must not raise SameFileError
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (hooks_dir / "hooks.json").exists()
+        assert (hooks_dir / "hooks.json").read_text() == '{"on": "pre-commit"}'
+
+    def test_external_agents_still_copied(self, tmp_path):
+        """Non-.apm/ agents must still be copied into .apm/ (no regression)."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Agents at root level (standard plugin layout)
+        agents_dir = plugin_dir / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "helper.agent.md").write_text("# Helper")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir)
+
+        assert (apm_dir / "agents" / "helper.agent.md").exists()
+        assert (apm_dir / "agents" / "helper.agent.md").read_text() == "# Helper"
+
+    def test_mixed_inside_and_external_agents_both_survive(self, tmp_path):
+        """Hybrid manifest mixing .apm/ paths and root-level paths:
+        the pre-positioned .apm/ agent must NOT be destroyed, AND the
+        external root-level agent must still be copied in.
+
+        Regression for the per-source overlap case raised in PR #1416 review.
+        """
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Pre-positioned agent inside .apm/
+        apm_dir = plugin_dir / ".apm"
+        apm_agents = apm_dir / "agents"
+        apm_agents.mkdir(parents=True)
+        (apm_agents / "pre.agent.md").write_text("# Pre")
+
+        # External agent at root level
+        root_agents = plugin_dir / "agents"
+        root_agents.mkdir()
+        (root_agents / "new.agent.md").write_text("# New")
+
+        manifest = {
+            "name": "test",
+            "agents": [".apm/agents/pre.agent.md", "agents/new.agent.md"],
+        }
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        # Pre-positioned survives
+        assert (apm_agents / "pre.agent.md").exists(), (
+            "pre-positioned .apm/ agent was destroyed in mixed-source case"
+        )
+        assert (apm_agents / "pre.agent.md").read_text() == "# Pre"
+
+        # External got copied in
+        assert (apm_agents / "new.agent.md").exists(), (
+            "external root-level agent was not copied in the mixed-source case"
+        )
+        assert (apm_agents / "new.agent.md").read_text() == "# New"
