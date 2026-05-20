@@ -2,8 +2,10 @@
 title: "GitHub Copilot App workflows (Experimental)"
 description: "Deploy APM prompts with schedule frontmatter as Copilot App workflows backed by the desktop SQLite store."
 sidebar:
-  order: 5
+  order: 6
 ---
+
+See the [Targets matrix](../../reference/targets-matrix/) for where `copilot-app` fits alongside the other deploy targets.
 
 :::caution[Frontier preview]
 This integration is experimental and off by default. You must enable the `copilot-app` flag before using it.
@@ -11,6 +13,8 @@ This integration is experimental and off by default. You must enable the `copilo
 ```bash
 apm experimental enable copilot-app
 ```
+
+See the [Experimental flags reference](../../reference/experimental/) for the full `apm experimental` subcommand surface (enable / disable / list).
 
 Until the flag is enabled, the `copilot-app` target stays inert: it is hidden from auto-detection, and explicit `--target copilot-app` installs fail cleanly with the enable hint instead of touching the App's database.
 :::
@@ -26,6 +30,10 @@ Prompts that do not carry workflow frontmatter are plain slash commands: they de
 The `copilot` target writes prompts as files (`.github/prompts/<name>.prompt.md`) for Copilot in IDEs. The desktop App stores workflows in a SQLite database, not on disk. They are different surfaces; `copilot-app` exists so that one APM install can serve both without leakage.
 
 ## Authoring a workflow prompt
+
+:::note[Shape predicate]
+Only `interval`, `schedule_hour`, and `schedule_day` at the top level mark a `.prompt.md` as a workflow. Setting `mode:`, `model:`, or `reasoning_effort:` alone keeps it a plain VSCode-style prompt (deploys to `copilot`, `claude`, etc.) -- those keys are accepted on workflows but never trigger workflow routing on their own.
+:::
 
 Add workflow frontmatter (flat top-level keys) to any `.prompt.md` file in your package's `.apm/prompts/` folder:
 
@@ -63,16 +71,16 @@ UI after install.
 |---|---|
 | `apm install` | INSERT row with `enabled = 0` (always disabled on install — you opt in). |
 | `apm install` (already installed, content unchanged) | UPDATE display fields only. `enabled`, `last_run_at`, `next_run_at` are preserved. |
-| `apm install` (already installed, any execution-affecting field changed: prompt body, schedule, mode, model, or reasoning effort) | UPDATE row AND reset `enabled = 0`, clear `next_run_at`. Rationale: you opted in to a specific prompt; any change to what runs or when is a new consent surface. |
+| `apm install` (already installed, any execution-affecting field changed) | UPDATE row; reset `enabled = 0`; clear `next_run_at`. |
 | `apm uninstall` | DELETE only APM-namespaced rows (`apm--<owner>--<pkg>--<prompt>`). User-authored rows are never touched. |
+
+Execution-affecting fields are the prompt body, schedule (`interval` / `schedule_hour` / `schedule_day`), `mode`, `model`, and `reasoning_effort`. The reset is by design: you opted in to a specific prompt, so any change to what runs or when is a new consent surface.
+
+Removing the source `.prompt.md` from a package and re-syncing drops the lockfile entry but does NOT delete the corresponding row from `~/.copilot/data.db` -- it merely orphans it. Run `apm uninstall <pkg>` to remove the row.
 
 ## Enable and check
 
-```bash
-apm experimental enable copilot-app
-apm experimental list
-apm experimental disable copilot-app
-```
+Use `apm experimental enable copilot-app` to turn the target on, `apm experimental list` to see all flags, and `apm experimental disable copilot-app` to turn it off again. See the [Experimental flags reference](../../reference/experimental/) for the complete subcommand surface.
 
 ## Database resolution
 
@@ -89,11 +97,11 @@ There is none. The DB file is local; access is governed by your filesystem permi
 
 ## Schema compatibility
 
-APM guards writes with `PRAGMA user_version`. The current tested version is `13`. If the App ships a newer schema, APM refuses to write and asks you to update APM rather than risk corruption.
+APM guards writes with `PRAGMA user_version` and accepts the closed range `[13, 13]` today. If the App ships a newer schema, APM refuses to write and asks you to update APM rather than risk corruption.
 
 ## Concurrency
 
-APM opens the DB in WAL mode and retries briefly when the App holds a write lock. If a lock cannot be acquired after the retry window, the install fails with a `[!]` warning noting that the Copilot App DB stayed locked and asking you to close the GitHub Copilot app momentarily and retry.
+The Copilot App owns the DB and keeps it in WAL mode while running. APM coexists with the App's writer connection by issuing `BEGIN IMMEDIATE` with a bounded retry; if a lock cannot be acquired after the retry window, the install fails with a `[!]` warning noting that the Copilot App DB stayed locked and asking you to close the GitHub Copilot app momentarily and retry.
 
 ## Lockfile entries
 

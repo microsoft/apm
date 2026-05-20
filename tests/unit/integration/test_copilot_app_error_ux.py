@@ -322,3 +322,55 @@ class TestDispatchByShape:
                 f"target {target_name!r} should NOT receive workflow-shape "
                 f"prompt; got {target_filenames}"
             )
+
+    def test_workflow_shape_skipped_by_copilot_prompt_integrator(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """The .github/prompts/ leak regression: a workflow-shape
+        .prompt.md must NOT ship to .github/prompts/ when --target
+        includes ``copilot`` (which routes through PromptIntegrator, not
+        CommandIntegrator).  A user running
+        ``--target copilot,copilot-app`` must see workflow metadata
+        only in the App and plain prompts only in .github/prompts/.
+        Without the shape-based skip in
+        PromptIntegrator._integrate_prompts_for_copilot, scheduled
+        prompts would leak into the slash-command surface and be
+        invoked by IDE users who never opted into the workflow."""
+        pkg_dir = tmp_path / "pkg"
+        prompts = pkg_dir / ".apm" / "prompts"
+        prompts.mkdir(parents=True)
+        (prompts / "scheduled.prompt.md").write_text(SCHEDULED_PROMPT)
+        (prompts / "plain.prompt.md").write_text(PLAIN_PROMPT)
+        pkg = SimpleNamespace(
+            install_path=pkg_dir,
+            package=SimpleNamespace(
+                name="demo-pkg",
+                source="github:acme-org/demo-pkg",
+                author=None,
+            ),
+        )
+        copilot_profile = KNOWN_TARGETS.get("copilot")
+        assert copilot_profile is not None
+        project_root = tmp_path / "proj"
+        project_root.mkdir()
+
+        result = PromptIntegrator().integrate_prompts_for_target(
+            copilot_profile,
+            pkg,
+            project_root=project_root,
+            diagnostics=_CapturingDiagnostics(),
+        )
+
+        prompts_dir = project_root / ".github" / "prompts"
+        written = [p.name for p in prompts_dir.rglob("*.prompt.md")] if prompts_dir.exists() else []
+        assert not any("scheduled" in name for name in written), (
+            f"workflow-shape prompt must NOT leak into .github/prompts/; got {written}"
+        )
+        # And the plain prompt SHOULD still deploy normally.
+        assert any("plain" in name for name in written), (
+            f"plain prompt should still deploy via --target copilot; got {written}"
+        )
+        # Sanity: the workflow-shape source was counted as skipped.
+        assert result.files_skipped >= 1
