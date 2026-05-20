@@ -666,7 +666,7 @@ class TestMarketplaceResolution(unittest.TestCase):
             assert "acme/gopls-lsp" in result.flattened_dependencies.dependencies
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
-    def test_marketplace_dep_failure_skipped_in_tree(self, mock_resolve):
+    def test_marketplace_dep_failure_surfaces_error(self, mock_resolve):
         mock_resolve.side_effect = RuntimeError("not found")
         with TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)
@@ -679,6 +679,8 @@ class TestMarketplaceResolution(unittest.TestCase):
             resolver = APMDependencyResolver()
             result = resolver.resolve_dependencies(project_root)
             assert result.flattened_dependencies.total_dependencies() == 0
+            assert result.has_errors()
+            assert any("bad-plugin" in e and "fake-marketplace" in e for e in result.resolution_errors)
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
     def test_marketplace_mixed_with_git_deps(self, mock_resolve):

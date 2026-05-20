@@ -355,6 +355,7 @@ class DependencyReference:
             apm_modules_dir: Path to the apm_modules directory
 
         Raises:
+            ValueError: If this is an unresolved marketplace dependency
             PathTraversalError: If the computed path escapes apm_modules_dir
         Returns:
             Path: Absolute path to the package installation directory
@@ -536,8 +537,13 @@ class DependencyReference:
 
             - path: ./packages/my-shared-skills
 
+        And marketplace dependency entries:
+
+            - name: gopls-lsp
+              marketplace: claude-plugins-official
+
         Args:
-            entry: Dictionary with 'git' or 'path' (required), plus optional fields
+            entry: Dictionary with 'git', 'path', or 'marketplace' key
 
         Returns:
             DependencyReference: Parsed dependency reference

@@ -225,6 +225,9 @@ class APMDependencyResolver:
             circular_dependencies=circular_deps,
         )
 
+        for warning in dependency_tree.resolution_warnings:
+            graph.add_error(warning)
+
         return graph
 
     def _remote_parent_eligible(self, parent_dep: DependencyReference) -> bool:
@@ -354,6 +357,11 @@ class APMDependencyResolver:
                 if resolved is not None:
                     dep_ref = resolved
                 else:
+                    tree.resolution_warnings.append(
+                        f"Failed to resolve marketplace dependency "
+                        f"'{dep_ref.marketplace_plugin_name}' from "
+                        f"marketplace '{dep_ref.marketplace_name}'"
+                    )
                     continue
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_unique_key())
@@ -372,6 +380,11 @@ class APMDependencyResolver:
                 if resolved is not None:
                     dep_ref = resolved
                 else:
+                    tree.resolution_warnings.append(
+                        f"Failed to resolve marketplace dependency "
+                        f"'{dep_ref.marketplace_plugin_name}' from "
+                        f"marketplace '{dep_ref.marketplace_name}'"
+                    )
                     continue
             key = dep_ref.get_unique_key()
             if key not in queued_keys:
@@ -511,6 +524,12 @@ class APMDependencyResolver:
                             if resolved is not None:
                                 sub_dep = resolved
                             else:
+                                tree.resolution_warnings.append(
+                                    f"Failed to resolve transitive marketplace dependency "
+                                    f"'{sub_dep.marketplace_plugin_name}' from "
+                                    f"marketplace '{sub_dep.marketplace_name}' "
+                                    f"(required by {node.dependency_ref.repo_url})"
+                                )
                                 continue
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
