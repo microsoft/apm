@@ -421,9 +421,13 @@ class TestConsoleUtilities:
 
     def test_set_console_stderr_basic(self):
         """set_console_stderr() can be called without error."""
-        set_console_stderr(True)
-        set_console_stderr(False)
-        # If this doesn't raise, the test passes
+        from apm_cli.utils.console import _reset_console
+
+        try:
+            set_console_stderr(True)
+            set_console_stderr(False)
+        finally:
+            _reset_console()
 
     @patch("apm_cli.utils.console._rich_echo")
     def test_rich_echo_called(self, mock_echo):

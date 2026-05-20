@@ -600,3 +600,249 @@ class TestCheckParallelPlain:
             result = _check_parallel_plain([dep], MagicMock(), False, 1)
 
         assert result[0].status == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: missed lines
+# ---------------------------------------------------------------------------
+
+
+class TestCheckMarketplaceRefImportError:
+    """Lines 91-92: ImportError in lazy imports → return None."""
+
+    def test_import_error_returns_none(self):
+        from apm_cli.commands.outdated import _check_marketplace_ref
+
+        dep = _make_dep(discovered_via="my-mkt", marketplace_plugin_name="pkg-a")
+        logger = MagicMock()
+
+        with patch.dict(
+            sys.modules,
+            {
+                "apm_cli.marketplace.client": None,
+                "apm_cli.marketplace.errors": None,
+                "apm_cli.marketplace.registry": None,
+            },
+        ):
+            result = _check_marketplace_ref(dep, logger)
+
+        assert result is None
+
+
+class TestCheckMarketplaceRefWithVersion:
+    """Lines 140-141: mkt_version is set → prepended to latest_display."""
+
+    def test_mkt_version_shown_in_latest_display(self):
+        from apm_cli.commands.outdated import _check_marketplace_ref
+
+        dep = _make_dep(
+            discovered_via="my-mkt",
+            marketplace_plugin_name="pkg-a",
+            resolved_ref="old-ref",
+            resolved_commit="abc1234567890",
+        )
+        logger = MagicMock()
+
+        mock_plugin = MagicMock()
+        mock_plugin.version = "v1.2.3"
+        mock_plugin.source = {"ref": "new-ref"}
+
+        mock_manifest = MagicMock()
+        mock_manifest.find_plugin.return_value = mock_plugin
+
+        mock_source = MagicMock()
+
+        with (
+            patch("apm_cli.marketplace.client.fetch_or_cache", return_value=mock_manifest),
+            patch(
+                "apm_cli.marketplace.registry.get_marketplace_by_name",
+                return_value=mock_source,
+            ),
+        ):
+            result = _check_marketplace_ref(dep, logger)
+
+        # mkt_version is "v1.2.3" so latest_display should include the version
+        assert result is not None
+        assert "v1.2.3" in result.latest
+
+
+class TestOutdatedCommandCoverage:
+    """Additional tests for outdated CLI command missed lines."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def _run(self, *args, env=None):
+        from apm_cli.cli import cli
+
+        return self.runner.invoke(cli, ["outdated", *args], env=env)
+
+    def test_apm_no_cache_skips_git_cache(self):
+        """Line 342→348: APM_NO_CACHE set → skip git cache setup."""
+        from apm_cli.commands.outdated import OutdatedRow
+
+        mock_logger = MagicMock(verbose=False)
+        dep = _make_dep()
+        mock_lockfile = MagicMock()
+        mock_lockfile.dependencies = {"org/repo": dep}
+        uptodate_row = OutdatedRow(
+            package="org/repo", current="abc", latest="abc", status="up-to-date"
+        )
+
+        with (
+            patch("apm_cli.core.command_logger.CommandLogger", return_value=mock_logger),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+            patch("apm_cli.core.auth.AuthResolver", return_value=MagicMock()),
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "apm_cli.commands.outdated._check_deps_with_progress",
+                return_value=[uptodate_row],
+            ),
+        ):
+            result = self._run(env={"APM_NO_CACHE": "1"})
+        assert result.exit_code == 0
+
+    def test_git_cache_oserror_skipped(self):
+        """Lines 346-347: OSError from GitCache → silently skipped."""
+        from apm_cli.commands.outdated import OutdatedRow
+
+        mock_logger = MagicMock(verbose=False)
+        dep = _make_dep()
+        mock_lockfile = MagicMock()
+        mock_lockfile.dependencies = {"org/repo": dep}
+        uptodate_row = OutdatedRow(
+            package="org/repo", current="abc", latest="abc", status="up-to-date"
+        )
+
+        with (
+            patch("apm_cli.core.command_logger.CommandLogger", return_value=mock_logger),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+            patch("apm_cli.core.auth.AuthResolver", return_value=MagicMock()),
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader",
+                return_value=MagicMock(),
+            ),
+            patch("apm_cli.cache.git_cache.GitCache", side_effect=OSError("no cache dir")),
+            patch(
+                "apm_cli.commands.outdated._check_deps_with_progress",
+                return_value=[uptodate_row],
+            ),
+        ):
+            result = self._run()
+        assert result.exit_code == 0
+
+    def test_check_deps_returns_empty_rows(self):
+        """Lines 383-384: _check_deps_with_progress returns [] → 'No remote deps'."""
+
+        mock_logger = MagicMock(verbose=False)
+        dep = _make_dep()
+        mock_lockfile = MagicMock()
+        mock_lockfile.dependencies = {"org/repo": dep}
+
+        with (
+            patch("apm_cli.core.command_logger.CommandLogger", return_value=mock_logger),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+            patch("apm_cli.core.auth.AuthResolver", return_value=MagicMock()),
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader",
+                return_value=MagicMock(),
+            ),
+            patch("apm_cli.commands.outdated._check_deps_with_progress", return_value=[]),
+        ):
+            result = self._run()
+        assert result.exit_code == 0
+
+    def test_plain_text_fallback_when_no_console(self):
+        """Lines 402, 437-446: console=None → ImportError → plain text table."""
+        from apm_cli.commands.outdated import OutdatedRow
+
+        mock_logger = MagicMock(verbose=False)
+        dep = _make_dep()
+        mock_lockfile = MagicMock()
+        mock_lockfile.dependencies = {"org/repo": dep}
+        outdated_row = OutdatedRow(
+            package="org/repo", current="abc", latest="def", status="outdated"
+        )
+
+        with (
+            patch("apm_cli.core.command_logger.CommandLogger", return_value=mock_logger),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+            patch("apm_cli.core.auth.AuthResolver", return_value=MagicMock()),
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "apm_cli.commands.outdated._check_deps_with_progress",
+                return_value=[outdated_row],
+            ),
+            patch("apm_cli.commands._helpers._get_console", return_value=None),
+        ):
+            result = self._run()
+        assert result.exit_code == 0  # outdated detected but no sys.exit(1)
+
+    def test_unknown_rows_logs_some_not_checked(self):
+        """Lines 455→exit: has_unknown=True, has_outdated=False → progress message."""
+        from apm_cli.commands.outdated import OutdatedRow
+
+        mock_logger = MagicMock(verbose=False)
+        dep = _make_dep()
+        mock_lockfile = MagicMock()
+        mock_lockfile.dependencies = {"org/repo": dep}
+        unknown_row = OutdatedRow(package="org/repo", current="abc", latest="-", status="unknown")
+
+        with (
+            patch("apm_cli.core.command_logger.CommandLogger", return_value=mock_logger),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=MagicMock()),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+            patch("apm_cli.core.auth.AuthResolver", return_value=MagicMock()),
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "apm_cli.commands.outdated._check_deps_with_progress",
+                return_value=[unknown_row],
+            ),
+            patch("apm_cli.commands._helpers._get_console", return_value=None),
+        ):
+            result = self._run()
+        assert result.exit_code == 0
+
+
+class TestCheckParallelException:
+    """Lines 541-543: Exception in _check_parallel future → unknown row."""
+
+    def test_exception_in_parallel_future_yields_unknown(self):
+        from apm_cli.commands.outdated import _check_parallel
+
+        dep = _make_dep()
+        progress = MagicMock()
+        progress.add_task.return_value = 0
+        logger = MagicMock()
+
+        with patch(
+            "apm_cli.commands.outdated._check_one_dep",
+            side_effect=RuntimeError("check failed"),
+        ):
+            rows = _check_parallel([dep], MagicMock(), False, 1, progress, logger)
+
+        assert len(rows) == 1
+        assert rows[0].status == "unknown"

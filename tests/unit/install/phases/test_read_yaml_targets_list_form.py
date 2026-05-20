@@ -119,3 +119,33 @@ def test_read_yaml_targets_unknown_token_in_list_raises_clean_error(tmp_path):
         _read_yaml_targets(ctx)
     headline = str(exc_info.value).splitlines()[0]
     assert headline == "[x] Unknown target 'bogus'"
+
+
+# ---------------------------------------------------------------------------
+# Missing coverage: singular value under 'targets:', null under 'target:',
+# and empty string under 'target:'
+# ---------------------------------------------------------------------------
+
+
+def test_targets_single_scalar_value_is_wrapped_in_list():
+    """targets: claude (single scalar, not a list) is treated as one-element list (line 80)."""
+    from apm_cli.core.apm_yml import parse_targets_field
+
+    result = parse_targets_field({"targets": "claude"})
+    assert result == ["claude"]
+
+
+def test_target_null_returns_empty_list():
+    """target: null (None) returns empty list (line 88)."""
+    from apm_cli.core.apm_yml import parse_targets_field
+
+    result = parse_targets_field({"target": None})
+    assert result == []
+
+
+def test_target_empty_string_returns_empty_list():
+    """target: '' (empty string) returns empty list (line 100)."""
+    from apm_cli.core.apm_yml import parse_targets_field
+
+    result = parse_targets_field({"target": ""})
+    assert result == []

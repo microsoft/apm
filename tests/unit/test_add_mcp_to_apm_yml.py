@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from apm_cli.commands.install import _add_mcp_to_apm_yml
+from apm_cli.install.mcp.writer import _diff_entry
 
 
 @pytest.fixture
@@ -201,3 +202,96 @@ class TestStructuralRobustness:
             yaml.safe_dump(data, fh, sort_keys=False)
         with pytest.raises(click.UsageError, match="must be a list"):
             _add_mcp_to_apm_yml("foo", "foo", manifest_path=tmp_apm_yml)
+
+
+# ---------------------------------------------------------------------------
+# _diff_entry unit tests (line 31 coverage: different-string path)
+# ---------------------------------------------------------------------------
+
+
+class TestDiffEntry:
+    """Direct tests for the private _diff_entry helper."""
+
+    def test_equal_strings_returns_empty(self):
+        assert _diff_entry("foo", "foo") == []
+
+    def test_different_strings_returns_arrow_line(self):
+        """Line 31: both old and new are strings but differ."""
+        result = _diff_entry("old-srv", "new-srv")
+        assert len(result) == 1
+        assert "old-srv" in result[0]
+        assert "new-srv" in result[0]
+        assert "->" in result[0]
+
+    def test_old_str_new_dict_uses_dict_diff(self):
+        """Old is a bare string; new is a dict with matching name but extra keys."""
+        result = _diff_entry("foo", {"name": "foo", "transport": "stdio"})
+        # transport key absent in old_d → diff should mention it
+        assert any("transport" in line for line in result)
+
+    def test_old_dict_new_str_uses_dict_diff(self):
+        result = _diff_entry({"name": "foo", "transport": "sse"}, "foo")
+        assert any("transport" in line for line in result)
+
+    def test_both_none_returns_empty(self):
+        assert _diff_entry(None, None) == []
+
+    def test_old_none_new_dict_returns_diff(self):
+        result = _diff_entry(None, {"name": "foo"})
+        # name key absent in old ({}) but present in new
+        assert any("name" in line for line in result)
+
+    def test_same_dict_returns_empty(self):
+        entry = {"name": "foo", "transport": "stdio"}
+        assert _diff_entry(entry, entry) == []
+
+    def test_dict_with_changed_key_returns_diff(self):
+        old = {"name": "foo", "transport": "stdio"}
+        new = {"name": "foo", "transport": "sse"}
+        result = _diff_entry(old, new)
+        assert len(result) == 1
+        assert "transport" in result[0]
+        assert "stdio" in result[0]
+        assert "sse" in result[0]
+
+
+class TestExistingEntryStringReplace:
+    """String-to-different-string replacement path exercises _diff_entry line 31."""
+
+    def _seed(self, path: Path, entry: str | dict = "old-srv") -> None:
+        data = _read(path)
+        data["dependencies"]["mcp"] = [entry]
+        with open(path, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(data, fh, sort_keys=False)
+
+    def test_force_replace_string_to_string(self, tmp_apm_yml):
+        """_diff_entry("old-srv", "new-srv") is called; line 31 runs."""
+        self._seed(tmp_apm_yml, "old-srv")
+        status, diff = _add_mcp_to_apm_yml(
+            "old-srv",
+            "new-srv",
+            force=True,
+            manifest_path=tmp_apm_yml,
+        )
+        # We're adding under the name "old-srv" but the entry value is "new-srv".
+        # Actually name lookup matches "old-srv" == item (str) so existing_idx is found.
+        # Since diff is non-empty (they differ) and force=True, status is "replaced".
+        assert status == "replaced"
+        assert diff is not None
+        assert len(diff) == 1
+
+    def test_tty_prompt_string_to_string_accepted(self, tmp_apm_yml):
+        """string→string replacement under interactive TTY (line 31 path)."""
+        self._seed(tmp_apm_yml, "old-srv")
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("click.confirm", return_value=True),
+        ):
+            status, diff = _add_mcp_to_apm_yml(
+                "old-srv",
+                "new-srv",
+                manifest_path=tmp_apm_yml,
+            )
+        assert status == "replaced"
+        assert diff is not None
