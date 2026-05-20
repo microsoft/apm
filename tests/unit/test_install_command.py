@@ -494,7 +494,7 @@ class TestTransitiveDepParentChain:
         )
         assert node.get_ancestor_chain() == "acme/root-pkg"
 
-    def test_download_callback_includes_chain_in_error(self, tmp_path):
+    def test_download_callback_includes_chain_in_error(self, tmp_path, monkeypatch):
         """When a transitive dep download fails, the error message includes
         the parent chain breadcrumb for debugging.
 
@@ -553,7 +553,7 @@ class TestTransitiveDepParentChain:
             download_callback=tracking_callback,
         )
 
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
         resolver.resolve_dependencies(tmp_path)
 
         # The callback should have been called for leaf-pkg
