@@ -7,19 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-05-20
+
 ### Added
 
-- **Experimental:** `copilot-app` target deploys prompts (with optional workflow frontmatter) directly into the GitHub Copilot desktop App's `~/.copilot/data.db` workflows table. Gated behind `apm experimental enable copilot-app`; works in both project scope (`apm install --target copilot-app` from a project's `apm.yml`) and user scope (`--global`). Workflows always install disabled (`enabled = 0`); user opts in from the App. No new CLI surface — `apm install / update / uninstall / list` cover the lifecycle. See [Copilot App integration](https://microsoft.github.io/apm/integrations/copilot-app/).
+- **Experimental:** `copilot-app` target deploys prompts (with optional workflow frontmatter) directly into the GitHub Copilot desktop App's `~/.copilot/data.db` workflows table. Gated behind `apm experimental enable copilot-app`; works in both project scope (`apm install --target copilot-app` from a project's `apm.yml`) and user scope (`--global`). Workflows always install disabled (`enabled = 0`); user opts in from the App. No new CLI surface — `apm install / update / uninstall / list` cover the lifecycle. See [Copilot App integration](https://microsoft.github.io/apm/integrations/copilot-app/). (#1405)
 
 ### Changed
 
-- **Experimental (`copilot-app`):** workflow prompts now use flat top-level frontmatter keys. Only `interval`, `schedule_hour`, `schedule_day` mark a `.prompt.md` as a workflow (dispatched to the Copilot App SQLite store); `mode`, `model`, `reasoning_effort` remain optional fields on a workflow but are NOT shape markers because they overload with plain VSCode / Copilot slash-command prompts. Plain prompts (no workflow keys) continue to deploy to slash-command targets only. `interval` defaults to `manual` when omitted. The redesign collapses what looked like two primitives (prompt vs scheduled prompt) into one shape-dispatched `.prompt.md`. Breaking only for users of the unreleased experimental target.
+- **Experimental (`copilot-app`):** workflow prompts now use flat top-level frontmatter keys. Only `interval`, `schedule_hour`, `schedule_day` mark a `.prompt.md` as a workflow (dispatched to the Copilot App SQLite store); `mode`, `model`, `reasoning_effort` remain optional fields on a workflow but are NOT shape markers because they overload with plain VSCode / Copilot slash-command prompts. Plain prompts (no workflow keys) continue to deploy to slash-command targets only. `interval` defaults to `manual` when omitted. The redesign collapses what looked like two primitives (prompt vs scheduled prompt) into one shape-dispatched `.prompt.md`. Breaking only for users of the unreleased experimental target. (#1405)
 
 ### Fixed
 
-- **Experimental (`copilot-app`):** workflow-shape `.prompt.md` files no longer leak to slash-command targets. Previously a single scheduled prompt would deploy to the Copilot App DB row AND to `.claude/commands/`, `.cursor/commands/`, `.copilot/prompts/`, and `.gemini/commands/`. Now each prompt belongs to exactly one surface based on frontmatter shape.
-- **Experimental (`copilot-app`):** pointing a plain `.prompt.md` (no workflow frontmatter) at `--target copilot-app` is now a hard error with an actionable diagnostic telling the author to add `interval: manual` or unset the target, rather than silently skipping.
+- **Experimental (`copilot-app`):** workflow-shape `.prompt.md` files no longer leak to slash-command targets. Previously a single scheduled prompt would deploy to the Copilot App DB row AND to `.claude/commands/`, `.cursor/commands/`, `.copilot/prompts/`, and `.gemini/commands/`. Now each prompt belongs to exactly one surface based on frontmatter shape. (#1405)
+- **Experimental (`copilot-app`):** pointing a plain `.prompt.md` (no workflow frontmatter) at `--target copilot-app` is now a hard error with an actionable diagnostic telling the author to add `interval: manual` or unset the target, rather than silently skipping. (#1405)
 - `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. User values are validated against a strict allowlist before composing the clone URL. (#1385, closes #1383)
+- Windows installer and `apm self-update` detect Windows Defender / antivirus blocks (HRESULT `0x800700E1`, PUA messages) instead of falling through to a generic "failed to run" and a pip fallback that itself dies on unsupported Python; surfaces three actionable recovery options (`Add-MpPreference -ExclusionPath`, `pip --user`, false-positive submission URL). (#1408)
+- Windows installer and `apm self-update` survive AppLocker / App Control for Business (WDAC) policies by staging the release into the allow-listed per-user install root **before** running the `apm.exe --version` smoke test, instead of testing from user-writable `%TEMP%` and hitting `0x80070005` Access Denied. Adds a hardened `Get-Sha256Hex` helper that works under restricted PowerShell sessions, and emits AppLocker-specific guidance on access-denied. (#1390, closes #1389)
 
 ## [0.14.0] - 2026-05-18
 
