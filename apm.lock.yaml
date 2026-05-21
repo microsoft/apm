@@ -1,3 +1,5 @@
 lockfile_version: '1'
 generated_at: '2026-04-21T21:45:34.516938+00:00'
 dependencies: []
+local_deployed_files:
+- copilot-app-db://workflows/apm--local--_local--batch-bug-shepherd
