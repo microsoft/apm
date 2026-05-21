@@ -99,6 +99,11 @@ class TestIsInternalOrMetadataHost:
         with patch("socket.gethostbyname", side_effect=UnicodeError):
             assert _is_internal_or_metadata_host("bad\x00host") is False
 
+    def test_hostname_resolves_to_alibaba_imds_returns_true(self):
+        """Hostname resolving to Alibaba IMDS (100.100.100.200) hits metadata check (line 73)."""
+        with patch("socket.gethostbyname", return_value="100.100.100.200"):
+            assert _is_internal_or_metadata_host("alibaba-internal-host") is True
+
 
 # ================================================================
 # warn_ssrf_url  (F5)
@@ -167,6 +172,20 @@ class TestWarnSsrfUrl:
         with patch("socket.gethostbyname", return_value="10.0.0.1"):
             warn_ssrf_url("http://internal-host/endpoint", logger)
         logger.warning.assert_called_once()
+
+    def test_urlparse_value_error_swallowed_silently(self):
+        """ValueError from urlparse is caught; no warning, no crash (lines 85-86)."""
+        logger = self._make_logger()
+        with patch("urllib.parse.urlparse", side_effect=ValueError("bad url")):
+            warn_ssrf_url("some-url", logger)
+        logger.warning.assert_not_called()
+
+    def test_urlparse_type_error_swallowed_silently(self):
+        """TypeError from urlparse is caught; no warning, no crash (lines 85-86)."""
+        logger = self._make_logger()
+        with patch("urllib.parse.urlparse", side_effect=TypeError("type error")):
+            warn_ssrf_url("some-url", logger)
+        logger.warning.assert_not_called()
 
 
 # ================================================================

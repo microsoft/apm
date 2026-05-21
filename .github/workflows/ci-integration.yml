@@ -202,7 +202,7 @@ jobs:
           # --dist loadgroup is required: it is the only xdist scheduler
           # that honors pytest.mark.xdist_group, which we use to keep
           # HOME-mutating tests serialized on a single worker.
-          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov"
+          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -269,6 +269,18 @@ jobs:
             echo "No coverage shard files found; skipping integration coverage summary."
           fi
         continue-on-error: true
+
+      # Integration coverage gate -- raise this floor when baseline improves.
+      # Current floor: 55% (actual ~71%, 16pt margin for community PRs).
+      - name: Enforce integration coverage gate
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            coverage report --fail-under=70
+          else
+            echo "ERROR: No combined coverage data -- the 'Combine and summarise coverage' step must produce .coverage before the gate can run."
+            exit 1
+          fi
 
       - name: Aggregate shard results
         run: |
