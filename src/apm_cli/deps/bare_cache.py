@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING, Any
 
 from git import Repo
 
+from ..utils.git_sparse import apply_sparse_cone
+
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
 
@@ -646,22 +648,7 @@ def materialize_from_bare(
         )
     checkout_target = known_sha or "HEAD"
     if sparse_paths:
-        subprocess.run(
-            [git_exe, "-C", str(consumer_dir), "sparse-checkout", "init", "--cone"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-            check=True,
-        )
-        subprocess.run(
-            [git_exe, "-C", str(consumer_dir), "sparse-checkout", "set", *sparse_paths],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-            check=True,
-        )
+        apply_sparse_cone(git_exe, consumer_dir, list(sparse_paths), env=env)
     subprocess.run(
         [git_exe, "-C", str(consumer_dir), "checkout", checkout_target],
         capture_output=True,

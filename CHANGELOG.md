@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- Cold `apm install` for subdirectory git dependencies is dramatically faster on large monorepos (validated ~30x to ~75x range on `dotnet/skills`, network-variant). `GitCache` now performs partial bare clones (`--filter=blob:none`) with promisor remotes plus sparse-cone consumer materialization, and threads the tiered resolver's resolved SHA through to skip a redundant `ls-remote`. Bare-cache disk usage drops by orders of magnitude on the validated workload. No lockfile schema, CLI surface, or auth flow changes. Servers that reject `--filter=blob:none` (older Gerrit / pre-2.20 GHE) transparently fall back to a full bare clone. (#1436, closes #1433)
+
 ### Changed
 
 - Unit test coverage raised to 88% (gate: `fail_under = 80`); integration test coverage raised to 71% with first CI gate at 55%. (#1402)

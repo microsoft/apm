@@ -230,3 +230,45 @@ class TestPartialBareFlavor:
             text=True,
         )
         assert rc.returncode != 0  # config key not set
+
+    def test_partial_clone_fallback_to_full_on_server_rejection(self, tmp_path: Path, monkeypatch):
+        """Server rejects --filter=blob:none -> retry without filter succeeds.
+
+        Older Gerrit / pre-2.20 GHE do not support filter v2. The cache
+        must transparently degrade to a full bare clone (baseline
+        behavior) rather than fail the install.
+        """
+        bare, sha = _build_local_bare_repo(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        import apm_cli.cache.git_cache as git_cache_mod
+
+        real_run = subprocess.run
+        rejected: list[list[str]] = []
+        retried: list[list[str]] = []
+
+        def fake_run(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and "--filter=blob:none" in cmd:
+                rejected.append(list(cmd))
+                raise subprocess.CalledProcessError(
+                    128, cmd, output=b"", stderr=b"fatal: server does not support filter"
+                )
+            if (
+                isinstance(cmd, list)
+                and "clone" in cmd
+                and "--bare" in cmd
+                and "--filter=blob:none" not in cmd
+            ):
+                retried.append(list(cmd))
+            return real_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(git_cache_mod.subprocess, "run", fake_run)
+
+        url = f"file://{bare}"
+        result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
+
+        assert rejected, "partial clone (with --filter) should have been attempted"
+        assert retried, "fallback retry (without --filter) should have been issued"
+        assert all("--filter=blob:none" not in c for c in retried)
+        assert (result / "alpha" / "file.txt").is_file()

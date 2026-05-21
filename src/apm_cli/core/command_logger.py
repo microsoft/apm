@@ -400,7 +400,7 @@ class InstallLogger(CommandLogger):
         sha_part = f" @{sha_short}" if sha_short else ""
         paths_part = f" sparse={','.join(sparse_paths)}" if sparse_paths else " sparse=<none>"
         _rich_echo(
-            f"    [perf] subdir {dep_name}{sha_part} cache={cache_state}{paths_part}",
+            f"    [i] perf: subdir {dep_name}{sha_part} cache={cache_state}{paths_part}",
             color="dim",
         )
 
@@ -415,7 +415,7 @@ class InstallLogger(CommandLogger):
         if not self.verbose:
             return
         _rich_echo(
-            f"    [perf] bare clone strategy={strategy} took={elapsed_ms}ms",
+            f"    [i] perf: bare clone strategy={strategy} took={elapsed_ms}ms",
             color="dim",
         )
 
@@ -433,7 +433,7 @@ class InstallLogger(CommandLogger):
         size_mb = consumer_size_bytes / (1024 * 1024)
         applied = "yes" if sparse_applied else "no"
         _rich_echo(
-            f"    [perf] materialize sparse={applied} size={size_mb:.2f}MB",
+            f"    [i] perf: materialize sparse={applied} size={size_mb:.2f} MB",
             color="dim",
         )
 
@@ -452,7 +452,7 @@ class InstallLogger(CommandLogger):
         if not non_zero:
             return
         parts = " ".join(f"{k}={v}" for k, v in non_zero.items())
-        _rich_echo(f"    [perf] ref-resolver tiers: {parts}", color="dim")
+        _rich_echo(f"    [i] perf: ref-resolver tiers: {parts}", color="dim")
 
     # --- Cleanup phase (stale and orphan file removal) ---
 

@@ -1176,7 +1176,7 @@ class GitHubPackageDownloader:
                     )
                     _perf_logger.subdir_download_start(
                         _dep_display,
-                        cache_state="persistent",
+                        cache_state="persistent-hit",
                         sha_short=_sha_short,
                         sparse_paths=[subdir_path],
                     )

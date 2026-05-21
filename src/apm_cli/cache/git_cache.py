@@ -33,6 +33,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..utils.git_sparse import apply_sparse_cone
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
 from .locking import atomic_land, cleanup_incomplete, shard_lock, stage_path
@@ -348,11 +349,12 @@ class GitCache:
                 # no behavior change for the user).
                 fallback_done = False
                 if partial and isinstance(exc, subprocess.CalledProcessError):
-                    _log.warning(
-                        "Partial clone (--filter=blob:none) failed for %s; "
-                        "retrying with full bare clone. Server may not "
-                        "support filter v2.",
-                        _sanitize_url(url),
+                    from ..utils.console import _rich_warning
+
+                    _rich_warning(
+                        f"Partial clone (--filter=blob:none) failed for "
+                        f"{_sanitize_url(url)}; retrying with full bare clone. "
+                        f"Server may not support filter v2."
                     )
                     from ..utils.file_ops import robust_rmtree
 
@@ -532,29 +534,7 @@ class GitCache:
                     # (not silently fallen back to full checkout) because
                     # a silent fallback would re-introduce the disk
                     # bloat this code path exists to avoid (#1433).
-                    subprocess.run(
-                        [git_exe, "-C", str(staged), "sparse-checkout", "init", "--cone"],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        env=subprocess_env,
-                        check=True,
-                    )
-                    subprocess.run(
-                        [
-                            git_exe,
-                            "-C",
-                            str(staged),
-                            "sparse-checkout",
-                            "set",
-                            *sparse_paths,
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        env=subprocess_env,
-                        check=True,
-                    )
+                    apply_sparse_cone(git_exe, staged, list(sparse_paths), env=subprocess_env)
                 # Checkout the specific SHA
                 subprocess.run(
                     [git_exe, "-C", str(staged), "checkout", sha],

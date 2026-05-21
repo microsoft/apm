@@ -403,6 +403,17 @@ class TestDownloadSubdirectoryPersistentCache:
         # persistent_cache.get_checkout was called
         persistent_cache.get_checkout.assert_called()
 
+        # Regression: the subdir-aware sparse_paths and locked_sha (when
+        # available) MUST propagate to the persistent cache so the
+        # variant-keyed shard ((sha, sparse_paths)) is actually hit and
+        # the cold-path bloat fix from #1433 is not silently bypassed.
+        call_kwargs = persistent_cache.get_checkout.call_args.kwargs
+        assert "sparse_paths" in call_kwargs
+        assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
+        # locked_sha is plumbed via the kwarg; presence (not value) is the
+        # contract this test defends.
+        assert "locked_sha" in call_kwargs
+
     def test_persistent_cache_miss_falls_through(self, tmp_path):
         """Lines 1088-1090: cache.get_checkout raises -> falls through to clone."""
         dep_ref = self._make_dep_ref()
