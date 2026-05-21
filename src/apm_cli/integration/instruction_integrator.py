@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.patterns import parse_apply_to
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -279,8 +280,12 @@ class InstructionIntegrator(BaseIntegrator):
         parts = ["---"]
         if description:
             parts.append(f"description: {description}")
-        if apply_to:
-            parts.append(f'globs: "{apply_to}"')
+        globs = parse_apply_to(apply_to)
+        if len(globs) == 1:
+            parts.append(f'globs: "{globs[0]}"')
+        elif globs:
+            parts.append("globs:")
+            parts.extend(f'  - "{g}"' for g in globs)
         parts.append("---")
 
         return "\n".join(parts) + "\n\n" + body.lstrip("\n")
@@ -367,12 +372,17 @@ class InstructionIntegrator(BaseIntegrator):
 
         # Build Windsurf rules frontmatter
         parts = ["---"]
-        if apply_to:
-            # Sanitize: strip newlines to prevent frontmatter injection
-            # via crafted applyTo values (e.g. "**\ntrigger: always_on").
-            safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        # Sanitize: strip newlines to prevent frontmatter injection
+        # via crafted applyTo values (e.g. "**\ntrigger: always_on").
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
+        if globs:
             parts.append("trigger: glob")
-            parts.append(f'globs: "{safe_apply_to}"')
+            if len(globs) == 1:
+                parts.append(f'globs: "{globs[0]}"')
+            else:
+                parts.append("globs:")
+                parts.extend(f'  - "{g}"' for g in globs)
         else:
             parts.append("trigger: always_on")
         parts.append("---")
@@ -421,10 +431,10 @@ class InstructionIntegrator(BaseIntegrator):
                     apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
 
         # Build Claude rules frontmatter (only when path-scoped)
-        if apply_to:
-            parts = ["---"]
-            parts.append("paths:")
-            parts.append(f'  - "{apply_to}"')
+        globs = parse_apply_to(apply_to)
+        if globs:
+            parts = ["---", "paths:"]
+            parts.extend(f'  - "{g}"' for g in globs)
             parts.append("---")
             return "\n".join(parts) + "\n\n" + body.lstrip("\n")
 

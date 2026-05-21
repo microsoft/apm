@@ -898,5 +898,92 @@ class TestGlobCacheReuse:
             assert id(optimizer._glob_set_cache["**/*.ts"]) == cached_set_id
 
 
+# ==================================================================
+# Comma-separated applyTo handling in the optimizer (issue #1366)
+# ==================================================================
+
+
+class TestApplyToCommaInOptimizer:
+    """Verify the optimizer splits comma-separated applyTo globs."""
+
+    @pytest.fixture
+    def comma_project(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "server").mkdir()
+            (root / "styles").mkdir()
+            (root / "tests").mkdir()
+            (root / "server" / "api.py").touch()
+            (root / "styles" / "main.css").touch()
+            (root / "tests" / "test_api.py").touch()
+            yield root
+
+    def test_comma_list_partial_match_places_without_warning(self, comma_project):
+        """Comma-list where some segments match files: no 'no files' warning."""
+        opt = ContextOptimizer(str(comma_project))
+        instr = Instruction(
+            name="multi",
+            file_path=Path("multi.instructions.md"),
+            description="multi",
+            apply_to="**/*.py,**/*.never_matches",
+            content="rules",
+            source="local",
+        )
+        placement = opt.optimize_instruction_placement([instr])
+        assert placement, "instruction should be placed"
+        assert not any("matched no files" in w for w in opt._warnings)
+        assert not any("matches no files" in w for w in opt._warnings)
+
+    def test_comma_list_zero_match_emits_single_warning(self, comma_project):
+        """Comma-list where NO segment matches: exactly one warning, names primitive."""
+        opt = ContextOptimizer(str(comma_project))
+        instr = Instruction(
+            name="orphan",
+            file_path=Path("orphan.instructions.md"),
+            description="orphan",
+            apply_to="**/*.nope,**/*.zilch",
+            content="rules",
+            source="local",
+        )
+        opt.optimize_instruction_placement([instr])
+        no_match_warnings = [
+            w for w in opt._warnings if "matched no files" in w or "matches no files" in w
+        ]
+        assert len(no_match_warnings) == 1
+        assert "orphan" in no_match_warnings[0]
+        # Warning must not echo the raw multi-pattern (noise reduction).
+        assert "**/*.nope,**/*.zilch" not in no_match_warnings[0]
+
+    def test_comma_list_whitespace_trimmed(self, comma_project):
+        """Whitespace around comma segments is stripped before matching."""
+        opt = ContextOptimizer(str(comma_project))
+        instr = Instruction(
+            name="trimmed",
+            file_path=Path("trimmed.instructions.md"),
+            description="trimmed",
+            apply_to=" **/*.py , **/*.css ",
+            content="rules",
+            source="local",
+        )
+        placement = opt.optimize_instruction_placement([instr])
+        assert placement
+        assert not any("matched no files" in w for w in opt._warnings)
+
+    def test_single_glob_regression(self, comma_project):
+        """Pre-existing single-glob behavior is unchanged."""
+        opt = ContextOptimizer(str(comma_project))
+        instr = Instruction(
+            name="py",
+            file_path=Path("py.instructions.md"),
+            description="py",
+            apply_to="**/*.py",
+            content="rules",
+            source="local",
+        )
+        placement = opt.optimize_instruction_placement([instr])
+        assert placement
+        assert not any("matched no files" in w for w in opt._warnings)
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
