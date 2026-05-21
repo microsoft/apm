@@ -1171,6 +1171,11 @@ class TestLocalBundleCompileRoundTrip:
         )
 
         # Now run `apm compile --target <target>` in the project dir.
+        # Pin cwd explicitly rather than rely on a side-effect from
+        # ``_invoke_install`` (which monkeypatch.chdir'd into the
+        # project): future refactors of the install helper must not
+        # silently break this E2E.
+        monkeypatch.chdir(project)
         runner = CliRunner()
         compile_result = runner.invoke(
             cli,

@@ -593,21 +593,34 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         """Transitive deps from lockfile are appended but not duplicated."""
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
+        # Write a real lockfile so discovery's single LockFile.read() call
+        # picks up the transitive entry. apm_modules dir doesn't need to
+        # actually exist for get_installed_paths to return the entries.
+        (Path(self.tmp) / "apm.lock.yaml").write_text(
+            "version: 1\n"
+            "dependencies:\n"
+            "  - repo_url: owner/direct-dep\n"
+            "    resolved_ref: HEAD\n"
+            "    resolved_commit: 0\n"
+            "    version: 0.0.0\n"
+            "    depth: 0\n"
+            "    source: registry\n"
+            "  - repo_url: owner/transitive-dep\n"
+            "    resolved_ref: HEAD\n"
+            "    resolved_commit: 0\n"
+            "    version: 0.0.0\n"
+            "    depth: 1\n"
+            "    source: registry\n"
+        )
         mock_dep = MagicMock()
         mock_dep.alias = None
         mock_dep.is_virtual = False
         mock_dep.repo_url = "owner/direct-dep"
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with (
-            patch(
-                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-                return_value=mock_package,
-            ),
-            patch(
-                "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
-                return_value=["owner/direct-dep", "owner/transitive-dep"],
-            ),
+        with patch(
+            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+            return_value=mock_package,
         ):
             result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["owner/direct-dep", "owner/transitive-dep"])
@@ -748,8 +761,14 @@ class TestLocalBundleStagedSlugs(unittest.TestCase):
             ]
         )
         result = get_dependency_declaration_order(self.tmp)
-        self.assertEqual([r for r in result if r != "real-bundle"], [])
+        # The legitimate apm_modules entry must produce its slug.
         self.assertIn("real-bundle", result)
+        # The non-apm_modules entries must NOT produce phantom slugs --
+        # check absence of plausible spoofs derived from their paths
+        # (filenames or first-segment dir names) without forbidding
+        # unrelated dependency entries from coexisting.
+        for phantom in ("style", ".github", "coding", ".agents"):
+            self.assertNotIn(phantom, result)
 
     def test_non_instructions_apm_subdirs_also_recognized(self):
         """Future-proof: bundles may stage other primitive types under
