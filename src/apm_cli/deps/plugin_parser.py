@@ -13,6 +13,7 @@ Key spec rules:
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional  # noqa: F401, UP035
@@ -23,6 +24,38 @@ from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
 
 _logger = logging.getLogger(__name__)
+
+
+class PluginIntegrityError(RuntimeError):
+    """Raised when a plugin destination tree contains a pre-existing symlink.
+
+    Refusing to copy through a symlinked destination is defense-in-depth
+    for the data-loss-adjacent ``shutil.copytree(..., dirs_exist_ok=True)``
+    flow in ``_map_plugin_artifacts``. A malicious package shipping
+    ``.apm/skills/<name>`` (or any other target_* subtree) as a symlink to
+    an external path (e.g. ``/etc``, ``$HOME/.ssh``) would otherwise
+    redirect writes outside the plugin root.
+    """
+
+
+def _assert_no_symlink_descendants(target: Path) -> None:
+    """Refuse to copy when *target* or any of its descendants is a symlink.
+
+    Uses ``lstat``/``os.walk(followlinks=False)`` so the check itself does
+    not traverse a hostile symlink. No-op when *target* does not exist.
+    """
+    if not target.exists() and not target.is_symlink():
+        return
+    if target.is_symlink():
+        raise PluginIntegrityError(f"Refusing to copy into symlinked plugin destination: {target}")
+    for root, dirs, files in os.walk(target, followlinks=False):
+        root_path = Path(root)
+        for name in dirs + files:
+            entry = root_path / name
+            if entry.is_symlink():
+                raise PluginIntegrityError(
+                    f"Refusing to copy into plugin destination containing symlinked entry: {entry}"
+                )
 
 
 def _surface_warning(message: str, logger: logging.Logger) -> None:
@@ -462,6 +495,7 @@ def _map_plugin_artifacts(
     agent_sources = _resolve_sources("agents", "agents")
     if agent_sources:
         target_agents = apm_dir / "agents"
+        _assert_no_symlink_descendants(target_agents)
         agent_dirs = [s for s in agent_sources if s.is_dir()]
         agent_files = [s for s in agent_sources if s.is_file()]
         for d in agent_dirs:
@@ -480,6 +514,7 @@ def _map_plugin_artifacts(
     skill_sources = _resolve_sources("skills", "skills")
     if skill_sources:
         target_skills = apm_dir / "skills"
+        _assert_no_symlink_descendants(target_skills)
         skill_dirs = [s for s in skill_sources if s.is_dir()]
         skill_files = [s for s in skill_sources if s.is_file()]
 
@@ -513,6 +548,7 @@ def _map_plugin_artifacts(
     command_sources = _resolve_sources("commands", "commands")
     if command_sources:
         target_prompts = apm_dir / "prompts"
+        _assert_no_symlink_descendants(target_prompts)
         target_prompts.mkdir(parents=True, exist_ok=True)
 
         def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):  # noqa: RUF013
@@ -544,6 +580,7 @@ def _map_plugin_artifacts(
     if isinstance(hooks_value, dict):
         # Inline hooks object -> write as .apm/hooks/hooks.json
         target_hooks = apm_dir / "hooks"
+        _assert_no_symlink_descendants(target_hooks)
         target_hooks.mkdir(parents=True, exist_ok=True)
         (target_hooks / "hooks.json").write_text(json.dumps(hooks_value, indent=2))
     elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
@@ -553,6 +590,7 @@ def _map_plugin_artifacts(
             pass
         else:
             target_hooks = apm_dir / "hooks"
+            _assert_no_symlink_descendants(target_hooks)
             target_hooks.mkdir(parents=True, exist_ok=True)
             dst = target_hooks / "hooks.json"
             if not _is_same_path(src_file, dst):
@@ -562,6 +600,7 @@ def _map_plugin_artifacts(
         hook_sources = _resolve_sources("hooks", "hooks")
         if hook_sources:
             target_hooks = apm_dir / "hooks"
+            _assert_no_symlink_descendants(target_hooks)
             for d in hook_sources:
                 if _is_same_path(d, target_hooks):
                     continue
@@ -572,6 +611,10 @@ def _map_plugin_artifacts(
         source_file = plugin_path / passthrough
         if source_file.exists() and not source_file.is_symlink():
             dst = apm_dir / passthrough
+            if dst.is_symlink():
+                raise PluginIntegrityError(
+                    f"Refusing to copy through symlinked plugin pass-through file: {dst}"
+                )
             if not _is_same_path(source_file, dst):
                 shutil.copy2(source_file, dst)
 

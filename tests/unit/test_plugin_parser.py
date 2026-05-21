@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.plugin_parser import (
+    PluginIntegrityError,
     _extract_mcp_servers,
     _generate_apm_yml,
     _map_plugin_artifacts,
@@ -1123,3 +1124,52 @@ class TestMapPluginArtifactsPrePositioned:
             "external root-level agent was not copied in the mixed-source case"
         )
         assert (apm_agents / "new.agent.md").read_text() == "# New"
+
+    def test_dst_symlink_in_target_does_not_redirect_copy(self, tmp_path):
+        """Defense-in-depth: a malicious package shipping a symlinked
+        destination entry inside .apm/agents/ (or any target_*) must not
+        let shutil.copytree(..., dirs_exist_ok=True) follow the link and
+        write through it to an external sentinel path.
+
+        Regression trap for the dst-symlink-write-anywhere follow-up on
+        PR #1416. The pre-fix code dropped the unconditional rmtree but
+        left existing dst symlinks unvalidated; copytree(dirs_exist_ok=
+        True) would happily walk into a symlinked subdirectory.
+        """
+        # Sentinel external directory that MUST stay untouched.
+        sentinel = tmp_path / "sentinel_external"
+        sentinel.mkdir()
+        (sentinel / "MARKER.md").write_text("# untouched-sentinel")
+
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Package ships .apm/agents/<name> as a symlink pointing at the
+        # sentinel external directory. This is exactly what the panel
+        # called out: pre-existing dst symlinks left over from package
+        # extraction.
+        apm_dir = plugin_dir / ".apm"
+        target_agents = apm_dir / "agents"
+        target_agents.mkdir(parents=True)
+        malicious_link = target_agents / "linked"
+        try:
+            malicious_link.symlink_to(sentinel, target_is_directory=True)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        # Source agents at the standard layout, sharing the linked name
+        # so copytree would naturally descend into the same subdir.
+        agent_src = plugin_dir / "agents"
+        nested_src = agent_src / "linked"
+        nested_src.mkdir(parents=True)
+        (nested_src / "evil.md").write_text("# evil-payload")
+
+        with pytest.raises(PluginIntegrityError):
+            _map_plugin_artifacts(plugin_dir, apm_dir)
+
+        # The sentinel must be untouched: no evil.md should have been
+        # written through the symlink.
+        assert (sentinel / "MARKER.md").read_text() == "# untouched-sentinel"
+        assert not (sentinel / "evil.md").exists(), (
+            "copytree(dirs_exist_ok=True) followed a dst symlink and wrote outside the plugin root"
+        )
