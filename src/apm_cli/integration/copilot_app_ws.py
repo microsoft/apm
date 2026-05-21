@@ -446,13 +446,19 @@ class WsClient:
         owner/repo detection, default-branch resolution, account
         binding. We get back the resolved ``project_id``.
 
-        ``was_created`` is best-effort: the server's
-        ``project_created`` reply carries a ``project`` payload but
-        not (currently) a "was new" flag, so we treat any successful
-        reply as "created or already existed -- caller should ALWAYS
-        emit the restart hint until upstream issue github/github-app#5483
-        lands the live broadcast". The hint is suppressed once the
-        webview learns about the row (i.e. after the user restarts).
+        ``was_created`` is inferred from the server's reply type:
+        ``project_created`` -> ``was_created=True`` (new ``projects`` row),
+        ``project_updated`` -> ``was_created=False`` (HIT on existing
+        ``main_repo_path``). The restart hint downstream only fires on
+        ``was_created=True``; on ``project_updated`` the webview already
+        knows the row and no restart is needed. The "was new" flag rides
+        on the message ``type`` rather than a dedicated field -- see
+        ``_extract_project_fields`` for the parser.
+
+        Upstream issue github/github-app#5483 tracks adding a live
+        broadcast so externally-inserted rows surface in the webview
+        without a restart; until that lands, the hint is the user-visible
+        signal that a manual restart wires the new project into the UI.
         """
         self._send(
             {

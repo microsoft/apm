@@ -198,8 +198,24 @@ def _find_repo_root(start: Path) -> Path | None:
 
     Returns the first ancestor containing ``.git`` (file or dir -- git
     worktrees use a file pointer), or ``None`` when no enclosing repo
-    is found. Symlinks in the chain are not followed (defense against
-    being lured into an attacker-controlled root).
+    is found.
+
+    .. note::
+       ``start`` is resolved with :meth:`pathlib.Path.resolve` so the
+       returned root is canonical (used as the UNIQUE key on
+       ``projects.main_repo_path``). This DOES follow symlinks in the
+       parent chain. The only symlink-rejection check here is on the
+       ``.git`` marker itself (``not git_marker.is_symlink()``), which
+       blocks the narrow case where an attacker plants a symlinked
+       ``.git`` pointer inside a directory under their control.
+       Defending against symlinked parent directories would require
+       switching to :meth:`Path.absolute` + an explicit per-component
+       walk, but that breaks legitimate setups where temp dirs (macOS
+       ``/tmp`` -> ``/private/tmp``) or user-controlled bind mounts
+       have symlinked ancestors. Project-creation already runs in the
+       user's own trust domain (CWD is a user-typed path), so this is
+       an acceptable trade-off; ``derive_repo_context`` callers should
+       not treat the returned path as adversary-controlled.
     """
     start = start.resolve()
     for candidate in (start, *start.parents):
