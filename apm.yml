@@ -13,6 +13,7 @@ license: MIT
 dependencies:
   apm:
     - ./packages/apm-review-panel
+    - ./packages/batch-bug-shepherd
   mcp: []
 
 scripts: {}

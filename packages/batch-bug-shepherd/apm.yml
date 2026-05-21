@@ -1,0 +1,18 @@
+name: batch-bug-shepherd
+version: 0.1.0
+description: Drive a batch of suspected bugs from raw issue list to mergeable PR queue -- triage in parallel, detect in-flight PRs, shepherd via apm-review-panel, dispatch fix sessions, complete with mutation-break + lint gates.
+author: Microsoft
+license: MIT
+
+# Composes the apm-review-panel skill as the per-PR review primitive.
+# Declared as a local-path manifest dep (anchored to THIS package's
+# directory per APM's local-path rule); a runtime activate-by-name
+# probe in assets/shepherd-prompt.md is the backstop if the harness
+# registry is bypassed. See genesis-plan-v2.md step 3.5 for the full
+# composition decision.
+dependencies:
+  apm:
+    - ../apm-review-panel
+  mcp: []
+
+scripts: {}
