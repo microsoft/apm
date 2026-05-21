@@ -141,6 +141,8 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 
 Use `apm experimental enable copilot-cowork` to turn on Microsoft 365 Copilot Cowork skill deployment. Once enabled, deploy skills with `apm install --target copilot-cowork --global`.
 
+Use `apm experimental enable copilot-app` to turn on GitHub Copilot desktop App workflow deployment. Once enabled, prompts that carry workflow frontmatter -- any flat top-level key of `interval`, `schedule_hour`, `schedule_day` -- can be deployed to the App's SQLite store at `~/.copilot/data.db` with `apm install --target copilot-app` (project scope) or `--target copilot-app --global` (user scope). A `.prompt.md` belongs to exactly ONE surface: workflow-shape prompts go to the App DB, plain prompts go to slash-command targets. Rows always start `enabled = 0` -- you opt in from the App. `apm install / update / uninstall` preserve user state (`enabled`, `last_run_at`, schedule overrides). Override the database path with `APM_COPILOT_APP_DB=<abs-path>`.
+
 ### Cross-client skills (`agent-skills`)
 
 Use `--target agent-skills` to deploy skills to `.agents/skills/` -- the cross-tool standard directory. This is useful when multiple clients (Codex, future tools) read from `.agents/skills/`. Unlike `--target all`, `agent-skills` must be requested explicitly: `apm install --target agent-skills` or `apm install --target all,agent-skills` for both. `apm compile --target agent-skills` is a no-op (skills-only target).

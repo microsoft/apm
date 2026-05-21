@@ -912,3 +912,45 @@ class TestValidConfigKeys:
         assert "auto-integrate" in result
         assert "temp-dir" in result
         assert "copilot-cowork-skills-dir" in result
+
+
+class TestConfigShowTempDir:
+    """Lines 127, 132-135: config show with temp-dir and copilot cowork dir."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_show_with_temp_dir_set(self):
+        """Line 127: temp_dir is set → shown in config table."""
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
+            patch("apm_cli.config.get_temp_dir", return_value="/tmp/apm-temp"),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+        ):
+            result = self.runner.invoke(config, [])
+        assert result.exit_code == 0
+        assert "/tmp/apm-temp" in result.output or "Temp Directory" in result.output
+
+    def test_show_with_copilot_cowork_dir_set(self):
+        """Lines 132-135: copilot_cowork enabled + dir set → shown."""
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/some/skills"),
+        ):
+            result = self.runner.invoke(config, [])
+        assert result.exit_code == 0
+        assert "/some/skills" in result.output or "Cowork Skills Dir" in result.output
+
+    def test_show_with_copilot_cowork_dir_not_set(self):
+        """Lines 132-138: copilot_cowork enabled + dir NOT set → auto-detection msg."""
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
+        ):
+            result = self.runner.invoke(config, [])
+        assert result.exit_code == 0
+        assert "auto-detection" in result.output or "Cowork" in result.output

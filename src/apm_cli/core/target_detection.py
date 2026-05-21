@@ -320,7 +320,7 @@ ALL_CANONICAL_TARGETS = frozenset(
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork"})
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork", "copilot-app"})
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
 #: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
