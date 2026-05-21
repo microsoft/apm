@@ -1381,16 +1381,16 @@ class TestProjectAnalysisGetFileTypesSummary(unittest.TestCase):
 
 
 def _color_formatter() -> CompilationFormatter:
-    """Return a formatter with use_color=True (Rich must be available)."""
-    f = CompilationFormatter(use_color=True)
-    if not f.use_color:
-        raise unittest.SkipTest("Rich not available")
-    # Force a wide console so Rich tables don't truncate column contents
-    # under narrow terminals (Windows CI runners default to ~80 cols).
-    from rich.console import Console
+    """Return a formatter with use_color=True (Rich must be available).
 
-    f.console = Console(width=200, force_terminal=False)
-    return f
+    Thin alias kept for test readability; the real construction (incl. the
+    pinned Console width that prevents column truncation under narrow
+    Windows CI terminals) lives in ``tests/unit/_formatter_helpers.py``
+    so the two formatter test modules cannot drift.
+    """
+    from tests.unit._formatter_helpers import make_color_formatter
+
+    return make_color_formatter()
 
 
 class TestFormatDefaultColor(unittest.TestCase):
