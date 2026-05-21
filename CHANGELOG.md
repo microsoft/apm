@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm update` against private Azure DevOps deps no longer fails on Windows with a misleading "az present but not logged in" diagnostic when the user IS signed in via `az login`. Root cause: Python's `subprocess.run(["az", ...])` -> `CreateProcessW` does not honor `PATHEXT` for non-`.exe` executables, so the Windows `az.cmd` wrapper could not be invoked even though `shutil.which("az")` resolved it. `AzureCliBearerProvider` now resolves the `az` binary via `shutil.which` once at construction and passes the absolute path to every subprocess call. As a defense-in-depth measure, the ADO `--update` preflight probe no longer strips `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM` / `GIT_ASKPASS`, so Git Credential Manager can answer for Entra-cached ADO credentials whenever bearer acquisition is unavailable for any reason (sandbox, proxy, future PATH quirks). The actual clone path keeps its full gitconfig isolation. (#1430)
+
 - Root `.apm` hooks no longer duplicate after renaming the project directory or using git worktrees; Claude, Codex, Cursor, Gemini, and Windsurf hook configs stay idempotent across checkouts. The hook source-id is now derived from `apm.yml`'s `name` field instead of `install_path.name`, and `apm install` silently heals stale same-content entries from prior checkout basenames. Copilot is unaffected (its hooks live in per-file namespaces under `.github/hooks/`, not a shared merged config). (#1392, closes #1329)
 
 ## [0.14.1] - 2026-05-20
