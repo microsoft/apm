@@ -89,3 +89,24 @@ class TestCacheShardKey:
         key1 = cache_shard_key("https://github.com/owner/repo")
         key2 = cache_shard_key("https://github.com/owner/repo")
         assert key1 == key2
+
+
+class TestMalformedNetloc:
+    """Malformed netlocs (e.g. Windows file:// URLs) must not raise.
+
+    Regression: on Windows, `file://C:\\path\\bare.git` parses with the
+    drive-letter colon interpreted as a host:port separator, so
+    `parsed.port` raises ValueError. Cache-key derivation must stay
+    deterministic and per-URL distinct without raising.
+    """
+
+    def test_windows_file_url_does_not_raise(self) -> None:
+        url = r"file://C:\Users\runneradmin\AppData\Local\Temp\bare.git"
+        # Must not raise:
+        key = cache_shard_key(url)
+        assert len(key) == 16
+
+    def test_windows_file_urls_distinct_paths_distinct_keys(self) -> None:
+        url_a = r"file://C:\Users\runneradmin\AppData\Local\Temp\repo_a.git"
+        url_b = r"file://C:\Users\runneradmin\AppData\Local\Temp\repo_b.git"
+        assert cache_shard_key(url_a) != cache_shard_key(url_b)
