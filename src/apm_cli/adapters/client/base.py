@@ -566,6 +566,16 @@ class MCPClientAdapter(ABC):
 
         return processed
 
+    def _resolve_env_placeholders(self, value, resolved_env):
+        """Legacy thin wrapper for backward compatibility.
+
+        Kept because external callers and the phase-3 test suite invoke
+        the pre-#1277 name. Delegates to ``_resolve_variable_placeholders``
+        with an empty ``runtime_vars`` map. New code should call
+        ``_resolve_variable_placeholders`` directly.
+        """
+        return self._resolve_variable_placeholders(value, resolved_env, {})
+
     # ------------------------------------------------------------------
     # Shared server-info helpers (used by all adapter subclasses)
     # ------------------------------------------------------------------
