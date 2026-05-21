@@ -7,9 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Experimental:** `copilot-app` target now scopes workflow rows to a real `projects` row instead of orphaning them at the App's root. When the App is running, project registration goes through the loopback WebSocket IPC surface (`~/.copilot/run/ws.{port,token}`, 0o600) so the project goes through the App's own owner/repo discovery and is immediately known to the webview; when the App is closed, registration falls through to a direct-SQLite `BEGIN IMMEDIATE` resolver against `~/.copilot/data.db`. Workflow rows are always written via SQLite (namespaced ids preserve lockfile stability). `--global` installs that carry workflow-shape prompts now emit a one-time warn-and-proceed diagnostic explaining the CWD-pivot risk and the per-row "attach to project" remediation. A one-time `Restart the Copilot App once` info hint fires on first project registration in a repo (see github/github-app#5483). (#1431)
+
 ### Changed
 
 - Unit test coverage raised to 88% (gate: `fail_under = 80`); integration test coverage raised to 71% with first CI gate at 55%. (#1402)
+
+### Security
+
+- `copilot-app` WS client refuses to read `~/.copilot/run/ws.token` if its mode is group- or other-readable, matching the App's documented 0o600 posture. Library exception text that echoes the handshake URL is scrubbed of any `?token=...` query argument before being wrapped into `WsError` subtypes, so credential material cannot land in diagnostics or user-visible warnings. (#1431)
+- `websockets` dependency is pinned with an upper bound (`>=12,<17`) to lock the current resolution and prevent a future major-version upload from silently landing across user installs. (#1431)
+
 
 ## [0.14.1] - 2026-05-20
 

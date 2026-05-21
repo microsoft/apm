@@ -2,21 +2,27 @@
 
 The App binds a per-launch authenticated WebSocket on ``127.0.0.1:<port>``
 and writes the port and token to ``~/.copilot/run/ws.{port,token}``
-(mode 0o600). Any local process that can read those files can speak
-the full ``WsClientMessage`` dialect. This module is the typed,
-synchronous, scope-limited Python client APM uses to:
+(mode 0o600 -- we re-check the token file's mode at read time and
+refuse to use a group/other-readable token). Any local process that
+can read those files can speak the full ``WsClientMessage`` dialect.
+This module is the typed, synchronous, scope-limited Python client APM
+uses to register a project from a filesystem path
+(``create_project_from_path``).
 
-* register a project from a filesystem path (``create_project_from_path``),
-* create or update an APM-managed workflow row attached to that
-  project (``create_workflow`` / ``update_workflow``).
+Scope: project registration only.
 
-The WS path is the **preferred** integration surface when the App is
-running: it goes through the App's own validation, fires the global
-``WorkflowsChanged`` broadcast so the Workflows tab live-refreshes,
-and avoids the white-screen failure mode where the webview cannot
-resolve an externally-written ``project_id`` (see reverse-eng report).
-When the App is closed the WS surface is unavailable and the caller
-falls back to direct SQLite via ``copilot_app_project``.
+Workflow rows are written via direct SQLite in
+``copilot_app_db.deploy_workflow`` regardless of which path created the
+project. This keeps lockfile ids stable (namespaced
+``owner/pkg/stem``) instead of opaque server-side UUIDs, and removes
+the need for paired ``create_workflow`` / ``update_workflow`` IPC. The
+WS surface still earns its keep on the project side: the App runs full
+discovery (owner/repo detection, default branch, account binding) and
+the resulting project row is the one the webview already knows about,
+which is how we avoid the white-screen failure mode where an
+externally-written ``project_id`` doesn't resolve. When the App is
+closed the WS surface is unavailable and the caller falls back to
+direct SQLite project registration via ``copilot_app_project``.
 
 Synchronous by design
 ---------------------
@@ -45,7 +51,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,18 +151,63 @@ def _run_dir() -> Path:
     return Path.home() / _RUN_DIR
 
 
+_TOKEN_QUERY_RE = re.compile(r"(\?|&)token=[^&\s\"'>]+")
+
+
+def _scrub_token(text: str) -> str:
+    """Redact any ``?token=...`` / ``&token=...`` query material from *text*.
+
+    Used before wrapping ``websockets`` library exceptions into our
+    ``WsError`` subtypes: those exception messages frequently echo back
+    the full handshake URL, which embeds the per-launch token. The
+    token is short-lived but still credential material, so we keep it
+    out of diagnostics, log lines, and user-visible warnings.
+    """
+    return _TOKEN_QUERY_RE.sub(r"\1token=<redacted>", text)
+
+
+def _token_file_mode_ok(path: Path) -> bool:
+    """Return True iff the token file has no group/other permissions.
+
+    The App writes the file as 0o600. If a later actor (user, backup
+    tool, sync agent) widens the mode, anything readable by group or
+    other can lift the token and impersonate APM against the App's WS
+    server for as long as the App stays open. We treat any
+    group/other bit as a refusal-to-read rather than warning-and-
+    continuing -- the SQLite fallback is always available, so the
+    cost of being strict is one extra restart, while the cost of being
+    permissive is a real credential leak.
+
+    POSIX-only check. On Windows ``stat.S_IRWXG`` / ``stat.S_IRWXO``
+    are reported as zero by ``os.stat`` so the check is effectively a
+    no-op there; ACL hardening on Windows is out of scope for this
+    module.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    mode = st.st_mode
+    return not (mode & (stat.S_IRWXG | stat.S_IRWXO))
+
+
 def _read_creds() -> tuple[int, str] | None:
     """Return ``(port, token)`` from the App's run-files or ``None``.
 
     Both files must exist and be readable; either missing means the App
-    is not running (or never has been since boot). We do not validate
-    the token format here -- the server rejects invalid tokens at
-    handshake.
+    is not running (or never has been since boot). The token file's
+    mode is verified to match the App's documented 0o600 posture --
+    if widened to group/other-readable we refuse rather than risk
+    sending credential material extracted from a non-private file.
+    We do not validate the token format itself; the server rejects
+    invalid tokens at handshake.
     """
     run = _run_dir()
     port_path = run / _PORT_FILE
     token_path = run / _TOKEN_FILE
     if not port_path.is_file() or not token_path.is_file():
+        return None
+    if not _token_file_mode_ok(token_path):
         return None
     try:
         port = int(port_path.read_text(encoding="ascii").strip())
@@ -205,18 +258,6 @@ class ProjectCreated:
     main_repo_path: str
 
 
-@dataclass(frozen=True)
-class WorkflowCreated:
-    """Outcome of ``create_workflow`` / ``update_workflow``.
-
-    The App generates a UUIDv4 for new rows. APM's caller does not
-    depend on the format -- the id is opaque and only used to address
-    the row in subsequent ``update_workflow`` / delete calls.
-    """
-
-    workflow_id: str
-
-
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -230,12 +271,16 @@ class WsClient:
 
         with WsClient() as client:
             project = client.create_project_from_path(repo_root)
-            for wf in workflows:
-                client.create_workflow(...)
+
+    The client exposes only ``create_project_from_path``: workflow
+    rows are written via direct SQLite (``copilot_app_db``) regardless
+    of which path created the project. This keeps lockfile ids
+    namespaced and stable (see module docstring).
 
     All public methods raise a ``WsError`` subtype on any failure; the
     caller in ``prompt_integrator._integrate_prompts_for_copilot_app``
-    catches ``WsError`` and falls through to the SQLite path.
+    catches ``WsError`` and falls through to the SQLite project
+    registration path.
     """
 
     def __init__(self, *, recv_timeout_s: float = _WS_RECV_TIMEOUT_S) -> None:
@@ -298,16 +343,22 @@ class WsClient:
                 max_size=2**24,
             )
         except Exception as exc:
-            msg = str(exc)
+            # Scrub the handshake URL's ``?token=<base64>`` before it
+            # lands in our exception text -- the ``websockets`` library
+            # echoes the full URL back in several of its InvalidStatus
+            # / InvalidHandshake messages.
+            raw = str(exc)
+            msg = _scrub_token(raw)
+            scrubbed_lower = msg.lower()
             # ``websockets`` raises InvalidStatus / InvalidHandshake for
             # HTTP-level rejections. 401/403 -> auth; everything else ->
             # generic protocol error. We string-match defensively so a
             # library-version bump doesn't break the branch.
-            if "401" in msg or "403" in msg or "unauthor" in msg.lower():
-                raise WsAuthError(f"WS auth rejected: {exc}") from exc
-            if "refused" in msg.lower() or "ConnectionRefused" in msg:
-                raise WsAppNotRunning(f"WS connection refused: {exc}") from exc
-            raise WsProtocolError(f"WS handshake failed: {exc}") from exc
+            if "401" in msg or "403" in msg or "unauthor" in scrubbed_lower:
+                raise WsAuthError(f"WS auth rejected: {msg}") from None
+            if "refused" in scrubbed_lower or "connectionrefused" in scrubbed_lower:
+                raise WsAppNotRunning(f"WS connection refused: {msg}") from None
+            raise WsProtocolError(f"WS handshake failed: {msg}") from None
 
     # -- low-level send/recv -------------------------------------------
 
@@ -423,104 +474,10 @@ class WsClient:
             main_repo_path=main_repo_path or str(path),
         )
 
-    def create_workflow(
-        self,
-        *,
-        name: str,
-        prompt: str,
-        interval: str = "manual",
-        mode: str | None = None,
-        schedule_hour: int = 9,
-        schedule_day: int = 1,
-        project_id: str | None = None,
-        enabled: bool = False,
-    ) -> WorkflowCreated:
-        """Create a workflow row through the App.
-
-        The App generates the workflow's id (UUIDv4). ``enabled``
-        defaults to ``False`` to match the install contract: APM never
-        flips the schedule on; the user opts in from the App UI.
-        """
-        payload: dict[str, Any] = {
-            "type": "create_workflow",
-            "name": name,
-            "prompt": prompt,
-            "interval": interval,
-            "schedule_hour": schedule_hour,
-            "schedule_day": schedule_day,
-            "enabled": enabled,
-        }
-        if mode is not None:
-            payload["mode"] = mode
-        if project_id is not None:
-            payload["project_id"] = project_id
-        self._send(payload)
-        reply = self._await_typed_reply(expected={"workflow_created"})
-        wid = _extract_workflow_id(reply)
-        if not wid:
-            raise WsProtocolError(f"workflow_created reply missing id: {reply!r}")
-        return WorkflowCreated(workflow_id=wid)
-
-    def update_workflow(
-        self,
-        *,
-        workflow_id: str,
-        name: str | None = None,
-        prompt: str | None = None,
-        interval: str | None = None,
-        mode: str | None = None,
-        schedule_hour: int | None = None,
-        schedule_day: int | None = None,
-        project_id: str | None = None,
-        enabled: bool | None = None,
-    ) -> WorkflowCreated:
-        """Update an existing workflow row in place.
-
-        Only fields explicitly passed are sent on the wire so the
-        server's partial-update semantics are preserved (unsent fields
-        keep their existing value).
-        """
-        payload: dict[str, Any] = {
-            "type": "update_workflow",
-            "id": workflow_id,
-        }
-        for key, value in (
-            ("name", name),
-            ("prompt", prompt),
-            ("interval", interval),
-            ("mode", mode),
-            ("schedule_hour", schedule_hour),
-            ("schedule_day", schedule_day),
-            ("project_id", project_id),
-            ("enabled", enabled),
-        ):
-            if value is not None:
-                payload[key] = value
-        self._send(payload)
-        reply = self._await_typed_reply(
-            expected={"workflow_updated", "workflow_created"},
-        )
-        wid = _extract_workflow_id(reply) or workflow_id
-        return WorkflowCreated(workflow_id=wid)
-
 
 # ---------------------------------------------------------------------------
 # Permissive parsers
 # ---------------------------------------------------------------------------
-
-
-def _extract_workflow_id(reply: dict[str, Any]) -> str | None:
-    """Pull the workflow id out of any of the shapes the server emits."""
-    for key in ("id", "workflow_id"):
-        v = reply.get(key)
-        if isinstance(v, str) and v:
-            return v
-    wf = reply.get("workflow")
-    if isinstance(wf, dict):
-        v = wf.get("id")
-        if isinstance(v, str) and v:
-            return v
-    return None
 
 
 def _extract_project_fields(

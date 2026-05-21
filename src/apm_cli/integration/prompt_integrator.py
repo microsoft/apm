@@ -154,35 +154,41 @@ class PromptIntegrator(BaseIntegrator):
     ) -> IntegrationResult:
         """Deploy workflow-shape prompts as Copilot App workflow rows.
 
-        Hybrid dispatch (PR A):
+        Hybrid dispatch:
 
         1. Detect the repo at ``project_root``. Derive a stable
-           ``ProjectRecipe`` (id, name, github owner/repo, default
-           branch) so the workflow rows can be scoped to a real
-           ``projects`` row instead of orphaned at the root.
+           ``RepoContext`` (name, github owner/repo, default branch) so
+           workflow rows scope to a real ``projects`` row instead of
+           being orphaned at the root.
         2. If ``user_scope`` is set AND any workflow-shape prompts are
            present, emit a warn-and-proceed diagnostic: workflows run
            with CWD=~/.copilot in global mode, which is almost never
            what the user wants. We still deploy so global skills /
            commands keep working; the user can attach the row to a
            project from the App UI.
-        3. If the App is running (``ws_available``), try the WS-IPC
-           path: ``create_project_from_path`` then ``create_workflow``
-           per prompt. The App generates UUIDs; we do not control the
-           row id but we get the live ``WorkflowsChanged`` broadcast
-           and avoid the project-not-loaded white-screen failure mode.
-        4. Otherwise (or on any WS error), fall back to the direct
-           SQLite path: register / look up the project via
-           ``resolve_or_register_project_sqlite``, stamp ``project_id``
-           on every row, and suffix the display name with ``(<repo>)``.
+        3. Resolve the ``project_id`` ONCE: if the App is running
+           (``ws_available``), try ``WsClient.create_project_from_path``
+           so the project row goes through the App's own validation
+           (owner/repo detection, default branch, account binding) and
+           is already known to the webview. On any ``WsError`` (or if
+           the App is closed) fall through to direct SQLite via
+           ``resolve_or_register_project_sqlite``.
+        4. Write every workflow row via direct SQLite
+           (``copilot_app_db.deploy_workflow``), stamped with the
+           resolved ``project_id`` and a namespaced
+           ``owner/pkg/stem`` id so the lockfile stays stable across
+           runs and across the WS-vs-SQLite project-resolution branch.
+        5. If the project was freshly created (either branch), emit
+           the one-time restart hint -- the webview's projectStore
+           does not currently refresh on a new ``projects`` row.
 
-        Workflow-shape (per ``_is_workflow_shape``) prompts deploy here.
-        Plain-shape prompts (no execution-affecting frontmatter keys)
-        are a hard error at this target: the user explicitly opted into
-        ``copilot-app`` for this package, and a plain prompt cannot
-        possibly be a workflow.  Surfacing the mismatch loudly beats
-        silently skipping the file and leaving the user wondering why
-        nothing landed in the App.
+        Workflow-shape (per ``_is_workflow_shape``) prompts deploy
+        here.  Plain-shape prompts (no execution-affecting frontmatter
+        keys) are a hard error at this target: the user explicitly
+        opted into ``copilot-app`` for this package, and a plain
+        prompt cannot possibly be a workflow.  Surfacing the mismatch
+        loudly beats silently skipping the file and leaving the user
+        wondering why nothing landed in the App.
 
         The DB module enforces ``enabled = 0`` on insert; any frontmatter
         ``enabled`` field, if present, is ignored.  This is a hard
@@ -203,6 +209,9 @@ class PromptIntegrator(BaseIntegrator):
             resolve_or_register_project_sqlite,
         )
         from apm_cli.integration.copilot_app_ws import (
+            WsAppNotRunning,
+            WsAuthError,
+            WsClient,
             WsError,
             ws_available,
         )
@@ -216,7 +225,7 @@ class PromptIntegrator(BaseIntegrator):
 
         # ------------------------------------------------------------------
         # Parse all candidate prompts up front so we can decide on the
-        # WS path / SQLite path / global-scope warning with one pass.
+        # global-scope warning with one pass.
         # ------------------------------------------------------------------
         parsed: list[tuple[Path, object, object]] = []
         files_skipped = 0
@@ -270,58 +279,58 @@ class PromptIntegrator(BaseIntegrator):
             )
 
         # ------------------------------------------------------------------
-        # Project scoping.
+        # Resolve project_id ONCE -- WS (preferred) then SQLite fallback.
         # ------------------------------------------------------------------
         repo_ctx = derive_repo_context(project_root)
         repo_suffix = f" ({repo_ctx.repo_name})" if repo_ctx is not None else ""
-
-        # WS path -- preferred when the App is running. We try it ONLY
-        # when we have a real repo context (a project to attach the
-        # workflows to); otherwise the WS path adds no value over the
-        # SQLite fallback.
-        if repo_ctx is not None and ws_available():
-            try:
-                return self._deploy_via_ws(
-                    repo_ctx=repo_ctx,
-                    parsed=parsed,
-                    pkg_name=pkg_name,
-                    owner=owner,
-                    files_skipped=files_skipped,
-                    diagnostics=diagnostics,
-                    db_path=db_path,
-                )
-            except WsError as exc:
-                # Live App but WS path broke -- log and fall through to
-                # SQLite. We never let a transient WS failure turn into
-                # a hard install error.
-                if diagnostics is not None:
-                    diagnostics.warn(
-                        message=(
-                            f"Copilot App live IPC unavailable ({exc}); "
-                            "falling back to direct database write."
-                        ),
-                        package=pkg_name,
-                    )
-
-        # ------------------------------------------------------------------
-        # SQLite fallback path.
-        # ------------------------------------------------------------------
         project_id: str | None = None
         was_created = False
+
         if repo_ctx is not None:
-            try:
-                resolved = resolve_or_register_project_sqlite(db_path, repo_ctx)
-                project_id = resolved.project_id
-                was_created = resolved.was_created
-            except CopilotAppDbError as exc:
-                if diagnostics is not None:
-                    diagnostics.warn(
-                        message=(
-                            f"Could not register project for Copilot App: {exc}. "
-                            "Workflows will be installed without a project binding."
-                        ),
-                        package=pkg_name,
-                    )
+            if ws_available():
+                try:
+                    with WsClient() as client:
+                        project = client.create_project_from_path(repo_ctx.repo_root)
+                    project_id = project.project_id
+                    was_created = project.was_created
+                except WsAppNotRunning:
+                    # Race: ws_available() saw the port files but the
+                    # App closed between probe and handshake. Silent
+                    # fallback -- closed App is the normal off-state.
+                    pass
+                except WsAuthError:
+                    # Stale ``ws.token`` -- most often because the App
+                    # rotated its token at restart. We fall back to
+                    # SQLite silently rather than nag on every install:
+                    # the user-visible signal is already the restart
+                    # hint emitted further down, and the SQLite path
+                    # produces an identical project row.
+                    pass
+                except WsError as exc:
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=(
+                                f"Could not reach the running Copilot App "
+                                f"({exc}). Registering the project directly "
+                                "in the App database instead."
+                            ),
+                            package=pkg_name,
+                        )
+
+            if project_id is None:
+                try:
+                    resolved = resolve_or_register_project_sqlite(db_path, repo_ctx)
+                    project_id = resolved.project_id
+                    was_created = resolved.was_created
+                except CopilotAppDbError as exc:
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=(
+                                f"Could not register project for Copilot App: {exc}. "
+                                "Workflows will be installed without a project binding."
+                            ),
+                            package=pkg_name,
+                        )
 
         if was_created and diagnostics is not None:
             # See github/github-app#5483 -- the App webview does not
@@ -337,6 +346,10 @@ class PromptIntegrator(BaseIntegrator):
                 package=pkg_name,
             )
 
+        # ------------------------------------------------------------------
+        # Workflow rows -- always SQLite, regardless of project source.
+        # Keeps lockfile ids namespaced and stable.
+        # ------------------------------------------------------------------
         synthetic_root = db_path.parent / "workflows"
         files_integrated = 0
         target_paths: list[Path] = []
@@ -370,90 +383,6 @@ class PromptIntegrator(BaseIntegrator):
                 continue
             files_integrated += 1
             target_paths.append(synthetic_root / wf_id)
-
-        return IntegrationResult(
-            files_integrated=files_integrated,
-            files_updated=0,
-            files_skipped=files_skipped,
-            target_paths=target_paths,
-            links_resolved=0,
-            files_adopted=0,
-        )
-
-    def _deploy_via_ws(
-        self,
-        *,
-        repo_ctx,
-        parsed: list,
-        pkg_name: str,
-        owner: str,
-        files_skipped: int,
-        diagnostics,
-        db_path: Path,
-    ) -> IntegrationResult:
-        """Deploy workflow rows through the live App's WS-IPC surface.
-
-        The App generates its own UUIDs for both the project and each
-        workflow; we do NOT use ``namespaced_id`` here. Lockfile
-        bookkeeping still uses the same ``copilot-app-db://workflows/``
-        scheme so uninstall + sync stays consistent regardless of which
-        path created the row -- the id is opaque to the rest of APM.
-        """
-        from apm_cli.integration.copilot_app_db import (
-            WorkflowRow,
-            deploy_workflow,
-            namespaced_id,
-        )
-        from apm_cli.integration.copilot_app_ws import WsClient
-
-        repo_suffix = f" ({repo_ctx.repo_name})"
-        synthetic_root = db_path.parent / "workflows"
-        files_integrated = 0
-        target_paths: list[Path] = []
-
-        with WsClient() as client:
-            try:
-                project = client.create_project_from_path(repo_ctx.repo_root)
-            except Exception:
-                raise
-
-            if project.was_created and diagnostics is not None:
-                diagnostics.info(
-                    message=(
-                        "Registered a new Copilot App project for this repo. "
-                        "If the Workflows tab does not refresh, restart the App once "
-                        "(see github/github-app#5483)."
-                    ),
-                    package=pkg_name,
-                )
-
-            # The App generates row UUIDs server-side, but we ALSO write
-            # a namespaced row via the SQLite path so the lockfile keeps
-            # a stable, predictable id. We do the SQLite write here
-            # (same db_path the App opens) -- the App's row and ours
-            # coexist; uninstall removes ours by id. This avoids the
-            # "WS path breaks namespacing" problem flagged in the plan.
-            for source_file, post, schedule in parsed:
-                prompt_stem = source_file.name.removesuffix(".prompt.md")
-                wf_id = namespaced_id(owner, pkg_name, prompt_stem)
-                base_name = post.metadata.get("name") or prompt_stem
-                display_name = f"{base_name}{repo_suffix}"
-                row = WorkflowRow(
-                    id=wf_id,
-                    name=str(display_name),
-                    prompt=post.content,
-                    interval=schedule.interval,
-                    schedule_hour=schedule.schedule_hour,
-                    schedule_day=schedule.schedule_day,
-                    enabled=0,
-                    model=schedule.model,
-                    reasoning_effort=schedule.reasoning_effort,
-                    mode=schedule.mode,
-                    project_id=project.project_id,
-                )
-                deploy_workflow(db_path, row)
-                files_integrated += 1
-                target_paths.append(synthetic_root / wf_id)
 
         return IntegrationResult(
             files_integrated=files_integrated,

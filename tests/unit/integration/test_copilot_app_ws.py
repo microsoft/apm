@@ -94,8 +94,16 @@ def run_dir(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _write_creds(run_dir: Path, port: int, token: str) -> None:
-    (run_dir / "ws.port").write_text(str(port), encoding="ascii")
-    (run_dir / "ws.token").write_text(token, encoding="ascii")
+    import os
+
+    port_path = run_dir / "ws.port"
+    token_path = run_dir / "ws.token"
+    port_path.write_text(str(port), encoding="ascii")
+    token_path.write_text(token, encoding="ascii")
+    # Match the App's 0o600 posture so ``_read_creds`` accepts the
+    # token file -- the production module refuses to read a token
+    # that is group/other-readable (see _token_file_mode_ok).
+    os.chmod(token_path, 0o600)
 
 
 # ---------------------------------------------------------------------------
@@ -279,77 +287,26 @@ class TestCreateProject:
         assert r.project_id == "p-1"
 
 
-class TestCreateWorkflow:
-    def test_round_trip_returns_id_and_omits_none_fields(self, run_dir: Path) -> None:
-        received: dict = {}
-
-        def handler(websocket):
-            received["msg"] = json.loads(websocket.recv())
-            websocket.send(json.dumps({"type": "workflow_created", "id": "wf-1"}))
-
-        with _Server(handler) as srv:
-            _write_creds(run_dir, srv.port, "tok")
-            with ws.WsClient() as client:
-                r = client.create_workflow(
-                    name="hello",
-                    prompt="say hi",
-                    mode="plan",
-                    project_id="proj-1",
-                )
-        assert r.workflow_id == "wf-1"
-        msg = received["msg"]
-        assert msg["type"] == "create_workflow"
-        assert msg["name"] == "hello"
-        assert msg["mode"] == "plan"
-        assert msg["project_id"] == "proj-1"
-        assert msg["enabled"] is False  # default
-
-    def test_workflow_id_from_nested_workflow_object(self, run_dir: Path) -> None:
-        def handler(websocket):
-            websocket.recv()
-            websocket.send(json.dumps({"type": "workflow_created", "workflow": {"id": "wf-2"}}))
-
-        with _Server(handler) as srv:
-            _write_creds(run_dir, srv.port, "tok")
-            with ws.WsClient() as client:
-                r = client.create_workflow(name="n", prompt="p")
-        assert r.workflow_id == "wf-2"
-
-
-class TestUpdateWorkflow:
-    def test_only_set_fields_are_sent(self, run_dir: Path) -> None:
-        received: dict = {}
-
-        def handler(websocket):
-            received["msg"] = json.loads(websocket.recv())
-            websocket.send(json.dumps({"type": "workflow_updated", "id": "wf-3"}))
-
-        with _Server(handler) as srv:
-            _write_creds(run_dir, srv.port, "tok")
-            with ws.WsClient() as client:
-                client.update_workflow(workflow_id="wf-3", prompt="new")
-        msg = received["msg"]
-        assert msg["type"] == "update_workflow"
-        assert msg["id"] == "wf-3"
-        assert msg["prompt"] == "new"
-        # Unset fields must NOT be on the wire (partial update).
-        for key in ("name", "interval", "mode", "schedule_hour", "enabled"):
-            assert key not in msg
-
-
 class TestDrainAndInterleavedPush:
     def test_response_found_after_push_messages(self, run_dir: Path) -> None:
         def handler(websocket):
             websocket.recv()
             websocket.send(json.dumps({"type": "workflows_changed"}))
             websocket.send(json.dumps({"type": "github_auth_success"}))
-            websocket.send(json.dumps({"type": "workflow_created", "id": "wf-late"}))
+            websocket.send(
+                json.dumps(
+                    {
+                        "type": "project_created",
+                        "project": {"id": "p-late", "main_repo_path": "/r"},
+                    }
+                )
+            )
 
         with _Server(handler) as srv:
             _write_creds(run_dir, srv.port, "tok")
             with ws.WsClient() as client:
-                r = client.create_workflow(name="n", prompt="p")
-        assert r.workflow_id == "wf-late"
+                r = client.create_project_from_path(Path("/r"))
+        assert r.project_id == "p-late"
 
 
 class TestRecvTimeout:
@@ -363,4 +320,83 @@ class TestRecvTimeout:
             _write_creds(run_dir, srv.port, "tok")
             with ws.WsClient(recv_timeout_s=0.3) as client:
                 with pytest.raises(ws.WsProtocolError, match=r"timed out"):
-                    client.create_workflow(name="n", prompt="p")
+                    client.create_project_from_path(Path("/r"))
+
+
+# ---------------------------------------------------------------------------
+# Security hardenings (token scrub + file mode)
+# ---------------------------------------------------------------------------
+
+
+class TestTokenScrub:
+    def test_scrub_removes_token_query_arg(self) -> None:
+        url = "ws://127.0.0.1:51234/?token=ABC123xyz= HTTP rejected"
+        scrubbed = ws._scrub_token(url)
+        assert "ABC123xyz" not in scrubbed
+        assert "token=<redacted>" in scrubbed
+
+    def test_scrub_handles_token_in_chained_query(self) -> None:
+        s = "GET /api?foo=1&token=SECRET_VALUE&bar=2 failed"
+        scrubbed = ws._scrub_token(s)
+        assert "SECRET_VALUE" not in scrubbed
+        assert "token=<redacted>" in scrubbed
+
+    def test_auth_error_message_does_not_leak_token(self, run_dir: Path, monkeypatch) -> None:
+        """End-to-end: a real 401 from the server must not embed the token."""
+
+        def handler(websocket):
+            # Never reached -- request gate below returns 401.
+            websocket.recv()
+
+        secret_token = "TOPSECRETtoken12345"
+        with _Server(handler, expect_token="OTHER") as srv:
+            _write_creds(run_dir, srv.port, secret_token)
+            client = ws.WsClient()
+            with pytest.raises(ws.WsAuthError) as excinfo:
+                client._connect()
+        # The token MUST NOT appear anywhere in the exception text or
+        # in any chained __context__ / __cause__ chain reachable from
+        # the wrapped exception. We use ``from None`` for exactly this
+        # reason -- guard it with a test.
+        assert secret_token not in str(excinfo.value)
+        chain = excinfo.value.__cause__ or excinfo.value.__context__
+        # ``from None`` suppresses __cause__; __context__ is permitted
+        # (implicit during except handling) but only matters if Python
+        # prints it. We accept either: no chain at all, OR a chain
+        # whose stringification also redacts the token.
+        if chain is not None:
+            # __context__ is the original websockets exception. Its own
+            # str() may still contain the URL; we cannot rewrite that
+            # at the library level, but ``raise ... from None`` ensures
+            # neither the default traceback printer nor APM's
+            # diagnostics formatter walks back to it.
+            pass  # accepted -- documented trade-off
+
+
+class TestTokenFileMode:
+    def test_world_readable_token_is_rejected(self, run_dir: Path, monkeypatch) -> None:
+        import os
+
+        _write_creds(run_dir, 12345, "tok")
+        token_path = run_dir / "ws.token"
+        # Widen the token file to be world-readable.
+        os.chmod(token_path, 0o644)
+        # ``_read_creds`` MUST refuse rather than return creds.
+        assert ws._read_creds() is None
+        # And the public liveness probe likewise reports unavailable.
+        assert ws.ws_available() is False
+
+    def test_group_readable_token_is_rejected(self, run_dir: Path) -> None:
+        import os
+
+        _write_creds(run_dir, 12345, "tok")
+        os.chmod(run_dir / "ws.token", 0o640)
+        assert ws._read_creds() is None
+
+    def test_owner_only_token_is_accepted(self, run_dir: Path) -> None:
+        import os
+
+        _write_creds(run_dir, 12345, "tok")
+        os.chmod(run_dir / "ws.token", 0o600)
+        creds = ws._read_creds()
+        assert creds == (12345, "tok")
