@@ -97,8 +97,12 @@ def _dir_size_bytes(path: Path) -> int:
     """Return the total on-disk size of a directory tree in bytes.
 
     Best-effort: silently skips files that disappear or cannot be
-    stat-ed mid-walk (e.g. transient .git lock files). Used only for
-    verbose-mode perf diagnostics (#1433) -- never gates behavior.
+    stat-ed mid-walk (e.g. transient .git lock files). Uses ``lstat``
+    so symlinks contribute the size of the link itself, never the
+    target -- this keeps the measurement bounded to the directory
+    tree and matches :func:`apm_cli.cache.git_cache._dir_size`. Used
+    only for verbose-mode perf diagnostics (#1433) -- never gates
+    behavior.
     """
     total = 0
     try:
@@ -106,7 +110,7 @@ def _dir_size_bytes(path: Path) -> int:
             for fname in filenames:
                 fpath = os.path.join(dirpath, fname)
                 try:
-                    total += os.path.getsize(fpath)
+                    total += os.lstat(fpath).st_size
                 except OSError:
                     continue
     except OSError:

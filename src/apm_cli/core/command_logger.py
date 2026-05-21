@@ -386,14 +386,14 @@ class InstallLogger(CommandLogger):
         dep_name: str,
         cache_state: str,
         sha_short: str = "",
-        sparse_paths: list | None = None,
+        sparse_paths: list[str] | None = None,
     ):
         """Log the start of a subdirectory dep download (verbose only).
 
-        Names the dep, the bare-cache state (``cold`` / ``warm`` /
-        ``persistent``), the resolved SHA (short), and the sparse paths
-        being requested. Surfaces enough state to diagnose a perf
-        regression from one log line.
+        Names the dep, the bare-cache state (e.g. ``cold`` / ``warm`` /
+        ``persistent`` / ``shared-bare``), the resolved SHA (short),
+        and the sparse paths being requested. Surfaces enough state to
+        diagnose a perf regression from one log line.
         """
         if not self.verbose:
             return
@@ -437,7 +437,7 @@ class InstallLogger(CommandLogger):
             color="dim",
         )
 
-    def tier_summary(self, stats: dict):
+    def tier_summary(self, stats: dict[str, int]):
         """Log the tiered ref resolver hit counts (verbose only).
 
         Emitted at the end of the resolve phase so the reader can see

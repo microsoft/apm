@@ -69,7 +69,10 @@ def _variant_key(sparse_paths: list[str] | None) -> str:
     """
     if not sparse_paths:
         return "full"
-    payload = json.dumps(sorted(sparse_paths), separators=(",", ":"))
+    # Deduplicate AND sort so callers passing [a,a] or [a,b]+[b,a]
+    # all collapse to the same variant key (the "set of paths"
+    # semantics the docstring promises).
+    payload = json.dumps(sorted(set(sparse_paths)), separators=(",", ":"))
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
     return f"sparse-{digest}"
 
