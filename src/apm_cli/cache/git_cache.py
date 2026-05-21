@@ -138,9 +138,7 @@ class GitCache:
 
         # Cache miss: ensure we have the bare repo, then create checkout
         self._ensure_bare_repo(url, shard_key, sha, env=env)
-        return self._create_checkout(
-            url, shard_key, sha, env=env, sparse_paths=sparse_paths
-        )
+        return self._create_checkout(url, shard_key, sha, env=env, sparse_paths=sparse_paths)
 
     def _resolve_sha(
         self,

@@ -6,8 +6,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from apm_cli.deps.bare_cache import materialize_from_bare
 
 
@@ -41,9 +39,7 @@ def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
 def test_default_full_tree_materialized(tmp_path: Path):
     bare, sha = _build_local_bare_repo(tmp_path)
     consumer = tmp_path / "consumer"
-    resolved = materialize_from_bare(
-        bare, consumer, ref=None, env=os.environ.copy(), known_sha=sha
-    )
+    resolved = materialize_from_bare(bare, consumer, ref=None, env=os.environ.copy(), known_sha=sha)
     assert resolved == sha
     assert (consumer / "plugins" / "f.txt").is_file()
     assert (consumer / "tools" / "f.txt").is_file()

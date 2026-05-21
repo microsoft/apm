@@ -42,6 +42,8 @@ DEFAULT_DEP = (
 APM_YML_TEMPLATE = """\
 name: perf-harness
 version: 0.0.0
+targets:
+  - copilot
 dependencies:
   apm:
     - {dep}
@@ -75,6 +77,29 @@ def _fmt_bytes(n: int) -> str:
 
 def _wipe_cache_root() -> None:
     root = get_cache_root()
+    if not root.exists():
+        return
+
+    def _chmod_writable(_func, path, _exc):
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            pass
+
+    # First pass: re-grant write to any dirs the cache chmod'd to 0o700
+    # (or chmod 0o500 on parent dirs after some failure mode).
+    for r, dirs, files in os.walk(root):
+        for d in dirs:
+            try:
+                os.chmod(Path(r) / d, 0o700)
+            except OSError:
+                pass
+        for f in files:
+            try:
+                os.chmod(Path(r) / f, 0o600)
+            except OSError:
+                pass
+    shutil.rmtree(root, onerror=_chmod_writable)
     if root.exists():
         shutil.rmtree(root, ignore_errors=True)
 
@@ -90,11 +115,9 @@ def _largest_subdir(parent: Path | None) -> Path | None:
 
 def _run_install(project_dir: Path) -> float:
     env = os.environ.copy()
-    apm_bin = shutil.which("apm")
-    if apm_bin is None:
-        cmd = ["uv", "run", "apm", "install", "--verbose"]
-    else:
-        cmd = [apm_bin, "install", "--verbose"]
+    # Always use `uv run apm` from this repo's root so we exercise the
+    # current worktree's apm, NOT a stale system-installed apm.
+    cmd = ["uv", "run", "--project", str(ROOT), "apm", "install", "--verbose"]
 
     start = time.monotonic()
     result = subprocess.run(
@@ -128,10 +151,18 @@ def _measure(project_dir: Path) -> dict:
     co_sha = _largest_subdir(co_shard)
     co_variant = _largest_subdir(co_sha)
 
+    # On baseline layout, <sha>/ IS the checkout (no variant subdir).
+    # On the new layout, <sha>/<variant>/ holds the working tree.
+    # Report the deepest non-empty directory whose total size is the
+    # actual on-disk consumer materialization cost.
+    sha_total = _dir_size_bytes(co_sha)
+    variant_total = _dir_size_bytes(co_variant)
+
     return {
         "wall_time": elapsed,
         "bare_bytes": _dir_size_bytes(db_shard),
-        "checkouts_shard_bytes": _dir_size_bytes(co_variant),
+        "checkout_sha_bytes": sha_total,
+        "checkout_variant_bytes": variant_total,
         "checkouts_variant": co_variant.name if co_variant else "(none)",
         "apm_modules_bytes": _dir_size_bytes(project_dir / "apm_modules"),
     }
@@ -178,9 +209,14 @@ def main() -> int:
             f"{_fmt_bytes(warm['bare_bytes']):>15}"
         )
         print(
-            f"{'checkouts shard (variant)':<28} "
-            f"{_fmt_bytes(cold['checkouts_shard_bytes']):>15} "
-            f"{_fmt_bytes(warm['checkouts_shard_bytes']):>15}"
+            f"{'checkouts sha-dir total':<28} "
+            f"{_fmt_bytes(cold['checkout_sha_bytes']):>15} "
+            f"{_fmt_bytes(warm['checkout_sha_bytes']):>15}"
+        )
+        print(
+            f"{'  variant subdir (if any)':<28} "
+            f"{_fmt_bytes(cold['checkout_variant_bytes']):>15} "
+            f"{_fmt_bytes(warm['checkout_variant_bytes']):>15}"
         )
         print(f"  variant name (cold): {cold['checkouts_variant']}")
         print(f"  variant name (warm): {warm['checkouts_variant']}")

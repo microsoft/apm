@@ -19,6 +19,7 @@ This is the first phase of the install pipeline.  It covers:
 from __future__ import annotations
 
 import builtins
+import contextlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -526,8 +527,6 @@ def run(ctx: InstallContext) -> None:
     if ctx.logger is not None and ctx.ref_resolver is not None:
         _tier_stats = getattr(ctx.ref_resolver, "stats", None)
         if _tier_stats:
-            try:
+            # tier_summary is install-only; other loggers degrade silently.
+            with contextlib.suppress(AttributeError, TypeError):
                 ctx.logger.tier_summary(_tier_stats)
-            except (AttributeError, TypeError):
-                # tier_summary is install-only; other loggers degrade silently.
-                pass

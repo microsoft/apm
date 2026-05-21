@@ -1155,9 +1155,9 @@ class GitHubPackageDownloader:
                 # WS3: persistent cache hit -- use the cached checkout directly.
                 temp_clone_path = _persistent_checkout
                 if _perf_logger is not None:
-                    _sha_short = (ref or "")[:12] if ref and re.match(
-                        r"^[a-f0-9]{7,40}$", ref
-                    ) else ""
+                    _sha_short = (
+                        (ref or "")[:12] if ref and re.match(r"^[a-f0-9]{7,40}$", ref) else ""
+                    )
                     _perf_logger.subdir_download_start(
                         _dep_display,
                         cache_state="persistent",

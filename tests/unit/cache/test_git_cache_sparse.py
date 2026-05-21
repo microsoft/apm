@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -53,9 +52,7 @@ def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
     work = tmp_path / "work"
     work.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
-    subprocess.run(
-        ["git", "-C", str(work), "config", "user.email", "t@e"], check=True
-    )
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@e"], check=True)
     subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True)
 
     for sub in ("alpha", "beta", "gamma"):
@@ -63,9 +60,7 @@ def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
         d.mkdir()
         (d / "file.txt").write_text(f"{sub}\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(work), "add", "."], check=True)
-    subprocess.run(
-        ["git", "-C", str(work), "commit", "-q", "-m", "init"], check=True
-    )
+    subprocess.run(["git", "-C", str(work), "commit", "-q", "-m", "init"], check=True)
     sha = subprocess.run(
         ["git", "-C", str(work), "rev-parse", "HEAD"],
         check=True,
@@ -74,9 +69,7 @@ def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
     ).stdout.strip()
 
     bare = tmp_path / "bare.git"
-    subprocess.run(
-        ["git", "clone", "-q", "--bare", str(work), str(bare)], check=True
-    )
+    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
     return bare, sha
 
 
@@ -102,9 +95,7 @@ class TestGetCheckoutLayout:
         cache = GitCache(cache_root)
 
         url = f"file://{bare}"
-        result = cache.get_checkout(
-            url, "main", locked_sha=sha, sparse_paths=["alpha"]
-        )
+        result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
         assert result.name.startswith("sparse-")
         assert result.parent.name == sha
         assert (result / "alpha" / "file.txt").is_file()
@@ -119,9 +110,7 @@ class TestGetCheckoutLayout:
 
         url = f"file://{bare}"
         full = cache.get_checkout(url, "main", locked_sha=sha)
-        sparse = cache.get_checkout(
-            url, "main", locked_sha=sha, sparse_paths=["alpha"]
-        )
+        sparse = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
         # Both live under same SHA parent, different variant subdirs.
         assert full.parent == sparse.parent
         assert full != sparse
