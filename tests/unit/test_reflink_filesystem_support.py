@@ -180,6 +180,9 @@ class TestCloneMacos:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Linux-only: fcntl module not available on Windows"
+)
 class TestCloneLinux:
     def test_success(self, tmp_path):
         import apm_cli.utils.reflink as rl

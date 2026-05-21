@@ -248,6 +248,46 @@ class MCPClientAdapter(ABC):
 
         return ""
 
+    @classmethod
+    def _select_best_package(cls, packages):
+        """Select the best package for installation from available packages.
+
+        Prioritizes packages in order: npm, docker, pypi, homebrew, others.
+        Uses ``_infer_registry_name`` so selection works even when the
+        registry API returns empty ``registry_name``.
+
+        Args:
+            packages (list): List of package dictionaries.
+
+        Returns:
+            dict: Best package to use, or None if no suitable package found.
+        """
+        priority_order = ["npm", "docker", "pypi", "homebrew"]
+
+        for target in priority_order:
+            for package in packages:
+                if cls._infer_registry_name(package) == target:
+                    return package
+
+        # If no priority package found, return the first one
+        return packages[0] if packages else None
+
+    @staticmethod
+    def _select_remote_with_url(remotes):
+        """Return the first remote entry that has a non-empty URL.
+
+        Args:
+            remotes (list): Candidate remote entries from the registry.
+
+        Returns:
+            dict or None: The first usable remote, or None if none qualify.
+        """
+        for remote in remotes:
+            url = (remote.get("url") or "").strip()
+            if url:
+                return remote
+        return None
+
     @staticmethod
     def _warn_input_variables(mapping, server_name, runtime_label):
         """Emit a warning for each ``${input:...}`` reference found in *mapping*.
@@ -541,6 +581,16 @@ class MCPClientAdapter(ABC):
             processed = runtime_pattern.sub(_replace_runtime, processed)
 
         return processed
+
+    def _resolve_env_placeholders(self, value, resolved_env):
+        """Legacy thin wrapper for backward compatibility.
+
+        Kept because external callers and the phase-3 test suite invoke
+        the pre-#1277 name. Delegates to ``_resolve_variable_placeholders``
+        with an empty ``runtime_vars`` map. New code should call
+        ``_resolve_variable_placeholders`` directly.
+        """
+        return self._resolve_variable_placeholders(value, resolved_env, {})
 
     # ------------------------------------------------------------------
     # Shared server-info helpers (used by all adapter subclasses)

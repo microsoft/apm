@@ -104,7 +104,7 @@ class TestAtomicWriteText:
         target = tmp_path / "new_file.txt"
         assert not target.exists()
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod") as mock_fchmod:
+        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
             with patch("apm_cli.utils.atomic_io.hasattr", return_value=True):
                 atomic_write_text(target, "data", new_file_mode=0o600)
 
@@ -117,7 +117,7 @@ class TestAtomicWriteText:
         target = tmp_path / "existing.txt"
         target.write_text("existing", encoding="utf-8")
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod") as mock_fchmod:
+        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
             atomic_write_text(target, "data", new_file_mode=0o600)
 
         mock_fchmod.assert_not_called()
@@ -126,7 +126,7 @@ class TestAtomicWriteText:
         """fchmod is NOT called when new_file_mode is None."""
         target = tmp_path / "out.txt"
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod") as mock_fchmod:
+        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
             atomic_write_text(target, "data", new_file_mode=None)
 
         mock_fchmod.assert_not_called()

@@ -208,7 +208,11 @@ class TestConfigureMcpServer:
 
     def test_returns_false_for_remote_only_server(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
-        server_info = {"remotes": [{"url": "https://example.com/sse"}], "packages": []}
+        # SSE transport is rejected by Codex (streamable-http only).
+        server_info = {
+            "remotes": [{"url": "https://example.com/sse", "transport_type": "sse"}],
+            "packages": [],
+        }
         with patch.object(adapter, "_fetch_server_info", return_value=server_info):
             result = adapter.configure_mcp_server("owner/remote-server")
         assert result is False

@@ -3051,6 +3051,21 @@ class TestIssue1007Fixes:
             (hooks_dir / filename).write_text(json.dumps(data), encoding="utf-8")
         return _make_package_info(pkg_dir, pkg_name)
 
+    def _make_pkg_at(
+        self,
+        project: Path,
+        relative_path: str,
+        pkg_name: str,
+        hook_files: dict,
+    ) -> PackageInfo:
+        """Create a package below apm_modules at a specific relative path."""
+        pkg_dir = project / "apm_modules" / Path(relative_path)
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        for filename, data in hook_files.items():
+            (hooks_dir / filename).write_text(json.dumps(data), encoding="utf-8")
+        return _make_package_info(pkg_dir, pkg_name)
+
     def _read_claude_settings(self, project: Path) -> dict:
         """Return parsed .claude/settings.json (or empty dict if absent)."""
         path = project / ".claude" / "settings.json"
@@ -3058,12 +3073,88 @@ class TestIssue1007Fixes:
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def _read_claude_sidecar(self, project: Path) -> dict:
+        """Return parsed .claude/apm-hooks.json sidecar (or empty dict if absent)."""
+        path = project / ".claude" / "apm-hooks.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _claude_sources(self, project: Path, event: str) -> list[str]:
+        """Return _apm_source markers for an event, ordered by settings.json entries.
+
+        Schema-strict Claude stores ownership in apm-hooks.json sidecar; match each
+        settings.json entry by content to its sidecar twin so order is preserved.
+        """
+        entries = self._read_claude_settings(project).get("hooks", {}).get(event, [])
+        sidecar_entries = self._read_claude_sidecar(project).get(event, [])
+        pool = list(sidecar_entries)
+        sources: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            cmp = {k: v for k, v in entry.items() if k != "_apm_source"}
+            match_idx = None
+            for idx, sc in enumerate(pool):
+                if not isinstance(sc, dict):
+                    continue
+                sc_cmp = {k: v for k, v in sc.items() if k != "_apm_source"}
+                if sc_cmp == cmp:
+                    match_idx = idx
+                    break
+            if match_idx is not None:
+                sources.append(pool.pop(match_idx).get("_apm_source"))
+        return sources
+
     def _read_cursor_hooks(self, project: Path) -> dict:
         """Return parsed .cursor/hooks.json (or empty dict if absent)."""
         path = project / ".cursor" / "hooks.json"
         if not path.exists():
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def _read_codex_hooks(self, project: Path) -> dict:
+        """Return parsed .codex/hooks.json (or empty dict if absent)."""
+        path = project / ".codex" / "hooks.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _make_root_local_pkg(
+        self,
+        project: Path,
+        *,
+        manifest_name: str = "sample-project",
+        hook_data: dict | None = None,
+    ) -> PackageInfo:
+        """Create root .apm hook content plus apm.yml metadata."""
+        if hook_data is None:
+            hook_data = {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "bash .codex/hooks/pre-push-review.sh",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        (project / "apm.yml").write_text(
+            f"name: {manifest_name}\nversion: 0.0.0\n",
+            encoding="utf-8",
+        )
+        hooks_dir = project / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "pre-push-review.json").write_text(
+            json.dumps(hook_data),
+            encoding="utf-8",
+        )
+        return _make_package_info(project, project.name)
 
     # ------------------------------------------------------------------
     # Group A: Target-aware file routing
@@ -3544,6 +3635,466 @@ class TestIssue1007Fixes:
         assert len(entries) == 2, (
             f"Cross-package identical entries must both be present; got {len(entries)}"
         )
+
+    def test_root_local_source_uses_manifest_name(self, temp_project: Path) -> None:
+        """Root .apm hooks use stable apm.yml metadata, not checkout basename."""
+        manifest_name = f"{temp_project.name}-manifest"
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name=manifest_name)
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == [f"_local/{manifest_name}"]
+
+    def test_root_local_heals_stale_source_in_claude_settings(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Root .apm reinstall removes same-content entries from old checkout sources."""
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "bash .codex/hooks/pre-push-review.sh",
+                                    }
+                                ],
+                                "_apm_source": "suspicious-bardeen-e50cf8",
+                            },
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": "echo user-owned"}],
+                            },
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["_local/sample-project"]
+        # settings.json must retain both the managed entry and the user-owned hook
+        assert len(entries) == 2
+        user_owned = [e for e in entries if e["hooks"][0]["command"] == "echo user-owned"]
+        assert len(user_owned) == 1
+
+    def test_root_local_heals_stale_source_in_codex_hooks(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Codex merged hooks get the same stale root-source healing."""
+        (temp_project / ".codex").mkdir()
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
+        hooks_path = temp_project / ".codex" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "bash .codex/hooks/pre-push-review.sh",
+                                    }
+                                ],
+                                "_apm_source": "suspicious-bardeen-e50cf8",
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_codex(pkg_info, temp_project)
+
+        entries = self._read_codex_hooks(temp_project)["hooks"]["PreToolUse"]
+        assert len(entries) == 1
+        assert entries[0]["_apm_source"] == "_local/sample-project"
+
+    def test_root_local_healer_preserves_dependency_source_entries(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Same-content dependency hooks are not mistaken for stale root hooks."""
+        hook_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bash .codex/hooks/pre-push-review.sh",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="sample-project",
+            hook_data=hook_data,
+        )
+        dep_info = self._make_pkg(temp_project, "dep-hooks", {"hooks.json": hook_data})
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(dep_info, temp_project)
+
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["hooks"]["PreToolUse"].append(
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bash .codex/hooks/pre-push-review.sh",
+                    }
+                ],
+                "_apm_source": "suspicious-bardeen-e50cf8",
+            }
+        )
+        settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+        integrator.integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["dep-hooks", "_local/sample-project"]
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            "owner/dep-hooks",
+            "org/project/dep-hooks",
+            "owner/repo/collections/dep-hooks",
+            "org/project/repo/collections/dep-hooks",
+            "owner/repo/.apm/skills/dep-hooks",
+            "_local/dep-hooks",
+        ],
+    )
+    def test_root_local_healer_preserves_bounded_dependency_layouts(
+        self,
+        temp_project: Path,
+        relative_path: str,
+    ) -> None:
+        """Bounded dependency scans preserve known package root layouts."""
+        hook_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bash .codex/hooks/pre-push-review.sh",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="sample-project",
+            hook_data=hook_data,
+        )
+        dep_info = self._make_pkg_at(
+            temp_project,
+            relative_path,
+            "dep-hooks",
+            {"hooks.json": hook_data},
+        )
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(dep_info, temp_project)
+
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["hooks"]["PreToolUse"].append(
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bash .codex/hooks/pre-push-review.sh",
+                    }
+                ],
+                "_apm_source": "stale-root-name",
+            }
+        )
+        settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+        integrator.integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["dep-hooks", "_local/sample-project"]
+
+    def test_dependency_hook_sources_uses_lockfile_paths(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Readable lockfiles provide exact dependency roots without broad scans."""
+        pkg_dir = temp_project / "apm_modules" / "owner" / "repo" / "collections" / "dep-hooks"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: dep-hooks\n", encoding="utf-8")
+        (temp_project / "apm.lock.yaml").write_text(
+            "\n".join(
+                [
+                    'lockfile_version: "1"',
+                    "dependencies:",
+                    "  - repo_url: owner/repo",
+                    "    virtual_path: collections/dep-hooks",
+                    "    is_virtual: true",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+
+    def test_dependency_hook_sources_rejects_lockfile_symlink_root(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Lockfile dependency roots do not follow symlink package roots."""
+        real_pkg = temp_project / "apm_modules" / "owner" / "real-dep"
+        real_pkg.mkdir(parents=True)
+        (real_pkg / "apm.yml").write_text("name: real-dep\n", encoding="utf-8")
+        link_pkg = temp_project / "apm_modules" / "owner" / "link-dep"
+        try:
+            link_pkg.symlink_to(real_pkg, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+        (temp_project / "apm.lock.yaml").write_text(
+            "\n".join(
+                [
+                    'lockfile_version: "1"',
+                    "dependencies:",
+                    "  - repo_url: owner/link-dep",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_dependency_hook_sources_falls_back_when_lockfile_paths_are_invalid(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Invalid lockfile paths do not disable bounded fallback discovery."""
+        pkg_dir = temp_project / "apm_modules" / "owner" / "dep-hooks"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: dep-hooks\n", encoding="utf-8")
+        (temp_project / "apm.lock.yaml").write_text(
+            "\n".join(
+                [
+                    'lockfile_version: "1"',
+                    "dependencies:",
+                    "  - repo_url: owner/repo",
+                    "    virtual_path: ../bad",
+                    "    is_virtual: true",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+
+    def test_bounded_dependency_scan_stops_at_package_root(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Nested package content below a package root is not a dependency source."""
+        root_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
+        package_root = temp_project / "apm_modules" / "owner" / "repo"
+        package_root.mkdir(parents=True)
+        (package_root / "apm.yml").write_text("name: repo\n", encoding="utf-8")
+        nested_skill = package_root / "tools" / "deep-skill"
+        nested_skill.mkdir(parents=True)
+        (nested_skill / "SKILL.md").write_text("# Deep Skill\n", encoding="utf-8")
+
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "bash .codex/hooks/pre-push-review.sh",
+                                    }
+                                ],
+                                "_apm_source": "deep-skill",
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["_local/sample-project"]
+
+    def test_bounded_dependency_scan_ignores_unrecognized_nested_markers(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Fallback discovery does not scan arbitrary package internals."""
+        nested = (
+            temp_project / "apm_modules" / "owner" / "repo" / "tests" / "fixtures" / "dep-hooks"
+        )
+        nested.mkdir(parents=True)
+        (nested / "SKILL.md").write_text("# Fixture Skill\n", encoding="utf-8")
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_bounded_dependency_scan_rejects_symlinked_namespace(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Fallback discovery does not follow namespace symlinks."""
+        repo_root = temp_project / "apm_modules" / "owner" / "repo"
+        repo_root.mkdir(parents=True)
+        outside = temp_project / "outside" / "dep-hooks"
+        outside.mkdir(parents=True)
+        (outside / "SKILL.md").write_text("# External Skill\n", encoding="utf-8")
+        try:
+            (repo_root / "collections").symlink_to(outside.parent, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_bounded_dependency_scan_rejects_symlinked_marker(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Fallback discovery does not accept symlinked package markers."""
+        package_root = temp_project / "apm_modules" / "owner" / "repo" / "collections" / "dep-hooks"
+        package_root.mkdir(parents=True)
+        outside_hooks = temp_project / "outside" / "hooks"
+        outside_hooks.mkdir(parents=True)
+        try:
+            (package_root / "hooks").symlink_to(outside_hooks, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_root_local_source_marker_does_not_collide_with_dependency_name(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Root source markers are namespaced even when apm.yml matches a dependency."""
+        hook_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo shared"}],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="matching-dep",
+            hook_data=hook_data,
+        )
+        dep_info = self._make_pkg(temp_project, "matching-dep", {"hooks.json": hook_data})
+
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(dep_info, temp_project)
+        integrator.integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["matching-dep", "_local/matching-dep"]
+
+    def test_root_local_heals_stale_source_for_multiple_hook_files_same_event(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Stale-source healing applies to every root hook file for an event."""
+        first = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo first"}],
+                    }
+                ]
+            }
+        }
+        second = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo second"}],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="sample-project",
+            hook_data=first,
+        )
+        (temp_project / ".apm" / "hooks" / "z-second.json").write_text(
+            json.dumps(second),
+            encoding="utf-8",
+        )
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": "echo second"}],
+                                "_apm_source": "old-root-name",
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(root_info, temp_project)
+
+        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
+        commands = [e["hooks"][0]["command"] for e in entries if isinstance(e, dict)]
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert commands == ["echo first", "echo second"]
+        assert sources == ["_local/sample-project", "_local/sample-project"]
 
     def test_reinstall_clears_aliased_events(self, temp_project: Path) -> None:
         """Re-integration removes stale postToolUse (camelCase) aliases.
