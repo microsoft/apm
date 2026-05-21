@@ -535,16 +535,3 @@ class CodexClientAdapter(MCPClientAdapter):
                         result.extend(["-e", env_name])
 
         return result
-
-    @staticmethod
-    def _select_remote_with_url(remotes):
-        """Return the first remote entry that has a non-empty URL.
-
-        Returns:
-            dict or None: The first usable remote, or None if none qualify.
-        """
-        for remote in remotes:
-            url = (remote.get("url") or "").strip()
-            if url:
-                return remote
-        return None

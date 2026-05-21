@@ -273,6 +273,22 @@ class MCPClientAdapter(ABC):
         return packages[0] if packages else None
 
     @staticmethod
+    def _select_remote_with_url(remotes):
+        """Return the first remote entry that has a non-empty URL.
+
+        Args:
+            remotes (list): Candidate remote entries from the registry.
+
+        Returns:
+            dict or None: The first usable remote, or None if none qualify.
+        """
+        for remote in remotes:
+            url = (remote.get("url") or "").strip()
+            if url:
+                return remote
+        return None
+
+    @staticmethod
     def _warn_input_variables(mapping, server_name, runtime_label):
         """Emit a warning for each ``${input:...}`` reference found in *mapping*.
 

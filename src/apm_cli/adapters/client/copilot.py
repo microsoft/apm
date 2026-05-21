@@ -991,22 +991,6 @@ class CopilotClientAdapter(MCPClientAdapter):
 
         return processed
 
-    @staticmethod
-    def _select_remote_with_url(remotes):
-        """Return the first remote entry that has a non-empty URL.
-
-        Args:
-            remotes (list): Candidate remote entries from the registry.
-
-        Returns:
-            dict or None: The first usable remote, or None if none qualify.
-        """
-        for remote in remotes:
-            url = (remote.get("url") or "").strip()
-            if url:
-                return remote
-        return None
-
     def _is_github_server(self, server_name, url):
         """Securely determine if a server is a GitHub MCP server.
 
