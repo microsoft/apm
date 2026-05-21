@@ -166,6 +166,7 @@ class TestTargetProfileUserScope:
             "gemini",
             "windsurf",
             "copilot-cowork",
+            "copilot-app",
             "agent-skills",
         }
         assert set(KNOWN_TARGETS.keys()) == expected

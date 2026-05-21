@@ -243,6 +243,25 @@ When adding a new precondition, add an entry to `_MARKER_CHECKS` and
 declare the marker in `pyproject.toml`; that is the only place the
 precondition needs to live.
 
+### Coverage policy
+
+Both suites enforce a hard coverage gate in CI. A PR that drops
+coverage below the gate cannot merge.
+
+| Suite       | Gate | Enforced in |
+|-------------|------|-------------|
+| Unit        | 80%  | `pyproject.toml` (`fail_under`) |
+| Integration | 70%  | `.github/workflows/ci-integration.yml` (`--fail-under`) |
+
+**Ratchet rule.** Gates only move upward. When actual coverage
+exceeds the gate by 5 or more percentage points, raise the gate to
+`actual - 3` in the next release PR.
+
+**Finding low-coverage files.** Every CI run publishes a
+"Lowest-coverage files" collapsible section in the job summary
+(rendered by `scripts/coverage-summary.py`). Check there to see
+which files would benefit most from new tests.
+
 ## Coding Style
 
 This project follows:

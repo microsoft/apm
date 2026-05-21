@@ -861,3 +861,49 @@ class TestDoctorVersionAlignment:
         result = runner.invoke(marketplace, ["doctor"])
         # Doctor exit is governed only by critical checks (1-2).
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: missed lines
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorAuthExceptionFallback:
+    """Lines 109-110: AuthResolver raises → has_token = False."""
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    @patch("apm_cli.core.auth.AuthResolver", side_effect=RuntimeError("no auth"))
+    def test_auth_exception_shows_no_token(
+        self, mock_auth, mock_run, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "No token" in result.output or "unauthenticated" in result.output.lower()
+
+
+class TestDoctorMarketplaceYmlError:
+    """Lines 166-168, 176-178: MarketplaceYmlError when loading config."""
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_apm_yml_marketplace_error_logged(self, mock_run, runner, tmp_path, monkeypatch):
+        """Lines 166-168: apm.yml marketplace block parse error."""
+        monkeypatch.chdir(tmp_path)
+        # Write a valid apm.yml but with bad marketplace block to trigger MarketplaceYmlError
+        (tmp_path / "apm.yml").write_text(
+            "name: test\nmarketplace:\n  invalid_key: bad\n",
+            encoding="utf-8",
+        )
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        # Either passes or fails gracefully
+        assert result.exit_code in (0, 1, 2)

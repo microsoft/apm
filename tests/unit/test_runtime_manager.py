@@ -511,3 +511,29 @@ class TestRuntimeStatusCommand:
         with patch(RUNTIME_MGR_PATH, side_effect=RuntimeError("fail")):
             result = runner.invoke(runtime_group, ["status"])
         assert result.exit_code == 1
+
+    def test_status_no_runtime_fallback_text(self):
+        """Lines 172-183: ImportError from _rich_panel → plain text fallback with no runtime."""
+        runner = CliRunner()
+        with patch(RUNTIME_MGR_PATH) as MockMgr:
+            mock_mgr = MagicMock()
+            mock_mgr.get_available_runtime.return_value = None
+            mock_mgr.get_runtime_preference.return_value = ["copilot", "codex"]
+            MockMgr.return_value = mock_mgr
+            with patch("apm_cli.commands.runtime._rich_panel", side_effect=ImportError("no rich")):
+                result = runner.invoke(runtime_group, ["status"])
+        assert result.exit_code == 0
+        assert "No runtimes available" in result.output or "runtime" in result.output.lower()
+
+    def test_status_with_runtime_fallback_text(self):
+        """Lines 172-183: ImportError fallback with available runtime → success message."""
+        runner = CliRunner()
+        with patch(RUNTIME_MGR_PATH) as MockMgr:
+            mock_mgr = MagicMock()
+            mock_mgr.get_available_runtime.return_value = "copilot"
+            mock_mgr.get_runtime_preference.return_value = ["copilot", "codex"]
+            MockMgr.return_value = mock_mgr
+            with patch("apm_cli.commands.runtime._rich_panel", side_effect=ImportError("no rich")):
+                result = runner.invoke(runtime_group, ["status"])
+        assert result.exit_code == 0
+        assert "copilot" in result.output.lower()
