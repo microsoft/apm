@@ -72,8 +72,8 @@ class TestPortableRelpath:
         unrelated.parent.mkdir(parents=True, exist_ok=True)
         unrelated.touch()
         result = portable_relpath(unrelated, base)
-        # Must be absolute (starts with /)
-        assert result.startswith("/")
+        # Must be absolute (POSIX leading-slash, or Windows drive like "C:/")
+        assert Path(result).is_absolute() or (len(result) >= 2 and result[1] == ":")
         # Must use forward slashes
         assert "\\" not in result
         # Must contain the filename
@@ -110,8 +110,8 @@ class TestPortableRelpath:
         with patch.object(Path, "resolve", patched_resolve):
             result = portable_relpath(child, tmp_path)
 
-        # Falls back to resolved absolute posix
-        assert result.startswith("/")
+        # Falls back to resolved absolute posix (POSIX leading-slash or Windows drive)
+        assert Path(result).is_absolute() or (len(result) >= 2 and result[1] == ":")
         assert "f.txt" in result
 
     # ------------------------------------------------------------------

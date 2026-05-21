@@ -1385,6 +1385,11 @@ def _color_formatter() -> CompilationFormatter:
     f = CompilationFormatter(use_color=True)
     if not f.use_color:
         raise unittest.SkipTest("Rich not available")
+    # Force a wide console so Rich tables don't truncate column contents
+    # under narrow terminals (Windows CI runners default to ~80 cols).
+    from rich.console import Console
+
+    f.console = Console(width=200, force_terminal=False)
     return f
 
 
