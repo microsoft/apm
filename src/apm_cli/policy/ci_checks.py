@@ -160,12 +160,18 @@ def _check_no_orphans(
     manifest: APMPackage,
     lock: LockFile,
 ) -> CheckResult:
-    """Verify no packages in lockfile are absent from manifest."""
+    """Verify no packages in lockfile are absent from manifest.
+
+    Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
+    candidates for orphan detection. Transitive deps belong to a
+    sub-package's manifest, not the root manifest, so the root manifest
+    cannot make them go away by editing its ``dependencies.apm`` list.
+    """
     manifest_keys = {dep.get_unique_key() for dep in manifest.get_apm_dependencies()}
     orphaned = [
         dep_key
-        for dep_key in lock.dependencies
-        if dep_key not in manifest_keys and dep_key != _SELF_KEY
+        for dep_key, locked_dep in lock.dependencies.items()
+        if dep_key not in manifest_keys and dep_key != _SELF_KEY and locked_dep.resolved_by is None
     ]
     if not orphaned:
         return CheckResult(
