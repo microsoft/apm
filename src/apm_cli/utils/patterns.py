@@ -16,8 +16,29 @@ def parse_apply_to(value: str | None) -> list[str]:
     stripped of surrounding whitespace; empty segments are discarded so
     leading, trailing, doubled-up, and lone commas are tolerated.
 
+    Commas inside brace alternation (``{a,b}``) are NOT separators -- only
+    top-level commas split the list.  So ``"**/*.{css,scss},**/*.py"``
+    yields ``["**/*.{css,scss}", "**/*.py"]``.
+
     Returns an empty list for ``None``, empty, or whitespace-only input.
     """
     if not value:
         return []
-    return [segment for segment in (part.strip() for part in value.split(",")) if segment]
+    segments: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for char in value:
+        if char == "{":
+            depth += 1
+            current.append(char)
+        elif char == "}":
+            if depth > 0:
+                depth -= 1
+            current.append(char)
+        elif char == "," and depth == 0:
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    segments.append("".join(current))
+    return [segment for segment in (s.strip() for s in segments) if segment]

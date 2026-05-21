@@ -39,3 +39,19 @@ class TestParseApplyTo:
             "**/api/**",
             "**/services/**",
         ]
+
+    def test_brace_alternation_not_split(self):
+        # Commas inside {...} are glob brace expansion, not list separators.
+        assert parse_apply_to("**/*.{css,scss}") == ["**/*.{css,scss}"]
+
+    def test_brace_alternation_mixed_with_top_level_comma(self):
+        assert parse_apply_to("**/*.{css,scss},**/*.py") == [
+            "**/*.{css,scss}",
+            "**/*.py",
+        ]
+
+    def test_nested_braces(self):
+        assert parse_apply_to("**/{a,{b,c}},**/*.py") == [
+            "**/{a,{b,c}}",
+            "**/*.py",
+        ]
