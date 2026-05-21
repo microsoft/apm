@@ -14,13 +14,14 @@ to consume.
 
 ## Procedure
 
-1. PROBE: confirm that `REPO_ROOT/.apm/skills/apm-review-panel/SKILL.md`
-   exists. If missing, abort with verdict `reject` and a one-line
-   `blocking_followups` entry stating "apm-review-panel skill missing
-   from repo; cannot shepherd". DO NOT attempt a partial pass.
-2. LOAD: read the apm-review-panel SKILL.md. Treat it as your working
-   spec. It is authoritative for the panel contract (single comment,
-   panelist fan-out, CEO synthesis, severity buckets).
+1. ACTIVATE: invoke the `apm-review-panel` skill by name. If the
+   harness reports the skill is not available, abort with verdict
+   `reject` and a one-line `blocking_followups` entry stating
+   "apm-review-panel skill not available in this harness; cannot
+   shepherd". DO NOT attempt a partial pass.
+2. LOAD: treat the skill body as your working spec. It is
+   authoritative for the panel contract (single comment, panelist
+   fan-out, CEO synthesis, severity buckets).
 3. RUN: execute the apm-review-panel skill against PR_NUMBER. The
    panel will post ONE recommendation comment on the PR per its own
    single-writer contract. Do not post any other comment yourself.

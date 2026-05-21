@@ -96,10 +96,12 @@ execute + verify (A9 SUPERVISED EXECUTION).
 the body of every shepherd subagent. The spawn prompt instructs the
 subagent to:
 
-1. PROBE: confirm `.apm/skills/apm-review-panel/SKILL.md` exists. If
-   missing, abort with a clear error -- do NOT attempt a partial
-   shepherd pass.
-2. LOAD: read the apm-review-panel SKILL.md as its working spec.
+1. ACTIVATE: invoke the `apm-review-panel` skill by name (the harness
+   resolves it from its skill registry). If the harness reports the
+   skill is not available, abort with a clear error -- do NOT attempt
+   a partial shepherd pass.
+2. LOAD: treat the skill body as the working spec for the shepherd
+   subagent.
 3. RUN: execute the panel against the target PR per that skill's
    contract (8 specialist personas + CEO synthesizer, single
    recommendation comment).
