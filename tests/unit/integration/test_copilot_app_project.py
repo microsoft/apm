@@ -258,12 +258,23 @@ class TestResolverErrors:
         with pytest.raises(cdb.CopilotAppDbMissingError, match=r"not found"):
             cap.resolve_or_register_project_sqlite(tmp_path / "absent.db", _make_ctx(repo))
 
-    def test_schema_too_new_raises(self, tmp_path: Path) -> None:
+    def test_schema_too_new_warns_and_continues(self, tmp_path: Path, capsys) -> None:
+        """A user_version above the tested max warns but does NOT raise.
+
+        See commit 05ea7780: the Copilot App ships fast and bumps
+        user_version on additive changes that do not break APM's
+        read/write surface, so we warn-and-continue rather than gate
+        every install on an APM release.
+        """
+        cdb._reset_user_version_warning_state()
         bad = _make_db(tmp_path / "newer.db", user_version=999)
         repo = tmp_path / "r"
         repo.mkdir()
-        with pytest.raises(cdb.CopilotAppDbSchemaError):
-            cap.resolve_or_register_project_sqlite(bad, _make_ctx(repo))
+        resolved = cap.resolve_or_register_project_sqlite(bad, _make_ctx(repo))
+        assert resolved.project_id  # resolver still succeeds
+        captured = capsys.readouterr()
+        # Warning surfaces the exact version delta.
+        assert "999" in (captured.out + captured.err)
 
 
 class TestRaceCollisionRecovery:
