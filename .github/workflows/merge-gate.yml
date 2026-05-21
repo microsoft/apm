@@ -126,7 +126,10 @@ jobs:
           # Theoretical worst case ~50m; observed today ~5m end-to-end.
           # Sized at 55m to absorb growth without false-failing the gate.
           TIMEOUT_MIN: '55'
-          POLL_SEC: '30'
+          # 5s poll keeps perceived gate latency low. With ~3 expected checks
+          # per poll = ~36 gh API calls/min, well under the 5000/hr quota.
+          # cancel-in-progress concurrency bounds parallel polling per PR.
+          POLL_SEC: '5'
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh
