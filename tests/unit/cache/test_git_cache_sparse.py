@@ -131,3 +131,102 @@ class TestGetCheckoutLayout:
         assert not (a / "beta").exists()
         assert (b / "beta").is_dir()
         assert not (b / "alpha").exists()
+
+
+class TestPartialBareFlavor:
+    """Partial-clone (perf #1433 follow-up): sparse callers should
+    use the ``__p`` bare flavor and the consumer should be configured
+    as a promisor."""
+
+    def test_sparse_caller_uses_partial_bare_dir(self, tmp_path: Path):
+        bare, sha = _build_local_bare_repo(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        url = f"file://{bare}"
+        cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
+
+        # The partial-flavor bare lives at <shard>__p.
+        bare_root = cache_root / "git" / "db_v1"
+        partial_bares = [p for p in bare_root.iterdir() if p.is_dir() and p.name.endswith("__p")]
+        assert len(partial_bares) == 1
+        full_bares = [p for p in bare_root.iterdir() if p.is_dir() and not p.name.endswith("__p")]
+        assert len(full_bares) == 0
+
+    def test_full_caller_uses_non_partial_bare_dir(self, tmp_path: Path):
+        bare, sha = _build_local_bare_repo(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        url = f"file://{bare}"
+        cache.get_checkout(url, "main", locked_sha=sha)
+
+        bare_root = cache_root / "git" / "db_v1"
+        partial_bares = [p for p in bare_root.iterdir() if p.is_dir() and p.name.endswith("__p")]
+        assert len(partial_bares) == 0
+        full_bares = [p for p in bare_root.iterdir() if p.is_dir() and not p.name.endswith("__p")]
+        assert len(full_bares) == 1
+
+    def test_full_and_sparse_callers_coexist_as_separate_bare_flavors(self, tmp_path: Path):
+        bare, sha = _build_local_bare_repo(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        url = f"file://{bare}"
+        cache.get_checkout(url, "main", locked_sha=sha)
+        cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
+
+        bare_root = cache_root / "git" / "db_v1"
+        names = sorted(p.name for p in bare_root.iterdir() if p.is_dir())
+        assert len(names) == 2
+        assert sum(1 for n in names if n.endswith("__p")) == 1
+        assert sum(1 for n in names if not n.endswith("__p")) == 1
+
+    def test_promisor_config_set_on_sparse_consumer(self, tmp_path: Path):
+        bare, sha = _build_local_bare_repo(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        url = f"file://{bare}"
+        result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
+
+        # Consumer's remote.origin.url must point at the promisor URL,
+        # not the local bare path, so lazy blob fetch can reach upstream.
+        cfg = subprocess.run(
+            ["git", "-C", str(result), "config", "remote.origin.url"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert cfg == url
+        promisor = subprocess.run(
+            ["git", "-C", str(result), "config", "remote.origin.promisor"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert promisor == "true"
+        pfilter = subprocess.run(
+            ["git", "-C", str(result), "config", "remote.origin.partialclonefilter"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert pfilter == "blob:none"
+
+    def test_full_consumer_has_no_promisor_config(self, tmp_path: Path):
+        bare, sha = _build_local_bare_repo(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        url = f"file://{bare}"
+        result = cache.get_checkout(url, "main", locked_sha=sha)
+
+        # Full path: no promisor config; remote.origin.url points at
+        # local bare (default `clone --local` behavior).
+        rc = subprocess.run(
+            ["git", "-C", str(result), "config", "remote.origin.promisor"],
+            capture_output=True,
+            text=True,
+        )
+        assert rc.returncode != 0  # config key not set

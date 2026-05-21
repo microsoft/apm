@@ -1118,9 +1118,20 @@ class GitHubPackageDownloader:
         # Build a canonical URL for cache key derivation.
         _persistent_cache = self.persistent_git_cache
         _persistent_checkout: Path | None = None
+        _resolved_sha_for_cache: str | None = None
         if _persistent_cache is not None:
             _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
             try:
+                # Tiered ref resolution (perf #1433 follow-up): resolve
+                # the ref through the attached TieredRefResolver BEFORE
+                # calling get_checkout so the cache skips its internal
+                # ls-remote. Same pattern as the non-subdir path at
+                # line ~1604 which passes locked_sha=resolved.
+                try:
+                    _resolved = self.resolve_git_reference(dep_ref)
+                    _resolved_sha_for_cache = _resolved.resolved_commit
+                except Exception:
+                    _resolved_sha_for_cache = None
                 # Sparse-cone (#1433): keying the persistent shard by
                 # (sha, subdir) ensures the cached working tree is the
                 # subdir only (<2 MB) instead of the full repo
@@ -1129,7 +1140,8 @@ class GitHubPackageDownloader:
                 # is unchanged so they still share object data.
                 _persistent_checkout = _persistent_cache.get_checkout(
                     _canonical_url,
-                    ref,
+                    _resolved_sha_for_cache or ref,
+                    locked_sha=_resolved_sha_for_cache,
                     env=self._git_env_dict(),
                     sparse_paths=[subdir_path],
                 )

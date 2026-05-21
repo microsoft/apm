@@ -44,6 +44,15 @@ _log = logging.getLogger(__name__)
 # Full SHA pattern: 40 hex characters
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 
+# Partial bare-cache flavor suffix (perf #1433 follow-up).
+# When a caller requests sparse_paths, we use a separate bare keyed at
+# ``<shard>__p`` cloned with ``--filter=blob:none``. The partial bare
+# downloads commits + trees only (~5% of repo size) and acts as a
+# promisor remote; blobs are lazy-fetched at consumer checkout time
+# scoped to the sparse cone. Full and partial bares coexist per URL
+# so legacy full-tree callers keep today's behavior unchanged.
+_PARTIAL_BARE_SUFFIX = "__p"
+
 
 def _variant_key(sparse_paths: list[str] | None) -> str:
     """Return the on-disk variant segment for a checkout shard.
@@ -136,9 +145,20 @@ class GitCache:
                 )
                 self._evict_checkout(checkout_dir)
 
-        # Cache miss: ensure we have the bare repo, then create checkout
-        self._ensure_bare_repo(url, shard_key, sha, env=env)
-        return self._create_checkout(url, shard_key, sha, env=env, sparse_paths=sparse_paths)
+        # Cache miss: ensure we have the bare repo, then create checkout.
+        # Sparse callers use a partial bare (blob:none) + promisor consumer
+        # so only the trees + the blobs reachable from the sparse cone are
+        # downloaded. Full-tree callers keep the legacy non-partial bare.
+        use_partial = bool(sparse_paths)
+        self._ensure_bare_repo(url, shard_key, sha, env=env, partial=use_partial)
+        return self._create_checkout(
+            url,
+            shard_key,
+            sha,
+            env=env,
+            sparse_paths=sparse_paths,
+            promisor_url=url if use_partial else None,
+        )
 
     def _resolve_sha(
         self,
@@ -245,14 +265,28 @@ class GitCache:
         sha: str,
         *,
         env: dict[str, str] | None = None,
+        partial: bool = False,
     ) -> Path:
         """Ensure a bare repo clone exists for the given shard, fetching if needed.
+
+        Args:
+            partial: If True, clone with ``--filter=blob:none`` into a
+                separate ``<shard>__p`` directory so the bare downloads
+                commits + trees only (~5% of full repo size) and acts
+                as a promisor remote for consumer lazy-fetch. Falls
+                back to a full clone in the same directory if the
+                server rejects the filter (older Gerrit / pre-2.20
+                GHE). Falling back leaves the partial-flavor dir with
+                full content; future sparse consumers will simply not
+                trigger any lazy fetch (all blobs already present), so
+                behavior degrades to today's baseline.
 
         Returns the path to the bare repo directory.
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
-        bare_dir = self._db_root / shard_key
+        bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if partial else "")
+        bare_dir = self._db_root / bare_shard
         # Containment guard: defends against pathological shard_key
         # values bypassing the cache root.
         ensure_path_within(bare_dir, self._db_root)
@@ -280,14 +314,22 @@ class GitCache:
             os.chmod(str(staged), 0o700)
 
             subprocess_env = env if env is not None else git_subprocess_env()
+            clone_args = [git_exe, "clone", "--bare"]
+            if partial:
+                # Promisor partial clone: trees + commits only. Blobs
+                # arrive lazily via the remote when the consumer needs
+                # them. Github / modern GHES / ADO support this; older
+                # servers reject it and we retry without --filter.
+                clone_args += ["--filter=blob:none"]
+            clone_args += [url, str(staged)]
             try:
-                # Full bare clone (no --filter): we extract file contents at
-                # checkout time, so all blobs must be present locally.  A
-                # partial clone would leave the working tree empty after
-                # `git clone --local --shared` + `git checkout`, because the
-                # alternates pointer would resolve trees but not blobs.
+                # Full bare clone (or partial when requested above). The
+                # full path extracts file contents at checkout time, so
+                # all blobs must be present locally. The partial path
+                # relies on the consumer being configured as a promisor
+                # so missing blobs trigger an on-demand fetch.
                 subprocess.run(
-                    [git_exe, "clone", "--bare", url, str(staged)],
+                    clone_args,
                     capture_output=True,
                     text=True,
                     timeout=300,
@@ -295,11 +337,53 @@ class GitCache:
                     check=True,
                 )
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-                # Clean up staged on failure
-                from ..utils.file_ops import robust_rmtree
+                # Partial clone fallback: some servers reject --filter
+                # (old Gerrit / pre-2.20 GHE). Retry once without it so
+                # we never block on this optimization. The resulting
+                # bare is full; future sparse consumers find all blobs
+                # locally and skip lazy fetch (degrades to baseline,
+                # no behavior change for the user).
+                fallback_done = False
+                if partial and isinstance(exc, subprocess.CalledProcessError):
+                    _log.warning(
+                        "Partial clone (--filter=blob:none) failed for %s; "
+                        "retrying with full bare clone. Server may not "
+                        "support filter v2.",
+                        _sanitize_url(url),
+                    )
+                    from ..utils.file_ops import robust_rmtree
 
-                robust_rmtree(staged, ignore_errors=True)
-                raise RuntimeError(f"Failed to clone {_sanitize_url(url)}: {exc}") from exc
+                    robust_rmtree(staged, ignore_errors=True)
+                    staged.mkdir(parents=True, exist_ok=True)
+                    os.chmod(str(staged), 0o700)
+                    try:
+                        subprocess.run(
+                            [git_exe, "clone", "--bare", url, str(staged)],
+                            capture_output=True,
+                            text=True,
+                            timeout=300,
+                            env=subprocess_env,
+                            check=True,
+                        )
+                        fallback_done = True
+                    except (
+                        subprocess.CalledProcessError,
+                        subprocess.TimeoutExpired,
+                        OSError,
+                    ) as exc2:
+                        from ..utils.file_ops import robust_rmtree
+
+                        robust_rmtree(staged, ignore_errors=True)
+                        raise RuntimeError(
+                            f"Failed to clone {_sanitize_url(url)} "
+                            f"(partial fallback also failed): {exc2}"
+                        ) from exc2
+                if not fallback_done:
+                    # Clean up staged on failure
+                    from ..utils.file_ops import robust_rmtree
+
+                    robust_rmtree(staged, ignore_errors=True)
+                    raise RuntimeError(f"Failed to clone {_sanitize_url(url)}: {exc}") from exc
 
             # Atomic land (lock is already held; pass it through so the
             # rename completes under the same critical section).
@@ -320,6 +404,7 @@ class GitCache:
         *,
         env: dict[str, str] | None = None,
         sparse_paths: list[str] | None = None,
+        promisor_url: str | None = None,
     ) -> Path:
         """Create a checkout at the specified SHA from the bare repo.
 
@@ -335,6 +420,15 @@ class GitCache:
             coexists with a possible full-tree shard at
             ``.../<sha>/full/`` for the same SHA.
 
+        Partial-clone promisor (perf #1433 follow-up):
+            When ``promisor_url`` is set, the bare lives at
+            ``<shard>__p`` (cloned with ``--filter=blob:none``) and
+            we configure the consumer's ``remote.origin`` to point
+            at the real upstream URL with ``promisor=true`` and
+            ``partialclonefilter=blob:none``. Sparse checkout then
+            lazy-fetches only the blobs reachable from the cone
+            (typically <2 MB instead of the full repo's blob set).
+
         Concurrency / write-deduplication
         ---------------------------------
         Acquires the shard lock BEFORE staging any work. On lock entry
@@ -348,7 +442,8 @@ class GitCache:
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
-        bare_dir = self._db_root / shard_key
+        bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if promisor_url else "")
+        bare_dir = self._db_root / bare_shard
         variant = _variant_key(sparse_paths)
         # New layout: <shard>/<sha>/<variant>/. The <sha> level is the
         # SHA dir (parent to the variant). The <variant> level is what
@@ -407,6 +502,28 @@ class GitCache:
                     env=subprocess_env,
                     check=True,
                 )
+                if promisor_url:
+                    # Configure consumer as a promisor pointing at the
+                    # real upstream URL so missing blobs (the partial
+                    # bare only carries trees) are lazy-fetched during
+                    # checkout. Without this, ``git checkout`` would
+                    # fail with "fatal: unable to read tree/blob" for
+                    # any object missing from the local alternates.
+                    # The fetch goes to ``promisor_url`` directly; auth
+                    # comes from the inherited subprocess_env.
+                    for cfg_args in (
+                        ["remote.origin.url", promisor_url],
+                        ["remote.origin.promisor", "true"],
+                        ["remote.origin.partialclonefilter", "blob:none"],
+                    ):
+                        subprocess.run(
+                            [git_exe, "-C", str(staged), "config", *cfg_args],
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                            env=subprocess_env,
+                            check=True,
+                        )
                 if sparse_paths:
                     # Sparse-cone setup BEFORE checkout. Failures raise
                     # (not silently fallen back to full checkout) because
@@ -512,9 +629,17 @@ class GitCache:
 
         git_exe = get_git_executable()
         subprocess_env = env if env is not None else git_subprocess_env()
+        # If this is a partial-flavor bare, preserve the filter on fetch
+        # so we don't pull all blobs reachable from the new SHA. Detected
+        # via shard-suffix naming convention (cheap, no git config probe).
+        is_partial = bare_dir.name.endswith(_PARTIAL_BARE_SUFFIX)
+        fetch_args = [git_exe, "-C", str(bare_dir), "fetch"]
+        if is_partial:
+            fetch_args += ["--filter=blob:none"]
+        fetch_args += [url, sha]
         try:
             subprocess.run(
-                [git_exe, "-C", str(bare_dir), "fetch", url, sha],
+                fetch_args,
                 capture_output=True,
                 text=True,
                 timeout=120,
