@@ -455,6 +455,7 @@ class CommandIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        scope=None,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
 
