@@ -261,6 +261,7 @@ class TestScriptRunnerWindowsParsing:
 
         with (
             patch("sys.platform", "linux"),
+            patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None),
             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
         ):
             runner._execute_runtime_command("codex --quiet", "prompt content", env)
