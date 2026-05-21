@@ -272,6 +272,7 @@ def integrate_package_primitives(
                 force=force,
                 managed_files=managed_files,
                 diagnostics=diagnostics,
+                scope=scope,
             )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:

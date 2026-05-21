@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cold `apm install` for subdirectory git dependencies is dramatically faster on large monorepos (validated ~30x to ~75x range on `dotnet/skills`, network-variant). `GitCache` now performs partial bare clones (`--filter=blob:none`) with promisor remotes plus sparse-cone consumer materialization, and threads the tiered resolver's resolved SHA through to skip a redundant `ls-remote`. Bare-cache disk usage drops by orders of magnitude on the validated workload. No lockfile schema, CLI surface, or auth flow changes. Servers that reject `--filter=blob:none` (older Gerrit / pre-2.20 GHE) transparently fall back to a full bare clone. (#1436, closes #1433)
 
+### Added
+
+- **Experimental:** `copilot-app` target now scopes workflow rows to a real `projects` row instead of orphaning them at the App's root. When the App is running, project registration goes through the loopback WebSocket IPC surface (`~/.copilot/run/ws.{port,token}`, 0o600) so the project goes through the App's own owner/repo discovery and is immediately known to the webview; when the App is closed, registration falls through to a direct-SQLite `BEGIN IMMEDIATE` resolver against `~/.copilot/data.db`. Workflow rows are always written via SQLite (namespaced ids preserve lockfile stability). `--global` installs that carry workflow-shape prompts now emit a one-time warn-and-proceed diagnostic explaining the CWD-pivot risk and the per-row "attach to project" remediation. A one-time `Restart the Copilot App once` info hint fires on first project registration in a repo (see github/github-app#5483). (#1431)
+
 ### Changed
 
 - Unit test coverage raised to 88% (gate: `fail_under = 80`); integration test coverage raised to 71% with first CI gate at 55%. (#1402)
@@ -18,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm update` against private Azure DevOps deps no longer fails on Windows with a misleading "az present but not logged in" diagnostic when the user IS signed in via `az login`. Root cause: Python's `subprocess.run(["az", ...])` -> `CreateProcessW` does not honor `PATHEXT` for non-`.exe` executables, so the Windows `az.cmd` wrapper could not be invoked even though `shutil.which("az")` resolved it. `AzureCliBearerProvider` now resolves the `az` binary via `shutil.which` once at construction and passes the absolute path to every subprocess call. As a defense-in-depth measure, the ADO `--update` preflight probe no longer strips `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM` / `GIT_ASKPASS`, so Git Credential Manager can answer for Entra-cached ADO credentials whenever bearer acquisition is unavailable for any reason (sandbox, proxy, future PATH quirks). The actual clone path keeps its full gitconfig isolation. (#1430)
-
 - Root `.apm` hooks no longer duplicate after renaming the project directory or using git worktrees; Claude, Codex, Cursor, Gemini, and Windsurf hook configs stay idempotent across checkouts. The hook source-id is now derived from `apm.yml`'s `name` field instead of `install_path.name`, and `apm install` silently heals stale same-content entries from prior checkout basenames. Copilot is unaffected (its hooks live in per-file namespaces under `.github/hooks/`, not a shared merged config). (#1392, closes #1329)
 
 ## [0.14.1] - 2026-05-20

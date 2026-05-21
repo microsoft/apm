@@ -138,10 +138,13 @@ class TestDeployErrorSurfacing:
         assert result.files_integrated == 0
         assert result.files_skipped == 2
 
-        # Two diagnostics, one per prompt, each carrying the original
-        # message so the user has something actionable.
-        assert len(diags.warns) == 2
-        for entry in diags.warns:
+        # Two per-prompt deploy diagnostics, each carrying the original
+        # message so the user has something actionable. (An additional
+        # "no git repo detected" warn fires once for the whole install
+        # because tmp_path is not a git working tree -- filter it out.)
+        deploy_warns = [w for w in diags.warns if expected_substring in w["message"]]
+        assert len(deploy_warns) == 2
+        for entry in deploy_warns:
             assert entry["package"] == "demo-pkg"
             assert "Copilot App" in entry["message"]
             assert expected_substring in entry["message"]
@@ -175,8 +178,12 @@ class TestDeployErrorSurfacing:
 
         assert result.files_integrated == 1
         assert result.files_skipped == 1
-        assert len(diags.warns) == 1
-        assert "transient lock" in diags.warns[0]["message"]
+        # One deploy warn for the transient lock; an additional "no git
+        # repo detected" warn fires once because tmp_path is not a git
+        # working tree -- filter it out.
+        deploy_warns = [w for w in diags.warns if "transient lock" in w["message"]]
+        assert len(deploy_warns) == 1
+        assert "transient lock" in deploy_warns[0]["message"]
 
     def test_missing_db_resolver_returns_empty_no_exception(
         self,
