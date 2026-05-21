@@ -14,7 +14,6 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from ..constants import (
-    APM_DIR,
     APM_LOCK_FILENAME,  # noqa: F401
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
@@ -27,6 +26,7 @@ from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
 from ..version import get_build_sha, get_version
+from .deps._utils import _scan_installed_packages
 
 # CRITICAL: Shadow Click commands at module level to prevent namespace collision
 # When Click commands like 'config set' are defined, calling set() can invoke the command
@@ -236,29 +236,6 @@ def _expand_with_ancestors(
                 continue
             expanded.add(ancestor)
     return expanded
-
-
-def _scan_installed_packages(apm_modules_dir: Path) -> list:
-    """Scan *apm_modules_dir* for installed package paths.
-
-    Walks the tree to find directories containing ``apm.yml`` or ``.apm``,
-    supporting GitHub (2-level), ADO (3-level), and subdirectory packages.
-
-    Returns:
-        List of ``"owner/repo"`` or ``"org/project/repo"`` path keys.
-    """
-    installed: list = []
-    if not apm_modules_dir.exists():
-        return installed
-    for candidate in apm_modules_dir.rglob("*"):
-        if not candidate.is_dir() or candidate.name.startswith("."):
-            continue
-        if not ((candidate / APM_YML_FILENAME).exists() or (candidate / APM_DIR).exists()):
-            continue
-        rel_parts = candidate.relative_to(apm_modules_dir).parts
-        if len(rel_parts) >= 2:
-            installed.append("/".join(rel_parts))
-    return installed
 
 
 def _standalone_installed_packages(

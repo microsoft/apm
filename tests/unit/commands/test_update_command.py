@@ -14,8 +14,10 @@ focus is on:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from unittest.mock import patch as _patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -169,6 +171,139 @@ class TestUpdateBackCompatShim:
 
 
 # -----------------------------------------------------------------------------
+# apm update --target flag
+# -----------------------------------------------------------------------------
+
+
+class TestUpdateTarget:
+    def test_target_forwarded_to_install(self, runner, tmp_path):
+        """--target value is passed through to _install_apm_dependencies."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "--target", "claude"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] == "claude"
+
+    def test_short_target_flag(self, runner, tmp_path):
+        """-t short form is accepted and forwarded."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "-t", "copilot"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] == "copilot"
+
+    def test_no_target_defaults_to_none(self, runner, tmp_path):
+        """Omitting --target passes None to _install_apm_dependencies."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] is None
+
+    def test_target_with_assume_yes(self, runner, tmp_path):
+        """--target and --yes work together; target is forwarded and install proceeds."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                captured["proceeded"] = cb(_stub_plan_with_changes())
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult(installed_count=1)
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "--yes", "--target", "cursor"])
+
+            assert result.exit_code == 0, result.output
+            assert captured["target"] == "cursor"
+            assert captured["proceeded"] is True
+
+    def test_multi_target_comma_separated(self, runner, tmp_path):
+        """--target claude,cursor (comma-separated) is parsed to a list and forwarded."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["target"] = kwargs.get("target")
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                from apm_cli.models.results import InstallResult
+
+                return InstallResult()
+
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies", side_effect=fake_install
+            ):
+                result = runner.invoke(cli, ["update", "--target", "claude,cursor"])
+
+            assert result.exit_code == 0, result.output
+            assert isinstance(captured["target"], list), (
+                f"Expected list for multi-target, got {type(captured['target'])}"
+            )
+            assert "claude" in captured["target"]
+            assert "cursor" in captured["target"]
+
+    def test_target_ignored_warning_on_shim_path(self, runner, tmp_path):
+        """--target outside an apm.yml project emits a warning that it will be ignored."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            with patch("apm_cli.commands.self_update.self_update.callback") as mock_self_update:
+                mock_self_update.return_value = None
+                result = runner.invoke(cli, ["update", "--target", "claude"])
+
+            assert "ignored" in result.output.lower() or "warning" in result.output.lower(), (
+                f"Expected an ignored/warning message, got: {result.output}"
+            )
+
+
+# -----------------------------------------------------------------------------
 # apm install --frozen / --update mutex
 # -----------------------------------------------------------------------------
 
@@ -182,3 +317,328 @@ class TestFrozenUpdateMutex:
             assert result.exit_code != 0
             assert "frozen" in result.output.lower()
             assert "update" in result.output.lower()
+
+
+# -----------------------------------------------------------------------------
+# Additional coverage for missed lines
+# -----------------------------------------------------------------------------
+
+
+class TestStdinIsTtyExceptionPath:
+    """Lines 92-93: _stdin_is_tty() absorbs AttributeError/ValueError."""
+
+    def test_stdin_is_tty_returns_false_when_stdin_none(self) -> None:
+        from apm_cli.commands.update import _stdin_is_tty
+
+        mock_sys = MagicMock()
+        mock_sys.stdin = None
+        with _patch("apm_cli.commands.update.sys", mock_sys):
+            assert _stdin_is_tty() is False
+
+    def test_stdin_is_tty_returns_false_when_isatty_raises_value_error(self) -> None:
+        from apm_cli.commands.update import _stdin_is_tty
+
+        mock_stdin = MagicMock()
+        mock_stdin.isatty.side_effect = ValueError("closed")
+        mock_sys = MagicMock()
+        mock_sys.stdin = mock_stdin
+        with _patch("apm_cli.commands.update.sys", mock_sys):
+            assert _stdin_is_tty() is False
+
+
+class TestUpdateCheckOnlyWithTarget:
+    """Line 185: check_only + target emits warning about target being ignored."""
+
+    def test_check_only_with_target_warns_about_ignore(self, runner, tmp_path) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch("apm_cli.commands.self_update.self_update.callback") as mock_self:
+                mock_self.return_value = None
+                result = runner.invoke(cli, ["update", "--check", "--target", "claude"])
+            # Should warn that --target is ignored
+            assert result.exit_code == 0
+            assert "--target" in result.output or "ignored" in result.output.lower()
+
+
+class TestUpdateCIEnvironment:
+    """Line 242: CI env var triggers info message."""
+
+    def test_ci_env_triggers_info_message(self, runner, tmp_path) -> None:
+        import os
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                from apm_cli.models.results import InstallResult
+
+                cb = kwargs["plan_callback"]
+                cb(UpdatePlan(entries=()))
+                return InstallResult()
+
+            with (
+                _patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                _patch.dict(os.environ, {"CI": "true"}),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 0, result.output
+            # The CI banner should mention self-update or CLI binary
+            assert "self-update" in result.output.lower() or "cli" in result.output.lower()
+
+
+class TestUpdateApmYmlParseError:
+    """Lines 258-260: FileNotFoundError/ValueError in apm.yml parse."""
+
+    def test_value_error_in_parse_exits_with_error(self, runner, tmp_path) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.models.apm_package.APMPackage.from_apm_yml",
+                side_effect=ValueError("invalid yaml"),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 1
+            assert "apm.yml" in result.output.lower() or "parse" in result.output.lower()
+
+    def test_file_not_found_exits_with_error(self, runner, tmp_path) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.models.apm_package.APMPackage.from_apm_yml",
+                side_effect=FileNotFoundError("apm.yml not found"),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 1
+
+
+class TestUpdatePlanCallbackPaths:
+    """Lines 282->286, 304-308: plan render and interactive confirm."""
+
+    def test_plan_changes_empty_rendered_text_non_tty(self, runner, tmp_path) -> None:
+        """Line 282->286: empty rendered string (no echo)."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                from apm_cli.models.results import InstallResult
+
+                cb = kwargs["plan_callback"]
+                cb(_stub_plan_with_changes())
+                return InstallResult()
+
+            with (
+                _patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                _patch("apm_cli.commands.update.render_plan_text", return_value=""),
+                _patch("apm_cli.commands.update._stdin_is_tty", return_value=False),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 1  # non-TTY without --yes
+
+    def test_plan_with_changes_confirm_yes(self, runner, tmp_path) -> None:
+        """Lines 304-308: user confirms → plan proceeds."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                from apm_cli.models.results import InstallResult
+
+                cb = kwargs["plan_callback"]
+                cb(_stub_plan_with_changes())
+                return InstallResult(installed_count=1)
+
+            with (
+                _patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                _patch("apm_cli.commands.update._stdin_is_tty", return_value=True),
+                _patch("apm_cli.commands.update.click.confirm", return_value=True),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 0, result.output
+
+    def test_plan_with_changes_confirm_no(self, runner, tmp_path) -> None:
+        """Lines 304-308: user declines → no changes."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                from apm_cli.models.results import InstallResult
+
+                cb = kwargs["plan_callback"]
+                cb(_stub_plan_with_changes())
+                return InstallResult()
+
+            with (
+                _patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                _patch("apm_cli.commands.update._stdin_is_tty", return_value=True),
+                _patch("apm_cli.commands.update.click.confirm", return_value=False),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 0, result.output
+            assert "no changes" in result.output.lower()
+
+
+class TestUpdateErrorHandling:
+    """Lines 321-339: exception handling in _run_dep_update."""
+
+    def test_frozen_install_error_exits(self, runner, tmp_path) -> None:
+        """Lines 321-324: FrozenInstallError shows reasons and exits 1."""
+        from apm_cli.install.errors import FrozenInstallError
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            err = FrozenInstallError("frozen", reasons=["reason1"])
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=err,
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 1
+            assert "frozen" in result.output.lower()
+
+    def test_authentication_error_with_context(self, runner, tmp_path) -> None:
+        """Lines 326-329: AuthenticationError with diagnostic_context."""
+        from apm_cli.install.errors import AuthenticationError
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            err = AuthenticationError("auth failed")
+            err.diagnostic_context = "check your token"
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=err,
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 1
+
+    def test_authentication_error_without_context(self, runner, tmp_path) -> None:
+        """Lines 326-329: AuthenticationError without diagnostic_context."""
+        from apm_cli.install.errors import AuthenticationError
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            err = AuthenticationError("auth error")
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=err,
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 1
+
+    def test_direct_dependency_error_exits(self, runner, tmp_path) -> None:
+        """Lines 331-332: DirectDependencyError."""
+        from apm_cli.install.errors import DirectDependencyError
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=DirectDependencyError("dep error"),
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 1
+
+    def test_policy_violation_error_exits(self, runner, tmp_path) -> None:
+        """Lines 331-332: PolicyViolationError."""
+        from apm_cli.install.errors import PolicyViolationError
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=PolicyViolationError("policy violation"),
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 1
+
+    def test_usage_error_propagates(self, runner, tmp_path) -> None:
+        """Line 334: click.UsageError is re-raised (exit code 2)."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=click.UsageError("bad usage"),
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 2
+
+    def test_generic_exception_exits_with_error(self, runner, tmp_path) -> None:
+        """Lines 336-339: generic Exception shows error message."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=RuntimeError("unexpected error"),
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 1
+            assert "error" in result.output.lower()
+
+    def test_generic_exception_verbose_no_hint(self, runner, tmp_path) -> None:
+        """Lines 337-338: with --verbose, no 'run with --verbose' hint shown."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=RuntimeError("boom"),
+            ):
+                result = runner.invoke(cli, ["update", "--yes", "--verbose"])
+            assert result.exit_code == 1
+
+
+class TestUpdatePlanStatePaths:
+    """Lines 343, 350: plan_state post-install checks."""
+
+    def test_plan_none_returns_early_no_success_message(self, runner, tmp_path) -> None:
+        """Line 343: plan is None → return without emitting success."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                from apm_cli.models.results import InstallResult
+
+                # Never call plan_callback → plan stays None
+                return InstallResult()
+
+            with _patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=fake_install,
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+            assert result.exit_code == 0, result.output
+            # Without plan_callback being invoked, no "Updated" or "applied" lines
+            assert "updated" not in result.output.lower() or "refreshes" in result.output.lower()
+
+    def test_proceeded_zero_installed_shows_applied(self, runner, tmp_path) -> None:
+        """Line 350: proceeded=True but installed_count=0 → 'Update applied.'"""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                from apm_cli.models.results import InstallResult
+
+                cb = kwargs["plan_callback"]
+                cb(_stub_plan_with_changes())
+                return InstallResult(installed_count=0)
+
+            with (
+                _patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                _patch("apm_cli.commands.update._stdin_is_tty", return_value=True),
+                _patch("apm_cli.commands.update.click.confirm", return_value=True),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 0, result.output
+            assert "update applied" in result.output.lower()

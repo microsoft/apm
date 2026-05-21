@@ -218,6 +218,14 @@ class GitHubPackageDownloader:
         # Set by the install pipeline; None disables persistent caching.
         self.persistent_git_cache = None
 
+        # #1369: tiered ref resolver. Attached by resolve.py / outdated.py
+        # after construction via ``build_tiered_ref_resolver``. When set,
+        # :meth:`resolve_git_reference` delegates to it before falling
+        # through to ``self._refs.resolve``. Declared here so the
+        # attribute is part of the documented downloader surface rather
+        # than a monkey-patched field.
+        self._tiered_resolver = None
+
     def _git_env_dict(self) -> dict[str, str]:
         """Return a sanitized git env dict for cache-layer subprocess calls.
 
@@ -626,8 +634,14 @@ class GitHubPackageDownloader:
     ) -> ResolvedReference:
         """Resolve a Git reference (branch/tag/commit) to a specific commit SHA.
 
-        Delegates to :class:`GitReferenceResolver`.
+        Delegates to :class:`TieredRefResolver` when one is attached
+        (per-run, by the install resolve phase or outdated command) for
+        the #1369 fast-path; falls through to the legacy
+        :class:`GitReferenceResolver` otherwise.
         """
+        tiered = getattr(self, "_tiered_resolver", None)
+        if tiered is not None:
+            return tiered.resolve(repo_ref)
         return self._refs.resolve(repo_ref)
 
     def _resolve_commit_sha_for_ref(self, dep_ref: DependencyReference, ref: str) -> str | None:
@@ -1622,25 +1636,10 @@ class GitHubPackageDownloader:
             raise
 
         # Validate the downloaded package
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            # Clean up on validation failure
-            if target_path.exists():
-                _rmtree(target_path)
-
-            error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
-            for error in validation_result.errors:
-                error_msg += f"  - {error}\n"
-            raise RuntimeError(error_msg.strip())
-
-        # Load the APM package metadata
-        if not validation_result.package:
-            raise RuntimeError(
-                f"Package validation succeeded but no package metadata found for {dep_ref.repo_url}"
-            )
-
-        package = validation_result.package
-        package.source = dep_ref.to_github_url()
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
         package.resolved_commit = resolved_ref.resolved_commit
 
         # For plugins without an explicit version, use the short commit SHA so the

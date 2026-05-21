@@ -336,16 +336,18 @@ class TestInitCommand:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
     def test_init_next_steps_panel_content(self):
-        """Test that next steps show install workflows, not apm run start."""
+        """Test that next steps show consumer + namespace discovery hints."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
                 result = self.runner.invoke(cli, ["init", "--yes"])
 
                 assert result.exit_code == 0
-                # New v5 panel content
+                # Consumer next-steps surface (Wave 3 v3 noun-verb teach)
                 assert "apm install" in result.output
-                assert "apm pack" in result.output
+                assert "apm run" in result.output
+                assert "apm plugin init" in result.output
+                assert "apm marketplace init" in result.output
                 assert "https://microsoft.github.io/apm" in result.output
                 # Old dead-end content must be gone
                 assert "apm compile" not in result.output

@@ -180,6 +180,44 @@ When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
 
+#### Optional workflow frontmatter (GitHub Copilot App, experimental)
+
+When the `copilot_app` experimental flag is enabled and the package is
+installed with `apm install --target copilot-app` (project scope) or
+`apm install --target copilot-app --global` (user scope), prompts that
+carry workflow frontmatter -- any flat top-level key of `interval`,
+`schedule_hour`, `schedule_day` -- are deployed as rows in the desktop
+App's SQLite store at `~/.copilot/data.db`. ``mode``, ``model``, and
+``reasoning_effort`` are optional fields on a workflow but do NOT mark
+a plain prompt as a workflow (they overload with plain VSCode / Copilot
+slash-command prompts); declare ``interval: manual`` to opt a no-schedule
+prompt into the App.
+
+```yaml
+---
+name: "Daily Digest"
+interval: daily           # manual | hourly | daily | weekly
+schedule_hour: 9          # 0-23 (UTC); ignored for manual / hourly
+schedule_day: 1           # 0-6 (weekly only)
+mode: interactive         # interactive | plan
+model: claude-opus-4.7    # optional
+reasoning_effort: high    # optional
+---
+```
+
+Rows are always inserted with `enabled = 0`; the user opts in from the
+App. A `.prompt.md` belongs to exactly ONE surface: workflow-frontmatter
+prompts go ONLY to the App DB, plain prompts go ONLY to file-based
+slash-command targets (`copilot`, `claude`, `cursor`, ...). Pointing a
+plain prompt at `--target copilot-app` is a hard error with an
+actionable diagnostic. `interval` is optional and defaults to `manual`
+when any other execution-shape key is present, so a parameterised
+prompt with no schedule still works as a manually-fired App workflow.
+The App also defines an `autopilot` mode, but APM intentionally does
+not accept it via this target -- a third-party package could otherwise
+auto-run the moment the user enables the row. Users who want autopilot
+can still set it themselves per-row from the App UI after install.
+
 ### 5. Agent (`*.agent.md`)
 
 Agent persona and behavior definition.
@@ -268,6 +306,8 @@ marketplace:
   owner:
     name: acme-org
     url: https://github.com/acme-org
+  versioning:                  # optional; used by `apm pack --check-versions`
+    strategy: lockstep         # lockstep | tag_pattern | per_package
   build:                       # APM-only, stripped at compile time
     tagPattern: "v{version}"
   metadata:                    # pass-through, copied verbatim
@@ -295,6 +335,13 @@ Schema rules:
 - `ref` takes precedence over `version`.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
+- `versioning.strategy` is optional. When present, it is consumed by
+  the `apm pack --check-versions` release gate to enforce alignment
+  between each local package's `version:` field and the marketplace
+  version: `lockstep` (all packages match `marketplace.version`),
+  `tag_pattern` (each package renders a unique tag via `tagPattern`),
+  or `per_package` (each package versions independently, gate only
+  checks that `version:` is present). Omit entirely to skip the gate.
 - Unknown keys raise a schema error -- do not invent fields.
 
 ### Build semantics

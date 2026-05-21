@@ -258,16 +258,8 @@ class CopilotClientAdapter(MCPClientAdapter):
             return False
 
         try:
-            # Use cached server info if available, otherwise fetch from registry
-            if server_info_cache and server_url in server_info_cache:
-                server_info = server_info_cache[server_url]
-            else:
-                # Fallback to registry lookup if not cached
-                server_info = self.registry_client.find_server_by_reference(server_url)
-
-            # Fail if server is not found in registry - security requirement
-            if not server_info:
-                print(f"Error: MCP server '{server_url}' not found in registry")
+            server_info = self._fetch_server_info(server_url, server_info_cache)
+            if server_info is None:
                 return False
 
             # Reset per-server tracking before formatting (so the per-server
@@ -572,40 +564,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                 "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
             }
 
-            # Add authentication headers for GitHub MCP server
-            server_name = server_info.get("name", "")
-            is_github_server = self._is_github_server(server_name, remote.get("url", ""))
-
-            if is_github_server:
-                # Use centralized token manager (copilot chain: GITHUB_COPILOT_PAT → GITHUB_TOKEN → GITHUB_APM_PAT),
-                # falling back to GITHUB_PERSONAL_ACCESS_TOKEN for Copilot CLI compat.
-                _tm = GitHubTokenManager()
-                github_token = _tm.get_token_for_purpose("copilot") or os.getenv(
-                    "GITHUB_PERSONAL_ACCESS_TOKEN"
-                )
-                if github_token:
-                    config["headers"] = {"Authorization": f"Bearer {github_token}"}
-
-            # Add any additional headers from registry if present
-            headers = remote.get("headers", [])
-            if headers:
-                if "headers" not in config:
-                    config["headers"] = {}
-                for header in headers:
-                    header_name = header.get("name", "")
-                    header_value = header.get("value", "")
-                    if header_name and header_value:
-                        # Resolve environment variable value
-                        resolved_value = self._resolve_env_variable(
-                            header_name, header_value, env_overrides
-                        )
-                        config["headers"][header_name] = resolved_value
-
-            # Warn about unresolvable ${input:...} references in headers
-            if config.get("headers"):
-                self._warn_input_variables(
-                    config["headers"], server_info.get("name", ""), "Copilot CLI"
-                )
+            self._apply_auth_and_headers(config, remote, server_info, env_overrides)
 
             # Apply tools override from MCP dependency overlay if present
             tools_override = server_info.get("_apm_tools_override")
@@ -628,77 +587,7 @@ class CopilotClientAdapter(MCPClientAdapter):
 
         if packages:
             # Use the first package for configuration (prioritize npm, then docker, then others)
-            package = self._select_best_package(packages)
-
-            if package:
-                registry_name = self._infer_registry_name(package)
-                package_name = package.get("name", "")
-                runtime_hint = package.get("runtime_hint", "")
-                runtime_arguments = package.get("runtime_arguments", [])
-                package_arguments = package.get("package_arguments", [])
-
-                # Process arguments to extract simple string values
-                env_vars = package.get("environment_variables", [])
-
-                # Resolve environment variables first
-                resolved_env = self._resolve_environment_variables(env_vars, env_overrides)
-
-                processed_runtime_args = self._process_arguments(
-                    runtime_arguments, resolved_env, runtime_vars
-                )
-                processed_package_args = self._process_arguments(
-                    package_arguments, resolved_env, runtime_vars
-                )
-
-                # Generate command and args based on package type
-                if registry_name == "npm":
-                    config["command"] = runtime_hint or "npx"
-                    config["args"] = (
-                        ["-y", package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
-                    )
-                    # For NPM packages, use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "docker":
-                    config["command"] = "docker"
-
-                    # For Docker packages, the registry provides the complete command template
-                    # We should respect the runtime_arguments as the authoritative Docker command structure
-                    if processed_runtime_args:
-                        # Registry provides complete Docker command arguments
-                        # Just inject environment variables where appropriate
-                        config["args"] = self._inject_env_vars_into_docker_args(
-                            processed_runtime_args, resolved_env
-                        )
-                    else:
-                        # Fallback to basic docker run command if no runtime args
-                        config["args"] = DockerArgsProcessor.process_docker_args(
-                            ["run", "-i", "--rm", package_name], resolved_env
-                        )
-                elif registry_name == "pypi":
-                    config["command"] = runtime_hint or "uvx"
-                    config["args"] = (
-                        [package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
-                    )
-                    # For PyPI packages, use env block
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "homebrew":
-                    # For homebrew packages, assume the binary name is the command
-                    config["command"] = (
-                        package_name.split("/")[-1] if "/" in package_name else package_name
-                    )
-                    config["args"] = processed_runtime_args + processed_package_args
-                    # For Homebrew packages, use env block
-                    if resolved_env:
-                        config["env"] = resolved_env
-                else:
-                    # Generic package handling
-                    config["command"] = runtime_hint or package_name
-                    config["args"] = processed_runtime_args + processed_package_args
-                    # Use env block for generic packages
-                    if resolved_env:
-                        config["env"] = resolved_env
+            self._select_and_dispatch_best_package(config, packages, env_overrides, runtime_vars)
 
         # Apply tools override from MCP dependency overlay if present
         tools_override = server_info.get("_apm_tools_override")
@@ -706,6 +595,130 @@ class CopilotClientAdapter(MCPClientAdapter):
             config["tools"] = tools_override
 
         return config
+
+    def _apply_auth_and_headers(
+        self, config, remote, server_info, env_overrides, runtime_label="Copilot CLI"
+    ):
+        """Inject GitHub token and registry-supplied headers into *config*.
+
+        Delegates to :meth:`MCPClientAdapter._apply_auth_and_headers_impl`,
+        supplying ``GitHubTokenManager`` from this module's namespace so that
+        ``unittest.mock.patch("apm_cli.adapters.client.copilot.GitHubTokenManager")``
+        correctly intercepts the instantiation in tests.
+        """
+        self._apply_auth_and_headers_impl(
+            config, remote, server_info, env_overrides, runtime_label, GitHubTokenManager
+        )
+
+    def _dispatch_package_to_config(
+        self,
+        config,
+        package_name,
+        registry_name,
+        runtime_hint,
+        processed_runtime_args,
+        processed_package_args,
+        resolved_env,
+    ):
+        """Populate *config* with command/args/env for a single package.
+
+        Handles npm and docker natively; delegates pypi, homebrew, and
+        generic registries to :meth:`MCPClientAdapter._apply_pypi_homebrew_generic_config`.
+
+        Args:
+            config: Mutable config dict; updated in place.
+            package_name: Registry package identifier.
+            registry_name: Registry type (``"npm"``, ``"docker"``, ``"pypi"``, …).
+            runtime_hint: Optional runtime override from the package entry.
+            processed_runtime_args: Pre-processed runtime argument list.
+            processed_package_args: Pre-processed package argument list.
+            resolved_env: Resolved environment variable mapping.
+        """
+        if registry_name == "npm":
+            config["command"] = runtime_hint or "npx"
+            config["args"] = (
+                ["-y", package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
+            )
+            if resolved_env:
+                config["env"] = resolved_env
+        elif registry_name == "docker":
+            config["command"] = "docker"
+            if processed_runtime_args:
+                config["args"] = self._inject_env_vars_into_docker_args(
+                    processed_runtime_args, resolved_env
+                )
+            else:
+                config["args"] = DockerArgsProcessor.process_docker_args(
+                    ["run", "-i", "--rm", package_name], resolved_env
+                )
+        else:
+            self._apply_pypi_homebrew_generic_config(
+                config,
+                registry_name,
+                package_name,
+                runtime_hint,
+                processed_runtime_args,
+                processed_package_args,
+                resolved_env,
+            )
+
+    def _select_and_dispatch_best_package(
+        self,
+        config,
+        packages,
+        env_overrides,
+        runtime_vars,
+        set_type_stdio: bool = False,
+    ):
+        """Select the best package from *packages*, resolve env, and populate *config*.
+
+        Shared dispatch path used by both
+        :meth:`CopilotClientAdapter._build_server_config` and
+        :meth:`CursorClientAdapter._build_server_config`.
+
+        Args:
+            config: Mutable config dict; updated in place.
+            packages: List of package dicts from the registry server info.
+            env_overrides: Pre-collected env-var overrides (may be empty).
+            runtime_vars: Runtime variable substitutions.
+            set_type_stdio: When ``True``, sets ``config["type"] = "stdio"``
+                before dispatching (required by the Cursor format).
+
+        Returns:
+            The selected package dict, or ``None`` if no package matched.
+        """
+        package = self._select_best_package(packages)
+        if not package:
+            return None
+
+        registry_name = self._infer_registry_name(package)
+        package_name = package.get("name", "")
+        runtime_hint = package.get("runtime_hint", "")
+        runtime_arguments = package.get("runtime_arguments", [])
+        package_arguments = package.get("package_arguments", [])
+        env_vars = package.get("environment_variables", [])
+
+        resolved_env = self._resolve_environment_variables(env_vars, env_overrides)
+        processed_runtime_args = self._process_arguments(
+            runtime_arguments, resolved_env, runtime_vars
+        )
+        processed_package_args = self._process_arguments(
+            package_arguments, resolved_env, runtime_vars
+        )
+
+        if set_type_stdio:
+            config["type"] = "stdio"
+
+        self._dispatch_package_to_config(
+            config,
+            package_name,
+            registry_name,
+            runtime_hint,
+            processed_runtime_args,
+            processed_package_args,
+            resolved_env,
+        )
+        return package
 
     def _resolve_environment_variables(self, env_vars, env_overrides=None):
         """Resolve (or translate) declared environment variables.
@@ -810,71 +823,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                     resolved[name] = _stringify_env_literal(value)
             return resolved
 
-        import os
-        import sys
-
-        from rich.prompt import Prompt
-
-        resolved = {}
-        env_overrides = env_overrides or {}
-
-        # If env_overrides is provided, it means the CLI has already handled environment variable collection
-        # In this case, we should NEVER prompt for additional variables
-        skip_prompting = bool(env_overrides)
-
-        # Check for CI/automated environment via APM_E2E_TESTS flag (more reliable than TTY detection)
-        if os.getenv("APM_E2E_TESTS") == "1":
-            skip_prompting = True
-            print(f" APM_E2E_TESTS detected, will skip environment variable prompts")  # noqa: F541
-
-        # Also skip prompting if we're in a non-interactive environment (fallback)
-        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
-        if not is_interactive:
-            skip_prompting = True
-
-        # Track which variables were explicitly provided with empty values (user wants defaults)
-        empty_value_vars = set()
-        if env_overrides:
-            for key, value in env_overrides.items():
-                if key in env_overrides and (not value or not value.strip()):
-                    empty_value_vars.add(key)
-
-        for env_var in env_vars:
-            if isinstance(env_var, dict):
-                name = env_var.get("name", "")
-                description = env_var.get("description", "")
-                required = env_var.get("required", True)
-
-                if name:
-                    # First check overrides, then environment
-                    value = env_overrides.get(name) or os.getenv(name)
-
-                    # Only prompt if not provided in overrides or environment AND it's required AND we're not in managed override mode
-                    if not value and required and not skip_prompting:
-                        prompt_text = f"Enter value for {name}"
-                        if description:
-                            prompt_text += f" ({description})"
-                        value = Prompt.ask(
-                            prompt_text,
-                            password=True  # noqa: SIM210
-                            if "token" in name.lower() or "key" in name.lower()
-                            else False,
-                        )
-
-                    # Add variable if it has a value OR if user explicitly provided empty and we have a default
-                    if value and value.strip():
-                        resolved[name] = value
-                    elif name in empty_value_vars and name in default_github_env:
-                        # User provided empty value and we have a default - use default
-                        resolved[name] = default_github_env[name]
-                    elif not required and name in default_github_env:
-                        # Variable is optional and we have a default - use default
-                        resolved[name] = default_github_env[name]
-                    elif skip_prompting and name in default_github_env:
-                        # Non-interactive environment and we have a default - use default
-                        resolved[name] = default_github_env[name]
-
-        return resolved
+        return self._resolve_env_vars_with_prompting(env_vars, env_overrides, default_github_env)
 
     def _resolve_env_variable(self, name, value, env_overrides=None):
         """Resolve (or translate) a single environment variable value.

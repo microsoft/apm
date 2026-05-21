@@ -454,7 +454,7 @@ class TestLoggingRules(_InstallAcceptanceBase):
 
     def test_status_symbols_are_ascii_brackets(self):
         """All STATUS_SYMBOLS must be ASCII bracket format [x]."""
-        bracket_pattern = {"[*]", "[>]", "[i]", "[!]", "[x]", "[+]", "[#]"}
+        bracket_pattern = {"[*]", "[>]", "[i]", "[!]", "[x]", "[+]", "[#]", "[~]", "[-]", "[=]"}
         for key, sym in STATUS_SYMBOLS.items():
             assert sym in bracket_pattern, (
                 f"STATUS_SYMBOLS['{key}'] = '{sym}' is not a valid bracket symbol"

@@ -899,12 +899,12 @@ class TestCoworkParserLayer:
     # -- Case 6: exact membership lock -----------------------------------
 
     def test_experimental_targets_exact_membership(self):
-        """EXPERIMENTAL_TARGETS must equal frozenset({'copilot-cowork'}) exactly.
+        """EXPERIMENTAL_TARGETS must equal the expected set exactly.
 
         This locks the constant so that adding a new experimental target
         requires an intentional test update.
         """
-        assert frozenset({"copilot-cowork"}) == EXPERIMENTAL_TARGETS
+        assert frozenset({"copilot-cowork", "copilot-app"}) == EXPERIMENTAL_TARGETS
 
     # -- Case 7: "all" expansion does NOT include "copilot-cowork" ---------------
 

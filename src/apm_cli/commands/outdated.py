@@ -6,6 +6,7 @@ For marketplace-sourced deps, checks available versions in the marketplace.
 """
 
 import logging
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -327,6 +328,38 @@ def outdated(global_, verbose, parallel_checks):
 
     auth_resolver = AuthResolver()
     downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
+
+    # #1369: wire the tiered ref resolver here too -- outdated calls
+    # downloader.resolve_git_reference() N times across a ThreadPoolExecutor,
+    # which is exactly the duplicate-resolution workload the L0 cache +
+    # coalesce lock are designed to collapse.
+    try:
+        from ..cache.git_cache import GitCache
+        from ..cache.paths import get_cache_root
+        from ..deps.tiered_ref_resolver import build_tiered_ref_resolver
+
+        _git_cache = None
+        if not os.environ.get("APM_NO_CACHE"):
+            try:
+                _git_cache = GitCache(get_cache_root(), refresh=False)
+                downloader.persistent_git_cache = _git_cache
+            except (OSError, ValueError):
+                pass
+        _tiered = build_tiered_ref_resolver(
+            downloader=downloader,
+            git_cache=_git_cache,
+        )
+        if _tiered is not None:
+            downloader._tiered_resolver = _tiered
+    except Exception as exc:  # pragma: no cover - never block outdated on resolver wiring
+        # Non-blocking, but log so --verbose surfaces wiring failures.
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "Tiered ref resolver wiring skipped for outdated (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
 
     # Filter to checkable deps (skip local + Artifactory)
     checkable = []

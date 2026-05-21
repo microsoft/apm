@@ -146,6 +146,24 @@ dependencies:
 APM falls back across protocols on the same port: `ssh://host:7999`
 will retry as `https://host:7999/...` if SSH is unreachable.
 
+## Bitbucket Data Center personal repos
+
+Bitbucket Data Center / Server exposes personal repositories under
+`/scm/~username/`. The `~` is part of the path segment and is preserved
+as-is in `apm.yml`:
+
+```yaml
+dependencies:
+  apm:
+    - git: https://bitbucket.example.com/scm/~jdoe/ml-utils.git
+      ref: v1.0.0
+    - git: ssh://git@bitbucket.example.com:7999/~jdoe/ml-utils.git
+      ref: v1.0.0
+```
+
+Token: `BITBUCKET_APM_PAT` (HTTPS) or your SSH key (SSH form). Sourcehut
+(`~user` path convention) works the same way.
+
 ## Pre-fetched bundles (offline / air-gapped)
 
 Install a packed bundle from disk:

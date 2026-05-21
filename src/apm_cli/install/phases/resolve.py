@@ -125,6 +125,32 @@ def run(ctx: InstallContext) -> None:
         except (OSError, ValueError):
             pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
 
+    # #1369: tiered ref resolver. Collapses N redundant shallow clones
+    # for ref->SHA resolution into a per-run cache + cheap commits API
+    # + bare-rev-parse waterfall, falling back to the legacy clone path.
+    # Wired AFTER persistent_git_cache so L2 can reach it. Reused by
+    # every code path that calls downloader.resolve_git_reference():
+    # install, update, outdated, publish.
+    try:
+        from apm_cli.deps.tiered_ref_resolver import build_tiered_ref_resolver
+
+        _tiered = build_tiered_ref_resolver(
+            downloader=downloader,
+            git_cache=getattr(downloader, "persistent_git_cache", None),
+        )
+        if _tiered is not None:
+            downloader._tiered_resolver = _tiered
+            ctx.ref_resolver = _tiered
+    except Exception as exc:  # pragma: no cover - defensive: never block resolve phase
+        # Keep non-blocking behavior, but make it diagnosable in --verbose.
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug(
+            "Tiered ref resolver wiring skipped (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
+
     # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)
     # ------------------------------------------------------------------
