@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Unit test coverage raised to 88% (gate: `fail_under = 80`); integration test coverage raised to 71% with first CI gate at 55%. (#1402)
 
+### Fixed
+
+- Root `.apm` hooks no longer duplicate after renaming the project directory or using git worktrees; Claude, Codex, Cursor, Gemini, and Windsurf hook configs stay idempotent across checkouts. The hook source-id is now derived from `apm.yml`'s `name` field instead of `install_path.name`, and `apm install` silently heals stale same-content entries from prior checkout basenames. Copilot is unaffected (its hooks live in per-file namespaces under `.github/hooks/`, not a shared merged config). (#1392, closes #1329)
+
 ## [0.14.1] - 2026-05-20
 
 ### Added

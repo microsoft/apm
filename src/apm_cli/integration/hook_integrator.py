@@ -604,12 +604,17 @@ class HookIntegrator(BaseIntegrator):
         """Return a stable source marker that is also safe for hook script paths."""
         if not isinstance(value, str) or not value:
             return fallback
-        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip(".-_")
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+        # Collapse any run of 2+ dots to a single dot before stripping edges.
+        # Embedded sequences like "foo..bar" would otherwise pass through the
+        # earlier guard and reach downstream Path joins as a parent-dir hop.
+        safe = re.sub(r"\.{2,}", ".", safe).strip(".-_")
         if not safe or safe in {".", ".."}:
             return fallback
         return safe
 
-    def _get_root_local_package_name(self, package_info, project_root: Path) -> str:
+    @staticmethod
+    def _get_root_local_package_name(package_info, project_root: Path) -> str:
         """Get the stable source marker for root .apm content."""
         apm_yml = Path(project_root) / "apm.yml"
         if apm_yml.exists():
@@ -618,19 +623,20 @@ class HookIntegrator(BaseIntegrator):
 
                 data = load_yaml(apm_yml)
                 if isinstance(data, dict):
-                    manifest_name = self._safe_source_name(data.get("name"))
+                    manifest_name = HookIntegrator._safe_source_name(data.get("name"))
                     if manifest_name != "_local":
                         return manifest_name
             except (OSError, ValueError, yaml.YAMLError) as exc:
                 _log.debug(
-                    "Hook integrator: apm.yml manifest unreadable for %s (%s), "
+                    "Hook integrator: apm.yml manifest unreadable for %s (%s: %s), "
                     "falling back to install_path basename",
                     project_root,
                     exc.__class__.__name__,
+                    exc,
                 )
 
         package = getattr(package_info, "package", None)
-        package_name = self._safe_source_name(getattr(package, "name", None))
+        package_name = HookIntegrator._safe_source_name(getattr(package, "name", None))
         if package_name != "_local":
             return package_name
         return "_local"
@@ -640,22 +646,26 @@ class HookIntegrator(BaseIntegrator):
 
         Args:
             package_info: PackageInfo object
+            project_root: When provided and the package is the project root,
+                reads ``apm.yml`` ``name`` for a stable source marker instead
+                of falling back to ``install_path.name`` (which drifts on
+                directory renames and worktrees). See #1329.
 
         Returns:
             str: Package name used as hook source marker and script namespace
         """
         if self._is_root_local_package(package_info, project_root):
-            return self._get_root_local_package_name(package_info, Path(project_root))
+            return HookIntegrator._get_root_local_package_name(package_info, Path(project_root))
         return package_info.install_path.name
 
+    @staticmethod
     def _get_hook_source_marker(
-        self,
         package_info,
         project_root: Path,
         package_name: str,
     ) -> str:
         """Get the marker stored in merged hook JSON for ownership cleanup."""
-        if self._is_root_local_package(package_info, project_root):
+        if HookIntegrator._is_root_local_package(package_info, project_root):
             if package_name == "_local":
                 return "_local"
             return f"_local/{package_name}"
@@ -839,8 +849,8 @@ class HookIntegrator(BaseIntegrator):
             HookIntegrator._collect_remote_dependency_sources(sources, package_root)
         return sources
 
+    @staticmethod
     def _should_remove_prior_merged_entry(
-        self,
         entry,
         *,
         source_marker: str,
@@ -857,7 +867,7 @@ class HookIntegrator(BaseIntegrator):
             return True
         if not heal_stale_root_source or not source or source in dependency_sources:
             return False
-        return self._hook_entry_content_key(entry) in fresh_content_keys
+        return HookIntegrator._hook_entry_content_key(entry) in fresh_content_keys
 
     def integrate_package_hooks(
         self,
@@ -1127,6 +1137,7 @@ class HookIntegrator(BaseIntegrator):
                         )
                     ]
                     if heal_stale_root_source:
+                        kept_ids = {id(e) for e in kept_entries}
                         healed = sum(
                             1
                             for e in prior_entries
@@ -1134,7 +1145,7 @@ class HookIntegrator(BaseIntegrator):
                             and e.get("_apm_source")
                             and e.get("_apm_source") != source_marker
                             and e.get("_apm_source") not in dependency_sources
-                            and e not in kept_entries
+                            and id(e) not in kept_ids
                         )
                         if healed:
                             _log.debug(
