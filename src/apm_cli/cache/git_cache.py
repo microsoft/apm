@@ -25,6 +25,8 @@ Concurrency:
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import logging
 import os
 import re
@@ -41,6 +43,26 @@ _log = logging.getLogger(__name__)
 
 # Full SHA pattern: 40 hex characters
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+
+
+def _variant_key(sparse_paths: list[str] | None) -> str:
+    """Return the on-disk variant segment for a checkout shard.
+
+    Layout (perf #1433):
+      - ``full`` -- full-tree checkout (sparse_paths is None / empty).
+      - ``sparse-<hash16>`` -- sparse-cone checkout where ``<hash16>`` is
+        the first 16 hex chars of sha256(json.dumps(sorted(paths))).
+        Two consumers requesting the same set of paths share a shard;
+        different sets get separate shards. We do NOT promote a full
+        checkout to also satisfy a sparse subset -- that complicates
+        eviction for negligible benefit (each sparse shard is ~subdir
+        size, so duplication cost is small).
+    """
+    if not sparse_paths:
+        return "full"
+    payload = json.dumps(sorted(sparse_paths), separators=(",", ":"))
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return f"sparse-{digest}"
 
 
 class GitCache:
@@ -74,6 +96,7 @@ class GitCache:
         *,
         locked_sha: str | None = None,
         env: dict[str, str] | None = None,
+        sparse_paths: list[str] | None = None,
     ) -> Path:
         """Return path to a cached checkout for the given repo+ref.
 
@@ -83,6 +106,10 @@ class GitCache:
             locked_sha: If provided (from lockfile), skip resolution and
                 use this SHA directly.
             env: Environment dict for git subprocesses.
+            sparse_paths: If non-empty, materialize only these top-level
+                directories using ``git sparse-checkout --cone``. The
+                shard is keyed by ``(sha, sparse_paths_variant)`` so
+                full and sparse variants of the same SHA coexist.
 
         Returns:
             Path to the checkout directory (guaranteed to contain valid
@@ -90,26 +117,30 @@ class GitCache:
         """
         shard_key = cache_shard_key(url)
         sha = self._resolve_sha(url, ref, locked_sha=locked_sha, env=env)
+        variant = _variant_key(sparse_paths)
 
-        checkout_dir = self._checkouts_root / shard_key / sha
+        checkout_dir = self._checkouts_root / shard_key / sha / variant
 
         # Cache hit path (skip if refresh requested)
         if not self._refresh and checkout_dir.is_dir():
             if verify_checkout_sha(checkout_dir, sha):
-                _log.debug("Cache HIT: %s @ %s", url, sha[:12])
+                _log.debug("Cache HIT: %s @ %s [%s]", url, sha[:12], variant)
                 return checkout_dir
             else:
                 # Integrity failure -- evict
                 _log.warning(
-                    "[!] Evicting corrupt cache entry: %s @ %s",
+                    "[!] Evicting corrupt cache entry: %s @ %s [%s]",
                     _sanitize_url(url),
                     sha[:12],
+                    variant,
                 )
                 self._evict_checkout(checkout_dir)
 
         # Cache miss: ensure we have the bare repo, then create checkout
         self._ensure_bare_repo(url, shard_key, sha, env=env)
-        return self._create_checkout(url, shard_key, sha, env=env)
+        return self._create_checkout(
+            url, shard_key, sha, env=env, sparse_paths=sparse_paths
+        )
 
     def _resolve_sha(
         self,
@@ -290,11 +321,21 @@ class GitCache:
         sha: str,
         *,
         env: dict[str, str] | None = None,
+        sparse_paths: list[str] | None = None,
     ) -> Path:
         """Create a checkout at the specified SHA from the bare repo.
 
         Uses ``git clone --local --shared`` from the bare repo for
         efficiency (no network, hardlinks objects).
+
+        Sparse-cone (perf #1433):
+            When ``sparse_paths`` is non-empty, ``git sparse-checkout
+            init --cone`` + ``set <paths...>`` runs BEFORE the SHA
+            checkout, so the working tree contains only the requested
+            top-level directories. The shard lives at
+            ``checkouts_v1/<shard>/<sha>/sparse-<hash>/`` so it
+            coexists with a possible full-tree shard at
+            ``.../<sha>/full/`` for the same SHA.
 
         Concurrency / write-deduplication
         ---------------------------------
@@ -310,14 +351,17 @@ class GitCache:
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
         bare_dir = self._db_root / shard_key
-        checkout_parent = self._checkouts_root / shard_key
-        # Containment guards: the shard_key + sha components are
-        # derived from sha256 / hex but defend at the boundary anyway.
-        ensure_path_within(checkout_parent, self._checkouts_root)
-        checkout_parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(str(checkout_parent), 0o700)
+        variant = _variant_key(sparse_paths)
+        # New layout: <shard>/<sha>/<variant>/. The <sha> level is the
+        # SHA dir (parent to the variant). The <variant> level is what
+        # the lock + atomic_land target so different variants of the
+        # same SHA do not race each other.
+        sha_parent = self._checkouts_root / shard_key / sha
+        ensure_path_within(sha_parent, self._checkouts_root)
+        sha_parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(sha_parent), 0o700)
 
-        final_dir = checkout_parent / sha
+        final_dir = sha_parent / variant
         ensure_path_within(final_dir, self._checkouts_root)
         lock = shard_lock(final_dir)
 
@@ -331,7 +375,12 @@ class GitCache:
             # rule out a poisoned half-write (atomic_land guards
             # against that, but we re-check defensively).
             if final_dir.is_dir() and verify_checkout_sha(final_dir, sha):
-                _log.debug("Write-dedup HIT under lock: %s @ %s", url, sha[:12])
+                _log.debug(
+                    "Write-dedup HIT under lock: %s @ %s [%s]",
+                    url,
+                    sha[:12],
+                    variant,
+                )
                 return final_dir
 
             staged = stage_path(final_dir)
@@ -360,6 +409,34 @@ class GitCache:
                     env=subprocess_env,
                     check=True,
                 )
+                if sparse_paths:
+                    # Sparse-cone setup BEFORE checkout. Failures raise
+                    # (not silently fallen back to full checkout) because
+                    # a silent fallback would re-introduce the disk
+                    # bloat this code path exists to avoid (#1433).
+                    subprocess.run(
+                        [git_exe, "-C", str(staged), "sparse-checkout", "init", "--cone"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=subprocess_env,
+                        check=True,
+                    )
+                    subprocess.run(
+                        [
+                            git_exe,
+                            "-C",
+                            str(staged),
+                            "sparse-checkout",
+                            "set",
+                            *sparse_paths,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=subprocess_env,
+                        check=True,
+                    )
                 # Checkout the specific SHA
                 subprocess.run(
                     [git_exe, "-C", str(staged), "checkout", sha],
