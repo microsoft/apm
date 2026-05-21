@@ -1,12 +1,32 @@
 lockfile_version: '1'
-generated_at: '2026-04-21T21:45:34.516938+00:00'
-dependencies: []
+generated_at: '2026-05-21T19:10:07.454672+00:00'
+apm_version: 0.14.1
+dependencies:
+- repo_url: _local/apm-review-panel
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/apm-review-panel
+  source: local
+  local_path: ./packages/apm-review-panel
+- repo_url: _local/batch-bug-shepherd
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/batch-bug-shepherd
+  - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
+  source: local
+  local_path: ./packages/batch-bug-shepherd
+- repo_url: _local/apm-review-panel
+  depth: 2
+  resolved_by: _local/batch-bug-shepherd
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/apm-review-panel
+  source: local
+  local_path: ../apm-review-panel
 local_deployed_files:
-- .agents/skills/apm-review-panel
 - .agents/skills/apm-strategy
 - .agents/skills/apm-triage-panel
 - .agents/skills/auth
-- .agents/skills/batch-bug-shepherd
 - .agents/skills/cli-logging-ux
 - .agents/skills/devx-ux
 - .agents/skills/docs-impact-architect
@@ -40,7 +60,6 @@ local_deployed_files:
 - .github/instructions/linting.instructions.md
 - .github/instructions/python.instructions.md
 - .github/instructions/tests.instructions.md
-- copilot-app-db://workflows/apm--local--_local--batch-bug-shepherd
 local_deployed_file_hashes:
   .github/agents/agentic-workflows.agent.md: sha256:d1ea2d038e2af8be11d6c95b3213b03b9777fae46f0438efa95d5a803e6c3765
   .github/agents/apm-ceo.agent.md: sha256:484da64428ea46a6183dffd3f30c9fc5fc5c747639c0c79e55be69dba0899323
