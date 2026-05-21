@@ -4,16 +4,16 @@ description: >-
   Use this skill to run a multi-persona expert advisory review on a labelled
   pull request in microsoft/apm. The panel fans out to five mandatory
   specialists plus a test-coverage specialist (active on every PR that
-  touches src/) plus two conditional specialists (auth, doc-writer),
-  all running in their own agent threads, and a CEO
+  touches src/) plus three conditional specialists (auth, doc-writer,
+  performance-expert), all running in their own agent threads, and a CEO
   synthesizer. The orchestrator is the sole writer to the PR: ONE
   recommendation comment, no verdict labels, no merge gating. The panel
   is advisory -- it surfaces findings, prioritizes follow-ups, and renders
   a ship-recommendation that the maintainer and author weigh. Activate
   when a non-trivial PR needs a cross-cutting recommendation
   (architecture, CLI logging, DevX UX, supply-chain security,
-  growth/positioning, optionally auth, docs, and test coverage, with CEO
-  arbitration).
+  growth/positioning, optionally auth, docs, perf, and test coverage,
+  with CEO arbitration).
 ---
 
 # APM Review Panel - Fan-Out Advisory Review
@@ -71,6 +71,7 @@ surfaces findings; the maintainer and the PR author decide ship.
 | [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Conditional (see below) |
 | [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
 | [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Yes (skipped only on docs-only PRs -- see below) |
+| [Performance Expert](../../agents/performance-expert.agent.md) | Package-Manager Performance Reviewer | Conditional (see below) |
 | [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Yes |
 
 ## Topology
@@ -113,10 +114,10 @@ surfaces findings; the maintainer and the PR author decide ship.
 
 ## Conditional panelists
 
-Two personas are conditional (auth, doc-writer). A third
-(test-coverage) is mandatory on every PR that touches `src/` and only
-skipped on documentation-only PRs -- see its section below for why.
-The orchestrator ALWAYS spawns ALL three tasks to keep the schema
+Three personas are conditional (auth, doc-writer, performance-expert). A
+fourth (test-coverage) is mandatory on every PR that touches `src/` and
+only skipped on documentation-only PRs -- see its section below for why.
+The orchestrator ALWAYS spawns ALL four tasks to keep the schema
 return shape uniform; the prompt instructs the subagent to set
 `active: false` with an `inactive_reason` if the condition does not
 hold.
@@ -167,6 +168,35 @@ prerequisites), (d) discoverability (cross-links, sidebar order if
 Starlight content). When the doc-writer is active because of code
 changes that SHOULD have updated docs but did not, the persona surfaces
 that gap as a finding.
+
+### Performance Expert
+
+Activate when the PR changes any of:
+- `src/apm_cli/cache/**`
+- `src/apm_cli/deps/**`
+- `src/apm_cli/install/phases/**`
+- `src/apm_cli/install/pipeline.py`
+- `src/apm_cli/install/resolve.py`
+- `scripts/perf/**`
+- `src/apm_cli/core/command_logger.py` (when the diff adds perf-instrumentation logs)
+
+Also activate when the PR description claims a performance win
+(speedup ratio, latency reduction, bytes-on-disk reduction, throughput
+improvement) or attaches a perf-harness measurement table.
+
+Fallback self-check (when no fast-path file matched): "Does this PR
+change the hot path for dependency download, materialization, cache
+layout, transport (git protocol, partial clone, sparse checkout),
+parallelism, or any user-visible install/update wall-time? If unsure,
+answer YES."
+
+When active, the performance-expert reviews against the package-manager
+performance playbook: transport minimization (depth, filter, sparse
+scope), cache layering and dedup keys, parallelism and lock contention,
+working-tree materialization cost, perf-harness methodology (cache
+wipe, warm/cold separation, statistical noise), and pervasive
+application of the chosen technique across install / update / run
+surfaces (not just the one path the PR exercises).
 
 ### Test Coverage Expert
 
@@ -249,6 +279,7 @@ output to the PR before step 6.
    - `auth-expert` (always - active per step 2)
    - `doc-writer` (always - active per step 2)
    - `test-coverage-expert` (always - active per step 2)
+   - `performance-expert` (always - active per step 2)
 
    Each task prompt MUST:
    - Reference its persona file by relative path so the subagent loads

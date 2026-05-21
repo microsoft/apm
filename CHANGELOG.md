@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- Cold `apm install` for subdirectory git dependencies is dramatically faster on large monorepos (validated ~30x to ~75x range on `dotnet/skills`, network-variant). `GitCache` now performs partial bare clones (`--filter=blob:none`) with promisor remotes plus sparse-cone consumer materialization, and threads the tiered resolver's resolved SHA through to skip a redundant `ls-remote`. Bare-cache disk usage drops by orders of magnitude on the validated workload. No lockfile schema, CLI surface, or auth flow changes. Servers that reject `--filter=blob:none` (older Gerrit / pre-2.20 GHE) transparently fall back to a full bare clone. (#1436, closes #1433)
+
 ### Added
 
 - **Experimental:** `copilot-app` target now scopes workflow rows to a real `projects` row instead of orphaning them at the App's root. When the App is running, project registration goes through the loopback WebSocket IPC surface (`~/.copilot/run/ws.{port,token}`, 0o600) so the project goes through the App's own owner/repo discovery and is immediately known to the webview; when the App is closed, registration falls through to a direct-SQLite `BEGIN IMMEDIATE` resolver against `~/.copilot/data.db`. Workflow rows are always written via SQLite (namespaced ids preserve lockfile stability). `--global` installs that carry workflow-shape prompts now emit a one-time warn-and-proceed diagnostic explaining the CWD-pivot risk and the per-row "attach to project" remediation. A one-time `Restart the Copilot App once` info hint fires on first project registration in a repo (see github/github-app#5483). (#1431)

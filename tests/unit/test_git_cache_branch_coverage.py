@@ -525,7 +525,7 @@ class TestGetCheckoutIntegrityFailure:
 
         sha = "a" * 40
         shard_key = "someshard"
-        checkout_dir = gc._checkouts_root / shard_key / sha
+        checkout_dir = gc._checkouts_root / shard_key / sha / "full"
         checkout_dir.mkdir(parents=True)
 
         with (

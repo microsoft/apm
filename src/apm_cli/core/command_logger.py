@@ -379,6 +379,81 @@ class InstallLogger(CommandLogger):
             return
         _rich_echo(f"    Package type: {type_label}", color="dim")
 
+    # --- Performance diagnostics (perf #1433) ---
+
+    def subdir_download_start(
+        self,
+        dep_name: str,
+        cache_state: str,
+        sha_short: str = "",
+        sparse_paths: list[str] | None = None,
+    ):
+        """Log the start of a subdirectory dep download (verbose only).
+
+        Names the dep, the bare-cache state (e.g. ``cold`` / ``warm`` /
+        ``persistent`` / ``shared-bare``), the resolved SHA (short),
+        and the sparse paths being requested. Surfaces enough state to
+        diagnose a perf regression from one log line.
+        """
+        if not self.verbose:
+            return
+        sha_part = f" @{sha_short}" if sha_short else ""
+        paths_part = f" sparse={','.join(sparse_paths)}" if sparse_paths else " sparse=<none>"
+        _rich_echo(
+            f"    [i] perf: subdir {dep_name}{sha_part} cache={cache_state}{paths_part}",
+            color="dim",
+        )
+
+    def bare_clone_strategy(self, strategy: str, elapsed_ms: int):
+        """Log the bare-clone strategy and wall time (verbose only).
+
+        ``strategy`` is the human-readable command shape, e.g.
+        ``--depth=1 --branch main`` or ``init+fetch --depth=1 <sha>``.
+        ``elapsed_ms`` lets readers spot a network-bound regression
+        without re-running with a profiler.
+        """
+        if not self.verbose:
+            return
+        _rich_echo(
+            f"    [i] perf: bare clone strategy={strategy} took={elapsed_ms}ms",
+            color="dim",
+        )
+
+    def materialize_result(self, sparse_applied: bool, consumer_size_bytes: int):
+        """Log materialization outcome and consumer dir size (verbose only).
+
+        ``sparse_applied`` tells the reader whether sparse-cone fired
+        on this consumer dir (sparse_paths were passed and accepted by
+        git). ``consumer_size_bytes`` is the on-disk size of the
+        working tree handed off to the integrator; a regression here
+        is the leading indicator that sparse-cone silently fell back.
+        """
+        if not self.verbose:
+            return
+        size_mb = consumer_size_bytes / (1024 * 1024)
+        applied = "yes" if sparse_applied else "no"
+        _rich_echo(
+            f"    [i] perf: materialize sparse={applied} size={size_mb:.2f} MB",
+            color="dim",
+        )
+
+    def tier_summary(self, stats: dict[str, int]):
+        """Log the tiered ref resolver hit counts (verbose only).
+
+        Emitted at the end of the resolve phase so the reader can see
+        how many ref->SHA lookups hit each tier (L0 per-run cache,
+        L1 commits API, L2 bare rev-parse, L3 legacy clone) without
+        wiring a debugger. A run dominated by L3 is the canonical
+        signal that ref-resolution is paying full clone cost.
+        """
+        if not self.verbose or not stats:
+            return
+        non_zero = {k: v for k, v in stats.items() if v}
+        if not non_zero:
+            return
+        parts = " ".join(f"{k}={v}" for k, v in non_zero.items())
+        _rich_echo(f"    [i] perf: ref-resolver tiers: {parts}", color="dim")
+
     # --- Cleanup phase (stale and orphan file removal) ---
 
     def stale_cleanup(self, dep_key: str, count: int):
