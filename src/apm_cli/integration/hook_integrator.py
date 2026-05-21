@@ -1352,6 +1352,7 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        scope=None,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 

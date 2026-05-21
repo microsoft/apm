@@ -439,6 +439,10 @@ class TestRunMcpInstallNoRuntimes:
         mock_client = MagicMock()
         mock_client.supports_user_scope = False
 
+        mock_ops = MagicMock()
+        mock_ops.validate_servers_exist.return_value = (["srv"], [])
+        mock_ops.check_servers_needing_installation.return_value = []
+
         with (
             patch(
                 "apm_cli.factory.ClientFactory.create_client",
@@ -453,9 +457,23 @@ class TestRunMcpInstallNoRuntimes:
                 "apm_cli.runtime.utils.find_runtime_binary",
                 return_value=None,
             ),
+            # find_runtime_binary is module-level imported into
+            # mcp_integrator_install at import time, so the patch on
+            # apm_cli.runtime.utils above does NOT rebind the symbol the
+            # function actually calls. Patch the local binding too so a
+            # developer machine with `claude` on PATH does not silently
+            # leak it into installed_runtimes and bypass the exclude path.
+            patch(
+                "apm_cli.integration.mcp_integrator_install.find_runtime_binary",
+                return_value=None,
+            ),
             patch(
                 "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
                 side_effect=lambda rts, **kw: rts,
+            ),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations",
+                return_value=mock_ops,
             ),
         ):
             mock_mgr = MagicMock()

@@ -66,6 +66,7 @@ class InstructionIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set[str] | None = None,
         diagnostics=None,
+        scope=None,
     ) -> IntegrationResult:
         """Integrate instructions for a single *target*.
 

@@ -257,6 +257,19 @@ def run(ctx: InstallContext) -> None:
     # prevents collisions across projects sharing the same package.
     # Rows always arrive enabled=0; users grant the second consent in
     # the App's Workflows tab before anything runs on a schedule.
+    #
+    # PR A (project-scoping): the integrator now auto-registers a row
+    # in the App's ``projects`` table for the current repository and
+    # stamps every workflow with that project_id, so workflows show up
+    # in the correct project's Workflows tab. On the *first* install
+    # into a repo, the App's webview does not always live-refresh on
+    # the externally-inserted ``projects`` row (see github/github-app
+    # #5483); the integrator emits a one-time restart hint so the user
+    # is not left wondering why the new project is missing from the UI.
+    # When the App is running, the integrator prefers the live
+    # WebSocket-IPC surface so the broadcast fires natively and no
+    # restart is needed; the SQLite path is the fallback for the
+    # App-closed case (still the common case during install).
 
     # ------------------------------------------------------------------
     # v2 resolution (#1154): signal-based provenance and strict errors.
