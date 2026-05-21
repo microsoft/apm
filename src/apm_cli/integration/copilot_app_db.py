@@ -270,9 +270,11 @@ def is_copilot_app_uri(lockfile_path: str) -> bool:
 class WorkflowRow:
     """Subset of the ``workflows`` table columns APM writes.
 
-    Fields not listed here (``created_at``, ``updated_at``, ``project_id``,
+    Fields not listed here (``created_at``, ``updated_at``,
     ``last_run_at``, ``next_run_at``) are left to the database defaults
-    or to existing values when updating.
+    or to existing values when updating. ``project_id`` is now first-
+    class on the write path (PR A) so every APM-installed workflow row
+    is scoped to a real ``projects`` row.
     """
 
     id: str
@@ -285,6 +287,7 @@ class WorkflowRow:
     model: str | None = None
     reasoning_effort: str | None = None
     mode: str | None = None
+    project_id: str | None = None
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -453,8 +456,8 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                     INSERT INTO workflows (
                         id, name, prompt, model, reasoning_effort,
                         interval, schedule_hour, schedule_day,
-                        enabled, mode
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                        enabled, mode, project_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                     """,
                     (
                         row.id,
@@ -466,6 +469,7 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                         row.schedule_hour,
                         row.schedule_day,
                         row.mode,
+                        row.project_id,
                     ),
                 )
             else:
@@ -490,6 +494,7 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                                schedule_hour = ?,
                                schedule_day = ?,
                                mode = ?,
+                               project_id = ?,
                                enabled = 0,
                                next_run_at = NULL,
                                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -504,18 +509,23 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                             row.schedule_hour,
                             row.schedule_day,
                             row.mode,
+                            row.project_id,
                             row.id,
                         ),
                     )
                 else:
+                    # Self-heal pre-PR-A rows: even when nothing else
+                    # changed, stamp project_id so a NULL left by an
+                    # older APM install is filled on the next run.
                     conn.execute(
                         """
                         UPDATE workflows
                            SET name = ?,
+                               project_id = ?,
                                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
                          WHERE id = ?
                         """,
-                        (row.name, row.id),
+                        (row.name, row.project_id, row.id),
                     )
             conn.execute("COMMIT")
         except Exception:
