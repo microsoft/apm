@@ -32,6 +32,94 @@ class TestIsAvailable:
             provider = AzureCliBearerProvider()
             assert provider.is_available() is False
 
+    def test_is_available_stable_after_construction(self):
+        """is_available reflects construction-time resolution only.
+
+        Once the provider is built, mid-process PATH changes (or shutil.which
+        side effects) must NOT flip the answer. This is the contract that
+        keeps is_available() consistent with get_bearer_token()'s pre-check
+        and avoids a "True now / az_not_found a moment later" race.
+        """
+        with patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"):
+            provider = AzureCliBearerProvider()
+        # Re-enter a context where which() would now say "missing": the
+        # already-constructed provider must still report True.
+        with patch("apm_cli.core.azure_cli.shutil.which", return_value=None):
+            assert provider.is_available() is True
+
+
+# ---------------------------------------------------------------------------
+# Windows az.cmd resolution (regression for microsoft/apm#1430)
+# ---------------------------------------------------------------------------
+
+
+class TestWindowsAzCmdResolution:
+    """Regression: subprocess.run must receive the shutil.which-resolved
+    path, not the bare "az" token. On Windows the resolver returns
+    "C:\\\\...\\\\az.cmd" and CreateProcessW cannot find "az" alone."""
+
+    WINDOWS_AZ_CMD = r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+
+    def test_init_resolves_via_shutil_which(self):
+        with patch(
+            "apm_cli.core.azure_cli.shutil.which", return_value=self.WINDOWS_AZ_CMD
+        ) as mock_which:
+            provider = AzureCliBearerProvider()
+            mock_which.assert_called_once_with("az")
+            assert provider._az_command == self.WINDOWS_AZ_CMD
+
+    def test_init_stores_none_when_not_on_path(self):
+        with patch("apm_cli.core.azure_cli.shutil.which", return_value=None):
+            provider = AzureCliBearerProvider()
+            assert provider._az_command is None
+
+    def test_init_absolute_path_skips_resolution(self):
+        """Caller passed an explicit absolute path -- trust verbatim."""
+        with patch("apm_cli.core.azure_cli.shutil.which") as mock_which:
+            provider = AzureCliBearerProvider(az_command="/opt/custom/az")
+            mock_which.assert_not_called()
+            assert provider._az_command == "/opt/custom/az"
+
+    def test_get_bearer_token_invokes_resolved_az_cmd_path(self):
+        """The exact Windows shape: shutil.which returns az.cmd; verify it
+        flows into subprocess.run as the argv[0]. Without the fix, argv[0]
+        would be the bare "az" token and CreateProcessW would fail."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = FAKE_JWT + "\n"
+        mock_result.stderr = ""
+
+        with (
+            patch("apm_cli.core.azure_cli.shutil.which", return_value=self.WINDOWS_AZ_CMD),
+            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            provider = AzureCliBearerProvider()
+            provider.get_bearer_token()
+            assert mock_run.call_count == 1
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == self.WINDOWS_AZ_CMD, (
+                f"subprocess.run must receive the resolved az.cmd path, got: {cmd[0]!r}"
+            )
+
+    def test_get_current_tenant_id_invokes_resolved_az_cmd_path(self):
+        """Same regression for the get_current_tenant_id() probe -- this
+        was the second swallowed-failure that drove the misleading Case 3
+        diagnostic on Windows."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "72f988bf-86f1-41af-91ab-2d7cd011db47\n"
+        mock_result.stderr = ""
+
+        with (
+            patch("apm_cli.core.azure_cli.shutil.which", return_value=self.WINDOWS_AZ_CMD),
+            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            provider = AzureCliBearerProvider()
+            provider.get_current_tenant_id()
+            assert mock_run.call_count == 1
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == self.WINDOWS_AZ_CMD
+
 
 # ---------------------------------------------------------------------------
 # get_bearer_token

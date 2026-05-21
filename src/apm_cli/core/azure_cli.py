@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -82,7 +83,24 @@ class AzureCliBearerProvider:
     _EXPIRY_SLACK_SECONDS: int = 60
 
     def __init__(self, az_command: str = "az") -> None:
-        self._az_command = az_command
+        # Resolve the az executable once at construction. On Windows the
+        # Azure CLI ships as az.cmd (a batch wrapper), and Python's
+        # subprocess.run -> CreateProcessW does NOT honor PATHEXT for
+        # non-.exe executables, so a bare "az" token fails with
+        # FileNotFoundError even though `shutil.which("az")` resolves it.
+        # See microsoft/apm#1430. Resolving via shutil.which here (which
+        # DOES honor PATHEXT) and storing the absolute path keeps every
+        # downstream subprocess.run call portable across platforms.
+        #
+        # Edge case: callers (notably tests) may pass an explicit path.
+        # If az_command already looks like a path (absolute or contains a
+        # separator) we trust it verbatim and skip re-resolution.
+        #
+        # PATH changes mid-process won't be detected; restart the CLI.
+        if os.path.isabs(az_command) or os.sep in az_command:
+            self._az_command: str | None = az_command
+        else:
+            self._az_command = shutil.which(az_command)
         # Cache stores (token, expires_at_epoch_seconds). expires_at is None
         # if the response did not include an expiresOn field (very old az
         # versions); in that case the token is treated as never-expiring
@@ -93,12 +111,16 @@ class AzureCliBearerProvider:
     # -- public API ---------------------------------------------------------
 
     def is_available(self) -> bool:
-        """Return True iff the ``az`` binary is on PATH.
+        """Return True iff the ``az`` binary was found on PATH at construction.
+
+        Resolution is one-shot (performed in :meth:`__init__`). PATH changes
+        made after the provider was constructed will NOT be observed; restart
+        the CLI if you have installed ``az`` mid-session.
 
         Does NOT check whether the user is logged in -- that requires a
         subprocess call and is deferred to :meth:`get_bearer_token`.
         """
-        return shutil.which(self._az_command) is not None
+        return self._az_command is not None
 
     def get_bearer_token(self) -> str:
         """Acquire (or return cached) bearer token for Azure DevOps.

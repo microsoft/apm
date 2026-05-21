@@ -157,7 +157,21 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         )
         _ctx_env = getattr(dep_ctx, "git_env", {}) or {}
         probe_env = {**os.environ, **_dl.git_env, **_ctx_env}
-        if is_generic:
+        # GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM carve-out: GitAuthEnvBuilder
+        # forces an empty global gitconfig for ALL hosts to prevent a user's
+        # ~/.gitconfig insteadOf rewrites or credential helpers from leaking
+        # tokens during a clone. But for preflight probes (a single ls-remote
+        # against the same host the dep targets), the redirection surface is
+        # nil and killing the user's global config kills Git Credential
+        # Manager along with it -- the helper most Windows ADO users rely on
+        # for Entra-cached credentials. For ADO specifically that matters
+        # because bearer acquisition can fail for reasons unrelated to login
+        # state (sandbox, proxy, microsoft/apm#1430-style PATH quirks), and
+        # GCM is the only remaining channel that can save us. Generic hosts
+        # have the same logic; widening the carve-out to ADO keeps the
+        # actual clone path isolated (it builds its own clean env) while
+        # giving the preflight probe the best chance to succeed.
+        if is_generic or is_azure_devops_hostname(host):
             for _key in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ASKPASS"):
                 probe_env.pop(_key, None)
 

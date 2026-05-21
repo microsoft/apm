@@ -194,11 +194,17 @@ class TestPreflightGenericHostAllowsCredentialHelpers:
         assert str(exc_info.value).startswith("Authentication failed for ghes.corp.example.com")
 
     @patch("subprocess.run")
-    def test_ado_host_retains_credential_blocking_env(self, mock_run):
-        """ADO hosts should retain GIT_ASKPASS (locked-down env with token in URL).
+    def test_ado_host_omits_credential_blocking_env(self, mock_run):
+        """ADO hosts strip GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM / GIT_ASKPASS
+        from the preflight probe env so Git Credential Manager can answer
+        for Entra-cached ADO creds when bearer acquisition is unavailable
+        (microsoft/apm#1430 -- Windows az.cmd resolution failure, sandboxed
+        runs, proxy issues, etc.).
 
-        Generic hosts strip GIT_ASKPASS to allow credential helpers; ADO hosts
-        keep it because auth is via token embedded in the URL.
+        The actual clone path remains isolated -- it builds its own clean
+        env via GitAuthEnvBuilder.setup_environment(). This carve-out only
+        widens the preflight PROBE leg so GCM gets a chance to authenticate
+        before we surface a misleading "az not logged in" diagnostic.
         """
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
 
@@ -219,9 +225,10 @@ class TestPreflightGenericHostAllowsCredentialHelpers:
         _preflight_auth_check(ctx, resolver, verbose=False)
 
         call_env = mock_run.call_args[1]["env"]
-        # ADO hosts keep the locked-down env since tokens are embedded in the URL
-        assert call_env.get("GIT_CONFIG_NOSYSTEM") == "1"
-        assert call_env.get("GIT_ASKPASS") == "echo"
+        # Layer 2 of #1430 fix: ADO preflight no longer kills GCM.
+        assert "GIT_CONFIG_NOSYSTEM" not in call_env
+        assert "GIT_ASKPASS" not in call_env
+        assert "GIT_CONFIG_GLOBAL" not in call_env
 
 
 # ---------------------------------------------------------------------------
