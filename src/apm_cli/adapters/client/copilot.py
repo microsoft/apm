@@ -1007,29 +1007,6 @@ class CopilotClientAdapter(MCPClientAdapter):
                 return remote
         return None
 
-    def _select_best_package(self, packages):
-        """Select the best package for installation from available packages.
-
-        Prioritizes packages in order: npm, docker, pypi, homebrew, others.
-        Uses ``_infer_registry_name`` so selection works even when the
-        registry API returns empty ``registry_name``.
-
-        Args:
-            packages (list): List of package dictionaries.
-
-        Returns:
-            dict: Best package to use, or None if no suitable package found.
-        """
-        priority_order = ["npm", "docker", "pypi", "homebrew"]
-
-        for target in priority_order:
-            for package in packages:
-                if self._infer_registry_name(package) == target:
-                    return package
-
-        # If no priority package found, return the first one
-        return packages[0] if packages else None
-
     def _is_github_server(self, server_name, url):
         """Securely determine if a server is a GitHub MCP server.
 
