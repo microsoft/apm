@@ -492,11 +492,15 @@ class TestApplyOverlay:
         with pytest.warns(UserWarning, match="version"):
             MCPIntegrator._apply_overlay(cache, dep)
 
-    def test_registry_str_overlay_emits_warning(self):
+    def test_registry_str_overlay_no_longer_emits_warning(self):
+        """registry: <url> is now honoured at install time, so no warning is emitted."""
         cache = {"svc": {"name": "svc"}}
         dep = _make_dep("svc", registry="https://custom.registry.example.com")
-        with pytest.warns(UserWarning, match="registry"):
-            MCPIntegrator._apply_overlay(cache, dep)
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning would raise
+            MCPIntegrator._apply_overlay(cache, dep)  # must not raise
 
 
 # ===========================================================================

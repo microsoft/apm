@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.runtime.utils import find_runtime_binary
@@ -18,7 +18,173 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
 
 
-def run_mcp_install(  # noqa: PLR0915
+def _install_registry_group(
+    operations: Any,
+    group_dep_names: list,
+    group_dep_map: dict,
+    group_deps: list,
+    target_runtimes: list,
+    stored_mcp_configs: dict,
+    servers_to_update: builtins.set,
+    successful_updates: builtins.set,
+    project_root: Any,
+    user_scope: bool,
+    verbose: bool,
+    console: Any,
+    logger: Any,
+) -> int:
+    """Process one group of registry deps through a single ``MCPServerOperations`` instance.
+
+    All deps in ``group_deps`` share the same target registry (either the
+    default or a per-dep override URL).  ``servers_to_update`` and
+    ``successful_updates`` are mutated in-place; the function returns the
+    number of servers newly configured or updated in this group.
+    """
+    # Lazy import: only available after MCPIntegrator finishes loading.
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    configured_count = 0
+
+    # Early validation: check all servers exist in registry (fail-fast).
+    # F4 (#1116): emit a single batch heartbeat so users see the
+    # registry round-trip in progress instead of silent stall.
+    logger.mcp_lookup_heartbeat(len(group_dep_names))
+    if verbose:
+        logger.verbose_detail(f"Validating {len(group_deps)} registry servers...")
+    valid_servers, invalid_servers = operations.validate_servers_exist(group_dep_names)
+
+    if invalid_servers:
+        logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
+        logger.progress("Run 'apm mcp search <query>' to find available servers")
+        raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
+
+    if valid_servers:
+        servers_to_install = operations.check_servers_needing_installation(
+            target_runtimes,
+            valid_servers,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
+        already_configured_candidates = [
+            dep for dep in valid_servers if dep not in servers_to_install
+        ]
+
+        # Detect config drift for "already configured" servers
+        if stored_mcp_configs and already_configured_candidates:
+            drifted_reg_deps = [
+                group_dep_map[n] for n in already_configured_candidates if n in group_dep_map
+            ]
+            drifted = MCPIntegrator._detect_mcp_config_drift(
+                drifted_reg_deps,
+                stored_mcp_configs,
+            )
+            if drifted:
+                servers_to_update.update(drifted)
+                MCPIntegrator._append_drifted_to_install_list(servers_to_install, drifted)
+        already_configured_servers = [
+            dep for dep in already_configured_candidates if dep not in servers_to_update
+        ]
+
+        if not servers_to_install:
+            if console:
+                for dep in already_configured_servers:
+                    console.print(
+                        f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
+                        f"[dim](already configured)[/dim]"
+                    )
+            else:
+                logger.success("All registry MCP servers already configured")
+        else:
+            if already_configured_servers:
+                if console:
+                    for dep in already_configured_servers:
+                        console.print(
+                            f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
+                            f"[dim](already configured)[/dim]"
+                        )
+                else:
+                    logger.verbose_detail(
+                        "Already configured registry MCP servers: "
+                        f"{', '.join(already_configured_servers)}"
+                    )
+
+            # Batch fetch server info once
+            if verbose:
+                logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
+            server_info_cache = operations.batch_fetch_server_info(servers_to_install)
+
+            # Apply overlays
+            for server_name in servers_to_install:
+                dep = group_dep_map.get(server_name)
+                if dep:
+                    MCPIntegrator._apply_overlay(server_info_cache, dep)
+
+            # Collect env and runtime variables
+            shared_env_vars = operations.collect_environment_variables(
+                servers_to_install, server_info_cache
+            )
+            for server_name in servers_to_install:
+                dep = group_dep_map.get(server_name)
+                if dep and dep.env:
+                    shared_env_vars.update(dep.env)
+            shared_runtime_vars = operations.collect_runtime_variables(
+                servers_to_install, server_info_cache
+            )
+
+            # Install for each target runtime
+            for dep in servers_to_install:
+                is_update = dep in servers_to_update
+                action_text = "Updating" if is_update else "Configuring"
+                if console:
+                    console.print(f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep}")
+                    console.print(
+                        f"|     +- {action_text} for "
+                        f"{', '.join([rt.title() for rt in target_runtimes])}..."
+                    )
+                else:
+                    logger.progress(
+                        f"{dep}: {action_text.lower()} for {', '.join(target_runtimes)}..."
+                    )
+
+                any_ok = False
+                for rt in target_runtimes:
+                    if verbose:
+                        logger.verbose_detail(f"Configuring {rt}...")
+                    if MCPIntegrator._install_for_runtime(
+                        rt,
+                        [dep],
+                        shared_env_vars,
+                        server_info_cache,
+                        shared_runtime_vars,
+                        project_root=project_root,
+                        user_scope=user_scope,
+                        logger=logger,
+                    ):
+                        any_ok = True
+
+                if any_ok:
+                    if console:
+                        label = "updated" if is_update else "configured"
+                        console.print(
+                            f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep} -> "
+                            f"{', '.join([rt.title() for rt in target_runtimes])}"
+                            f" [dim]({label})[/dim]"
+                        )
+                    configured_count += 1
+                    if is_update:
+                        successful_updates.add(dep)
+                elif console:
+                    console.print(
+                        f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep}  "
+                        "-- failed for all runtimes"
+                    )
+                else:
+                    logger.error(f"{dep} -- failed for all runtimes")
+
+    return configured_count
+
+
+def run_mcp_install(
     mcp_deps: list,
     runtime: str | None = None,
     exclude: str | None = None,
@@ -92,7 +258,6 @@ def run_mcp_install(  # noqa: PLR0915
         dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
     ]
     registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
-    registry_dep_map = {dep.name: dep for dep in registry_deps if hasattr(dep, "name")}
 
     console = _get_console()
     # Track servers that were re-applied due to config drift
@@ -333,145 +498,39 @@ def run_mcp_install(  # noqa: PLR0915
         try:
             from apm_cli.registry.operations import MCPServerOperations
 
-            operations = MCPServerOperations()
+            # Group deps by their per-dep registry URL so each group is
+            # resolved against the correct registry endpoint.
+            # Plain strings (backward-compat) and deps with registry=None go to
+            # the default group (key=None).  Only str values trigger routing.
+            registry_groups: builtins.dict[str | None, list] = {}
+            for dep in registry_deps:
+                dep_registry = getattr(dep, "registry", None)
+                key = dep_registry if isinstance(dep_registry, str) else None
+                if key not in registry_groups:
+                    registry_groups[key] = []
+                registry_groups[key].append(dep)
 
-            # Early validation: check all servers exist in registry (fail-fast).
-            # F4 (#1116): emit a single batch heartbeat so users see the
-            # registry round-trip in progress instead of silent stall.
-            logger.mcp_lookup_heartbeat(len(registry_dep_names))
-            if verbose:
-                logger.verbose_detail(f"Validating {len(registry_deps)} registry servers...")
-            valid_servers, invalid_servers = operations.validate_servers_exist(registry_dep_names)
-
-            if invalid_servers:
-                logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
-                logger.progress("Run 'apm mcp search <query>' to find available servers")
-                raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
-
-            if valid_servers:
-                servers_to_install = operations.check_servers_needing_installation(
-                    target_runtimes,
-                    valid_servers,
+            for group_registry_url, group_deps_list in registry_groups.items():
+                group_dep_names = [
+                    dep.name if hasattr(dep, "name") else dep for dep in group_deps_list
+                ]
+                group_dep_map = {dep.name: dep for dep in group_deps_list if hasattr(dep, "name")}
+                operations = MCPServerOperations(registry_url=group_registry_url)
+                configured_count += _install_registry_group(
+                    operations=operations,
+                    group_dep_names=group_dep_names,
+                    group_dep_map=group_dep_map,
+                    group_deps=group_deps_list,
+                    target_runtimes=target_runtimes,
+                    stored_mcp_configs=stored_mcp_configs,
+                    servers_to_update=servers_to_update,
+                    successful_updates=successful_updates,
                     project_root=project_root,
                     user_scope=user_scope,
+                    verbose=verbose,
+                    console=console,
+                    logger=logger,
                 )
-                already_configured_candidates = [
-                    dep for dep in valid_servers if dep not in servers_to_install
-                ]
-
-                # Detect config drift for "already configured" servers
-                if stored_mcp_configs and already_configured_candidates:
-                    drifted_reg_deps = [
-                        registry_dep_map[n]
-                        for n in already_configured_candidates
-                        if n in registry_dep_map
-                    ]
-                    drifted = MCPIntegrator._detect_mcp_config_drift(
-                        drifted_reg_deps,
-                        stored_mcp_configs,
-                    )
-                    if drifted:
-                        servers_to_update.update(drifted)
-                        MCPIntegrator._append_drifted_to_install_list(servers_to_install, drifted)
-                already_configured_servers = [
-                    dep for dep in already_configured_candidates if dep not in servers_to_update
-                ]
-
-                if not servers_to_install:
-                    if console:
-                        for dep in already_configured_servers:
-                            console.print(
-                                f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
-                                f"[dim](already configured)[/dim]"
-                            )
-                    else:
-                        logger.success("All registry MCP servers already configured")
-                else:
-                    if already_configured_servers:
-                        if console:
-                            for dep in already_configured_servers:
-                                console.print(
-                                    f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
-                                    f"[dim](already configured)[/dim]"
-                                )
-                        else:
-                            logger.verbose_detail(
-                                "Already configured registry MCP servers: "
-                                f"{', '.join(already_configured_servers)}"
-                            )
-
-                    # Batch fetch server info once
-                    if verbose:
-                        logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
-                    server_info_cache = operations.batch_fetch_server_info(servers_to_install)
-
-                    # Apply overlays
-                    for server_name in servers_to_install:
-                        dep = registry_dep_map.get(server_name)
-                        if dep:
-                            MCPIntegrator._apply_overlay(server_info_cache, dep)
-
-                    # Collect env and runtime variables
-                    shared_env_vars = operations.collect_environment_variables(
-                        servers_to_install, server_info_cache
-                    )
-                    for server_name in servers_to_install:
-                        dep = registry_dep_map.get(server_name)
-                        if dep and dep.env:
-                            shared_env_vars.update(dep.env)
-                    shared_runtime_vars = operations.collect_runtime_variables(
-                        servers_to_install, server_info_cache
-                    )
-
-                    # Install for each target runtime
-                    for dep in servers_to_install:
-                        is_update = dep in servers_to_update
-                        action_text = "Updating" if is_update else "Configuring"
-                        if console:
-                            console.print(f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep}")
-                            console.print(
-                                f"|     +- {action_text} for "
-                                f"{', '.join([rt.title() for rt in target_runtimes])}..."
-                            )
-                        else:
-                            logger.progress(
-                                f"{dep}: {action_text.lower()} for {', '.join(target_runtimes)}..."
-                            )
-
-                        any_ok = False
-                        for rt in target_runtimes:
-                            if verbose:
-                                logger.verbose_detail(f"Configuring {rt}...")
-                            if MCPIntegrator._install_for_runtime(
-                                rt,
-                                [dep],
-                                shared_env_vars,
-                                server_info_cache,
-                                shared_runtime_vars,
-                                project_root=project_root,
-                                user_scope=user_scope,
-                                logger=logger,
-                            ):
-                                any_ok = True
-
-                        if any_ok:
-                            if console:
-                                label = "updated" if is_update else "configured"
-                                console.print(
-                                    f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep} -> "
-                                    f"{', '.join([rt.title() for rt in target_runtimes])}"
-                                    f" [dim]({label})[/dim]"
-                                )
-                            configured_count += 1
-                            if is_update:
-                                successful_updates.add(dep)
-                        elif console:
-                            console.print(
-                                f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep}  "
-                                "-- failed for all runtimes"
-                            )
-                        else:
-                            logger.error(f"{dep} -- failed for all runtimes")
 
         except ImportError:
             logger.warning("Registry operations not available")

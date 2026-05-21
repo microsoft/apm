@@ -312,12 +312,6 @@ class MCPIntegrator:
                 f"at install time and will be ignored.",
                 stacklevel=2,
             )
-        if isinstance(dep.registry, str):
-            warnings.warn(
-                f"MCP overlay field 'registry' on '{dep.name}' is not yet applied "
-                f"at install time and will be ignored.",
-                stacklevel=2,
-            )
 
     # ------------------------------------------------------------------
     # Name extraction
