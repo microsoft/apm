@@ -53,19 +53,11 @@ Targets for this run: **${input:targets}**
 6. RENDER the final report from the final-report-template asset
    shipped with the skill at session end.
 
-## Hard rules
+## Delegation
 
-- ASCII only in every artifact this prompt produces (plan.md, the
-  ground-truth table, PR comments delegated to subagents, the final
-  report).
-- The orchestrator NEVER posts to a PR directly. Every PR-side write
-  is delegated to the responsible subagent (shepherd posts the
-  panel comment; completion posts the confirmation comment).
-- The lint contract gates every push: completion subagents run
-  `uv run --extra dev ruff check src/ tests/ && uv run --extra dev
-  ruff format --check src/ tests/` and refuse to push unless both
-  are silent.
-- The mutation-break gate is non-negotiable: a regression-trap test
-  is real only when deleting the production guard makes it FAIL.
-- The PR-in-flight cross-reference is non-negotiable: never dispatch
-  a fix subagent for an issue that already has an open community PR.
+All disciplines (ASCII-only, lint contract, mutation-break gate,
+single-writer interlock per PR comment, PR-in-flight cross-reference,
+schema-validation of subagent returns) are owned by the
+**batch-bug-shepherd** skill. This prompt does NOT re-assert them --
+the skill body is the single source of truth. If the skill body
+evolves, this prompt inherits the change without edit.
