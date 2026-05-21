@@ -180,7 +180,6 @@ jobs:
           pattern: unit-coverage-shard-*
           path: coverage-shards/
           merge-multiple: true
-        continue-on-error: true
 
       - name: Combine and summarise coverage
         if: always()
@@ -192,7 +191,6 @@ jobs:
           else
             echo "No coverage shard files found; skipping unit coverage summary."
           fi
-        continue-on-error: true
 
       # Enforce the same 80% floor pyproject.toml declares. Runs after
       # combine so it sees the union of all shards' exercised lines.
