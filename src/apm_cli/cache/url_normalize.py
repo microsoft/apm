@@ -80,14 +80,24 @@ def normalize_repo_url(url: str) -> str:
     # `parsed.hostname`/`parsed.port` can raise ValueError on malformed
     # netlocs -- notably on Windows where `file://C:\path` parses with
     # netloc `C:\path` and the drive-letter colon is interpreted as
-    # host:port. Fall back to the raw netloc (lowercased) so cache-key
-    # derivation stays deterministic and per-URL distinct without raising.
+    # host:port. Fall back to a sanitized netloc (lowercased, password
+    # stripped) so cache-key derivation stays deterministic and per-URL
+    # distinct without raising or embedding credentials in the key.
     try:
         hostname = (parsed.hostname or "").lower()
         username = parsed.username or ""
         port = parsed.port
     except ValueError:
-        authority = parsed.netloc.lower()
+        # Strip password from userinfo (keep username) before lowercasing,
+        # mirroring Step 4 in the happy path so credentials never leak into
+        # the cache key or any caller that logs the normalized form.
+        raw_netloc = parsed.netloc
+        if "@" in raw_netloc:
+            userinfo, _, hostport = raw_netloc.rpartition("@")
+            user_only = userinfo.split(":", 1)[0]
+            authority = f"{user_only}@{hostport}".lower() if user_only else hostport.lower()
+        else:
+            authority = raw_netloc.lower()
         hostname = ""
     else:
         # Step 5: Strip default ports

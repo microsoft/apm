@@ -110,3 +110,14 @@ class TestMalformedNetloc:
         url_a = r"file://C:\Users\runneradmin\AppData\Local\Temp\repo_a.git"
         url_b = r"file://C:\Users\runneradmin\AppData\Local\Temp\repo_b.git"
         assert cache_shard_key(url_a) != cache_shard_key(url_b)
+
+    def test_fallback_strips_password_from_netloc(self) -> None:
+        """Malformed-netloc fallback must still drop the password (Step 4).
+
+        Otherwise credentials end up baked into cache keys and any caller
+        that logs the normalized URL leaks them.
+        """
+        with_secret = normalize_repo_url("https://user:secret@host:badport/repo")
+        without_secret = normalize_repo_url("https://user@host:badport/repo")
+        assert "secret" not in with_secret
+        assert with_secret == without_secret
