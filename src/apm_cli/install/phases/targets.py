@@ -44,7 +44,7 @@ def _read_yaml_targets(ctx) -> list[str] | None:
     return result if result else None
 
 
-def run(ctx: InstallContext) -> None:
+def run(ctx: InstallContext) -> None:  # noqa: C901
     """Execute the targets phase.
 
     On return ``ctx.targets`` and ``ctx.integrators`` are populated.

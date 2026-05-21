@@ -192,7 +192,7 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
     ),
 )
 @click.pass_context
-def pack_cmd(
+def pack_cmd(  # noqa: C901, PLR0913
     ctx,
     fmt,
     target,

@@ -77,7 +77,7 @@ class DependencyReference:
     is_local: bool = False  # True if this is a local filesystem dependency
     local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
 
-    # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
+    # Monorepo inheritance: { git: parent, path: ... } â€” expanded in resolver
     is_parent_repo_inheritance: bool = False
 
     artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
@@ -686,125 +686,6 @@ class DependencyReference:
         return "." not in last
 
     @classmethod
-    def split_gitlab_direct_shorthand_parts(
-        cls, package: str
-    ) -> tuple[str, list[str], str | None] | None:
-        """If *package* is bare host/path shorthand, return (host, path_segments, ref_str).
-
-        Returns ``None`` for ``https://``, ``git@``, or non–GitLab-class hosts.
-        """
-        s = package.strip()
-        ref_out: str | None = None
-        if "#" in s:
-            s, r = s.rsplit("#", 1)
-            s = s.strip()
-            r = r.strip()
-            ref_out = r if r else None
-        maybe_raise_bare_fqdn_github_gitlab_conflict(package)
-        if s.startswith(("git@", "https://", "http://", "ssh://", "//")):
-            return None
-        if "/" not in s:
-            return None
-        parts = s.split("/")
-        host_cand = parts[0]
-        if "." not in host_cand:
-            return None
-        segs = [p for p in parts[1:] if p]
-        if len(segs) < 1:
-            return None
-        if not is_supported_git_host(host_cand) or not is_gitlab_hostname(host_cand):
-            return None
-        return (host_cand, segs, ref_out)
-
-    @classmethod
-    def needs_gitlab_direct_shorthand_probing(
-        cls, package: str, dep_ref: "DependencyReference"
-    ) -> bool:
-        """True when install should probe left-to-right repo boundaries (GitLab only)."""
-        if dep_ref.is_local:
-            return False
-        if dep_ref.is_virtual:
-            return False
-        sp = cls.split_gitlab_direct_shorthand_parts(package)
-        if not sp:
-            return False
-        _host, segs, _ref = sp
-        return len(segs) >= 3
-
-    @classmethod
-    def iter_gitlab_direct_shorthand_boundary_candidates(cls, path_segments: list[str]):
-        """Yield (repo_url, virtual_suffix) for k=2..n-1 (earliest k first)."""
-        n = len(path_segments)
-        if n < 3:
-            return
-        for k in range(2, n):
-            repo = "/".join(path_segments[:k])
-            suffix = "/".join(path_segments[k:])
-            if cls.virtual_suffix_is_installable_shape(suffix):
-                yield repo, suffix
-
-    @classmethod
-    def from_gitlab_shorthand_probe(
-        cls,
-        host: str,
-        repo_url: str,
-        virtual_path: str,
-        reference: str | None,
-    ) -> "DependencyReference":
-        """Build a virtual dependency ref for a resolved GitLab shorthand probe."""
-        return cls(
-            repo_url=repo_url,
-            host=host,
-            reference=reference,
-            virtual_path=virtual_path,
-            is_virtual=True,
-        )
-
-    @classmethod
-    def _gitlab_shorthand_repo_segment_count(
-        cls,
-        path_segments: list[str],
-        has_virtual_ext: bool,
-        has_collection: bool,
-    ) -> int:
-        """Return how many segments after the host belong to the GitLab project path.
-
-        GitLab allows nested groups; unlike GitHub's fixed ``owner/repo``, the
-        project slug may span 3+ segments. Virtual package shorthand must not
-        chop a nested group path after two segments.
-
-        Shorthand cannot disambiguate every deep namespace; ambiguous cases use
-        object form with ``git:`` + ``path:`` in ``apm.yml``.
-
-        This does **not** split extension-less paths (e.g. ``.../registry/pkg``)
-        into repo + virtual: that would mis-parse valid 5+ segment project
-        paths; use ``parse_from_dict`` with an explicit ``path`` for those.
-        """
-        n = len(path_segments)
-        if n < 2:
-            return n
-
-        if has_collection and "collections" in path_segments:
-            coll_idx = path_segments.index("collections")
-            if coll_idx >= 2:
-                return coll_idx
-            return n
-
-        if has_virtual_ext:
-            for idx, seg in enumerate(path_segments):
-                if idx >= 2 and seg in cls._GITLAB_VIRTUAL_ROOT_SEGMENTS:
-                    return idx
-            if n == 3:
-                return 2
-            if n == 4:
-                return 3
-            if n >= 5:
-                return 3
-            return 2
-
-        return n
-
-    @classmethod
     def _detect_virtual_package(cls, dependency_str: str):
         """Detect whether *dependency_str* refers to a virtual package.
 
@@ -1336,59 +1217,6 @@ class DependencyReference:
         return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
     @classmethod
-    def _validate_final_repo_fields(cls, host, repo_url):
-        """Validate the final repo_url and extract ADO organisation fields.
-
-        Performs character-set and segment-count validation appropriate for
-        the detected host type (Azure DevOps vs generic git host).
-
-        Returns:
-            ``(ado_organization, ado_project, ado_repo)`` -- all ``None``
-            for non-ADO hosts.
-        """
-        is_ado_final = host and is_azure_devops_hostname(host)
-        if is_ado_final:
-            if not re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._\- ]+/[a-zA-Z0-9._\- ]+$", repo_url):
-                raise ValueError(
-                    f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
-                )
-            ado_parts = repo_url.split("/")
-            validate_path_segments(repo_url, context="Azure DevOps repository path")
-            return ado_parts[0], ado_parts[1], ado_parts[2]
-
-        segments = repo_url.split("/")
-        if len(segments) < 2:
-            raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
-        if not all(re.match(_NON_ADO_PATH_SEGMENT_RE, s) for s in segments):
-            raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
-        validate_path_segments(repo_url, context="repository path")
-        for seg in segments:
-            if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
-                raise ValueError(
-                    f"Invalid repository format: '{repo_url}' contains a virtual file extension. "
-                    f"Use the dict format with 'path:' for virtual packages in SSH/HTTPS URLs"
-                )
-        return None, None, None
-
-    @staticmethod
-    def _extract_artifactory_prefix(dependency_str, host):
-        """Extract the Artifactory VCS prefix from the original dependency string.
-
-        Returns:
-            The prefix string (e.g. ``"artifactory/github"``) or ``None``.
-        """
-        _art_str = dependency_str.split("#")[0].split("@")[0]
-        # Strip scheme if present (e.g., https://host/artifactory/...)
-        if "://" in _art_str:
-            _art_str = _art_str.split("://", 1)[1]
-        _art_segs = _art_str.replace(f"{host}/", "", 1).split("/")
-        if is_artifactory_path(_art_segs):
-            art_result = parse_artifactory_path(_art_segs)
-            if art_result:
-                return art_result[0]
-        return None
-
-    @classmethod
     def parse(cls, dependency_str: str) -> "DependencyReference":
         """Parse a dependency string into a DependencyReference.
 
@@ -1519,93 +1347,43 @@ class DependencyReference:
             ssh_user=ssh_user,
         )
 
-    def to_apm_yml_entry(self):
-        """Return the entry to store in apm.yml.
 
-        For HTTP (insecure) deps, returns a dict with 'git' and 'allow_insecure' keys.
-        For deps with skill_subset, returns a dict with 'git' and 'skills' keys.
-        For all other deps, returns the canonical string (same as to_canonical()).
+from .field_validation import (  # noqa: E402
+    _extract_artifactory_prefix,
+    _validate_final_repo_fields,
+)
+from .formatting import (  # noqa: E402
+    _get_display_name,
+    _to_apm_yml_entry,
+    _to_clone_url,
+    _to_github_url,
+    _to_string,
+)
+from .gitlab_shorthand import (  # noqa: E402
+    _from_gitlab_shorthand_probe,
+    _gitlab_shorthand_repo_segment_count,
+    _iter_gitlab_direct_shorthand_boundary_candidates,
+    _needs_gitlab_direct_shorthand_probing,
+    _split_gitlab_direct_shorthand_parts,
+)
 
-        Returns:
-            str or dict: String for simple deps; dict for HTTP or skill-subset deps.
-        """
-        if self.is_insecure:
-            host = self.host or default_host()
-            entry = {"git": f"http://{host}/{self.repo_url}"}
-            if self.reference:
-                entry["ref"] = self.reference
-            if self.alias:
-                entry["alias"] = self.alias
-            entry["allow_insecure"] = self.allow_insecure
-            if self.skill_subset:
-                entry["skills"] = sorted(self.skill_subset)
-            return entry
-        if self.skill_subset:
-            entry = {"git": self.get_identity()}
-            if self.reference:
-                entry["ref"] = self.reference
-            if self.alias:
-                entry["alias"] = self.alias
-            entry["skills"] = sorted(self.skill_subset)
-            return entry
-        return self.to_canonical()
-
-    def to_github_url(self) -> str:
-        """Convert to full repository URL.
-
-        For Azure DevOps, generates: https://dev.azure.com/org/project/_git/repo
-        For GitHub, generates: https://github.com/owner/repo
-        For local packages, returns the local path.
-        """
-        if self.is_local and self.local_path:
-            return self.local_path
-
-        host = self.host or default_host()
-        netloc = f"{host}:{self.port}" if self.port else host
-
-        scheme = "http" if self.is_insecure else "https"
-
-        if self.is_azure_devops():
-            # ADO format: https://dev.azure.com/org/project/_git/repo
-            project = urllib.parse.quote(self.ado_project, safe="")
-            repo = urllib.parse.quote(self.ado_repo, safe="")
-            return f"https://{netloc}/{self.ado_organization}/{project}/_git/{repo}"
-        elif self.artifactory_prefix:
-            return f"{scheme}://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
-        else:
-            # Git host format: https://github.com/owner/repo
-            return f"{scheme}://{netloc}/{self.repo_url}"
-
-    def to_clone_url(self) -> str:
-        """Convert to a clone-friendly URL (same as to_github_url for most purposes)."""
-        return self.to_github_url()
-
-    def get_display_name(self) -> str:
-        """Get display name for this dependency (alias or repo name)."""
-        if self.alias:
-            return self.alias
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.is_virtual:
-            return self.get_virtual_package_name()
-        return self.repo_url  # Full repo URL for disambiguation
-
-    def __str__(self) -> str:
-        """String representation of the dependency reference."""
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.host:
-            host_label = f"{self.host}:{self.port}" if self.port else self.host
-            if self.artifactory_prefix:
-                result = f"{host_label}/{self.artifactory_prefix}/{self.repo_url}"
-            else:
-                result = f"{host_label}/{self.repo_url}"
-        else:
-            result = self.repo_url
-        if self.virtual_path:
-            result += f"/{self.virtual_path}"
-        if self.reference:
-            result += f"#{self.reference}"
-        if self.alias:
-            result += f"@{self.alias}"
-        return result
+DependencyReference.to_apm_yml_entry = _to_apm_yml_entry
+DependencyReference.to_github_url = _to_github_url
+DependencyReference.to_clone_url = _to_clone_url
+DependencyReference.get_display_name = _get_display_name
+DependencyReference.__str__ = _to_string
+DependencyReference.split_gitlab_direct_shorthand_parts = classmethod(
+    _split_gitlab_direct_shorthand_parts
+)
+DependencyReference.needs_gitlab_direct_shorthand_probing = classmethod(
+    _needs_gitlab_direct_shorthand_probing
+)
+DependencyReference.iter_gitlab_direct_shorthand_boundary_candidates = classmethod(
+    _iter_gitlab_direct_shorthand_boundary_candidates
+)
+DependencyReference.from_gitlab_shorthand_probe = classmethod(_from_gitlab_shorthand_probe)
+DependencyReference._gitlab_shorthand_repo_segment_count = classmethod(
+    _gitlab_shorthand_repo_segment_count
+)
+DependencyReference._validate_final_repo_fields = classmethod(_validate_final_repo_fields)
+DependencyReference._extract_artifactory_prefix = staticmethod(_extract_artifactory_prefix)

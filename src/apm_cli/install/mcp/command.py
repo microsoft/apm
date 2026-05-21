@@ -36,7 +36,7 @@ except ImportError:
     pass
 
 
-def run_mcp_install(
+def run_mcp_install(  # noqa: PLR0913
     *,
     mcp_name: str,
     transport: str | None,

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-def run(ctx: InstallContext) -> None:
+def run(ctx: InstallContext) -> None:  # noqa: C901, PLR0915
     """Execute the resolve phase.
 
     On return every field listed in the *Resolve phase outputs* section of
