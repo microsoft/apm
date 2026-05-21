@@ -2,20 +2,20 @@
 name: batch-bug-shepherd
 description: >-
   Use this skill to drive a batch of suspected bugs in microsoft/apm
-  from raw issue list to mergeable PR queue. Fan out one reproduction
-  subagent per candidate issue (verify on HEAD: LEGIT / UNCLEAR /
-  FIXED-AT-HEAD), cross-reference each legit issue against open PRs,
-  branch the workflow (in-flight community PR -> shepherd via the
-  apm-review-panel skill; no PR -> fix session with TDD and a
-  mutation-break gate), then dispatch one completion subagent per
+  from raw issue list to mergeable PR queue. Fan out one triage
+  subagent per issue (LEGIT / UNCLEAR / FIXED-AT-HEAD), cross-reference
+  legit issues against open PRs, then branch: in-flight community PR
+  -> shepherd via the apm-review-panel skill; no PR -> fix session with
+  TDD and a mutation-break gate. Dispatch one completion subagent per
   shepherd verdict to resolve panel follow-ups, push to the contributor
   fork (or open a superseding PR that preserves author authorship via
-  commit trailers) and post one ready-to-merge confirmation. Maintain a
-  single plan.md ground-truth table as the canonical session state.
+  commit trailers), and post one ready-to-merge confirmation. Maintain
+  a single plan.md ground-truth table as canonical session state.
   Activate when the maintainer asks to triage a list of issues, sweep
-  the bug queue, drive in-flight PRs to merge, shepherd community
-  contributions, or work down the bug backlog -- even if "shepherd" or
-  "batch" is not named.
+  the bug queue or backlog, shepherd all bug-flagged issues this
+  quarter, run a weekly sweep of community-reported issues, drive
+  in-flight community PRs to merge, or work down community bug
+  contributions -- even if "shepherd" or "batch" is not named.
 ---
 
 # batch-bug-shepherd - Outer-loop bug-queue orchestrator
