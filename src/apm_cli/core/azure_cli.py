@@ -92,12 +92,13 @@ class AzureCliBearerProvider:
         # DOES honor PATHEXT) and storing the absolute path keeps every
         # downstream subprocess.run call portable across platforms.
         #
-        # Edge case: callers (notably tests) may pass an explicit path.
-        # If az_command already looks like a path (absolute or contains a
-        # separator) we trust it verbatim and skip re-resolution.
+        # Edge case: callers (notably tests) may pass an explicit absolute
+        # path. We trust absolute paths verbatim and skip re-resolution.
+        # Relative tokens always flow through shutil.which so a
+        # CWD-relative form like "subdir/az" cannot bypass resolution.
         #
         # PATH changes mid-process won't be detected; restart the CLI.
-        if os.path.isabs(az_command) or os.sep in az_command:
+        if os.path.isabs(az_command):
             self._az_command: str | None = az_command
         else:
             self._az_command = shutil.which(az_command)
@@ -168,6 +169,12 @@ class AzureCliBearerProvider:
         Uses ``az account show --query tenantId -o tsv``.  Returns ``None``
         on any failure -- this method never raises.
         """
+        # Explicit early-return when az was not resolved at __init__: avoids
+        # passing None as argv[0] to subprocess.run (which would TypeError
+        # and only be swallowed by the broad except below). Mirrors the
+        # is_available() guard that get_bearer_token() does.
+        if not self._az_command:
+            return None
         try:
             result = subprocess.run(
                 [self._az_command, "account", "show", "--query", "tenantId", "-o", "tsv"],
