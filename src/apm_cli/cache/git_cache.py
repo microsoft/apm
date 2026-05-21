@@ -318,12 +318,15 @@ class GitCache:
             os.chmod(str(staged), 0o700)
 
             subprocess_env = env if env is not None else git_subprocess_env()
-            clone_args = [git_exe, "clone", "--bare"]
+            clone_args = [git_exe, "clone", "--bare", "--no-tags"]
             if partial:
                 # Promisor partial clone: trees + commits only. Blobs
                 # arrive lazily via the remote when the consumer needs
                 # them. Github / modern GHES / ADO support this; older
                 # servers reject it and we retry without --filter.
+                # --no-tags above skips fetching tag objects (release
+                # tags can sum to MBs on monorepos); the cache is
+                # SHA-keyed and never resolves via tags.
                 clone_args += ["--filter=blob:none"]
             clone_args += [url, str(staged)]
             try:
@@ -363,7 +366,7 @@ class GitCache:
                     os.chmod(str(staged), 0o700)
                     try:
                         subprocess.run(
-                            [git_exe, "clone", "--bare", url, str(staged)],
+                            [git_exe, "clone", "--bare", "--no-tags", url, str(staged)],
                             capture_output=True,
                             text=True,
                             timeout=300,
