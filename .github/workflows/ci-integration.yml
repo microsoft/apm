@@ -202,13 +202,30 @@ jobs:
           # --dist loadgroup is required: it is the only xdist scheduler
           # that honors pytest.mark.xdist_group, which we use to keep
           # HOME-mutating tests serialized on a single worker.
-          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10"
+          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
         # Per-shard timeout is ~1/4 of the original 30 min budget plus
         # headroom for the slowest shard (HOME-group tests).
         timeout-minutes: 15
+
+      - name: Rename coverage data for shard
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            mv .coverage .coverage.shard-${{ matrix.shard }}
+          fi
+
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage-shard-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Fan-in job that preserves the gate-required check name
   # "Integration Tests (Linux)". Branch protection / merge-gate.yml
@@ -219,6 +236,52 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     steps:
+      # Coverage summary runs first (with if: always()) so we get
+      # observability even when some shards fail. The shard-result
+      # gate runs last so it can still fail the job.
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install coverage
+        run: pip install "coverage[toml]"
+
+      - name: Download shard coverage
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: integration-coverage-shard-*
+          path: coverage-shards/
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Combine and summarise coverage
+        if: always()
+        run: |
+          if find coverage-shards -type f -name '.coverage*' 2>/dev/null | grep -q .; then
+            coverage combine coverage-shards/
+            coverage json -o coverage.json
+            python3 scripts/coverage-summary.py coverage.json --title "Integration Test Coverage"
+          else
+            echo "No coverage shard files found; skipping integration coverage summary."
+          fi
+        continue-on-error: true
+
+      # Integration coverage gate -- raise this floor when baseline improves.
+      # Current floor: 55% (actual ~71%, 16pt margin for community PRs).
+      - name: Enforce integration coverage gate
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            coverage report --fail-under=70
+          else
+            echo "ERROR: No combined coverage data -- the 'Combine and summarise coverage' step must produce .coverage before the gate can run."
+            exit 1
+          fi
+
       - name: Aggregate shard results
         run: |
           if [[ "${{ needs.integration-tests-shard.result }}" != "success" ]]; then

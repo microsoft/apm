@@ -3,12 +3,13 @@
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import toml
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from ...utils.console import _rich_warning
+from ...utils.console import _rich_success, _rich_warning
 from .base import MCPClientAdapter
 
 _log = logging.getLogger(__name__)
@@ -148,18 +149,6 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            # Check for remote servers early - Codex doesn't support remote/SSE servers
-            remotes = server_info.get("remotes", [])
-            packages = server_info.get("packages", [])
-
-            # If server has only remote endpoints and no packages, it's a remote-only server
-            if remotes and not packages:
-                print(f"[!]  Warning: MCP server '{server_url}' is a remote server (SSE type)")
-                print("   Codex CLI only supports local servers with command/args configuration")
-                print("   Remote servers are not supported by Codex CLI")
-                print("   Skipping installation for Codex CLI")
-                return False
-
             # Determine the server name for configuration key
             if server_name:
                 # Use explicitly provided server name
@@ -177,11 +166,18 @@ class CodexClientAdapter(MCPClientAdapter):
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
 
+            # Skip if formatter signaled "unsupported" (e.g. SSE remote on Codex)
+            if server_config is None:
+                return False
+
             # Update configuration using the chosen key
             if not self.update_config({config_key: server_config}):
                 return False
 
-            print(f"Successfully configured MCP server '{config_key}' for Codex CLI")
+            _rich_success(
+                f"Configured MCP server '{config_key}' for Codex CLI",
+                symbol="success",
+            )
             return True
 
         except Exception as e:
@@ -197,7 +193,7 @@ class CodexClientAdapter(MCPClientAdapter):
             runtime_vars (dict, optional): Runtime variable values.
 
         Returns:
-            dict: Formatted server configuration for Codex CLI.
+            dict | None: Formatted server configuration for Codex CLI, or None if unsupported (e.g. SSE remote).
         """
         if runtime_vars is None:
             runtime_vars = {}
@@ -236,11 +232,59 @@ class CodexClientAdapter(MCPClientAdapter):
             config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
             return config
 
-        # Note: Remote servers (SSE type) are handled in configure_mcp_server and rejected early
-        # This method only handles local servers with packages
-
-        # Get packages from server info
+        # Remote MCP handling.
+        # Precedence on Codex when a server publishes BOTH a remote and a stdio
+        # package: prefer the stdio package (falls through to the packages branch
+        # below). The remote-only branch here handles the streamable-http path
+        # and rejects SSE / non-https / empty-url remotes with explicit warnings.
+        remotes = server_info.get("remotes", [])
         packages = server_info.get("packages", [])
+        if remotes and not packages:
+            remote = self._select_remote_with_url(remotes) or remotes[0]
+            server_name = server_info.get("name", "")
+            if (remote.get("transport_type") or "").strip() == "sse":
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: SSE transport "
+                    "is deprecated by the MCP spec and not supported by Codex. "
+                    "Switch to `transport: streamable-http`.",
+                    symbol="warning",
+                )
+                return None
+
+            remote_url = (remote.get("url") or "").strip()
+            if not remote_url:
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: remote entry "
+                    "has an empty url. Set `url:` to the server's streamable-http endpoint.",
+                    symbol="warning",
+                )
+                return None
+
+            scheme = urlparse(remote_url).scheme.lower()
+            if scheme != "https":
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
+                    f"must use https:// (got {scheme or 'no scheme'}).",
+                    symbol="warning",
+                )
+                return None
+
+            remote_config = {
+                "url": remote_url,
+                "id": server_info.get("id", ""),
+            }
+            http_headers: dict[str, str] = {}
+            for header in remote.get("headers", []):
+                h_name = header.get("name", "")
+                h_value = header.get("value", "")
+                if h_name and h_value:
+                    http_headers[h_name] = self._resolve_variable_placeholders(
+                        h_value, env_overrides or {}, runtime_vars or {}
+                    )
+            if http_headers:
+                remote_config["http_headers"] = http_headers
+                self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            return remote_config
 
         if not packages:
             # If no packages are available, this indicates incomplete server configuration
@@ -252,6 +296,13 @@ class CodexClientAdapter(MCPClientAdapter):
             )
 
         if packages:
+            if remotes:
+                # Hybrid registry server: log that Codex prefers the stdio package
+                # over the remote endpoint so the precedence is auditable.
+                _log.debug(
+                    "Codex hybrid server '%s': preferring stdio package over remote endpoint",
+                    server_info.get("name", "unknown"),
+                )
             # Use the first package for configuration (prioritize npm, then docker, then others)
             package = self._select_best_package(packages)
 
@@ -484,6 +535,19 @@ class CodexClientAdapter(MCPClientAdapter):
                         result.extend(["-e", env_name])
 
         return result
+
+    @staticmethod
+    def _select_remote_with_url(remotes):
+        """Return the first remote entry that has a non-empty URL.
+
+        Returns:
+            dict or None: The first usable remote, or None if none qualify.
+        """
+        for remote in remotes:
+            url = (remote.get("url") or "").strip()
+            if url:
+                return remote
+        return None
 
     def _select_best_package(self, packages):
         """Select the best package for installation from available packages.

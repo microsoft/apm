@@ -180,6 +180,44 @@ When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
 
+#### Optional workflow frontmatter (GitHub Copilot App, experimental)
+
+When the `copilot_app` experimental flag is enabled and the package is
+installed with `apm install --target copilot-app` (project scope) or
+`apm install --target copilot-app --global` (user scope), prompts that
+carry workflow frontmatter -- any flat top-level key of `interval`,
+`schedule_hour`, `schedule_day` -- are deployed as rows in the desktop
+App's SQLite store at `~/.copilot/data.db`. ``mode``, ``model``, and
+``reasoning_effort`` are optional fields on a workflow but do NOT mark
+a plain prompt as a workflow (they overload with plain VSCode / Copilot
+slash-command prompts); declare ``interval: manual`` to opt a no-schedule
+prompt into the App.
+
+```yaml
+---
+name: "Daily Digest"
+interval: daily           # manual | hourly | daily | weekly
+schedule_hour: 9          # 0-23 (UTC); ignored for manual / hourly
+schedule_day: 1           # 0-6 (weekly only)
+mode: interactive         # interactive | plan
+model: claude-opus-4.7    # optional
+reasoning_effort: high    # optional
+---
+```
+
+Rows are always inserted with `enabled = 0`; the user opts in from the
+App. A `.prompt.md` belongs to exactly ONE surface: workflow-frontmatter
+prompts go ONLY to the App DB, plain prompts go ONLY to file-based
+slash-command targets (`copilot`, `claude`, `cursor`, ...). Pointing a
+plain prompt at `--target copilot-app` is a hard error with an
+actionable diagnostic. `interval` is optional and defaults to `manual`
+when any other execution-shape key is present, so a parameterised
+prompt with no schedule still works as a manually-fired App workflow.
+The App also defines an `autopilot` mode, but APM intentionally does
+not accept it via this target -- a third-party package could otherwise
+auto-run the moment the user enables the row. Users who want autopilot
+can still set it themselves per-row from the App UI after install.
+
 ### 5. Agent (`*.agent.md`)
 
 Agent persona and behavior definition.

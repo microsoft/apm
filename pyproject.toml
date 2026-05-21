@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.14.0"
+version = "0.14.1"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -128,6 +128,24 @@ indent-style = "space"
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
+
+[tool.coverage.run]
+source = ["src/apm_cli"]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 80
+# Exclude lines that are not meant to be covered
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not benchmark and not live'"
