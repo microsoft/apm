@@ -3,12 +3,13 @@
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import toml
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from ...utils.console import _rich_warning
+from ...utils.console import _rich_success, _rich_warning
 from .base import MCPClientAdapter
 
 _log = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class CodexClientAdapter(MCPClientAdapter):
 
         with open(config_path, "w", encoding="utf-8") as f:
             toml.dump(current_config, f)
+        os.chmod(config_path, 0o600)
         _log.debug("Codex config written to %s", config_path)
         return True
 
@@ -147,18 +149,6 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            # Check for remote servers early - Codex doesn't support remote/SSE servers
-            remotes = server_info.get("remotes", [])
-            packages = server_info.get("packages", [])
-
-            # If server has only remote endpoints and no packages, it's a remote-only server
-            if remotes and not packages:
-                print(f"[!]  Warning: MCP server '{server_url}' is a remote server (SSE type)")
-                print("   Codex CLI only supports local servers with command/args configuration")
-                print("   Remote servers are not supported by Codex CLI")
-                print("   Skipping installation for Codex CLI")
-                return False
-
             # Determine the server name for configuration key
             if server_name:
                 # Use explicitly provided server name
@@ -176,11 +166,18 @@ class CodexClientAdapter(MCPClientAdapter):
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
 
+            # Skip if formatter signaled "unsupported" (e.g. SSE remote on Codex)
+            if server_config is None:
+                return False
+
             # Update configuration using the chosen key
             if not self.update_config({config_key: server_config}):
                 return False
 
-            print(f"Successfully configured MCP server '{config_key}' for Codex CLI")
+            _rich_success(
+                f"Configured MCP server '{config_key}' for Codex CLI",
+                symbol="success",
+            )
             return True
 
         except Exception as e:
@@ -196,8 +193,11 @@ class CodexClientAdapter(MCPClientAdapter):
             runtime_vars (dict, optional): Runtime variable values.
 
         Returns:
-            dict: Formatted server configuration for Codex CLI.
+            dict | None: Formatted server configuration for Codex CLI, or None if unsupported (e.g. SSE remote).
         """
+        if runtime_vars is None:
+            runtime_vars = {}
+
         # Default configuration structure with registry ID for conflict detection
         config = {
             "command": "unknown",
@@ -206,21 +206,85 @@ class CodexClientAdapter(MCPClientAdapter):
             "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
         }
 
-        # Self-defined stdio deps carry raw command/args  -- use directly
+        # Self-defined stdio deps carry raw command/args. Route ``env`` and
+        # ``args`` through the resolver pipeline so all three placeholder
+        # syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``) are resolved at
+        # install time before being written to ~/.codex/config.toml.
+        # See issue #1266.
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
-            config["args"] = [self.normalize_project_arg(arg) for arg in raw["args"]]
+            resolved_env_for_args: dict = {}
             if raw.get("env"):
-                config["env"] = raw["env"]
+                resolved_env_for_args = self._resolve_environment_variables(
+                    raw["env"], env_overrides=env_overrides
+                )
+                config["env"] = resolved_env_for_args
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
+
+            def _process_stdio_arg(arg):
+                if isinstance(arg, str):
+                    arg = self._resolve_variable_placeholders(
+                        arg, resolved_env_for_args, runtime_vars
+                    )
+                return self.normalize_project_arg(arg)
+
+            config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
             return config
 
-        # Note: Remote servers (SSE type) are handled in configure_mcp_server and rejected early
-        # This method only handles local servers with packages
-
-        # Get packages from server info
+        # Remote MCP handling.
+        # Precedence on Codex when a server publishes BOTH a remote and a stdio
+        # package: prefer the stdio package (falls through to the packages branch
+        # below). The remote-only branch here handles the streamable-http path
+        # and rejects SSE / non-https / empty-url remotes with explicit warnings.
+        remotes = server_info.get("remotes", [])
         packages = server_info.get("packages", [])
+        if remotes and not packages:
+            remote = self._select_remote_with_url(remotes) or remotes[0]
+            server_name = server_info.get("name", "")
+            if (remote.get("transport_type") or "").strip() == "sse":
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: SSE transport "
+                    "is deprecated by the MCP spec and not supported by Codex. "
+                    "Switch to `transport: streamable-http`.",
+                    symbol="warning",
+                )
+                return None
+
+            remote_url = (remote.get("url") or "").strip()
+            if not remote_url:
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: remote entry "
+                    "has an empty url. Set `url:` to the server's streamable-http endpoint.",
+                    symbol="warning",
+                )
+                return None
+
+            scheme = urlparse(remote_url).scheme.lower()
+            if scheme != "https":
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
+                    f"must use https:// (got {scheme or 'no scheme'}).",
+                    symbol="warning",
+                )
+                return None
+
+            remote_config = {
+                "url": remote_url,
+                "id": server_info.get("id", ""),
+            }
+            http_headers: dict[str, str] = {}
+            for header in remote.get("headers", []):
+                h_name = header.get("name", "")
+                h_value = header.get("value", "")
+                if h_name and h_value:
+                    http_headers[h_name] = self._resolve_variable_placeholders(
+                        h_value, env_overrides or {}, runtime_vars or {}
+                    )
+            if http_headers:
+                remote_config["http_headers"] = http_headers
+                self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            return remote_config
 
         if not packages:
             # If no packages are available, this indicates incomplete server configuration
@@ -232,6 +296,13 @@ class CodexClientAdapter(MCPClientAdapter):
             )
 
         if packages:
+            if remotes:
+                # Hybrid registry server: log that Codex prefers the stdio package
+                # over the remote endpoint so the precedence is auditable.
+                _log.debug(
+                    "Codex hybrid server '%s': preferring stdio package over remote endpoint",
+                    server_info.get("name", "unknown"),
+                )
             # Use the first package for configuration (prioritize npm, then docker, then others)
             package = self._select_best_package(packages)
 
@@ -373,48 +444,6 @@ class CodexClientAdapter(MCPClientAdapter):
         default_github_env = {"GITHUB_TOOLSETS": "context", "GITHUB_DYNAMIC_TOOLSETS": "1"}
         return self._resolve_env_vars_with_prompting(env_vars, env_overrides, default_github_env)
 
-    def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
-        """Resolve both environment and runtime variable placeholders in values.
-
-        Args:
-            value (str): Value that may contain placeholders like <TOKEN_NAME> or {runtime_var}
-            resolved_env (dict): Dictionary of resolved environment variables.
-            runtime_vars (dict): Dictionary of resolved runtime variables.
-
-        Returns:
-            str: Processed value with actual variable values.
-        """
-        import re
-
-        if not value:
-            return value
-
-        processed = str(value)
-
-        # Replace <TOKEN_NAME> with actual values from resolved_env (for Docker env vars)
-        env_pattern = r"<([A-Z_][A-Z0-9_]*)>"
-
-        def replace_env_var(match):
-            env_name = match.group(1)
-            return resolved_env.get(env_name, match.group(0))  # Return original if not found
-
-        processed = re.sub(env_pattern, replace_env_var, processed)
-
-        # Replace {runtime_var} with actual values from runtime_vars
-        runtime_pattern = r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
-
-        def replace_runtime_var(match):
-            var_name = match.group(1)
-            return runtime_vars.get(var_name, match.group(0))  # Return original if not found
-
-        processed = re.sub(runtime_pattern, replace_runtime_var, processed)
-
-        return processed
-
-    def _resolve_env_placeholders(self, value, resolved_env):
-        """Legacy method for backward compatibility. Use _resolve_variable_placeholders instead."""
-        return self._resolve_variable_placeholders(value, resolved_env, {})
-
     def _ensure_docker_env_flags(self, base_args, env_vars):
         """Ensure all environment variables are represented as -e flags in Docker args.
 
@@ -506,6 +535,19 @@ class CodexClientAdapter(MCPClientAdapter):
                         result.extend(["-e", env_name])
 
         return result
+
+    @staticmethod
+    def _select_remote_with_url(remotes):
+        """Return the first remote entry that has a non-empty URL.
+
+        Returns:
+            dict or None: The first usable remote, or None if none qualify.
+        """
+        for remote in remotes:
+            url = (remote.get("url") or "").strip()
+            if url:
+                return remote
+        return None
 
     def _select_best_package(self, packages):
         """Select the best package for installation from available packages.
