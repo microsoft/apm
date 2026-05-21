@@ -622,16 +622,45 @@ class TestExportPluginBundle:
         assert pj["version"] == "2.0.0"
 
     def test_synthesizes_plugin_json_when_absent(self, tmp_path):
+        """G2: bare plugin shape (no marketplace block) gets an [i] info,
+        no longer a yellow warning, because synthesis from apm.yml is the
+        APM-native happy path."""
         project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
         out = tmp_path / "build"
 
-        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as mock_warn:
+        with (
+            patch("apm_cli.bundle.plugin_exporter._rich_info") as mock_info,
+            patch("apm_cli.bundle.plugin_exporter._rich_warning") as mock_warn,
+        ):
             result = export_plugin_bundle(project, out)
 
         pj = json.loads((result.bundle_path / "plugin.json").read_text())
         assert pj["name"] == "test-pkg"
-        # Warning emitted about synthesis
-        assert any("plugin.json" in str(c) for c in mock_warn.call_args_list)
+        # Info emitted about synthesis (demoted from warning per #1348 G2)
+        assert any("apm.yml" in str(c) for c in mock_info.call_args_list)
+        # No misleading "consider running apm init --plugin" warning
+        assert not any("apm init --plugin" in str(c) for c in mock_warn.call_args_list)
+
+    def test_synthesis_info_suppressed_when_marketplace_block_present(self, tmp_path):
+        """G2: marketplace-publishing project (apm.yml has marketplace:)
+        SHOULD NOT emit the synthesis info, because plugin.json is not
+        the audience here -- the marketplace artifacts are."""
+        project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
+        # Append a marketplace block to apm.yml
+        apm_yml = project / "apm.yml"
+        apm_yml.write_text(
+            apm_yml.read_text()
+            + "\nmarketplace:\n  name: m\n  description: d\n  version: 0.1.0\n"
+            + "  owner: {name: acme}\n  packages: [{name: p, source: acme/p, version: '^1.0.0'}]\n"
+        )
+        out = tmp_path / "build"
+
+        with patch("apm_cli.bundle.plugin_exporter._rich_info") as mock_info:
+            export_plugin_bundle(project, out)
+
+        assert not any("deriving it from apm.yml" in str(c) for c in mock_info.call_args_list), (
+            "marketplace-block project should not see plugin.json synthesis chatter"
+        )
 
     def test_prompt_md_rename(self, tmp_path):
         project = _setup_plugin_project(

@@ -235,6 +235,52 @@ class BaseIntegrator:
         except OSError:
             return False
 
+    def _check_adopt_or_skip(
+        self,
+        target_path: Path,
+        source_file: Path,
+        rel_path: str,
+        managed_files: set[str] | None,
+        force: bool,
+        diagnostics,
+        target_paths: list,
+    ) -> tuple[bool, bool]:
+        """Check whether *target_path* should be adopted or skipped.
+
+        Combines :meth:`is_content_identical_to_source` (adopt) and
+        :meth:`check_collision` (skip) into a single call so integrators
+        share the decision logic without code duplication.
+
+        When adopting, *target_path* is appended to *target_paths* as a
+        side effect so the caller's bookkeeping stays correct.
+
+        Args:
+            target_path: Destination path on disk.
+            source_file: Source file to compare against for byte-identity.
+            rel_path: Relative path string used for collision detection and
+                diagnostics.
+            managed_files: Set of APM-managed relative paths; ``None`` means
+                none managed.
+            force: When ``True``, collisions are silently overwritten.
+            diagnostics: Optional diagnostics collector; forwarded to
+                :meth:`check_collision`.
+            target_paths: Mutable list; *target_path* is appended on adopt.
+
+        Returns:
+            ``(skip, adopted)`` — when ``skip`` is ``True`` the caller must
+            ``continue`` (or otherwise skip writing this file); ``adopted``
+            is ``True`` only when the existing file was byte-identical and
+            has been silently adopted.
+        """
+        if self.is_content_identical_to_source(target_path, source_file):
+            target_paths.append(target_path)
+            return True, True
+        if self.check_collision(
+            target_path, rel_path, managed_files, force, diagnostics=diagnostics
+        ):
+            return True, False
+        return False, False
+
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
     @staticmethod
@@ -363,12 +409,22 @@ class BaseIntegrator:
 
         for target in source:
             for prim_name, mapping in target.primitives.items():
-                # Dynamic-root targets (cowork) use cowork:// URI prefix.
+                # Dynamic-root targets (cowork, copilot-app) use URI prefixes.
                 if target.resolved_deploy_root is not None:
                     if prim_name == "skills":
                         from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
 
                         skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
+                    elif target.name == "copilot-app":
+                        from apm_cli.integration.copilot_app_db import (
+                            COPILOT_APP_LOCKFILE_PREFIX,
+                        )
+
+                        raw_key = f"{prim_name}_{target.name}"
+                        bucket_key = BaseIntegrator._BUCKET_ALIASES.get(raw_key, raw_key)
+                        if bucket_key not in buckets:
+                            buckets[bucket_key] = set()
+                        prefix_map[COPILOT_APP_LOCKFILE_PREFIX] = bucket_key
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
                 prefix = (

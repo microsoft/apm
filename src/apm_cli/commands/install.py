@@ -927,7 +927,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
+    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
 )
 @click.option(
     "--allow-insecure",
@@ -978,7 +978,12 @@ def _handle_mcp_install(
     "mcp_name",
     default=None,
     metavar="NAME",
-    help="Add an MCP server entry to apm.yml. Use with --transport, --url, --env, --header, --mcp-version, or post-- stdio command.",
+    help=(
+        "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, "
+        "--header, --mcp-version, or a stdio command after `--`. Resolves active "
+        "targets the same way `apm install` does (--target > apm.yml targets: > "
+        "auto-detect); writes only for active targets, skips others with [i]."
+    ),
 )
 @click.option(
     "--transport",
@@ -1792,10 +1797,18 @@ def _install_apm_packages(ctx, outcome):
     # Continue with MCP installation (existing logic)
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
-    mcp_apm_config = {
-        "target": apm_package.target,
-        "scripts": apm_package.scripts or {},
-    }
+    # Forward only the targets-key the user actually declared so parse_targets_field
+    # in the gate sees the same dict shape it sees from raw apm.yml. Including a
+    # `targets: None` placeholder when the user wrote `target:` (singular) would
+    # falsely trip the conflict-mutex check (see core.apm_yml.parse_targets_field).
+    # This restores parity with `apm install` for users on the modern `targets:`
+    # plural form -- without this, `targets:` was silently dropped at the call
+    # site and the gate fell back to permissive directory detection (#1335).
+    mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
+    if apm_package.targets is not None:
+        mcp_apm_config["targets"] = apm_package.targets
+    elif apm_package.target is not None:
+        mcp_apm_config["target"] = apm_package.target
     if should_install_mcp and mcp_deps:
         mcp_count = MCPIntegrator.install(
             mcp_deps,

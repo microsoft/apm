@@ -77,6 +77,13 @@ scripts:
 
 APM automatically downloads, installs, and configures the Codex CLI with GitHub Models for free usage.
 
+> **⚠️ Compatibility Note — Codex v0.116+ and GitHub Models:** Codex v0.116 and later default
+> to the OpenAI Responses API (`wire_api=responses`), which GitHub Models does not expose
+> (returns 404). If you install a Codex version ≥ v0.116, change `wire_api` in
+> `~/.codex/config.toml` from `"responses"` to `"chat"` to restore GitHub Models
+> compatibility. Alternatively, pin to the last known-compatible release:
+> `apm runtime setup codex --version rust-v0.115.0`
+
 ### Setup
 
 #### 1. Install via APM

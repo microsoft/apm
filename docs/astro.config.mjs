@@ -211,6 +211,7 @@ export default defineConfig({
 						{ label: 'CI/CD pipelines', slug: 'integrations/ci-cd' },
 						{ label: 'GitHub Agentic Workflows', slug: 'integrations/gh-aw' },
 						{ label: 'Microsoft 365 Copilot Cowork (Experimental)', slug: 'integrations/copilot-cowork' },
+						{ label: 'GitHub Copilot App workflows (Experimental)', slug: 'integrations/copilot-app' },
 						{ label: 'AI runtime compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub rulesets', slug: 'integrations/github-rulesets' },
 					],

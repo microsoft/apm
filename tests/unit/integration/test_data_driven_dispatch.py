@@ -308,6 +308,7 @@ class TestExhaustivenessChecks:
             "rules_claude",  # was instructions_claude, aliased
             "skills",  # cross-target bucket
             "hooks",  # cross-target bucket
+            "prompts_copilot-app",  # copilot-app uses dedicated prompts bucket
         }
 
         assert expected_keys == set(buckets.keys()), (

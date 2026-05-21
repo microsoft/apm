@@ -32,8 +32,9 @@ Skills always deploy to the cross-tool `.agents/skills/` directory by
 default (see [Skills convergence](#skills-convergence) below). All other
 primitives land under each target's own root.
 
-`copilot-cowork` (Microsoft 365 Copilot) is gated behind an experimental
-flag and not listed above. See [Experimental](../experimental/).
+`copilot-cowork` (Microsoft 365 Copilot) and `copilot-app` (GitHub
+Copilot desktop App) are gated behind experimental flags and not listed
+above. See [Experimental](../experimental/).
 
 ## Detection and resolution
 
@@ -60,8 +61,10 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 
-`agent-skills` and `copilot-cowork` are never auto-detected. Select them
-explicitly with `--target`.
+`agent-skills`, `copilot-cowork`, and `copilot-app` are never
+auto-detected. Select them explicitly with `--target`, or list them in
+a project's `apm.yml` `targets:` field so contributors running plain
+`apm install` pick them up automatically.
 
 ## copilot
 
@@ -182,7 +185,19 @@ To restore the pre-convergence per-target layout (skills land under each target'
 
 ## MCP servers
 
-MCP is not a `TargetProfile` primitive; it is wired by a separate integrator that writes per-client config files (e.g. `.vscode/mcp.json`, `.cursor/mcp.json`, `.claude.json`) for every target with an MCP client adapter. The matrix above marks `mcp` supported when an adapter exists. See [`apm mcp`](../cli/mcp/) for the runtime surface.
+MCP is not a `TargetProfile` primitive; it is wired by a separate
+integrator that writes per-client config files (e.g.
+`.vscode/mcp.json`, `.cursor/mcp.json`, `.claude.json`) for every
+target in the active set that has an MCP client adapter. Active set
+follows the same `--target` > `targets:` > auto-detect chain as
+`apm install`: a runtime with an adapter but outside the active set
+is skipped and APM emits an `[i] Skipped MCP config for X  (active
+targets: Y)` line so the gate decision is observable. The matrix
+above marks `mcp` supported when an adapter exists; whether the
+config gets written on a given install is a function of the active
+target set, not just adapter availability. See
+[Install MCP servers](../../consumer/install-mcp-servers/) for the
+gate behavior and [`apm mcp`](../cli/mcp/) for the runtime surface.
 
 ## See also
 

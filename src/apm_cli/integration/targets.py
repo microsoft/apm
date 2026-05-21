@@ -123,6 +123,20 @@ class TargetProfile:
     in ``KNOWN_TARGETS`` for tooling introspection.
     """
 
+    scope_invariant_resolver: bool = False
+    """When True, ``user_root_resolver`` runs in BOTH project and user
+    scope (the resolved deploy root does not depend on install intent).
+
+    Set this for targets whose deploy root is a user-machine resource
+    that exists regardless of who triggered the install -- e.g.
+    ``copilot-app`` (the GitHub Copilot desktop App's SQLite DB at
+    ``~/.copilot/data.db`` is the same path whether a team-shared
+    workflow comes in via project ``apm.yml`` or user-scope ``--global``).
+
+    Contrast with cowork, where the OneDrive deploy root only makes
+    sense at user scope; project-scope cowork is intentionally rejected.
+    """
+
     generated_files: tuple[str, ...] = ()
     """Additional generated files associated with this target.
 
@@ -248,6 +262,19 @@ class TargetProfile:
         All downstream code reads ``target.root_dir`` directly.
         """
         if not user_scope:
+            # Most targets have no project-scope resolver work to do.
+            # The scope_invariant_resolver opt-in lets a target whose
+            # deploy root is a user-machine resource (e.g. copilot-app's
+            # ~/.copilot/data.db) populate resolved_deploy_root even when
+            # the install intent is project-scope. Downstream lockfile
+            # enrichment then routes via the dynamic-root URI path.
+            if self.scope_invariant_resolver and self.user_root_resolver is not None:
+                resolved_root = self.user_root_resolver()
+                if resolved_root is None:
+                    return None
+                from dataclasses import replace
+
+                return replace(self, resolved_deploy_root=resolved_root)
             return self
 
         from dataclasses import replace
@@ -315,6 +342,24 @@ class TargetProfile:
             filtered = self.primitives
 
         return replace(self, root_dir=new_root, primitives=filtered)
+
+
+# ------------------------------------------------------------------
+# Runtime -> canonical target alias map
+# ------------------------------------------------------------------
+#
+# Several runtime identifiers used at the MCP-config layer (e.g. ``vscode``,
+# ``agents``) emit configuration that lands inside the ``copilot`` target's
+# tree.  The MCP gate (``mcp_integrator._gate_project_scoped_runtimes``) and
+# the explicit-target resolution branch in :func:`active_targets` both need
+# to map runtime -> canonical-target name in the same way.  Hold the table
+# in one place to prevent the two sites drifting -- a silent drift would
+# strip a runtime even when its canonical target is active (the same class
+# of bug as #1335).
+RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
+    "vscode": "copilot",
+    "agents": "copilot",
+}
 
 
 # ------------------------------------------------------------------
@@ -555,6 +600,33 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_resolver=lambda: _resolve_copilot_cowork_root(),
         requires_flag="copilot_cowork",
     ),
+    # GitHub Copilot desktop App -- experimental, user-scope only.
+    # Prompts whose frontmatter carries workflow-shape keys (``interval``,
+    # ``schedule_hour``, ``schedule_day``) are installed as rows in the
+    # app's ``workflows`` table at ``~/.copilot/data.db``.  ``mode`` /
+    # ``model`` / ``reasoning_effort`` are optional fields on a workflow
+    # but do NOT mark a plain prompt as a workflow (they overload with
+    # plain VSCode / Copilot slash-command prompts).  No files are
+    # written under the deploy root; the synthetic root is only used so
+    # the existing target machinery can address rows via the
+    # ``copilot-app-db://workflows/<id>`` lockfile URI scheme.
+    "copilot-app": TargetProfile(
+        name="copilot-app",
+        root_dir="copilot-app",  # display grouping placeholder only
+        primitives={
+            "prompts": PrimitiveMapping(
+                "workflows",
+                ".prompt.md",
+                "prompt_standard",
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_resolver=lambda: _resolve_copilot_app_root(),
+        requires_flag="copilot_app",
+        scope_invariant_resolver=True,
+    ),
 }
 
 
@@ -607,6 +679,19 @@ def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821
     from apm_cli.integration.copilot_cowork_paths import resolve_copilot_cowork_skills_dir
 
     return resolve_copilot_cowork_skills_dir()
+
+
+def _resolve_copilot_app_root() -> Path | None:  # noqa: F821
+    """Thin wrapper around ``copilot_app_db.resolve_copilot_app_root()``.
+
+    Used as the ``user_root_resolver`` callable for the ``copilot-app``
+    target.  Returns ``~/.copilot/`` only when the app's SQLite DB is
+    present, so the target is invisible on machines without the app
+    installed.
+    """
+    from apm_cli.integration.copilot_app_db import resolve_copilot_app_root
+
+    return resolve_copilot_app_root()
 
 
 def _is_flag_enabled(flag_name: str) -> bool:
@@ -700,7 +785,7 @@ def active_targets_user_scope(
         profiles: list = []
         seen: set = set()
         for t in raw:
-            canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
+            canonical = RUNTIME_TO_CANONICAL_TARGET.get(t, t)
             if canonical == "all":
                 from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
 
@@ -773,7 +858,7 @@ def active_targets(
         profiles: list = []
         seen: set = set()
         for t in raw:
-            canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
+            canonical = RUNTIME_TO_CANONICAL_TARGET.get(t, t)
             if canonical == "all":
                 # Exclude explicit-only targets (agent-skills) -- they must
                 # be requested individually.

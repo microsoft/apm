@@ -47,13 +47,15 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     "--yes", "-y", is_flag=True, help="Skip interactive prompts and use auto-detected defaults"
 )
 @click.option(
-    "--plugin", is_flag=True, help="Initialize as plugin author (creates plugin.json + apm.yml)"
+    "--plugin",
+    is_flag=True,
+    help="(deprecated) Use 'apm plugin init' instead. Scaffolds plugin.json + apm.yml.",
 )
 @click.option(
     "--marketplace",
     "marketplace_flag",
     is_flag=True,
-    help="Seed apm.yml with a 'marketplace:' authoring block",
+    help="(deprecated) Use 'apm marketplace init' instead. Seeds a marketplace block.",
 )
 @click.option(
     "--target",
@@ -68,10 +70,54 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
-    With --plugin, also creates plugin.json for plugin authors.
-    With --marketplace, also seeds apm.yml with a marketplace authoring block.
+
+    Producers: prefer 'apm plugin init' (plugin scaffold) or
+    'apm marketplace init' (marketplace block). The --plugin and
+    --marketplace flags on 'apm init' are kept for backward
+    compatibility and will be removed in v0.16.
     """
-    logger = CommandLogger("init", verbose=verbose)
+    # Soft deprecation warnings -- legacy flags still work.
+    if plugin:
+        click.echo(
+            "[!] 'apm init --plugin' is deprecated. Run: apm plugin init",
+            err=True,
+        )
+        click.echo("    Legacy flag will be removed in v0.16.", err=True)
+    if marketplace_flag:
+        click.echo(
+            "[!] 'apm init --marketplace' is deprecated. Run: apm marketplace init",
+            err=True,
+        )
+        click.echo("    Legacy flag will be removed in v0.16.", err=True)
+
+    _perform_init(
+        project_name=project_name,
+        yes=yes,
+        plugin=plugin,
+        marketplace_flag=marketplace_flag,
+        target_flag=target_flag,
+        verbose=verbose,
+        source="init",
+    )
+
+
+def _perform_init(
+    *,
+    project_name,
+    yes,
+    plugin,
+    marketplace_flag,
+    target_flag,
+    verbose,
+    source="init",
+):
+    """Shared init body. Called by `apm init` and `apm plugin init`.
+
+    ``source`` controls the "Next steps" hint shape:
+      - "init"   -> consumer-focused, teaches the noun-verb namespace
+      - "plugin" -> plugin-author next steps (same as legacy --plugin)
+    """
+    logger = CommandLogger(source, verbose=verbose)
     try:
         # Handle explicit current directory
         if project_name == ".":
@@ -200,10 +246,23 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
         _rich_blank_line()
 
         # Next steps - actionable commands matching README workflow
+        # Branch on ``source`` so that:
+        #   * ``apm init`` (consumer)  teaches the noun-verb namespace
+        #     (apm plugin init / apm marketplace init).
+        #   * ``apm plugin init``      shows plugin-author next steps.
+        #   * ``apm init --marketplace`` (deprecated) reuses plugin guidance
+        #     when --plugin was also supplied; otherwise consumer guidance.
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
                 "Pack as plugin:          apm pack",
+            ]
+        elif source == "init":
+            next_steps = [
+                "Install a package:               apm install <owner>/<repo>",
+                "Run a script:                    apm run <script>",
+                "Build a plugin? Scaffold one:    apm plugin init",
+                "Publishing a marketplace?:       apm marketplace init",
             ]
         else:
             next_steps = [

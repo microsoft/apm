@@ -10,7 +10,7 @@ from apm_cli.runtime.codex_runtime import CodexRuntime
 class TestCodexRuntime:
     """Test Codex runtime adapter."""
 
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_init_success(self, mock_which):
         """Test successful initialization."""
         mock_which.return_value = "/usr/local/bin/codex"
@@ -20,7 +20,7 @@ class TestCodexRuntime:
         assert runtime.model_name == "test-model"
         mock_which.assert_called_once_with("codex")
 
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_init_not_available(self, mock_which):
         """Test initialization when Codex not available."""
         mock_which.return_value = None
@@ -29,7 +29,7 @@ class TestCodexRuntime:
             CodexRuntime()
 
     @patch("apm_cli.runtime.codex_runtime.subprocess.Popen")
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_execute_prompt_success(self, mock_which, mock_popen):
         """Test successful prompt execution."""
         mock_which.return_value = "/usr/local/bin/codex"
@@ -47,7 +47,7 @@ class TestCodexRuntime:
         mock_popen.assert_called_once()
 
     @patch("apm_cli.runtime.codex_runtime.subprocess.Popen")
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_execute_prompt_failure(self, mock_which, mock_popen):
         """Test prompt execution failure."""
         mock_which.return_value = "/usr/local/bin/codex"
@@ -63,7 +63,7 @@ class TestCodexRuntime:
         with pytest.raises(RuntimeError, match="Codex execution failed"):
             runtime.execute_prompt("Test prompt")
 
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_list_available_models(self, mock_which):
         """Test listing available models."""
         mock_which.return_value = "/usr/local/bin/codex"
@@ -75,7 +75,7 @@ class TestCodexRuntime:
         assert models["codex-default"]["provider"] == "codex"
 
     @patch("apm_cli.runtime.codex_runtime.subprocess.run")
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_get_runtime_info(self, mock_which, mock_run):
         """Test getting runtime info."""
         mock_which.return_value = "/usr/local/bin/codex"
@@ -92,7 +92,7 @@ class TestCodexRuntime:
         assert info["version"] == "1.0.0"
         assert info["capabilities"]["mcp_servers"] == "native_support"
 
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_is_available_true(self, mock_which):
         """Test runtime availability check - available."""
         mock_which.return_value = "/usr/local/bin/codex"
@@ -100,7 +100,7 @@ class TestCodexRuntime:
         assert CodexRuntime.is_available() is True
         mock_which.assert_called_once_with("codex")
 
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_is_available_false(self, mock_which):
         """Test runtime availability check - not available."""
         mock_which.return_value = None
@@ -112,7 +112,7 @@ class TestCodexRuntime:
         """Test runtime name getter."""
         assert CodexRuntime.get_runtime_name() == "codex"
 
-    @patch("apm_cli.runtime.codex_runtime.shutil.which")
+    @patch("apm_cli.runtime.codex_runtime.find_runtime_binary")
     def test_str_representation(self, mock_which):
         """Test string representation."""
         mock_which.return_value = "/usr/local/bin/codex"

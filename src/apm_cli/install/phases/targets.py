@@ -212,6 +212,53 @@ def run(ctx: InstallContext) -> None:
             raise SystemExit(1)
 
     # ------------------------------------------------------------------
+    # GitHub Copilot App target gating (mirrors cowork rules above):
+    # explicit --target copilot-app with flag OFF must hint at the
+    # experimental enable command; with flag ON but no ~/.copilot/data.db
+    # must error with an actionable install instruction; without --global
+    # must error because copilot-app is user-scope only.
+    # ------------------------------------------------------------------
+    _user_asked_copilot_app = False
+    if _explicit:
+        if isinstance(_explicit, list):
+            _user_asked_copilot_app = "copilot-app" in _explicit
+        else:
+            _user_asked_copilot_app = _explicit == "copilot-app"
+
+    if _user_asked_copilot_app:
+        _copilot_app_resolved = any(t.name == "copilot-app" for t in _targets)
+        if not _copilot_app_resolved:
+            from apm_cli.core.experimental import is_enabled as _is_flag_on
+
+            if not _is_flag_on("copilot_app"):
+                if ctx.logger:
+                    ctx.logger.progress(
+                        "The 'copilot-app' target requires an experimental flag. "
+                        "Run: apm experimental enable copilot-app",
+                        symbol="info",
+                    )
+            else:
+                _app_msg = (
+                    "GitHub Copilot desktop App not detected.\n"
+                    "Expected ~/.copilot/data.db but the file is missing.\n"
+                    "Install the app, or omit '--target copilot-app'."
+                )
+                if ctx.logger:
+                    ctx.logger.error(_app_msg, symbol="cross")
+                raise SystemExit(1)
+
+    # NOTE: copilot-app intentionally has no project-scope gate. The DB
+    # at ~/.copilot/data.db is a single user-scoped resource, but the
+    # *intent* to deploy can legitimately come from a project's apm.yml
+    # (a team-shared scheduled prompt belongs in the project that owns
+    # the prompt, not in every developer's user-scope manifest). The
+    # experimental flag (machine-level opt-in) is the consent envelope;
+    # the package-namespaced row id (apm--<owner>--<pkg>--<prompt>)
+    # prevents collisions across projects sharing the same package.
+    # Rows always arrive enabled=0; users grant the second consent in
+    # the App's Workflows tab before anything runs on a schedule.
+
+    # ------------------------------------------------------------------
     # v2 resolution (#1154): signal-based provenance and strict errors.
     # Runs AFTER the legacy resolver and cowork gates so existing
     # behavior is preserved.  The v2 resolver validates signals and

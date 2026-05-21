@@ -174,8 +174,13 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "build",
         "codex",
         "packages",
+        "versioning",
     }
 )
+
+_VERSIONING_KEYS = frozenset({"strategy"})
+
+_VERSIONING_STRATEGIES = frozenset({"lockstep", "tag_pattern", "per_package"})
 
 _CLAUDE_KEYS = frozenset(
     {
@@ -208,6 +213,24 @@ class MarketplaceBuild:
     """APM-only build configuration block."""
 
     tag_pattern: str = "v{version}"
+
+
+@dataclass(frozen=True)
+class MarketplaceVersioning:
+    """Release-time versioning strategy for the marketplace.
+
+    Controls how ``apm pack --check-versions`` verifies per-package
+    version alignment across local-path packages:
+
+    * ``lockstep`` (default) -- every local package's top-level
+      ``version`` must equal the marketplace's top-level ``version``.
+    * ``tag_pattern`` -- each rendered tag must be unique across all
+      local packages; missing ``version`` still fails.
+    * ``per_package`` -- only requires that each local package declare
+      a ``version``; equality is not enforced.
+    """
+
+    strategy: str = "lockstep"
 
 
 @dataclass(frozen=True)
@@ -311,6 +334,7 @@ class MarketplaceConfig:
     codex: MarketplaceCodexConfig = field(default_factory=MarketplaceCodexConfig)
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
+    versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
     packages: tuple[PackageEntry, ...] = ()
     output_specs: tuple[MarketplaceOutputSpec, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -433,6 +457,25 @@ def _parse_build(raw: Any) -> MarketplaceBuild:
     tag_pattern = tag_pattern.strip()
     _validate_tag_pattern(tag_pattern, context="build.tagPattern")
     return MarketplaceBuild(tag_pattern=tag_pattern)
+
+
+def _parse_versioning(raw: Any) -> MarketplaceVersioning:
+    """Parse and validate the optional ``marketplace.versioning`` block."""
+    if raw is None:
+        return MarketplaceVersioning()
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError(f"'versioning' must be a mapping, got {type(raw).__name__}")
+    _check_unknown_keys(raw, _VERSIONING_KEYS, context="versioning")
+    strategy = raw.get("strategy", "lockstep")
+    if not isinstance(strategy, str) or not strategy.strip():
+        raise MarketplaceYmlError("'versioning.strategy' must be a non-empty string")
+    strategy = strategy.strip()
+    if strategy not in _VERSIONING_STRATEGIES:
+        valid = ", ".join(sorted(_VERSIONING_STRATEGIES))
+        raise MarketplaceYmlError(
+            f"'versioning.strategy' must be one of: {valid}; got {strategy!r}"
+        )
+    return MarketplaceVersioning(strategy=strategy)
 
 
 def _parse_claude(raw: Any, *, default_output: str) -> MarketplaceClaudeConfig:
@@ -1016,6 +1059,9 @@ def _build_config(
     # -- build --
     build = _parse_build(marketplace_dict.get("build"))
 
+    # -- versioning (release-gate strategy) --
+    versioning = _parse_versioning(marketplace_dict.get("versioning"))
+
     # -- codex output --
     codex = _parse_codex(marketplace_dict.get("codex"))
 
@@ -1099,6 +1145,7 @@ def _build_config(
         codex=codex,
         metadata=metadata,
         build=build,
+        versioning=versioning,
         packages=tuple(entries),
         output_specs=output_specs,
         warnings=tuple(warnings_sink),

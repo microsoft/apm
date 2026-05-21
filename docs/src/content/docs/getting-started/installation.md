@@ -252,6 +252,30 @@ $env:APM_DEBUG = "1"
 apm install <package>
 ```
 
+### `Access is denied` running apm.exe on Windows (AppLocker / App Control for Business)
+
+If the installer (or `apm self-update`) fails at the `Testing binary...` step with `Access is denied` / HRESULT `0x80070005`, an enterprise application control policy ([AppLocker](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/applocker/applocker-overview) or [App Control for Business / WDAC](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/)) is blocking execution of `apm.exe` from a user-writable path.
+
+The installer stages the binary under `%LOCALAPPDATA%\Programs\apm\releases\<tag>` **before** invoking it, so a single allow-list rule for that path is enough.
+
+Ask your endpoint admin to add one of:
+
+- **Path rule:** `%LOCALAPPDATA%\Programs\apm\*`
+- **Publisher / hash rule** for the released `apm.exe`
+
+If you cannot change policy, set `APM_TEMP_DIR` to a directory your policy allows and retry:
+
+```powershell
+$env:APM_TEMP_DIR = "$env:LOCALAPPDATA\Programs\apm\tmp"
+irm https://aka.ms/apm-windows | iex
+```
+
+As a last resort, install via pip (runs from your Python user site):
+
+```powershell
+pip install --user apm-cli
+```
+
 ## Next steps
 
 See the [Quick Start](../quick-start/) to set up your first project.

@@ -393,6 +393,41 @@ class TestCloneURLBuilding:
         url = build_https_clone_url("bitbucket.domain.ext", "team/repo", port=8443)
         assert url == "https://bitbucket.domain.ext:8443/team/repo"
 
+    def test_ssh_clone_url_with_custom_user(self):
+        """Custom SSH usernames (e.g. EMU accounts) are preserved in the SCP shorthand."""
+        url = build_ssh_url("github.com", "acme/repo", user="myuser")
+        assert url == "myuser@github.com:acme/repo.git"
+
+    def test_ssh_clone_url_with_custom_user_and_port(self):
+        """Custom SSH user + port emits the explicit ssh:// form."""
+        url = build_ssh_url("bitbucket.domain.ext", "team/repo", port=7999, user="myuser")
+        assert url == "ssh://myuser@bitbucket.domain.ext:7999/team/repo.git"
+
+    def test_ssh_clone_url_default_user_unchanged(self):
+        """Omitting the user keeps the historical ``git@`` default."""
+        url = build_ssh_url("github.com", "acme/repo")
+        assert url == "git@github.com:acme/repo.git"
+
+    def test_ssh_clone_url_rejects_option_injection_user(self):
+        """A leading ``-`` would be interpreted as an SSH option flag by OpenSSH; reject it."""
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid SSH user"):
+            build_ssh_url("github.com", "acme/repo", user="-oProxyCommand=evil")
+
+    def test_ssh_clone_url_rejects_user_with_at_sign(self):
+        """A ``@`` in the user would split the userinfo and shift the host."""
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid SSH user"):
+            build_ssh_url("github.com", "acme/repo", user="user@other-host")
+
+    def test_ssh_clone_url_rejects_empty_user(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="non-empty"):
+            build_ssh_url("github.com", "acme/repo", user="")
+
     def test_https_clone_url_with_token_and_port(self):
         url = build_https_clone_url("bitbucket.domain.ext", "team/repo", token="pat-xxx", port=8443)
         assert url == "https://x-access-token:pat-xxx@bitbucket.domain.ext:8443/team/repo.git"
@@ -462,6 +497,43 @@ class TestSecurityWithGenericHosts:
     def test_invalid_characters_rejected(self):
         with pytest.raises(ValueError, match="Invalid repository path component"):
             DependencyReference.parse("https://gitlab.com/user/repo$bad")
+
+    def test_bitbucket_personal_repo_tilde_url(self):
+        """Bitbucket Data Center personal repos use ``~username`` path segments."""
+        dep = DependencyReference.parse("https://example.com/scm/~myuser/my-apm-repo.git")
+        assert dep.host == "example.com"
+        assert dep.repo_url == "scm/~myuser/my-apm-repo"
+        assert dep.is_virtual is False
+
+    def test_bitbucket_personal_repo_tilde_shorthand(self):
+        """Tilde-prefixed user segment is also valid in FQDN shorthand form."""
+        dep = DependencyReference.parse("example.com/scm/~myuser/my-apm-repo")
+        assert dep.host == "example.com"
+        assert dep.repo_url == "scm/~myuser/my-apm-repo"
+
+    def test_ado_rejects_tilde_in_repo_path(self):
+        """ADO URLs MUST reject ``~`` in path segments.
+
+        Regression trap for the secure_by_default asymmetry between the ADO
+        and non-ADO path-component whitelists. Tilde has no meaning on
+        Azure DevOps URLs; keeping it out preserves the strict ADO surface
+        even though Bitbucket DC accepts it.
+        """
+        with pytest.raises(ValueError, match="Invalid repository path component"):
+            DependencyReference.parse("https://dev.azure.com/myorg/myproj/_git/~bad")
+
+    def test_bitbucket_personal_repo_tilde_scp_form(self):
+        """SCP shorthand (``git@host:path``) carries Bitbucket DC personal repos too."""
+        dep = DependencyReference.parse("git@bitbucket.example.com:~jdoe/ml-utils.git")
+        assert dep.host == "bitbucket.example.com"
+        assert dep.repo_url == "~jdoe/ml-utils"
+
+    def test_bitbucket_personal_repo_tilde_ssh_url(self):
+        """``ssh://`` URL form with custom port carries Bitbucket DC personal repos."""
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/~jdoe/ml-utils.git")
+        assert dep.host == "bitbucket.example.com"
+        assert dep.port == 7999
+        assert dep.repo_url == "~jdoe/ml-utils"
 
 
 class TestFQDNVirtualPaths:

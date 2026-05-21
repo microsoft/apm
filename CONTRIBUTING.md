@@ -243,6 +243,25 @@ When adding a new precondition, add an entry to `_MARKER_CHECKS` and
 declare the marker in `pyproject.toml`; that is the only place the
 precondition needs to live.
 
+### Coverage policy
+
+Both suites enforce a hard coverage gate in CI. A PR that drops
+coverage below the gate cannot merge.
+
+| Suite       | Gate | Enforced in |
+|-------------|------|-------------|
+| Unit        | 80%  | `pyproject.toml` (`fail_under`) |
+| Integration | 70%  | `.github/workflows/ci-integration.yml` (`--fail-under`) |
+
+**Ratchet rule.** Gates only move upward. When actual coverage
+exceeds the gate by 5 or more percentage points, raise the gate to
+`actual - 3` in the next release PR.
+
+**Finding low-coverage files.** Every CI run publishes a
+"Lowest-coverage files" collapsible section in the job summary
+(rendered by `scripts/coverage-summary.py`). Check there to see
+which files would benefit most from new tests.
+
 ## Coding Style
 
 This project follows:
@@ -280,6 +299,20 @@ This is optional -- CI is the authoritative gate. The pre-commit hook rev may la
 If your changes affect how users interact with the project, update the documentation accordingly.
 
 ## Extending APM
+
+### Adding or modifying an MCP client adapter
+
+The MCP client adapters (`src/apm_cli/adapters/client/`) inherit shared
+utilities from `MCPClientAdapter` in `base.py`.  When adding a new adapter
+or modifying an existing one:
+
+- Inherit from `MCPClientAdapter` and reuse the shared helpers
+  (`_apply_pypi_homebrew_generic_config`, `_apply_auth_and_headers_impl`,
+  `_resolve_env_vars_with_prompting`).
+- Do **not** copy-paste logic from sibling adapters -- the pylint R0801
+  similarity threshold is 10 lines and CI will fail on duplicated blocks.
+- For marketplace tag-parsing, use `marketplace._shared.iter_semver_tags`
+  rather than re-implementing the refs-iteration loop.
 
 ### How to add an experimental feature flag
 

@@ -68,7 +68,7 @@ class TestMCPRegistry:
 
         # Leave the temp tree before unlinking it.  Otherwise cwd can still
         # reference the directory inode and os.getcwd() raises FileNotFoundError
-        # on POSIX -- breaking later tests on the same xdist worker.
+        # on POSIX — breaking later tests on the same xdist worker.
         with contextlib.suppress(FileNotFoundError, OSError):
             os.chdir(tempfile.gettempdir())
 
