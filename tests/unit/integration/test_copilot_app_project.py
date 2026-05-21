@@ -272,8 +272,8 @@ class TestRaceCollisionRecovery:
     ) -> None:
         """Simulate concurrent INSERT mid-transaction.
 
-        Captures the connection the resolver opens via ``_connect``, then
-        monkeypatches ``derive_project_recipe`` (called between SELECT
+        Captures the connection the resolver opens via ``cdb._connect``,
+        then monkeypatches ``derive_project_recipe`` (called between SELECT
         and INSERT) to insert a colliding row on the SAME connection so
         the resolver's INSERT trips ``sqlite3.IntegrityError`` and falls
         into the race-recovery SELECT branch.
@@ -283,14 +283,14 @@ class TestRaceCollisionRecovery:
         winning_id = "11111111-2222-4333-8444-555555555555"
 
         captured: dict[str, sqlite3.Connection] = {}
-        real_connect = cap._connect
+        real_connect = cdb._connect
 
         def capturing_connect(path):
             conn = real_connect(path)
             captured["c"] = conn
             return conn
 
-        monkeypatch.setattr(cap, "_connect", capturing_connect)
+        monkeypatch.setattr(cdb, "_connect", capturing_connect)
 
         real_derive = cap.derive_project_recipe
 

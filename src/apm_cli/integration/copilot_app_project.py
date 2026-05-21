@@ -43,10 +43,7 @@ from pathlib import Path
 
 from apm_cli.integration.copilot_app_db import (
     CopilotAppDbError,
-    CopilotAppDbMissingError,
-    _begin_immediate_with_retry,
-    _check_user_version,
-    _connect,
+    _open_write_txn,
 )
 
 # ---------------------------------------------------------------------------
@@ -343,75 +340,65 @@ def resolve_or_register_project_sqlite(
             (delegated to ``_check_user_version``).
         CopilotAppDbLockedError: ``BEGIN IMMEDIATE`` timed out.
     """
-    if not db_path.is_file():
-        raise CopilotAppDbMissingError(
-            f"Copilot App database not found at {db_path}. "
-            f"Install the GitHub Copilot desktop app, or omit "
-            f"'--target copilot-app'."
-        )
-
-    conn = _connect(db_path)
+    conn = _open_write_txn(db_path)
     try:
-        _check_user_version(conn)
-        _begin_immediate_with_retry(conn)
+        existing = conn.execute(
+            "SELECT id, main_repo_path FROM projects WHERE main_repo_path = ?",
+            (str(ctx.repo_root),),
+        ).fetchone()
+        if existing is not None:
+            conn.execute("COMMIT")
+            return ResolvedProject(
+                project_id=existing["id"],
+                was_created=False,
+                main_repo_path=existing["main_repo_path"],
+            )
+
+        recipe = derive_project_recipe(ctx)
         try:
-            existing = conn.execute(
+            conn.execute(
+                _PROJECTS_INSERT_SQL,
+                (
+                    recipe.id,
+                    recipe.name,
+                    recipe.main_repo_path,
+                    recipe.default_branch,
+                    recipe.github_owner,
+                    recipe.github_repo,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            # Race: another writer (the App itself, or a parallel
+            # apm install) inserted the same main_repo_path between
+            # our SELECT and INSERT. Re-read inside this transaction
+            # to find the winner's id.
+            row = conn.execute(
                 "SELECT id, main_repo_path FROM projects WHERE main_repo_path = ?",
                 (str(ctx.repo_root),),
             ).fetchone()
-            if existing is not None:
-                conn.execute("COMMIT")
-                return ResolvedProject(
-                    project_id=existing["id"],
-                    was_created=False,
-                    main_repo_path=existing["main_repo_path"],
-                )
-
-            recipe = derive_project_recipe(ctx)
-            try:
-                conn.execute(
-                    _PROJECTS_INSERT_SQL,
-                    (
-                        recipe.id,
-                        recipe.name,
-                        recipe.main_repo_path,
-                        recipe.default_branch,
-                        recipe.github_owner,
-                        recipe.github_repo,
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                # Race: another writer (the App itself, or a parallel
-                # apm install) inserted the same main_repo_path between
-                # our SELECT and INSERT. Re-read inside this transaction
-                # to find the winner's id.
-                row = conn.execute(
-                    "SELECT id, main_repo_path FROM projects WHERE main_repo_path = ?",
-                    (str(ctx.repo_root),),
-                ).fetchone()
-                if row is None:
-                    # IntegrityError but no matching row -- some other
-                    # constraint failed (e.g. NOT NULL on a column we
-                    # don't write). Surface as a DB error.
-                    raise CopilotAppDbError(
-                        "Race recovery failed: project row INSERT collided "
-                        "but no matching row was found post-collision."
-                    ) from None
-                conn.execute("COMMIT")
-                return ResolvedProject(
-                    project_id=row["id"],
-                    was_created=False,
-                    main_repo_path=row["main_repo_path"],
-                )
-
+            if row is None:
+                # IntegrityError but no matching row -- some other
+                # constraint failed (e.g. NOT NULL on a column we
+                # don't write). Surface as a DB error.
+                raise CopilotAppDbError(
+                    "Race recovery failed: project row INSERT collided "
+                    "but no matching row was found post-collision."
+                ) from None
             conn.execute("COMMIT")
             return ResolvedProject(
-                project_id=recipe.id,
-                was_created=True,
-                main_repo_path=recipe.main_repo_path,
+                project_id=row["id"],
+                was_created=False,
+                main_repo_path=row["main_repo_path"],
             )
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+
+        conn.execute("COMMIT")
+        return ResolvedProject(
+            project_id=recipe.id,
+            was_created=True,
+            main_repo_path=recipe.main_repo_path,
+        )
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     finally:
         conn.close()
