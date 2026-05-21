@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Shard PR-time unit tests into two pytest-split groups with a fan-in coverage gate; move PyInstaller binary build to a parallel non-required job; reduce `merge-gate` poll interval to 5 s. (#1437)
+- Shard PR-time unit tests into two pytest-split groups (each required); move global 80% coverage gate to a non-required `Coverage Combine (Linux)` job at PR time and require it on `merge_group`; move PyInstaller binary build to a parallel non-required job; reduce `merge-gate` poll interval to 5 s. (#1437)
 - Unit test coverage raised to 88% (gate: `fail_under = 80`); integration test coverage raised to 71% with first CI gate at 55%. (#1402)
 
 ### Fixed
