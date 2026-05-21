@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- PR-time CI cut from ~4 min to ~70-90 s by sharding `pytest` two ways with `pytest-split` and a fan-in coverage gate, moving the PyInstaller binary build off the required critical path into a parallel non-required `pr-binary-smoke` job, and lowering `merge-gate.yml` poll interval from 30 s to 5 s. The required check name `Build & Test (Linux)` is preserved by the fan-in job. The 80% unit coverage floor is now enforced after `coverage combine`, mirroring the pattern already used in `ci-integration.yml`.
 - Unit test coverage raised to 88% (gate: `fail_under = 80`); integration test coverage raised to 71% with first CI gate at 55%. (#1402)
 
 ### Fixed
