@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.patterns import parse_apply_to
+from apm_cli.utils.patterns import parse_apply_to, yaml_double_quote
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -282,10 +282,10 @@ class InstructionIntegrator(BaseIntegrator):
             parts.append(f"description: {description}")
         globs = parse_apply_to(apply_to)
         if len(globs) == 1:
-            parts.append(f'globs: "{globs[0]}"')
+            parts.append(f"globs: {yaml_double_quote(globs[0])}")
         elif globs:
             parts.append("globs:")
-            parts.extend(f'  - "{g}"' for g in globs)
+            parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
         parts.append("---")
 
         return "\n".join(parts) + "\n\n" + body.lstrip("\n")
@@ -379,10 +379,10 @@ class InstructionIntegrator(BaseIntegrator):
         if globs:
             parts.append("trigger: glob")
             if len(globs) == 1:
-                parts.append(f'globs: "{globs[0]}"')
+                parts.append(f"globs: {yaml_double_quote(globs[0])}")
             else:
                 parts.append("globs:")
-                parts.extend(f'  - "{g}"' for g in globs)
+                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
         else:
             parts.append("trigger: always_on")
         parts.append("---")
@@ -434,7 +434,7 @@ class InstructionIntegrator(BaseIntegrator):
         globs = parse_apply_to(apply_to)
         if globs:
             parts = ["---", "paths:"]
-            parts.extend(f'  - "{g}"' for g in globs)
+            parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
             parts.append("---")
             return "\n".join(parts) + "\n\n" + body.lstrip("\n")
 

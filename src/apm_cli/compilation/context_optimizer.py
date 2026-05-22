@@ -27,26 +27,7 @@ from ..output.models import (
 from ..primitives.models import Instruction
 from ..utils.exclude import should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
-from ..utils.patterns import parse_apply_to
-
-
-def _has_top_level_comma(pattern: str) -> bool:
-    """Return True if ``pattern`` contains a comma outside any ``{...}`` group.
-
-    Commas inside brace alternation (e.g. ``**/*.{css,scss}``) are part
-    of glob brace expansion and must not be treated as list separators.
-    """
-    depth = 0
-    for ch in pattern:
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            if depth > 0:
-                depth -= 1
-        elif ch == "," and depth == 0:
-            return True
-    return False
-
+from ..utils.patterns import has_top_level_comma, parse_apply_to
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -687,7 +668,7 @@ class ContextOptimizer:
         """
         # For comma-lists, only the first segment is consulted - the
         # placement still flows into a single directory.
-        if _has_top_level_comma(pattern):
+        if has_top_level_comma(pattern):
             segments = parse_apply_to(pattern)
             if not segments:
                 return None
@@ -749,7 +730,7 @@ class ContextOptimizer:
         # segment match as a hit so list patterns mirror per-glob semantics.
         # Only split on top-level commas - commas inside brace alternation
         # (e.g. ``**/*.{css,scss}``) must stay attached for brace expansion.
-        if _has_top_level_comma(pattern):
+        if has_top_level_comma(pattern):
             segments = parse_apply_to(pattern)
             return any(self._file_matches_pattern(file_path, seg) for seg in segments)
 
