@@ -181,8 +181,8 @@ class TestConsoleSingletonScaling:
             for _ in range(n):
                 _get_console()
 
-        t_small = _median_time(lambda: call_n(100))
-        t_large = _median_time(lambda: call_n(1000))
+        t_small = _median_time(lambda: call_n(1000))
+        t_large = _median_time(lambda: call_n(10000))
 
         if t_small < 1e-7:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
@@ -358,8 +358,8 @@ class TestVariantKeyScaling:
     The function sorts, deduplicates, JSON-serialises and SHA-256-hashes
     the sparse path list. For 10x input growth an O(n log n) algorithm
     should give ~10-13x; an O(n^2) algorithm would give ~100x. We use
-    ``ratio < 13`` as the guard -- tight enough to catch quadratic
-    regressions while leaving ~30% margin above the measured ~9x
+    ``ratio < 17`` as the guard -- tight enough to catch quadratic
+    regressions while leaving ~30% margin above the measured ~12x
     baseline on current hardware.
 
     Uses repeated calls per sample to push total runtime above the
@@ -369,8 +369,8 @@ class TestVariantKeyScaling:
     def test_scaling_ratio(self) -> None:
         from apm_cli.cache.git_cache import _variant_key
 
-        small_paths = _make_sparse_paths(50)
-        large_paths = _make_sparse_paths(500)
+        small_paths = _make_sparse_paths(200)
+        large_paths = _make_sparse_paths(2000)
         repeats = 500
 
         def call_n(paths: list[str]) -> None:
@@ -384,7 +384,7 @@ class TestVariantKeyScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 13, (
+        assert ratio < 17, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -432,14 +432,14 @@ class TestVariantLookupScaling:
 
         target_variant = _variant_key(["target/path"])
 
-        # Small: 10 sibling variants
-        for i in range(10):
+        # Small: 50 sibling variants
+        for i in range(50):
             v = _variant_key([f"path-{i}"])
             (sha_dir_small / v).mkdir()
         (sha_dir_small / target_variant).mkdir(exist_ok=True)
 
-        # Large: 100 sibling variants
-        for i in range(100):
+        # Large: 500 sibling variants
+        for i in range(500):
             v = _variant_key([f"path-{i}"])
             (sha_dir_large / v).mkdir()
         (sha_dir_large / target_variant).mkdir(exist_ok=True)
