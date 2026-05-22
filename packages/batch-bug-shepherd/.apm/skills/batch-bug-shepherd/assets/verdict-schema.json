@@ -2,11 +2,12 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "batch-bug-shepherd-verdict-schema.json",
   "title": "batch-bug-shepherd subagent return shapes",
-  "description": "Three return shapes, one per wave. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR and continue.",
+  "description": "Four return shapes, one per wave (triage / shepherd / completion / conflict-resolution). Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR and continue.",
   "oneOf": [
     { "$ref": "#/definitions/triage_return" },
     { "$ref": "#/definitions/shepherd_return" },
-    { "$ref": "#/definitions/completion_return" }
+    { "$ref": "#/definitions/completion_return" },
+    { "$ref": "#/definitions/conflict_resolution_return" }
   ],
   "definitions": {
     "triage_return": {
@@ -177,6 +178,118 @@
         {
           "if": { "properties": { "status": { "const": "superseded" } } },
           "then": { "required": ["superseded_by"] }
+        }
+      ]
+    },
+    "conflict_resolution_return": {
+      "type": "object",
+      "required": ["kind", "pr", "status", "mergeStateStatus_pre"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "conflict-resolution" },
+        "pr": { "type": "integer", "minimum": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["resolved", "requires-author-action", "requires-human-judgment", "resolution-failed"]
+        },
+        "mergeStateStatus_pre": {
+          "type": "string",
+          "description": "The mergeStateStatus value observed by Phase 5a probe BEFORE any rebase. Captured via `gh pr view --json mergeStateStatus`, never asserted from recall."
+        },
+        "mergeStateStatus_post": {
+          "type": "string",
+          "description": "The mergeStateStatus value observed by Phase 5c re-probe AFTER push. Required when status=resolved; must be one of CLEAN / UNSTABLE / HAS_HOOKS (anything else means the rebase did not in fact resolve)."
+        },
+        "conflicting_paths": {
+          "type": "array",
+          "description": "Paths reported by `git status` during the rebase. Empty array when status=requires-author-action (no rebase attempted) is legal.",
+          "items": { "type": "string" }
+        },
+        "rebase_evidence": {
+          "type": "string",
+          "description": "Brief human-readable narrative of the rebase: base SHA, head SHA pre-rebase, head SHA post-rebase, conflicts resolved, fallback used (merge-of-main) if any. Required when status=resolved."
+        },
+        "push_command": {
+          "type": "string",
+          "pattern": "^(?!.*--force(?!-with-lease)).*$",
+          "description": "The exact `git push ...` command used. MUST use --force-with-lease (never bare --force). The pattern rejects any --force not immediately followed by -with-lease. Required when status=resolved."
+        },
+        "rebase_touched_regression_test": {
+          "type": "boolean",
+          "description": "True if the rebase introduced changes to a test added during fold-in (regression-trap test). Drives whether mutation_break_evidence is required."
+        },
+        "mutation_break_evidence": {
+          "type": "array",
+          "description": "Required when rebase_touched_regression_test=true. Same shape as completion_return.mutation_break_evidence: re-run the gate post-rebase.",
+          "items": {
+            "type": "object",
+            "required": ["test", "guard_removed", "failed_without_guard"],
+            "properties": {
+              "test": { "type": "string" },
+              "guard_removed": { "type": "string" },
+              "failed_without_guard": { "type": "boolean" }
+            }
+          }
+        },
+        "lint_evidence": {
+          "type": "string",
+          "description": "Exit code and silent-output confirmation for the canonical ruff pair post-rebase. Required when status=resolved."
+        },
+        "comment_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the SECOND-and-final PR comment (resolution-confirmation). Two-comment-per-PR cap honored: completion + resolution = 2."
+        },
+        "fork_url": {
+          "type": "string",
+          "description": "Required when status=requires-author-action: the contributor fork URL the orchestrator could not push to (maintainerCanModify=false)."
+        },
+        "maintainerCanModify": {
+          "type": "boolean",
+          "description": "Required when status=requires-author-action: the boolean evidence that pushing was blocked."
+        },
+        "blocker": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Required when status in {requires-human-judgment, resolution-failed}. One-paragraph human-readable explanation of why the rebase was irrecoverable or what failed."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "resolved" } } },
+          "then": {
+            "required": ["rebase_evidence", "push_command", "mergeStateStatus_post", "lint_evidence", "comment_url"],
+            "properties": {
+              "mergeStateStatus_post": { "enum": ["CLEAN", "UNSTABLE", "HAS_HOOKS"] }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": { "const": "resolved" },
+              "rebase_touched_regression_test": { "const": true }
+            },
+            "required": ["status", "rebase_touched_regression_test"]
+          },
+          "then": { "required": ["mutation_break_evidence"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "requires-author-action" } } },
+          "then": {
+            "required": ["fork_url", "maintainerCanModify"],
+            "properties": {
+              "maintainerCanModify": { "const": false }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "requires-human-judgment" } } },
+          "then": { "required": ["blocker", "conflicting_paths"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "resolution-failed" } } },
+          "then": { "required": ["blocker"] }
         }
       ]
     }

@@ -186,7 +186,7 @@ populated and deferred_followups filed as tracking issues; 1 PR
 stays in-session blocked on flaky CI. Cross-session-message ONLY
 on green; failures stay in-session.
 
-## Progress (Phase 5 - final report)
+## Progress (Phase 5 - mergeability gate)
 
 ```mermaid
 flowchart TB
@@ -195,8 +195,71 @@ flowchart TB
     P2[Phase 2 cross-ref]:::done
     P3[Phase 3 shepherd-or-fix]:::done
     P4[Phase 4 completion]:::done
-    P5[Phase 5 final report]:::active
-    P0 --> P1 --> P2 --> P3 --> P4 --> P5
+    subgraph WAVE4[Phase 5 mergeability gate]
+        direction LR
+        P5a[5a probe R=11]:::done
+        P5b[5b resolve C=2]:::active
+        P5c[5c re-probe]:::pending
+    end
+    P6[Phase 6 final report]:::pending
+    P0 --> P1 --> P2 --> P3 --> P4 --> WAVE4 --> P6
+    classDef pending fill:#eee,stroke:#999,color:#333
+    classDef active  fill:#fff3b0,stroke:#b8860b,color:#333,stroke-width:2px
+    classDef done    fill:#cfe8c9,stroke:#2e7d32,color:#1b5e20
+    classDef blocked fill:#f8c7c7,stroke:#b71c1c,color:#7f0000
+    classDef skipped fill:#f0f0f0,stroke:#bbb,color:#888,stroke-dasharray:3 3
+```
+
+Loading `references/mergeability-gate.md` (load trigger: entering
+Phase 5).
+
+Sub-phase 5a probes every Phase-4 ready PR via `gh pr view
+<pr> --json mergeStateStatus,mergeable,maintainerCanModify,
+headRepository,headRepositoryOwner,headRefName` (S7 DETERMINISTIC
+TOOL BRIDGE; never asserted from recall). Partition:
+
+| PR    | mergeStateStatus | route          |
+|-------|------------------|----------------|
+| #1402 | CLEAN            | verified-ready |
+| #1410 | CLEAN            | verified-ready |
+| #1396 | DIRTY            | 5b             |
+| #1441 | DIRTY            | 5b             |
+| (7 more) | CLEAN         | verified-ready |
+
+C = 2 of 11. Dispatch table for sub-wave 5b:
+
+| subagent_id            | target   | persona                     | brief                                                                                |
+|------------------------|----------|-----------------------------|--------------------------------------------------------------------------------------|
+| resolve-conflicts-1396 | PR #1396 | conflict-resolution-prompt  | Rebase onto main; resolve faithfully; lint; push --force-with-lease; re-probe        |
+| resolve-conflicts-1441 | PR #1441 | conflict-resolution-prompt  | (same shape)                                                                         |
+
+Sub-wave 5b returns: both `status: resolved`,
+`mergeStateStatus_post: CLEAN`, push_command containing
+`--force-with-lease`, resolution-confirmation comment posted (the
+second-and-final comment per the two-comment cap).
+
+Sub-phase 5c: orchestrator-side trust-but-verify re-probe agrees.
+Four-way partition this run: 11 resolved, 0
+requires-author-action, 0 requires-human-judgment, 0
+resolution-failed.
+
+## Progress (Phase 6 - final report)
+
+```mermaid
+flowchart TB
+    P0[Phase 0 scope]:::done
+    P1[Phase 1 triage]:::done
+    P2[Phase 2 cross-ref]:::done
+    P3[Phase 3 shepherd-or-fix]:::done
+    P4[Phase 4 completion]:::done
+    subgraph WAVE4[Phase 5 mergeability gate]
+        direction LR
+        P5a[5a probe R=11]:::done
+        P5b[5b resolve C=2]:::done
+        P5c[5c re-probe]:::done
+    end
+    P6[Phase 6 final report]:::active
+    P0 --> P1 --> P2 --> P3 --> P4 --> WAVE4 --> P6
     classDef pending fill:#eee,stroke:#999,color:#333
     classDef active  fill:#fff3b0,stroke:#b8860b,color:#333,stroke-width:2px
     classDef done    fill:#cfe8c9,stroke:#2e7d32,color:#1b5e20
@@ -206,13 +269,18 @@ flowchart TB
 
 Reading the final table; rendering `assets/final-report-template.md`:
 
-- 11 ready-to-merge (PR links + CI evidence; folded items
-  enumerated per PR; deferred items linked to tracking issues)
-- 1 still in-session (blocked on flaky CI)
+- 11 ready-to-merge (verified MERGEABLE against current main at
+  the post-5c probe SHA; PR links + CI evidence; folded items per
+  PR; deferred items linked to tracking issues)
+- 0 requires-author-action
+- 0 requires-human-judgment
+- 0 resolution-failed
+- 1 still in-session (blocked on flaky CI from Phase 4)
 - 8 FIXED-AT-HEAD (recommend close)
 - 5 UNCLEAR (surfaced for human triage with repro notes)
 
 Single-writer interlock honored on every PR. Lint contract honored
-on every push. Bias toward folding honored: FOLD items landed
-in-PR, DEFER items filed as tracking issues, none silently
-dropped.
+on every push, including the post-rebase pushes. Bias toward
+folding honored. Mergeability gate honored: 2 PRs rebased and
+re-probed before the report claimed them ready; bare `--force` was
+never used (`--force-with-lease` only).

@@ -20,13 +20,14 @@ description: >-
 
 # batch-bug-shepherd - Outer-loop bug-queue orchestrator
 
-This skill is an A10 ORCHESTRATOR-SAGA over three fan-out waves
-(triage, shepherd-or-fix, completion) with a persisted ground-truth
-table between phases. It COMPOSES the
+This skill is an A10 ORCHESTRATOR-SAGA over four fan-out waves
+(triage, shepherd-or-fix, completion, conflict-resolution) with a
+persisted ground-truth table between phases. It COMPOSES the
 [apm-review-panel](../apm-review-panel/SKILL.md) skill -- it does NOT
 re-implement panel review. Per-PR shepherding is delegated; per-issue
-verification, PR-in-flight branching, fix dispatch, completion, and
-the cross-session table are owned here.
+verification, PR-in-flight branching, fix dispatch, completion,
+post-wave mergeability re-probe, and the cross-session table are
+owned here.
 
 The skill is ADVISORY at the panel layer and EXECUTIVE at the
 orchestrator layer: it WILL push commits, open PRs, post comments,
@@ -99,25 +100,39 @@ execute + verify (A9 SUPERVISED EXECUTION).
   takes 30+ minutes wall and dozens of parallel subagents; without
   the diagram they cannot tell `still working` from `stuck`. Skipping
   the visibility renders breaks the saga's human-in-the-loop contract.
+- **Mergeability is post-wave truth, not pre-wave assumption.** A
+  PR that Phase 4 marked ready-to-merge can stop being mergeable
+  the moment the maintainer lands another PR onto main. The
+  ground-truth table is not allowed to claim `ready-to-merge`
+  without a post-wave `gh pr view --json mergeStateStatus`
+  re-probe. Phase 5 enforces this gate: every ready PR is
+  re-probed; CONFLICTING ones go through a one-subagent-per-PR
+  rebase + faithful conflict resolution + `--force-with-lease`
+  push + re-probe; non-pushable forks (`maintainerCanModify=false`)
+  surface as `requires-author-action` rather than blocking the
+  report. Bare `--force` is prohibited. See
+  `references/mergeability-gate.md` for the step-by-step (load
+  when entering Phase 5).
+- **Two-comment-per-PR cap.** Across the entire saga, a single PR
+  receives at most TWO orchestrator-controlled comments: the Phase
+  4 completion-confirmation comment, and the Phase 5b
+  resolution-confirmation comment (only when conflicts were
+  resolved). The apm-review-panel comment posted in Phase 3 is the
+  panel's own contract and does not count against this cap. No
+  third comment from any phase under any circumstance.
 - **Bias toward folding recommendations into the in-flight PR.**
-  When `shepherd_return.recommended_followups[]` is non-empty,
-  the default is FOLD-INTO-PR via the completion subagent, NOT
-  defer to a tracking issue. The completion subagent (see
-  `assets/completion-prompt.md` step 2) classifies each
-  recommended item against explicit criteria: items that touch
-  files already in the diff, single helper extractions, regression
-  traps for the PR's own behavior, hermetic integration tests of
-  the new surface, and adjacent doc / CHANGELOG patches all FOLD
-  by default. Only genuinely separable work -- cross-cutting
-  refactors, broad doc restructuring, new feature work,
-  architectural additions -- becomes a tracking issue via
-  `gh issue create`. The verdict mapping (`shepherd-prompt.md`
-  step 4) makes `ship_with_followups` with 0 blocking findings
-  emit `verdict: ready-to-merge` precisely so the completion
-  subagent runs on the fold-in surface rather than blocking the
-  PR for what the panel itself called non-blocking. The skill
-  ships now; it does not ship "now plus a backlog of papercuts
-  the maintainer will never get to".
+  When `shepherd_return.recommended_followups[]` is non-empty, the
+  default is FOLD-INTO-PR via the completion subagent, NOT defer
+  to a tracking issue. The completion subagent (see
+  `assets/completion-prompt.md` step 2) classifies each item with
+  explicit FOLD vs DEFER criteria and biases toward FOLD on close
+  calls. Only genuinely separable work -- cross-cutting refactors,
+  broad doc restructuring, new feature work, architectural
+  additions -- becomes a tracking issue. The verdict mapping makes
+  `ship_with_followups` with 0 blocking findings emit `verdict:
+  ready-to-merge` precisely so completion runs on the fold-in
+  surface rather than blocking on what the panel itself called
+  non-blocking. Ships now, not "now plus a backlog of papercuts".
 
 ## Composition with apm-review-panel
 
@@ -250,67 +265,63 @@ label. If `F = 0`, render P4 as `skipped`.
 Print the dispatch table mapping each `completion-<pr>` subagent_id
 to its target PR BEFORE spawning.
 
-For each PR (both 3a-shepherded community PRs and 3b-fixed PRs that
-need follow-ups), spawn one completion subagent with
-`assets/completion-prompt.md`. Each completion subagent:
+For each PR (both 3a-shepherded community PRs and 3b-fixed PRs
+that need follow-ups), spawn one completion subagent with
+`assets/completion-prompt.md`. The full procedure (CLASSIFY,
+resolve blockers FIRST, implement FOLD items consulting the right
+panelist persona, file DEFER items via `gh issue create`, lint
+silent, push-or-supersede, wait for CI, post ONE confirmation
+comment) lives in the spawn body. The orchestrator owns only
+schema-validation of the return JSON and table update; it does NOT
+re-derive the per-PR steps.
 
-1. Reads the shepherd PR comment, `BLOCKING_FOLLOWUPS`, and
-   `RECOMMENDED_FOLLOWUPS` (the latter is the input channel for
-   the fold-in invariant; see `verdict-schema.json` shepherd_return
-   shape).
-2. CLASSIFIES every recommended item as FOLD (cheap + on-path;
-   lands in this PR) or DEFER (separable; opens a tracking issue
-   via `gh issue create`). Bias toward FOLD per the architecture
-   invariant.
-3. Resolves every blocking-severity follow-up FIRST. Common shapes:
-   - Extract helpers; align with canonical sibling logic.
-   - Add regression-trap tests (mutation-break gate enforced).
-   - Fix merge conflicts; rebase if cleaner.
-4. IMPLEMENTS every FOLD item, consulting the right panelist
-   persona per `source_persona` (e.g. python-architect for code,
-   test-coverage-expert for tests, supply-chain-security-expert
-   for trust-boundary work). For non-trivial single items it MAY
-   spawn a nested Task subagent to keep context isolated.
-5. FILES every DEFER item as a tracking issue with rationale +
-   PR backlink; records the issue numbers in
-   `deferred_followups[]`.
-6. Runs the lint contract. Both commands MUST be silent.
-7. Pushes:
-   - Tries `git push <author-fork> <branch>` first when
-     `maintainerCanModify=true`.
-   - On rejection or when the flag is false, opens a superseding
-     PR under `microsoft/apm` via `git checkout -b
-     supersede/<original-pr> && git cherry-pick ... && gh pr create
-     --base main --title "..." --body "Supersedes #<n>; preserves
-     authorship via commit trailers."`. Each commit carries
-     `Co-authored-by: <original-author>` trailer.
-   - Closes the superseded PR via `gh pr close <n> --comment
-     "Superseded by #<m>. Thank you for the original work; the
-     superseding PR preserves your authorship via commit trailers and
-     resolves the panel follow-ups so we can land this promptly."`.
-8. Waits for CI on the target PR. If green AND every blocking
-   follow-up is addressed AND every recommended follow-up is
-   either folded or filed as a tracking issue, posts ONE
-   confirmation comment (template in
-   `assets/final-report-template.md` -> "PR confirmation" block)
-   listing folded items (with file:line citations) and deferred
-   items (with tracking-issue numbers).
-9. Cross-session-messages the orchestrator with the completion
-   return JSON: `status: ready-to-merge`, plus `folded_followups`
-   and `deferred_followups` arrays. On failure, stays in-session
-   and surfaces the blocker for human review; does NOT message
-   back as green.
+### Phase 5 - mergeability gate (WAVE 4)
 
-### Phase 5 - final report
+Re-render the progress diagram with `P0..P4` `done` and the `WAVE4`
+subgraph `active`. Substitute `R` (ready-PR count from Phase 4) and
+`C` (CONFLICTING-PR count from the 5a probe) into the P5a / P5b
+labels. If `R = 0`, skip Phase 5 entirely; if `C = 0`, render P5b
+as `skipped`.
+
+**Load `references/mergeability-gate.md` when entering this
+phase.** That file holds the binding step-by-step (probe CLI flags,
+retry policy, four-way partition logic, trust-but-verify re-probe).
+The contract below is the summary the orchestrator MUST honor.
+
+- 5a (single-thread, read-only): probe every Phase-4 ready PR via
+  `gh pr view <pr> --json
+  mergeStateStatus,mergeable,maintainerCanModify,headRepository,
+  headRepositoryOwner,headRefName` -- a fact-that-must-be-true
+  (truth #2), through S7 DETERMINISTIC TOOL BRIDGE, never recall.
+  Partition CLEAN / UNSTABLE / HAS_HOOKS (verified-ready) from
+  BEHIND / DIRTY / CONFLICTING (route to 5b). BLOCKED is NOT a
+  conflict and stays verified-ready with a `gate_note`.
+- 5b (fan-out, one subagent per CONFLICTING PR): print the
+  dispatch table mapping `resolve-conflicts-<pr>` subagent_ids to
+  PRs. Spawn one subagent per PR using
+  `assets/conflict-resolution-prompt.md`. Each subagent owns its
+  PR end-to-end: rebase, faithful merge of both intents, lint
+  silent, push with `--force-with-lease` (NEVER bare `--force`),
+  re-probe, post the single resolution-confirmation comment.
+- 5c (single-thread, read-only): trust-but-verify re-probe;
+  partition into the schema's four `conflict_resolution_return`
+  statuses (`resolved`, `requires-author-action`,
+  `requires-human-judgment`, `resolution-failed`); update the
+  ground-truth table. Schema enforces `--force-with-lease` via
+  regex pattern guard on `push_command`.
+
+### Phase 6 - final report
 
 Re-render the progress diagram with every phase `done` (or
 `blocked` where the human-escalation queue is non-empty). Print the
 final ground-truth table below it.
 
 Read the table one last time. Render `assets/final-report-template.md`
-to the user: per-issue verdict, PR link, ready-to-merge status,
-unresolved blockers (with the responsible subagent's session
-reference), and any rows still `UNCLEAR` for human triage.
+to the user: per-issue verdict, PR link, post-gate status (one of
+ready-to-merge-verified, requires-author-action,
+requires-human-judgment, resolution-failed, superseded, blocked,
+unclear), with the responsible subagent's session reference where
+applicable.
 
 Use clickable GitHub links (`https://github.com/microsoft/apm/issues/<n>`
 and `.../pull/<n>`) and `@<author>` references that resolve to
@@ -331,13 +342,22 @@ the purpose of the report.
   (loads apm-review-panel).
 - `assets/fix-prompt.md` -- spawn body for WAVE 2b subagents.
 - `assets/completion-prompt.md` -- spawn body for WAVE 3 subagents.
+- `assets/conflict-resolution-prompt.md` -- spawn body for WAVE 4
+  (Phase 5b) subagents. Owns rebase, faithful conflict merge,
+  `--force-with-lease` push, mergeability re-probe, and the
+  resolution-confirmation comment.
 - `assets/final-report-template.md` -- the user-facing report shape
   AND the PR confirmation comment shape used by completion
-  subagents.
+  subagents AND the resolution-confirmation comment shape used by
+  conflict-resolution subagents.
 - `assets/progress-diagram.md` -- the mermaid progress diagram, the
   color contract (pending / active / done / blocked / skipped), and
-  the dispatch-table render rules. Re-rendered at every phase
-  boundary.
+  the dispatch-table render rules (Phase 1, 3a, 3b, 4, 5b).
+  Re-rendered at every phase boundary.
+- `references/mergeability-gate.md` -- load-on-demand orchestrator
+  step-by-step for Phase 5 (probe CLI, retry policy,
+  trust-but-verify re-probe, four-way partition). Load trigger:
+  WHEN ENTERING PHASE 5.
 
 ## Operating contract for the orchestrator thread
 

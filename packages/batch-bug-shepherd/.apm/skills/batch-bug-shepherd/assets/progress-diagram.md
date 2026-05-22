@@ -1,7 +1,7 @@
 # Progress diagram (operator visibility contract)
 
 Consumed by: `../SKILL.md` (architecture invariant
-"Operator visibility is a contract, not a courtesy" + Phase 0..5
+"Operator visibility is a contract, not a courtesy" + Phase 0..6
 boundary directives).
 
 The orchestrator MUST render this mermaid diagram to the operator
@@ -56,9 +56,17 @@ flowchart TB
     end
 
     P4["Phase 4<br/>completion<br/>F = <F> PRs needing follow-up"]:::pending
-    P5["Phase 5<br/>final report"]:::pending
 
-    P0 --> P1 --> P2 --> WAVE2 --> P4 --> P5
+    subgraph WAVE4[" "]
+        direction LR
+        P5a["Phase 5a<br/>mergeability probe<br/>R = <R> ready PRs"]:::pending
+        P5b["Phase 5b<br/>conflict resolution<br/>C = <C> conflicting PRs"]:::pending
+        P5c["Phase 5c<br/>re-probe synthesis"]:::pending
+    end
+
+    P6["Phase 6<br/>final report"]:::pending
+
+    P0 --> P1 --> P2 --> WAVE2 --> P4 --> WAVE4 --> P6
 
     classDef pending fill:#f5f5f5,stroke:#9ca3af,stroke-width:1px,color:#111827
     classDef active  fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#0c4a6e
@@ -107,18 +115,19 @@ the operator's situational awareness.
 
 ## Dispatch-time table requirement
 
-When spawning a fan-out wave (Phase 1, 3a, 3b, 4), the orchestrator
-MUST also print the dispatch table BEFORE issuing the parallel
-spawns, so the operator sees which subagent is doing what:
+When spawning a fan-out wave (Phase 1, 3a, 3b, 4, 5b), the
+orchestrator MUST also print the dispatch table BEFORE issuing the
+parallel spawns, so the operator sees which subagent is doing what:
 
 ```
 ### Dispatch (Phase <N>) -- <k> parallel subagents
 
-| subagent_id     | target            | role              |
-|-----------------|-------------------|-------------------|
-| triage-1435     | issue #1435       | reproduce on HEAD |
-| triage-1415     | issue #1415       | reproduce on HEAD |
-| ...             | ...               | ...               |
+| subagent_id              | target            | role              |
+|--------------------------|-------------------|-------------------|
+| triage-1435              | issue #1435       | reproduce on HEAD |
+| triage-1415              | issue #1415       | reproduce on HEAD |
+| resolve-conflicts-1396   | PR #1396          | rebase + resolve  |
+| ...                      | ...               | ...               |
 ```
 
 This is mandatory so the operator can correlate completion
@@ -144,8 +153,21 @@ sub-waves spawn in parallel; treat the subgraph as one active band).
 When `m = 0` (all LEGIT issues have community PRs in flight), render
 `P3b` with class `skipped` and label `Phase 3b<br/>fix dispatch<br/>m = 0 (skipped)`.
 
+### Skipped conflict resolution
+
+When `C = 0` (every ready PR is MERGEABLE on first probe), render
+`P5b` with class `skipped` and label `Phase 5b<br/>conflict resolution<br/>C = 0 (skipped)`.
+`P5a` and `P5c` still render `done`; the gate ran, just had nothing to do.
+
+### After Phase 4 with conflicts present
+
+`P0`, `P1`, `P2`, `WAVE2`, `P4` all `done`. `WAVE4` subgraph: `P5a`
+`done`, `P5b` `active`, `P5c` `pending`. `R` populated from
+completion-wave returns; `C` populated from 5a probe (e.g.
+`C = 2 of 6`).
+
 ### End of run with blockers
 
-`P0..P5` all `done`. The table below shows N rows with `blocked` status
+`P0..P6` all `done`. The table below shows N rows with `blocked` status
 for the human-escalation queue. The diagram itself stays green - it
 tracks phase completion, not row-level status.

@@ -161,6 +161,27 @@
       "expected": "no_fire",
       "split": "train",
       "notes": "Single-PR completion phrasing; remains apm-review-panel territory."
+    },
+    {
+      "id": "fire-11",
+      "query": "double-check none of the PRs we just marked ready went stale on main",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Mid-saga continuation of a bbs run; the new Phase 5 mergeability gate is the right home. The phrasing is plural ('the PRs') and references prior batch state ('we just marked ready'); routes to bbs."
+    },
+    {
+      "id": "no-fire-14",
+      "query": "rebase my branch onto main and resolve conflicts",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-branch git operation; routes to manual git, not bbs. Guards against the new 'rebase' vocabulary leaking out of the batch context."
+    },
+    {
+      "id": "no-fire-15",
+      "query": "this single PR has merge conflicts now, can you rebase it?",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR conflict resolution; routes to a one-off conflict-resolution session, not bbs outer loop."
     }
   ]
 }
