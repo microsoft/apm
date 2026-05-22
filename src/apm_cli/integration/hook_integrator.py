@@ -452,11 +452,17 @@ class HookIntegrator(BaseIntegrator):
                     else target_rel
                 )
                 new_command = new_command.replace(full_var, resolved_cmd)
-            elif deploy_root is not None:
-                # File absent: resolve to absolute source path so Claude Code
-                # gets a clear "file not found" rather than an unexpanded variable.
+            else:
+                # File absent: always warn so a misconfigured hook is never
+                # silently deployed.  For user-scope (deploy_root set) also
+                # rewrite the unexpanded variable to an absolute source path
+                # so the target surfaces a clear "file not found".  For
+                # project-scope (deploy_root is None) leave the variable in
+                # place -- rewriting to an absolute path would re-introduce
+                # the #1394 portability regression in committed configs.
                 _rich_warning(f"Hook script not found: {source_file}")
-                new_command = new_command.replace(full_var, str(source_file))
+                if deploy_root is not None:
+                    new_command = new_command.replace(full_var, str(source_file))
 
         # Handle relative ./path and .\path references (safe to run after
         # ${CLAUDE_PLUGIN_ROOT} substitution since replacements produce paths
@@ -484,11 +490,12 @@ class HookIntegrator(BaseIntegrator):
                     else target_rel
                 )
                 new_command = new_command.replace(rel_ref, resolved_cmd)
-            elif deploy_root is not None:
-                # File absent: resolve to absolute source path so the target
-                # gets a clear "file not found" rather than a bare relative ref.
+            else:
+                # File absent: always warn (see ${PLUGIN_ROOT} branch above
+                # for the project-scope vs user-scope rationale).
                 _rich_warning(f"Hook script not found: {source_file}")
-                new_command = new_command.replace(rel_ref, str(source_file))
+                if deploy_root is not None:
+                    new_command = new_command.replace(rel_ref, str(source_file))
 
         return new_command, scripts_to_copy
 
@@ -993,6 +1000,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks by merging into a target-specific JSON config.
 
@@ -1013,6 +1021,19 @@ class HookIntegrator(BaseIntegrator):
         # Opt-in check: some targets only deploy when their dir exists
         if config.require_dir and not target_dir.exists():
             return _empty
+
+        # Absolutize hook commands only for user-scope deploys.  Claude
+        # Code (and the Codex/Cursor/Gemini equivalents) reads
+        # ``~/.claude/settings.json`` without a fixed cwd and does not
+        # expand ``${CLAUDE_PLUGIN_ROOT}`` in that file (see #1310 / #1354),
+        # so user-scope deploys must write absolute paths.  Project-scope
+        # ``<repo>/.claude/settings.json`` is typically checked in and runs
+        # with cwd at the repo root, where repo-relative paths resolve
+        # correctly -- baking absolute machine paths into checked-in config
+        # breaks portability across clones, contributors, and CI (#1394).
+        # ``user_scope`` is threaded from the caller's ``InstallScope`` so
+        # the gate is explicit rather than inferred from deploy-root shape.
+        _deploy_root_for_rewrite = project_root if user_scope else None
 
         hook_files = self.find_hook_files(package_info.install_path)
         hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
@@ -1084,7 +1105,7 @@ class HookIntegrator(BaseIntegrator):
                 config.target_key,
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
-                deploy_root=project_root,
+                deploy_root=_deploy_root_for_rewrite,
             )
 
             # Merge hooks into config (additive)
@@ -1285,6 +1306,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .claude/settings.json.
 
@@ -1297,6 +1320,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     def integrate_package_hooks_cursor(
@@ -1306,6 +1330,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .cursor/hooks.json.
 
@@ -1318,6 +1344,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     def integrate_package_hooks_codex(
@@ -1327,6 +1354,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .codex/hooks.json.
 
@@ -1339,6 +1368,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     # ------------------------------------------------------------------
@@ -1355,12 +1385,19 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         scope=None,
+        user_scope: bool = False,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
         Copilot uses individual JSON files (genuinely different pattern).
         All other merge-based targets are dispatched via the
         ``_MERGE_HOOK_TARGETS`` registry.
+
+        ``user_scope`` controls whether merged-hook ``command`` paths are
+        rewritten to absolute paths (required when deploying to
+        ``~/.claude/settings.json`` -- see #1310 / #1354) or left
+        repo-relative so checked-in project-scope configs stay portable
+        across clones, contributors, and CI runners (#1394).
         """
         if target.name == "copilot":
             return self.integrate_package_hooks(
@@ -1382,6 +1419,7 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+                user_scope=user_scope,
             )
 
         return HookIntegrationResult(
