@@ -81,7 +81,7 @@ class TestGetCheckoutLayout:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         result = cache.get_checkout(url, "main", locked_sha=sha)
         assert result.name == "full"
         assert result.parent.name == sha
@@ -94,7 +94,7 @@ class TestGetCheckoutLayout:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
         assert result.name.startswith("sparse-")
         assert result.parent.name == sha
@@ -108,7 +108,7 @@ class TestGetCheckoutLayout:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         full = cache.get_checkout(url, "main", locked_sha=sha)
         sparse = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
         # Both live under same SHA parent, different variant subdirs.
@@ -122,7 +122,7 @@ class TestGetCheckoutLayout:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         a = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
         b = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["beta"])
         assert a != b
@@ -143,7 +143,7 @@ class TestPartialBareFlavor:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
 
         # The partial-flavor bare lives at <shard>__p.
@@ -158,7 +158,7 @@ class TestPartialBareFlavor:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         cache.get_checkout(url, "main", locked_sha=sha)
 
         bare_root = cache_root / "git" / "db_v1"
@@ -172,7 +172,7 @@ class TestPartialBareFlavor:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         cache.get_checkout(url, "main", locked_sha=sha)
         cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
 
@@ -187,7 +187,7 @@ class TestPartialBareFlavor:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
 
         # Consumer's remote.origin.url must point at the promisor URL,
@@ -219,7 +219,7 @@ class TestPartialBareFlavor:
         cache_root = tmp_path / "cache"
         cache = GitCache(cache_root)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         result = cache.get_checkout(url, "main", locked_sha=sha)
 
         # Full path: no promisor config; remote.origin.url points at
@@ -265,7 +265,7 @@ class TestPartialBareFlavor:
 
         monkeypatch.setattr(git_cache_mod.subprocess, "run", fake_run)
 
-        url = f"file://{bare}"
+        url = bare.as_uri()
         result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
 
         assert rejected, "partial clone (with --filter) should have been attempted"

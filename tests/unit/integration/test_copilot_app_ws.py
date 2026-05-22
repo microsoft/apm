@@ -9,6 +9,7 @@ client speaks the App's dialect correctly.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 import time
@@ -94,8 +95,6 @@ def run_dir(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _write_creds(run_dir: Path, port: int, token: str) -> None:
-    import os
-
     port_path = run_dir / "ws.port"
     token_path = run_dir / "ws.token"
     port_path.write_text(str(port), encoding="ascii")
@@ -213,6 +212,15 @@ class TestCreateProject:
                     }
                 )
             )
+            # Keep the connection open until the client closes so the
+            # client's recv loop sees the buffered project_created
+            # frame before the server-side close races it (observed
+            # on Windows runners where peer-close ordering can drop
+            # in-flight frames if the handler returns too eagerly).
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                websocket.recv()
 
         with _Server(handler) as srv:
             _write_creds(run_dir, srv.port, "tok")
@@ -373,10 +381,13 @@ class TestTokenScrub:
             pass  # accepted -- documented trade-off
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX permission bits: production code short-circuits to True on Windows "
+    "(os.stat synthesizes group/other bits from the read-only flag).",
+)
 class TestTokenFileMode:
     def test_world_readable_token_is_rejected(self, run_dir: Path, monkeypatch) -> None:
-        import os
-
         _write_creds(run_dir, 12345, "tok")
         token_path = run_dir / "ws.token"
         # Widen the token file to be world-readable.
@@ -387,15 +398,11 @@ class TestTokenFileMode:
         assert ws.ws_available() is False
 
     def test_group_readable_token_is_rejected(self, run_dir: Path) -> None:
-        import os
-
         _write_creds(run_dir, 12345, "tok")
         os.chmod(run_dir / "ws.token", 0o640)
         assert ws._read_creds() is None
 
     def test_owner_only_token_is_accepted(self, run_dir: Path) -> None:
-        import os
-
         _write_creds(run_dir, 12345, "tok")
         os.chmod(run_dir / "ws.token", 0o600)
         creds = ws._read_creds()
