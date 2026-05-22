@@ -288,15 +288,25 @@ class TestGetCurrentTenantId:
         mock_result.stdout = "72f988bf-86f1-41af-91ab-2d7cd011db47\n"
         mock_result.stderr = ""
 
-        with patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result):
+        # Also stub shutil.which so the test passes on runners where
+        # `az` is not on PATH (e.g. GitHub macOS arm64 images), where
+        # the constructor otherwise sets _az_command=None and
+        # get_current_tenant_id short-circuits before subprocess.run.
+        with (
+            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
+            patch("apm_cli.core.azure_cli.subprocess.run", return_value=mock_result),
+        ):
             provider = AzureCliBearerProvider()
             tenant = provider.get_current_tenant_id()
             assert tenant == "72f988bf-86f1-41af-91ab-2d7cd011db47"
 
     def test_get_current_tenant_id_returns_none_on_failure(self):
-        with patch(
-            "apm_cli.core.azure_cli.subprocess.run",
-            side_effect=OSError("az not found"),
+        with (
+            patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"),
+            patch(
+                "apm_cli.core.azure_cli.subprocess.run",
+                side_effect=OSError("az not found"),
+            ),
         ):
             provider = AzureCliBearerProvider()
             assert provider.get_current_tenant_id() is None
