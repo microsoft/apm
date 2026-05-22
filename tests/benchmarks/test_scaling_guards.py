@@ -7,9 +7,9 @@ below a threshold, catching O(n^2) regressions without full benchmarking.
 Threshold rationale
 -------------------
 For 10x input growth an O(n) algorithm should give ~10x wall-clock growth.
-An O(n^2) algorithm would give ~100x.  We use ``ratio < 25`` as the guard
-so that noisy CI runners do not flake while quadratic regressions are still
-caught.
+An O(n^2) algorithm would give ~100x.  Each guard's threshold is set to
+~30% above the measured baseline ratio so that noisy CI runners do not
+flake while quadratic regressions are still caught.
 """
 
 import os
@@ -93,7 +93,7 @@ class TestChildrenIndexScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 25, (
+        assert ratio < 15, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -149,7 +149,7 @@ class TestDiscoveryScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 25, (
+        assert ratio < 14, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -227,7 +227,7 @@ class TestComputePackageHashScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 25, (
+        assert ratio < 16, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -277,7 +277,7 @@ class TestSemanticEquivalenceScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 25, (
+        assert ratio < 15, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -335,7 +335,7 @@ class TestShouldExcludeScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_deep / t_shallow
-        assert ratio < 25, (
+        assert ratio < 2, (
             f"Scaling ratio {ratio:.1f}x for 3x depth increase suggests "
             f"super-quadratic regression (t_shallow={t_shallow:.6f}s, "
             f"t_deep={t_deep:.6f}s)"
@@ -358,8 +358,8 @@ class TestVariantKeyScaling:
     The function sorts, deduplicates, JSON-serialises and SHA-256-hashes
     the sparse path list. For 10x input growth an O(n log n) algorithm
     should give ~10-13x; an O(n^2) algorithm would give ~100x. We use
-    ``ratio < 15`` as the guard -- tight enough to catch quadratic
-    regressions while leaving ~60% margin above the measured ~9x
+    ``ratio < 13`` as the guard -- tight enough to catch quadratic
+    regressions while leaving ~30% margin above the measured ~9x
     baseline on current hardware.
 
     Uses repeated calls per sample to push total runtime above the
@@ -384,7 +384,7 @@ class TestVariantKeyScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 15, (
+        assert ratio < 13, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -418,7 +418,7 @@ class TestVariantLookupScaling:
     SHA and verifies that checking whether one specific variant exists
     does not degrade with the number of siblings. The ``is_dir()``
     call is an inode lookup -- O(1) on all supported filesystems.
-    Measured baseline is ~1x; we use ``ratio < 5`` to leave margin
+    Measured baseline is ~1x; we use ``ratio < 2`` to leave ~30% margin
     for noisy CI runners while catching any accidental directory scan.
     """
 
@@ -458,7 +458,7 @@ class TestVariantLookupScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 5, (
+        assert ratio < 2, (
             f"Scaling ratio {ratio:.1f}x for 10x sibling variants suggests "
             f"linear scan regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
