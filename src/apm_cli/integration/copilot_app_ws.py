@@ -178,11 +178,15 @@ def _token_file_mode_ok(path: Path) -> bool:
     cost of being strict is one extra restart, while the cost of being
     permissive is a real credential leak.
 
-    POSIX-only check. On Windows ``stat.S_IRWXG`` / ``stat.S_IRWXO``
-    are reported as zero by ``os.stat`` so the check is effectively a
-    no-op there; ACL hardening on Windows is out of scope for this
+    POSIX-only check. On Windows ``os.stat`` synthesizes group/other
+    bits from the read-only flag (typically ``0o100666`` for r/w
+    files), so the POSIX-style ``& S_IRWXG | S_IRWXO`` test would
+    spuriously reject every token file. We short-circuit to ``True``
+    on Windows; ACL hardening on Windows is out of scope for this
     module.
     """
+    if os.name == "nt":
+        return True
     try:
         st = path.stat()
     except OSError:

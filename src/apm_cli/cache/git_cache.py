@@ -287,7 +287,7 @@ class GitCache:
 
         Returns the path to the bare repo directory.
         """
-        from ..utils.git_env import get_git_executable, git_subprocess_env
+        from ..utils.git_env import get_git_executable, git_long_paths_args, git_subprocess_env
 
         bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if partial else "")
         bare_dir = self._db_root / bare_shard
@@ -318,7 +318,7 @@ class GitCache:
             os.chmod(str(staged), 0o700)
 
             subprocess_env = env if env is not None else git_subprocess_env()
-            clone_args = [git_exe, "clone", "--bare", "--no-tags"]
+            clone_args = [git_exe, *git_long_paths_args(), "clone", "--bare", "--no-tags"]
             if partial:
                 # Promisor partial clone: trees + commits only. Blobs
                 # arrive lazily via the remote when the consumer needs
@@ -366,7 +366,15 @@ class GitCache:
                     os.chmod(str(staged), 0o700)
                     try:
                         subprocess.run(
-                            [git_exe, "clone", "--bare", "--no-tags", url, str(staged)],
+                            [
+                                git_exe,
+                                *git_long_paths_args(),
+                                "clone",
+                                "--bare",
+                                "--no-tags",
+                                url,
+                                str(staged),
+                            ],
                             capture_output=True,
                             text=True,
                             timeout=300,
@@ -448,7 +456,7 @@ class GitCache:
         get the lock and return immediately. Critical for CI matrix
         builds where multiple jobs hit the same uncached repo.
         """
-        from ..utils.git_env import get_git_executable, git_subprocess_env
+        from ..utils.git_env import get_git_executable, git_long_paths_args, git_subprocess_env
 
         bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if promisor_url else "")
         bare_dir = self._db_root / bare_shard
@@ -497,6 +505,7 @@ class GitCache:
                 subprocess.run(
                     [
                         git_exe,
+                        *git_long_paths_args(),
                         "clone",
                         "--local",
                         "--shared",

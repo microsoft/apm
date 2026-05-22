@@ -95,3 +95,20 @@ def reset_git_cache() -> None:
     global _git_executable, _git_resolved
     _git_executable = None
     _git_resolved = False
+
+
+def git_long_paths_args() -> list[str]:
+    """Return ``-c core.longpaths=true`` on Windows, ``[]`` elsewhere.
+
+    Windows enforces a 260-character ``MAX_PATH`` limit by default,
+    which the GitCache's deeply-nested ``checkouts_v1/<shard>/<sha>/
+    <variant>.incomplete.<pid>.<ns>/`` layout can exceed during
+    ``git clone`` -- git fails with ``Filename too long`` while
+    creating ``.git/hooks/`` files. Setting ``core.longpaths=true``
+    via ``-c`` opts that single subprocess into the long-path API
+    without mutating the user's global gitconfig. The flag is a
+    no-op on POSIX so callers can prepend it unconditionally.
+    """
+    if os.name == "nt":
+        return ["-c", "core.longpaths=true"]
+    return []

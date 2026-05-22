@@ -169,7 +169,9 @@ class TestDeriveProjectRecipe:
         )
         r = cap.derive_project_recipe(ctx)
         assert r.name == "x"
-        assert r.main_repo_path == "/tmp/x"
+        # ``main_repo_path`` is the OS-native string form of the repo
+        # root; on POSIX this is ``/tmp/x``, on Windows ``\tmp\x``.
+        assert r.main_repo_path == str(Path("/tmp/x"))
         assert r.default_branch == "main"
         assert r.github_owner == "o"
         assert r.github_repo == "x"

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Windows: GitCache sparse-cone consumer clone no longer fails with `Filename too long`; `git clone`/`checkout` pass `-c core.longpaths=true` on Windows so the nested `checkouts_v1/<shard>/<sha>/<variant>.incomplete.<pid>.<ns>/` layout stays within the Win32 path limit. (#1454)
+- Windows: `copilot-app` WS handshake no longer rejects `~/.copilot/run/ws.token` because Windows synthesises group/other bits from the read-only flag; the POSIX-only mode check now short-circuits to accept on Windows. (#1454)
 - `apm install` honours per-dependency `registry:` URLs in MCP deps instead of warning and ignoring them. (#1443, closes #1393)
 - VS Code adapter handles MCP v0.1 `runtimeArguments` with `variables`, unblocking Docker MCP servers that need workspace mounts. (#1444, closes #1391)
 - `apm install --skill <name>` persists the skill filter to `apm.yml` so subsequent runs honour the selection. (#1442, closes #1395)
