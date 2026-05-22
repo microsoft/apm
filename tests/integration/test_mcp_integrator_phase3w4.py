@@ -329,6 +329,10 @@ class TestApplyOverlay:
         assert any("version" in str(w.message) for w in caught)
 
     def test_registry_overlay_warns_when_string(self):
+        # Historical behavior: a string `registry` field on an MCPDependency
+        # emitted a runtime warning. The warning was removed when the field
+        # became a no-op overlay (kept for forward-compat with newer apm.yml
+        # schemas that may attach it). Assert the silent-noop contract.
         dep = _make_dep("srv")
         dep.version = None
         dep.registry = "custom-registry"
@@ -336,7 +340,7 @@ class TestApplyOverlay:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             MCPIntegrator._apply_overlay(cache, dep)
-        assert any("registry" in str(w.message) for w in caught)
+        assert not any("registry" in str(w.message) for w in caught)
 
     def test_unknown_server_is_noop(self):
         dep = _make_dep("missing-srv", transport="stdio")

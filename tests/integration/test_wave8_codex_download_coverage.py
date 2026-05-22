@@ -174,12 +174,17 @@ class TestCodexConfigureMcpServer:
         assert "custom" in data["mcp_servers"]
 
     def test_remote_only_rejected(self, tmp_path: Path) -> None:
+        # Codex now accepts remote-only streamable-http servers (see
+        # CodexClientAdapter._format_server_config). Only SSE and
+        # non-https / empty-URL remotes are rejected. Assert the SSE
+        # rejection branch which is the actual remote-only "reject"
+        # contract.
         from apm_cli.adapters.client.codex import CodexClientAdapter
 
         adapter = CodexClientAdapter(project_root=tmp_path)
         server_info = {
             "name": "remote",
-            "remotes": [{"url": "https://example.com/sse"}],
+            "remotes": [{"url": "https://example.com/sse", "transport_type": "sse"}],
             "packages": [],
         }
         with patch.object(adapter, "_fetch_server_info", return_value=server_info):

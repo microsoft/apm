@@ -40,11 +40,17 @@ from apm_cli.primitives.models import Instruction
 
 
 def _make_instruction(apply_to: str | None = "**/*.py", content: str = "content") -> Instruction:
+    from pathlib import Path as _Path
+
     inst = MagicMock(spec=Instruction)
     inst.apply_to = apply_to
     inst.content = content
     inst.source_file = None
     inst.source = None
+    # Production fallback path reads instruction.file_path.stem when an
+    # instruction matches no files; spec=Instruction does not expose
+    # dataclass fields automatically, so set it explicitly.
+    inst.file_path = _Path("test.instructions.md")
     return inst
 
 

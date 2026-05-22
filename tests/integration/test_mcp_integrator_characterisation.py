@@ -297,13 +297,23 @@ class TestCollectTransitive:
         pkg.name = "good"
         pkg.get_mcp_dependencies.return_value = [dep]
 
+        # Side-effect order must follow the filesystem-discovery order of
+        # apm.yml files (which Path.iterdir does not guarantee to be
+        # alphabetic across OSes/filesystems). Determine the order
+        # lazily so the bad-then-good (ValueError-then-pkg) sequence
+        # always lines up with whichever directory is enumerated first.
+        def _from_apm_yml(path, *_args, **_kw):
+            if path == first:
+                raise ValueError("bad")
+            return pkg
+
         with patch("apm_cli.models.apm_package.APMPackage") as mock_pkg_cls:
-            mock_pkg_cls.from_apm_yml.side_effect = [ValueError("bad"), pkg]
+            mock_pkg_cls.from_apm_yml.side_effect = _from_apm_yml
             result = MCPIntegrator.collect_transitive(apm_modules)
 
         assert result == [dep]
-        assert mock_pkg_cls.from_apm_yml.call_args_list[0].args[0] == first
-        assert mock_pkg_cls.from_apm_yml.call_args_list[1].args[0] == second
+        called_paths = {call.args[0] for call in mock_pkg_cls.from_apm_yml.call_args_list}
+        assert called_paths == {first, second}
 
     def test_supports_lock_entries_with_virtual_path(self, tmp_path: Path) -> None:
         apm_modules = tmp_path / "apm_modules"
