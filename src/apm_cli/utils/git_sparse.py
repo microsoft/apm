@@ -20,6 +20,7 @@ def apply_sparse_cone(
     *,
     env: dict[str, str] | None,
     timeout: int = 30,
+    extra_git_args: list[str] | None = None,
 ) -> None:
     """Initialize cone-mode sparse checkout and set the requested paths.
 
@@ -35,11 +36,16 @@ def apply_sparse_cone(
         paths: Top-level cone paths to materialize. Must be non-empty.
         env: Subprocess environment (auth / safe.bareRepository etc.).
         timeout: Per-subprocess timeout in seconds.
+        extra_git_args: Extra args inserted between the git executable
+            and the first subcommand (e.g. ``["-c", "core.longpaths=true"]``
+            on Windows so the long staged path under ``checkouts_v1/``
+            does not trip MAX_PATH when git locks ``.git/config``).
     """
     if not paths:
         return
+    head = [git_exe, *(extra_git_args or [])]
     subprocess.run(
-        [git_exe, "-C", str(repo_dir), "sparse-checkout", "init", "--cone"],
+        [*head, "-C", str(repo_dir), "sparse-checkout", "init", "--cone"],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -47,7 +53,7 @@ def apply_sparse_cone(
         check=True,
     )
     subprocess.run(
-        [git_exe, "-C", str(repo_dir), "sparse-checkout", "set", *paths],
+        [*head, "-C", str(repo_dir), "sparse-checkout", "set", *paths],
         capture_output=True,
         text=True,
         timeout=timeout,

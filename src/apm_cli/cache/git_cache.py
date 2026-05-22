@@ -534,7 +534,14 @@ class GitCache:
                         ["remote.origin.partialclonefilter", "blob:none"],
                     ):
                         subprocess.run(
-                            [git_exe, "-C", str(staged), "config", *cfg_args],
+                            [
+                                git_exe,
+                                *git_long_paths_args(),
+                                "-C",
+                                str(staged),
+                                "config",
+                                *cfg_args,
+                            ],
                             capture_output=True,
                             text=True,
                             timeout=10,
@@ -546,10 +553,23 @@ class GitCache:
                     # (not silently fallen back to full checkout) because
                     # a silent fallback would re-introduce the disk
                     # bloat this code path exists to avoid (#1433).
-                    apply_sparse_cone(git_exe, staged, list(sparse_paths), env=subprocess_env)
+                    apply_sparse_cone(
+                        git_exe,
+                        staged,
+                        list(sparse_paths),
+                        env=subprocess_env,
+                        extra_git_args=git_long_paths_args(),
+                    )
                 # Checkout the specific SHA
                 subprocess.run(
-                    [git_exe, "-C", str(staged), "checkout", sha],
+                    [
+                        git_exe,
+                        *git_long_paths_args(),
+                        "-C",
+                        str(staged),
+                        "checkout",
+                        sha,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=60,
