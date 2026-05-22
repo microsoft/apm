@@ -7,30 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Performance
-
-- Cold `apm install` for subdirectory git dependencies is dramatically faster on large monorepos (validated ~30x to ~75x range on `dotnet/skills`, network-variant). `GitCache` now performs partial bare clones (`--filter=blob:none`) with promisor remotes plus sparse-cone consumer materialization, and threads the tiered resolver's resolved SHA through to skip a redundant `ls-remote`. Bare-cache disk usage drops by orders of magnitude on the validated workload. No lockfile schema, CLI surface, or auth flow changes. Servers that reject `--filter=blob:none` (older Gerrit / pre-2.20 GHE) transparently fall back to a full bare clone. (#1436, closes #1433)
+## [0.14.2] - 2026-05-22
 
 ### Added
 
-- **Experimental:** `copilot-app` target now scopes workflow rows to a real `projects` row instead of orphaning them at the App's root. When the App is running, project registration goes through the loopback WebSocket IPC surface (`~/.copilot/run/ws.{port,token}`, 0o600) so the project goes through the App's own owner/repo discovery and is immediately known to the webview; when the App is closed, registration falls through to a direct-SQLite `BEGIN IMMEDIATE` resolver against `~/.copilot/data.db`. Workflow rows are always written via SQLite (namespaced ids preserve lockfile stability). `--global` installs that carry workflow-shape prompts now emit a one-time warn-and-proceed diagnostic explaining the CWD-pivot risk and the per-row "attach to project" remediation. A one-time `Restart the Copilot App once` info hint fires on first project registration in a repo (see github/github-app#5483). (#1431)
+- **Experimental:** `copilot-app` target scopes workflows to a real project row via loopback WS IPC (App running) or direct SQLite (App closed); `--global` workflow installs emit a one-time CWD-pivot warning. (#1431)
 
 ### Changed
 
-- Shard PR-time unit tests into two pytest-split groups (each required); move global 80% coverage gate to a non-required `Coverage Combine (Linux)` job at PR time and require it on `merge_group`; move PyInstaller binary build to a parallel non-required job; reduce `merge-gate` poll interval to 5 s. (#1437)
-- Unit test coverage raised to 88% (gate: `fail_under = 80`); integration test coverage raised to 71% with first CI gate at 55%. (#1402)
+- PR-time CI shards unit tests, moves the 80% coverage gate off the critical path, and parallelises the PyInstaller build for faster contributor signal. (#1437)
+- Unit coverage raised to 88% (gate 80%); integration coverage raised to 71% (gate 55%). (#1402)
+- Replace logic-replay tests for #763 with real-flow coverage to catch real regressions. (#1340)
+
+### Performance
+
+- Cold `apm install` for subdirectory git deps is ~30x-75x faster on large monorepos via partial bare clones plus sparse-cone materialization; transparent fallback when servers reject `--filter=blob:none`. (#1436, closes #1433)
 
 ### Fixed
 
-- Comma-separated `applyTo` globs now correctly emit a YAML list under `globs:` / `paths:` in Claude, Cursor, and Windsurf instruction outputs (Copilot output unchanged -- it already preserves `applyTo` verbatim and handles comma-lists natively). The shared `parse_apply_to()` helper is brace-aware, so `**/*.{css,scss},**/*.py` is split on the top-level comma only. Closes a documented promise that was silently broken on the three non-Copilot harnesses. (#1387, closes #1366)
-- `apm update` against private Azure DevOps deps no longer fails on Windows with a misleading "az present but not logged in" diagnostic when the user IS signed in via `az login`. Root cause: Python's `subprocess.run(["az", ...])` -> `CreateProcessW` does not honor `PATHEXT` for non-`.exe` executables, so the Windows `az.cmd` wrapper could not be invoked even though `shutil.which("az")` resolved it. `AzureCliBearerProvider` now resolves the `az` binary via `shutil.which` once at construction and passes the absolute path to every subprocess call. As a defense-in-depth measure, the ADO `--update` preflight probe no longer strips `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM` / `GIT_ASKPASS`, so Git Credential Manager can answer for Entra-cached ADO credentials whenever bearer acquisition is unavailable for any reason (sandbox, proxy, future PATH quirks). The actual clone path keeps its full gitconfig isolation. (#1430)
-- Root `.apm` hooks no longer duplicate after renaming the project directory or using git worktrees; Claude, Codex, Cursor, Gemini, and Windsurf hook configs stay idempotent across checkouts. The hook source-id is now derived from `apm.yml`'s `name` field instead of `install_path.name`, and `apm install` silently heals stale same-content entries from prior checkout basenames. Copilot is unaffected (its hooks live in per-file namespaces under `.github/hooks/`, not a shared merged config). (#1392, closes #1329)
-- `apm install` now honours per-dependency `registry:` URLs in MCP dependencies instead of ignoring them with a warning. Dependencies targeting different registries are grouped and resolved against the correct registry endpoint. (#1443, closes #1393)
-- VS Code adapter now handles MCP registry v0.1 `runtimeArguments` entries with `variables` placeholders, fixing Docker-based MCP servers that require workspace mounts or other runtime parameters. (#1444, closes #1391)
-- `apm install --skill <name>` now persists the skill subset filter to `apm.yml` so subsequent `apm install` runs honour the selection. (#1442, closes #1395)
-- `apm audit` no longer false-reports non-skill primitives (instructions, agents, prompts, hooks, commands) as orphaned drift for targets with `auto_create=False` (windsurf, cursor, claude, codex, copilot, gemini, opencode). The drift replay engine now pre-creates target root directories in the ephemeral scratch space. (#1441, closes #1411)
-- Copilot harness auto-detection now recognises `.github/instructions/`, `.github/agents/`, `.github/prompts/`, and `.github/hooks/` as valid Copilot markers, and the "No harness detected" error message lists them. (#1440, closes #1435)
-- `apm install` (project-scope) keeps hook `command` paths repo-relative again, so checked-in `.claude/settings.json`, `.codex/hooks.json`, and equivalents stay portable across clones, contributors, and CI runners; user-scope (`apm install -g`) still writes absolute paths (#1310 / #1354 preserved). Re-run `apm install` on existing repos to rewrite any committed absolutized configs back to repo-relative paths. (#1394)
+- `apm install` honours per-dependency `registry:` URLs in MCP deps instead of warning and ignoring them. (#1443, closes #1393)
+- VS Code adapter handles MCP v0.1 `runtimeArguments` with `variables`, unblocking Docker MCP servers that need workspace mounts. (#1444, closes #1391)
+- `apm install --skill <name>` persists the skill filter to `apm.yml` so subsequent runs honour the selection. (#1442, closes #1395)
+- `apm audit` no longer false-flags non-skill primitives as orphaned drift on `auto_create=False` targets. (#1441, closes #1411)
+- Copilot harness auto-detection recognises `.github/instructions/`, `agents/`, `prompts/`, and `hooks/` as valid markers. (#1440, closes #1435)
+- `apm install` (project-scope) keeps hook `command` paths repo-relative so committed configs stay portable across clones and CI. (#1396, closes #1394)
+- PyInstaller binary restores `optimize=2`, shrinking the Windows Defender ML false-positive surface. (#1450)
+- Comma-separated `applyTo` globs emit proper YAML lists in Claude, Cursor, and Windsurf instruction outputs (brace-aware split). (#1387, #1449, closes #1366)
+- `GitCache` no longer crashes on Windows `file://` URLs where `urllib.parse.port` raises `ValueError`. (#1446)
+- `apm compile` discovers local-bundle instructions inside `apm_modules/` again. (#1388)
+- `apm install --target copilot-app` warns instead of failing when the App schema is newer than expected. (#1434)
+- Plugin packaging no longer destroys pre-positioned `.apm/` content during artifact mapping. (#1416)
+- `apm update` against private ADO deps no longer fails on Windows with a misleading "az not logged in" -- `az.cmd` is now resolved via `shutil.which`; ADO preflight preserves `GIT_*` env so GCM can fall back. (#1432, closes #1430)
+- Windows unit-test job is green again (Codex CLI path quoting + ADO subprocess env). (#1427)
+- Root `.apm` hooks no longer duplicate after directory renames or worktrees; hook source-ids derive from `apm.yml` `name` and self-heal stale entries. (#1392, closes #1329)
+- Codex and Gemini stdio MCP configs expand `${env:VAR}` placeholders in self-defined env vars. (#1277, closes #1266)
+- Codex CLI now supports Streamable HTTP MCP servers, matching the other harnesses. (#1262, closes #1260)
+- `apm install` preflight uses ssh (not https) on ssh-based dependency URLs. (#1303, closes #1293)
 
 ## [0.14.1] - 2026-05-20
 
