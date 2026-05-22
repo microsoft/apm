@@ -214,13 +214,14 @@ def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
         # Each source is popped on first match so identical content shared
         # between APM and the user is only claimed once.
         import json
+        from collections import deque
 
-        pool: dict[str, list[str]] = {}
+        pool: dict[str, deque[str]] = {}
         for sc_entry in sidecar_entries:
             if isinstance(sc_entry, dict) and "_apm_source" in sc_entry:
                 cmp = {k: v for k, v in sorted(sc_entry.items()) if k != "_apm_source"}
                 cmp_key = json.dumps(cmp, sort_keys=True)
-                pool.setdefault(cmp_key, []).append(sc_entry["_apm_source"])
+                pool.setdefault(cmp_key, deque()).append(sc_entry["_apm_source"])
 
         for disk_entry in hooks[event_name]:
             if not isinstance(disk_entry, dict) or "_apm_source" in disk_entry:
@@ -229,7 +230,7 @@ def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
             disk_key = json.dumps(disk_cmp, sort_keys=True)
             sources = pool.get(disk_key)
             if sources:
-                disk_entry["_apm_source"] = sources.pop(0)
+                disk_entry["_apm_source"] = sources.popleft()
                 if not sources:
                     del pool[disk_key]
 

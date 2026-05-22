@@ -314,10 +314,9 @@ class TestShouldExcludeScaling:
     def test_scaling_ratio(self, tmp_path):
         """Depth 5 vs depth 15 with a 2-segment ** pattern.
 
-        For a 3x depth increase, the ratio should be < 25x (sub-quadratic).
-        A quadratic algorithm would give ~9x just from depth, but with
-        2 ** segments the branching factor can compound.  25x is our
-        generous guard against super-quadratic blowup.
+        For a 3x depth increase, the ratio should stay < 2x (sub-quadratic).
+        A quadratic algorithm would give ~9x just from depth; < 2x confirms
+        the matcher scales well below that.
         """
         from apm_cli.utils.exclude import should_exclude, validate_exclude_patterns
 
@@ -356,11 +355,11 @@ class TestVariantKeyScaling:
     """_variant_key must stay O(n log n) in path count.
 
     The function sorts, deduplicates, JSON-serialises and SHA-256-hashes
-    the sparse path list. For 10x input growth an O(n log n) algorithm
-    should give ~10-13x; an O(n^2) algorithm would give ~100x. We use
-    ``ratio < 17`` as the guard -- tight enough to catch quadratic
-    regressions while leaving ~30% margin above the measured ~12x
-    baseline on current hardware.
+    the sparse path list. For 10x input growth (200->2000) an O(n log n)
+    algorithm gives a theoretical ratio of ~14.3x; an O(n^2) algorithm
+    would give ~100x. We use ``ratio < 25`` as the guard -- tight enough
+    to catch quadratic regressions while leaving ~74% margin above the
+    theoretical baseline.
 
     Uses repeated calls per sample to push total runtime above the
     measurement floor and reduce timer noise on fast CI runners.
