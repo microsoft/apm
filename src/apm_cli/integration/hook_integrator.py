@@ -447,11 +447,17 @@ class HookIntegrator(BaseIntegrator):
                     else target_rel
                 )
                 new_command = new_command.replace(full_var, resolved_cmd)
-            elif deploy_root is not None:
-                # File absent: resolve to absolute source path so Claude Code
-                # gets a clear "file not found" rather than an unexpanded variable.
+            else:
+                # File absent: always warn so a misconfigured hook is never
+                # silently deployed.  For user-scope (deploy_root set) also
+                # rewrite the unexpanded variable to an absolute source path
+                # so the target surfaces a clear "file not found".  For
+                # project-scope (deploy_root is None) leave the variable in
+                # place -- rewriting to an absolute path would re-introduce
+                # the #1394 portability regression in committed configs.
                 _rich_warning(f"Hook script not found: {source_file}")
-                new_command = new_command.replace(full_var, str(source_file))
+                if deploy_root is not None:
+                    new_command = new_command.replace(full_var, str(source_file))
 
         # Handle relative ./path and .\path references (safe to run after
         # ${CLAUDE_PLUGIN_ROOT} substitution since replacements produce paths
@@ -479,11 +485,12 @@ class HookIntegrator(BaseIntegrator):
                     else target_rel
                 )
                 new_command = new_command.replace(rel_ref, resolved_cmd)
-            elif deploy_root is not None:
-                # File absent: resolve to absolute source path so the target
-                # gets a clear "file not found" rather than a bare relative ref.
+            else:
+                # File absent: always warn (see ${PLUGIN_ROOT} branch above
+                # for the project-scope vs user-scope rationale).
                 _rich_warning(f"Hook script not found: {source_file}")
-                new_command = new_command.replace(rel_ref, str(source_file))
+                if deploy_root is not None:
+                    new_command = new_command.replace(rel_ref, str(source_file))
 
         return new_command, scripts_to_copy
 

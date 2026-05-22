@@ -3609,6 +3609,88 @@ class TestIssue1007Fixes:
         assert "missing.sh" in cmd, "Command must contain the script name"
         assert Path(cmd).is_absolute(), "Command must be an absolute path (the source file)"
 
+    def test_rewrite_command_missing_script_warns_in_both_scopes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing hook scripts must emit a warning regardless of scope (#1394 follow-up).
+
+        Pre-fix, project-scope (deploy_root=None) silently left
+        ``${CLAUDE_PLUGIN_ROOT}/...`` unexpanded with zero diagnostic
+        output, so a misconfigured hook reached the deployed config
+        without any signal. Both scopes must now warn.
+        """
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        warnings: list[str] = []
+        monkeypatch.setattr(hi_mod, "_rich_warning", lambda msg: warnings.append(msg))
+
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        integrator = HookIntegrator()
+
+        # Project-scope (deploy_root=None): must warn, command must keep
+        # the unexpanded variable so we never bake an absolute source
+        # prefix into committed configs (#1394).
+        cmd_project, _ = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=None,
+        )
+        assert "${CLAUDE_PLUGIN_ROOT}" in cmd_project, (
+            "Project-scope must leave the variable unexpanded so committed "
+            f"configs stay portable; got {cmd_project!r}"
+        )
+        assert len(warnings) == 1 and "Hook script not found" in warnings[0], (
+            f"Project-scope must emit exactly one missing-script warning; got {warnings!r}"
+        )
+
+        # User-scope (deploy_root set): must warn AND rewrite to the
+        # absolute source path so the target surfaces a clear runtime
+        # failure (preserves #1310 / #1354 behaviour).
+        cmd_user, _ = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=tmp_path / "fake-home",
+        )
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd_user, (
+            f"User-scope must resolve the variable; got {cmd_user!r}"
+        )
+        assert Path(cmd_user).is_absolute()
+        assert len(warnings) == 2, (
+            f"User-scope must emit a second missing-script warning; got {warnings!r}"
+        )
+
+    def test_rewrite_command_missing_relative_script_warns_in_project_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ``./path`` branch must also warn for project-scope missing scripts."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        warnings: list[str] = []
+        monkeypatch.setattr(hi_mod, "_rich_warning", lambda msg: warnings.append(msg))
+
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        integrator = HookIntegrator()
+
+        cmd, _ = integrator._rewrite_command_for_target(
+            "./hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=None,
+        )
+        # Variable / relative ref stays in place under project-scope so
+        # the committed config never embeds an absolute prefix.
+        assert "./hooks/missing.sh" in cmd
+        assert len(warnings) == 1 and "Hook script not found" in warnings[0], (
+            f"Project-scope must warn for the ./path branch too; got {warnings!r}"
+        )
+
     # ------------------------------------------------------------------
     # Group C: Event normalisation for Claude
     # ------------------------------------------------------------------
