@@ -763,12 +763,13 @@ class TestClaudeIntegration:
             assert all("_apm_source" not in e for e in stop)
             return {h["command"] for entry in stop for h in entry["hooks"]}
 
-        # Commands are now absolute paths (deploy_root=project_root is threaded
-        # through _integrate_merged_hooks so Claude Code never sees an unexpanded
-        # ${CLAUDE_PLUGIN_ROOT} variable).  Assert on the absolute form.
+        # Project-scope writes repo-relative paths so checked-in
+        # settings.json stays portable across clones / CI (#1394).
+        # User-scope deploys (project_root == ~) still absolutize via
+        # _rewrite_command_for_target's deploy_root branch -- see #1354.
         assert extract_commands(first) == {
-            str((temp_project / ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh").resolve()),
-            str((temp_project / ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh").resolve()),
+            ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh",
+            ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh",
         }
 
         # Verify sidecar has the ownership info
@@ -781,6 +782,99 @@ class TestClaudeIntegration:
             integrator.integrate_package_hooks_claude(pkg_info, temp_project)
 
         assert settings_path.read_text() == first
+
+    def test_project_scope_writes_relative_hook_paths(self, temp_project):
+        """Project-scope (.claude/settings.json checked into the repo) must keep
+        repo-relative hook commands so the generated config is portable across
+        clones / contributors / CI runners (#1394).
+
+        Regression: #1354 unconditionally threaded deploy_root=project_root to
+        absolutize commands -- correct for user-scope (~/.claude/settings.json,
+        which #1310 was about) but wrong for project-scope, where it baked the
+        installer's machine-local absolute prefix into the committed JSON.
+        """
+        pkg_dir = temp_project / "scope-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        (hooks_dir / "stop.sh").write_text("#!/bin/bash\nexit 0")
+
+        pkg_info = _make_package_info(pkg_dir, "scope-pkg")
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+
+        settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
+        cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        assert cmd == ".claude/hooks/scope-pkg/hooks/stop.sh", (
+            f"Project-scope command must be repo-relative; got {cmd!r}"
+        )
+        assert not Path(cmd).is_absolute(), (
+            f"Project-scope command must not be absolute; got {cmd!r}"
+        )
+        assert str(temp_project) not in cmd, (
+            f"Project-scope command must not embed the installer's absolute prefix; got {cmd!r}"
+        )
+
+    def test_user_scope_still_writes_absolute_hook_paths(self, temp_project):
+        """User-scope deploys must still absolutize hook commands --
+        ``~/.claude/settings.json`` runs without a fixed cwd, so relative
+        paths cannot resolve (#1310 / #1354).
+
+        ``user_scope=True`` is the explicit signal the production dispatch
+        (``services.integrate_package_primitives``) computes from the
+        ``InstallScope`` enum, kept independent of deploy-root layout in
+        ``core/scope.py``.
+        """
+        pkg_dir = temp_project / "scope-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        (hooks_dir / "stop.sh").write_text("#!/bin/bash\nexit 0")
+
+        pkg_info = _make_package_info(pkg_dir, "scope-pkg")
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(pkg_info, temp_project, user_scope=True)
+
+        settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
+        cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        assert Path(cmd).is_absolute(), f"User-scope command must be absolute; got {cmd!r}"
+        assert cmd == str(
+            (temp_project / ".claude" / "hooks" / "scope-pkg" / "hooks" / "stop.sh").resolve()
+        )
 
     def test_no_hooks_returns_empty_result(self, temp_project):
         """Test Claude integration with no hook files returns empty result."""
@@ -2450,6 +2544,37 @@ class TestCodexHookIntegration:
 
         assert result.files_integrated == 0
 
+    def test_codex_project_scope_keeps_relative_hook_paths(self):
+        """Project-scope .codex/hooks.json must stay portable (#1394).
+
+        Mirrors the Claude regression test for the Codex target so the
+        shared _integrate_merged_hooks scope check is asserted from both
+        public entry points.
+        """
+        hook_data = {
+            "hooks": {
+                "SessionStart": [
+                    {"type": "command", "command": "${CURSOR_PLUGIN_ROOT}/hooks/run.sh"}
+                ]
+            }
+        }
+        pi = self._make_package_info(hook_data=hook_data)
+        # ${CURSOR_PLUGIN_ROOT}/hooks/run.sh resolves under package root.
+        scripts_dir = pi.install_path / "hooks"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        (scripts_dir / "run.sh").write_text("#!/bin/bash\nexit 0")
+
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_codex(pi, self.root)
+
+        data = json.loads((self.root / ".codex" / "hooks.json").read_text())
+        cmd = data["hooks"]["SessionStart"][0]["command"]
+        assert cmd == ".codex/hooks/test-pkg/hooks/run.sh", (
+            f"Project-scope Codex command must be repo-relative; got {cmd!r}"
+        )
+        assert not Path(cmd).is_absolute()
+        assert str(self.root) not in cmd
+
 
 # --- Gemini hook integration tests -----------------------------------------------
 
@@ -3483,6 +3608,88 @@ class TestIssue1007Fixes:
         )
         assert "missing.sh" in cmd, "Command must contain the script name"
         assert Path(cmd).is_absolute(), "Command must be an absolute path (the source file)"
+
+    def test_rewrite_command_missing_script_warns_in_both_scopes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing hook scripts must emit a warning regardless of scope (#1394 follow-up).
+
+        Pre-fix, project-scope (deploy_root=None) silently left
+        ``${CLAUDE_PLUGIN_ROOT}/...`` unexpanded with zero diagnostic
+        output, so a misconfigured hook reached the deployed config
+        without any signal. Both scopes must now warn.
+        """
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        warnings: list[str] = []
+        monkeypatch.setattr(hi_mod, "_rich_warning", lambda msg: warnings.append(msg))
+
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        integrator = HookIntegrator()
+
+        # Project-scope (deploy_root=None): must warn, command must keep
+        # the unexpanded variable so we never bake an absolute source
+        # prefix into committed configs (#1394).
+        cmd_project, _ = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=None,
+        )
+        assert "${CLAUDE_PLUGIN_ROOT}" in cmd_project, (
+            "Project-scope must leave the variable unexpanded so committed "
+            f"configs stay portable; got {cmd_project!r}"
+        )
+        assert len(warnings) == 1 and "Hook script not found" in warnings[0], (
+            f"Project-scope must emit exactly one missing-script warning; got {warnings!r}"
+        )
+
+        # User-scope (deploy_root set): must warn AND rewrite to the
+        # absolute source path so the target surfaces a clear runtime
+        # failure (preserves #1310 / #1354 behaviour).
+        cmd_user, _ = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=tmp_path / "fake-home",
+        )
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd_user, (
+            f"User-scope must resolve the variable; got {cmd_user!r}"
+        )
+        assert Path(cmd_user).is_absolute()
+        assert len(warnings) == 2, (
+            f"User-scope must emit a second missing-script warning; got {warnings!r}"
+        )
+
+    def test_rewrite_command_missing_relative_script_warns_in_project_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ``./path`` branch must also warn for project-scope missing scripts."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        warnings: list[str] = []
+        monkeypatch.setattr(hi_mod, "_rich_warning", lambda msg: warnings.append(msg))
+
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        integrator = HookIntegrator()
+
+        cmd, _ = integrator._rewrite_command_for_target(
+            "./hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=None,
+        )
+        # Variable / relative ref stays in place under project-scope so
+        # the committed config never embeds an absolute prefix.
+        assert "./hooks/missing.sh" in cmd
+        assert len(warnings) == 1 and "Hook script not found" in warnings[0], (
+            f"Project-scope must warn for the ./path branch too; got {warnings!r}"
+        )
 
     # ------------------------------------------------------------------
     # Group C: Event normalisation for Claude

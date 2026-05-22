@@ -70,6 +70,9 @@ class TestInstallContextFields:
         # issue #1203: --frozen + plan-callback for `apm update`
         "frozen",
         "plan_callback",
+        # issue #1395: --skill filter persisted to apm.yml
+        "skill_subset",
+        "skill_subset_from_cli",
     )
 
     def test_all_required_fields_present(self):
