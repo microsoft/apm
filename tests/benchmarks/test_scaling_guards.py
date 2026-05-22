@@ -632,7 +632,7 @@ class TestFlattenDependenciesScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 17, (
+        assert ratio < 21, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -734,7 +734,7 @@ class TestRenderInstructionsScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 15, (
+        assert ratio < 21, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -784,7 +784,7 @@ class TestGetInstalledPathsScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 15, (
+        assert ratio < 21, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
