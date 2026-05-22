@@ -128,6 +128,32 @@ jobs:
           APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
         run: uv run pytest tests/integration/test_core_smoke.py -v
 
+  scaling-guards:
+    name: Scaling Guards (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # Scaling guards are hermetic, network-free tests that catch
+      # O(n^2) algorithmic regressions by comparing wall-clock ratios
+      # at two input sizes. They run in ~5s and need no binary or
+      # secrets -- parallel with the build job for zero added latency.
+      - name: Run scaling guards
+        run: uv run pytest tests/benchmarks/test_scaling_guards.py -v --tb=short
+
   integration-tests-shard:
     name: Integration Tests Shard ${{ matrix.shard }} (Linux)
     needs: [build, smoke-test]
@@ -232,7 +258,7 @@ jobs:
   # require this exact name; shard jobs above are not required directly.
   integration-tests:
     name: Integration Tests (Linux)
-    needs: [integration-tests-shard]
+    needs: [integration-tests-shard, scaling-guards]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -289,6 +315,14 @@ jobs:
             exit 1
           fi
           echo "All integration test shards passed."
+
+      - name: Aggregate scaling-guards result
+        run: |
+          if [[ "${{ needs.scaling-guards.result }}" != "success" ]]; then
+            echo "Scaling guards failed: ${{ needs.scaling-guards.result }}"
+            exit 1
+          fi
+          echo "Scaling guards passed."
 
   release-validation:
     name: Release Validation (Linux)

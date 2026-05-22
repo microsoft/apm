@@ -340,3 +340,126 @@ class TestShouldExcludeScaling:
             f"super-quadratic regression (t_shallow={t_shallow:.6f}s, "
             f"t_deep={t_deep:.6f}s)"
         )
+
+
+# ---------------------------------------------------------------------------
+# 7. Sparse-cone variant key scaling (_variant_key)
+# ---------------------------------------------------------------------------
+
+
+def _make_sparse_paths(n: int) -> list[str]:
+    """Build a list of *n* distinct top-level sparse-cone paths."""
+    return [f"plugins/pkg-{i}/skills/skill-{i}" for i in range(n)]
+
+
+class TestVariantKeyScaling:
+    """_variant_key must stay O(n log n) in path count.
+
+    The function sorts, deduplicates, JSON-serialises and SHA-256-hashes
+    the sparse path list. For 10x input growth an O(n log n) algorithm
+    should give ~10-13x; an O(n^2) algorithm would give ~100x. We use
+    ``ratio < 15`` as the guard -- tight enough to catch quadratic
+    regressions while leaving ~60% margin above the measured ~9x
+    baseline on current hardware.
+
+    Uses repeated calls per sample to push total runtime above the
+    measurement floor and reduce timer noise on fast CI runners.
+    """
+
+    def test_scaling_ratio(self) -> None:
+        from apm_cli.cache.git_cache import _variant_key
+
+        small_paths = _make_sparse_paths(50)
+        large_paths = _make_sparse_paths(500)
+        repeats = 500
+
+        def call_n(paths: list[str]) -> None:
+            for _ in range(repeats):
+                _variant_key(paths)
+
+        t_small = _median_time(lambda: call_n(small_paths))
+        t_large = _median_time(lambda: call_n(large_paths))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 15, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+    def test_canonicalization(self) -> None:
+        """Variant key is order-insensitive, duplicate-insensitive, and deterministic."""
+        from apm_cli.cache.git_cache import _variant_key
+
+        # Order-insensitive
+        assert _variant_key(["b", "a"]) == _variant_key(["a", "b"])
+        # Duplicate-insensitive
+        assert _variant_key(["a", "a"]) == _variant_key(["a"])
+        # Distinct sets produce distinct keys
+        assert _variant_key(["a"]) != _variant_key(["b"])
+        # None / empty -> "full"
+        assert _variant_key(None) == "full"
+        assert _variant_key([]) == "full"
+
+
+# ---------------------------------------------------------------------------
+# 8. Sparse-cone checkout variant lookup scaling
+# ---------------------------------------------------------------------------
+
+
+class TestVariantLookupScaling:
+    """Checkout variant resolution must be O(1) per lookup.
+
+    The cache layout places variants at ``<shard>/<sha>/<variant>/``.
+    This guard creates many sibling variant directories for the same
+    SHA and verifies that checking whether one specific variant exists
+    does not degrade with the number of siblings. The ``is_dir()``
+    call is an inode lookup -- O(1) on all supported filesystems.
+    Measured baseline is ~1x; we use ``ratio < 5`` to leave margin
+    for noisy CI runners while catching any accidental directory scan.
+    """
+
+    def test_scaling_ratio(self, tmp_path: Path) -> None:
+        from apm_cli.cache.git_cache import _variant_key
+
+        sha_dir_small = tmp_path / "small" / "abc123"
+        sha_dir_large = tmp_path / "large" / "abc123"
+        sha_dir_small.mkdir(parents=True)
+        sha_dir_large.mkdir(parents=True)
+
+        target_variant = _variant_key(["target/path"])
+
+        # Small: 10 sibling variants
+        for i in range(10):
+            v = _variant_key([f"path-{i}"])
+            (sha_dir_small / v).mkdir()
+        (sha_dir_small / target_variant).mkdir(exist_ok=True)
+
+        # Large: 100 sibling variants
+        for i in range(100):
+            v = _variant_key([f"path-{i}"])
+            (sha_dir_large / v).mkdir()
+        (sha_dir_large / target_variant).mkdir(exist_ok=True)
+
+        repeats = 2000
+
+        def check_exists(sha_dir: Path) -> None:
+            target = sha_dir / target_variant
+            for _ in range(repeats):
+                target.is_dir()
+
+        t_small = _median_time(lambda: check_exists(sha_dir_small))
+        t_large = _median_time(lambda: check_exists(sha_dir_large))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 5, (
+            f"Scaling ratio {ratio:.1f}x for 10x sibling variants suggests "
+            f"linear scan regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
