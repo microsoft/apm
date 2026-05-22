@@ -43,15 +43,36 @@ Targets for this run: **${input:targets}**
    plan.md). If `sweep-all` produced more than 20 candidates, ASK for
    confirmation; otherwise proceed.
 
+   Then RENDER the progress mermaid diagram per the skill's
+   `assets/progress-diagram.md` -- every phase styled `pending`,
+   with the candidate count `N` substituted into the P0/P1 labels.
+   Print the live (empty) ground-truth table directly below it.
+   This anchors the operator's view for the rest of the run.
+
 4. INITIALIZE the ground-truth table in plan.md using the
    ground-truth-table asset shipped with the skill. One row per
    candidate. Status `pending-triage`.
 
-5. EXECUTE the skill phases in order. For each phase boundary,
-   reload the ground-truth table before spawning the next wave.
+5. EXECUTE the skill phases in order. For each phase boundary:
+   - reload the ground-truth table from plan.md (B4 PLAN MEMENTO),
+   - re-render the progress mermaid with the just-entered phase
+     styled `active` and earlier phases `done` / `blocked` /
+     `skipped` per the color contract,
+   - print the live ground-truth table beneath the diagram,
+   - and (for every fan-out wave: Phase 1, 3a, 3b, 4) print the
+     dispatch table mapping each subagent_id to its target BEFORE
+     spawning.
+
+   These renders are mandatory, not cosmetic -- they are the
+   operator's only real-time signal that the saga is alive and
+   what it's working on.
 
 6. RENDER the final report from the final-report-template asset
-   shipped with the skill at session end.
+   shipped with the skill at session end. Use clickable GitHub
+   issue / PR / author links so the operator can navigate without
+   copy-paste. Re-render the progress mermaid one last time with
+   every phase `done` (or `blocked` where the human-escalation
+   queue is non-empty).
 
 ## Delegation
 

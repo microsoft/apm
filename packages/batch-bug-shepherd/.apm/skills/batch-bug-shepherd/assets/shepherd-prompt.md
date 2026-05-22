@@ -26,17 +26,36 @@ to consume.
    panel will post ONE recommendation comment on the PR per its own
    single-writer contract. Do not post any other comment yourself.
 4. EXTRACT: from the CEO synthesis output, distill:
-   - `verdict`: map `ship_now` -> `ready-to-merge`,
-     `ship_with_followups` -> `needs-author-changes`,
-     `needs_discussion` -> `needs-author-changes`,
-     `needs_rework` -> `reject`.
-   - `blocking_followups`: every `severity: blocking` finding across
-     all panelists, deduplicated. Each entry is the work definition
-     the completion subagent must address.
+   - `verdict`: map the CEO stance against the empty/non-empty
+     state of blocking findings (the SCHEMA is the source of
+     truth -- only three legal verdicts exist):
+     - `ship_now` -> `ready-to-merge`.
+     - `ship_with_followups` with ZERO blocking findings ->
+       `ready-to-merge`. Recommended items still flow downstream
+       via `recommended_followups[]`; they do NOT change the
+       verdict.
+     - `ship_with_followups` with at least one blocking finding ->
+       `needs-author-changes`.
+     - `needs_discussion` -> `needs-author-changes`.
+     - `needs_rework` -> `reject`.
+   - `blocking_followups`: every `severity: blocking` finding
+     across all panelists, deduplicated. Each entry is mandatory
+     work for the completion subagent. Empty list is legal and
+     common (it implies `verdict: ready-to-merge`).
+   - `recommended_followups`: every non-blocking but substantive
+     finding (typical panel severities: `recommended`, `nit-fold`,
+     `nit`). Deduplicate. Set each item's `source_persona` to the
+     panelist who surfaced it (the completion subagent uses this
+     to pick the right lens when implementing the fold). If the
+     panelist explicitly flagged an item as separable (cross-cutting
+     refactor, new feature, broad doc work), set `fold_hint: defer`
+     as a hint; otherwise leave `fold_hint` unset and let the
+     completion subagent classify per its own criteria.
 5. Return the verdict JSON matching `verdict-schema.json` (`kind:
    "shepherd"`). Include `comment_url`, `maintainerCanModify`,
    `author`, `head_repo`, `head_branch` so the completion subagent
-   can act without re-querying.
+   can act without re-querying. BOTH `blocking_followups` and
+   `recommended_followups` MUST be present (empty arrays if none).
 
 ## Hard rules
 
