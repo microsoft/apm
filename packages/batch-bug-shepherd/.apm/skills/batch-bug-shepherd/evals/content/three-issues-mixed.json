@@ -14,6 +14,7 @@
     "expected_phases_with_skill": [
       "phase 0: ground-truth table written to plan.md",
       "phase 1: 3 parallel triage subagents",
+      "phase 1.5: strategic-alignment gate fans out apm-ceo subagents per LEGIT row; PRINCIPLES.md cited per verdict; demoted rows skip phase 2/3/4/5",
       "phase 2: gh pr list cross-reference run for both LEGIT rows",
       "phase 3a: 1 shepherd spawn (apm-review-panel) for #312",
       "phase 3b: 1 fix spawn for #311",
@@ -40,6 +41,7 @@
     {"id": "dispatch-table-before-fanout", "pattern": "(?im)^\\s*\\|\\s*subagent_id\\s*\\|\\s*target\\s*\\|", "weight": 2, "description": "Operator-visibility contract: a dispatch table mapping subagent_id to target precedes each fan-out wave."},
     {"id": "recommended-followups-channel", "pattern": "(?is)recommended[_ -]?followups", "weight": 1, "description": "Schema-honored channel for non-blocking findings flowed from shepherd to completion."},
     {"id": "fold-defer-classifier", "pattern": "(?is)(fold[/ ]?defer|classif(y|ies)[^.\\n]{0,40}(fold|defer)|fold[^.\\n]{0,40}defer)", "weight": 1, "description": "Completion subagent classifies recommended items as FOLD vs DEFER per the fold-in invariant."},
-    {"id": "tracking-issue-for-defer", "pattern": "(?is)gh\\s+issue\\s+create[\\s\\S]{0,200}(defer|separable|tracking)|deferred[_ ]?followups", "weight": 1, "description": "DEFER items are filed as tracking issues (not silently dropped)."}
+    {"id": "tracking-issue-for-defer", "pattern": "(?is)gh\\s+issue\\s+create[\\s\\S]{0,200}(defer|separable|tracking)|deferred[_ ]?followups", "weight": 1, "description": "DEFER items are filed as tracking issues (not silently dropped)."},
+    {"id": "strategic-alignment-gate", "pattern": "(?is)(strategic[- ]?alignment|phase\\s*1\\.5|apm-ceo[^.\\n]{0,60}principles|PRINCIPLES\\.md)", "weight": 2, "description": "Phase 1.5 strategic-alignment gate is named: apm-ceo subagent checks each LEGIT row against PRINCIPLES.md before shepherd / fix work."}
   ]
 }

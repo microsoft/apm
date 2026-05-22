@@ -20,12 +20,17 @@ description: >-
 
 # batch-bug-shepherd - Outer-loop bug-queue orchestrator
 
-This skill is an A10 ORCHESTRATOR-SAGA over four fan-out waves
-(triage, shepherd-or-fix, completion, conflict-resolution) with a
-persisted ground-truth table between phases. It COMPOSES the
+This skill is an A10 ORCHESTRATOR-SAGA over five fan-out waves
+(triage, strategic-alignment, shepherd-or-fix, completion,
+conflict-resolution) with a persisted ground-truth table between
+phases. It COMPOSES the
 [apm-review-panel](../apm-review-panel/SKILL.md) skill -- it does NOT
-re-implement panel review. Per-PR shepherding is delegated; per-issue
-verification, PR-in-flight branching, fix dispatch, completion,
+re-implement panel review. It also COMPOSES the `apm-ceo` persona
+(host-repo agent at `.apm/agents/apm-ceo.agent.md`) for the
+strategic-alignment gate, which checks every LEGIT bug against
+`PRINCIPLES.md` before allowing shepherd / fix work to proceed.
+Per-PR shepherding is delegated; per-issue verification, strategic
+alignment, PR-in-flight branching, fix dispatch, completion,
 post-wave mergeability re-probe, and the cross-session table are
 owned here.
 
@@ -90,29 +95,26 @@ execute + verify (A9 SUPERVISED EXECUTION).
   plan.md if cross-session-message is unavailable) ONLY when CI is
   green and all blocking follow-ups landed. Failures stay in the
   subagent's session until resolved or escalated to a human.
-- **Operator visibility is a contract, not a courtesy.** The
-  orchestrator MUST render the progress mermaid diagram (with the
-  current phase styled `active`) plus the live ground-truth table to
-  chat at every phase boundary, and MUST print a dispatch table
-  immediately before every fan-out spawn. The exact contract --
-  color palette, node labels, when to render -- lives in
-  `assets/progress-diagram.md`. The operator is steering a saga that
+- **Operator visibility is a contract, not a courtesy.** At every
+  phase boundary the orchestrator MUST render the progress mermaid
+  diagram (current phase `active`) + the live ground-truth table
+  to chat, AND print a dispatch table immediately before every
+  fan-out spawn. The full color contract, render rules, and
+  dispatch-table format live in `assets/progress-diagram.md`. Saga
   takes 30+ minutes wall and dozens of parallel subagents; without
-  the diagram they cannot tell `still working` from `stuck`. Skipping
-  the visibility renders breaks the saga's human-in-the-loop contract.
+  the diagram the operator cannot tell `still working` from
+  `stuck`.
 - **Mergeability is post-wave truth, not pre-wave assumption.** A
   PR that Phase 4 marked ready-to-merge can stop being mergeable
-  the moment the maintainer lands another PR onto main. The
-  ground-truth table is not allowed to claim `ready-to-merge`
-  without a post-wave `gh pr view --json mergeStateStatus`
-  re-probe. Phase 5 enforces this gate: every ready PR is
-  re-probed; CONFLICTING ones go through a one-subagent-per-PR
-  rebase + faithful conflict resolution + `--force-with-lease`
-  push + re-probe; non-pushable forks (`maintainerCanModify=false`)
-  surface as `requires-author-action` rather than blocking the
-  report. Bare `--force` is prohibited. See
-  `references/mergeability-gate.md` for the step-by-step (load
-  when entering Phase 5).
+  the moment the maintainer lands another PR onto main. The table
+  is not allowed to claim `ready-to-merge` without a post-wave
+  `gh pr view --json mergeStateStatus` re-probe. Phase 5 enforces
+  this: every ready PR is re-probed; CONFLICTING ones go through a
+  one-subagent-per-PR rebase + faithful conflict resolution +
+  `--force-with-lease` push + re-probe; non-pushable forks
+  (`maintainerCanModify=false`) surface as
+  `requires-author-action`. Bare `--force` is prohibited. See
+  `references/mergeability-gate.md`.
 - **Two-comment-per-PR cap.** Across the entire saga, a single PR
   receives at most TWO orchestrator-controlled comments: the Phase
   4 completion-confirmation comment, and the Phase 5b
@@ -124,39 +126,40 @@ execute + verify (A9 SUPERVISED EXECUTION).
   When `shepherd_return.recommended_followups[]` is non-empty, the
   default is FOLD-INTO-PR via the completion subagent, NOT defer
   to a tracking issue. The completion subagent (see
-  `assets/completion-prompt.md` step 2) classifies each item with
-  explicit FOLD vs DEFER criteria and biases toward FOLD on close
+  `assets/completion-prompt.md` step 2) classifies each item FOLD
+  vs DEFER with explicit criteria and biases toward FOLD on close
   calls. Only genuinely separable work -- cross-cutting refactors,
-  broad doc restructuring, new feature work, architectural
-  additions -- becomes a tracking issue. The verdict mapping makes
-  `ship_with_followups` with 0 blocking findings emit `verdict:
-  ready-to-merge` precisely so completion runs on the fold-in
-  surface rather than blocking on what the panel itself called
-  non-blocking. Ships now, not "now plus a backlog of papercuts".
+  broad doc restructuring, new feature work -- becomes a tracking
+  issue. The verdict mapping makes `ship_with_followups` with 0
+  blocking findings emit `verdict: ready-to-merge` so completion
+  runs on the fold-in surface. Ships now, not "now plus a backlog
+  of papercuts".
+- **Strategic-alignment gate before shepherd work.** After Phase 1
+  and BEFORE Phase 2, every LEGIT row passes through Phase 1.5:
+  one `apm-ceo` subagent per row inspects the bug against
+  `PRINCIPLES.md` (rejection contract) + `MANIFESTO.md`. Rows
+  demoted to `out-of-scope` / `wrong-direction` SKIP Phase 2/3/4/5
+  and surface in Phase 6 under "Recommend close as out-of-scope".
+  The gate FAILS OPEN to `aligned` on subagent malformed-x2 or
+  non-citable principle; it ABORTS only when `apm-ceo.agent.md` or
+  `PRINCIPLES.md` itself is missing. Silently demoting under
+  infrastructure failure would hide real defects. See
+  `references/strategic-alignment-gate.md`.
 
 ## Composition with apm-review-panel
 
-`apm-review-panel` is the shepherd primitive. This skill spawns it as
-the body of every shepherd subagent. The spawn prompt instructs the
-subagent to:
+`apm-review-panel` is the shepherd primitive. This skill spawns it
+as the body of every shepherd subagent. The spawn prompt ACTIVATES
+the panel skill by name, runs it against the captured PR per the
+panel's own contract (8 specialist personas + CEO synthesizer,
+single recommendation comment), and RETURNS a verdict matching
+`assets/verdict-schema.json` (`ready-to-merge` |
+`needs-author-changes` | `reject`) plus blocking-severity findings
+for the completion subagent. If the harness reports the panel skill
+is unavailable, abort with a clear error.
 
-1. ACTIVATE: invoke the `apm-review-panel` skill by name (the harness
-   resolves it from its skill registry). If the harness reports the
-   skill is not available, abort with a clear error -- do NOT attempt
-   a partial shepherd pass.
-2. LOAD: treat the skill body as the working spec for the shepherd
-   subagent.
-3. RUN: execute the panel against the target PR per that skill's
-   contract (8 specialist personas + CEO synthesizer, single
-   recommendation comment).
-4. RETURN: a structured verdict matching `assets/verdict-schema.json`
-   (`ready-to-merge` | `needs-author-changes` | `reject`) plus the
-   list of blocking-severity findings the completion subagent must
-   address.
-
-This is the only dependency between the two skills. The orchestrator
-NEVER reaches into apm-review-panel internals; it consumes the comment
-and the verdict.
+This is the only dependency between the two skills. The
+orchestrator NEVER reaches into apm-review-panel internals.
 
 ## Phases
 
@@ -209,12 +212,41 @@ row `UNCLEAR -- subagent malformed` and continue.
 
 Update the table. Move on only when every row has a triage verdict.
 
+### Phase 1.5 - strategic-alignment gate (WAVE 1.5)
+
+Re-render with `P15` `active` (substitute `L` LEGIT count). If
+`L = 0`, render P1.5 as `skipped` and pass through.
+
+**Load `references/strategic-alignment-gate.md` when entering this
+phase** -- it holds the binding procedure (external-dep probes,
+fail-open semantics, deferred-PR strategic-rejection subagent).
+
+Probe `.apm/agents/apm-ceo.agent.md` and `PRINCIPLES.md`. Either
+missing -> ABORT. Print the dispatch table for the
+`ceo-align-<issue>` subagents, then spawn `L` parallel threads with
+`assets/strategic-alignment-prompt.md`. Returns are
+`strategic_alignment_return` JSON (verdict in `aligned` |
+`aligned-with-reservations` | `out-of-scope` | `wrong-direction`).
+Schema-validate per retry-once; on second malformed, route as
+`aligned` with `gate_note` (fail-open).
+
+Update `strategic_verdict` + `strategic_rationale` columns.
+Demoted rows flip to status `triaged-deferred` and are SKIPPED by
+Phase 2/3/4/5. `aligned-with-reservations` rows stay in saga;
+downstream phases MUST surface the reservations.
+
 ### Phase 2 - PR-in-flight cross-reference
 
 Re-render the progress diagram with `P1` `done` and `P2` `active`.
 Substitute `L` (LEGIT row count) into the P2 label.
 
-For every `LEGIT` row, run `gh pr list --search
+Skip every row with status `triaged-deferred` (Phase 1.5 demoted).
+Run a LIGHTWEIGHT `gh pr list` probe against demoted rows only to
+feed the deferred-PR strategic-rejection comment procedure in
+`references/strategic-alignment-gate.md`; this read-only probe
+does not route demoted rows back into Phase 2.
+
+For every `LEGIT` row (status `triaged`), run `gh pr list --search
 "<issue-ref-or-keywords>" --state open --json
 number,title,headRefName,author,maintainerCanModify`. Also inspect
 each linked PR on the issue itself. Two outcomes per row:
@@ -235,7 +267,9 @@ Print TWO dispatch tables -- one for sub-wave 3a (shepherd-<pr>
 subagent_ids -> PR numbers) and one for sub-wave 3b (fix-<issue>
 subagent_ids -> issue numbers) -- BEFORE spawning either sub-wave.
 
-Two parallel sub-waves, both fan-out:
+Two parallel sub-waves, both fan-out. BOTH sub-waves filter out
+any row with status `triaged-deferred` (strategically demoted by
+Phase 1.5).
 
 **Sub-wave 3a -- SHEPHERD.** For each PR-in-flight row, spawn a child
 thread with `assets/shepherd-prompt.md` (which is a thin wrapper that
@@ -258,124 +292,109 @@ every spawn returns.
 
 ### Phase 4 - completion fan-out (WAVE 3)
 
-Re-render the progress diagram with `P0..P3` `done` and `P4`
-`active`. Substitute `F` (PRs needing follow-up work) into the P4
-label. If `F = 0`, render P4 as `skipped`.
+Re-render with `P4` `active`. Substitute `F` into the P4 label;
+if `F = 0`, render P4 as `skipped`.
 
-Print the dispatch table mapping each `completion-<pr>` subagent_id
-to its target PR BEFORE spawning.
-
-For each PR (both 3a-shepherded community PRs and 3b-fixed PRs
-that need follow-ups), spawn one completion subagent with
-`assets/completion-prompt.md`. The full procedure (CLASSIFY,
-resolve blockers FIRST, implement FOLD items consulting the right
-panelist persona, file DEFER items via `gh issue create`, lint
-silent, push-or-supersede, wait for CI, post ONE confirmation
-comment) lives in the spawn body. The orchestrator owns only
-schema-validation of the return JSON and table update; it does NOT
-re-derive the per-PR steps.
+Print the `completion-<pr>` dispatch table, then for each PR
+needing follow-ups (EXCLUDING `triaged-deferred` rows) spawn one
+completion subagent with `assets/completion-prompt.md`. The full
+procedure (CLASSIFY, resolve blockers FIRST, implement FOLD items
+consulting the right panelist persona, file DEFER items via `gh
+issue create`, lint silent, push-or-supersede, wait for CI, post
+ONE confirmation comment) lives in the spawn body. For rows with
+`strategic_verdict = aligned-with-reservations`, the subagent MUST
+surface the reservations in its confirmation-comment prose. The
+orchestrator owns only schema-validation and table update.
 
 ### Phase 5 - mergeability gate (WAVE 4)
 
-Re-render the progress diagram with `P0..P4` `done` and the `WAVE4`
-subgraph `active`. Substitute `R` (ready-PR count from Phase 4) and
-`C` (CONFLICTING-PR count from the 5a probe) into the P5a / P5b
-labels. If `R = 0`, skip Phase 5 entirely; if `C = 0`, render P5b
-as `skipped`.
+Re-render with `WAVE4` `active`. Substitute `R` (ready-PR count)
+and `C` (CONFLICTING-PR count) into the P5a / P5b labels. If
+`R = 0`, skip Phase 5 entirely; if `C = 0`, render P5b as
+`skipped`.
 
 **Load `references/mergeability-gate.md` when entering this
-phase.** That file holds the binding step-by-step (probe CLI flags,
-retry policy, four-way partition logic, trust-but-verify re-probe).
-The contract below is the summary the orchestrator MUST honor.
+phase** -- it holds the binding step-by-step (probe CLI flags,
+retry policy, four-way partition, trust-but-verify re-probe). The
+contract summary:
 
-- 5a (single-thread, read-only): probe every Phase-4 ready PR via
-  `gh pr view <pr> --json
+- 5a (read-only): probe every Phase-4 ready PR via S7
+  DETERMINISTIC TOOL BRIDGE (`gh pr view --json
   mergeStateStatus,mergeable,maintainerCanModify,headRepository,
-  headRepositoryOwner,headRefName` -- a fact-that-must-be-true
-  (truth #2), through S7 DETERMINISTIC TOOL BRIDGE, never recall.
+  headRepositoryOwner,headRefName`). Skip `triaged-deferred` rows.
   Partition CLEAN / UNSTABLE / HAS_HOOKS (verified-ready) from
-  BEHIND / DIRTY / CONFLICTING (route to 5b). BLOCKED is NOT a
-  conflict and stays verified-ready with a `gate_note`.
-- 5b (fan-out, one subagent per CONFLICTING PR): print the
-  dispatch table mapping `resolve-conflicts-<pr>` subagent_ids to
-  PRs. Spawn one subagent per PR using
-  `assets/conflict-resolution-prompt.md`. Each subagent owns its
-  PR end-to-end: rebase, faithful merge of both intents, lint
-  silent, push with `--force-with-lease` (NEVER bare `--force`),
-  re-probe, post the single resolution-confirmation comment.
-- 5c (single-thread, read-only): trust-but-verify re-probe;
-  partition into the schema's four `conflict_resolution_return`
-  statuses (`resolved`, `requires-author-action`,
-  `requires-human-judgment`, `resolution-failed`); update the
-  ground-truth table. Schema enforces `--force-with-lease` via
-  regex pattern guard on `push_command`.
+  BEHIND / DIRTY / CONFLICTING (route to 5b). BLOCKED is not a
+  conflict.
+- 5b (fan-out, one subagent per CONFLICTING PR): print dispatch
+  table, spawn `resolve-conflicts-<pr>` subagents using
+  `assets/conflict-resolution-prompt.md`. Each owns its PR
+  end-to-end: rebase, faithful conflict merge, lint silent, push
+  with `--force-with-lease` (NEVER bare `--force`), re-probe, post
+  the single resolution-confirmation comment.
+- 5c (read-only): trust-but-verify re-probe; partition into the
+  schema's four `conflict_resolution_return` statuses; update the
+  table.
 
 ### Phase 6 - final report
 
-Re-render the progress diagram with every phase `done` (or
-`blocked` where the human-escalation queue is non-empty). Print the
-final ground-truth table below it.
-
-Read the table one last time. Render `assets/final-report-template.md`
-to the user: per-issue verdict, PR link, post-gate status (one of
-ready-to-merge-verified, requires-author-action,
-requires-human-judgment, resolution-failed, superseded, blocked,
-unclear), with the responsible subagent's session reference where
-applicable.
+Re-render with every phase `done` (or `blocked` where the
+human-escalation queue is non-empty). Render
+`assets/final-report-template.md`: per-issue verdict, PR link,
+post-gate status (one of ready-to-merge-verified,
+requires-author-action, requires-human-judgment, resolution-failed,
+superseded, blocked, unclear, strategically-deferred), with
+subagent session refs. The template includes a "Recommend close as
+out-of-scope" partition for rows demoted by Phase 1.5, each citing
+the principle that fired.
 
 Use clickable GitHub links (`https://github.com/microsoft/apm/issues/<n>`
-and `.../pull/<n>`) and `@<author>` references that resolve to
-profile URLs in markdown-rendering chat clients. Plain text issue
-numbers without links force the operator to copy-paste -- defeats
-the purpose of the report.
+and `.../pull/<n>`) and `@<author>` profile links. Plain text
+issue numbers defeat the purpose.
 
 ## Bundled assets
 
-- `assets/verdict-schema.json` -- JSON schema for triage, shepherd,
-  and completion returns. Schema-validate every subagent return
-  (S4 SCHEMA-VALIDATE).
-- `assets/ground-truth-table.md` -- canonical table template.
-  Columns: `issue | verdict | pr | pr_in_flight | author | status |
-  notes`. Updated on every subagent return.
-- `assets/triage-prompt.md` -- spawn body for WAVE 1 subagents.
-- `assets/shepherd-prompt.md` -- spawn body for WAVE 2a subagents
-  (loads apm-review-panel).
-- `assets/fix-prompt.md` -- spawn body for WAVE 2b subagents.
-- `assets/completion-prompt.md` -- spawn body for WAVE 3 subagents.
-- `assets/conflict-resolution-prompt.md` -- spawn body for WAVE 4
-  (Phase 5b) subagents. Owns rebase, faithful conflict merge,
-  `--force-with-lease` push, mergeability re-probe, and the
-  resolution-confirmation comment.
-- `assets/final-report-template.md` -- the user-facing report shape
-  AND the PR confirmation comment shape used by completion
-  subagents AND the resolution-confirmation comment shape used by
-  conflict-resolution subagents.
-- `assets/progress-diagram.md` -- the mermaid progress diagram, the
-  color contract (pending / active / done / blocked / skipped), and
-  the dispatch-table render rules (Phase 1, 3a, 3b, 4, 5b).
-  Re-rendered at every phase boundary.
-- `references/mergeability-gate.md` -- load-on-demand orchestrator
-  step-by-step for Phase 5 (probe CLI, retry policy,
-  trust-but-verify re-probe, four-way partition). Load trigger:
-  WHEN ENTERING PHASE 5.
+- `assets/verdict-schema.json` -- JSON schema for all five subagent
+  return shapes. Schema-validate every return (S4).
+- `assets/ground-truth-table.md` -- canonical table template
+  (`issue | verdict | pr | pr_in_flight | author | status |
+  strategic_verdict | strategic_rationale | notes`).
+- `assets/triage-prompt.md` -- WAVE 1 spawn body.
+- `assets/strategic-alignment-prompt.md` -- WAVE 1.5 spawn body
+  (loads `apm-ceo` persona + PRINCIPLES.md).
+- `assets/shepherd-prompt.md` -- WAVE 2a spawn body (loads
+  apm-review-panel).
+- `assets/fix-prompt.md` -- WAVE 2b spawn body.
+- `assets/completion-prompt.md` -- WAVE 3 spawn body.
+- `assets/conflict-resolution-prompt.md` -- WAVE 4 spawn body
+  (rebase, faithful merge, `--force-with-lease`, re-probe, single
+  resolution-confirmation comment).
+- `assets/final-report-template.md` -- user-facing report shape +
+  PR confirmation comment + resolution-confirmation comment.
+- `assets/progress-diagram.md` -- mermaid progress diagram, color
+  contract, dispatch-table render rules (Phase 1, 1.5, 3a, 3b, 4,
+  5b).
+- `references/strategic-alignment-gate.md` -- Phase 1.5
+  step-by-step (external-dep probes, fail-open semantics,
+  deferred-PR strategic-rejection subagent). Load WHEN ENTERING
+  PHASE 1.5.
+- `references/mergeability-gate.md` -- Phase 5 step-by-step (probe
+  CLI, retry policy, trust-but-verify re-probe, four-way
+  partition). Load WHEN ENTERING PHASE 5.
 
 ## Operating contract for the orchestrator thread
 
-- Before each phase: re-read `plan.md` ground-truth table. Do NOT
-  rely on recall from earlier phases.
-- After each subagent return: schema-validate, then update the
-  table, then write it back to `plan.md`.
-- Never post to a PR directly. Delegate every PR-side write to the
-  subagent responsible for that PR.
-- Never skip the cross-reference phase. The "duplicates community
-  work" failure mode is more expensive than every other failure mode
-  this skill defends against, combined.
-- Honor the lint and encoding rules transitively: every spawn prompt
-  reminds its subagent of both.
-- Render the progress mermaid + the live ground-truth table to chat
-  at every phase boundary, and the dispatch table before every
-  fan-out wave. Skipping these renders is a contract violation, not
-  a stylistic choice (`assets/progress-diagram.md`).
+- Before each phase: re-read `plan.md` ground-truth table.
+- After each subagent return: schema-validate, update the table,
+  write it back to `plan.md`.
+- Never post to a PR directly; delegate every PR-side write to the
+  responsible subagent.
+- Never skip the cross-reference phase. Duplicating community work
+  is the most expensive failure mode this skill defends against.
+- Honor the lint and encoding rules transitively (every spawn
+  prompt reminds its subagent of both).
+- Render the progress mermaid + live ground-truth table at every
+  phase boundary, and the dispatch table before every fan-out wave
+  (`assets/progress-diagram.md`).
 
 ## Out of scope
 

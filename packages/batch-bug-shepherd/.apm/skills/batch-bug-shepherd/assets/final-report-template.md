@@ -72,12 +72,30 @@ Scope: {{ scope_description }} ({{ candidate_count }} candidates)
 - Issue #{{ issue }} -- {{ verdict }} ({{ evidence }})
 {{/each}}
 
+### Recommend close as out-of-scope (strategic-alignment gate)
+
+Per Phase 1.5 (`apm-ceo` persona vs `PRINCIPLES.md`), the following
+rows are LEGIT defects but conflict with the project's direction.
+The maintainer should close each (and any associated PR) with a
+courtesy comment citing the principle below.
+
+{{#each strategic_deferred}}
+- Issue #{{ issue }}{{#if pr}} (PR #{{ pr }}, author @{{ author }}){{/if}} -- verdict `{{ verdict }}` per `{{ cited_principle }}`. {{ rationale }}{{#if comment_landed}} Courtesy comment posted on PR #{{ pr }}.{{/if}}{{#if comment_failed}} (gate-comment-failed: {{ comment_failure_reason }}){{/if}}
+{{/each}}
+
+### Aligned with reservations (downstream-surfaced)
+
+{{#each strategic_aligned_with_reservations}}
+- Issue #{{ issue }}{{#if pr}} (PR #{{ pr }}){{/if}} -- aligned per `{{ cited_principle }}` with reservations: {{ reservations_joined }}.
+{{/each}}
+
 ### Disciplines honored this run
 
 - Verify-before-fix: {{ triage_pass_count }} / {{ candidate_count }} verified on HEAD.
 - PR-in-flight cross-reference: {{ inflight_count }} community PR(s) shepherded; 0 community PRs duplicated.
 - Mutation-break gate: {{ mutation_break_count }} regression-trap test(s) verified by guard deletion.
 - Lint contract: {{ lint_silent_count }} push(es) gated by silent ruff pair.
+- Strategic-alignment gate: {{ strategic_gate_count }} LEGIT row(s) inspected by `apm-ceo` against `PRINCIPLES.md`; {{ strategic_aligned_count }} aligned, {{ strategic_aligned_with_reservations_count }} aligned-with-reservations (surfaced downstream), {{ strategic_deferred_count }} demoted (out-of-scope / wrong-direction). Gate failed open on {{ strategic_failed_open_count }} row(s) under infrastructure failure.
 - Mergeability gate: {{ gate_run_count }} PR(s) re-probed against current main; {{ resolved_count }} rebased to MERGEABLE; {{ author_action_count }} surfaced to author; {{ human_judgment_count }} escalated to human judgment.
 - Two-comment-per-PR cap: at most one completion-confirmation comment + one resolution-confirmation comment.
 - Force-push hygiene: every rebase pushed with `--force-with-lease`, never bare `--force`.

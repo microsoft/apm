@@ -47,7 +47,8 @@ with the live numbers known at each phase boundary. Substitute the
 flowchart TB
     P0["Phase 0<br/>scope resolution<br/>N = <N> candidates"]:::pending
     P1["Phase 1<br/>triage fan-out<br/><N> parallel subagents"]:::pending
-    P2["Phase 2<br/>PR-in-flight cross-ref<br/>L = <L> LEGIT rows"]:::pending
+    P15["Phase 1.5<br/>strategic-alignment gate<br/>L = <L> LEGIT rows -> apm-ceo"]:::pending
+    P2["Phase 2<br/>PR-in-flight cross-ref<br/>L' = <L_prime> aligned LEGIT rows"]:::pending
 
     subgraph WAVE2[" "]
         direction LR
@@ -66,7 +67,7 @@ flowchart TB
 
     P6["Phase 6<br/>final report"]:::pending
 
-    P0 --> P1 --> P2 --> WAVE2 --> P4 --> WAVE4 --> P6
+    P0 --> P1 --> P15 --> P2 --> WAVE2 --> P4 --> WAVE4 --> P6
 
     classDef pending fill:#f5f5f5,stroke:#9ca3af,stroke-width:1px,color:#111827
     classDef active  fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#0c4a6e
@@ -115,19 +116,19 @@ the operator's situational awareness.
 
 ## Dispatch-time table requirement
 
-When spawning a fan-out wave (Phase 1, 3a, 3b, 4, 5b), the
+When spawning a fan-out wave (Phase 1, 1.5, 3a, 3b, 4, 5b), the
 orchestrator MUST also print the dispatch table BEFORE issuing the
 parallel spawns, so the operator sees which subagent is doing what:
 
 ```
 ### Dispatch (Phase <N>) -- <k> parallel subagents
 
-| subagent_id              | target            | role              |
-|--------------------------|-------------------|-------------------|
-| triage-1435              | issue #1435       | reproduce on HEAD |
-| triage-1415              | issue #1415       | reproduce on HEAD |
-| resolve-conflicts-1396   | PR #1396          | rebase + resolve  |
-| ...                      | ...               | ...               |
+| subagent_id              | target            | role                |
+|--------------------------|-------------------|---------------------|
+| triage-1435              | issue #1435       | reproduce on HEAD   |
+| ceo-align-1435           | issue #1435       | strategic alignment |
+| resolve-conflicts-1396   | PR #1396          | rebase + resolve    |
+| ...                      | ...               | ...                 |
 ```
 
 This is mandatory so the operator can correlate completion
@@ -147,6 +148,13 @@ k, m, F).
 sub-waves spawn in parallel; treat the subgraph as one active band).
 `P4` and `P5` `pending`. `L`, `k`, `m` populated; `F` still unknown
 (comes from shepherd returns).
+
+### Skipped strategic-alignment gate
+
+When `L = 0` (zero LEGIT rows from Phase 1), render `P15` with class
+`skipped` and label `Phase 1.5<br/>strategic-alignment gate<br/>L = 0 (skipped)`.
+The gate had no rows to inspect; pass through to Phase 2 with
+`L_prime = 0` also.
 
 ### Skipped fix wave
 
