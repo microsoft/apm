@@ -75,7 +75,7 @@ class TestGetCheckout:
     def test_cache_hit_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"
         sha = "a" * 40
-        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha
+        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha / "full"
         checkout_dir.mkdir(parents=True)
 
         with (
@@ -93,7 +93,7 @@ class TestGetCheckout:
     def test_cache_hit_with_failed_integrity_evicts_and_recreates(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"
         sha = "b" * 40
-        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha
+        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha / "full"
         checkout_dir.mkdir(parents=True)
         recreated = checkout_dir.parent / "recreated"
 
@@ -108,8 +108,10 @@ class TestGetCheckout:
 
         assert result == recreated
         mock_evict.assert_called_once_with(checkout_dir)
-        mock_ensure.assert_called_once_with(url, cache_shard_key(url), sha, env=None)
-        mock_create.assert_called_once_with(url, cache_shard_key(url), sha, env=None)
+        mock_ensure.assert_called_once_with(url, cache_shard_key(url), sha, env=None, partial=False)
+        mock_create.assert_called_once_with(
+            url, cache_shard_key(url), sha, env=None, sparse_paths=None, promisor_url=None
+        )
 
     def test_refresh_ignores_existing_checkout(self, tmp_path: Path) -> None:
         with (
@@ -119,7 +121,7 @@ class TestGetCheckout:
             cache = GitCache(tmp_path, refresh=True)
         url = "https://github.com/owner/repo.git"
         sha = "c" * 40
-        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha
+        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha / "full"
         checkout_dir.mkdir(parents=True)
 
         with (
@@ -138,7 +140,7 @@ class TestGetCheckout:
     def test_cache_miss_creates_checkout(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"
         sha = "d" * 40
-        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha
+        checkout_dir = cache._checkouts_root / cache_shard_key(url) / sha / "full"
 
         with (
             patch.object(cache, "_resolve_sha", return_value=sha),
@@ -148,8 +150,12 @@ class TestGetCheckout:
             result = cache.get_checkout(url, None, locked_sha=sha, env={"A": "1"})
 
         assert result == checkout_dir
-        mock_ensure.assert_called_once_with(url, cache_shard_key(url), sha, env={"A": "1"})
-        mock_create.assert_called_once_with(url, cache_shard_key(url), sha, env={"A": "1"})
+        mock_ensure.assert_called_once_with(
+            url, cache_shard_key(url), sha, env={"A": "1"}, partial=False
+        )
+        mock_create.assert_called_once_with(
+            url, cache_shard_key(url), sha, env={"A": "1"}, sparse_paths=None, promisor_url=None
+        )
 
 
 class TestResolveSha:
@@ -447,7 +453,7 @@ class TestCreateCheckout:
     def test_write_dedup_hit_under_lock_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
         shard_key = cache_shard_key(url)
-        final_dir = cache._checkouts_root / shard_key / ("a" * 40)
+        final_dir = cache._checkouts_root / shard_key / ("a" * 40) / "full"
         final_dir.mkdir(parents=True)
 
         with (
@@ -465,7 +471,7 @@ class TestCreateCheckout:
         shard_key = cache_shard_key(url)
         bare_dir = cache._db_root / shard_key
         bare_dir.mkdir(parents=True)
-        final_dir = cache._checkouts_root / shard_key / ("b" * 40)
+        final_dir = cache._checkouts_root / shard_key / ("b" * 40) / "full"
         final_dir.mkdir(parents=True)
 
         def _land(staged: Path, final: Path, _lock: object) -> bool:
@@ -534,7 +540,7 @@ class TestCreateCheckout:
     def test_atomic_land_false_accepts_valid_winner(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
         shard_key = cache_shard_key(url)
-        final_dir = cache._checkouts_root / shard_key / ("e" * 40)
+        final_dir = cache._checkouts_root / shard_key / ("e" * 40) / "full"
         final_dir.mkdir(parents=True)
         (cache._db_root / shard_key).mkdir(parents=True)
 
@@ -556,7 +562,7 @@ class TestCreateCheckout:
     def test_atomic_land_false_with_invalid_winner_evicts_and_raises(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
         shard_key = cache_shard_key(url)
-        final_dir = cache._checkouts_root / shard_key / ("f" * 40)
+        final_dir = cache._checkouts_root / shard_key / ("f" * 40) / "full"
         final_dir.mkdir(parents=True)
         (cache._db_root / shard_key).mkdir(parents=True)
 
