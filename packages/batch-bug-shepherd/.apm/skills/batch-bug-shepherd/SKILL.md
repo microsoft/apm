@@ -7,15 +7,15 @@ description: >-
   legit issues against open PRs, then branch: in-flight community PR
   -> shepherd via the apm-review-panel skill; no PR -> fix session with
   TDD and a mutation-break gate. Dispatch one completion subagent per
-  shepherd verdict to resolve panel follow-ups, push to the contributor
-  fork (or open a superseding PR that preserves author authorship via
-  commit trailers), and post one ready-to-merge confirmation. Maintain
-  a single plan.md ground-truth table as canonical session state.
-  Activate when the maintainer asks to triage a list of issues, sweep
-  the bug queue or backlog, shepherd all bug-flagged issues this
-  quarter, run a weekly sweep of community-reported issues, drive
-  in-flight community PRs to merge, or work down community bug
-  contributions -- even if "shepherd" or "batch" is not named.
+  shepherd verdict to resolve panel follow-ups, FOLD non-blocking
+  recommendations into the same PR by default (DEFER cross-cutting
+  items to tracking issues), push to the contributor fork (preserving
+  author via commit trailers), and post one ready-to-merge
+  confirmation. Maintain a single plan.md ground-truth table as
+  canonical session state. Activate when the maintainer asks to triage
+  issues, sweep the bug queue, shepherd bug-flagged issues, run a
+  weekly community sweep, or drive in-flight community PRs to merge
+  -- even if "shepherd" or "batch" is not named.
 ---
 
 # batch-bug-shepherd - Outer-loop bug-queue orchestrator
@@ -89,6 +89,35 @@ execute + verify (A9 SUPERVISED EXECUTION).
   plan.md if cross-session-message is unavailable) ONLY when CI is
   green and all blocking follow-ups landed. Failures stay in the
   subagent's session until resolved or escalated to a human.
+- **Operator visibility is a contract, not a courtesy.** The
+  orchestrator MUST render the progress mermaid diagram (with the
+  current phase styled `active`) plus the live ground-truth table to
+  chat at every phase boundary, and MUST print a dispatch table
+  immediately before every fan-out spawn. The exact contract --
+  color palette, node labels, when to render -- lives in
+  `assets/progress-diagram.md`. The operator is steering a saga that
+  takes 30+ minutes wall and dozens of parallel subagents; without
+  the diagram they cannot tell `still working` from `stuck`. Skipping
+  the visibility renders breaks the saga's human-in-the-loop contract.
+- **Bias toward folding recommendations into the in-flight PR.**
+  When `shepherd_return.recommended_followups[]` is non-empty,
+  the default is FOLD-INTO-PR via the completion subagent, NOT
+  defer to a tracking issue. The completion subagent (see
+  `assets/completion-prompt.md` step 2) classifies each
+  recommended item against explicit criteria: items that touch
+  files already in the diff, single helper extractions, regression
+  traps for the PR's own behavior, hermetic integration tests of
+  the new surface, and adjacent doc / CHANGELOG patches all FOLD
+  by default. Only genuinely separable work -- cross-cutting
+  refactors, broad doc restructuring, new feature work,
+  architectural additions -- becomes a tracking issue via
+  `gh issue create`. The verdict mapping (`shepherd-prompt.md`
+  step 4) makes `ship_with_followups` with 0 blocking findings
+  emit `verdict: ready-to-merge` precisely so the completion
+  subagent runs on the fold-in surface rather than blocking the
+  PR for what the panel itself called non-blocking. The skill
+  ships now; it does not ship "now plus a backlog of papercuts
+  the maintainer will never get to".
 
 ## Composition with apm-review-panel
 
@@ -119,6 +148,13 @@ and the verdict.
 Work through the phases in order. Reload the ground-truth table at
 each phase boundary. Do not skip the cross-reference phase.
 
+At every phase boundary (and once at the run start, once at the
+end), render the progress mermaid diagram + the live ground-truth
+table to chat per `assets/progress-diagram.md`. Before every
+fan-out wave, also render the dispatch table mapping subagent_id to
+target. These are not optional -- they are the operator's only
+real-time window into a multi-wave parallel saga.
+
 ### Phase 0 - scope resolution
 
 Input is either (a) an explicit issue list (e.g. `#123 #456 #789`) or
@@ -134,7 +170,17 @@ candidate count, expected wave shape, and the disciplines that will
 be enforced (mutation-break, ASCII, lint). Ask for confirmation only
 if `sweep-all` produced more than 20 candidates -- otherwise proceed.
 
+Then render the progress mermaid diagram for the first time per
+`assets/progress-diagram.md` -- every phase `pending`, with the
+candidate count `N` substituted into the P0 and P1 labels. Print
+the live (empty) ground-truth table below it. This is the
+operator's anchor frame for the run.
+
 ### Phase 1 - triage fan-out (WAVE 1)
+
+Re-render the progress diagram with `P1` styled `active`. Print the
+dispatch table mapping each `triage-<issue>` subagent_id to its
+target issue BEFORE issuing the parallel spawns.
 
 Spawn one child thread per candidate using `assets/triage-prompt.md`.
 Each subagent:
@@ -150,6 +196,9 @@ Update the table. Move on only when every row has a triage verdict.
 
 ### Phase 2 - PR-in-flight cross-reference
 
+Re-render the progress diagram with `P1` `done` and `P2` `active`.
+Substitute `L` (LEGIT row count) into the P2 label.
+
 For every `LEGIT` row, run `gh pr list --search
 "<issue-ref-or-keywords>" --state open --json
 number,title,headRefName,author,maintainerCanModify`. Also inspect
@@ -162,6 +211,14 @@ each linked PR on the issue itself. Two outcomes per row:
 Update the table. This phase MUST complete before any phase-3 spawn.
 
 ### Phase 3 - shepherd-or-fix fan-out (WAVE 2)
+
+Re-render the progress diagram with `P0..P2` `done` and the `WAVE2`
+subgraph `active`. Substitute `k` and `m` into the P3a / P3b
+labels. If `m = 0`, render P3b as `skipped` (dashed border).
+
+Print TWO dispatch tables -- one for sub-wave 3a (shepherd-<pr>
+subagent_ids -> PR numbers) and one for sub-wave 3b (fix-<issue>
+subagent_ids -> issue numbers) -- BEFORE spawning either sub-wave.
 
 Two parallel sub-waves, both fan-out:
 
@@ -186,22 +243,43 @@ every spawn returns.
 
 ### Phase 4 - completion fan-out (WAVE 3)
 
+Re-render the progress diagram with `P0..P3` `done` and `P4`
+`active`. Substitute `F` (PRs needing follow-up work) into the P4
+label. If `F = 0`, render P4 as `skipped`.
+
+Print the dispatch table mapping each `completion-<pr>` subagent_id
+to its target PR BEFORE spawning.
+
 For each PR (both 3a-shepherded community PRs and 3b-fixed PRs that
 need follow-ups), spawn one completion subagent with
 `assets/completion-prompt.md`. Each completion subagent:
 
-1. Reads the shepherd comment (or, for own-fix PRs, its own
-   self-review notes from the fix subagent return).
-2. Resolves each blocking-severity follow-up. Common shapes:
+1. Reads the shepherd PR comment, `BLOCKING_FOLLOWUPS`, and
+   `RECOMMENDED_FOLLOWUPS` (the latter is the input channel for
+   the fold-in invariant; see `verdict-schema.json` shepherd_return
+   shape).
+2. CLASSIFIES every recommended item as FOLD (cheap + on-path;
+   lands in this PR) or DEFER (separable; opens a tracking issue
+   via `gh issue create`). Bias toward FOLD per the architecture
+   invariant.
+3. Resolves every blocking-severity follow-up FIRST. Common shapes:
    - Extract helpers; align with canonical sibling logic.
    - Add regression-trap tests (mutation-break gate enforced).
    - Fix merge conflicts; rebase if cleaner.
-3. Runs the lint contract. Both commands MUST be silent.
-4. Pushes:
+4. IMPLEMENTS every FOLD item, consulting the right panelist
+   persona per `source_persona` (e.g. python-architect for code,
+   test-coverage-expert for tests, supply-chain-security-expert
+   for trust-boundary work). For non-trivial single items it MAY
+   spawn a nested Task subagent to keep context isolated.
+5. FILES every DEFER item as a tracking issue with rationale +
+   PR backlink; records the issue numbers in
+   `deferred_followups[]`.
+6. Runs the lint contract. Both commands MUST be silent.
+7. Pushes:
    - Tries `git push <author-fork> <branch>` first when
      `maintainerCanModify=true`.
-   - On rejection or when the flag is false, opens a superseding PR
-     under `microsoft/apm` via `git checkout -b
+   - On rejection or when the flag is false, opens a superseding
+     PR under `microsoft/apm` via `git checkout -b
      supersede/<original-pr> && git cherry-pick ... && gh pr create
      --base main --title "..." --body "Supersedes #<n>; preserves
      authorship via commit trailers."`. Each commit carries
@@ -210,21 +288,35 @@ need follow-ups), spawn one completion subagent with
      "Superseded by #<m>. Thank you for the original work; the
      superseding PR preserves your authorship via commit trailers and
      resolves the panel follow-ups so we can land this promptly."`.
-5. Waits for CI on the target PR. If green AND every blocking
-   follow-up is addressed, posts ONE confirmation comment (template
-   in `assets/final-report-template.md` -> "PR confirmation" block)
-   summarizing the changes and citing CI evidence.
-6. Cross-session-messages the orchestrator with the PR number and
-   `status: ready-to-merge`. On failure, stays in-session and
-   surfaces the blocker for human review; does NOT message back as
-   green.
+8. Waits for CI on the target PR. If green AND every blocking
+   follow-up is addressed AND every recommended follow-up is
+   either folded or filed as a tracking issue, posts ONE
+   confirmation comment (template in
+   `assets/final-report-template.md` -> "PR confirmation" block)
+   listing folded items (with file:line citations) and deferred
+   items (with tracking-issue numbers).
+9. Cross-session-messages the orchestrator with the completion
+   return JSON: `status: ready-to-merge`, plus `folded_followups`
+   and `deferred_followups` arrays. On failure, stays in-session
+   and surfaces the blocker for human review; does NOT message
+   back as green.
 
 ### Phase 5 - final report
+
+Re-render the progress diagram with every phase `done` (or
+`blocked` where the human-escalation queue is non-empty). Print the
+final ground-truth table below it.
 
 Read the table one last time. Render `assets/final-report-template.md`
 to the user: per-issue verdict, PR link, ready-to-merge status,
 unresolved blockers (with the responsible subagent's session
 reference), and any rows still `UNCLEAR` for human triage.
+
+Use clickable GitHub links (`https://github.com/microsoft/apm/issues/<n>`
+and `.../pull/<n>`) and `@<author>` references that resolve to
+profile URLs in markdown-rendering chat clients. Plain text issue
+numbers without links force the operator to copy-paste -- defeats
+the purpose of the report.
 
 ## Bundled assets
 
@@ -242,6 +334,10 @@ reference), and any rows still `UNCLEAR` for human triage.
 - `assets/final-report-template.md` -- the user-facing report shape
   AND the PR confirmation comment shape used by completion
   subagents.
+- `assets/progress-diagram.md` -- the mermaid progress diagram, the
+  color contract (pending / active / done / blocked / skipped), and
+  the dispatch-table render rules. Re-rendered at every phase
+  boundary.
 
 ## Operating contract for the orchestrator thread
 
@@ -256,6 +352,10 @@ reference), and any rows still `UNCLEAR` for human triage.
   this skill defends against, combined.
 - Honor the lint and encoding rules transitively: every spawn prompt
   reminds its subagent of both.
+- Render the progress mermaid + the live ground-truth table to chat
+  at every phase boundary, and the dispatch table before every
+  fan-out wave. Skipping these renders is a contract violation, not
+  a stylistic choice (`assets/progress-diagram.md`).
 
 ## Out of scope
 

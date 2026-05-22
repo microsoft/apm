@@ -29,6 +29,12 @@
     {"id": "cross-reference-step", "pattern": "(?is)(gh\\s+pr\\s+list|pr-in-flight|cross[- ]?reference)", "weight": 2, "description": "PR-in-flight cross-reference performed."},
     {"id": "phase-discipline", "pattern": "(?is)phase\\s*[0-5]", "weight": 1, "description": "Phase contract is named (0..5)."},
     {"id": "table-reload", "pattern": "(?is)(re[- ]?read|reload)[^.\\n]{0,40}(table|plan\\.md|ground[- ]?truth)", "weight": 1, "description": "Table reload at phase boundaries (B4 PLAN MEMENTO + B8 ATTENTION ANCHOR)."},
-    {"id": "final-report", "pattern": "(?is)final[- ]?report", "weight": 1, "description": "Final report rendered."}
+    {"id": "final-report", "pattern": "(?is)final[- ]?report", "weight": 1, "description": "Final report rendered."},
+    {"id": "progress-diagram-header", "pattern": "(?im)^##\\s+Progress\\s*\\(Phase\\s+\\d", "weight": 2, "description": "Operator-visibility contract: a 'Progress (Phase N - <name>)' header anchors each phase boundary render."},
+    {"id": "mermaid-flowchart-rendered", "pattern": "(?is)```mermaid[\\s\\S]+?flowchart\\s+TB[\\s\\S]+?classDef\\s+active", "weight": 2, "description": "Operator-visibility contract: a mermaid flowchart with the active classDef is rendered to chat at the phase boundary."},
+    {"id": "dispatch-table-before-fanout", "pattern": "(?im)^\\s*\\|\\s*subagent_id\\s*\\|\\s*target\\s*\\|", "weight": 2, "description": "Operator-visibility contract: a dispatch table mapping subagent_id to target precedes each fan-out wave."},
+    {"id": "recommended-followups-channel", "pattern": "(?is)recommended[_ -]?followups", "weight": 1, "description": "Schema-honored channel for non-blocking findings flowed from shepherd to completion."},
+    {"id": "fold-defer-classifier", "pattern": "(?is)(fold[/ ]?defer|classif(y|ies)[^.\\n]{0,40}(fold|defer)|fold[^.\\n]{0,40}defer)", "weight": 1, "description": "Completion subagent classifies recommended items as FOLD vs DEFER per the fold-in invariant."},
+    {"id": "tracking-issue-for-defer", "pattern": "(?is)gh\\s+issue\\s+create[\\s\\S]{0,200}(defer|separable|tracking)|deferred[_ ]?followups", "weight": 1, "description": "DEFER items are filed as tracking issues (not silently dropped)."}
   ]
 }

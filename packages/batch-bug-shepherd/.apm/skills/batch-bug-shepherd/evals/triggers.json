@@ -140,6 +140,27 @@
       "expected": "no_fire",
       "split": "val",
       "notes": "Design work, not batch triage."
+    },
+    {
+      "id": "no-fire-11",
+      "query": "fold the panel recommendations into PR #1234",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR fold-in -> apm-review-panel completion flow, NOT batch outer-loop. Guards against dispatch mis-fire after the fold-in invariant was added."
+    },
+    {
+      "id": "no-fire-12",
+      "query": "fold the followups into this one PR",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR phrasing using the new fold-in vocabulary; must not fire batch-bug-shepherd."
+    },
+    {
+      "id": "no-fire-13",
+      "query": "apply the panel recommendations to PR #998 and close it out",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Single-PR completion phrasing; remains apm-review-panel territory."
     }
   ]
 }

@@ -34,6 +34,12 @@
     {"id": "mutation-break-gate", "pattern": "(?is)mutation[- ]?break", "weight": 1, "description": "Mutation-break gate is named."},
     {"id": "lint-gate", "pattern": "(?is)(ruff\\s+check|lint\\s+contract|lint\\s+gate)", "weight": 1, "description": "Lint contract is named before any push."},
     {"id": "no-direct-pr-comment", "pattern": "(?is)(never\\s+posts?\\s+to\\s+a\\s+pr|single[- ]?writer|one\\s+(panel|recommendation)\\s+comment)", "weight": 1, "description": "Single-writer interlock per PR comment stated."},
-    {"id": "fixed-at-head-handled", "pattern": "(?is)(fixed[- ]?at[- ]?head|recommend\\s+(to\\s+)?close)", "weight": 1, "description": "FIXED-AT-HEAD outcome handled (close recommendation rather than fix dispatch)."}
+    {"id": "fixed-at-head-handled", "pattern": "(?is)(fixed[- ]?at[- ]?head|recommend\\s+(to\\s+)?close)", "weight": 1, "description": "FIXED-AT-HEAD outcome handled (close recommendation rather than fix dispatch)."},
+    {"id": "progress-diagram-header", "pattern": "(?im)^##\\s+Progress\\s*\\(Phase\\s+\\d", "weight": 2, "description": "Operator-visibility contract: a 'Progress (Phase N - <name>)' header anchors each phase boundary render."},
+    {"id": "mermaid-flowchart-rendered", "pattern": "(?is)```mermaid[\\s\\S]+?flowchart\\s+TB[\\s\\S]+?classDef\\s+active", "weight": 2, "description": "Operator-visibility contract: a mermaid flowchart with the active classDef is rendered to chat at the phase boundary."},
+    {"id": "dispatch-table-before-fanout", "pattern": "(?im)^\\s*\\|\\s*subagent_id\\s*\\|\\s*target\\s*\\|", "weight": 2, "description": "Operator-visibility contract: a dispatch table mapping subagent_id to target precedes each fan-out wave."},
+    {"id": "recommended-followups-channel", "pattern": "(?is)recommended[_ -]?followups", "weight": 1, "description": "Schema-honored channel for non-blocking findings flowed from shepherd to completion."},
+    {"id": "fold-defer-classifier", "pattern": "(?is)(fold[/ ]?defer|classif(y|ies)[^.\\n]{0,40}(fold|defer)|fold[^.\\n]{0,40}defer)", "weight": 1, "description": "Completion subagent classifies recommended items as FOLD vs DEFER per the fold-in invariant."},
+    {"id": "tracking-issue-for-defer", "pattern": "(?is)gh\\s+issue\\s+create[\\s\\S]{0,200}(defer|separable|tracking)|deferred[_ ]?followups", "weight": 1, "description": "DEFER items are filed as tracking issues (not silently dropped)."}
   ]
 }
