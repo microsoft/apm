@@ -175,7 +175,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 )
 
             # Generate server configuration
-            server_config, input_vars = self._format_server_config(server_info)
+            server_config, input_vars = self._format_server_config(
+                server_info, runtime_vars=runtime_vars
+            )
 
             if not server_config:
                 if logger:
@@ -228,11 +230,12 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 print(f"Error configuring MCP server: {e}")
             return False
 
-    def _format_server_config(self, server_info):
+    def _format_server_config(self, server_info, runtime_vars=None):
         """Format server details into VSCode mcp.json compatible format.
 
         Args:
             server_info (dict): Server information from registry.
+            runtime_vars (dict, optional): Runtime variable substitutions.
 
         Returns:
             tuple: (server_config, input_vars) where:
@@ -270,7 +273,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
             package = self._select_best_package(server_info["packages"])
             runtime_hint = package.get("runtime_hint", "") if package else ""
             registry_name = self._infer_registry_name(package) if package else ""
-            pkg_args = self._extract_package_args(package) if package else []
+            pkg_args = (
+                self._extract_package_args(package, runtime_vars=runtime_vars) if package else []
+            )
 
             # Handle npm packages
             if runtime_hint == "npx" or registry_name == "npm":
@@ -496,16 +501,25 @@ class VSCodeClientAdapter(MCPClientAdapter):
         return result
 
     @staticmethod
-    def _extract_package_args(package):
+    def _extract_package_args(package, runtime_vars=None):
         """Extract positional arguments from a package entry.
 
         The MCP registry API uses ``package_arguments`` (with ``type``/``value``
         pairs).  Older or synthetic entries may use ``runtime_arguments``
-        (with ``is_required``/``value_hint``).  This method normalises both
-        formats into a flat list of argument strings.
+        (with ``is_required``/``value_hint``).  v0.1 registry format uses
+        ``runtime_arguments`` where a ``variables`` dict is a *sibling* of
+        ``value_hint``; the ``value_hint`` string contains ``{var_name}``
+        placeholders that are substituted at config-generation time.
+        This method normalises all formats into a flat list of argument strings.
 
         Args:
             package (dict): A single package entry.
+            runtime_vars (dict, optional): Runtime variable substitutions.
+                When a ``{var_name}`` placeholder is encountered in a v0.1
+                ``value_hint``, the corresponding value from ``runtime_vars``
+                is used.  For VS Code, ``workspaceFolder`` defaults to the
+                native ``${workspaceFolder}`` interpolation token when not
+                supplied via ``runtime_vars``.
 
         Returns:
             list[str]: Ordered argument strings, may be empty.
@@ -525,13 +539,32 @@ class VSCodeClientAdapter(MCPClientAdapter):
             if args:
                 return args
 
-        # Fall back to runtime_arguments (legacy / synthetic format)
+        # Fall back to runtime_arguments (legacy / synthetic format and v0.1 variables shape)
         rt_args = package.get("runtime_arguments") or []
         if rt_args:
             args = []
             for arg in rt_args:
                 if isinstance(arg, dict):
-                    if arg.get("is_required", False) and arg.get("value_hint"):
+                    if "variables" in arg and "value_hint" in arg:
+                        # v0.1 format: variables is a sibling of value_hint; the
+                        # value_hint string contains {var_name} placeholders.
+                        value = arg["value_hint"]
+                        for var_name in arg["variables"]:
+                            if runtime_vars and var_name in runtime_vars:
+                                replacement = runtime_vars[var_name]
+                            elif var_name == "workspaceFolder":
+                                # VS Code native variable substitution token
+                                replacement = "${workspaceFolder}"
+                            else:
+                                replacement = f"${{{var_name}}}"
+                            value = value.replace(f"{{{var_name}}}", replacement)
+                        if value:
+                            args.append(value)
+                    elif arg.get("is_required", False) and arg.get("value_hint"):
+                        # Legacy format: explicit is_required=True entries
+                        args.append(arg["value_hint"])
+                    elif "value_hint" in arg and arg["value_hint"] and "is_required" not in arg:
+                        # v0.1 format: plain value_hint entries without is_required
                         args.append(arg["value_hint"])
             if args:
                 return args
