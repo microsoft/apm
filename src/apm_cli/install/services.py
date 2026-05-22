@@ -135,6 +135,8 @@ def integrate_package_primitives(
     """
     from apm_cli.integration.dispatch import get_dispatch_table
 
+    from ..core.scope import InstallScope
+
     _dispatch = get_dispatch_table()
     result = {
         "prompts": 0,
@@ -265,14 +267,23 @@ def integrate_package_primitives(
             _mapping = _target.primitives.get(_prim_name)
             if _mapping is None:
                 continue
+            _call_kwargs: dict[str, Any] = {
+                "force": force,
+                "managed_files": managed_files,
+                "diagnostics": diagnostics,
+                "scope": scope,
+            }
+            # Hook integrator alone needs the scope signal: project-scope
+            # deploys keep ``command`` paths repo-relative (#1394), user-scope
+            # deploys absolutize them (#1310 / #1354).  Sibling integrators
+            # don't accept this kwarg, so include it only for hooks.
+            if _prim_name == "hooks":
+                _call_kwargs["user_scope"] = scope is InstallScope.USER
             _int_result = getattr(_integrator, _entry.integrate_method)(
                 _target,
                 package_info,
                 project_root,
-                force=force,
-                managed_files=managed_files,
-                diagnostics=diagnostics,
-                scope=scope,
+                **_call_kwargs,
             )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
