@@ -416,25 +416,25 @@ def _resolve_package_references(
                     # layer -- no new flag, env var, or schema field needed.
                     _risk = resolution.cross_repo_misconfig_risk
                     if _risk is not None:
-                        # Multi-line reason: the two qualification options
-                        # are alternatives, not a single instruction, so
-                        # they read clearer as separate bullets under a
-                        # short lead-in. ``validation_fail`` prepends the
-                        # package name; the body below is the remediation.
-                        # Assemble line-by-line and join with newlines so
-                        # formatting tweaks remain localised per line.
-                        reason_lines = [
-                            f"refused (dependency-confusion risk #1326): "
-                            f"bare `repo: {_risk.bare_repo_field}` on "
-                            f"enterprise marketplace '{_risk.marketplace_host}'"
-                            f" is ambiguous. Host-qualify the plugin `repo` "
-                            f"field in marketplace.json to one of:",
-                            f"  - '{_risk.suggested_qualified_repo}' "
-                            f"(enterprise dep on this marketplace)",
-                            f"  - 'github.com/{_risk.bare_repo_field}' "
-                            f"(declared cross-host dep on public github.com)",
-                        ]
-                        reason = "\n".join(reason_lines)
+                        # Two explicit-host options are alternatives, not a
+                        # sequence, so they read clearer as separate bullets.
+                        # ``validation_fail`` prepends the package name; the
+                        # body below is the remediation.  Each list element is
+                        # one logical clause so individual edits stay local.
+                        _lead = (
+                            f"refused (dependency-confusion risk #1326): bare"
+                            f" `repo: {_risk.bare_repo_field}` on enterprise"
+                            f" marketplace '{_risk.marketplace_host}' is ambiguous."
+                            f" Host-qualify the plugin `repo` field in"
+                            f" marketplace.json to one of:"
+                        )
+                        reason = "\n".join(
+                            [
+                                _lead,
+                                f"  - '{_risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
+                                f"  - 'github.com/{_risk.bare_repo_field}' (declared cross-host dep on public github.com)",
+                            ]
+                        )
                         invalid_outcomes.append((package, reason))
                         if logger:
                             logger.validation_fail(package, reason)
