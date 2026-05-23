@@ -354,11 +354,12 @@ Schema rules:
 ### Cross-repo plugin sources on enterprise marketplaces
 
 When a marketplace published on a `*.ghe.com` host references a plugin
-in a different repo via dict-form `source: {type: github, repo: ...}`,
-the `repo:` field **must be host-qualified**. A bare `owner/repo` form
-is refused at install time because it cannot be disambiguated from a
-public-github.com dependency-confusion attempt (see CHANGELOG entry
-for #1326). Two valid forms:
+in a different repo via the YAML mapping form of `source:` -- with
+nested `type:` and `repo:` keys (rather than the simple `source: owner/repo`
+string) -- the `repo:` field **must be host-qualified**. A bare
+`owner/repo` value is refused at install time because it cannot be
+disambiguated from a public-github.com dependency-confusion attempt
+(see CHANGELOG entry for #1326). Two valid forms:
 
 ```yaml
 plugins:

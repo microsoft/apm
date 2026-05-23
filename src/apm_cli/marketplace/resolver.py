@@ -311,12 +311,28 @@ def _compute_cross_repo_misconfig_risk(
     # an unambiguous declared cross-host dependency). Only the truly-bare
     # ``owner/repo`` form is the dependency-confusion vector this sentinel
     # flags. ``_needs_canonical_host_prefix`` above already returns False
-    # for SAME-host qualification (its idempotency clause); this is the
-    # symmetric guard for CROSS-host explicit qualification, which the
-    # idempotency check cannot detect because the canonical starts with a
-    # different host than ``source.host``.
-    first_segment = bare.split("/", 1)[0]
-    if is_supported_git_host(first_segment):
+    # for SAME-host qualification (its idempotency clause) and for URL /
+    # SSH SCP shorthand canonicals; this is the symmetric guard for the
+    # remaining case -- CROSS-host shorthand qualification (``github.com/...``
+    # on a ``*.ghe.com`` marketplace), which the idempotency check cannot
+    # detect because the canonical starts with a different host than
+    # ``source.host``.
+    #
+    # Defense in depth: extract the host from URL and SCP shorthand forms
+    # too, so the guard is robust even if a future upstream refactor lets
+    # those forms reach this point. A bare ``split("/", 1)[0]`` would
+    # otherwise classify ``https://...`` as having a ``https:`` first
+    # segment (not a host) and incorrectly attach the sentinel.
+    explicit_host = ""
+    bare_lower = bare.lower()
+    if bare_lower.startswith(("https://", "http://", "ssh://")):
+        explicit_host = (urlparse(bare).hostname or "").strip()
+    elif bare.startswith("git@") and ":" in bare:
+        # SCP shorthand: ``git@host:owner/repo``
+        explicit_host = bare[4:].split(":", 1)[0].strip()
+    else:
+        explicit_host = bare.split("/", 1)[0]
+    if is_supported_git_host(explicit_host):
         return None
     return CrossRepoMisconfigRisk(
         marketplace_host=source.host,

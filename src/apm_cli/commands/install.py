@@ -421,17 +421,20 @@ def _resolve_package_references(
                         # they read clearer as separate bullets under a
                         # short lead-in. ``validation_fail`` prepends the
                         # package name; the body below is the remediation.
-                        reason = (
-                            "refused (dependency-confusion risk #1326): "
+                        # Assemble line-by-line and join with newlines so
+                        # formatting tweaks remain localised per line.
+                        reason_lines = [
+                            f"refused (dependency-confusion risk #1326): "
                             f"bare `repo: {_risk.bare_repo_field}` on "
                             f"enterprise marketplace '{_risk.marketplace_host}'"
-                            " is ambiguous. Host-qualify the plugin `repo` "
-                            "field in marketplace.json to one of:\n"
-                            f"  - '{_risk.suggested_qualified_repo}'  "
-                            "(enterprise dep on this marketplace)\n"
-                            f"  - 'github.com/{_risk.bare_repo_field}'  "
-                            "(declared cross-host dep on public github.com)"
-                        )
+                            f" is ambiguous. Host-qualify the plugin `repo` "
+                            f"field in marketplace.json to one of:",
+                            f"  - '{_risk.suggested_qualified_repo}' "
+                            f"(enterprise dep on this marketplace)",
+                            f"  - 'github.com/{_risk.bare_repo_field}' "
+                            f"(declared cross-host dep on public github.com)",
+                        ]
+                        reason = "\n".join(reason_lines)
                         invalid_outcomes.append((package, reason))
                         if logger:
                             logger.validation_fail(package, reason)
