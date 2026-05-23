@@ -10,6 +10,7 @@ import toml
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_success, _rich_warning
+from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import MCPClientAdapter
 
 _log = logging.getLogger(__name__)
@@ -422,6 +423,15 @@ class CodexClientAdapter(MCPClientAdapter):
                                 str(additional_value), resolved_env, runtime_vars
                             )
                             processed.append(processed_value)
+                elif not arg_type and "value_hint" in arg:
+                    # v0.1 registry format: shared helper handles is_required
+                    # guard and {var_name} placeholder substitution.
+                    value = process_v01_value_hint_arg(arg, runtime_vars)
+                    if value:
+                        processed_value = self._resolve_variable_placeholders(
+                            value, resolved_env, runtime_vars
+                        )
+                        processed.append(processed_value)
             elif isinstance(arg, str):
                 # Already a string, use as-is but resolve variable placeholders
                 processed_value = self._resolve_variable_placeholders(

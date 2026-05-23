@@ -18,6 +18,7 @@ from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
 from ...utils.github_host import is_github_hostname
+from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import (
     _ENV_PLACEHOLDER_RE,
     _ENV_VAR_RE,
@@ -982,6 +983,15 @@ class CopilotClientAdapter(MCPClientAdapter):
                                 str(value), resolved_env, runtime_vars
                             )
                             processed.append(processed_value)
+                elif not arg_type and "value_hint" in arg:
+                    # v0.1 registry format: shared helper handles is_required
+                    # guard and {var_name} placeholder substitution.
+                    value = process_v01_value_hint_arg(arg, runtime_vars)
+                    if value:
+                        processed_value = self._resolve_variable_placeholders(
+                            value, resolved_env, runtime_vars
+                        )
+                        processed.append(processed_value)
             elif isinstance(arg, str):
                 # Already a string, use as-is but resolve variable placeholders
                 processed_value = self._resolve_variable_placeholders(
