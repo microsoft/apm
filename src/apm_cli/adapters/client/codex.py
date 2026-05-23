@@ -422,6 +422,21 @@ class CodexClientAdapter(MCPClientAdapter):
                                 str(additional_value), resolved_env, runtime_vars
                             )
                             processed.append(processed_value)
+                elif not arg_type and "value_hint" in arg:
+                    # v0.1 registry format: value_hint with optional variables dict
+                    value = arg["value_hint"]
+                    if "variables" in arg:
+                        for var_name in arg["variables"]:
+                            if runtime_vars and var_name in runtime_vars:
+                                replacement = runtime_vars[var_name]
+                            else:
+                                replacement = f"${{{var_name}}}"
+                            value = value.replace(f"{{{var_name}}}", replacement)
+                    if value:
+                        processed_value = self._resolve_variable_placeholders(
+                            str(value), resolved_env, runtime_vars
+                        )
+                        processed.append(processed_value)
             elif isinstance(arg, str):
                 # Already a string, use as-is but resolve variable placeholders
                 processed_value = self._resolve_variable_placeholders(
