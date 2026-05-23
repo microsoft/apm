@@ -124,6 +124,33 @@ class TestCopilotProcessArgumentsV01Variables(unittest.TestCase):
         self.assertEqual(result[6], "/workspace")
         self.assertEqual(result[7], "ghcr.io/example/playwright-mcp:1.2.3")
 
+    def test_legacy_optional_hint_skipped(self):
+        """Legacy entries with is_required: False must not be appended."""
+        adapter = self._adapter()
+        args = [
+            {"value_hint": "--optional-flag", "is_required": False},
+            {"value_hint": "required-arg"},
+        ]
+        result = adapter._process_arguments(args, resolved_env={}, runtime_vars={})
+        self.assertEqual(result, ["required-arg"])
+        self.assertNotIn("--optional-flag", result)
+
+    def test_legacy_optional_hint_with_variables_skipped(self):
+        """Legacy entries with is_required: False and a variables dict are skipped."""
+        adapter = self._adapter()
+        args = [
+            {
+                "value_hint": "{optionalPath}:/data",
+                "is_required": False,
+                "variables": {
+                    "optionalPath": {"description": "Optional mount", "is_required": False}
+                },
+            },
+            {"value_hint": "required-arg"},
+        ]
+        result = adapter._process_arguments(args, resolved_env={}, runtime_vars={})
+        self.assertEqual(result, ["required-arg"])
+
 
 # ---------------------------------------------------------------------------
 # Codex adapter
@@ -179,6 +206,33 @@ class TestCodexProcessArgumentsV01Variables(unittest.TestCase):
         self.assertEqual(len(result), 8)
         self.assertEqual(result[0], "run")
         self.assertEqual(result[4], "/ws:/workspace")
+
+    def test_legacy_optional_hint_skipped(self):
+        """Legacy entries with is_required: False must not be appended."""
+        adapter = self._adapter()
+        args = [
+            {"value_hint": "--optional-flag", "is_required": False},
+            {"value_hint": "required-arg"},
+        ]
+        result = adapter._process_arguments(args, resolved_env={}, runtime_vars={})
+        self.assertEqual(result, ["required-arg"])
+        self.assertNotIn("--optional-flag", result)
+
+    def test_legacy_optional_hint_with_variables_skipped(self):
+        """Legacy entries with is_required: False and a variables dict are skipped."""
+        adapter = self._adapter()
+        args = [
+            {
+                "value_hint": "{optionalPath}:/data",
+                "is_required": False,
+                "variables": {
+                    "optionalPath": {"description": "Optional mount", "is_required": False}
+                },
+            },
+            {"value_hint": "required-arg"},
+        ]
+        result = adapter._process_arguments(args, resolved_env={}, runtime_vars={})
+        self.assertEqual(result, ["required-arg"])
 
 
 if __name__ == "__main__":
