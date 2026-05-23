@@ -54,16 +54,15 @@ class TestCanonicalDependencyString:
         dep = DependencyReference.parse("owner/repo#v1.0.0")
         assert dep.get_canonical_dependency_string() == "owner/repo"
 
-    def test_regular_github_package_with_alias_shorthand_removed(self):
-        """Shorthand @alias syntax is no longer supported."""
-        with pytest.raises(ValueError):
+    def test_regular_github_package_alias_rejected(self):
+        """Shorthand @alias syntax is rejected with a migration error."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
             DependencyReference.parse("owner/repo@myalias")
 
-    def test_regular_github_package_with_reference_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias — @ is no longer parsed as alias separator."""
-        dep = DependencyReference.parse("owner/repo#main@myalias")
-        assert dep.reference == "main@myalias"
-        assert dep.alias is None
+    def test_regular_github_package_with_reference_and_alias_rejected(self):
+        """Shorthand #ref@alias is rejected at parse time with a migration error."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo#main@myalias")
 
     def test_virtual_file_package(self):
         """Virtual file includes full path."""

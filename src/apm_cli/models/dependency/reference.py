@@ -417,6 +417,32 @@ class DependencyReference:
         return result
 
     @staticmethod
+    def _reject_shorthand_alias(dependency_str: str) -> None:
+        """Reject bare-shorthand ``@alias`` with an actionable migration error.
+
+        Bare ``@alias`` is not part of the supported reference grammar (#340
+        retired the ``@`` separator to avoid the npm/go/cargo ``@version``
+        collision). The dedicated SSH parsers extract ``@alias`` from
+        ``ssh://`` URLs and SCP shorthand (``<user>@host:path``); this guard
+        fires for the remaining cases like ``owner/repo[/sub][#ref]@alias``,
+        which would otherwise silently leak the alias into ``virtual_path``
+        or ``reference``.
+        """
+        stripped = dependency_str.strip()
+        if "@" not in stripped:
+            return
+        if stripped.lower().startswith(("https://", "http://", "ssh://")):
+            return
+        if SCP_LIKE_RE.match(stripped):
+            return
+        raise ValueError(
+            f"Shorthand '@alias' is not supported in '{dependency_str}'. "
+            f"Use the object form with an 'alias:' field to install a "
+            f"dependency under a custom directory name. "
+            f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
+        )
+
+    @staticmethod
     def _parse_ssh_protocol_url(url: str):
         """Parse an ``ssh://`` protocol URL using ``urllib.parse.urlparse``.
 
@@ -1398,8 +1424,6 @@ class DependencyReference:
         - user/repo#v1.0.0
         - user/repo#commit_sha
         - github.com/user/repo#ref
-        - user/repo@alias
-        - user/repo#ref@alias
         - user/repo/path/to/file.prompt.md (virtual file package)
         - user/repo/skills/foo (virtual subdirectory package)
         - user/repo/collections/foo (virtual subdirectory package)
@@ -1455,6 +1479,8 @@ class DependencyReference:
             raise ValueError(
                 unsupported_host_error("//...", context="Protocol-relative URLs are not supported")
             )
+
+        cls._reject_shorthand_alias(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 

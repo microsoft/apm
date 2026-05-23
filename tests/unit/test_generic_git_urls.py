@@ -624,17 +624,20 @@ class TestNestedGroupSupport:
         assert dep.reference == "v2.0"
         assert dep.is_virtual is False
 
-    def test_nested_group_with_alias_shorthand_removed(self):
-        """Shorthand @alias on nested groups is no longer supported."""
-        with pytest.raises(ValueError):
+    def test_nested_group_alias_rejected(self):
+        """Shorthand @alias on nested groups is rejected."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
             DependencyReference.parse("gitlab.com/group/subgroup/repo@my-alias")
 
-    def test_nested_group_with_ref_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias on nested groups — @ is no longer parsed as alias separator."""
-        dep = DependencyReference.parse("gitlab.com/group/subgroup/repo#main@alias")
-        assert dep.repo_url == "group/subgroup/repo"
-        assert dep.reference == "main@alias"
-        assert dep.alias is None
+    def test_nested_group_with_ref_and_alias_rejected(self):
+        """Shorthand #ref@alias on nested groups is rejected at parse time."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("gitlab.com/group/subgroup/repo#main@alias")
+
+    def test_nested_group_with_subpath_and_alias_rejected(self):
+        """Subpath + alias under a nested group is rejected (silent-miscoercion bug fix)."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("gitlab.com/group/subgroup/repo/skills/foo@my-alias")
 
     # --- SSH URLs ---
 
