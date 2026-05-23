@@ -563,9 +563,8 @@ class AgentsCompiler:
                 ensure_path_within(claude_rules_dir, self.base_dir)
             except PathTraversalError:
                 self._log(
-                    "progress",
+                    "warning",
                     ".claude/rules/ is a symlink outside the project root -- ignoring",
-                    symbol="warning",
                 )
             else:
                 if any(claude_rules_dir.glob("*.md")):

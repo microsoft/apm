@@ -67,6 +67,7 @@ def project_with_instruction():
         yield proj
 
 
+@pytest.mark.integration
 def test_install_then_compile_skips_duplicated_instructions(project_with_instruction):
     """After install populates .claude/rules/, compile must drop the
     instructions section from CLAUDE.md. Pre-PR-#1146 the section was
@@ -104,6 +105,7 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
         )
 
 
+@pytest.mark.integration
 def test_compile_alone_then_compile_again_skips_on_second_run(project_with_instruction):
     """`apm compile` itself also writes per-file rules into
     ``.claude/rules/``; running it twice must trigger the dedup on the
