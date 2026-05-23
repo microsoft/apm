@@ -875,24 +875,17 @@ def run_dependency_policy_checks(
         if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
             return result
 
-    # -- Target / compilation checks (11-13) -----------------------
-    # Skipped when effective_target is None -- those run in a separate
-    # post-targets call (W2-target-aware).
+    # -- Target / compilation + manifest tail checks ----------------
+    # Collect applicable tail checks, then run in a single loop so
+    # the function stays within the max-returns threshold.
+    tail_checks: list[CheckResult] = []
     if effective_target is not None:
-        # Build a minimal raw_yml dict so _check_compilation_target
-        # sees the effective (possibly CLI-overridden) target value
-        # rather than what is literally on disk.
         synthetic_yml = {"target": effective_target}
-        if _run(_check_compilation_target(synthetic_yml, policy.compilation)):
-            return result
-
-    # -- Manifest-level explicit-includes check --------------------
-    # Only run when the caller supplied the manifest includes value.
-    # Dep-only seams that lack manifest context (legacy callers) skip
-    # this check; the install pipeline and ``apm audit`` wrappers both
-    # supply it.
+        tail_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
-        if _run(_check_includes_explicit(manifest_includes, policy.manifest)):
+        tail_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
+    for check in tail_checks:
+        if _run(check):
             return result
 
     # NOTE: compilation strategy, source attribution, manifest fields,

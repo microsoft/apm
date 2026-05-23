@@ -34,9 +34,7 @@ def _call(**overrides) -> None:
         global_=False,
         only=None,
         update=False,
-        use_ssh=False,
-        use_https=False,
-        allow_protocol_fallback=False,
+        any_transport_flag=False,
         registry_url=None,
     )
     defaults.update(overrides)
@@ -201,18 +199,18 @@ class TestE3OnlyApmConflictsWithMcp:
 class TestE4TransportSelectionFlags:
     def test_use_ssh_raises(self) -> None:
         with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(use_ssh=True)
+            _call(any_transport_flag=True)
 
     def test_use_https_raises(self) -> None:
         with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(use_https=True)
+            _call(any_transport_flag=True)
 
     def test_allow_protocol_fallback_raises(self) -> None:
         with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(allow_protocol_fallback=True)
+            _call(any_transport_flag=True)
 
     def test_none_set_ok(self) -> None:
-        _call(use_ssh=False, use_https=False, allow_protocol_fallback=False)
+        _call(any_transport_flag=False)
 
 
 # ---------------------------------------------------------------------------

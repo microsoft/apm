@@ -796,7 +796,6 @@ def _handle_mcp_install(
     runtime,
     exclude,
     verbose,
-    dry_run,
     logger,
     no_policy,
     validated_registry_url,
@@ -852,14 +851,14 @@ def _handle_mcp_install(
             mcp_deps=[_preflight_dep],
             no_policy=no_policy,
             logger=logger,
-            dry_run=dry_run,
+            dry_run=logger.dry_run,
         )
     except PolicyBlockError:
         # Diagnostics already emitted by the helper + logger.
         logger.render_summary()
         sys.exit(1)
 
-    if dry_run:
+    if logger.dry_run:
         # C1: validate eagerly so dry-run rejects what real install would.
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -885,9 +884,7 @@ def _handle_mcp_install(
         force=force,
         runtime=runtime,
         exclude=exclude,
-        verbose=verbose,
         logger=logger,
-        manifest_path=mcp_manifest_path,
         apm_dir=mcp_apm_dir,
         scope=mcp_scope,
         registry_url=validated_registry_url,
@@ -1326,9 +1323,7 @@ def install(  # noqa: PLR0913
             global_=global_,
             only=only,
             update=update,
-            use_ssh=use_ssh,
-            use_https=use_https,
-            allow_protocol_fallback=allow_protocol_fallback,
+            any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
             registry_url=validated_registry_url,
         )
 
@@ -1354,7 +1349,6 @@ def install(  # noqa: PLR0913
                 runtime=runtime,
                 exclude=exclude,
                 verbose=verbose,
-                dry_run=dry_run,
                 logger=logger,
                 no_policy=no_policy,
                 validated_registry_url=validated_registry_url,
