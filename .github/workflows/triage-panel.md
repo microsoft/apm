@@ -208,8 +208,9 @@ safe-outputs:
 # assign-milestone, dispatch-workflow) cause gh-aw's DIFC policy to
 # elevate the minimum integrity for MCP reads to HIGH. Issues filed by
 # external contributors (non-org-members) are assigned LOW integrity,
-# so search_issues and get_issue silently drop them -- making the
-# triage panel blind to the exact issues it exists to triage.
+# so search_issues silently drops them while get_issue fails with
+# McpError: MCP error 0: [Filtered] -- making the triage panel blind
+# to the exact issues it exists to triage.
 #
 # Setting read-integrity to `low` restores visibility of all public
 # issues regardless of author affiliation. This is safe because:
@@ -510,9 +511,8 @@ safe-output tools. Required label-set hygiene per issue:
   added at least one `theme/*` label in this run, you MUST also call
   `dispatch_workflow` with `workflow_name: "project-sync"` and inputs
   `{"content_id": "<issue node id>"}` -- where `<issue node id>` is
-  the `id` field returned by `gh issue list --json id` / `gh issue
-  view --json id` (it looks like `I_kwDO...`, NOT the integer issue
-  number). This triggers the PGS project board sync for that issue.
+  the `id` field from the MCP `search_issues` or `get_issue` response
+  (it looks like `I_kwDO...`, NOT the integer issue number). This triggers the PGS project board sync for that issue.
   It is required because gh-aw applies `add-labels` under
   `GITHUB_TOKEN`, and GitHub does NOT fire downstream workflow events
   from `GITHUB_TOKEN`-driven label changes -- so without this dispatch
