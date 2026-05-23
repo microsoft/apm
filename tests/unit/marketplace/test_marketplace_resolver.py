@@ -1152,6 +1152,35 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_cross_repo_qualified_to_github_com_no_risk(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        """#1326 cross-host explicit qualification: ``repo: github.com/owner/repo``
+        on a ``*.ghe.com`` marketplace is declared cross-host intent, NOT a
+        dependency-confusion ambiguity. The sentinel must not attach
+        (otherwise the install gate would refuse a legitimate cross-host
+        dependency the operator explicitly declared).
+
+        The same-host idempotency path in ``_needs_canonical_host_prefix``
+        only handles ``repo: corp.ghe.com/owner/repo``; this case is the
+        symmetric escape hatch for cross-host intent at the resolver layer.
+        """
+        plugin = MarketplacePlugin(
+            name="cross-host",
+            source={
+                "type": "github",
+                "repo": "github.com/platform-team/shared-tool",
+                "path": "plugins/cross-host",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("cross-host", "my-marketplace")
+        assert result.cross_repo_misconfig_risk is None
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
     def test_cross_repo_url_form_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """Full ``https://`` URL carries its own host; hint inapplicable."""
         plugin = MarketplacePlugin(

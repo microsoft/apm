@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **BREAKING:** `apm install` against a `*.ghe.com` marketplace now refuses bare cross-repo `repo:` fields in `marketplace.json` before any outbound validation HTTP runs, closing a dependency-confusion vector where an attacker pre-staging the bare namespace on public `github.com` would have the install silently resolve at attacker content. Marketplace authors must host-qualify cross-repo sources: `repo: github.com/owner/repo` for a declared `github.com` open-source dep, or `repo: corp.ghe.com/owner/repo` for an enterprise dep. The earlier `#1305` advisory-hint-on-failure design covered only the failure path; the success path (attacker namespace exists) is now fail-closed at the install boundary. (closes #1326)
+
 ### Fixed
 
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)

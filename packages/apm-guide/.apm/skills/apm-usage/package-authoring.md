@@ -351,6 +351,36 @@ Schema rules:
   checks that `version:` is present). Omit entirely to skip the gate.
 - Unknown keys raise a schema error -- do not invent fields.
 
+### Cross-repo plugin sources on enterprise marketplaces
+
+When a marketplace published on a `*.ghe.com` host references a plugin
+in a different repo via dict-form `source: {type: github, repo: ...}`,
+the `repo:` field **must be host-qualified**. A bare `owner/repo` form
+is refused at install time because it cannot be disambiguated from a
+public-github.com dependency-confusion attempt (see CHANGELOG entry
+for #1326). Two valid forms:
+
+```yaml
+plugins:
+  - name: shared-tool
+    source:
+      type: github
+      # Enterprise dep (most common): host-qualify to the marketplace host
+      repo: corp.ghe.com/platform-team/shared-tool
+      path: plugins/shared
+
+  - name: opensource-helper
+    source:
+      type: github
+      # Declared cross-host dep: host-qualify to github.com explicitly
+      repo: github.com/opensource-org/helper
+      path: plugins/helper
+```
+
+In-marketplace plugins (`source: ./...` or `source: owner/marketplace-repo`
+when it matches the marketplace project) are unaffected -- the resolver
+backfills the host automatically.
+
 ### Build semantics
 
 `apm pack` runs `git ls-remote` against each remote plugin source, picks the

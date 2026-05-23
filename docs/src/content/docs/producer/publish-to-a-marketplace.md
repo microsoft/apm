@@ -220,6 +220,14 @@ consumers running `apm install --update` on their own cadence.
 - **No `versions[]` array.** Each compiled package carries one
   resolved ref -- the highest tag matching the range at build time.
   Re-run `apm pack` and re-tag to publish a new version.
+- **Bare cross-repo `repo:` on enterprise (`*.ghe.com`) marketplaces is
+  refused at install time.** Dict-form plugin sources that point to a
+  different repo than the marketplace project must host-qualify the
+  `repo:` field -- `repo: corp.ghe.com/owner/repo` for an enterprise dep
+  or `repo: github.com/owner/repo` for a declared cross-host dep. A bare
+  `owner/repo` cannot be disambiguated from a dependency-confusion
+  attempt where an attacker pre-stages the namespace on public
+  `github.com`, so the install command fail-closes before validating.
 
 ## Governance
 

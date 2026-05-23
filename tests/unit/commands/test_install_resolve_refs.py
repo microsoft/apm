@@ -283,15 +283,20 @@ class TestResolvePackageReferencesGitLabDirectShorthandPersistence:
 
 
 # ---------------------------------------------------------------------------
-# #1305 -- cross-repo bare-on-enterprise hint surfaces on validation failure
+# #1326 -- cross-repo bare-on-enterprise fail-closed gate (dependency confusion)
 # ---------------------------------------------------------------------------
 
 
-class TestResolvePackageReferencesCrossRepoMisconfigHint:
+class TestResolvePackageReferencesCrossRepoFailClosed:
     """When a marketplace resolution attaches a ``CrossRepoMisconfigRisk``
-    sentinel and the package later fails validation, an actionable hint must
-    be emitted via the logger. The legitimate cross-host path validates
-    successfully and never reaches the hint branch."""
+    sentinel the install command must refuse the package immediately --
+    before any outbound validation HTTP probe -- and surface a reason
+    string naming both qualification escape hatches. This is the
+    dependency-confusion gate (#1326): the same syntactic ambiguity an
+    attacker would exploit by pre-staging the bare namespace on public
+    github.com is rejected at the install boundary rather than silently
+    resolved against attacker content.
+    """
 
     @staticmethod
     def _resolution_with_risk():
@@ -336,75 +341,26 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             cross_repo_misconfig_risk=None,
         )
 
-    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
-    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
-    @patch("apm_cli.marketplace.resolver.parse_marketplace_ref")
-    @patch("apm_cli.commands.install.DependencyReference")
-    def test_hint_emitted_on_validation_failure_with_risk(
-        self,
-        mock_dep_cls,
-        mock_parse_ref,
-        mock_resolve_mkt,
-        mock_validate,
-    ):
-        """Risk-bearing resolution that fails validation emits the hint."""
-        mock_parse_ref.return_value = ("shared-tool", "my-marketplace", None)
-        mock_resolve_mkt.return_value = self._resolution_with_risk()
-        ref = _make_dep_ref(
-            "platform-team/shared-tool/plugins/shared",
-            "github.com/platform-team/shared-tool/plugins/shared",
-        )
-        mock_dep_cls.parse.return_value = ref
-        mock_dep_cls.is_local_path.return_value = False
-        _disable_gitlab_direct_probe(mock_dep_cls)
-
-        logger = MagicMock()
-        logger.verbose = False
-
-        _resolve_package_references(
-            ["shared-tool@my-marketplace"],
-            [],
-            set(),
-            logger=logger,
-        )
-
-        # The hint must be emitted exactly once via ``logger.warning``
-        # (PR #1292 panel review's explicit guidance for this follow-up).
-        # Assertions are anchored to the surrounding prose so a CodeQL
-        # "incomplete URL substring sanitization" pattern recognizer does
-        # not flag a bare hostname substring check in this test file.
-        warn_calls = list(logger.warning.call_args_list)
-        assert len(warn_calls) == 1
-        # ``info`` must NOT be used for the hint (the original PR shipped
-        # ``logger.info`` and was caught by the 3-persona panel convergence).
-        assert logger.info.call_args_list == []
-        emitted = warn_calls[0].args[0]
-        # Hint identifies the plugin@marketplace and both intent branches.
-        assert "'shared-tool@my-marketplace'" in emitted
-        assert "registered on 'corp.ghe.com'" in emitted
-        assert "`repo: platform-team/shared-tool`" in emitted
-        assert "'corp.ghe.com/platform-team/shared-tool'" in emitted
-        # Second clause acknowledges the legitimate-cross-host path so a
-        # transient-failure on a real github.com dep is not misdirected.
-        assert "intentionally a github.com dependency" in emitted
-        # Stale ``Hint:`` prefix from the original PR must not return; the
-        # warning symbol carries the advisory signal on its own.
-        assert "Hint:" not in emitted
-
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
     @patch("apm_cli.marketplace.resolver.parse_marketplace_ref")
     @patch("apm_cli.commands.install.DependencyReference")
-    def test_hint_not_emitted_when_validation_passes_even_with_risk(
+    def test_install_refused_when_risk_present_validate_never_called(
         self,
         mock_dep_cls,
         mock_parse_ref,
         mock_resolve_mkt,
         mock_validate,
     ):
-        """The legitimate cross-host path (validation succeeds) must NOT
-        emit the hint -- this is the entire reason the hint lives at the
-        failure boundary instead of at resolver time."""
+        """Risk-bearing resolution rejects the package before validation.
+
+        The mock for ``_validate_package_exists`` is configured to return
+        True -- modelling the attack precondition (attacker has pre-staged
+        the bare namespace on public github.com so the validator would
+        succeed). The gate must fire pre-validation so the mock is never
+        called: no probe to the attacker URL, no information leak, no
+        attacker content downloaded.
+        """
         mock_parse_ref.return_value = ("shared-tool", "my-marketplace", None)
         mock_resolve_mkt.return_value = self._resolution_with_risk()
         ref = _make_dep_ref(
@@ -418,28 +374,49 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
         logger = MagicMock()
         logger.verbose = False
 
-        _resolve_package_references(
+        result = _resolve_package_references(
             ["shared-tool@my-marketplace"],
             [],
             set(),
             logger=logger,
         )
 
-        assert logger.warning.call_args_list == []
+        # Gate fires pre-validation -- no HTTP probe to attacker URL.
+        assert mock_validate.call_count == 0
+        # Package landed in invalid_outcomes with a refusal reason that
+        # names both qualification escape hatches.
+        valid_outcomes, invalid_outcomes = result[0], result[1]
+        assert valid_outcomes == []
+        assert len(invalid_outcomes) == 1
+        rejected, reason = invalid_outcomes[0]
+        assert rejected == "shared-tool@my-marketplace"
+        # Reason carries enterprise host, both qualified forms, and the
+        # issue reference for grep-ability. Host substrings are anchored
+        # with surrounding quote/backtick characters so CodeQL's
+        # ``py/incomplete-url-substring-sanitization`` does not flag bare
+        # host-name membership checks (see tests/**/CLAUDE.md).
+        assert "'corp.ghe.com'" in reason
+        assert "`repo: platform-team/shared-tool`" in reason
+        assert "'corp.ghe.com/platform-team/shared-tool'" in reason
+        assert "'github.com/platform-team/shared-tool'" in reason
+        assert "#1326" in reason
+        # ``validation_fail`` is the user-visible surface (not ``warning``);
+        # the refusal IS the failure, not a hint on top of one.
+        assert logger.validation_fail.call_count == 1
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
     @patch("apm_cli.marketplace.resolver.parse_marketplace_ref")
     @patch("apm_cli.commands.install.DependencyReference")
-    def test_no_hint_when_resolution_has_no_risk(
+    def test_install_proceeds_when_no_risk_attached(
         self,
         mock_dep_cls,
         mock_parse_ref,
         mock_resolve_mkt,
         mock_validate,
     ):
-        """In-marketplace / non-enterprise resolutions carry no risk
-        sentinel; validation-fail must NOT print a hint."""
+        """In-marketplace / non-enterprise resolutions carry no sentinel;
+        the gate is dormant and the normal validate path runs."""
         mock_parse_ref.return_value = ("shared-tool", "my-marketplace", None)
         mock_resolve_mkt.return_value = self._resolution_without_risk()
         ref = _make_dep_ref(
@@ -460,18 +437,20 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             logger=logger,
         )
 
-        assert logger.warning.call_args_list == []
+        # No sentinel = gate dormant = validate runs as normal.
+        assert mock_validate.call_count == 1
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     @patch("apm_cli.commands.install.DependencyReference")
-    def test_no_hint_for_plain_owner_repo_failure(
+    def test_no_gate_for_plain_owner_repo(
         self,
         mock_dep_cls,
         mock_validate,
     ):
-        """A bare ``owner/repo`` (no marketplace) that fails validation
-        must NOT trigger the hint -- the risk map is only populated by
-        marketplace resolutions."""
+        """A bare ``owner/repo`` (no marketplace) bypasses marketplace
+        resolution entirely -- the sentinel is only emitted by
+        ``resolve_marketplace_plugin``, so the gate cannot fire for direct
+        deps. Validation proceeds normally even though it then fails."""
         ref = _make_dep_ref(
             "platform-team/shared-tool",
             "github.com/platform-team/shared-tool",
@@ -490,4 +469,5 @@ class TestResolvePackageReferencesCrossRepoMisconfigHint:
             logger=logger,
         )
 
-        assert logger.warning.call_args_list == []
+        # Validate is called (gate not engaged for non-marketplace deps).
+        assert mock_validate.call_count == 1

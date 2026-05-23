@@ -32,7 +32,11 @@ from dataclasses import dataclass
 from urllib.parse import quote, urlparse
 
 from ..models.dependency.reference import DependencyReference
-from ..utils.github_host import is_azure_devops_hostname, is_github_hostname
+from ..utils.github_host import (
+    is_azure_devops_hostname,
+    is_github_hostname,
+    is_supported_git_host,
+)
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from .client import fetch_or_cache
 from .errors import PluginNotFoundError
@@ -50,7 +54,9 @@ _SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
 @dataclass(frozen=True)
 class CrossRepoMisconfigRisk:
     """Signal that a cross-repo dict ``type: github`` source on an enterprise
-    GitHub-family marketplace resolved to a bare canonical (#1305).
+    GitHub-family marketplace declares a bare ``owner/repo`` whose canonical
+    falls back to ``github.com`` -- the same syntactic ambiguity that powers
+    a dependency-confusion attack (#1326, formerly diagnosed only as #1305).
 
     Attached to :class:`MarketplacePluginResolution` when the marketplace is on
     ``*.ghe.com`` and the plugin's dict source declares a bare ``owner/repo``
@@ -60,9 +66,18 @@ class CrossRepoMisconfigRisk:
     to ``github.com``. Two intents share this syntax -- a legitimate cross-host
     ``github.com`` open-source dep, or a misconfigured same-host entry that
     should have been ``corp.ghe.com/owner/repo`` -- and the resolver cannot
-    distinguish them. The install command consults this sentinel when the
-    package fails validation so an actionable hint surfaces only at the
-    failure boundary, never on the legitimate path.
+    distinguish them.
+
+    Consumer contract (#1326): the install command consults this sentinel
+    BEFORE any outbound validation HTTP call and refuses the package
+    fail-closed when it is non-``None``. The earlier #1305 design surfaced
+    only an advisory hint on validation failure, which left the success
+    path (attacker pre-stages the bare namespace on public github.com)
+    silently exploitable. Cross-host explicit qualification by the
+    marketplace author -- ``repo: github.com/owner/repo`` -- prevents
+    the sentinel from attaching at the resolver layer (see
+    :func:`_compute_cross_repo_misconfig_risk`), which is the supported
+    escape hatch for declared cross-host intent.
     """
 
     marketplace_host: str
@@ -80,9 +95,10 @@ class MarketplacePluginResolution:
     subdirectory plugins), install logic should prefer it over
     :meth:`~apm_cli.models.dependency.reference.DependencyReference.parse`
     on :attr:`canonical` to avoid mis-parsing nested paths as GitLab project segments.
-    :attr:`cross_repo_misconfig_risk` is non-``None`` only for the #1305
-    cross-repo bare-on-enterprise pattern; consumers emit it as a hint when the
-    package subsequently fails validation.
+    :attr:`cross_repo_misconfig_risk` is non-``None`` only for the
+    cross-repo bare-on-enterprise pattern (#1305 / #1326); the install
+    command consumes it as a pre-validation fail-closed signal so a
+    dependency-confusion attempt cannot reach an outbound HTTP probe.
     """
 
     canonical: str
@@ -289,6 +305,18 @@ def _compute_cross_repo_misconfig_risk(
         return None
     bare = repo_field.strip().lstrip("/")
     if "/" not in bare:
+        return None
+    # #1326: an already-host-qualified `repo:` field declares explicit intent
+    # (e.g. ``repo: github.com/owner/repo`` on a ``*.ghe.com`` marketplace is
+    # an unambiguous declared cross-host dependency). Only the truly-bare
+    # ``owner/repo`` form is the dependency-confusion vector this sentinel
+    # flags. ``_needs_canonical_host_prefix`` above already returns False
+    # for SAME-host qualification (its idempotency clause); this is the
+    # symmetric guard for CROSS-host explicit qualification, which the
+    # idempotency check cannot detect because the canonical starts with a
+    # different host than ``source.host``.
+    first_segment = bare.split("/", 1)[0]
+    if is_supported_git_host(first_segment):
         return None
     return CrossRepoMisconfigRisk(
         marketplace_host=source.host,

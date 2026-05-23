@@ -352,13 +352,6 @@ def _resolve_package_references(
     invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
-    # #1305: canonical -> (marketplace_name, plugin_name, CrossRepoMisconfigRisk)
-    # for cross-repo dict ``type: github`` sources on enterprise marketplaces
-    # whose bare ``repo`` would mis-route auth at ``github.com``. Recorded
-    # before validation runs so the validation-fail branch can emit an
-    # actionable hint -- ``_marketplace_provenance`` is only written on
-    # validation success and cannot be relied on at the failure boundary.
-    _misconfig_risks = {}
     validated_packages = []
     dependencies_changed = False
 
@@ -407,19 +400,48 @@ def _resolve_package_references(
                     canonical_str, _resolved_plugin = resolution
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
+                    # #1326: dependency-confusion fail-closed gate.
+                    # When the resolver attaches ``CrossRepoMisconfigRisk``,
+                    # the marketplace declared a bare ``owner/repo`` on a
+                    # ``*.ghe.com`` host and the canonical falls back to
+                    # ``github.com`` -- the same syntactic form that an
+                    # attacker pre-staging the namespace on public github.com
+                    # would exploit. Refuse before any outbound validation so
+                    # no probe reaches the potentially-attacker-controlled
+                    # URL (information leak + RCE both shut at one boundary).
+                    # Escape hatch: marketplace.json author host-qualifies
+                    # ``repo:`` (either to the enterprise host for same-host
+                    # intent or to github.com for declared cross-host intent).
+                    # That prevents the sentinel from attaching at resolver
+                    # layer -- no new flag, env var, or schema field needed.
+                    _risk = getattr(resolution, "cross_repo_misconfig_risk", None)
+                    if _risk is not None:
+                        # Multi-line reason: the two qualification options
+                        # are alternatives, not a single instruction, so
+                        # they read clearer as separate bullets under a
+                        # short lead-in. ``validation_fail`` prepends the
+                        # package name; the body below is the remediation.
+                        reason = (
+                            "refused (dependency-confusion risk #1326): "
+                            f"bare `repo: {_risk.bare_repo_field}` on "
+                            f"enterprise marketplace '{_risk.marketplace_host}'"
+                            " is ambiguous. Host-qualify the plugin `repo` "
+                            "field in marketplace.json to one of:\n"
+                            f"  - '{_risk.suggested_qualified_repo}'  "
+                            "(enterprise dep on this marketplace)\n"
+                            f"  - 'github.com/{_risk.bare_repo_field}'  "
+                            "(declared cross-host dep on public github.com)"
+                        )
+                        invalid_outcomes.append((package, reason))
+                        if logger:
+                            logger.validation_fail(package, reason)
+                        continue
                     marketplace_provenance = {
                         "discovered_via": marketplace_name,
                         "marketplace_plugin_name": plugin_name,
                     }
                     package = canonical_str
                     marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
-                    _risk = getattr(resolution, "cross_repo_misconfig_risk", None)
-                    if _risk is not None:
-                        _misconfig_risks[canonical_str] = (
-                            marketplace_name,
-                            plugin_name,
-                            _risk,
-                        )
                 except Exception as mkt_err:
                     reason = str(mkt_err)
                     invalid_outcomes.append((package, reason))
@@ -557,34 +579,6 @@ def _resolve_package_references(
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
-            # #1305: when a cross-repo dict ``type: github`` source on an
-            # enterprise marketplace fails validation, the failure is most
-            # likely the silent auth mis-route (bare canonical fell back to
-            # ``github.com``). Surface the host-qualify hint inline so the
-            # operator can correct ``marketplace.json`` without rerunning
-            # under ``--verbose`` to decode the auth trace. ``logger.warning``
-            # is used (not ``info``) per the PR #1292 panel review's explicit
-            # guidance for this exact follow-up: a misconfiguration that
-            # voids ``apm install`` should be at warning level, not buried
-            # in info-level ambient output. The second clause acknowledges
-            # the legitimate cross-host alternative so operators whose
-            # github.com dep failed for a transient reason (rate limit,
-            # network, expired PAT) are not misdirected into adding an
-            # enterprise host prefix that would break a working config.
-            _risk_entry = _misconfig_risks.get(package)
-            if _risk_entry is not None and logger:
-                _mp_name, _plugin_name, _risk = _risk_entry
-                logger.warning(
-                    f"'{_plugin_name}@{_mp_name}' is registered on "
-                    f"'{_risk.marketplace_host}' but the plugin's bare "
-                    f"`repo: {_risk.bare_repo_field}` resolved to "
-                    "'github.com'. If you meant the enterprise host, set "
-                    "the plugin's `repo` field to "
-                    f"'{_risk.suggested_qualified_repo}' in marketplace.json. "
-                    "If this is intentionally a github.com dependency, "
-                    "verify your github.com credentials and that the "
-                    "repository is accessible."
-                )
 
     return (
         valid_outcomes,
