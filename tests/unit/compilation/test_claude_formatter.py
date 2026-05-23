@@ -1,8 +1,10 @@
 """Unit tests for ClaudeFormatter - CLAUDE.md generation."""
 
+import pathlib
 import shutil
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -37,6 +39,23 @@ class TestClaudeFormatterInit:
         """Test initialization with relative path."""
         formatter = ClaudeFormatter(".")
         assert formatter.base_dir.is_absolute()
+
+    def test_init_falls_back_to_absolute_on_oserror(self):
+        """When Path.resolve() raises OSError, __init__ uses absolute() as fallback."""
+        with patch.object(pathlib.Path, "resolve", side_effect=OSError("resolve failed")):
+            formatter = ClaudeFormatter(".")
+        # base_dir must be absolute regardless of which code path was taken
+        assert formatter.base_dir.is_absolute()
+        assert formatter.warnings == []
+        assert formatter.errors == []
+
+    def test_init_falls_back_to_absolute_on_filenotfounderror(self):
+        """When Path.resolve() raises FileNotFoundError, __init__ uses absolute() as fallback."""
+        with patch.object(pathlib.Path, "resolve", side_effect=FileNotFoundError("not found")):
+            formatter = ClaudeFormatter(".")
+        assert formatter.base_dir.is_absolute()
+        assert formatter.warnings == []
+        assert formatter.errors == []
 
 
 class TestFormatDistributed:
