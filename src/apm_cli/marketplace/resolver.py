@@ -332,6 +332,12 @@ def _compute_cross_repo_misconfig_risk(
         explicit_host = bare[4:].split(":", 1)[0].strip()
     else:
         explicit_host = bare.split("/", 1)[0]
+    # ``is_supported_git_host`` accepts any valid FQDN, not an allowlist.
+    # This is intentional: the goal is to distinguish "looks like a
+    # hostname" (explicit intent) from "bare owner/repo" (ambiguous).
+    # Restricting to known hosts would silently refuse legitimate
+    # self-hosted Git servers and create a false sense of security --
+    # the real protection is the fail-closed refusal of the bare form.
     if is_supported_git_host(explicit_host):
         return None
     return CrossRepoMisconfigRisk(

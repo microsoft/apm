@@ -9,7 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **BREAKING:** `apm install` against a `*.ghe.com` marketplace now refuses bare cross-repo `repo:` fields in `marketplace.json` before any outbound validation HTTP runs, closing a dependency-confusion vector where an attacker pre-staging the bare namespace on public `github.com` would have the install silently resolve at attacker content. Marketplace authors must host-qualify cross-repo sources: `repo: github.com/owner/repo` for a declared `github.com` open-source dep, or `repo: corp.ghe.com/owner/repo` for an enterprise dep. The earlier `#1305` advisory-hint-on-failure design covered only the failure path; the success path (attacker namespace exists) is now fail-closed at the install boundary. (closes #1326)
+- **BREAKING:** `apm install` against a `*.ghe.com` marketplace now refuses bare cross-repo `repo:` fields in `marketplace.json` before any network request runs, closing a dependency-confusion attack vector. Previously a bare `repo: owner/repo` on an enterprise marketplace could silently resolve to an attacker-controlled namespace on public `github.com`; the install now fail-closes with an actionable error. Qualify the `repo:` field to fix:
+
+  ```yaml
+  # Before (ambiguous -- refused on enterprise marketplaces):
+  source:
+    type: git
+    repo: owner/repo
+
+  # After -- enterprise dep on the same host:
+  source:
+    type: git
+    repo: corp.ghe.com/owner/repo
+
+  # After -- declared cross-host dep on public github.com:
+  source:
+    type: git
+    repo: github.com/owner/repo
+  ```
+
+  (closes #1326) -- by @edenfunf (#1459)
 
 ### Fixed
 

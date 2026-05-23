@@ -221,13 +221,30 @@ consumers running `apm install --update` on their own cadence.
   resolved ref -- the highest tag matching the range at build time.
   Re-run `apm pack` and re-tag to publish a new version.
 - **Bare cross-repo `repo:` on enterprise (`*.ghe.com`) marketplaces is
-  refused at install time.** Dict-form plugin sources that point to a
+  refused at install time.** Dict-form plugin sources (the `source:`
+  mapping with nested `type:` and `repo:` keys) that point to a
   different repo than the marketplace project must host-qualify the
-  `repo:` field -- `repo: corp.ghe.com/owner/repo` for an enterprise dep
-  or `repo: github.com/owner/repo` for a declared cross-host dep. A bare
-  `owner/repo` cannot be disambiguated from a dependency-confusion
-  attempt where an attacker pre-stages the namespace on public
-  `github.com`, so the install command fail-closes before validating.
+  `repo:` field. A bare `owner/repo` cannot be disambiguated from a
+  dependency-confusion attempt where an attacker pre-stages the namespace
+  on public `github.com`, so the install command fail-closes before
+  validating.
+
+  ```yaml
+  # Refused -- ambiguous bare form on enterprise marketplace:
+  source:
+    type: git
+    repo: owner/repo
+
+  # Accepted -- enterprise dep on the same host:
+  source:
+    type: git
+    repo: corp.ghe.com/owner/repo
+
+  # Accepted -- declared cross-host dep on public github.com:
+  source:
+    type: git
+    repo: github.com/owner/repo
+  ```
 
 ## Governance
 

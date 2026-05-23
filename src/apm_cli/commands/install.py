@@ -414,7 +414,7 @@ def _resolve_package_references(
                     # intent or to github.com for declared cross-host intent).
                     # That prevents the sentinel from attaching at resolver
                     # layer -- no new flag, env var, or schema field needed.
-                    _risk = getattr(resolution, "cross_repo_misconfig_risk", None)
+                    _risk = resolution.cross_repo_misconfig_risk
                     if _risk is not None:
                         # Multi-line reason: the two qualification options
                         # are alternatives, not a single instruction, so
