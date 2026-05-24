@@ -128,6 +128,32 @@ jobs:
           APM_BINARY_PATH: ${{ github.workspace }}/dist/apm-linux-x86_64/apm
         run: uv run pytest tests/integration/test_core_smoke.py -v
 
+  scaling-guards:
+    name: Scaling Guards (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # Scaling guards are hermetic, network-free tests that catch
+      # O(n^2) algorithmic regressions by comparing wall-clock ratios
+      # at two input sizes. They run in ~5s and need no binary or
+      # secrets -- parallel with the build job for zero added latency.
+      - name: Run scaling guards
+        run: uv run pytest tests/benchmarks/test_scaling_guards.py -v --tb=short
+
   integration-tests-shard:
     name: Integration Tests Shard ${{ matrix.shard }} (Linux)
     needs: [build, smoke-test]
@@ -202,7 +228,7 @@ jobs:
           # --dist loadgroup is required: it is the only xdist scheduler
           # that honors pytest.mark.xdist_group, which we use to keep
           # HOME-mutating tests serialized on a single worker.
-          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10"
+          PYTEST_EXTRA_ARGS: "--splits 4 --group ${{ matrix.shard }} -n 2 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
@@ -210,15 +236,78 @@ jobs:
         # headroom for the slowest shard (HOME-group tests).
         timeout-minutes: 15
 
+      - name: Rename coverage data for shard
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            mv .coverage .coverage.shard-${{ matrix.shard }}
+          fi
+
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage-shard-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Fan-in job that preserves the gate-required check name
   # "Integration Tests (Linux)". Branch protection / merge-gate.yml
   # require this exact name; shard jobs above are not required directly.
   integration-tests:
     name: Integration Tests (Linux)
-    needs: [integration-tests-shard]
+    needs: [integration-tests-shard, scaling-guards]
     if: always()
     runs-on: ubuntu-24.04
     steps:
+      # Coverage summary runs first (with if: always()) so we get
+      # observability even when some shards fail. The shard-result
+      # gate runs last so it can still fail the job.
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install coverage
+        run: pip install "coverage[toml]"
+
+      - name: Download shard coverage
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: integration-coverage-shard-*
+          path: coverage-shards/
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Combine and summarise coverage
+        if: always()
+        run: |
+          if find coverage-shards -type f -name '.coverage*' 2>/dev/null | grep -q .; then
+            coverage combine coverage-shards/
+            coverage json -o coverage.json
+            python3 scripts/coverage-summary.py coverage.json --title "Integration Test Coverage"
+          else
+            echo "No coverage shard files found; skipping integration coverage summary."
+          fi
+        continue-on-error: true
+
+      # Integration coverage gate -- raise this floor when baseline improves.
+      # Current floor: 55% (actual ~71%, 16pt margin for community PRs).
+      - name: Enforce integration coverage gate
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            coverage report --fail-under=70
+          else
+            echo "ERROR: No combined coverage data -- the 'Combine and summarise coverage' step must produce .coverage before the gate can run."
+            exit 1
+          fi
+
       - name: Aggregate shard results
         run: |
           if [[ "${{ needs.integration-tests-shard.result }}" != "success" ]]; then
@@ -226,6 +315,14 @@ jobs:
             exit 1
           fi
           echo "All integration test shards passed."
+
+      - name: Aggregate scaling-guards result
+        run: |
+          if [[ "${{ needs.scaling-guards.result }}" != "success" ]]; then
+            echo "Scaling guards failed: ${{ needs.scaling-guards.result }}"
+            exit 1
+          fi
+          echo "Scaling guards passed."
 
   release-validation:
     name: Release Validation (Linux)

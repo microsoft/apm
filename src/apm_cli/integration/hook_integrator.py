@@ -51,9 +51,15 @@ from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
+import yaml
+
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.console import _rich_warning
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
@@ -204,24 +210,29 @@ def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
     for event_name, sidecar_entries in sidecar_data.items():
         if event_name not in hooks or not isinstance(sidecar_entries, list):
             continue
-        # Build a consumable pool of (normalised-content, source) pairs.
-        # Each entry is popped on first match so identical content shared
+        # Build a dict keyed by normalised content -> list of sources.
+        # Each source is popped on first match so identical content shared
         # between APM and the user is only claimed once.
-        pool: list[tuple[dict, str]] = []
+        import json
+        from collections import deque
+
+        pool: dict[str, deque[str]] = {}
         for sc_entry in sidecar_entries:
             if isinstance(sc_entry, dict) and "_apm_source" in sc_entry:
                 cmp = {k: v for k, v in sorted(sc_entry.items()) if k != "_apm_source"}
-                pool.append((cmp, sc_entry["_apm_source"]))
+                cmp_key = json.dumps(cmp, sort_keys=True)
+                pool.setdefault(cmp_key, deque()).append(sc_entry["_apm_source"])
 
         for disk_entry in hooks[event_name]:
             if not isinstance(disk_entry, dict) or "_apm_source" in disk_entry:
                 continue
             disk_cmp = {k: v for k, v in sorted(disk_entry.items()) if k != "_apm_source"}
-            for i, (sc_cmp, source) in enumerate(pool):
-                if disk_cmp == sc_cmp:
-                    disk_entry["_apm_source"] = source
-                    pool.pop(i)
-                    break
+            disk_key = json.dumps(disk_cmp, sort_keys=True)
+            sources = pool.get(disk_key)
+            if sources:
+                disk_entry["_apm_source"] = sources.popleft()
+                if not sources:
+                    del pool[disk_key]
 
 
 # Mapping from hook-file stem suffix to the set of target keys that
@@ -441,11 +452,17 @@ class HookIntegrator(BaseIntegrator):
                     else target_rel
                 )
                 new_command = new_command.replace(full_var, resolved_cmd)
-            elif deploy_root is not None:
-                # File absent: resolve to absolute source path so Claude Code
-                # gets a clear "file not found" rather than an unexpanded variable.
+            else:
+                # File absent: always warn so a misconfigured hook is never
+                # silently deployed.  For user-scope (deploy_root set) also
+                # rewrite the unexpanded variable to an absolute source path
+                # so the target surfaces a clear "file not found".  For
+                # project-scope (deploy_root is None) leave the variable in
+                # place -- rewriting to an absolute path would re-introduce
+                # the #1394 portability regression in committed configs.
                 _rich_warning(f"Hook script not found: {source_file}")
-                new_command = new_command.replace(full_var, str(source_file))
+                if deploy_root is not None:
+                    new_command = new_command.replace(full_var, str(source_file))
 
         # Handle relative ./path and .\path references (safe to run after
         # ${CLAUDE_PLUGIN_ROOT} substitution since replacements produce paths
@@ -473,11 +490,12 @@ class HookIntegrator(BaseIntegrator):
                     else target_rel
                 )
                 new_command = new_command.replace(rel_ref, resolved_cmd)
-            elif deploy_root is not None:
-                # File absent: resolve to absolute source path so the target
-                # gets a clear "file not found" rather than a bare relative ref.
+            else:
+                # File absent: always warn (see ${PLUGIN_ROOT} branch above
+                # for the project-scope vs user-scope rationale).
                 _rich_warning(f"Hook script not found: {source_file}")
-                new_command = new_command.replace(rel_ref, str(source_file))
+                if deploy_root is not None:
+                    new_command = new_command.replace(rel_ref, str(source_file))
 
         return new_command, scripts_to_copy
 
@@ -583,16 +601,285 @@ class HookIntegrator(BaseIntegrator):
 
         return rewritten, unique_scripts
 
-    def _get_package_name(self, package_info) -> str:
+    @staticmethod
+    def _is_root_local_package(package_info, project_root: Path | None) -> bool:
+        """Return True when *package_info* represents the project's own .apm content."""
+        if project_root is None:
+            return False
+        try:
+            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+        except (OSError, RuntimeError):
+            return False
+
+    @staticmethod
+    def _safe_source_name(value: str | None, fallback: str = "_local") -> str:
+        """Return a stable source marker that is also safe for hook script paths."""
+        if not isinstance(value, str) or not value:
+            return fallback
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+        # Collapse any run of 2+ dots to a single dot before stripping edges.
+        # Embedded sequences like "foo..bar" would otherwise pass through the
+        # earlier guard and reach downstream Path joins as a parent-dir hop.
+        safe = re.sub(r"\.{2,}", ".", safe).strip(".-_")
+        if not safe or safe in {".", ".."}:
+            return fallback
+        return safe
+
+    @staticmethod
+    def _get_root_local_package_name(package_info, project_root: Path) -> str:
+        """Get the stable source marker for root .apm content."""
+        apm_yml = Path(project_root) / "apm.yml"
+        if apm_yml.exists():
+            try:
+                from apm_cli.utils.yaml_io import load_yaml
+
+                data = load_yaml(apm_yml)
+                if isinstance(data, dict):
+                    manifest_name = HookIntegrator._safe_source_name(data.get("name"))
+                    if manifest_name != "_local":
+                        return manifest_name
+            except (OSError, ValueError, yaml.YAMLError) as exc:
+                _log.debug(
+                    "Hook integrator: apm.yml manifest unreadable for %s (%s: %s), "
+                    "falling back to install_path basename",
+                    project_root,
+                    exc.__class__.__name__,
+                    exc,
+                )
+
+        package = getattr(package_info, "package", None)
+        package_name = HookIntegrator._safe_source_name(getattr(package, "name", None))
+        if package_name != "_local":
+            return package_name
+        return "_local"
+
+    def _get_package_name(self, package_info, project_root: Path | None = None) -> str:
         """Get a short package name for use in file/directory naming.
 
         Args:
             package_info: PackageInfo object
+            project_root: When provided and the package is the project root,
+                reads ``apm.yml`` ``name`` for a stable source marker instead
+                of falling back to ``install_path.name`` (which drifts on
+                directory renames and worktrees). See #1329.
 
         Returns:
-            str: Package name derived from install path
+            str: Package name used as hook source marker and script namespace
         """
+        if self._is_root_local_package(package_info, project_root):
+            return HookIntegrator._get_root_local_package_name(package_info, Path(project_root))
         return package_info.install_path.name
+
+    @staticmethod
+    def _get_hook_source_marker(
+        package_info,
+        project_root: Path,
+        package_name: str,
+    ) -> str:
+        """Get the marker stored in merged hook JSON for ownership cleanup."""
+        if HookIntegrator._is_root_local_package(package_info, project_root):
+            if package_name == "_local":
+                return "_local"
+            return f"_local/{package_name}"
+        return package_name
+
+    @staticmethod
+    def _hook_entry_content_key(entry: dict) -> str:
+        """Build a stable comparison key excluding APM ownership metadata."""
+        comparable = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
+        return json.dumps(comparable, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _dependency_hook_sources(project_root: Path) -> set[str]:
+        """Return source markers that correspond to installed dependency dirs."""
+        apm_modules = project_root / "apm_modules"
+        if not apm_modules.is_dir():
+            return set()
+
+        lockfile_paths, lockfile_readable = HookIntegrator._lockfile_dependency_paths(project_root)
+        if lockfile_readable:
+            sources: set[str] = set()
+            for rel_path in lockfile_paths:
+                package_path = HookIntegrator._safe_dependency_path(apm_modules, rel_path)
+                if package_path is None:
+                    continue
+                HookIntegrator._add_dependency_source(sources, package_path)
+            return sources
+
+        return HookIntegrator._bounded_dependency_hook_sources(apm_modules)
+
+    @staticmethod
+    def _lockfile_dependency_paths(project_root: Path) -> tuple[list[str], bool]:
+        """Return installed dependency paths from a readable lockfile, if present."""
+        try:
+            from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, LockFile, get_lockfile_path
+
+            lockfile_path = get_lockfile_path(project_root)
+            if not lockfile_path.exists():
+                legacy_path = project_root / LEGACY_LOCKFILE_NAME
+                if legacy_path.exists():
+                    lockfile_path = legacy_path
+            if not lockfile_path.exists():
+                return [], False
+            lockfile = LockFile.read(lockfile_path)
+            if lockfile is None:
+                return [], False
+            return lockfile.get_installed_paths(project_root / "apm_modules"), True
+        except (AttributeError, OSError, TypeError, ValueError, KeyError):
+            return [], False
+
+    @staticmethod
+    def _safe_dependency_path(apm_modules: Path, rel_path: str) -> Path | None:
+        """Return a lockfile dependency path without escaping apm_modules."""
+        try:
+            validate_path_segments(
+                rel_path,
+                context="lockfile dependency path",
+                reject_empty=True,
+            )
+            package_path = apm_modules / Path(rel_path)
+            ensure_path_within(package_path, apm_modules)
+            if HookIntegrator._has_symlink_component(apm_modules, package_path):
+                return None
+            return package_path
+        except (OSError, PathTraversalError, RuntimeError, TypeError):
+            return None
+
+    @staticmethod
+    def _has_symlink_component(apm_modules: Path, package_path: Path) -> bool:
+        """Return True when any component below apm_modules is a symlink."""
+        try:
+            relative = package_path.relative_to(apm_modules)
+            current = apm_modules
+            for part in relative.parts:
+                current = current / part
+                if current.is_symlink():
+                    return True
+            return False
+        except (OSError, ValueError):
+            return True
+
+    @staticmethod
+    def _is_dependency_package_dir(path: Path) -> bool:
+        """Return True when *path* looks like an installed package root."""
+        try:
+            hooks = path / "hooks"
+            apm_hooks = path / ".apm" / "hooks"
+            apm_yml = path / "apm.yml"
+            skill_md = path / "SKILL.md"
+            return (
+                (hooks.is_dir() and not hooks.is_symlink())
+                or (apm_hooks.is_dir() and not apm_hooks.is_symlink())
+                or (apm_yml.is_file() and not apm_yml.is_symlink())
+                or (skill_md.is_file() and not skill_md.is_symlink())
+            )
+        except OSError:
+            return False
+
+    @staticmethod
+    def _add_dependency_source(sources: set[str], package_path: Path) -> bool:
+        """Add package_path.name to sources when package_path is a package root."""
+        try:
+            if (
+                not package_path.is_dir()
+                or package_path.is_symlink()
+                or not HookIntegrator._is_dependency_package_dir(package_path)
+            ):
+                return False
+        except OSError:
+            return False
+        sources.add(package_path.name)
+        return True
+
+    @staticmethod
+    def _child_dependency_dirs(path: Path) -> list[Path]:
+        """Return direct non-hidden child dirs without following symlink roots."""
+        try:
+            if path.is_symlink() or not path.is_dir():
+                return []
+            return sorted(
+                [
+                    child
+                    for child in path.iterdir()
+                    if not child.is_symlink() and child.is_dir() and not child.name.startswith(".")
+                ],
+                key=lambda child: child.name,
+            )
+        except OSError:
+            return []
+
+    @staticmethod
+    def _collect_known_subdirectory_sources(sources: set[str], repo_root: Path) -> None:
+        """Collect dependency sources from known virtual subdirectory layouts."""
+        for namespace in ("collections", "skills"):
+            for package_path in HookIntegrator._child_dependency_dirs(repo_root / namespace):
+                HookIntegrator._add_dependency_source(sources, package_path)
+
+        apm_dir = repo_root / ".apm"
+        try:
+            if apm_dir.is_symlink() or not apm_dir.is_dir():
+                return
+        except OSError:
+            return
+        for primitive in ("agents", "commands", "hooks", "instructions", "prompts", "skills"):
+            for package_path in HookIntegrator._child_dependency_dirs(apm_dir / primitive):
+                HookIntegrator._add_dependency_source(sources, package_path)
+
+    @staticmethod
+    def _collect_remote_dependency_sources(sources: set[str], namespace: Path) -> None:
+        """Collect fallback sources from explicit remote install layouts."""
+        if HookIntegrator._add_dependency_source(sources, namespace):
+            return
+
+        for repo_or_project in HookIntegrator._child_dependency_dirs(namespace):
+            if HookIntegrator._add_dependency_source(sources, repo_or_project):
+                continue
+
+            HookIntegrator._collect_known_subdirectory_sources(sources, repo_or_project)
+
+            for ado_repo in HookIntegrator._child_dependency_dirs(repo_or_project):
+                if HookIntegrator._add_dependency_source(sources, ado_repo):
+                    continue
+                HookIntegrator._collect_known_subdirectory_sources(sources, ado_repo)
+
+    @staticmethod
+    def _collect_local_dependency_sources(sources: set[str], local_namespace: Path) -> None:
+        """Collect apm_modules/_local/<name> package roots only."""
+        for local_package in HookIntegrator._child_dependency_dirs(local_namespace):
+            HookIntegrator._add_dependency_source(sources, local_package)
+
+    @staticmethod
+    def _bounded_dependency_hook_sources(apm_modules: Path) -> set[str]:
+        """Fallback source scan limited to known apm_modules package layouts."""
+        sources: set[str] = set()
+
+        for package_root in HookIntegrator._child_dependency_dirs(apm_modules):
+            if package_root.name == "_local":
+                HookIntegrator._collect_local_dependency_sources(sources, package_root)
+                continue
+
+            HookIntegrator._collect_remote_dependency_sources(sources, package_root)
+        return sources
+
+    @staticmethod
+    def _should_remove_prior_merged_entry(
+        entry,
+        *,
+        source_marker: str,
+        fresh_content_keys: set[str],
+        heal_stale_root_source: bool,
+        dependency_sources: set[str],
+        remove_current_source: bool,
+    ) -> bool:
+        """Return True when an existing merged-hook entry should be replaced."""
+        if not isinstance(entry, dict):
+            return False
+        source = entry.get("_apm_source")
+        if remove_current_source and source == source_marker:
+            return True
+        if not heal_stale_root_source or not source or source in dependency_sources:
+            return False
+        return HookIntegrator._hook_entry_content_key(entry) in fresh_content_keys
 
     def integrate_package_hooks(
         self,
@@ -633,7 +920,7 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
-        package_name = self._get_package_name(package_info)
+        package_name = self._get_package_name(package_info, project_root)
         hooks_integrated = 0
         scripts_copied = 0
         scripts_adopted = 0
@@ -713,6 +1000,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks by merging into a target-specific JSON config.
 
@@ -734,12 +1022,30 @@ class HookIntegrator(BaseIntegrator):
         if config.require_dir and not target_dir.exists():
             return _empty
 
+        # Absolutize hook commands only for user-scope deploys.  Claude
+        # Code (and the Codex/Cursor/Gemini equivalents) reads
+        # ``~/.claude/settings.json`` without a fixed cwd and does not
+        # expand ``${CLAUDE_PLUGIN_ROOT}`` in that file (see #1310 / #1354),
+        # so user-scope deploys must write absolute paths.  Project-scope
+        # ``<repo>/.claude/settings.json`` is typically checked in and runs
+        # with cwd at the repo root, where repo-relative paths resolve
+        # correctly -- baking absolute machine paths into checked-in config
+        # breaks portability across clones, contributors, and CI (#1394).
+        # ``user_scope`` is threaded from the caller's ``InstallScope`` so
+        # the gate is explicit rather than inferred from deploy-root shape.
+        _deploy_root_for_rewrite = project_root if user_scope else None
+
         hook_files = self.find_hook_files(package_info.install_path)
         hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
         if not hook_files:
             return _empty
 
-        package_name = self._get_package_name(package_info)
+        package_name = self._get_package_name(package_info, project_root)
+        source_marker = self._get_hook_source_marker(package_info, project_root, package_name)
+        heal_stale_root_source = self._is_root_local_package(package_info, project_root)
+        dependency_sources = (
+            self._dependency_hook_sources(project_root) if heal_stale_root_source else set()
+        )
         hooks_integrated = 0
         scripts_copied = 0
         scripts_adopted = 0
@@ -799,7 +1105,7 @@ class HookIntegrator(BaseIntegrator):
                 config.target_key,
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
-                deploy_root=project_root,
+                deploy_root=_deploy_root_for_rewrite,
             )
 
             # Merge hooks into config (additive)
@@ -825,7 +1131,12 @@ class HookIntegrator(BaseIntegrator):
                 # Mark each entry with APM source for sync/cleanup
                 for entry in entries:
                     if isinstance(entry, dict):
-                        entry["_apm_source"] = package_name
+                        entry["_apm_source"] = source_marker
+                fresh_content_keys = {
+                    self._hook_entry_content_key(entry)
+                    for entry in entries
+                    if isinstance(entry, dict)
+                }
 
                 # Idempotent upsert: drop any prior entries owned by this
                 # package before appending fresh ones. Without this, every
@@ -835,13 +1146,42 @@ class HookIntegrator(BaseIntegrator):
                 # with multiple hook files targeting the same event
                 # contributes each file's entries in turn, and stripping
                 # on every iteration would erase earlier files' work.
-                if event_name not in cleared_events:
+                remove_current_source = event_name not in cleared_events
+                if remove_current_source or heal_stale_root_source:
                     # Clear from the normalised event
-                    json_config["hooks"][event_name] = [
+                    prior_entries = json_config["hooks"][event_name]
+                    kept_entries = [
                         e
-                        for e in json_config["hooks"][event_name]
-                        if not (isinstance(e, dict) and e.get("_apm_source") == package_name)
+                        for e in prior_entries
+                        if not self._should_remove_prior_merged_entry(
+                            e,
+                            source_marker=source_marker,
+                            fresh_content_keys=fresh_content_keys,
+                            heal_stale_root_source=heal_stale_root_source,
+                            dependency_sources=dependency_sources,
+                            remove_current_source=remove_current_source,
+                        )
                     ]
+                    if heal_stale_root_source:
+                        kept_ids = {id(e) for e in kept_entries}
+                        healed = sum(
+                            1
+                            for e in prior_entries
+                            if isinstance(e, dict)
+                            and e.get("_apm_source")
+                            and e.get("_apm_source") != source_marker
+                            and e.get("_apm_source") not in dependency_sources
+                            and id(e) not in kept_ids
+                        )
+                        if healed:
+                            _log.debug(
+                                "Hook integrator: healed %d stale same-content "
+                                "merged hook entries for source %s in event %s",
+                                healed,
+                                source_marker,
+                                event_name,
+                            )
+                    json_config["hooks"][event_name] = kept_entries
                     # Also clear from any alias events that map to
                     # this normalised name (handles migration from
                     # corrupted installs with mixed-case event keys).
@@ -850,8 +1190,13 @@ class HookIntegrator(BaseIntegrator):
                             json_config["hooks"][alias] = [
                                 e
                                 for e in json_config["hooks"][alias]
-                                if not (
-                                    isinstance(e, dict) and e.get("_apm_source") == package_name
+                                if not self._should_remove_prior_merged_entry(
+                                    e,
+                                    source_marker=source_marker,
+                                    fresh_content_keys=fresh_content_keys,
+                                    heal_stale_root_source=heal_stale_root_source,
+                                    dependency_sources=dependency_sources,
+                                    remove_current_source=remove_current_source,
                                 )
                             ]
                             # Remove the alias key entirely if now empty
@@ -863,22 +1208,19 @@ class HookIntegrator(BaseIntegrator):
                 # Deduplicate same-package entries by content.
                 # Safety net for edge cases where multiple source files
                 # produce semantically identical entries.
-                seen_content: list[dict] = []
+                import json as _json
+
+                seen_keys: set[str] = set()
                 deduped: list = []
                 for entry in json_config["hooks"][event_name]:
                     if not isinstance(entry, dict):
                         deduped.append(entry)
                         continue
-                    # Build comparison key (all fields except _apm_source)
                     cmp = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
                     source = entry.get("_apm_source")
-                    is_dup = False
-                    for seen in seen_content:
-                        if seen.get("_source") == source and seen.get("_cmp") == cmp:
-                            is_dup = True
-                            break
-                    if not is_dup:
-                        seen_content.append({"_source": source, "_cmp": cmp})
+                    dedup_key = _json.dumps({"s": source, "c": cmp}, sort_keys=True)
+                    if dedup_key not in seen_keys:
+                        seen_keys.add(dedup_key)
                         deduped.append(entry)
                 json_config["hooks"][event_name] = deduped
 
@@ -964,6 +1306,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .claude/settings.json.
 
@@ -976,6 +1320,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     def integrate_package_hooks_cursor(
@@ -985,6 +1330,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .cursor/hooks.json.
 
@@ -997,6 +1344,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     def integrate_package_hooks_codex(
@@ -1006,6 +1354,8 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        *,
+        user_scope: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks into .codex/hooks.json.
 
@@ -1018,6 +1368,7 @@ class HookIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            user_scope=user_scope,
         )
 
     # ------------------------------------------------------------------
@@ -1033,12 +1384,20 @@ class HookIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        scope=None,
+        user_scope: bool = False,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
         Copilot uses individual JSON files (genuinely different pattern).
         All other merge-based targets are dispatched via the
         ``_MERGE_HOOK_TARGETS`` registry.
+
+        ``user_scope`` controls whether merged-hook ``command`` paths are
+        rewritten to absolute paths (required when deploying to
+        ``~/.claude/settings.json`` -- see #1310 / #1354) or left
+        repo-relative so checked-in project-scope configs stay portable
+        across clones, contributors, and CI runners (#1394).
         """
         if target.name == "copilot":
             return self.integrate_package_hooks(
@@ -1060,6 +1419,7 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+                user_scope=user_scope,
             )
 
         return HookIntegrationResult(

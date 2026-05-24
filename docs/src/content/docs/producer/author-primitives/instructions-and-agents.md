@@ -58,6 +58,22 @@ unconditional and gets folded into compiled context files
 (`AGENTS.md`, `GEMINI.md`) instead of a per-file rule directory. With
 it, each harness wraps the body in its own scoping syntax.
 
+`applyTo` accepts either a single glob or a comma-separated list of
+globs. Commas inside brace alternation (`**/*.{css,scss}`) are part of
+the glob and are NOT treated as list separators -- only top-level
+commas split the list.
+
+```markdown
+---
+description: Frontend style rules
+applyTo: "**/*.{css,scss},**/*.tsx"
+---
+```
+
+On Copilot the comma-list is preserved verbatim (Copilot splits it
+natively). On Claude, Cursor, and Windsurf the list is expanded to a
+YAML array under `paths:` / `globs:`.
+
 ### Body conventions
 
 - Lead with bullets, not prose. Instructions are read by an agent
@@ -72,10 +88,10 @@ it, each harness wraps the body in its own scoping syntax.
 
 | Target | Output path | Transform |
 |---|---|---|
-| copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved |
-| claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list |
-| cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:`; description auto-derived if missing |
-| windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:`; missing `applyTo` -> `trigger: always_on` |
+| copilot | `.github/instructions/<name>.instructions.md` | verbatim; `applyTo` preserved (comma-lists split natively by Copilot) |
+| claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
+| cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (scalar for single glob, YAML array for comma-lists); description auto-derived if missing |
+| windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |

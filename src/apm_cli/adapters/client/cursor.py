@@ -86,6 +86,7 @@ class CursorClientAdapter(CopilotClientAdapter):
 
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
+        os.chmod(config_path, 0o600)
 
     def get_current_config(self):
         """Read the current ``.cursor/mcp.json`` contents."""

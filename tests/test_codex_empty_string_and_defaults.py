@@ -10,6 +10,7 @@ This test verifies that the adapter:
 
 import os
 import sys
+from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
 
 import pytest
@@ -217,6 +218,94 @@ class TestCodexEmptyStringAndDefaults:
             env_section = server_config["env"]
             assert env_section["GITHUB_TOOLSETS"] == "context"  # Default
             assert env_section["GITHUB_DYNAMIC_TOOLSETS"] == "1"  # Default
+
+
+class TestCodexSelfDefinedStdioEnvResolution:
+    """Regression coverage for issue #1266.
+
+    Self-defined stdio MCP servers declared in ``apm.yml`` pass their ``env``
+    block through the adapter as a plain dict (the ``_raw_stdio["env"]``
+    shape). Before #1266, the Codex adapter wrote that dict to disk verbatim,
+    so placeholders like ``${TOKEN}`` ended up as literal strings in
+    ``~/.codex/config.toml`` and authentication silently failed. The fix
+    routes the dict through ``_resolve_environment_variables`` in legacy
+    mode so all three placeholder syntaxes resolve to literal values from
+    ``env_overrides`` -> ``os.environ`` at install time.
+    """
+
+    @pytest.fixture
+    def adapter(self, tmp_path, monkeypatch):
+        """Codex adapter writing into an isolated ~/.codex under tmp_path."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        return CodexClientAdapter(user_scope=True)
+
+    @staticmethod
+    def _server_info_with_placeholders():
+        return {
+            "name": "bitbucket",
+            "id": "",
+            "_raw_stdio": {
+                "command": "pnpx",
+                "args": ["@aashari/mcp-server-atlassian-bitbucket@3.1.0"],
+                "env": {
+                    "TOKEN_DOLLAR": "${ATLASSIAN_API_TOKEN}",
+                    "TOKEN_ENVPREFIX": "${env:ATLASSIAN_API_TOKEN}",
+                    "TOKEN_ANGLE": "<ATLASSIAN_API_TOKEN>",
+                    "LITERAL_EMAIL": "user@example.com",
+                },
+            },
+        }
+
+    def test_all_three_placeholder_syntaxes_resolve_to_literal(self, adapter):
+        env_overrides = {"ATLASSIAN_API_TOKEN": "real-secret-xyz123"}
+
+        with patch.object(adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = (
+                self._server_info_with_placeholders()
+            )
+            ok = adapter.configure_mcp_server("bitbucket", env_overrides=env_overrides)
+
+        assert ok is True
+        env_block = adapter.get_current_config()["mcp_servers"]["bitbucket"]["env"]
+        assert env_block["TOKEN_DOLLAR"] == "real-secret-xyz123"
+        assert env_block["TOKEN_ENVPREFIX"] == "real-secret-xyz123"
+        assert env_block["TOKEN_ANGLE"] == "real-secret-xyz123"
+        assert env_block["LITERAL_EMAIL"] == "user@example.com"
+
+    def test_unresolvable_placeholder_is_preserved(self, adapter, monkeypatch):
+        """When neither env_overrides nor os.environ provides the value,
+        the placeholder must round-trip unchanged rather than disappear."""
+        monkeypatch.delenv("ATLASSIAN_API_TOKEN", raising=False)
+
+        with patch.object(adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = (
+                self._server_info_with_placeholders()
+            )
+            adapter.configure_mcp_server("bitbucket")
+
+        env_block = adapter.get_current_config()["mcp_servers"]["bitbucket"]["env"]
+        assert env_block["TOKEN_DOLLAR"] == "${ATLASSIAN_API_TOKEN}"
+        assert env_block["TOKEN_ENVPREFIX"] == "${env:ATLASSIAN_API_TOKEN}"
+        assert env_block["TOKEN_ANGLE"] == "<ATLASSIAN_API_TOKEN>"
+
+    def test_placeholders_in_args_also_resolve(self, adapter):
+        server_info = {
+            "name": "demo",
+            "id": "",
+            "_raw_stdio": {
+                "command": "demo",
+                "args": ["--token", "<API_TOKEN>"],
+                "env": {"API_TOKEN": "<API_TOKEN>"},
+            },
+        }
+
+        with patch.object(adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = server_info
+            adapter.configure_mcp_server("demo", env_overrides={"API_TOKEN": "tok-abc"})
+
+        srv = adapter.get_current_config()["mcp_servers"]["demo"]
+        assert srv["env"]["API_TOKEN"] == "tok-abc"
+        assert srv["args"] == ["--token", "tok-abc"]
 
 
 if __name__ == "__main__":

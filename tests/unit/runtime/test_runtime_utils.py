@@ -293,3 +293,41 @@ class TestFindRuntimeBinaryPathSecurity:
 
         # The symlink escapes runtimes dir, so must fall back to PATH
         assert result == path_binary
+
+
+class TestFindRuntimeBinaryWindowsExe:
+    """Tests for Windows .exe suffix handling in find_runtime_binary."""
+
+    def test_finds_exe_binary_on_windows(self, fake_home) -> None:
+        """On Windows, <name>.exe is found in ~/.apm/runtimes/ before falling back."""
+
+        runtime_dir = fake_home / ".apm" / "runtimes"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        apm_exe = runtime_dir / "codex.exe"
+        apm_exe.touch()
+        apm_exe.chmod(0o755)
+
+        with (
+            patch("sys.platform", "win32"),
+            patch("apm_cli.runtime.utils.shutil.which", return_value=None),
+        ):
+            result = find_runtime_binary("codex")
+
+        assert result == str(apm_exe)
+
+    def test_skips_exe_on_non_windows(self, fake_home) -> None:
+        """On non-Windows, .exe binary is not checked."""
+        runtime_dir = fake_home / ".apm" / "runtimes"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        apm_exe = runtime_dir / "codex.exe"
+        apm_exe.touch()
+        apm_exe.chmod(0o755)
+        # No codex (without .exe) exists
+
+        with (
+            patch("sys.platform", "linux"),
+            patch("apm_cli.runtime.utils.shutil.which", return_value=None),
+        ):
+            result = find_runtime_binary("codex")
+
+        assert result is None

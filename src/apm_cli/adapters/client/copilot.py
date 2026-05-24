@@ -7,7 +7,6 @@ architecture specification.
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import ClassVar
 
@@ -19,85 +18,16 @@ from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
 from ...utils.github_host import is_github_hostname
-from .base import _ENV_VAR_RE, MCPClientAdapter
-
-# Combined env-var placeholder regex covering all three syntaxes Copilot accepts:
-#   <VARNAME>          legacy APM (group 1, uppercase only)
-#   ${VARNAME}         POSIX shell (group 2)
-#   ${env:VARNAME}     VS Code-flavored (group 2)
-# A single-pass substitution preserves the original ``<VAR>`` semantics:
-# resolved values are NOT re-scanned, so a token whose literal text contains
-# ``${...}`` does not get recursively expanded. Module-level compile avoids
-# per-call cost. ``${input:...}`` is intentionally not matched here.
-_COPILOT_ENV_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
-
-# Detects the legacy ``<VAR>`` placeholder syntax. Used both for translation
-# and for emitting an aggregated deprecation warning, mirroring the analogous
-# pattern in ``vscode.py``.
-_LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
-
-
-def _translate_env_placeholder(value):
-    """Pure-textual translation of env-var placeholders to Copilot CLI's
-    native runtime substitution syntax (``${VAR}``).
-
-    This is the security-critical helper for issue #1152: it MUST NOT read
-    ``os.environ`` and MUST NOT resolve placeholders to their literal values.
-    Copilot CLI resolves ``${VAR}`` from the host environment at server-start
-    time, so APM emits placeholders verbatim rather than baking secrets into
-    ``~/.copilot/mcp-config.json``.
-
-    Translations:
-        ``${env:VAR}``     -> ``${VAR}``     (strip ``env:`` prefix)
-        ``${VAR}``         -> ``${VAR}``     (no-op)
-        ``<VAR>``          -> ``${VAR}``     (legacy syntax migration)
-        ``${VAR:-default}``-> passthrough    (regex doesn't match)
-        ``$VAR`` (bare)    -> passthrough    (regex doesn't match)
-        ``${input:foo}``   -> passthrough    (regex doesn't match)
-        non-string         -> passthrough
-
-    The translation is idempotent: applying it twice produces the same
-    result as applying it once.
-    """
-    if not isinstance(value, str):
-        return value
-
-    def _to_brace(match):
-        # group(1) = legacy <VAR>; group(2) = ${VAR} / ${env:VAR}
-        var_name = match.group(1) or match.group(2)
-        return "${" + var_name + "}"
-
-    return _COPILOT_ENV_RE.sub(_to_brace, value)
-
-
-def _extract_legacy_angle_vars(value):
-    """Return the set of legacy ``<VAR>`` names present in *value*.
-
-    Used to aggregate deprecation warnings across all servers in a single
-    install run, so authors see one helpful list instead of one warning per
-    occurrence.
-    """
-    if not isinstance(value, str):
-        return set()
-    return set(_LEGACY_ANGLE_VAR_RE.findall(value))
-
-
-def _has_env_placeholder(value):
-    """True if *value* is a string containing any recognised env-var
-    placeholder syntax (``${VAR}``, ``${env:VAR}``, or legacy ``<VAR>``).
-    Used to distinguish placeholder-sourced env values (which translate)
-    from hardcoded literal defaults (which stay literal).
-    """
-    if not isinstance(value, str):
-        return False
-    return bool(_COPILOT_ENV_RE.search(value))
-
-
-def _stringify_env_literal(value):
-    """Return MCP env literal values in the manifest ``map<string, string>`` shape."""
-    if isinstance(value, bool):
-        return str(value).lower()
-    return str(value)
+from ._mcp_runtime_args import process_v01_value_hint_arg
+from .base import (
+    _ENV_PLACEHOLDER_RE,
+    _ENV_VAR_RE,
+    MCPClientAdapter,
+    _extract_legacy_angle_vars,
+    _has_env_placeholder,
+    _stringify_env_literal,
+    _translate_env_placeholder,
+)
 
 
 class CopilotClientAdapter(MCPClientAdapter):
@@ -169,14 +99,6 @@ class CopilotClientAdapter(MCPClientAdapter):
         super().__init__(project_root=project_root, user_scope=user_scope)
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
-        # Per-server tracking of placeholder-sourced env-var keys, populated
-        # during ``_format_server_config`` and consumed by the post-install
-        # summary line. Keys: env-var names; never holds resolved values.
-        self._last_env_placeholder_keys = set()
-        # Per-server collection of legacy ``<VAR>`` offenders, populated by
-        # the resolution helpers and consumed by ``configure_mcp_server`` to
-        # feed the aggregated deprecation warning.
-        self._last_legacy_angle_vars = set()
 
     def get_config_path(self):
         """Get the path to the Copilot CLI MCP configuration file.
@@ -811,17 +733,18 @@ class CopilotClientAdapter(MCPClientAdapter):
             return resolved
 
         if isinstance(env_vars, dict):
-            resolved = {}
-            for name, value in env_vars.items():
-                if not name:
-                    continue
-                if isinstance(value, str):
-                    resolved[name] = self._resolve_env_variable(
-                        name, value, env_overrides=env_overrides
-                    )
-                elif value is not None:
-                    resolved[name] = _stringify_env_literal(value)
-            return resolved
+            # Mirror the base-class dict-shape branch but coerce non-string
+            # scalars through Copilot's hardened ``_stringify_env_literal``
+            # helper so booleans/ints land as the strings Copilot CLI expects.
+            return {
+                name: (
+                    self._resolve_env_variable(name, value, env_overrides=env_overrides)
+                    if isinstance(value, str)
+                    else _stringify_env_literal(value)
+                )
+                for name, value in env_vars.items()
+                if name and value is not None
+            }
 
         return self._resolve_env_vars_with_prompting(env_vars, env_overrides, default_github_env)
 
@@ -898,7 +821,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                 )
             return env_value if env_value else match.group(0)
 
-        return _COPILOT_ENV_RE.sub(_replace, value)
+        return _ENV_PLACEHOLDER_RE.sub(_replace, value)
 
     def _inject_env_vars_into_docker_args(self, docker_args, env_vars):
         """Inject environment variables into Docker arguments following registry template.
@@ -1060,6 +983,15 @@ class CopilotClientAdapter(MCPClientAdapter):
                                 str(value), resolved_env, runtime_vars
                             )
                             processed.append(processed_value)
+                elif not arg_type and "value_hint" in arg:
+                    # v0.1 registry format: shared helper handles is_required
+                    # guard and {var_name} placeholder substitution.
+                    value = process_v01_value_hint_arg(arg, runtime_vars)
+                    if value:
+                        processed_value = self._resolve_variable_placeholders(
+                            value, resolved_env, runtime_vars
+                        )
+                        processed.append(processed_value)
             elif isinstance(arg, str):
                 # Already a string, use as-is but resolve variable placeholders
                 processed_value = self._resolve_variable_placeholders(
@@ -1068,113 +1000,6 @@ class CopilotClientAdapter(MCPClientAdapter):
                 processed.append(processed_value)
 
         return processed
-
-    def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
-        """Resolve runtime template variables and translate or resolve env-var
-        placeholders in argument strings.
-
-        Behaviour depends on ``self._supports_runtime_env_substitution``:
-
-        - True (Copilot CLI default): env-var placeholders (``<VAR>``,
-          ``${VAR}``, ``${env:VAR}``) are translated to ``${VAR}`` for
-          runtime substitution by Copilot CLI. APM template variables
-          (``{runtime_var}``) are still resolved at install time because
-          they are an APM-internal concept Copilot cannot interpret.
-
-        - False (legacy / sibling-adapter behaviour): legacy ``<VAR>``
-          placeholders are resolved against ``resolved_env`` (the dict of
-          literal env-var values), and ``{runtime_var}`` against
-          ``runtime_vars``. Newer ``${VAR}`` / ``${env:VAR}`` syntaxes are
-          left as-is for backward compatibility.
-
-        Args:
-            value (str): Value that may contain placeholders.
-            resolved_env (dict): Dictionary of resolved env vars (legacy
-                mode) or placeholder strings (translate mode).
-            runtime_vars (dict): Dictionary of resolved runtime variables.
-
-        Returns:
-            str: Processed value with placeholders translated or resolved.
-        """
-        import re
-
-        if not value:
-            return value
-
-        processed = str(value)
-
-        if self._supports_runtime_env_substitution:
-            # Track legacy <VAR> offenders before translating them away.
-            self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(processed))
-            # Translate all three env-var placeholder syntaxes to ${VAR}.
-            processed = _translate_env_placeholder(processed)
-        else:
-            # Replace <TOKEN_NAME> with actual values from resolved_env (for Docker env vars)
-            env_pattern = r"<([A-Z_][A-Z0-9_]*)>"
-
-            def replace_env_var(match):
-                env_name = match.group(1)
-                return resolved_env.get(env_name, match.group(0))  # Return original if not found
-
-            processed = re.sub(env_pattern, replace_env_var, processed)
-
-        # Replace {runtime_var} with actual values from runtime_vars (for NPM args).
-        # Negative lookbehind on `$` so we never re-substitute inside an already-translated
-        # ${VAR} env placeholder (the brace is part of a Copilot CLI runtime substitution,
-        # not an APM template variable).
-        if runtime_vars:
-            runtime_pattern = r"(?<!\$)\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
-
-            def replace_runtime_var(match):
-                var_name = match.group(1)
-                return runtime_vars.get(var_name, match.group(0))
-
-            processed = re.sub(runtime_pattern, replace_runtime_var, processed)
-
-        return processed
-
-    def _resolve_env_placeholders(self, value, resolved_env):
-        """Legacy method for backward compatibility. Use _resolve_variable_placeholders instead."""
-        return self._resolve_variable_placeholders(value, resolved_env, {})
-
-    @staticmethod
-    def _select_remote_with_url(remotes):
-        """Return the first remote entry that has a non-empty URL.
-
-        Args:
-            remotes (list): Candidate remote entries from the registry.
-
-        Returns:
-            dict or None: The first usable remote, or None if none qualify.
-        """
-        for remote in remotes:
-            url = (remote.get("url") or "").strip()
-            if url:
-                return remote
-        return None
-
-    def _select_best_package(self, packages):
-        """Select the best package for installation from available packages.
-
-        Prioritizes packages in order: npm, docker, pypi, homebrew, others.
-        Uses ``_infer_registry_name`` so selection works even when the
-        registry API returns empty ``registry_name``.
-
-        Args:
-            packages (list): List of package dictionaries.
-
-        Returns:
-            dict: Best package to use, or None if no suitable package found.
-        """
-        priority_order = ["npm", "docker", "pypi", "homebrew"]
-
-        for target in priority_order:
-            for package in packages:
-                if self._infer_registry_name(package) == target:
-                    return package
-
-        # If no priority package found, return the first one
-        return packages[0] if packages else None
 
     def _is_github_server(self, server_name, url):
         """Securely determine if a server is a GitHub MCP server.

@@ -32,8 +32,9 @@ Skills always deploy to the cross-tool `.agents/skills/` directory by
 default (see [Skills convergence](#skills-convergence) below). All other
 primitives land under each target's own root.
 
-`copilot-cowork` (Microsoft 365 Copilot) is gated behind an experimental
-flag and not listed above. See [Experimental](../experimental/).
+`copilot-cowork` (Microsoft 365 Copilot) and `copilot-app` (GitHub
+Copilot desktop App) are gated behind experimental flags and not listed
+above. See [Experimental](../experimental/).
 
 ## Detection and resolution
 
@@ -60,8 +61,10 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 
-`agent-skills` and `copilot-cowork` are never auto-detected. Select them
-explicitly with `--target`.
+`agent-skills`, `copilot-cowork`, and `copilot-app` are never
+auto-detected. Select them explicitly with `--target`, or list them in
+a project's `apm.yml` `targets:` field so contributors running plain
+`apm install` pick them up automatically.
 
 ## copilot
 

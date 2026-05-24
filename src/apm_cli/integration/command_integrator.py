@@ -455,6 +455,7 @@ class CommandIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        scope=None,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
 
@@ -511,6 +512,23 @@ class CommandIntegrator(BaseIntegrator):
         any_dropped_keys = False
 
         for prompt_file in prompt_files:
+            # Skip workflow-shape prompts: they belong to the Copilot
+            # App workflows table, not a slash-command directory.  This
+            # is the central fix for Option B's slash-command leak:
+            # a single .prompt.md file with execution metadata used to
+            # ship to .claude/commands/, .cursor/commands/, .gemini/
+            # commands/, .copilot/prompts/ AND the App DB.  Only the
+            # last destination was correct.
+            try:
+                from apm_cli.integration.prompt_integrator import _is_workflow_shape
+
+                _meta = frontmatter.load(str(prompt_file)).metadata
+            except Exception:
+                _meta = {}
+            if _is_workflow_shape(_meta):
+                files_skipped += 1
+                continue
+
             filename = prompt_file.name
             if filename.endswith(".prompt.md"):
                 base_name = filename[: -len(".prompt.md")]

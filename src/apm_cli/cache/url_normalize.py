@@ -75,23 +75,38 @@ def normalize_repo_url(url: str) -> str:
 
     # Parse the URL
     parsed = urllib.parse.urlparse(url)
-
-    # Step 3: Lowercase hostname
-    hostname = (parsed.hostname or "").lower()
-
-    # Step 4: Strip password, keep username
-    username = parsed.username or ""
-
-    # Step 5: Strip default ports
-    port = parsed.port
     scheme = (parsed.scheme or "https").lower()
-    if port and _DEFAULT_PORTS.get(scheme) == port:
-        port = None
 
-    # Reconstruct the authority
-    authority = f"{username}@{hostname}" if username else hostname
-    if port:
-        authority = f"{authority}:{port}"
+    # `parsed.hostname`/`parsed.port` can raise ValueError on malformed
+    # netlocs -- notably on Windows where `file://C:\path` parses with
+    # netloc `C:\path` and the drive-letter colon is interpreted as
+    # host:port. Fall back to a sanitized netloc (lowercased, password
+    # stripped) so cache-key derivation stays deterministic and per-URL
+    # distinct without raising or embedding credentials in the key.
+    try:
+        hostname = (parsed.hostname or "").lower()
+        username = parsed.username or ""
+        port = parsed.port
+    except ValueError:
+        # Strip password from userinfo (keep username) before lowercasing,
+        # mirroring Step 4 in the happy path so credentials never leak into
+        # the cache key or any caller that logs the normalized form.
+        raw_netloc = parsed.netloc
+        if "@" in raw_netloc:
+            userinfo, _, hostport = raw_netloc.rpartition("@")
+            user_only = userinfo.split(":", 1)[0]
+            authority = f"{user_only}@{hostport}".lower() if user_only else hostport.lower()
+        else:
+            authority = raw_netloc.lower()
+        hostname = ""
+    else:
+        # Step 5: Strip default ports
+        if port and _DEFAULT_PORTS.get(scheme) == port:
+            port = None
+        # Reconstruct the authority (Step 3 lowercase host, Step 4 drop password)
+        authority = f"{username}@{hostname}" if username else hostname
+        if port:
+            authority = f"{authority}:{port}"
 
     # Step 1: Strip trailing .git from path
     path = parsed.path or ""

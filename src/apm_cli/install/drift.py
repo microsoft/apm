@@ -424,6 +424,14 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
 
+    # Pre-create target root dirs in scratch so integrators with
+    # auto_create=False do not skip non-skill primitives during replay.
+    # During a real install, these directories already exist in the project;
+    # in the scratch replay they must be seeded explicitly.
+    for _target in targets:
+        _scratch_target_root = scratch_root / _target.root_dir
+        _scratch_target_root.mkdir(parents=True, exist_ok=True)
+
     # Defense-in-depth: snapshot every file under a governed root and
     # under apm.lock.yaml, then assert no mutation on exit. The primary
     # write-redirect is ``scratch_root=scratch_root`` threaded into every

@@ -409,12 +409,22 @@ class BaseIntegrator:
 
         for target in source:
             for prim_name, mapping in target.primitives.items():
-                # Dynamic-root targets (cowork) use cowork:// URI prefix.
+                # Dynamic-root targets (cowork, copilot-app) use URI prefixes.
                 if target.resolved_deploy_root is not None:
                     if prim_name == "skills":
                         from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
 
                         skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
+                    elif target.name == "copilot-app":
+                        from apm_cli.integration.copilot_app_db import (
+                            COPILOT_APP_LOCKFILE_PREFIX,
+                        )
+
+                        raw_key = f"{prim_name}_{target.name}"
+                        bucket_key = BaseIntegrator._BUCKET_ALIASES.get(raw_key, raw_key)
+                        if bucket_key not in buckets:
+                            buckets[bucket_key] = set()
+                        prefix_map[COPILOT_APP_LOCKFILE_PREFIX] = bucket_key
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
                 prefix = (

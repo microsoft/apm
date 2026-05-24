@@ -2,6 +2,7 @@
 
 import builtins
 import sys
+import traceback
 from pathlib import Path  # noqa: F401
 
 import click
@@ -216,8 +217,18 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger,
                 user_scope=scope is InstallScope.USER,
             )
-        except Exception:
-            pass  # Best effort cleanup
+        except Exception as _sync_err:
+            # Surface why integration cleanup failed instead of swallowing
+            # silently. Previously a bare `except: pass` here masked
+            # Windows-only failures where the DB row was never deleted on
+            # `apm uninstall --target copilot-app`.
+            logger.warning(f"Integration cleanup failed: {type(_sync_err).__name__}: {_sync_err}")
+            # Preserve the traceback under verbose for diagnosing
+            # platform-specific failures without spamming default output.
+            logger.verbose_detail(traceback.format_exc().rstrip())
+            logger.verbose_detail(
+                "Some integrated files may remain. Run `apm install --force` to resync."
+            )
 
         for label, count in cleaned.items():
             if count > 0:

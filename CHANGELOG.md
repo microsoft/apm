@@ -9,7 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. User values are validated against a strict allowlist before composing the clone URL. (#1385, closes #1383)
+- Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
+
+## [0.14.2] - 2026-05-22
+
+### Added
+
+- **Experimental:** `copilot-app` target scopes workflows to a real project row via loopback WS IPC (App running) or direct SQLite (App closed); `--global` workflow installs emit a one-time CWD-pivot warning. (#1431)
+
+### Changed
+
+- PR-time CI shards unit tests, moves the 80% coverage gate off the critical path, and parallelises the PyInstaller build for faster contributor signal. (#1437)
+- Unit coverage raised to 88% (gate 80%); integration coverage raised to 71% (gate 55%). (#1402)
+- Replace logic-replay tests for #763 with real-flow coverage to catch real regressions. (#1340)
+
+### Performance
+
+- Cold `apm install` for subdirectory git deps is ~30x-75x faster on large monorepos via partial bare clones plus sparse-cone materialization; transparent fallback when servers reject `--filter=blob:none`. (#1436, closes #1433)
+
+### Fixed
+
+- Windows: GitCache sparse-cone consumer clone no longer fails with `Filename too long`; `git clone`/`checkout` pass `-c core.longpaths=true` on Windows so the nested `checkouts_v1/<shard>/<sha>/<variant>.incomplete.<pid>.<ns>/` layout stays within the Win32 path limit. (#1454)
+- Windows: `copilot-app` WS handshake no longer rejects `~/.copilot/run/ws.token` because Windows synthesises group/other bits from the read-only flag; the POSIX-only mode check now short-circuits to accept on Windows. (#1454)
+- `apm install` honours per-dependency `registry:` URLs in MCP deps instead of warning and ignoring them. (#1443, closes #1393)
+- VS Code adapter handles MCP v0.1 `runtimeArguments` with `variables`, unblocking Docker MCP servers that need workspace mounts. (#1444, closes #1391)
+- `apm install --skill <name>` persists the skill filter to `apm.yml` so subsequent runs honour the selection. (#1442, closes #1395)
+- `apm audit` no longer false-flags non-skill primitives as orphaned drift on `auto_create=False` targets. (#1441, closes #1411)
+- Copilot harness auto-detection recognises `.github/instructions/`, `agents/`, `prompts/`, and `hooks/` as valid markers. (#1440, closes #1435)
+- `apm install` (project-scope) keeps hook `command` paths repo-relative so committed configs stay portable across clones and CI. (#1396, closes #1394)
+- PyInstaller binary restores `optimize=2`, shrinking the Windows Defender ML false-positive surface. (#1450)
+- Comma-separated `applyTo` globs emit proper YAML lists in Claude, Cursor, and Windsurf instruction outputs (brace-aware split). (#1387, #1449, closes #1366)
+- `GitCache` no longer crashes on Windows `file://` URLs where `urllib.parse.port` raises `ValueError`. (#1446)
+- `apm compile` discovers local-bundle instructions inside `apm_modules/` again. (#1388)
+- `apm install --target copilot-app` warns instead of failing when the App schema is newer than expected. (#1434)
+- Plugin packaging no longer destroys pre-positioned `.apm/` content during artifact mapping. (#1416)
+- `apm update` against private ADO deps no longer fails on Windows with a misleading "az not logged in" -- `az.cmd` is now resolved via `shutil.which`; ADO preflight preserves `GIT_*` env so GCM can fall back. (#1432, closes #1430)
+- Windows unit-test job is green again (Codex CLI path quoting + ADO subprocess env). (#1427)
+- Root `.apm` hooks no longer duplicate after directory renames or worktrees; hook source-ids derive from `apm.yml` `name` and self-heal stale entries. (#1392, closes #1329)
+- Codex and Gemini stdio MCP configs expand `${env:VAR}` placeholders in self-defined env vars. (#1277, closes #1266)
+- Codex CLI now supports Streamable HTTP MCP servers, matching the other harnesses. (#1262, closes #1260)
+- `apm install` preflight uses ssh (not https) on ssh-based dependency URLs. (#1303, closes #1293)
+
+## [0.14.1] - 2026-05-20
+
+### Added
+
+- **Experimental:** `copilot-app` target deploys prompts (with optional workflow frontmatter) directly into the GitHub Copilot desktop App's `~/.copilot/data.db` workflows table; shape-dispatched `.prompt.md` (workflow keys `interval` / `schedule_hour` / `schedule_day` route to the App, plain prompts route to slash-command targets) so each prompt lands on exactly one surface. Gated behind `apm experimental enable copilot-app`; works in project (`apm install --target copilot-app`) and user (`--global`) scope; workflows install disabled, user opts in from the App. See [Copilot App integration](https://microsoft.github.io/apm/integrations/copilot-app/). (#1405)
+
+### Fixed
+
+- `apm install` honors the SSH user portion of dependency URLs (`ssh://user@host/...` and scp shorthand `user@host:org/repo`) instead of hardcoding `git@`; unblocks EMU accounts and other non-`git` SSH identities. (#1385, closes #1383)
+- Windows installer and `apm self-update` detect Windows Defender / antivirus blocks (HRESULT `0x800700E1`, PUA messages) and surface three actionable recovery options (`Add-MpPreference -ExclusionPath`, `pip --user`, false-positive submission URL) instead of falling through to a generic "failed to run" and a pip fallback that itself dies on unsupported Python. (#1408)
+- Windows installer and `apm self-update` survive AppLocker / App Control for Business (WDAC) policies by staging the release into the allow-listed per-user install root before running the `apm.exe --version` smoke test, and emit AppLocker-specific guidance on `0x80070005` Access Denied instead of silently falling back to pip. (#1390, closes #1389)
+- `apm uninstall <local-path>` on Windows no longer rejects absolute paths (`C:\...\my-pkg`) as "Invalid package format" and silently leaves deployed copilot-app workflow DB rows behind. Local paths are now detected on every platform, so install/uninstall round-trips cleanly. (#1413)
 
 ### Changed
 

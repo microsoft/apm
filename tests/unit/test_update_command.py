@@ -372,3 +372,22 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSelfUpdateOuterException(unittest.TestCase):
+    """Lines 188-190: outer Exception handler in self_update."""
+
+    def setUp(self):
+        self.runner = CliRunner()
+
+    def test_outer_exception_handler(self):
+        """Lines 188-190: outer except catches unexpected error → exit(1)."""
+        from apm_cli.cli import cli
+
+        with patch(
+            "apm_cli.commands.self_update.is_self_update_enabled",
+            side_effect=RuntimeError("unexpected"),
+        ):
+            result = self.runner.invoke(cli, ["self-update"])
+
+        self.assertNotEqual(result.exit_code, 0)

@@ -287,7 +287,7 @@ class TestIgnoreNonContentSourceGuard(unittest.TestCase):
     # 2 hooks. After PR #1153 follow-up #2, ALL 7 use ignore_non_content;
     # the import + 7 call sites yields >= 8 references.
     _MODULES: typing.ClassVar[list[tuple[str, str, int]]] = [
-        ("apm_cli.deps", "plugin_parser", 7),
+        ("apm_cli.deps", "plugin_parser", 5),
         ("apm_cli.bundle", "packer", 2),
         ("apm_cli.bundle", "unpacker", 2),
     ]

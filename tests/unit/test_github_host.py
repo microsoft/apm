@@ -354,3 +354,85 @@ def test_unsupported_host_error_with_context():
     # Should still include standard guidance
     assert "github.com" in error_msg
     assert "GITHUB_HOST" in error_msg
+
+
+# ---------------------------------------------------------------------------
+# is_ssh_auth_failure_signal
+# ---------------------------------------------------------------------------
+
+
+class TestIsSshAuthFailureSignal:
+    """is_ssh_auth_failure_signal classifies OpenSSH stderr correctly."""
+
+    # --- known auth rejection strings -> True ---
+
+    def test_permission_denied(self):
+        assert github_host.is_ssh_auth_failure_signal(
+            "git@git.corp.internal: Permission denied (publickey)."
+        )
+
+    def test_publickey_substring(self):
+        assert github_host.is_ssh_auth_failure_signal(
+            "debug1: Offering public key: /home/user/.ssh/id_ed25519"
+            "\nno more authentication methods to try"
+        )
+
+    def test_no_more_authentication_methods(self):
+        assert github_host.is_ssh_auth_failure_signal(
+            "Permission denied (publickey).\r\nfatal: Could not read from remote repository."
+        )
+
+    def test_host_key_verification_failed(self):
+        assert github_host.is_ssh_auth_failure_signal(
+            "Host key verification failed.\nfatal: Could not read from remote repository."
+        )
+
+    def test_no_supported_authentication_methods(self):
+        assert github_host.is_ssh_auth_failure_signal(
+            "no supported authentication methods available (server sent: publickey)"
+        )
+
+    def test_too_many_authentication_failures(self):
+        assert github_host.is_ssh_auth_failure_signal(
+            "Received disconnect from 10.0.0.1 port 22:2: Too many authentication failures"
+        )
+
+    def test_agent_refused_operation(self):
+        assert github_host.is_ssh_auth_failure_signal(
+            "sign_and_send_pubkey: signing failed: agent refused operation"
+        )
+
+    def test_case_insensitive(self):
+        assert github_host.is_ssh_auth_failure_signal("PERMISSION DENIED (PUBLICKEY).")
+
+    # --- connectivity errors -> False (must NOT be classified as auth failures) ---
+
+    def test_could_not_resolve_hostname(self):
+        """DNS failure is NOT an auth failure -- preflight must defer."""
+        assert not github_host.is_ssh_auth_failure_signal(
+            "ssh: Could not resolve hostname git.internal.corp: nodename nor servname provided"
+        )
+
+    def test_connection_refused(self):
+        """Firewall/service-down is NOT an auth failure -- preflight must defer."""
+        assert not github_host.is_ssh_auth_failure_signal(
+            "ssh: connect to host git.internal.corp port 22: Connection refused"
+        )
+
+    def test_network_unreachable(self):
+        assert not github_host.is_ssh_auth_failure_signal(
+            "connect to host git.internal.corp port 22: Network unreachable"
+        )
+
+    # --- edge cases -> False ---
+
+    def test_none_input(self):
+        assert not github_host.is_ssh_auth_failure_signal(None)
+
+    def test_empty_string(self):
+        assert not github_host.is_ssh_auth_failure_signal("")
+
+    def test_unrelated_stderr(self):
+        assert not github_host.is_ssh_auth_failure_signal(
+            "warning: remote HEAD refers to nonexistent ref, unable to checkout."
+        )

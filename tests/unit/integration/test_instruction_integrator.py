@@ -1181,6 +1181,142 @@ class TestConvertToWindsurfRules:
         assert 'globs: "src/**/*.ts"' in result
 
 
+# ==================================================================
+# Comma-separated applyTo splitting tests (issue #1366)
+# Covers Claude, Cursor, Windsurf converters and Copilot verbatim path.
+# ==================================================================
+
+
+class TestApplyToCommaSplitting:
+    """Verify all three converters split comma-separated applyTo globs."""
+
+    # ---- Claude ----
+
+    def test_claude_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Rules"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+
+    def test_claude_comma_whitespace_trimmed(self):
+        content = "---\napplyTo: '**/*.py, **/*.pyi , src/**/*.ts'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert '  - "**/*.py"' in result
+        assert '  - "**/*.pyi"' in result
+        assert '  - "src/**/*.ts"' in result
+        assert '  - " **/*.pyi"' not in result
+
+    def test_claude_trailing_comma_dropped(self):
+        content = "---\napplyTo: '**/*.py,'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" in result
+        assert '  - "**/*.py"' in result
+        assert result.count('  - "') == 1
+        assert '  - ""' not in result
+
+    def test_claude_leading_comma_dropped(self):
+        content = "---\napplyTo: ',**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert result.count('  - "') == 1
+        assert '  - "**/*.py"' in result
+
+    def test_claude_single_comma_treated_as_empty(self):
+        content = "---\napplyTo: ','\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" not in result
+        assert "# R" in result
+
+    def test_claude_whitespace_only_treated_as_empty(self):
+        content = "---\napplyTo: '   '\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" not in result
+        assert "# R" in result
+
+    # ---- Cursor ----
+
+    def test_cursor_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+        assert 'globs: "**/src/**,' not in result
+
+    def test_cursor_single_glob_stays_scalar(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert 'globs: "**/*.py"' in result
+        assert '  - "**/*.py"' not in result
+
+    def test_cursor_comma_whitespace_trimmed(self):
+        content = "---\napplyTo: 'a, b , c'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert '  - "a"' in result
+        assert '  - "b"' in result
+        assert '  - "c"' in result
+
+    def test_cursor_single_comma_treated_as_empty(self):
+        content = "---\napplyTo: ','\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs" not in result
+
+    def test_cursor_trailing_comma_normalises_to_single(self):
+        content = "---\napplyTo: '**/*.py,'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert 'globs: "**/*.py"' in result
+
+    # ---- Windsurf ----
+
+    def test_windsurf_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+        assert 'globs: "**/src/**,' not in result
+
+    def test_windsurf_single_glob_stays_scalar(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert 'globs: "**/*.py"' in result
+
+    def test_windsurf_comma_whitespace_trimmed(self):
+        content = '---\napplyTo: "a, b , c"\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert '  - "a"' in result
+        assert '  - "b"' in result
+        assert '  - "c"' in result
+
+    def test_windsurf_single_comma_falls_back_to_always_on(self):
+        content = '---\napplyTo: ","\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert "trigger: always_on" in result
+        assert "globs" not in result
+
+    # ---- Copilot verbatim preservation ----
+
+    def test_copilot_preserves_comma_list_verbatim(self):
+        """Copilot must NEVER split applyTo - consuming tool handles it."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "src.instructions.md"
+            dst = Path(td) / "dst.instructions.md"
+            src.write_text(
+                "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Multi rules\n"
+            )
+            integrator = InstructionIntegrator()
+            integrator.copy_instruction(src, dst)
+            written = dst.read_text()
+            assert "applyTo: '**/src/**,**/api/**,**/services/**'" in written
+            assert "paths:" not in written
+
+
 class TestWindsurfRulesIntegration:
     """Test end-to-end Windsurf rules deployment."""
 

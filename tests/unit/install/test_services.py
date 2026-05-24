@@ -50,6 +50,11 @@ def _make_cowork_target(cowork_root: Path) -> Any:
     return replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
+def _make_copilot_app_target(app_root: Path) -> Any:
+    """Return a TargetProfile with resolved_deploy_root set for copilot-app."""
+    return replace(KNOWN_TARGETS["copilot-app"], resolved_deploy_root=app_root)
+
+
 # ---------------------------------------------------------------------------
 # TestDeployedPathEntry
 # ---------------------------------------------------------------------------
@@ -79,6 +84,28 @@ class TestDeployedPathEntry:
         ):
             result = _deployed_path_entry(target_path, project_root, targets=[cowork_target])
         assert result == "cowork://skills/my-skill/SKILL.md"
+
+    def test_copilot_app_uri_for_out_of_tree_synthetic_path(self, tmp_path: Path) -> None:
+        """copilot-app synthesises ``<root>/workflows/<id>`` paths that
+        live outside the project tree; ``_deployed_path_entry`` must
+        encode them as ``copilot-app-db://workflows/<id>`` so the
+        lockfile pipeline does not try to make them project-relative."""
+        app_root = tmp_path / "copilot-data"
+        app_root.mkdir()
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        wf_id = "apm--acme-org--demo-pkg--daily-digest"
+        target_path = app_root / "workflows" / wf_id
+        app_target = _make_copilot_app_target(app_root)
+
+        result = _deployed_path_entry(target_path, project_root, targets=[app_target])
+
+        assert result == f"copilot-app-db://workflows/{wf_id}"
+
+        # Round-trip: the URI must decode back to the original id.
+        from apm_cli.integration.copilot_app_db import from_lockfile_uri
+
+        assert from_lockfile_uri(result) == wf_id
 
     def test_runtime_error_when_no_matching_target(self, tmp_path: Path) -> None:
         """Out-of-tree path with no dynamic-root target must raise, not silently store an absolute path."""

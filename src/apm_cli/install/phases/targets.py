@@ -10,10 +10,13 @@ This is the second phase of the install pipeline, running after resolve.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.integration.targets import TargetProfile
 
 
 def _read_yaml_targets(ctx) -> list[str] | None:
@@ -42,6 +45,45 @@ def _read_yaml_targets(ctx) -> list[str] | None:
 
     result = parse_targets_field(data)
     return result if result else None
+
+
+def _create_target_dirs(
+    targets: Iterable[TargetProfile],
+    project_root: Path,
+    explicit: str | None,
+    logger: Any = None,
+) -> list[Path]:
+    """Create root_dir for each target when auto_create=True or explicit is set.
+
+    Targets that resolve to an external deploy root (``resolved_deploy_root``)
+    are skipped: their directories live outside the project tree and are
+    created by the integrator's deploy logic, not here.
+
+    Returns the list of directories actually created.
+    """
+    created: list[Path] = []
+    for _t in targets:
+        if not _t.auto_create and not explicit:
+            continue
+        if _t.resolved_deploy_root is not None:
+            continue
+        _root = _t.root_dir
+        _target_dir = project_root / _root
+        if not _target_dir.exists():
+            try:
+                _target_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                if logger:
+                    _display_root = f"~/{_root}/"
+                    logger.error(
+                        f"Cannot create {_display_root} -- permission denied. "
+                        f"Check directory permissions or use a different --target."
+                    )
+                raise SystemExit(1) from None
+            created.append(_target_dir)
+            if logger:
+                logger.verbose_detail(f"Created {_root}/ ({_t.name} target)")
+    return created
 
 
 def run(ctx: InstallContext) -> None:
@@ -168,6 +210,66 @@ def run(ctx: InstallContext) -> None:
                     "Run: apm install --target copilot-cowork --global"
                 )
             raise SystemExit(1)
+
+    # ------------------------------------------------------------------
+    # GitHub Copilot App target gating (mirrors cowork rules above):
+    # explicit --target copilot-app with flag OFF must hint at the
+    # experimental enable command; with flag ON but no ~/.copilot/data.db
+    # must error with an actionable install instruction; without --global
+    # must error because copilot-app is user-scope only.
+    # ------------------------------------------------------------------
+    _user_asked_copilot_app = False
+    if _explicit:
+        if isinstance(_explicit, list):
+            _user_asked_copilot_app = "copilot-app" in _explicit
+        else:
+            _user_asked_copilot_app = _explicit == "copilot-app"
+
+    if _user_asked_copilot_app:
+        _copilot_app_resolved = any(t.name == "copilot-app" for t in _targets)
+        if not _copilot_app_resolved:
+            from apm_cli.core.experimental import is_enabled as _is_flag_on
+
+            if not _is_flag_on("copilot_app"):
+                if ctx.logger:
+                    ctx.logger.progress(
+                        "The 'copilot-app' target requires an experimental flag. "
+                        "Run: apm experimental enable copilot-app",
+                        symbol="info",
+                    )
+            else:
+                _app_msg = (
+                    "GitHub Copilot desktop App not detected.\n"
+                    "Expected ~/.copilot/data.db but the file is missing.\n"
+                    "Install the app, or omit '--target copilot-app'."
+                )
+                if ctx.logger:
+                    ctx.logger.error(_app_msg, symbol="cross")
+                raise SystemExit(1)
+
+    # NOTE: copilot-app intentionally has no project-scope gate. The DB
+    # at ~/.copilot/data.db is a single user-scoped resource, but the
+    # *intent* to deploy can legitimately come from a project's apm.yml
+    # (a team-shared scheduled prompt belongs in the project that owns
+    # the prompt, not in every developer's user-scope manifest). The
+    # experimental flag (machine-level opt-in) is the consent envelope;
+    # the package-namespaced row id (apm--<owner>--<pkg>--<prompt>)
+    # prevents collisions across projects sharing the same package.
+    # Rows always arrive enabled=0; users grant the second consent in
+    # the App's Workflows tab before anything runs on a schedule.
+    #
+    # PR A (project-scoping): the integrator now auto-registers a row
+    # in the App's ``projects`` table for the current repository and
+    # stamps every workflow with that project_id, so workflows show up
+    # in the correct project's Workflows tab. On the *first* install
+    # into a repo, the App's webview does not always live-refresh on
+    # the externally-inserted ``projects`` row (see github/github-app
+    # #5483); the integrator emits a one-time restart hint so the user
+    # is not left wondering why the new project is missing from the UI.
+    # When the App is running, the integrator prefers the live
+    # WebSocket-IPC surface so the broadcast fires natively and no
+    # restart is needed; the SQLite path is the fallback for the
+    # App-closed case (still the common case during install).
 
     # ------------------------------------------------------------------
     # v2 resolution (#1154): signal-based provenance and strict errors.
@@ -322,26 +424,7 @@ def run(ctx: InstallContext) -> None:
                     "deployed. Check 'target:' in apm.yml or use --target."
                 )
 
-        for _t in _targets:
-            if not _t.auto_create and not _explicit:
-                continue
-            if _t.resolved_deploy_root is not None:
-                continue
-            _root = _t.root_dir
-            _target_dir = ctx.project_root / _root
-            if not _target_dir.exists():
-                try:
-                    _target_dir.mkdir(parents=True, exist_ok=True)
-                except PermissionError:
-                    if ctx.logger:
-                        _display_root = f"~/{_root}/"
-                        ctx.logger.error(
-                            f"Cannot create {_display_root} -- permission denied. "
-                            f"Check directory permissions or use a different --target."
-                        )
-                    raise SystemExit(1) from None
-                if ctx.logger:
-                    ctx.logger.verbose_detail(f"Created {_root}/ ({_t.name} target)")
+        _create_target_dirs(_targets, ctx.project_root, _explicit, ctx.logger)
 
     # Legacy detect_target call -- return values are not consumed by any
     # downstream code but the call is preserved for behaviour parity with

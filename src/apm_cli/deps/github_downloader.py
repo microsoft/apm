@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time  # noqa: F401
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -91,6 +91,31 @@ def _rmtree(path) -> None:
     from ..utils.file_ops import robust_rmtree
 
     robust_rmtree(path, ignore_errors=True)
+
+
+def _dir_size_bytes(path: Path) -> int:
+    """Return the total on-disk size of a directory tree in bytes.
+
+    Best-effort: silently skips files that disappear or cannot be
+    stat-ed mid-walk (e.g. transient .git lock files). Uses ``lstat``
+    so symlinks contribute the size of the link itself, never the
+    target -- this keeps the measurement bounded to the directory
+    tree and matches :func:`apm_cli.cache.git_cache._dir_size`. Used
+    only for verbose-mode perf diagnostics (#1433) -- never gates
+    behavior.
+    """
+    total = 0
+    try:
+        for dirpath, _dirnames, filenames in os.walk(str(path)):
+            for fname in filenames:
+                fpath = os.path.join(dirpath, fname)
+                try:
+                    total += os.lstat(fpath).st_size
+                except OSError:
+                    continue
+    except OSError:
+        return 0
+    return total
 
 
 class GitProgressReporter(RemoteProgress):
@@ -225,6 +250,14 @@ class GitHubPackageDownloader:
         # attribute is part of the documented downloader surface rather
         # than a monkey-patched field.
         self._tiered_resolver = None
+
+        # Perf #1433: optional InstallLogger attached by the install
+        # pipeline. When set, the subdir download path emits structured
+        # verbose-only [perf] lines (subdir_download_start /
+        # bare_clone_strategy / materialize_result). None means the
+        # downloader is being driven outside the install pipeline (e.g.
+        # tests, marketplace) -- the [perf] channel stays silent.
+        self.install_logger = None
 
     def _git_env_dict(self) -> dict[str, str]:
         """Return a sanitized git env dict for cache-layer subprocess calls.
@@ -585,9 +618,17 @@ class GitHubPackageDownloader:
         ref: str | None,
         env: dict[str, str],
         known_sha: str | None = None,
+        sparse_paths: list[str] | None = None,
     ) -> str:
         """Thin delegate to :func:`bare_cache.materialize_from_bare` (kept on the class so test patches still work)."""
-        return materialize_from_bare(bare_path, consumer_dir, ref=ref, env=env, known_sha=known_sha)
+        return materialize_from_bare(
+            bare_path,
+            consumer_dir,
+            ref=ref,
+            env=env,
+            known_sha=known_sha,
+            sparse_paths=sparse_paths,
+        )
 
     def _fetch_sha_into_bare(
         self,
@@ -1060,6 +1101,8 @@ class GitHubPackageDownloader:
         # Use user-specified ref, or None to use repo's default branch
         ref = dep_ref.reference  # None if not specified
         subdir_path = dep_ref.virtual_path
+        _perf_logger = getattr(self, "install_logger", None)
+        _dep_display = str(dep_ref)
 
         # Update progress - starting
         if progress_obj and progress_task_id is not None:
@@ -1079,11 +1122,32 @@ class GitHubPackageDownloader:
         # Build a canonical URL for cache key derivation.
         _persistent_cache = self.persistent_git_cache
         _persistent_checkout: Path | None = None
+        _resolved_sha_for_cache: str | None = None
         if _persistent_cache is not None:
             _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
             try:
+                # Tiered ref resolution (perf #1433 follow-up): resolve
+                # the ref through the attached TieredRefResolver BEFORE
+                # calling get_checkout so the cache skips its internal
+                # ls-remote. Same pattern as the non-subdir path at
+                # line ~1604 which passes locked_sha=resolved.
+                try:
+                    _resolved = self.resolve_git_reference(dep_ref)
+                    _resolved_sha_for_cache = _resolved.resolved_commit
+                except Exception:
+                    _resolved_sha_for_cache = None
+                # Sparse-cone (#1433): keying the persistent shard by
+                # (sha, subdir) ensures the cached working tree is the
+                # subdir only (<2 MB) instead of the full repo
+                # (~78 MB for dotnet/skills). Different subdirs of the
+                # same SHA land in separate variant shards; bare cache
+                # is unchanged so they still share object data.
                 _persistent_checkout = _persistent_cache.get_checkout(
-                    _canonical_url, ref, env=self._git_env_dict()
+                    _canonical_url,
+                    _resolved_sha_for_cache or ref,
+                    locked_sha=_resolved_sha_for_cache,
+                    env=self._git_env_dict(),
+                    sparse_paths=[subdir_path],
                 )
             except Exception:
                 # Cache miss or failure -- fall through to normal clone path.
@@ -1106,6 +1170,20 @@ class GitHubPackageDownloader:
             if _persistent_checkout is not None:
                 # WS3: persistent cache hit -- use the cached checkout directly.
                 temp_clone_path = _persistent_checkout
+                if _perf_logger is not None:
+                    _sha_short = (
+                        (ref or "")[:12] if ref and re.match(r"^[a-f0-9]{7,40}$", ref) else ""
+                    )
+                    _perf_logger.subdir_download_start(
+                        _dep_display,
+                        cache_state="persistent-hit",
+                        sha_short=_sha_short,
+                        sparse_paths=[subdir_path],
+                    )
+                    _perf_logger.materialize_result(
+                        sparse_applied=True,
+                        consumer_size_bytes=_dir_size_bytes(_persistent_checkout),
+                    )
             elif use_shared:
                 # WS2 (#1126): shared cache holds BARE clones keyed by
                 # (host, owner, repo, ref). Each consumer materializes its
@@ -1114,6 +1192,7 @@ class GitHubPackageDownloader:
                 # subdirectories of the same repo+ref can share one bare
                 # without racing on sparse-checkout. See design.md sec 5.5.
                 is_commit_sha = ref and re.match(r"^[a-f0-9]{7,40}$", ref) is not None
+                _perf_t0_bare = time.monotonic()
 
                 def _shared_bare_clone_fn(bare_target: Path) -> None:
                     self._bare_clone_with_fallback(
@@ -1143,6 +1222,20 @@ class GitHubPackageDownloader:
                     )
                 except Exception as e:
                     raise RuntimeError(f"Failed to clone repository: {e}") from e
+                _perf_bare_elapsed_ms = int((time.monotonic() - _perf_t0_bare) * 1000)
+                if _perf_logger is not None:
+                    _strategy = (
+                        f"init+fetch --depth=1 origin {ref[:12]}"
+                        if is_commit_sha
+                        else f"--depth=1 --branch {ref or '<default>'}"
+                    )
+                    _perf_logger.subdir_download_start(
+                        _dep_display,
+                        cache_state="shared-bare",
+                        sha_short=ref[:12] if is_commit_sha and ref else "",
+                        sparse_paths=[subdir_path],
+                    )
+                    _perf_logger.bare_clone_strategy(_strategy, _perf_bare_elapsed_ms)
 
                 # Per-consumer materialization. mkdtemp gives a unique
                 # path so concurrent consumers do not collide. The bare
@@ -1166,11 +1259,25 @@ class GitHubPackageDownloader:
                         # _bare_action, so rev-parse HEAD returns 40 chars.
                         # Copilot review finding (#1135).
                         known_sha=ref if (is_commit_sha and len(ref) == 40) else None,
+                        # Sparse-cone (#1433): materialize ONLY the
+                        # subdirectory we need. Cuts the consumer
+                        # working tree from full-repo to subdir-size
+                        # on a typical monorepo (78 MB -> <2 MB for
+                        # dotnet/skills). Bare cache is unchanged
+                        # (subdir-agnostic) so multiple consumers
+                        # requesting different subdirs of the same
+                        # repo+SHA still share the object DB.
+                        sparse_paths=[subdir_path],
                     )
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed to prepare dependency from cached clone: {e}"
                     ) from e
+                if _perf_logger is not None:
+                    _perf_logger.materialize_result(
+                        sparse_applied=True,
+                        consumer_size_bytes=_dir_size_bytes(temp_clone_path),
+                    )
             else:
                 # Legacy per-dep clone path (no shared cache).
                 temp_dir = tempfile.mkdtemp(dir=get_apm_temp_dir())
