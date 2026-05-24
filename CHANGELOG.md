@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm marketplace add` now accepts local filesystem paths, `file://` URIs, SSH URLs, and HTTPS URLs to any git host (Azure DevOps via `ADO_APM_PAT`, GitLab, Gitea, Bitbucket Server, self-hosted). Generic-git registrations fetch `marketplace.json` via `GitCache` and never forward APM tokens; local marketplaces read the manifest directly. `apm install <plugin>@<local-marketplace>` is fully supported, including marketplaces whose `marketplace.json` uses relative plugin sources.
+
+### Security
+
+- `GitCache` now disables git hooks (`core.hooksPath=/dev/null`) and skips submodule recursion on every clone, fetch, and checkout. Hardens APM against malicious upstreams, which is on-path for the new generic-git marketplace support.
+
 ### Fixed
 
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
