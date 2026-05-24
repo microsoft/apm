@@ -64,7 +64,9 @@ def _extract_owner_repo_from_url(url: str) -> tuple[str, str]:
         path = path[: -len(".git")]
     segments = [s for s in path.split("/") if s]
     if len(segments) >= 2:
-        return (segments[-2], segments[-1])
+        # Multi-segment paths (GHES nested groups, GitLab subgroups) are
+        # preserved by joining all segments except the last into `owner`.
+        return ("/".join(segments[:-1]), segments[-1])
     if len(segments) == 1:
         return ("", segments[0])
     return ("", "")
