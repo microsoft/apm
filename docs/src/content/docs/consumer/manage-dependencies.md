@@ -64,7 +64,7 @@ parser. The supported forms:
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
 | Object form | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
-| Marketplace dict | `{ name: <plugin>, marketplace: <mkt> }` | Install a plugin from a registered marketplace. Resolved to a concrete git ref at install time. |
+| Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). Resolved to a concrete git ref at install time. |
 
 Object form in YAML — three mutually exclusive keys select the variant
 (`git`, `path`, or `marketplace`):
@@ -84,6 +84,11 @@ dependencies:
     # Marketplace: resolved to a concrete git ref at install time
     - name: sec-check
       marketplace: acme-plugins
+
+    # Marketplace with version constraint (semver range)
+    - name: secrets-vault
+      marketplace: acme-plugins
+      version: "~2.1.0"
 ```
 
 For private repos and non-GitHub hosts, see
@@ -136,6 +141,28 @@ Branches move; tags and SHAs do not. For reproducibility, prefer tags or
 SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
+
+### Marketplace ref override
+
+When installing from a marketplace via the CLI, append `#<ref>` to
+override the marketplace entry's default `source.ref`:
+
+```bash
+apm install plugin@marketplace#v2.0.0
+```
+
+In `apm.yml`, use the `version` field in the marketplace object form.
+Semver ranges and bare versions (e.g. `~2.1.0`, `^2.0`, `2.1.0`) are
+resolved against git tags matching `{name}--v{version}` on the
+marketplace repository. The highest matching tag is used.
+
+```yaml
+dependencies:
+  apm:
+    - name: secrets-vault
+      marketplace: acme-tools
+      version: "~2.1.0"
+```
 
 ## Remove a dependency
 

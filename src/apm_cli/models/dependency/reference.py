@@ -101,6 +101,7 @@ class DependencyReference:
     is_marketplace: bool = False
     marketplace_name: str | None = None
     marketplace_plugin_name: str | None = None
+    marketplace_version_spec: str | None = None
 
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
@@ -542,8 +543,14 @@ class DependencyReference:
             - name: gopls-lsp
               marketplace: claude-plugins-official
 
+            - name: secrets-vault
+              marketplace: acme-tools
+              version: "~2.1.0"
+
         Args:
-            entry: Dictionary with 'git', 'path', or 'marketplace' key
+            entry: Dictionary with 'git', 'path', or 'marketplace' key.
+                   Marketplace entries support 'name', 'marketplace', and
+                   optional 'version' (semver range) fields.
 
         Returns:
             DependencyReference: Parsed dependency reference
@@ -551,11 +558,18 @@ class DependencyReference:
         Raises:
             ValueError: If the entry is missing required fields or has invalid format
         """
-        # Support marketplace dependencies: { name: X, marketplace: Y }
+        # Support marketplace dependencies: { name: X, marketplace: Y, version: Z }
         if "marketplace" in entry:
             if "git" in entry or "path" in entry:
                 raise ValueError(
                     "Ambiguous dependency: 'marketplace' cannot be combined with 'git' or 'path'"
+                )
+            _MARKETPLACE_KEYS = {"name", "marketplace", "version"}
+            unknown = set(entry.keys()) - _MARKETPLACE_KEYS
+            if unknown:
+                raise ValueError(
+                    f"Unknown keys in marketplace dependency: {sorted(unknown)}. "
+                    f"Allowed keys: {sorted(_MARKETPLACE_KEYS)}"
                 )
             name = entry.get("name")
             marketplace = entry["marketplace"]
@@ -575,11 +589,17 @@ class DependencyReference:
                     f"Invalid marketplace name: '{marketplace}'. "
                     "Names can only contain letters, numbers, dots, underscores, and hyphens"
                 )
+            version_spec = entry.get("version")
+            if version_spec is not None:
+                if not isinstance(version_spec, str) or not version_spec.strip():
+                    raise ValueError("'version' field must be a non-empty string")
+                version_spec = version_spec.strip()
             return cls(
                 repo_url=f"_marketplace/{marketplace}/{name}",
                 is_marketplace=True,
                 marketplace_name=marketplace,
                 marketplace_plugin_name=name,
+                marketplace_version_spec=version_spec,
             )
 
         # Support dict-form local path: { path: ./local/dir }
@@ -1576,6 +1596,9 @@ class DependencyReference:
 
         Returns:
             str or dict: String for simple deps; dict for HTTP or skill-subset deps.
+
+        Raises:
+            ValueError: If this is an unresolved marketplace dependency.
         """
         if self.is_marketplace:
             raise ValueError(
