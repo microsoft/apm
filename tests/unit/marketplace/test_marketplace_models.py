@@ -30,7 +30,13 @@ class TestMarketplaceSource:
     def test_to_dict_defaults(self):
         src = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         d = src.to_dict()
-        assert d == {"name": "acme", "owner": "acme-org", "repo": "plugins"}
+        # URL is synthesised from legacy fields, plus legacy mirror retained for downgrade safety
+        assert d == {
+            "name": "acme",
+            "url": "https://github.com/acme-org/plugins",
+            "owner": "acme-org",
+            "repo": "plugins",
+        }
         assert "host" not in d  # default omitted
         assert "branch" not in d
 
