@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "batch-bug-shepherd-verdict-schema.json",
+  "title": "batch-bug-shepherd subagent return shapes",
+  "description": "Three return shapes, one per wave. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR and continue.",
+  "oneOf": [
+    { "$ref": "#/definitions/triage_return" },
+    { "$ref": "#/definitions/shepherd_return" },
+    { "$ref": "#/definitions/completion_return" }
+  ],
+  "definitions": {
+    "triage_return": {
+      "type": "object",
+      "required": ["kind", "issue", "verdict", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "triage" },
+        "issue": { "type": "integer", "minimum": 1 },
+        "verdict": {
+          "type": "string",
+          "enum": ["LEGIT", "UNCLEAR", "FIXED-AT-HEAD", "NOT-A-BUG"]
+        },
+        "summary": { "type": "string", "maxLength": 400 },
+        "repro_steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Smallest possible reproduction; required when verdict=LEGIT."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "Command output, file paths, or commit refs that justify the verdict."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "verdict": { "const": "LEGIT" } } },
+          "then": { "required": ["repro_steps"] }
+        }
+      ]
+    },
+    "shepherd_return": {
+      "type": "object",
+      "required": ["kind", "pr", "issue", "verdict", "comment_url", "blocking_followups"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "shepherd" },
+        "pr": { "type": "integer", "minimum": 1 },
+        "issue": { "type": "integer", "minimum": 1 },
+        "verdict": {
+          "type": "string",
+          "enum": ["ready-to-merge", "needs-author-changes", "reject"]
+        },
+        "comment_url": { "type": "string", "format": "uri" },
+        "blocking_followups": {
+          "type": "array",
+          "description": "Each item is the work definition the completion subagent will resolve.",
+          "items": {
+            "type": "object",
+            "required": ["id", "summary"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "summary": { "type": "string", "maxLength": 400 },
+              "source_persona": { "type": "string" },
+              "file_hints": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "maintainerCanModify": { "type": "boolean" },
+        "author": { "type": "string" },
+        "head_repo": { "type": "string" },
+        "head_branch": { "type": "string" }
+      }
+    },
+    "completion_return": {
+      "type": "object",
+      "required": ["kind", "pr", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "completion" },
+        "pr": { "type": "integer", "minimum": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["ready-to-merge", "blocked", "superseded"]
+        },
+        "superseded_by": { "type": "integer", "minimum": 1 },
+        "supersedes": { "type": "integer", "minimum": 1 },
+        "ci_evidence": {
+          "type": "string",
+          "description": "CI run URL or `gh pr checks` summary; required when status=ready-to-merge."
+        },
+        "lint_evidence": {
+          "type": "string",
+          "description": "Exit code and silent-output confirmation for the canonical ruff pair; required when status=ready-to-merge."
+        },
+        "mutation_break_evidence": {
+          "type": "array",
+          "description": "One entry per regression-trap test added: the test name, the guard deleted, and confirmation that the test failed without the guard.",
+          "items": {
+            "type": "object",
+            "required": ["test", "guard_removed", "failed_without_guard"],
+            "properties": {
+              "test": { "type": "string" },
+              "guard_removed": { "type": "string" },
+              "failed_without_guard": { "type": "boolean" }
+            }
+          }
+        },
+        "blocker": {
+          "type": "string",
+          "description": "Required when status=blocked. One-paragraph human-readable explanation."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ready-to-merge" } } },
+          "then": { "required": ["ci_evidence", "lint_evidence"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "blocked" } } },
+          "then": { "required": ["blocker"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "superseded" } } },
+          "then": { "required": ["superseded_by"] }
+        }
+      ]
+    }
+  }
+}

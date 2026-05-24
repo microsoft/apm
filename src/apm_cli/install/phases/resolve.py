@@ -125,6 +125,13 @@ def run(ctx: InstallContext) -> None:
         except (OSError, ValueError):
             pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
 
+    # Perf #1433: attach the InstallLogger so the subdir download path
+    # can emit verbose-only [perf] lines (subdir cache state, bare
+    # clone strategy + elapsed, materialize sparse-applied + size).
+    # Optional; tests / non-install drivers leave this None.
+    if ctx.logger is not None:
+        downloader.install_logger = ctx.logger
+
     # #1369: tiered ref resolver. Collapses N redundant shallow clones
     # for ref->SHA resolution into a per-run cache + cheap commits API
     # + bare-rev-parse waterfall, falling back to the legacy clone path.
@@ -512,3 +519,13 @@ def run(ctx: InstallContext) -> None:
     # deps have extracted their subpaths.  Safe to call even if no
     # subdir deps were processed (no-op in that case).
     shared_cache.cleanup()
+
+    # Perf #1433: emit ref-resolver tier hit counts at the end of the
+    # resolve phase. Verbose only; one line; lets reviewers see which
+    # waterfall tier carried the run without attaching a debugger.
+    if ctx.logger is not None and ctx.ref_resolver is not None:
+        _tier_stats = getattr(ctx.ref_resolver, "stats", None)
+        if _tier_stats:
+            # tier_summary is install-only; other loggers degrade silently.
+            if hasattr(ctx.logger, "tier_summary"):
+                ctx.logger.tier_summary(_tier_stats)

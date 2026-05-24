@@ -46,6 +46,8 @@ ENV/
 # Test coverage
 .coverage
 .coverage.*
+.coverage_*.json
+coverage*.json
 htmlcov/
 .tox/
 .pytest_cache/

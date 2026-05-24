@@ -159,33 +159,28 @@ class TestCodexClientAdapter(unittest.TestCase):
         server_config = config["mcp_servers"]["my_server"]
         self.assertEqual(server_config["command"], "npx")
 
+    @patch("apm_cli.adapters.client.codex._rich_warning")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
-    def test_configure_mcp_server_remote_rejected(self, mock_find_server):
-        """Test that remote servers (SSE type) are rejected by Codex adapter."""
-        # Mock registry response for remote-only server
+    def test_configure_mcp_server_sse_remote_rejected(self, mock_find_server, mock_warn):
+        """SSE remotes are rejected with a warning that points to streamable-http."""
         mock_server_info = {
             "id": "remote-server-id",
             "name": "remote-server",
             "remotes": [{"transport_type": "sse", "url": "https://example.com/mcp"}],
-            "packages": [],  # No packages, only remote endpoints
+            "packages": [],
         }
         mock_find_server.return_value = mock_server_info
 
-        # Capture printed output
-        with patch("builtins.print") as mock_print:
-            result = self.adapter.configure_mcp_server("remote-server")
+        result = self.adapter.configure_mcp_server("remote-server")
 
-        # Should return False (rejected)
         self.assertFalse(result)
         mock_find_server.assert_called_once_with("remote-server")
 
-        # Verify warning message was printed
-        mock_print.assert_any_call(
-            "[!]  Warning: MCP server 'remote-server' is a remote server (SSE type)"
-        )
-        mock_print.assert_any_call(
-            "   Codex CLI only supports local servers with command/args configuration"
-        )
+        mock_warn.assert_called_once()
+        warn_message = mock_warn.call_args[0][0]
+        self.assertIn("remote-server", warn_message)
+        self.assertIn("SSE", warn_message)
+        self.assertIn("streamable-http", warn_message)
 
         # Verify no config was updated
         config = self.adapter.get_current_config()
@@ -272,6 +267,239 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.assertEqual(
             config["args"],
             ["-y", "@modelcontextprotocol/server-filesystem", ".", "."],
+        )
+
+    def test_format_server_config_streamable_http_writes_url_and_id(self):
+        """Streamable-HTTP remote produces url + id (no http_headers when none)."""
+        server_info = {
+            "name": "figma",
+            "id": "ab12cd34-0000-0000-0000-000000000000",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                }
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["url"], "https://mcp.figma.com/mcp")
+        self.assertEqual(config["id"], "ab12cd34-0000-0000-0000-000000000000")
+        self.assertNotIn("http_headers", config)
+
+    def test_format_server_config_streamable_http_writes_headers(self):
+        """Registry-supplied headers land under ``http_headers``."""
+        server_info = {
+            "name": "figma",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [
+                        {"name": "Authorization", "value": "Bearer ghp_xxx"},
+                        {"name": "X-Figma-Region", "value": "us-east-1"},
+                    ],
+                }
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(
+            config["http_headers"],
+            {
+                "Authorization": "Bearer ghp_xxx",
+                "X-Figma-Region": "us-east-1",
+            },
+        )
+
+    def test_format_server_config_streamable_http_self_defined(self):
+        """Self-defined streamable-http info produces a remote config."""
+        server_info = {
+            "name": "my-remote",
+            "remotes": [
+                {
+                    "transport_type": "streamable-http",
+                    "url": "https://example.com/mcp",
+                    "headers": [{"name": "Authorization", "value": "Bearer xyz"}],
+                }
+            ],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["url"], "https://example.com/mcp")
+        self.assertEqual(config["http_headers"], {"Authorization": "Bearer xyz"})
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_format_server_config_streamable_http_rejects_non_https(self, mock_warn):
+        """Non-HTTPS remote URLs are rejected to prevent cleartext header leakage."""
+        server_info = {
+            "name": "evil-remote",
+            "id": "evil-id",
+            "remotes": [
+                {
+                    "url": "http://mcp.example.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [{"name": "Authorization", "value": "Bearer secret"}],
+                }
+            ],
+        }
+
+        result = self.adapter._format_server_config(server_info)
+
+        self.assertIsNone(result)
+        mock_warn.assert_called_once()
+        warn_message = mock_warn.call_args[0][0]
+        self.assertIn("evil-remote", warn_message)
+        self.assertIn("https://", warn_message)
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_http_remote_rejected(self, mock_find_server, mock_warn):
+        """End-to-end: an http:// remote URL never lands in the Codex config."""
+        mock_find_server.return_value = {
+            "name": "evil-remote",
+            "id": "evil-id",
+            "remotes": [
+                {
+                    "url": "http://mcp.example.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [{"name": "Authorization", "value": "Bearer secret"}],
+                }
+            ],
+            "packages": [],
+        }
+
+        result = self.adapter.configure_mcp_server("evil-remote")
+
+        self.assertFalse(result)
+        mock_warn.assert_called_once()
+        warn_message = mock_warn.call_args[0][0]
+        self.assertIn("evil-remote", warn_message)
+        self.assertIn("https://", warn_message)
+
+        # Verify no config was written
+        config = self.adapter.get_current_config()
+        self.assertNotIn("mcp_servers", config)
+
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_streamable_http_writes_toml_entry(self, mock_find_server):
+        """End-to-end install of a streamable-HTTP server writes a parseable TOML entry."""
+        mock_find_server.return_value = {
+            "name": "figma",
+            "id": "ab12cd34-0000-0000-0000-000000000000",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                    "headers": [{"name": "Authorization", "value": "Bearer ghp_xxx"}],
+                }
+            ],
+        }
+
+        result = self.adapter.configure_mcp_server("figma/figma")
+
+        self.assertTrue(result)
+        config = self.adapter.get_current_config()
+        figma = config["mcp_servers"]["figma"]
+        self.assertEqual(figma["url"], "https://mcp.figma.com/mcp")
+        self.assertEqual(figma["id"], "ab12cd34-0000-0000-0000-000000000000")
+        self.assertEqual(figma["http_headers"], {"Authorization": "Bearer ghp_xxx"})
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_format_server_config_streamable_http_rejects_empty_url(self, mock_warn):
+        """Empty / whitespace-only remote URLs are rejected with a clear message."""
+        for empty_value in ("", "   ", None):
+            with self.subTest(url=empty_value):
+                mock_warn.reset_mock()
+                server_info = {
+                    "name": "broken-remote",
+                    "id": "broken-id",
+                    "remotes": [
+                        {
+                            "url": empty_value,
+                            "transport_type": "streamable-http",
+                        }
+                    ],
+                }
+                result = self.adapter._format_server_config(server_info)
+                self.assertIsNone(result)
+                mock_warn.assert_called_once()
+                msg = mock_warn.call_args[0][0]
+                self.assertIn("broken-remote", msg)
+                # Message must explicitly mention that the URL is empty/missing
+                # rather than the misleading "no scheme" wording urlparse would
+                # produce for an empty string.
+                self.assertTrue(
+                    "empty" in msg.lower() or "missing" in msg.lower() or "no url" in msg.lower(),
+                    f"Expected empty/missing URL wording; got: {msg!r}",
+                )
+
+    @patch("apm_cli.adapters.client.codex._rich_success")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_streamable_http_emits_rich_success(
+        self, mock_find_server, mock_success
+    ):
+        """Successful streamable-HTTP registration emits a green _rich_success line."""
+        mock_find_server.return_value = {
+            "name": "figma",
+            "id": "ab12cd34-0000-0000-0000-000000000000",
+            "remotes": [
+                {
+                    "url": "https://mcp.figma.com/mcp",
+                    "transport_type": "streamable-http",
+                }
+            ],
+        }
+        result = self.adapter.configure_mcp_server("figma/figma")
+        self.assertTrue(result)
+        mock_success.assert_called_once()
+        msg = mock_success.call_args[0][0]
+        self.assertIn("figma", msg)
+        self.assertIn("Codex CLI", msg)
+
+    @patch("apm_cli.adapters.client.codex._rich_success")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_stdio_emits_rich_success(self, mock_find_server, mock_success):
+        """stdio registrations also emit _rich_success (not bare print)."""
+        mock_find_server.return_value = {
+            "id": "test-id",
+            "name": "test-server",
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "test-package",
+                    "version": "1.0.0",
+                    "arguments": [],
+                }
+            ],
+            "environment_variables": [],
+        }
+        result = self.adapter.configure_mcp_server("test-server", "my_server")
+        self.assertTrue(result)
+        mock_success.assert_called_once()
+
+    @patch("apm_cli.adapters.client.codex._log")
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_configure_mcp_server_hybrid_logs_precedence(self, mock_find_server, mock_log):
+        """Hybrid servers (remotes + packages) log that packages win for Codex."""
+        mock_find_server.return_value = {
+            "id": "hybrid-server-id",
+            "name": "hybrid-server",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://example.com/mcp"}],
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "hybrid-package",
+                    "version": "1.0.0",
+                    "arguments": [],
+                }
+            ],
+            "environment_variables": [],
+        }
+        result = self.adapter.configure_mcp_server("hybrid-server", "hybrid")
+        self.assertTrue(result)
+        # At least one debug call must mention the precedence decision.
+        debug_messages = [str(call) for call in mock_log.debug.call_args_list]
+        self.assertTrue(
+            any("hybrid" in m and "package" in m.lower() for m in debug_messages),
+            f"Expected a debug log about packages-win precedence; got: {debug_messages}",
         )
 
 

@@ -202,6 +202,26 @@ safe-outputs:
       - project-sync
     max: 10
 
+# DIFC read-integrity exemption
+#
+# Write-class safe-outputs (add-comment, add-labels, remove-labels,
+# assign-milestone, dispatch-workflow) cause gh-aw's DIFC policy to
+# elevate the minimum integrity for MCP reads to HIGH. Issues filed by
+# external contributors (non-org-members) are assigned LOW integrity,
+# so search_issues silently drops them while get_issue fails with
+# McpError: MCP error 0: [Filtered] -- making the triage panel blind
+# to the exact issues it exists to triage.
+#
+# Setting read-integrity to `low` restores visibility of all public
+# issues regardless of author affiliation. This is safe because:
+#   (a) the panel only READS issue content for classification -- it
+#       never executes, evals, or re-emits raw body text;
+#   (b) prompt-injection rails (BATCH_ALLOW_LIST, body-size cap, spam
+#       filter) are enforced in the prompt, not in DIFC; and
+#   (c) write actions are still gated by safe-outputs allow-lists.
+difc:
+  read-integrity: low
+
 timeout-minutes: 30
 ---
 
@@ -271,9 +291,10 @@ fetch the full body again -- the cap is the cap.
 ### SCHEDULED_SWEEP
 
 Find up to 10 untriaged open issues, **oldest first**, excluding
-bots. The candidate list lives in the GitHub MCP server -- shell `gh`
-is not authenticated, so use the MCP `search_issues` tool with a
-server-side filter that excludes already-triaged issues:
+bots. Use the MCP `search_issues` tool (authenticated via the gh-aw
+runtime; the `difc: read-integrity: low` exemption ensures external
+contributor issues are not filtered) with a server-side filter that
+excludes already-triaged issues:
 
 ```
 search_issues(
@@ -286,10 +307,17 @@ search_issues(
 the `-label:status/triaged` negation, so the response contains ONLY
 the candidates we care about. With `list_issues` we'd have to
 paginate the entire open-issue queue and filter the triaged label
-client-side -- and the MCP gateway's DIFC integrity filter silently
-drops responses from non-collaborator authors mid-page, which makes
-"is the next page worth fetching?" reasoning unreliable. The search
-API sidesteps both problems.
+client-side, which is wasteful and error-prone.
+
+**DIFC note:** Write-class safe-outputs (add-comment, add-labels,
+etc.) normally elevate the MCP read-integrity floor to HIGH, which
+would silently drop issues authored by external contributors (LOW
+integrity). The `difc: read-integrity: low` declaration in the
+workflow frontmatter exempts this workflow's MCP reads from that
+elevation. Without the exemption, `search_issues` and `get_issue`
+would return only org-member issues -- defeating the triage panel's
+purpose. See the `difc:` block in the frontmatter for the safety
+rationale.
 
 The `sort:created-asc` qualifier returns oldest first, so the first
 30 results are the oldest untriaged issues -- exactly the queue we
@@ -341,14 +369,28 @@ rolled issue; just process the 10 you picked.
 
 ### OPT_IN_RETRIAGE
 
-The triggering issue is `#${{ github.event.issue.number }}`. Read it:
+The triggering issue is `#${{ github.event.issue.number }}`. Read it
+using the MCP `get_issue` tool (the `gh` CLI is not authenticated in
+the agent sandbox; MCP tools are authenticated and the `difc:
+read-integrity: low` exemption ensures external contributor issues
+are visible):
 
-```bash
-gh issue view "${{ github.event.issue.number }}" \
-  --repo "${{ github.repository }}" \
-  --json number,title,author,labels,locked,state,body,milestone,createdAt,id
-gh issue view "${{ github.event.issue.number }}" \
-  --repo "${{ github.repository }}" --comments
+```
+get_issue(
+  owner: "microsoft",
+  repo: "apm",
+  issue_number: ${{ github.event.issue.number }},
+)
+```
+
+Then fetch the issue's comment history:
+
+```
+list_issue_comments(
+  owner: "microsoft",
+  repo: "apm",
+  issue_number: ${{ github.event.issue.number }},
+)
 ```
 
 This is a **re-triage** request from a maintainer. They have already
@@ -361,10 +403,11 @@ comment, do NOT remove the label.
 
 ### MANUAL_DISPATCH
 
-The issue is `#${{ inputs.issue_number }}`. Same `gh issue view` calls
-as OPT_IN_RETRIAGE. Treat as re-triage if the issue already has any
-`theme/*`, `area/*`, or `status/triaged` labels; treat as first-pass
-triage otherwise.
+The issue is `#${{ inputs.issue_number }}`. Same MCP `get_issue` and
+`list_issue_comments` calls as OPT_IN_RETRIAGE (substituting
+`${{ inputs.issue_number }}` for the issue number). Treat as re-triage
+if the issue already has any `theme/*`, `area/*`, or `status/triaged`
+labels; treat as first-pass triage otherwise.
 
 ## Step 2: Run the panel via the apm-triage-panel skill
 
@@ -468,9 +511,8 @@ safe-output tools. Required label-set hygiene per issue:
   added at least one `theme/*` label in this run, you MUST also call
   `dispatch_workflow` with `workflow_name: "project-sync"` and inputs
   `{"content_id": "<issue node id>"}` -- where `<issue node id>` is
-  the `id` field returned by `gh issue list --json id` / `gh issue
-  view --json id` (it looks like `I_kwDO...`, NOT the integer issue
-  number). This triggers the PGS project board sync for that issue.
+  the `id` field from the MCP `search_issues` or `get_issue` response
+  (it looks like `I_kwDO...`, NOT the integer issue number). This triggers the PGS project board sync for that issue.
   It is required because gh-aw applies `add-labels` under
   `GITHUB_TOKEN`, and GitHub does NOT fire downstream workflow events
   from `GITHUB_TOKEN`-driven label changes -- so without this dispatch

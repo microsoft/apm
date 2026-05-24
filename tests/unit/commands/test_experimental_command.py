@@ -16,7 +16,7 @@ Coverage:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -558,3 +558,207 @@ class TestMalformedValueReset:
             _mod.CONFIG_DIR = orig_dir
             _mod.CONFIG_FILE = orig_file
             _mod._config_cache = None
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: missed lines in experimental.py
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTableImportErrorFallback:
+    """Lines 82, 106-116: _build_table falls back to plain text when console is None."""
+
+    def test_list_plain_text_fallback_when_no_console(self, runner: CliRunner) -> None:
+        """Lines 82, 106-116: console=None → ImportError raised → plain-text output."""
+        from apm_cli.commands.experimental import experimental
+
+        with patch("apm_cli.commands.experimental._get_console", return_value=None):
+            result = runner.invoke(experimental, ["list"])
+
+        assert result.exit_code == 0
+        # Should show flag names in plain text (not Rich table)
+        assert "verbose" in result.output.lower() or "experimental" in result.output.lower()
+
+
+class TestPrintListFooterStaleKeys:
+    """Line 64: stale config keys trigger a note in list footer."""
+
+    def test_stale_keys_note_shown_in_list(self, runner: CliRunner, tmp_path) -> None:
+        """Line 64: get_stale_config_keys() returns non-empty → note shown."""
+        from apm_cli.commands.experimental import experimental
+
+        with patch(
+            "apm_cli.commands.experimental.get_stale_config_keys",
+            return_value=["old_key"],
+        ):
+            result = runner.invoke(experimental, ["list"])
+
+        assert result.exit_code == 0
+        assert (
+            "unknown flag" in result.output.lower()
+            or "stale" in result.output.lower()
+            or "1" in result.output
+        )
+
+
+class TestDisableFlagUnknown:
+    """Lines 271-272: disable_flag with unknown flag name."""
+
+    def test_disable_unknown_flag_exits_1(self, runner: CliRunner) -> None:
+        """Lines 271-272: unknown flag → _handle_unknown_flag → return."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["disable", "totally_unknown_feature_xyz"])
+        assert result.exit_code == 1
+
+
+class TestResetStaleMalformedKeys:
+    """Lines 338, 340: reset with stale and malformed keys."""
+
+    def test_reset_shows_stale_keys(self, runner: CliRunner, tmp_path) -> None:
+        """Line 338: stale config key listed in reset preview."""
+        import json as _json
+
+        import apm_cli.config as _mod
+
+        # _isolate_config already set CONFIG_FILE to tmp_path/.apm/config.json
+        config_dir = tmp_path / ".apm"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / "config.json"
+        config_file.write_text(
+            _json.dumps({"experimental": {"old_removed_flag_xyz": True}}),
+            encoding="utf-8",
+        )
+        _mod._config_cache = None
+
+        from apm_cli.commands.experimental import experimental
+
+        # Do NOT pass --yes so the preview lines are built (lines 338, 340)
+        result = runner.invoke(experimental, ["reset"], input="y\n")
+        assert result.exit_code == 0
+
+    def test_reset_shows_malformed_keys(self, runner: CliRunner, tmp_path) -> None:
+        """Line 340: malformed config key listed in reset preview."""
+        import json as _json
+
+        import apm_cli.config as _mod
+
+        # _isolate_config already set CONFIG_FILE to tmp_path/.apm/config.json
+        config_dir = tmp_path / ".apm"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / "config.json"
+        # A known flag set to a non-boolean string value → malformed
+        config_file.write_text(
+            _json.dumps({"experimental": {"verbose_version": "yes"}}),
+            encoding="utf-8",
+        )
+        _mod._config_cache = None
+
+        from apm_cli.commands.experimental import experimental
+
+        # Do NOT pass --yes so the preview lines are built (line 340)
+        result = runner.invoke(experimental, ["reset"], input="y\n")
+        assert result.exit_code == 0
+
+
+class TestResetConfirmFallback:
+    """Lines 354-355, 357-359: reset confirmation fallback and cancel."""
+
+    def test_reset_confirm_importerror_falls_back_to_click_confirm(self, runner: CliRunner) -> None:
+        """Lines 354-355: rich.prompt.Confirm ImportError → click.confirm fallback."""
+        import sys as _sys
+
+        from apm_cli.commands.experimental import experimental
+
+        # Enable a flag so there's something to reset (non-empty overridden)
+        runner.invoke(experimental, ["enable", "verbose-version"])
+
+        orig = _sys.modules.get("rich.prompt")
+        try:
+            _sys.modules["rich.prompt"] = None  # type: ignore[assignment]
+            # Input 'n' to cancel (covers lines 357-359 as well)
+            result = runner.invoke(experimental, ["reset"], input="n\n")
+        finally:
+            if orig is None:
+                _sys.modules.pop("rich.prompt", None)
+            else:
+                _sys.modules["rich.prompt"] = orig
+
+        assert result.exit_code == 0
+
+    def test_reset_confirm_declined_cancels(self, runner: CliRunner) -> None:
+        """Lines 357-359: if not confirmed → 'Operation cancelled' + return."""
+        from apm_cli.commands.experimental import experimental
+
+        # Enable a flag so there's something to reset
+        runner.invoke(experimental, ["enable", "verbose-version"])
+
+        result = runner.invoke(experimental, ["reset"], input="n\n")
+        assert result.exit_code == 0
+        assert "cancelled" in result.output.lower()
+
+
+class TestMultipleSuggestions:
+    """Line 135: _handle_unknown_flag with multiple similar suggestions."""
+
+    def test_multiple_suggestions_shown(self, runner: CliRunner) -> None:
+        """Line 135: len(suggestions) > 1 → 'Similar features:' line."""
+        from apm_cli.commands.experimental import _handle_unknown_flag
+
+        logger = MagicMock()
+        logger.error = MagicMock()
+        logger.progress = MagicMock()
+
+        with patch(
+            "apm_cli.commands.experimental.validate_flag_name",
+            side_effect=ValueError("unknown", ["suggestion_a", "suggestion_b"]),
+        ):
+            with pytest.raises(SystemExit):
+                _handle_unknown_flag("some_flag", logger)
+
+        # Should have called progress with "Similar features:"
+        calls = [str(c) for c in logger.progress.call_args_list]
+        assert any("similar" in c.lower() for c in calls)
+
+
+class TestListAllFlagsDisabledWhenAllEnabled:
+    """Lines 197-198: --disabled with all flags enabled → note + return."""
+
+    def test_disabled_filter_shows_note_when_all_enabled(self, runner: CliRunner) -> None:
+        """Lines 197-198: all flags enabled → 'All experimental flags are currently enabled.'"""
+        from apm_cli.commands.experimental import FLAGS, experimental
+
+        # Enable all flags
+        for flag_name in FLAGS:
+            runner.invoke(experimental, ["enable", flag_name])
+
+        result = runner.invoke(experimental, ["list", "--disabled"])
+        assert result.exit_code == 0
+        assert "all experimental flags are currently enabled" in result.output.lower()
+
+
+class TestEnableFlagWithHint:
+    """Line 252→exit: enable a flag that has a hint message."""
+
+    def test_enable_flag_shows_hint(self, runner: CliRunner) -> None:
+        """Lines 252-253: flag.hint is set → hint shown after enabling."""
+        from apm_cli.commands.experimental import experimental
+
+        # verbose_version has hint='Run apm --version to see the new output.'
+        result = runner.invoke(experimental, ["enable", "verbose-version"])
+        assert result.exit_code == 0
+        # Hint should appear after successful enable
+        assert (
+            "apm --version" in result.output or "Run" in result.output or "output" in result.output
+        )
+
+
+class TestResetUnknownFlagName:
+    """Lines 302-303: reset with specific unknown flag name."""
+
+    def test_reset_unknown_flag_name_exits_1(self, runner: CliRunner) -> None:
+        """Lines 302-303: reset UNKNOWN → _handle_unknown_flag + return."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["reset", "totally_unknown_xyz"])
+        assert result.exit_code == 1

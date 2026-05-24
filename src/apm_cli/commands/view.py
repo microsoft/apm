@@ -415,7 +415,26 @@ def display_versions(package: str, logger: CommandLogger) -> None:
 # ------------------------------------------------------------------
 
 
-@click.command(name="view")
+_VIEW_HELP = (
+    "View package metadata or list remote versions.\n\n"
+    "Without FIELD, displays local metadata for an installed package. "
+    "With FIELD, queries specific data (may contact the remote).\n\n"
+    "\b\n"
+    "Fields:\n"
+    "    versions    List available remote tags and branches\n\n"
+    "\b\n"
+    "Examples:\n"
+    "    apm view org/repo                # Local metadata\n"
+    "    apm view org/repo versions       # Remote tags/branches\n"
+    "    apm view org/repo -g             # From user scope"
+)
+
+
+@click.command(
+    name="view",
+    help=_VIEW_HELP,
+    short_help="View package metadata or list remote versions",
+)
 @click.argument("package", required=True)
 @click.argument("field", required=False, default=None)
 @click.option(
@@ -427,21 +446,7 @@ def display_versions(package: str, logger: CommandLogger) -> None:
     help="Inspect package from user scope (~/.apm/)",
 )
 def view(package: str, field: str | None, global_: bool):
-    """View package metadata or list remote versions.
-
-    Without FIELD, displays local metadata for an installed package.
-    With FIELD, queries specific data (may contact the remote).
-
-    \b
-    Fields:
-        versions    List available remote tags and branches
-
-    \b
-    Examples:
-        apm view org/repo                # Local metadata
-        apm view org/repo versions       # Remote tags/branches
-        apm view org/repo -g             # From user scope
-    """
+    """View package metadata or list remote versions."""
     from ..core.scope import InstallScope, get_apm_dir
 
     logger = CommandLogger("view")

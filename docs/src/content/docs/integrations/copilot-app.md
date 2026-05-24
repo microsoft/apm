@@ -78,6 +78,41 @@ Execution-affecting fields are the prompt body, schedule (`interval` / `schedule
 
 Removing the source `.prompt.md` from a package and re-syncing drops the lockfile entry but does NOT delete the corresponding row from `~/.copilot/data.db` -- it merely orphans it. Run `apm uninstall <pkg>` to remove the row.
 
+## Project scoping
+
+Workflows are scoped to a real Copilot App project so "Run now" in the Workflows tab CWDs into the right repository and the row groups under the correct sidebar entry. APM resolves the project once per install, then stamps every workflow row's `project_id`.
+
+Two resolution paths run in this order:
+
+| Order | When it fires | What it does |
+|---|---|---|
+| 1 | The Copilot App is running and is reachable on its loopback WebSocket (`~/.copilot/run/ws.{port,token}`, 0o600). | APM calls the App's own `create_project_from_path` over IPC. The App runs full discovery (GitHub owner/repo detection, default branch, account binding) and the resulting project is immediately known to the webview, so opening the Workflows tab cannot hit the white-screen-on-unknown-project failure mode. |
+| 2 | The Copilot App is closed, OR the WebSocket surface is unreachable for any reason (stale token after restart, etc). | APM falls back to a direct-SQLite `BEGIN IMMEDIATE` resolver: SELECT by `main_repo_path` (UNIQUE), INSERT if missing. |
+
+In both paths the workflow rows are written via direct SQLite -- the WS surface is currently project-registration only -- so lockfile ids stay namespaced and stable (`apm--<owner>--<pkg>--<prompt>`) across runs and across the WS-vs-SQLite branch.
+
+If APM cannot derive a repo context at all (no `.git/`, no `origin`, etc) the workflows install with `project_id = NULL`. You can attach them to any project after the fact from the App's Workflows tab.
+
+### One-time restart hint
+
+The first time APM registers a brand-new project for a given repository, install prints:
+
+```
+[i] Registered a new Copilot App project for this repo. Restart the Copilot App once so the new project appears in the UI (see github/github-app#5483).
+```
+
+Subsequent installs into the same repo are silent. The hint is upstream-bug guidance: the App's webview does not currently refresh its projects sidebar when a new `projects` row appears mid-session, so one restart wires the new project into the UI. Once the App learns about the project, neither the install nor the App needs to be restarted again.
+
+## `--global` and workflow-shape prompts
+
+Workflows installed with `apm install --global` run with `CWD=~/.copilot`, not a repository -- which is almost never what the user wants. APM still deploys global workflows (so global skills and commands keep working), but emits a one-time warn-and-proceed diagnostic whenever a `--global` install carries any workflow-shape prompt:
+
+```
+[!] Copilot App workflows installed with --global run with CWD=~/.copilot, not a project. Attach the workflow to a project from the App's Workflows tab to fix this, or re-run `apm install` from a repo without --global.
+```
+
+The remediation is per-row: attach the workflow to any project from the Workflows tab in the App. Or re-run `apm install` from inside a repo without `--global`.
+
 ## Enable and check
 
 Use `apm experimental enable copilot-app` to turn the target on, `apm experimental list` to see all flags, and `apm experimental disable copilot-app` to turn it off again. See the [Experimental flags reference](../../reference/experimental/) for the complete subcommand surface.

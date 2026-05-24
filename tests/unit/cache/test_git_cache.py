@@ -58,7 +58,7 @@ class TestGitCacheGetCheckout:
 
         url = "https://github.com/owner/repo"
         real_shard = cache_shard_key(url)
-        checkout_dir = tmp_path / "git" / "checkouts_v1" / real_shard / sha
+        checkout_dir = tmp_path / "git" / "checkouts_v1" / real_shard / sha / "full"
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
 
@@ -82,7 +82,7 @@ class TestGitCacheGetCheckout:
         from apm_cli.cache.url_normalize import cache_shard_key
 
         real_shard = cache_shard_key(url)
-        checkout_dir = tmp_path / "git" / "checkouts_v1" / real_shard / sha
+        checkout_dir = tmp_path / "git" / "checkouts_v1" / real_shard / sha / "full"
         checkout_dir.mkdir(parents=True)
 
         # First call: rev-parse returns wrong SHA (integrity failure)
@@ -282,7 +282,7 @@ class TestCheckoutWriteDedup:
 
         # Simulate "another process already landed this shard": create
         # the final_dir BEFORE _create_checkout runs.
-        final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha
+        final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
 
@@ -343,7 +343,7 @@ class TestCheckoutWriteDedup:
         shard = cache_shard_key(url)
 
         # Populate final_dir BUT integrity will report failure.
-        final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha
+        final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
 

@@ -29,6 +29,20 @@ _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 _BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
 
 _WORKFLOWS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS "projects" (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    container_kind TEXT NOT NULL DEFAULT 'repository',
+    main_repo_path TEXT UNIQUE,
+    default_branch TEXT,
+    github_owner TEXT,
+    github_repo TEXT,
+    auto_open_in_browser INTEGER NOT NULL DEFAULT 1,
+    auto_approve INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS "workflows" (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
@@ -415,8 +429,17 @@ class TestCopilotAppDeployUninstall:
 
         # Project consumer lives in a separate directory; CliRunner runs
         # in cwd, so we change into it for the install + uninstall calls.
+        # ``git init`` so derive_repo_context can build a RepoContext and
+        # the integrator stamps a real project_id (PR A).
+        import subprocess as _sp
+
         consumer_dir = tmp_path / "consumer-project"
         consumer_dir.mkdir()
+        _sp.run(
+            ["git", "init", "-q", str(consumer_dir)],
+            check=True,
+            capture_output=True,
+        )
         (consumer_dir / "apm.yml").write_text(_MINIMAL_APM_YML, encoding="ascii")
         monkeypatch.chdir(consumer_dir)
 
@@ -450,6 +473,35 @@ class TestCopilotAppDeployUninstall:
         )
         assert ids_after_install[0].startswith("apm--"), ids_after_install[0]
 
+        # PR A: project-scope installs MUST stamp project_id on the
+        # workflow row so it shows up under the correct project in the
+        # App's Workflows tab. The integrator auto-registers a row in
+        # the ``projects`` table for the consumer directory.
+        conn = sqlite3.connect(str(db))
+        try:
+            row = conn.execute(
+                "SELECT project_id, name FROM workflows WHERE id = ?",
+                (ids_after_install[0],),
+            ).fetchone()
+            assert row is not None
+            assert row[0] is not None, "project_id must be stamped on the workflow row"
+            # Display name carries the repo suffix `(<repo>)`.
+            assert "(" in row[1] and ")" in row[1], (
+                f"workflow name should have repo suffix, got {row[1]!r}"
+            )
+            proj = conn.execute(
+                "SELECT main_repo_path FROM projects WHERE id = ?", (row[0],)
+            ).fetchone()
+            assert proj is not None
+            assert Path(proj[0]) == consumer_dir.resolve()
+        finally:
+            conn.close()
+
+        # First-time install into a new repo must emit the restart hint
+        # (the App webview does not live-refresh on externally-inserted
+        # projects rows -- see github/github-app#5483).
+        assert "Restart the Copilot" in install_result.output, install_result.output
+
         uninstall_result = runner.invoke(
             cli,
             ["uninstall", str(pkg_dir), "-v"],
@@ -472,3 +524,73 @@ class TestCopilotAppDeployUninstall:
                 f"--- uninstall output ---\n{uninstall_result.output}\n"
                 f"--- post-uninstall lockfile ---\n{_lock}\n"
             )
+
+    def test_global_install_with_workflow_emits_warning(
+        self,
+        tmp_path: Path,
+        fake_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``--global`` + workflow-shape prompts warns (not fails).
+
+        Workflows installed at user scope run with CWD=~/.copilot, not a
+        project, which is almost never what the author intended. PR A
+        replaces the prior hard-fail with a warn-and-proceed: the row
+        still lands, but the user is told to attach it to a project
+        from the App UI.
+        """
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(
+            _conf,
+            "_config_cache",
+            {"experimental": {"copilot_app": True}},
+        )
+        db = _seed_db(fake_home / "data.db")
+        monkeypatch.setenv("APM_COPILOT_APP_DB", str(db))
+
+        pkg_dir = tmp_path / "global-wf-pkg"
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            textwrap.dedent(
+                """\
+                name: global-wf-pkg
+                description: global+workflow warn test
+                version: 0.0.1
+                """
+            ),
+            encoding="ascii",
+        )
+        (prompts_dir / "morning.prompt.md").write_text(
+            textwrap.dedent(
+                """\
+                ---
+                name: Morning
+                interval: daily
+                schedule_hour: 8
+                schedule_day: 1
+                ---
+                Greet the day.
+                """
+            ),
+            encoding="ascii",
+        )
+
+        from apm_cli.integration import copilot_app_db as cdb
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["install", str(pkg_dir), "--target", "copilot-app", "--global"],
+            env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
+            catch_exceptions=False,
+        )
+        # Warn-and-proceed: exit 0, row was inserted, but warning visible.
+        assert result.exit_code == 0, result.output
+        ids = cdb.list_managed_workflow_ids(db)
+        assert len(ids) == 1, ids
+        # Warning text must mention --global and surface the attach hint.
+        out = (result.output or "").lower()
+        assert "--global" in out, result.output
+        assert "attach" in out, result.output

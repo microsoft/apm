@@ -623,6 +623,10 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
+    ("copilot", "dir", ".github/instructions"),
+    ("copilot", "dir", ".github/agents"),
+    ("copilot", "dir", ".github/prompts"),
+    ("copilot", "dir", ".github/hooks"),
     ("codex", "dir", ".codex"),
     ("gemini", "dir", ".gemini"),
     ("gemini", "file", "GEMINI.md"),

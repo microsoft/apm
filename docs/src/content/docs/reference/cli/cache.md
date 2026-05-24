@@ -115,9 +115,24 @@ Inside the cache root:
 <cache-root>/
   git/
     db_v1/           # bare repository databases
-    checkouts_v1/    # per-SHA worktree checkouts
+                     #   <shard>/      -- full bare clone (default)
+                     #   <shard>__p/   -- partial bare clone
+                     #                    (--filter=blob:none) used
+                     #                    for sparse-checkout consumers
+    checkouts_v1/    # per-SHA worktree checkouts, variant-keyed
+                     #   <shard>/<sha>/full/             -- full tree
+                     #   <shard>/<sha>/sparse-<hash>/    -- sparse cone
+                     #                                     (<hash> = first
+                     #                                      16 hex of
+                     #                                      sha256(paths))
   http_v1/           # conditional-GET response cache
 ```
+
+The `full/` and `sparse-<variant>/` subdirs let two consumers of the
+same commit share storage when they want the same subdirs, and keep
+distinct shards when they do not -- without the variant suffix the
+sparse checkout would clobber the full tree for any other consumer
+of that SHA.
 
 The cache root is created with mode `0700` and validated to be
 absolute with no NUL bytes before use.

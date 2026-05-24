@@ -271,7 +271,12 @@ a = Analysis(
     win_private_assemblies=False,
     cipher=None,
     noarchive=False,
-    optimize=1,  # -O: strip asserts; keep __doc__ so Click reads command help from docstrings (#1298)
+    optimize=2,  # -OO: strip asserts AND __doc__. Reduces PYZ string surface to
+    # avoid Defender ML false positives (Trojan:Script/Wacatac.H!ml on v0.14.0; see #1407).
+    # Every @click.command() MUST set help= explicitly; the docstring fallback is gone.
+    # tests/unit/test_cli_consistency.py::test_every_registered_command_has_explicit_help
+    # is the silent-drift guard. See #1298 for the original (now-superseded) motivation
+    # to keep docstrings.
 )
 
 # Exclude bundled OpenSSL shared libraries on Linux.

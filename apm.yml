@@ -5,9 +5,15 @@ includes: auto
 author: Microsoft
 license: MIT
 
-# No external deps -- microsoft/apm is the package source itself.
+# Local-path manifest deps on the extracted skill packages.
+# Each was INLINE in .apm/skills/ until the v2 extraction.
+# Extraction unlocks consumer reuse of each primitive standalone
+# (consumers can install just the panel for single-PR review, or
+# just the shepherd which transitively pulls the panel).
 dependencies:
-  apm: []
+  apm:
+    - ./packages/apm-review-panel
+    - ./packages/batch-bug-shepherd
   mcp: []
 
 scripts: {}
