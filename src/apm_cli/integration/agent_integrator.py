@@ -94,6 +94,7 @@ class AgentIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        scope=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 

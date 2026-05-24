@@ -151,13 +151,17 @@ agent a procedure" fits a skill -- and reaches every harness.
 - **Script paths.** Use `${PLUGIN_ROOT}` (or the harness-specific
   alias) for scripts that ship inside the package. Plain absolute
   paths break on consumers' machines.
-- **Claude target path resolution.** When installing for the Claude
-  target, `apm install` rewrites `${PLUGIN_ROOT}` and relative `./`
-  references to absolute paths so Claude Code can execute scripts
-  regardless of the working directory.  Scripts that are missing at
-  install time are replaced with their expected absolute path and a
-  warning is emitted — the hook is written, but the script will fail
-  at runtime until the file is present.
+- **Hook script path resolution.** `apm install -g` (user-scope)
+  rewrites `${PLUGIN_ROOT}` and relative `./` references to absolute
+  paths so Claude Code can execute scripts regardless of the working
+  directory. Project-scope `apm install` (no `-g`) keeps `command`
+  paths repo-relative so checked-in configs stay portable across
+  clones, contributors, and CI. Either way, if a referenced script
+  is missing at install time the installer emits a warning -- in
+  user-scope the unexpanded variable is rewritten to the absolute
+  source path so the hook fails loudly at runtime; in project-scope
+  the variable is left in place so the deployed config never embeds
+  the installer's machine-local prefix.
 - **Same `.prompt.md` is two primitives.** A single
   `.apm/prompts/foo.prompt.md` becomes Copilot's prompt and Claude's
   `/foo` command in the same install. Name files with both surfaces

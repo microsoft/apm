@@ -112,6 +112,26 @@ def test_signal_whitelist_copilot_instructions_is_signal(tmp_path):
     assert "copilot" in _signal_targets(tmp_path)
 
 
+def test_signal_whitelist_github_instructions_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "instructions").mkdir(parents=True)
+    assert "copilot" in _signal_targets(tmp_path)
+
+
+def test_signal_whitelist_github_agents_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "agents").mkdir(parents=True)
+    assert "copilot" in _signal_targets(tmp_path)
+
+
+def test_signal_whitelist_github_prompts_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "prompts").mkdir(parents=True)
+    assert "copilot" in _signal_targets(tmp_path)
+
+
+def test_signal_whitelist_github_hooks_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "hooks").mkdir(parents=True)
+    assert "copilot" in _signal_targets(tmp_path)
+
+
 def test_signal_whitelist_github_dir_alone_NOT_signal(tmp_path):
     (tmp_path / ".github").mkdir()
     assert "copilot" not in _signal_targets(tmp_path)

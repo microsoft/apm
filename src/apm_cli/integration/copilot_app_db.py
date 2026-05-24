@@ -17,10 +17,12 @@ prompts).  This module is the I/O boundary:
    URI scheme.  ``apm.lock`` always carries the rendered URI; absolute
    filesystem paths never leak into the lockfile.
 
-3. **Schema guard** -- check ``PRAGMA user_version`` before any write
-   and refuse to touch a DB whose schema is newer than we've tested
-   against.  Apps that ship a forward-incompatible schema must wait
-   for an APM upgrade.
+3. **Schema guard** -- check ``PRAGMA user_version`` before any write.
+   Below the minimum tested version we hard-fail (the ``workflows``
+   table may genuinely not exist).  Above the maximum tested version
+   we warn-and-continue: the Copilot App ships fast and most schema
+   bumps are additive and forward-compatible with APM's read/write
+   surface.
 
 4. **WAL-safe writes** -- the app keeps a writer connection open while
    running; use ``BEGIN IMMEDIATE`` + bounded retry to coexist without
@@ -76,7 +78,7 @@ the design's reverse-engineering pass.  Lower values would imply a
 pre-workflows schema where the ``workflows`` table doesn't exist.
 """
 
-_MAX_SUPPORTED_USER_VERSION: int = 13
+_MAX_SUPPORTED_USER_VERSION: int = 15
 """Highest ``PRAGMA user_version`` we are tested against.
 
 When the app ships a newer schema we refuse to write rather than risk
@@ -270,9 +272,11 @@ def is_copilot_app_uri(lockfile_path: str) -> bool:
 class WorkflowRow:
     """Subset of the ``workflows`` table columns APM writes.
 
-    Fields not listed here (``created_at``, ``updated_at``, ``project_id``,
+    Fields not listed here (``created_at``, ``updated_at``,
     ``last_run_at``, ``next_run_at``) are left to the database defaults
-    or to existing values when updating.
+    or to existing values when updating. ``project_id`` is now first-
+    class on the write path (PR A) so every APM-installed workflow row
+    is scoped to a real ``projects`` row.
     """
 
     id: str
@@ -285,6 +289,7 @@ class WorkflowRow:
     model: str | None = None
     reasoning_effort: str | None = None
     mode: str | None = None
+    project_id: str | None = None
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -301,12 +306,36 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+_warned_user_versions: set[int] = set()
+"""Process-wide dedup set for forward-compat warnings.
+
+``deploy_workflow`` is called once per APM-managed workflow row, so a
+single ``apm install`` against a newer-than-tested App schema would
+otherwise emit the same warning N times.  Reset by tests via
+``_reset_user_version_warning_state``.
+"""
+
+
+def _reset_user_version_warning_state() -> None:
+    """Test helper: clear the dedup set between cases."""
+    _warned_user_versions.clear()
+
+
 def _check_user_version(conn: sqlite3.Connection) -> int:
     """Read ``PRAGMA user_version`` and enforce the supported range.
 
     Returns the version integer.  Raises ``CopilotAppDbSchemaError``
-    when the version is outside ``[_MIN_SUPPORTED_USER_VERSION,
-    _MAX_SUPPORTED_USER_VERSION]``.
+    when the version is *below* ``_MIN_SUPPORTED_USER_VERSION`` (the
+    ``workflows`` table may genuinely not exist on a pre-workflows
+    schema -- a hard fail is correct).
+
+    When the version is *above* ``_MAX_SUPPORTED_USER_VERSION`` we
+    warn-and-continue: the Copilot App ships fast and most user_version
+    bumps are additive and forward-compatible with APM's narrow
+    read/write surface.  Hard-failing on every bump made every Copilot
+    App release a release window for APM.  The warning is emitted once
+    per process (deduped by version) via ``_rich_warning`` so multi-row
+    installs don't spam.
     """
     cur = conn.execute("PRAGMA user_version")
     version = int(cur.fetchone()[0])
@@ -317,12 +346,17 @@ def _check_user_version(conn: sqlite3.Connection) -> int:
             f"Update the GitHub Copilot app to a version that includes "
             f"the workflows feature."
         )
-    if version > _MAX_SUPPORTED_USER_VERSION:
-        raise CopilotAppDbSchemaError(
-            f"Copilot App DB schema is newer than this APM release "
-            f"supports (user_version={version}, max tested "
-            f"{_MAX_SUPPORTED_USER_VERSION}). Upgrade APM, or skip "
-            f"'--target copilot-app' until APM catches up."
+    if version > _MAX_SUPPORTED_USER_VERSION and version not in _warned_user_versions:
+        _warned_user_versions.add(version)
+        # Wording authored by the devx-ux-expert persona; ship verbatim.
+        from apm_cli.utils.console import _rich_warning
+
+        _rich_warning(
+            f"[!] Copilot App schema version {version} is newer than APM's "
+            f"tested maximum ({_MAX_SUPPORTED_USER_VERSION}). Proceeding "
+            f"anyway -- if you see unexpected behavior, run: apm --version "
+            f"&& gh issue new -R microsoft/apm -t 'Schema v{version} compat' "
+            f"-b 'Observed: <describe>'"
         )
     return version
 
@@ -364,6 +398,40 @@ def _begin_immediate_with_retry(conn: sqlite3.Connection) -> None:
 # ---------------------------------------------------------------------------
 # Public deploy / cleanup helpers
 # ---------------------------------------------------------------------------
+
+
+def _open_write_txn(db_path: Path) -> sqlite3.Connection:
+    """Resolve the App DB and open a write transaction, or raise.
+
+    Centralizes the prelude shared by every writer in this package
+    (and by ``copilot_app_project.resolve_or_register_project``):
+
+    1. Refuse if ``db_path`` does not exist (``CopilotAppDbMissingError``).
+    2. Open a fresh connection via ``_connect``.
+    3. Verify the schema is in range via ``_check_user_version``.
+    4. Acquire a write lock via ``_begin_immediate_with_retry``.
+
+    On any failure during steps 3 / 4 the connection is closed before
+    the exception propagates. The caller owns the connection on success
+    and MUST ``COMMIT`` / ``ROLLBACK`` + ``close()``.
+
+    Extracted to satisfy the repo's R0801 duplicate-code guardrail and
+    to keep the missing-DB error wording identical across writers.
+    """
+    if not db_path.is_file():
+        raise CopilotAppDbMissingError(
+            f"Copilot App database not found at {db_path}. "
+            f"Install the GitHub Copilot desktop app, or omit "
+            f"'--target copilot-app'."
+        )
+    conn = _connect(db_path)
+    try:
+        _check_user_version(conn)
+        _begin_immediate_with_retry(conn)
+    except Exception:
+        conn.close()
+        raise
+    return conn
 
 
 def _validate_row(row: WorkflowRow) -> None:
@@ -417,47 +485,79 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
 
     Raises:
         CopilotAppDbMissingError: ``db_path`` does not exist.
-        CopilotAppDbSchemaError: ``PRAGMA user_version`` is out of range.
+        CopilotAppDbSchemaError: ``PRAGMA user_version`` is below
+            ``_MIN_SUPPORTED_USER_VERSION``.  Versions above
+            ``_MAX_SUPPORTED_USER_VERSION`` only emit a warning.
         CopilotAppDbLockedError: write transaction could not be acquired.
         ValueError: ``row`` fails ``_validate_row``.
     """
     _validate_row(row)
-    if not db_path.is_file():
-        raise CopilotAppDbMissingError(
-            f"Copilot App database not found at {db_path}. "
-            f"Install the GitHub Copilot desktop app, or omit "
-            f"'--target copilot-app'."
-        )
-
-    conn = _connect(db_path)
+    conn = _open_write_txn(db_path)
     try:
-        _check_user_version(conn)
-        _begin_immediate_with_retry(conn)
-        try:
-            existing = conn.execute(
+        existing = conn.execute(
+            """
+            SELECT prompt, mode, interval, schedule_hour, schedule_day,
+                   model, reasoning_effort
+              FROM workflows WHERE id = ?
+            """,
+            (row.id,),
+        ).fetchone()
+        if existing is None:
+            # INSERT always writes enabled=0 regardless of row.enabled.
+            # The user must opt in via the App UI -- a third-party package
+            # cannot auto-run on install even if a future caller passes
+            # enabled=1 to this writer. Defence in depth alongside the
+            # caller-side enforcement in PromptIntegrator.
+            conn.execute(
                 """
-                SELECT prompt, mode, interval, schedule_hour, schedule_day,
-                       model, reasoning_effort
-                  FROM workflows WHERE id = ?
+                INSERT INTO workflows (
+                    id, name, prompt, model, reasoning_effort,
+                    interval, schedule_hour, schedule_day,
+                    enabled, mode, project_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
-                (row.id,),
-            ).fetchone()
-            if existing is None:
-                # INSERT always writes enabled=0 regardless of row.enabled.
-                # The user must opt in via the App UI -- a third-party package
-                # cannot auto-run on install even if a future caller passes
-                # enabled=1 to this writer. Defence in depth alongside the
-                # caller-side enforcement in PromptIntegrator.
+                (
+                    row.id,
+                    row.name,
+                    row.prompt,
+                    row.model,
+                    row.reasoning_effort,
+                    row.interval,
+                    row.schedule_hour,
+                    row.schedule_day,
+                    row.mode,
+                    row.project_id,
+                ),
+            )
+        else:
+            execution_changed = (
+                existing["prompt"] != row.prompt
+                or existing["mode"] != row.mode
+                or existing["interval"] != row.interval
+                or existing["schedule_hour"] != row.schedule_hour
+                or existing["schedule_day"] != row.schedule_day
+                or existing["model"] != row.model
+                or existing["reasoning_effort"] != row.reasoning_effort
+            )
+            if execution_changed:
                 conn.execute(
                     """
-                    INSERT INTO workflows (
-                        id, name, prompt, model, reasoning_effort,
-                        interval, schedule_hour, schedule_day,
-                        enabled, mode
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    UPDATE workflows
+                       SET name = ?,
+                           prompt = ?,
+                           model = ?,
+                           reasoning_effort = ?,
+                           interval = ?,
+                           schedule_hour = ?,
+                           schedule_day = ?,
+                           mode = ?,
+                           project_id = ?,
+                           enabled = 0,
+                           next_run_at = NULL,
+                           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                     WHERE id = ?
                     """,
                     (
-                        row.id,
                         row.name,
                         row.prompt,
                         row.model,
@@ -466,61 +566,28 @@ def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:
                         row.schedule_hour,
                         row.schedule_day,
                         row.mode,
+                        row.project_id,
+                        row.id,
                     ),
                 )
             else:
-                execution_changed = (
-                    existing["prompt"] != row.prompt
-                    or existing["mode"] != row.mode
-                    or existing["interval"] != row.interval
-                    or existing["schedule_hour"] != row.schedule_hour
-                    or existing["schedule_day"] != row.schedule_day
-                    or existing["model"] != row.model
-                    or existing["reasoning_effort"] != row.reasoning_effort
+                # Self-heal pre-PR-A rows: even when nothing else
+                # changed, stamp project_id so a NULL left by an
+                # older APM install is filled on the next run.
+                conn.execute(
+                    """
+                    UPDATE workflows
+                       SET name = ?,
+                           project_id = ?,
+                           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                     WHERE id = ?
+                    """,
+                    (row.name, row.project_id, row.id),
                 )
-                if execution_changed:
-                    conn.execute(
-                        """
-                        UPDATE workflows
-                           SET name = ?,
-                               prompt = ?,
-                               model = ?,
-                               reasoning_effort = ?,
-                               interval = ?,
-                               schedule_hour = ?,
-                               schedule_day = ?,
-                               mode = ?,
-                               enabled = 0,
-                               next_run_at = NULL,
-                               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-                         WHERE id = ?
-                        """,
-                        (
-                            row.name,
-                            row.prompt,
-                            row.model,
-                            row.reasoning_effort,
-                            row.interval,
-                            row.schedule_hour,
-                            row.schedule_day,
-                            row.mode,
-                            row.id,
-                        ),
-                    )
-                else:
-                    conn.execute(
-                        """
-                        UPDATE workflows
-                           SET name = ?,
-                               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-                         WHERE id = ?
-                        """,
-                        (row.name, row.id),
-                    )
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     finally:
         conn.close()
 

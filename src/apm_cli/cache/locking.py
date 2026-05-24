@@ -6,12 +6,12 @@ never visible in a partially-populated state.
 
 Atomic landing protocol
 -----------------------
-1. Stage content into ``<shard>.incomplete.<pid>.<ts>/``
+1. Stage content into ``<shard>.inc.<8hex>/``
 2. Acquire shard ``.lock`` file (filelock)
 3. Re-check final path does not exist (TOCTOU defense)
 4. ``os.replace()`` staged dir -> final shard path (atomic on same FS)
 5. Release lock
-6. On cache init, clean up any stale ``*.incomplete.*`` siblings
+6. On cache init, clean up any stale ``*.inc.*`` / ``*.incomplete.*`` siblings
 
 Design notes
 ------------
@@ -57,14 +57,25 @@ def shard_lock(shard_dir: Path, *, timeout: float = DEFAULT_LOCK_TIMEOUT) -> Fil
 def stage_path(final_path: Path) -> Path:
     """Return a staging directory path adjacent to *final_path*.
 
-    Format: ``<final_path>.incomplete.<pid>.<monotonic_ns>``
+    Format: ``<final_path>.inc.<8hex>``
 
     The staging dir lives in the same parent as the final path to
-    guarantee ``os.replace`` atomicity (same filesystem).
+    guarantee ``os.replace`` atomicity (same filesystem). The suffix
+    is short on purpose: deeply nested cache paths
+    (``checkouts_v1/<shard>/<sha>/<variant>/...``) can collide with
+    Windows MAX_PATH (260 chars), and git's sparse-checkout config
+    writes don't always honor ``core.longpaths=true`` for files
+    under ``.git/`` (worktree config probe fails before the flag is
+    applied). Eight hex chars of high-resolution time keep collision
+    risk negligible (~ns granularity) while saving ~20 chars vs the
+    earlier ``.incomplete.<pid>.<monotonic_ns>`` scheme.
     """
-    pid = os.getpid()
-    ts = int(time.monotonic_ns())
-    return final_path.with_name(f"{final_path.name}.incomplete.{pid}.{ts}")
+    # 64-bit monotonic_ns -> 16 hex; take the low 8 nibbles which
+    # rotate every ~4 seconds at ns granularity, far below the
+    # lifetime of any one staging dir. PID is unnecessary because
+    # the shard lock serialises stagers within a parent dir.
+    suffix = f"{time.monotonic_ns() & 0xFFFFFFFF:08x}"
+    return final_path.with_name(f"{final_path.name}.inc.{suffix}")
 
 
 def atomic_land(staged: Path, final: Path, lock: FileLock) -> bool:
@@ -111,10 +122,13 @@ def atomic_land(staged: Path, final: Path, lock: FileLock) -> bool:
 
 
 def cleanup_incomplete(parent: Path) -> int:
-    """Remove stale ``.incomplete.*`` directories under *parent*.
+    """Remove stale staging directories under *parent*.
 
     Called during cache initialization to recover from interrupted
-    operations (e.g. kill -9 during a clone).
+    operations (e.g. kill -9 during a clone). Matches both the
+    current ``.inc.<8hex>`` marker and the legacy
+    ``.incomplete.<pid>.<ns>`` marker so caches written by earlier
+    APM versions are still cleaned up after upgrade.
 
     Returns:
         Number of stale directories removed.
@@ -125,7 +139,9 @@ def cleanup_incomplete(parent: Path) -> int:
     removed = 0
     try:
         for entry in os.scandir(str(parent)):
-            if entry.is_dir(follow_symlinks=False) and ".incomplete." in entry.name:
+            if entry.is_dir(follow_symlinks=False) and (
+                ".inc." in entry.name or ".incomplete." in entry.name
+            ):
                 _safe_rmtree_staged(Path(entry.path))
                 removed += 1
     except OSError as exc:

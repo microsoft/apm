@@ -277,3 +277,9 @@ components:
     spdx: MIT
     copyright_snippet: Copyright (c) 2014-2026 Anthon van der Neut, Ruamel bvba
     notes: Canonical source is SourceForge (Mercurial). LICENSE retrieved from the official PyPI sdist tarball ruamel_yaml-0.19.1.tar.gz.
+  - name: websockets
+    pyproject_name: websockets
+    upstream: https://github.com/python-websockets/websockets
+    spdx: BSD-3-Clause
+    copyright_snippet: Copyright (c) Aymeric Augustin and contributors
+    notes: Used by the copilot-app integrator to nudge the Copilot desktop App over its local WebSocket IPC channel after writing workflows to the App DB.

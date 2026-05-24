@@ -1,8 +1,20 @@
 lockfile_version: '1'
-generated_at: '2026-04-21T21:45:34.516938+00:00'
-dependencies: []
+generated_at: '2026-05-21T20:29:36.132987+00:00'
+apm_version: 0.14.1
+dependencies:
+- repo_url: _local/apm-review-panel
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/apm-review-panel
+  source: local
+  local_path: ./packages/apm-review-panel
+- repo_url: _local/batch-bug-shepherd
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/batch-bug-shepherd
+  source: local
+  local_path: ./packages/batch-bug-shepherd
 local_deployed_files:
-- .agents/skills/apm-review-panel
 - .agents/skills/apm-strategy
 - .agents/skills/apm-triage-panel
 - .agents/skills/auth
@@ -60,6 +72,6 @@ local_deployed_file_hashes:
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
   .github/instructions/integrators.instructions.md: sha256:b151e0438088d2c0b636dfc28532ecf43c3b51e5f1070a354b8d5b57c345e335
-  .github/instructions/linting.instructions.md: sha256:312acd32353567834ec9f4f246710a47a991729a11c0380aa6a010b63de607eb
+  .github/instructions/linting.instructions.md: sha256:8d31137f18842570bef6c93f8396587ac691e5fc973988bd865b008b0983f90d
   .github/instructions/python.instructions.md: sha256:45173f778eddc126c37c7ace96acd0e17adb1895031eec134ec0754638d3ba37
   .github/instructions/tests.instructions.md: sha256:b527ccaecf0e92f74d300fc9027f1bc49bb43d8ddcdd36338c1556fcde0d8b2d

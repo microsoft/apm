@@ -19,6 +19,7 @@ import builtins
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
 
+from apm_cli.install.phases._redownload import _should_skip_redownload
 from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
@@ -115,12 +116,9 @@ def _resolve_download_strategy(
                         # Git check failed (e.g. .git removed, or virtual
                         # package install_path is not a git repo). Fall back
                         # to content-hash verification (#763).
-                        if locked_dep.content_hash and install_path.is_dir():
-                            from apm_cli.utils.content_hash import verify_package_hash
-
-                            if verify_package_hash(install_path, locked_dep.content_hash):
-                                lockfile_match = True
-                                lockfile_match_via_content_hash_only = True
+                        if _should_skip_redownload(locked_dep, install_path):
+                            lockfile_match = True
+                            lockfile_match_via_content_hash_only = True
             elif not ref_changed:
                 # Normal mode: compare local HEAD with lockfile SHA.
                 try:
@@ -133,12 +131,9 @@ def _resolve_download_strategy(
                     # Git check failed (e.g. .git removed, or virtual package
                     # install_path is not a git repo). Fall back to
                     # content-hash verification (#763).
-                    if locked_dep.content_hash and install_path.is_dir():
-                        from apm_cli.utils.content_hash import verify_package_hash
-
-                        if verify_package_hash(install_path, locked_dep.content_hash):
-                            lockfile_match = True
-                            lockfile_match_via_content_hash_only = True
+                    if _should_skip_redownload(locked_dep, install_path):
+                        lockfile_match = True
+                        lockfile_match_via_content_hash_only = True
 
     # Self-heal pipeline (PR #1158).
     #

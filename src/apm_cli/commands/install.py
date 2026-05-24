@@ -226,6 +226,8 @@ class InstallContext:
     legacy_skill_paths: bool = False
     frozen: bool = False
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
+    skill_subset: "builtins.tuple[str, ...] | None" = None
+    skill_subset_from_cli: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +334,7 @@ def _resolve_package_references(
     logger=None,
     scope=None,
     allow_insecure=False,
+    skill_subset=None,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -443,6 +446,18 @@ def _resolve_package_references(
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
+            # Attach --skill filter so to_apm_yml_entry() emits the dict form
+            if skill_subset:
+                # Normalize: strip whitespace, drop empty strings, deduplicate
+                # (preserve order) so invalid or redundant names can't persist.
+                _seen: builtins.set[str] = builtins.set()
+                _normalized: builtins.list[str] = []
+                for _s in skill_subset:
+                    _s = _s.strip()
+                    if _s and _s not in _seen:
+                        _seen.add(_s)
+                        _normalized.append(_s)
+                dep_ref.skill_subset = _normalized
             if marketplace_dep_ref is not None or direct_gitlab_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
@@ -473,6 +488,13 @@ def _resolve_package_references(
             if logger:
                 logger.validation_fail(package, scope_reject)
             continue
+
+        # Ensure structured entry is used for apm.yml persistence when skill
+        # filter is active (normal non-marketplace/non-insecure path doesn't
+        # set _apm_yml_entries; _merge_packages_into_yml falls back to the
+        # plain canonical string without this).
+        if skill_subset and canonical not in _apm_yml_entries:
+            _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
 
         # Check if package is already in dependencies (by identity)
         already_in_deps = identity in existing_identities
@@ -625,6 +647,7 @@ def _validate_and_add_packages_to_apm_yml(
     auth_resolver=None,
     scope=None,
     allow_insecure=False,
+    skill_subset=None,
 ):
     """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
 
@@ -688,6 +711,7 @@ def _validate_and_add_packages_to_apm_yml(
         logger=logger,
         scope=scope,
         allow_insecure=allow_insecure,
+        skill_subset=skill_subset,
     )
 
     outcome = _ValidationOutcome(
@@ -1436,6 +1460,7 @@ def install(  # noqa: PLR0913
                 auth_resolver=auth_resolver,
                 scope=scope,
                 allow_insecure=allow_insecure,
+                skill_subset=_skill_subset,
             )
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:
@@ -1476,6 +1501,8 @@ def install(  # noqa: PLR0913
             legacy_skill_paths=legacy_skill_paths,
             frozen=frozen,
             plan_callback=None,
+            skill_subset=_skill_subset,
+            skill_subset_from_cli=bool(skill_names),
         )
 
         apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
@@ -1703,6 +1730,8 @@ def _install_apm_packages(ctx, outcome):
                 legacy_skill_paths=ctx.legacy_skill_paths,
                 frozen=ctx.frozen,
                 plan_callback=ctx.plan_callback,
+                skill_subset=ctx.skill_subset,
+                skill_subset_from_cli=ctx.skill_subset_from_cli,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics

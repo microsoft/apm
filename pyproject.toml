@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.14.1"
+version = "0.14.2"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,6 +37,7 @@ dependencies = [
     "GitPython>=3.1.0",
     "ruamel.yaml>=0.18.0",
     "filelock>=3.12",
+    "websockets>=12,<17",
 ]
 
 [project.optional-dependencies]
@@ -137,7 +138,7 @@ parallel = true
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
-fail_under = 75
+fail_under = 80
 # Exclude lines that are not meant to be covered
 exclude_lines = [
     "pragma: no cover",

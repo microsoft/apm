@@ -278,6 +278,38 @@ class TestNoOrphans:
         assert not result.passed
         assert "extra/orphan" in result.details
 
+    def test_transitive_dep_not_flagged_as_orphan(self, tmp_path):
+        """Transitive deps (resolved_by set) are NOT root orphans.
+
+        A sub-package's local-path dep appears in the root lockfile with
+        ``resolved_by`` set. The root manifest cannot remove it; flagging
+        it as an orphan would create an unfixable CI failure.
+        """
+        _write_apm_yml(tmp_path, deps=["owner/repo"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files: []
+                  - repo_url: _local/sub
+                    source: local
+                    local_path: ../sub
+                    depth: 2
+                    resolved_by: _local/parent
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_no_orphans(manifest, lock)
+        assert result.passed, result.details
+
 
 # -- Config consistency ---------------------------------------------
 

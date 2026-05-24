@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "sweep-bug-queue",
+  "summary": "Maintainer asks to sweep the entire open bug queue. With the skill loaded, the orchestrator runs gh issue list to enumerate candidates, asks for user confirmation when the count exceeds 20, fans out triage subagents in parallel, then proceeds through the full phase contract. Without the skill, the orchestrator either drifts (no confirmation, no plan.md table, serial execution) or refuses with a vague 'too many issues' response.",
+  "scenario": {
+    "user_query": "sweep the bug queue and drive whatever's mergeable to a ready-to-ship state",
+    "ground_truth": {
+      "candidate_count": 25,
+      "expected_confirmation_prompt": true
+    },
+    "expected_phases_with_skill": [
+      "phase 0: gh issue list --label bug --state open executed; 25 candidates resolved; user confirmation requested (threshold > 20)",
+      "phase 1: parallel triage fan-out post-confirmation",
+      "phase 2: gh pr list cross-reference for every LEGIT row",
+      "phase 3a/3b: shepherd-or-fix fan-out",
+      "phase 4: completion fan-out, cross-session-message only on green",
+      "phase 5: final-report-template rendered"
+    ]
+  },
+  "fixtures": {
+    "with_skill": "../fixtures/sweep-bug-queue.with_skill.md",
+    "without_skill": "../fixtures/sweep-bug-queue.without_skill.md"
+  },
+  "rubric": [
+    {"id": "issue-enum-cli", "pattern": "(?is)gh\\s+issue\\s+list[^\\n]{0,200}(--label\\s+bug|state\\s+open)", "weight": 2, "description": "Candidate enumeration via gh issue list, not by guesswork."},
+    {"id": "user-confirmation", "pattern": "(?is)(confirm|confirmation|threshold[^\\n]{0,40}20|ask\\s+(for\\s+)?confirmation)", "weight": 2, "description": "User confirmation requested when candidate count crosses the sweep-all threshold."},
+    {"id": "ground-truth-table", "pattern": "(?im)^\\s*\\|\\s*issue\\s*\\|\\s*verdict\\s*\\|", "weight": 2, "description": "Ground-truth table initialized in plan.md."},
+    {"id": "parallel-triage", "pattern": "(?is)triage[^.\\n]{0,80}(parallel|fan[- ]?out)", "weight": 2, "description": "Triage explicitly fanned out, not serialized."},
+    {"id": "cross-reference-step", "pattern": "(?is)(gh\\s+pr\\s+list|pr-in-flight|cross[- ]?reference)", "weight": 2, "description": "PR-in-flight cross-reference performed."},
+    {"id": "phase-discipline", "pattern": "(?is)phase\\s*[0-5]", "weight": 1, "description": "Phase contract is named (0..5)."},
+    {"id": "table-reload", "pattern": "(?is)(re[- ]?read|reload)[^.\\n]{0,40}(table|plan\\.md|ground[- ]?truth)", "weight": 1, "description": "Table reload at phase boundaries (B4 PLAN MEMENTO + B8 ATTENTION ANCHOR)."},
+    {"id": "final-report", "pattern": "(?is)final[- ]?report", "weight": 1, "description": "Final report rendered."}
+  ]
+}

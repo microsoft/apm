@@ -287,13 +287,51 @@ def get_dependency_declaration_order(base_dir: str) -> list[str]:
                 # This matches our org-namespaced directory structure
                 dependency_names.append(dep.repo_url)
 
-        # Include transitive dependencies from apm.lock
-        # Direct deps from apm.yml have priority; transitive deps are appended
-        lockfile_paths = LockFile.installed_paths_for_project(Path(base_dir))
+        # Include transitive dependencies + local-bundle slugs from the
+        # lockfile.  Read it once and reuse the parsed object for both
+        # the transitive-paths walk and the ``local_deployed_files``
+        # slug derivation (issue #1363) to avoid duplicate YAML parses
+        # on every compile.
+        project_root = Path(base_dir)
+        lockfile_path = project_root / "apm.lock.yaml"
+        if not lockfile_path.exists():
+            legacy = project_root / "apm.lock"
+            if legacy.exists():
+                lockfile_path = legacy
+        lock = LockFile.read(lockfile_path) if lockfile_path.exists() else None
+
         direct_set = set(dependency_names)
-        for path in lockfile_paths:
-            if path not in direct_set:
-                dependency_names.append(path)
+        if lock is not None:
+            for path in lock.get_installed_paths(project_root / "apm_modules"):
+                if path not in direct_set:
+                    dependency_names.append(path)
+
+        # Local-bundle install stages instructions under
+        # ``apm_modules/<slug>/.apm/...`` but intentionally does NOT
+        # mutate ``apm.yml`` (services.py:489-490), so the scan loop
+        # would otherwise never visit those staged dirs and
+        # ``apm compile`` would produce no output for compile-only
+        # targets (opencode, codex, gemini).
+        #
+        # Provenance is anchored to the lockfile record -- a stray
+        # directory under ``apm_modules/`` without a lockfile entry must
+        # not be discovered (defends against phantom-content injection
+        # and stale-debris drift).
+        if lock is not None:
+            local_slugs: set[str] = set()
+            for deployed in lock.local_deployed_files:
+                # Match ``apm_modules/<slug>/.apm/...`` only. Other
+                # deployed files (``.github/instructions/...``,
+                # ``.agents/skills/...``) are not bundle staging
+                # markers and must not produce phantom slugs.
+                parts = Path(deployed).parts
+                if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
+                    local_slugs.add(parts[1])
+            seen = set(dependency_names)
+            for slug in sorted(local_slugs):
+                if slug not in seen:
+                    dependency_names.append(slug)
+                    seen.add(slug)
 
         return dependency_names
 
