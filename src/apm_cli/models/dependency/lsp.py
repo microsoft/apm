@@ -158,8 +158,7 @@ class LSPDependency:
             )
         if ".." in self.name.split("/"):
             raise ValueError(
-                f"Invalid LSP dependency name '{self.name}': must not contain "
-                f"'..' path segments."
+                f"Invalid LSP dependency name '{self.name}': must not contain '..' path segments."
             )
 
         if self.command is not None:
@@ -176,8 +175,7 @@ class LSPDependency:
                 )
             except PathTraversalError:
                 raise ValueError(
-                    f"Invalid LSP command '{self.command}': must not contain "
-                    f"'..' path segments."
+                    f"Invalid LSP command '{self.command}': must not contain '..' path segments."
                 ) from None
 
         if self.transport is not None and self.transport not in self._VALID_TRANSPORTS:
