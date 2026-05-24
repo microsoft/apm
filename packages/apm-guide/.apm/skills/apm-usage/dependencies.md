@@ -164,14 +164,24 @@ package's directory, not the project root.
 |-------|----------|-------------|
 | `name` | REQUIRED | Plugin identifier within the marketplace (`^[a-zA-Z0-9._-]+$`). |
 | `marketplace` | REQUIRED | Registered marketplace name (`^[a-zA-Z0-9._-]+$`). |
+| `version` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`). Resolved against `{name}--v{version}` git tags on the marketplace repo. |
 
 During resolution, marketplace entries are looked up in the marketplace's
-`marketplace.json` and replaced with concrete git coordinates. The lockfile
-records the resolved ref, not the marketplace placeholder.
+`marketplace.json` and replaced with concrete git coordinates. When `version`
+is a semver range or bare version number, the resolver lists git tags
+matching `{name}--v{version}`, filters by the constraint, and picks the
+highest matching tag. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
+resolution and override the source ref directly. The lockfile records the
+resolved ref, not the marketplace placeholder. Unknown keys in a marketplace
+entry are rejected.
 
 ```yaml
 - name: sec-check
   marketplace: acme-plugins
+
+- name: secrets-vault
+  marketplace: acme-plugins
+  version: "~2.1.0"
 ```
 
 ## Registry-sourced APM dependencies (experimental)

@@ -81,7 +81,7 @@ class DependencyTree:
         default_factory=lambda: defaultdict(list)
     )
     max_depth: int = 0
-    resolution_warnings: list[str] = field(default_factory=list)
+    resolution_errors: list[str] = field(default_factory=list)
 
     def add_node(self, node: DependencyNode) -> None:
         """Add a node to the tree."""

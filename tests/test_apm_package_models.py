@@ -2096,6 +2096,50 @@ class TestMarketplaceDependencyParsing:
         )
         assert dep_a.get_unique_key() != dep_b.get_unique_key()
 
+    def test_marketplace_dep_with_version_spec(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "secrets-vault", "marketplace": "acme-tools", "version": "~2.1.0"}
+        )
+        assert dep.is_marketplace is True
+        assert dep.marketplace_plugin_name == "secrets-vault"
+        assert dep.marketplace_version_spec == "~2.1.0"
+
+    def test_marketplace_dep_version_spec_whitespace_stripped(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "plugin", "marketplace": "mkt", "version": "  ^2.0  "}
+        )
+        assert dep.marketplace_version_spec == "^2.0"
+
+    def test_marketplace_dep_version_spec_empty_rejected(self):
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "version": ""}
+            )
+
+    def test_marketplace_dep_version_spec_non_string_rejected(self):
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "version": 123}
+            )
+
+    def test_marketplace_dep_without_version_spec(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "plugin", "marketplace": "mkt"}
+        )
+        assert dep.marketplace_version_spec is None
+
+    def test_marketplace_dep_unknown_keys_rejected(self):
+        with pytest.raises(ValueError, match="Unknown keys"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "ref": "v2.0"}
+            )
+
+    def test_marketplace_dep_multiple_unknown_keys_rejected(self):
+        with pytest.raises(ValueError, match="Unknown keys"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "ref": "v2.0", "alias": "p"}
+            )
+
     def test_git_dict_still_works(self):
         dep = DependencyReference.parse_from_dict(
             {"git": "https://github.com/owner/repo.git", "ref": "main"}

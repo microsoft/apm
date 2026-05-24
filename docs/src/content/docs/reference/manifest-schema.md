@@ -405,14 +405,23 @@ Marketplace dependency (resolved at install time):
 ```yaml
 - name: sec-check
   marketplace: acme-plugins
+
+- name: secrets-vault
+  marketplace: acme-plugins
+  version: "~2.1.0"
 ```
 
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
 | `name` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Plugin identifier within the marketplace. |
 | `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
+| `version` | `string` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`) | Version constraint resolved against git tags on the marketplace repository. When omitted the marketplace entry's default ref is used. |
 
-The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. During dependency resolution the resolver calls `resolve_marketplace_plugin()` to look up the plugin in the marketplace's `marketplace.json` and replace the entry with a concrete git reference (owner/repo, ref, and optional virtual path). Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
+The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()` to look up the plugin in the marketplace's `marketplace.json` and replace the entry with a concrete git reference (owner/repo, ref, and optional virtual path).
+
+When `version` is specified and is a semver range or bare version number (e.g. `~2.1.0`, `^2.0`, `2.1.0`), the resolver lists git tags on the marketplace repository matching the `{name}--v{version}` convention, filters to those satisfying the constraint, and resolves to the highest matching tag. If no tag satisfies the range, resolution fails with a `NoMatchingVersionError`. Pre-release versions (e.g. `2.0.0-beta.1`) are excluded unless the range explicitly opts in. When `version` is a raw git ref (e.g. `v2.0.0`, `main`, or a commit SHA), it is used as a direct ref override without tag resolution.
+
+Resolution failures stop the install instead of silently skipping the dependency. The lockfile records the **resolved** coordinates and pinned commit, not the marketplace placeholder. Unresolved marketplace dependencies cannot compute install paths or serialize back to `apm.yml`.
 
 Registry dependency (whole package or virtual sub-path):
 
