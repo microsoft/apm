@@ -115,7 +115,9 @@ class MCPConflictDetector:
                 server_name = raw_key[len("mcp_servers.") :]
                 if server_name.startswith('"') and server_name.endswith('"'):
                     server_name = server_name[1:-1]
-                if isinstance(value, dict) and ("command" in value or "args" in value):
+                if isinstance(value, dict) and (
+                    "command" in value or "args" in value or "url" in value
+                ):
                     servers[server_name] = value
 
         return servers

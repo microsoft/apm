@@ -1083,7 +1083,7 @@ class TestGenericHostSshFirstValidation:
 
 
 class TestExplicitTargetDirCreation:
-    """Verify --target creates root_dir even when auto_create=False (GH bug fix)."""
+    """Verify _create_target_dirs creates explicit root_dir for auto_create=False (#763)."""
 
     def setup_method(self):
         self._tmpdir = tempfile.mkdtemp()
@@ -1095,44 +1095,34 @@ class TestExplicitTargetDirCreation:
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_explicit_target_creates_dir_for_auto_create_false(self):
-        """When _explicit is set, target dirs are created even if auto_create=False."""
+        """When explicit is set, target dirs are created even if auto_create=False."""
+        from apm_cli.install.phases.targets import _create_target_dirs
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         claude = KNOWN_TARGETS["claude"]
         assert claude.auto_create is False
 
-        # Simulate the fixed loop logic: create dir when _explicit is set
-        _explicit = "claude"
-        _targets = [claude]
-        for _t in _targets:
-            if not _t.auto_create and not _explicit:
-                continue
-            _target_dir = self.project_root / _t.root_dir
-            if not _target_dir.exists():
-                _target_dir.mkdir(parents=True, exist_ok=True)
+        created = _create_target_dirs([claude], self.project_root, explicit="claude")
 
         assert (self.project_root / ".claude").is_dir()
+        assert (self.project_root / ".claude") in created
 
     def test_auto_detect_skips_dir_for_auto_create_false(self):
-        """Without _explicit, auto_create=False targets don't get dirs created."""
+        """Without explicit, auto_create=False targets don't get dirs created."""
+        from apm_cli.install.phases.targets import _create_target_dirs
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         claude = KNOWN_TARGETS["claude"]
         assert claude.auto_create is False
 
-        _explicit = None
-        _targets = [claude]
-        for _t in _targets:
-            if not _t.auto_create and not _explicit:
-                continue
-            _target_dir = self.project_root / _t.root_dir
-            if not _target_dir.exists():
-                _target_dir.mkdir(parents=True, exist_ok=True)
+        created = _create_target_dirs([claude], self.project_root, explicit=None)
 
         assert not (self.project_root / ".claude").exists()
+        assert created == []
 
     def test_auto_create_true_always_creates_dir(self):
-        """auto_create=True targets create dir regardless of _explicit."""
+        """auto_create=True targets create dir regardless of explicit."""
+        from apm_cli.install.phases.targets import _create_target_dirs
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         copilot = KNOWN_TARGETS["copilot"]
@@ -1143,24 +1133,24 @@ class TestExplicitTargetDirCreation:
 
             shutil.rmtree(self.project_root / copilot.root_dir, ignore_errors=True)
 
-            _targets = [copilot]
-            for _t in _targets:
-                if not _t.auto_create and not _explicit:
-                    continue
-                _target_dir = self.project_root / _t.root_dir
-                if not _target_dir.exists():
-                    _target_dir.mkdir(parents=True, exist_ok=True)
-
+            created = _create_target_dirs([copilot], self.project_root, explicit=_explicit)
             assert (self.project_root / ".github").is_dir(), (
-                f"auto_create=True should create dir when _explicit={_explicit!r}"
+                f"auto_create=True should create dir when explicit={_explicit!r}"
             )
+            assert (self.project_root / ".github") in created
 
 
 class TestContentHashFallback:
-    """Verify content-hash fallback when .git is removed from installed packages."""
+    """Verify the install pipeline uses content-hash fallback when .git is removed (#763).
+
+    These tests exercise the production helper ``_should_skip_redownload`` directly
+    (the same one called from both ``phases/integrate.py`` and ``phases/download.py``).
+    Mutation-break: deleting the guard contents in ``_should_skip_redownload``
+    (forcing ``return False`` or ``return True``) MUST fail these tests.
+    """
 
     def test_hash_match_skips_redownload(self):
-        """Content hash verification allows skipping re-download."""
+        """Content hash verification on real files returns True for unmodified content."""
         from apm_cli.utils.content_hash import compute_package_hash, verify_package_hash
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1172,7 +1162,7 @@ class TestContentHashFallback:
             assert verify_package_hash(pkg_dir, content_hash) is True
 
     def test_hash_mismatch_triggers_redownload(self):
-        """Mismatched content hash means re-download should proceed."""
+        """Mismatched content hash on real files returns False."""
         from apm_cli.utils.content_hash import verify_package_hash
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1182,24 +1172,55 @@ class TestContentHashFallback:
 
             assert verify_package_hash(pkg_dir, "sha256:badhash") is False
 
-    def test_missing_content_hash_skips_fallback(self):
-        """When locked dep has no content_hash, the fallback guard prevents
-        verify_package_hash from being called."""
-        from apm_cli.utils.content_hash import verify_package_hash
+    def test_should_skip_redownload_true_when_hash_matches_and_dir_exists(self):
+        """Production helper returns True when content_hash matches an existing dir."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
+        from apm_cli.utils.content_hash import compute_package_hash
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            pkg_dir = Path(tmpdir) / "pkg"
-            pkg_dir.mkdir()
-            (pkg_dir / "file.txt").write_text("data")
+            pkg = Path(tmpdir) / "pkg"
+            pkg.mkdir()
+            (pkg / "f.txt").write_text("data")
 
-            # Simulate the guard logic from install.py:
-            # if _pd_locked_chk.content_hash and _pd_path.is_dir():
-            content_hash = None  # no content_hash recorded in lockfile
-            fallback_triggered = False
-            if content_hash and pkg_dir.is_dir():
-                fallback_triggered = verify_package_hash(pkg_dir, content_hash)
+            locked_dep = types.SimpleNamespace(content_hash=compute_package_hash(pkg))
 
-            assert not fallback_triggered, "Fallback must not trigger when content_hash is None"
+            assert _should_skip_redownload(locked_dep, pkg) is True
+
+    def test_should_skip_redownload_false_when_content_hash_is_none(self):
+        """Production helper returns False when locked dep has no content_hash."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "pkg"
+            pkg.mkdir()
+            (pkg / "f.txt").write_text("data")
+
+            locked_dep = types.SimpleNamespace(content_hash=None)
+
+            assert _should_skip_redownload(locked_dep, pkg) is False
+
+    def test_should_skip_redownload_false_when_install_path_not_a_dir(self):
+        """Production helper returns False when install_path is missing/not a dir."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing = Path(tmpdir) / "does-not-exist"
+            locked_dep = types.SimpleNamespace(content_hash="sha256:abc")
+
+            assert _should_skip_redownload(locked_dep, missing) is False
+
+    def test_should_skip_redownload_false_when_hash_mismatch(self):
+        """Production helper returns False when content_hash does not match on-disk."""
+        from apm_cli.install.phases._redownload import _should_skip_redownload
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "pkg"
+            pkg.mkdir()
+            (pkg / "f.txt").write_text("data")
+
+            locked_dep = types.SimpleNamespace(content_hash="sha256:badhash")
+
+            assert _should_skip_redownload(locked_dep, pkg) is False
 
 
 class TestAllowInsecureFlag:

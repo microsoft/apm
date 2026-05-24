@@ -763,12 +763,13 @@ class TestClaudeIntegration:
             assert all("_apm_source" not in e for e in stop)
             return {h["command"] for entry in stop for h in entry["hooks"]}
 
-        # Commands are now absolute paths (deploy_root=project_root is threaded
-        # through _integrate_merged_hooks so Claude Code never sees an unexpanded
-        # ${CLAUDE_PLUGIN_ROOT} variable).  Assert on the absolute form.
+        # Project-scope writes repo-relative paths so checked-in
+        # settings.json stays portable across clones / CI (#1394).
+        # User-scope deploys (project_root == ~) still absolutize via
+        # _rewrite_command_for_target's deploy_root branch -- see #1354.
         assert extract_commands(first) == {
-            str((temp_project / ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh").resolve()),
-            str((temp_project / ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh").resolve()),
+            ".claude/hooks/multi-stop-pkg/hooks/stop-a.sh",
+            ".claude/hooks/multi-stop-pkg/hooks/stop-b.sh",
         }
 
         # Verify sidecar has the ownership info
@@ -781,6 +782,99 @@ class TestClaudeIntegration:
             integrator.integrate_package_hooks_claude(pkg_info, temp_project)
 
         assert settings_path.read_text() == first
+
+    def test_project_scope_writes_relative_hook_paths(self, temp_project):
+        """Project-scope (.claude/settings.json checked into the repo) must keep
+        repo-relative hook commands so the generated config is portable across
+        clones / contributors / CI runners (#1394).
+
+        Regression: #1354 unconditionally threaded deploy_root=project_root to
+        absolutize commands -- correct for user-scope (~/.claude/settings.json,
+        which #1310 was about) but wrong for project-scope, where it baked the
+        installer's machine-local absolute prefix into the committed JSON.
+        """
+        pkg_dir = temp_project / "scope-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        (hooks_dir / "stop.sh").write_text("#!/bin/bash\nexit 0")
+
+        pkg_info = _make_package_info(pkg_dir, "scope-pkg")
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+
+        settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
+        cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        assert cmd == ".claude/hooks/scope-pkg/hooks/stop.sh", (
+            f"Project-scope command must be repo-relative; got {cmd!r}"
+        )
+        assert not Path(cmd).is_absolute(), (
+            f"Project-scope command must not be absolute; got {cmd!r}"
+        )
+        assert str(temp_project) not in cmd, (
+            f"Project-scope command must not embed the installer's absolute prefix; got {cmd!r}"
+        )
+
+    def test_user_scope_still_writes_absolute_hook_paths(self, temp_project):
+        """User-scope deploys must still absolutize hook commands --
+        ``~/.claude/settings.json`` runs without a fixed cwd, so relative
+        paths cannot resolve (#1310 / #1354).
+
+        ``user_scope=True`` is the explicit signal the production dispatch
+        (``services.integrate_package_primitives``) computes from the
+        ``InstallScope`` enum, kept independent of deploy-root layout in
+        ``core/scope.py``.
+        """
+        pkg_dir = temp_project / "scope-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        (hooks_dir / "stop.sh").write_text("#!/bin/bash\nexit 0")
+
+        pkg_info = _make_package_info(pkg_dir, "scope-pkg")
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(pkg_info, temp_project, user_scope=True)
+
+        settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
+        cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        assert Path(cmd).is_absolute(), f"User-scope command must be absolute; got {cmd!r}"
+        assert cmd == str(
+            (temp_project / ".claude" / "hooks" / "scope-pkg" / "hooks" / "stop.sh").resolve()
+        )
 
     def test_no_hooks_returns_empty_result(self, temp_project):
         """Test Claude integration with no hook files returns empty result."""
@@ -2450,6 +2544,37 @@ class TestCodexHookIntegration:
 
         assert result.files_integrated == 0
 
+    def test_codex_project_scope_keeps_relative_hook_paths(self):
+        """Project-scope .codex/hooks.json must stay portable (#1394).
+
+        Mirrors the Claude regression test for the Codex target so the
+        shared _integrate_merged_hooks scope check is asserted from both
+        public entry points.
+        """
+        hook_data = {
+            "hooks": {
+                "SessionStart": [
+                    {"type": "command", "command": "${CURSOR_PLUGIN_ROOT}/hooks/run.sh"}
+                ]
+            }
+        }
+        pi = self._make_package_info(hook_data=hook_data)
+        # ${CURSOR_PLUGIN_ROOT}/hooks/run.sh resolves under package root.
+        scripts_dir = pi.install_path / "hooks"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        (scripts_dir / "run.sh").write_text("#!/bin/bash\nexit 0")
+
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_codex(pi, self.root)
+
+        data = json.loads((self.root / ".codex" / "hooks.json").read_text())
+        cmd = data["hooks"]["SessionStart"][0]["command"]
+        assert cmd == ".codex/hooks/test-pkg/hooks/run.sh", (
+            f"Project-scope Codex command must be repo-relative; got {cmd!r}"
+        )
+        assert not Path(cmd).is_absolute()
+        assert str(self.root) not in cmd
+
 
 # --- Gemini hook integration tests -----------------------------------------------
 
@@ -3051,6 +3176,21 @@ class TestIssue1007Fixes:
             (hooks_dir / filename).write_text(json.dumps(data), encoding="utf-8")
         return _make_package_info(pkg_dir, pkg_name)
 
+    def _make_pkg_at(
+        self,
+        project: Path,
+        relative_path: str,
+        pkg_name: str,
+        hook_files: dict,
+    ) -> PackageInfo:
+        """Create a package below apm_modules at a specific relative path."""
+        pkg_dir = project / "apm_modules" / Path(relative_path)
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        for filename, data in hook_files.items():
+            (hooks_dir / filename).write_text(json.dumps(data), encoding="utf-8")
+        return _make_package_info(pkg_dir, pkg_name)
+
     def _read_claude_settings(self, project: Path) -> dict:
         """Return parsed .claude/settings.json (or empty dict if absent)."""
         path = project / ".claude" / "settings.json"
@@ -3058,12 +3198,88 @@ class TestIssue1007Fixes:
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def _read_claude_sidecar(self, project: Path) -> dict:
+        """Return parsed .claude/apm-hooks.json sidecar (or empty dict if absent)."""
+        path = project / ".claude" / "apm-hooks.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _claude_sources(self, project: Path, event: str) -> list[str]:
+        """Return _apm_source markers for an event, ordered by settings.json entries.
+
+        Schema-strict Claude stores ownership in apm-hooks.json sidecar; match each
+        settings.json entry by content to its sidecar twin so order is preserved.
+        """
+        entries = self._read_claude_settings(project).get("hooks", {}).get(event, [])
+        sidecar_entries = self._read_claude_sidecar(project).get(event, [])
+        pool = list(sidecar_entries)
+        sources: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            cmp = {k: v for k, v in entry.items() if k != "_apm_source"}
+            match_idx = None
+            for idx, sc in enumerate(pool):
+                if not isinstance(sc, dict):
+                    continue
+                sc_cmp = {k: v for k, v in sc.items() if k != "_apm_source"}
+                if sc_cmp == cmp:
+                    match_idx = idx
+                    break
+            if match_idx is not None:
+                sources.append(pool.pop(match_idx).get("_apm_source"))
+        return sources
+
     def _read_cursor_hooks(self, project: Path) -> dict:
         """Return parsed .cursor/hooks.json (or empty dict if absent)."""
         path = project / ".cursor" / "hooks.json"
         if not path.exists():
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def _read_codex_hooks(self, project: Path) -> dict:
+        """Return parsed .codex/hooks.json (or empty dict if absent)."""
+        path = project / ".codex" / "hooks.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _make_root_local_pkg(
+        self,
+        project: Path,
+        *,
+        manifest_name: str = "sample-project",
+        hook_data: dict | None = None,
+    ) -> PackageInfo:
+        """Create root .apm hook content plus apm.yml metadata."""
+        if hook_data is None:
+            hook_data = {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "bash .codex/hooks/pre-push-review.sh",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        (project / "apm.yml").write_text(
+            f"name: {manifest_name}\nversion: 0.0.0\n",
+            encoding="utf-8",
+        )
+        hooks_dir = project / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "pre-push-review.json").write_text(
+            json.dumps(hook_data),
+            encoding="utf-8",
+        )
+        return _make_package_info(project, project.name)
 
     # ------------------------------------------------------------------
     # Group A: Target-aware file routing
@@ -3393,6 +3609,88 @@ class TestIssue1007Fixes:
         assert "missing.sh" in cmd, "Command must contain the script name"
         assert Path(cmd).is_absolute(), "Command must be an absolute path (the source file)"
 
+    def test_rewrite_command_missing_script_warns_in_both_scopes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing hook scripts must emit a warning regardless of scope (#1394 follow-up).
+
+        Pre-fix, project-scope (deploy_root=None) silently left
+        ``${CLAUDE_PLUGIN_ROOT}/...`` unexpanded with zero diagnostic
+        output, so a misconfigured hook reached the deployed config
+        without any signal. Both scopes must now warn.
+        """
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        warnings: list[str] = []
+        monkeypatch.setattr(hi_mod, "_rich_warning", lambda msg: warnings.append(msg))
+
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        integrator = HookIntegrator()
+
+        # Project-scope (deploy_root=None): must warn, command must keep
+        # the unexpanded variable so we never bake an absolute source
+        # prefix into committed configs (#1394).
+        cmd_project, _ = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=None,
+        )
+        assert "${CLAUDE_PLUGIN_ROOT}" in cmd_project, (
+            "Project-scope must leave the variable unexpanded so committed "
+            f"configs stay portable; got {cmd_project!r}"
+        )
+        assert len(warnings) == 1 and "Hook script not found" in warnings[0], (
+            f"Project-scope must emit exactly one missing-script warning; got {warnings!r}"
+        )
+
+        # User-scope (deploy_root set): must warn AND rewrite to the
+        # absolute source path so the target surfaces a clear runtime
+        # failure (preserves #1310 / #1354 behaviour).
+        cmd_user, _ = integrator._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=tmp_path / "fake-home",
+        )
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd_user, (
+            f"User-scope must resolve the variable; got {cmd_user!r}"
+        )
+        assert Path(cmd_user).is_absolute()
+        assert len(warnings) == 2, (
+            f"User-scope must emit a second missing-script warning; got {warnings!r}"
+        )
+
+    def test_rewrite_command_missing_relative_script_warns_in_project_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ``./path`` branch must also warn for project-scope missing scripts."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        warnings: list[str] = []
+        monkeypatch.setattr(hi_mod, "_rich_warning", lambda msg: warnings.append(msg))
+
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        integrator = HookIntegrator()
+
+        cmd, _ = integrator._rewrite_command_for_target(
+            "./hooks/missing.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=None,
+        )
+        # Variable / relative ref stays in place under project-scope so
+        # the committed config never embeds an absolute prefix.
+        assert "./hooks/missing.sh" in cmd
+        assert len(warnings) == 1 and "Hook script not found" in warnings[0], (
+            f"Project-scope must warn for the ./path branch too; got {warnings!r}"
+        )
+
     # ------------------------------------------------------------------
     # Group C: Event normalisation for Claude
     # ------------------------------------------------------------------
@@ -3544,6 +3842,466 @@ class TestIssue1007Fixes:
         assert len(entries) == 2, (
             f"Cross-package identical entries must both be present; got {len(entries)}"
         )
+
+    def test_root_local_source_uses_manifest_name(self, temp_project: Path) -> None:
+        """Root .apm hooks use stable apm.yml metadata, not checkout basename."""
+        manifest_name = f"{temp_project.name}-manifest"
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name=manifest_name)
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == [f"_local/{manifest_name}"]
+
+    def test_root_local_heals_stale_source_in_claude_settings(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Root .apm reinstall removes same-content entries from old checkout sources."""
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "bash .codex/hooks/pre-push-review.sh",
+                                    }
+                                ],
+                                "_apm_source": "suspicious-bardeen-e50cf8",
+                            },
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": "echo user-owned"}],
+                            },
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["_local/sample-project"]
+        # settings.json must retain both the managed entry and the user-owned hook
+        assert len(entries) == 2
+        user_owned = [e for e in entries if e["hooks"][0]["command"] == "echo user-owned"]
+        assert len(user_owned) == 1
+
+    def test_root_local_heals_stale_source_in_codex_hooks(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Codex merged hooks get the same stale root-source healing."""
+        (temp_project / ".codex").mkdir()
+        pkg_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
+        hooks_path = temp_project / ".codex" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "bash .codex/hooks/pre-push-review.sh",
+                                    }
+                                ],
+                                "_apm_source": "suspicious-bardeen-e50cf8",
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_codex(pkg_info, temp_project)
+
+        entries = self._read_codex_hooks(temp_project)["hooks"]["PreToolUse"]
+        assert len(entries) == 1
+        assert entries[0]["_apm_source"] == "_local/sample-project"
+
+    def test_root_local_healer_preserves_dependency_source_entries(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Same-content dependency hooks are not mistaken for stale root hooks."""
+        hook_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bash .codex/hooks/pre-push-review.sh",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="sample-project",
+            hook_data=hook_data,
+        )
+        dep_info = self._make_pkg(temp_project, "dep-hooks", {"hooks.json": hook_data})
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(dep_info, temp_project)
+
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["hooks"]["PreToolUse"].append(
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bash .codex/hooks/pre-push-review.sh",
+                    }
+                ],
+                "_apm_source": "suspicious-bardeen-e50cf8",
+            }
+        )
+        settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+        integrator.integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["dep-hooks", "_local/sample-project"]
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            "owner/dep-hooks",
+            "org/project/dep-hooks",
+            "owner/repo/collections/dep-hooks",
+            "org/project/repo/collections/dep-hooks",
+            "owner/repo/.apm/skills/dep-hooks",
+            "_local/dep-hooks",
+        ],
+    )
+    def test_root_local_healer_preserves_bounded_dependency_layouts(
+        self,
+        temp_project: Path,
+        relative_path: str,
+    ) -> None:
+        """Bounded dependency scans preserve known package root layouts."""
+        hook_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "bash .codex/hooks/pre-push-review.sh",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="sample-project",
+            hook_data=hook_data,
+        )
+        dep_info = self._make_pkg_at(
+            temp_project,
+            relative_path,
+            "dep-hooks",
+            {"hooks.json": hook_data},
+        )
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(dep_info, temp_project)
+
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["hooks"]["PreToolUse"].append(
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bash .codex/hooks/pre-push-review.sh",
+                    }
+                ],
+                "_apm_source": "stale-root-name",
+            }
+        )
+        settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+        integrator.integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["dep-hooks", "_local/sample-project"]
+
+    def test_dependency_hook_sources_uses_lockfile_paths(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Readable lockfiles provide exact dependency roots without broad scans."""
+        pkg_dir = temp_project / "apm_modules" / "owner" / "repo" / "collections" / "dep-hooks"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: dep-hooks\n", encoding="utf-8")
+        (temp_project / "apm.lock.yaml").write_text(
+            "\n".join(
+                [
+                    'lockfile_version: "1"',
+                    "dependencies:",
+                    "  - repo_url: owner/repo",
+                    "    virtual_path: collections/dep-hooks",
+                    "    is_virtual: true",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+
+    def test_dependency_hook_sources_rejects_lockfile_symlink_root(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Lockfile dependency roots do not follow symlink package roots."""
+        real_pkg = temp_project / "apm_modules" / "owner" / "real-dep"
+        real_pkg.mkdir(parents=True)
+        (real_pkg / "apm.yml").write_text("name: real-dep\n", encoding="utf-8")
+        link_pkg = temp_project / "apm_modules" / "owner" / "link-dep"
+        try:
+            link_pkg.symlink_to(real_pkg, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+        (temp_project / "apm.lock.yaml").write_text(
+            "\n".join(
+                [
+                    'lockfile_version: "1"',
+                    "dependencies:",
+                    "  - repo_url: owner/link-dep",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_dependency_hook_sources_falls_back_when_lockfile_paths_are_invalid(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Invalid lockfile paths do not disable bounded fallback discovery."""
+        pkg_dir = temp_project / "apm_modules" / "owner" / "dep-hooks"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: dep-hooks\n", encoding="utf-8")
+        (temp_project / "apm.lock.yaml").write_text(
+            "\n".join(
+                [
+                    'lockfile_version: "1"',
+                    "dependencies:",
+                    "  - repo_url: owner/repo",
+                    "    virtual_path: ../bad",
+                    "    is_virtual: true",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == {"dep-hooks"}
+
+    def test_bounded_dependency_scan_stops_at_package_root(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Nested package content below a package root is not a dependency source."""
+        root_info = self._make_root_local_pkg(temp_project, manifest_name="sample-project")
+        package_root = temp_project / "apm_modules" / "owner" / "repo"
+        package_root.mkdir(parents=True)
+        (package_root / "apm.yml").write_text("name: repo\n", encoding="utf-8")
+        nested_skill = package_root / "tools" / "deep-skill"
+        nested_skill.mkdir(parents=True)
+        (nested_skill / "SKILL.md").write_text("# Deep Skill\n", encoding="utf-8")
+
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "bash .codex/hooks/pre-push-review.sh",
+                                    }
+                                ],
+                                "_apm_source": "deep-skill",
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["_local/sample-project"]
+
+    def test_bounded_dependency_scan_ignores_unrecognized_nested_markers(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Fallback discovery does not scan arbitrary package internals."""
+        nested = (
+            temp_project / "apm_modules" / "owner" / "repo" / "tests" / "fixtures" / "dep-hooks"
+        )
+        nested.mkdir(parents=True)
+        (nested / "SKILL.md").write_text("# Fixture Skill\n", encoding="utf-8")
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_bounded_dependency_scan_rejects_symlinked_namespace(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Fallback discovery does not follow namespace symlinks."""
+        repo_root = temp_project / "apm_modules" / "owner" / "repo"
+        repo_root.mkdir(parents=True)
+        outside = temp_project / "outside" / "dep-hooks"
+        outside.mkdir(parents=True)
+        (outside / "SKILL.md").write_text("# External Skill\n", encoding="utf-8")
+        try:
+            (repo_root / "collections").symlink_to(outside.parent, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_bounded_dependency_scan_rejects_symlinked_marker(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Fallback discovery does not accept symlinked package markers."""
+        package_root = temp_project / "apm_modules" / "owner" / "repo" / "collections" / "dep-hooks"
+        package_root.mkdir(parents=True)
+        outside_hooks = temp_project / "outside" / "hooks"
+        outside_hooks.mkdir(parents=True)
+        try:
+            (package_root / "hooks").symlink_to(outside_hooks, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        assert HookIntegrator._dependency_hook_sources(temp_project) == set()
+
+    def test_root_local_source_marker_does_not_collide_with_dependency_name(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Root source markers are namespaced even when apm.yml matches a dependency."""
+        hook_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo shared"}],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="matching-dep",
+            hook_data=hook_data,
+        )
+        dep_info = self._make_pkg(temp_project, "matching-dep", {"hooks.json": hook_data})
+
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(dep_info, temp_project)
+        integrator.integrate_package_hooks_claude(root_info, temp_project)
+
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert sources == ["matching-dep", "_local/matching-dep"]
+
+    def test_root_local_heals_stale_source_for_multiple_hook_files_same_event(
+        self,
+        temp_project: Path,
+    ) -> None:
+        """Stale-source healing applies to every root hook file for an event."""
+        first = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo first"}],
+                    }
+                ]
+            }
+        }
+        second = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "echo second"}],
+                    }
+                ]
+            }
+        }
+        root_info = self._make_root_local_pkg(
+            temp_project,
+            manifest_name="sample-project",
+            hook_data=first,
+        )
+        (temp_project / ".apm" / "hooks" / "z-second.json").write_text(
+            json.dumps(second),
+            encoding="utf-8",
+        )
+        settings_path = temp_project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": "echo second"}],
+                                "_apm_source": "old-root-name",
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(root_info, temp_project)
+
+        entries = self._read_claude_settings(temp_project)["hooks"]["PreToolUse"]
+        commands = [e["hooks"][0]["command"] for e in entries if isinstance(e, dict)]
+        sources = self._claude_sources(temp_project, "PreToolUse")
+        assert commands == ["echo first", "echo second"]
+        assert sources == ["_local/sample-project", "_local/sample-project"]
 
     def test_reinstall_clears_aliased_events(self, temp_project: Path) -> None:
         """Re-integration removes stale postToolUse (camelCase) aliases.

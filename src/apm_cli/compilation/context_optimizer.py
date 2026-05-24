@@ -27,6 +27,7 @@ from ..output.models import (
 from ..primitives.models import Instruction
 from ..utils.exclude import should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
+from ..utils.patterns import has_top_level_comma, parse_apply_to
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -570,20 +571,21 @@ class ContextOptimizer:
         if not matching_directories:
             # Smart fallback: Try to place in semantically appropriate directory
             intended_dir = self._extract_intended_directory_from_pattern(pattern)
+            name = getattr(instruction, "name", None) or instruction.file_path.stem
 
             if intended_dir:
                 # Place in the intended directory (e.g., docs/ for docs/**/*.md)
                 placement = intended_dir
                 reasoning = f"No matching files found, placed in intended directory '{portable_relpath(intended_dir, self.base_dir)}'"
                 self._warnings.append(
-                    f"Pattern '{pattern}' matches no files - placing in intended directory '{portable_relpath(intended_dir, self.base_dir)}'"
+                    f"applyTo for '{name}' matched no files - placing in '{portable_relpath(intended_dir, self.base_dir)}'"
                 )
             else:
                 # Fallback to root for global patterns
                 placement = self.base_dir
                 reasoning = "No matching files found, fallback to root placement"
                 self._warnings.append(
-                    f"Pattern '{pattern}' matches no files - placing at project root"
+                    f"applyTo for '{name}' matched no files - placing at project root"
                 )
 
             # Calculate relevance score for the fallback placement
@@ -659,11 +661,19 @@ class ContextOptimizer:
         """Extract the intended directory from a pattern like 'docs/**/*.md' -> 'docs'.
 
         Args:
-            pattern (str): File pattern to analyze.
+            pattern (str): File pattern (may be a comma-separated list).
 
         Returns:
             Optional[Path]: Intended directory path, or None if pattern is global.
         """
+        # For comma-lists, only the first segment is consulted - the
+        # placement still flows into a single directory.
+        if has_top_level_comma(pattern):
+            segments = parse_apply_to(pattern)
+            if not segments:
+                return None
+            pattern = segments[0]
+
         if not pattern or pattern.startswith("**/"):
             return None  # Global pattern
 
@@ -711,11 +721,19 @@ class ContextOptimizer:
 
         Args:
             file_path (Path): File path to check
-            pattern (str): Glob pattern to match against
+            pattern (str): Glob pattern or comma-separated list of globs.
 
         Returns:
-            bool: True if file matches pattern
+            bool: True if file matches pattern (or any segment of a list).
         """
+        # applyTo accepts a comma-separated list of globs; treat any
+        # segment match as a hit so list patterns mirror per-glob semantics.
+        # Only split on top-level commas - commas inside brace alternation
+        # (e.g. ``**/*.{css,scss}``) must stay attached for brace expansion.
+        if has_top_level_comma(pattern):
+            segments = parse_apply_to(pattern)
+            return any(self._file_matches_pattern(file_path, seg) for seg in segments)
+
         # Expand any brace patterns
         expanded_patterns = self._expand_glob_pattern(pattern)
 

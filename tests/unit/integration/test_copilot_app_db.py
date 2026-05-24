@@ -155,11 +155,47 @@ class TestVersionGuard:
         with pytest.raises(cdb.CopilotAppDbSchemaError, match=r"older than supported"):
             cdb.deploy_workflow(db, row)
 
-    def test_rejects_user_version_above_max(self, tmp_path: Path):
-        db = _make_db(tmp_path / "new.db", user_version=999)
+    @pytest.mark.parametrize("version", [16, 17, 50])
+    def test_warns_but_continues_above_max(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        version: int,
+    ):
+        """Forward-compat: newer-than-tested schemas warn, do not raise.
+
+        The Copilot App bumps ``user_version`` on additive changes that
+        do not break APM's read/write surface; hard-failing made every
+        App release a release window for APM.  See devx-ux verdict in
+        the schema-warn PR.
+        """
+        cdb._reset_user_version_warning_state()
+        db = _make_db(tmp_path / f"v{version}.db", user_version=version)
         row = cdb.WorkflowRow(id=cdb.namespaced_id("o", "p", "n"), name="N", prompt="x")
-        with pytest.raises(cdb.CopilotAppDbSchemaError, match=r"newer than this APM"):
+        cdb.deploy_workflow(db, row)  # no raise
+        captured = capsys.readouterr()
+        combined = " ".join((captured.out + captured.err).split())
+        assert "[!]" in combined
+        assert f"version {version}" in combined
+        assert str(cdb._MAX_SUPPORTED_USER_VERSION) in combined
+        assert "gh issue new" in combined
+
+    def test_above_max_warning_deduped_per_version(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ):
+        """Multi-row install must warn once per version, not per row."""
+        cdb._reset_user_version_warning_state()
+        db = _make_db(tmp_path / "v20.db", user_version=20)
+        for i in range(3):
+            row = cdb.WorkflowRow(id=cdb.namespaced_id("o", "p", f"n{i}"), name=f"N{i}", prompt="x")
             cdb.deploy_workflow(db, row)
+        captured = capsys.readouterr()
+        combined = " ".join((captured.out + captured.err).split())
+        # Dedup contract: a single warning line for v20 across N rows.
+        assert combined.count("[!] Copilot App schema version 20") == 1
+        assert 20 in cdb._warned_user_versions
 
 
 # ---------------------------------------------------------------------------

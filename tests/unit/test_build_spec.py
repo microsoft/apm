@@ -120,6 +120,38 @@ class TestSpecFileSyntax:
         assert "def _read_version_from_pyproject" in snippet
         assert "def is_upx_available" in snippet
 
+    def test_pyinstaller_optimize_is_2(self):
+        """Regression guard: Analysis(optimize=...) must be 2 (python -OO).
+
+        ``optimize=2`` strips both ``assert``s and ``__doc__`` from compiled
+        bytecode. Stripping ``__doc__`` keeps the PYZ string surface small,
+        which is critical for avoiding the Defender ML false positive
+        (Trojan:Script/Wacatac.H!ml) that affected v0.14.0 -- see #1407.
+
+        If this test fails, do NOT just lower the value to fix #1298-style
+        docstring-fallback bugs. Instead, set ``help=`` (or ``short_help=``)
+        explicitly on the offending Click command; the
+        ``test_every_registered_command_has_explicit_help`` test in
+        ``tests/unit/test_cli_consistency.py`` enforces this contract.
+        """
+        source = _SPEC_FILE.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(_SPEC_FILE))
+        analysis_optimize_values: list[int] = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Analysis"
+            ):
+                for kw in node.keywords:
+                    if kw.arg == "optimize" and isinstance(kw.value, ast.Constant):
+                        analysis_optimize_values.append(kw.value.value)
+        assert analysis_optimize_values, "No Analysis(optimize=...) keyword found in build/apm.spec"
+        assert all(v == 2 for v in analysis_optimize_values), (
+            f"Analysis(optimize=...) must be 2 (got {analysis_optimize_values}). "
+            "See test docstring for context."
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. should_use_upx()

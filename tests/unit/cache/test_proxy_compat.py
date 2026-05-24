@@ -74,7 +74,7 @@ class TestInsteadOfRewrite:
         # Pre-populate the checkout to simulate first install success.
         # The integrity verifier reads ``.git/HEAD`` directly, so we
         # must lay down a HEAD file containing the expected SHA.
-        checkout_dir = tmp_path / "git" / "checkouts_v1" / shard / sha
+        checkout_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         checkout_dir.mkdir(parents=True)
         git_dir = checkout_dir / ".git"
         git_dir.mkdir()
