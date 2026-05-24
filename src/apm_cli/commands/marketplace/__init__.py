@@ -424,7 +424,7 @@ def _looks_like_local_marketplace_source(raw: str) -> bool:
         return False
     if raw.lower().startswith("file://"):
         return True
-    if raw.startswith(("/", "./", "../", "~/")) or raw == "~":
+    if raw.startswith(("/", "./", "../", "~/", ".\\", "..\\", "~\\")) or raw == "~":
         return True
     # Windows drive letter: C:\foo or C:/foo
     return len(raw) >= 3 and raw[0].isalpha() and raw[1] == ":" and raw[2] in ("\\", "/")
