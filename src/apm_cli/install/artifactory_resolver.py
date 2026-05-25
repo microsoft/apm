@@ -61,7 +61,7 @@ _ARTIFACTORY_BOUNDARY_AUTH = (
 class _CandidateStatus:
     """Probe outcome for one candidate boundary."""
 
-    EXISTS = "exists"  # at least one URL shape returned 2xx
+    EXISTS = "exists"  # at least one URL shape returned 2xx or 3xx (existence proof, redirect inclusive)
     MISSING = "missing"  # every URL shape returned 4xx other than 401/403
     AUTH = "auth"  # only 401/403 seen -- cannot tell if the repo exists
 
@@ -75,6 +75,7 @@ def _candidate_archive_status(
     headers: dict[str, str],
     verify,
     timeout: int = 15,
+    scheme: str = "https",
 ) -> str:
     """Classify one candidate's existence by HEAD-probing every archive URL shape.
 
@@ -82,7 +83,7 @@ def _candidate_archive_status(
     ``AUTH`` from ``MISSING`` is deliberate: a misconfigured token should
     surface a different error than a wrong owner/repo split.
     """
-    urls = build_artifactory_archive_url(host, prefix, owner, repo, ref)
+    urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
     saw_auth = False
     for url in urls:
         try:
@@ -132,12 +133,15 @@ def _proxy_probe_headers(
 
 def _proxy_routing_target(
     dep_ref: DependencyReference,
-) -> tuple[str, str, bool] | None:
-    """Return ``(host, prefix, is_mode_1)`` if *dep_ref* routes through the proxy.
+) -> tuple[str, str, str, bool] | None:
+    """Return ``(host, prefix, scheme, is_mode_1)`` if *dep_ref* routes through the proxy.
 
-    * Mode 1 (explicit FQDN): host and prefix come from the dependency ref.
-    * Mode 2 (bare shorthand under ``PROXY_REGISTRY_ONLY``): host and prefix
-      come from the registry-proxy config.
+    * Mode 1 (explicit FQDN): host and prefix come from the dependency ref;
+      scheme is always ``https`` (Mode 1 deps reject ``http://`` upstream).
+    * Mode 2 (bare shorthand under ``PROXY_REGISTRY_ONLY``): host, prefix,
+      and scheme come from the registry-proxy config, so installs that
+      intentionally route through an ``http://`` proxy (isolated networks
+      using ``PROXY_REGISTRY_ALLOW_HTTP=1``) probe over the same transport.
 
     Returns ``None`` when no proxy routing applies (regular GitHub/ADO deps)
     or when host/prefix are not real strings (e.g. mocked dependency refs
@@ -147,7 +151,7 @@ def _proxy_routing_target(
         host = dep_ref.host
         prefix = dep_ref.artifactory_prefix
         if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
-            return (host, prefix, True)
+            return (host, prefix, "https", True)
         return None
     from ..deps.artifactory_orchestrator import ArtifactoryRouter
 
@@ -156,9 +160,9 @@ def _proxy_routing_target(
     cfg = ArtifactoryRouter.parse_proxy_config()
     if cfg is None:
         return None
-    host, prefix, _scheme = cfg
+    host, prefix, scheme = cfg
     if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
-        return (host, prefix, False)
+        return (host, prefix, scheme or "https", False)
     return None
 
 
@@ -186,7 +190,7 @@ def _resolve_artifactory_boundary(
     if target is None:
         # Not routed through the proxy -- nothing for this resolver to do.
         return dep_ref
-    host, prefix, is_mode_1 = target
+    host, prefix, scheme, is_mode_1 = target
 
     # Strip any inlined ``user:pass@host`` credentials before echoing the
     # package string back in error messages.  Deferred until after the
@@ -225,7 +229,7 @@ def _resolve_artifactory_boundary(
                 f"/{cand_repo}#{ref}{path_suffix}"
             )
         status = _candidate_archive_status(
-            host, cand_prefix, cand_owner, cand_repo, ref, headers, verify
+            host, cand_prefix, cand_owner, cand_repo, ref, headers, verify, scheme=scheme
         )
         if status == _CandidateStatus.EXISTS:
             # If the probe confirms the parse-time boundary, return the

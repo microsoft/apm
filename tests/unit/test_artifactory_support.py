@@ -145,6 +145,30 @@ class TestParseArtifactoryPath:
         assert result[2] == "repo"
         assert result[3] == "subdir"
 
+    def test_empty_segment_before_boundary_returns_none(self):
+        """``owner//virtual`` has no repo before the explicit boundary -> invalid.
+
+        Regression guard: previously fell through to ``repo=''``, producing a
+        malformed dep ref that broke downstream URL construction.
+        """
+        assert (
+            parse_artifactory_path(
+                ["artifactory", "github", "owner", "", "subdir"]
+            )
+            is None
+        )
+
+    def test_iterator_yields_nothing_for_empty_segment_before_boundary(self):
+        """Same edge case at the iterator layer -- no candidate is yielded."""
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        candidates = list(
+            iter_artifactory_boundary_candidates(
+                ["artifactory", "github", "owner", "", "subdir"]
+            )
+        )
+        assert candidates == []
+
 
 class TestIterArtifactoryBoundaryCandidates:
     """Test the candidate iterator that backs the install-time probe."""

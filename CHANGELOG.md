@@ -13,7 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Parse-time Artifactory boundary detection no longer uses directory-marker heuristics (`skills/`, `prompts/`, `agents/`, `collections/`, `instructions/`). The install-time resolver is authoritative for the (owner, repo, virtual_path) split; parse-time defaults to a simple all-as-repo / structural-file-extension rule. The `_VIRTUAL_PATH_ROOT_SEGMENTS`, `_ARTIFACTORY_VIRTUAL_MARKERS`, and `_ARTIFACTORY_VIRTUAL_FILE_EXTENSIONS` constants are removed.
+- Parse-time Artifactory boundary detection no longer uses directory-marker heuristics (`skills/`, `prompts/`, `agents/`, `collections/`, `instructions/`). The install-time resolver is authoritative for the (owner, repo, virtual_path) split. Parse-time defaults differ by mode:
+  - **Explicit FQDN** (`host/artifactory/key/owner/repo/...`): `parse_artifactory_path` stays intentionally shallow -- `owner` = first segment after the prefix, `repo` = next segment, remainder = `virtual_path`.
+  - **Bare shorthand under `PROXY_REGISTRY_ONLY`**: `_bare_shorthand_repo_segment_count` defaults to all-as-repo with a structural file-extension rule on the last segment (a path ending in `.prompt.md`/`.instructions.md`/`.chatmode.md`/`.agent.md` is by shape a virtual file; everything before it is the repo).
+
+  Both modes converge at install time: `_resolve_artifactory_boundary` HEAD-probes candidate splits and rebuilds the dependency reference at the proxy-verified split. The `_VIRTUAL_PATH_ROOT_SEGMENTS`, `_ARTIFACTORY_VIRTUAL_MARKERS`, and `_ARTIFACTORY_VIRTUAL_FILE_EXTENSIONS` constants are removed.
 
 ### Fixed
 

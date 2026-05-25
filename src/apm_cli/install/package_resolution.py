@@ -45,8 +45,17 @@ def resolve_parsed_dependency_reference(
     """Parse or probe *package* into a ``DependencyReference``.
 
     Returns ``(dep_ref, direct_virtual_resolved)`` where the second flag is
-    True when a probe (GitLab shorthand or Artifactory boundary) rebuilt the
-    dep ref, so the install pipeline persists it as a structured entry.
+    True when the dep should be persisted as a structured ``git:`` + ``path:``
+    entry in ``apm.yml`` (the canonical shorthand cannot round-trip the probed
+    boundary).  The two probe paths gate this flag differently:
+
+    * **GitLab shorthand** -- True only when the resolved ref is a virtual
+      package (``is_virtual and virtual_path``); a probe that lands on a bare
+      repo with no virtual path stays in canonical shorthand form.
+    * **Artifactory boundary** -- True whenever the probe rebuilt the ref
+      (parse-time guess differed from the proxy-verified split); a probe that
+      merely confirms the parse-time boundary keeps the original ref so
+      apm.yml stays in its existing shape.
 
     For Artifactory deps the optional ``resolve_artifactory_boundary`` is
     authoritative: it returns the proxy-verified boundary or raises -- there

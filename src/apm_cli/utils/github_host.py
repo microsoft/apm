@@ -695,13 +695,17 @@ _resolve_artifactory_boundary`, which probes archive URLs and rebuilds the
         empty_idx = after_owner.index("")
         repo_parts = after_owner[:empty_idx]
         suffix_parts = [s for s in after_owner[empty_idx + 1 :] if s]
-        if repo_parts:
-            return (
-                prefix,
-                owner,
-                "/".join(repo_parts),
-                "/".join(suffix_parts) if suffix_parts else None,
-            )
+        if not repo_parts:
+            # ``owner//virtual`` has no segments before the explicit boundary,
+            # so there is no repo to install -- reject as invalid rather than
+            # falling through and returning ``repo=''``.
+            return None
+        return (
+            prefix,
+            owner,
+            "/".join(repo_parts),
+            "/".join(suffix_parts) if suffix_parts else None,
+        )
 
     repo = after_owner[0]
     virtual_path = "/".join(after_owner[1:]) if len(after_owner) > 1 else None
