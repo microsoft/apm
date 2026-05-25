@@ -346,6 +346,12 @@ Basic instructions for E2E testing.
             env = os.environ.copy()
             env["HOME"] = temp_e2e_home
 
+            # Ensure Copilot CLI can find the token under its preferred env var
+            if "GITHUB_APM_PAT" in os.environ:
+                env["COPILOT_GITHUB_TOKEN"] = os.environ["GITHUB_APM_PAT"]
+            elif "GITHUB_TOKEN" in os.environ:
+                env["COPILOT_GITHUB_TOKEN"] = os.environ["GITHUB_TOKEN"]
+
             # Run with real-time output streaming (using 'start' script which calls Copilot CLI)
             cmd = f'{apm_binary} run start --param name="developer"'
             print(f"Executing: {cmd}")
