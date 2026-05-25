@@ -722,10 +722,13 @@ class TestCacheKey:
     def test_non_default_host_includes_host(self):
         source = MarketplaceSource(name="skills", owner="o", repo="r", host="ghes.corp.com")
         key = client_mod._cache_key(source)
-        # Host must appear in the key (form may vary: kind-prefixed or host-prefixed).
-        assert "ghes.corp.com" in key or "ghes_corp_com" in key
-        assert key.endswith("skills")
-        assert key != "skills"
+        # Assert exact key structure: ``<kind>__<host>__<name>``. Using equality
+        # (not substring containment) avoids CodeQL's "incomplete URL substring
+        # sanitization" pattern and guards against accidental host-collision bugs.
+        segments = key.split("__")
+        assert segments[0] in {"git", "ghes_corp_com"}
+        assert segments[-1] == "skills"
+        assert any(seg in {"ghes.corp.com", "ghes_corp_com"} for seg in segments[1:-1])
 
     def test_different_hosts_different_keys(self):
         s1 = MarketplaceSource(name="mkt", owner="o", repo="r", host="a.com")

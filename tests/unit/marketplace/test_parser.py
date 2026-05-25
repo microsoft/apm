@@ -11,6 +11,8 @@ Covers:
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from apm_cli.commands.marketplace import _parse_marketplace_source
@@ -53,7 +55,9 @@ def test_scp_ssh_url_classified_as_git() -> None:
         "git@gitea.example.com:org/repo.git", host_flag=None
     )
     assert kind == "git"
-    assert "gitea.example.com" in url
+    # SCP-style remains as-is (no scheme); assert exact form to avoid
+    # arbitrary-substring matches CodeQL flags as URL-sanitization weakness.
+    assert url == "git@gitea.example.com:org/repo.git"
     assert host == "gitea.example.com"
 
 
@@ -101,7 +105,8 @@ def test_https_ado_url_classified_as_git() -> None:
     url, kind, host = _parse_marketplace_source(
         "https://dev.azure.com/contoso/eng/_git/agent-forge", host_flag=None
     )
-    # ADO classification routes through "git" kind so subprocess-git fetcher handles it
+    # ADO classification routes through "git" kind so subprocess-git fetcher handles it.
     assert kind == "git"
-    assert "dev.azure.com" in url
+    # Use urlsplit().hostname for exact host match (CodeQL: avoid substring sanitization).
+    assert urlsplit(url).hostname == "dev.azure.com"
     assert host == "dev.azure.com"
