@@ -120,7 +120,7 @@ def run(ctx: InstallContext) -> None:
             _cache_root = get_cache_root()
             downloader.persistent_git_cache = GitCache(
                 _cache_root,
-                refresh=getattr(ctx, "refresh", False),
+                refresh=ctx.refresh,
             )
         except (OSError, ValueError):
             pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
@@ -188,7 +188,14 @@ def run(ctx: InstallContext) -> None:
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
     update_refs = ctx.update_refs or ctx.refresh
+    if ctx.refresh and ctx.logger:
+        ctx.logger.verbose_detail("[*] --refresh: re-resolving all refs")
     logger = ctx.logger
+
+    # Hoist drift helpers so download_callback avoids per-call sys.modules
+    # lookups and static analysis can see the dependency.
+    from apm_cli.drift import build_download_ref, detect_ref_change
+
     verbose = ctx.verbose  # noqa: F841
 
     def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
@@ -272,8 +279,6 @@ def run(ctx: InstallContext) -> None:
 
             # T5: Use locked commit for reproducibility, unless the manifest
             # ref has drifted from what the lockfile recorded (spec drift).
-            from apm_cli.drift import build_download_ref, detect_ref_change
-
             _locked_dep = (
                 existing_lockfile.get_dependency(dep_ref.get_unique_key())
                 if existing_lockfile
@@ -287,6 +292,17 @@ def run(ctx: InstallContext) -> None:
             if _ref_changed:
                 with callback_lock:
                     ctx.expected_hash_change_deps.add(dep_ref.get_unique_key())
+                if logger:
+                    _old = (
+                        _locked_dep.resolved_ref or _locked_dep.resolved_commit[:8]
+                        if _locked_dep
+                        else "?"
+                    )
+                    _new = dep_ref.reference or "HEAD"
+                    logger.verbose_detail(
+                        f"  [!] Spec drift: {dep_ref.get_unique_key()} "
+                        f"{_old} -> {_new}, re-resolving"
+                    )
 
             download_dep = build_download_ref(
                 dep_ref,

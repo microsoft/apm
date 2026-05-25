@@ -913,7 +913,7 @@ def _handle_mcp_install(
 @click.option(
     "--update",
     is_flag=True,
-    help="Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI)",
+    help="Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI). Unlike --refresh, --update restructures the entire dependency graph.",
 )
 @click.option("--dry-run", is_flag=True, help="Show what would be installed without installing")
 @click.option(
@@ -1072,7 +1072,7 @@ def _handle_mcp_install(
     "--refresh",
     is_flag=True,
     default=False,
-    help="Bypass the persistent cache and re-fetch all dependencies from upstream.",
+    help="Re-fetch all dependencies from upstream and re-resolve all ref pins. Use 'apm update' for interactive upgrade planning.",
 )
 @click.option(
     "--legacy-skill-paths",
