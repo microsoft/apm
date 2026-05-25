@@ -16,7 +16,7 @@ def ensure_config_exists():
 
     if not os.path.exists(CONFIG_FILE):
         try:
-            fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"default_client": "vscode"}, f)
         except FileExistsError:
