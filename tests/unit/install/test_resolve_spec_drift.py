@@ -1,9 +1,10 @@
-"""Unit tests for resolve-phase spec-drift handling.
+"""Unit tests for spec-drift handling in the install pipeline.
 
-Verifies that the BFS download callback in ``resolve.py`` uses
-``detect_ref_change`` and ``build_download_ref`` from ``drift.py``
-so that user-specified ``#tag``/``#sha`` changes in the manifest
-are not silently overridden by stale lockfile entries.
+Verifies the contract between the resolve/integrate phases and the
+``detect_ref_change``/``build_download_ref`` helpers from ``drift.py``.
+These tests exercise the helpers directly to confirm the contract
+that the production call sites rely on.  For unit tests of the drift
+helpers themselves, see ``tests/unit/test_drift_detection.py``.
 """
 
 from __future__ import annotations
@@ -66,10 +67,14 @@ def _dep(repo_url: str = "owner/repo", reference: str | None = None) -> Dependen
 
 
 class TestResolvePhaseSpecDrift(unittest.TestCase):
-    """Verify that the resolve-phase download callback honours spec drift.
+    """Verify the spec-drift contract: when ref changes, the download ref
+    should use the manifest ref (not the locked commit), and vice versa.
 
-    These tests exercise the *same* functions that the resolve phase now
-    calls (detect_ref_change, build_download_ref) to confirm the contract.
+    For unit tests of the drift helpers themselves (added/removed/changed
+    pins, orphans, config drift), see ``tests/unit/test_drift_detection.py``.
+    These tests focus on the combined detect+build contract and the
+    expected_hash_change_deps marking that the resolve and integrate
+    phases rely on.
     """
 
     def test_spec_drift_uses_manifest_ref(self):
@@ -99,48 +104,6 @@ class TestResolvePhaseSpecDrift(unittest.TestCase):
 
         download_ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)
         self.assertEqual(download_ref.reference, "aaa1111111111111111111111111111111111111")
-
-    def test_added_pin_triggers_drift(self):
-        """Adding a #tag to a previously-unpinned dep should trigger re-resolution."""
-        locked = _LockedDep(
-            resolved_ref=None,
-            resolved_commit="bbb2222222222222222222222222222222222222",
-        )
-        lockfile = _LockFile(dependencies={"owner/repo": locked})
-        dep = _dep(reference="v1.0.0")
-
-        self.assertTrue(detect_ref_change(dep, locked))
-
-        download_ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=True)
-        self.assertEqual(download_ref.reference, "v1.0.0")
-
-    def test_removed_pin_triggers_drift(self):
-        """Removing a #tag (back to default branch) should trigger re-resolution."""
-        locked = _LockedDep(
-            resolved_ref="v1.0.0",
-            resolved_commit="aaa1111111111111111111111111111111111111",
-        )
-        lockfile = _LockFile(dependencies={"owner/repo": locked})
-        dep = _dep(reference=None)
-
-        self.assertTrue(detect_ref_change(dep, locked))
-
-        download_ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=True)
-        self.assertIsNone(download_ref.reference)
-
-    def test_sha_pin_change_triggers_drift(self):
-        """Changing from one commit SHA to another should trigger re-resolution."""
-        locked = _LockedDep(
-            resolved_ref="abc1234",
-            resolved_commit="aaa1111111111111111111111111111111111111",
-        )
-        lockfile = _LockFile(dependencies={"owner/repo": locked})
-        dep = _dep(reference="def5678")
-
-        self.assertTrue(detect_ref_change(dep, locked))
-
-        download_ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=True)
-        self.assertEqual(download_ref.reference, "def5678")
 
     def test_first_install_no_lockfile(self):
         """First install (no lockfile) should use manifest ref directly."""
@@ -241,37 +204,6 @@ class TestRefreshFlagWiring(unittest.TestCase):
 
         download_ref = build_download_ref(dep, lockfile, update_refs=update_refs, ref_changed=False)
         self.assertEqual(download_ref.reference, "aaa1111111111111111111111111111111111111")
-
-
-# ---------------------------------------------------------------------------
-# Tests: backward compatibility with old lockfiles
-# ---------------------------------------------------------------------------
-
-
-class TestOldLockfileBackwardCompat(unittest.TestCase):
-    """Old lockfiles may lack resolved_ref. Verify conservative behaviour."""
-
-    def test_old_lockfile_no_resolved_ref_with_user_pin(self):
-        """Old lockfile without resolved_ref + user adds #tag -- drift detected."""
-        locked = _LockedDep(
-            resolved_ref=None,
-            resolved_commit="old_sha",
-        )
-        dep = _dep(reference="v1.0.0")
-
-        # None != "v1.0.0" -- True -- conservative re-download
-        self.assertTrue(detect_ref_change(dep, locked))
-
-    def test_old_lockfile_no_resolved_ref_no_user_pin(self):
-        """Old lockfile without resolved_ref + user has no pin -- no drift."""
-        locked = _LockedDep(
-            resolved_ref=None,
-            resolved_commit="old_sha",
-        )
-        dep = _dep(reference=None)
-
-        # None == None -- False -- no drift, use locked commit
-        self.assertFalse(detect_ref_change(dep, locked))
 
 
 if __name__ == "__main__":

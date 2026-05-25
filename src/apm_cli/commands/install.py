@@ -1732,6 +1732,7 @@ def _install_apm_packages(ctx, outcome):
                 plan_callback=ctx.plan_callback,
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
+                refresh=ctx.refresh,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
@@ -1959,6 +1960,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     legacy_skill_paths: bool = False,
     frozen: bool = False,
     plan_callback=None,
+    refresh: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1996,5 +1998,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
         legacy_skill_paths=legacy_skill_paths,
         frozen=frozen,
         plan_callback=plan_callback,
+        refresh=refresh,
     )
     return InstallService().run(request)

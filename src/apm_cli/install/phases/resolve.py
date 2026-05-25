@@ -187,7 +187,7 @@ def run(ctx: InstallContext) -> None:
     # --refresh implies re-resolution of all refs (but does NOT discard
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
-    update_refs = ctx.update_refs or getattr(ctx, "refresh", False)
+    update_refs = ctx.update_refs or ctx.refresh
     logger = ctx.logger
     verbose = ctx.verbose  # noqa: F841
 
