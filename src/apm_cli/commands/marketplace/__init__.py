@@ -600,9 +600,14 @@ def add(source, name, ref, branch, host, verbose):
             )
             sys.exit(1)
 
+        # Surface progress before the slow probe + fetch (5-30s for generic-git)
+        # so the user sees activity instead of staring at a blank terminal.
+        provisional_label = name or _default_alias_from_url(url)
+        logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
+
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- _auto_detect_path only consults url/ref/path/kind.
-        probe_name = name or _default_alias_from_url(url)
+        probe_name = provisional_label
         probe_source = MarketplaceSource(
             name=probe_name,
             url=url,
@@ -652,7 +657,6 @@ def add(source, name, ref, branch, host, verbose):
             f"Resolved marketplace alias '{display_name}' failed validation"
         )
 
-        logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
         logger.verbose_detail(f"    Source: {fetch_source.display_source}")
         logger.verbose_detail(f"    Kind: {kind}")
         logger.verbose_detail(f"    Ref: {effective_ref}")
@@ -893,7 +897,7 @@ def remove(name, yes, verbose):
                 )
                 sys.exit(1)
             confirmed = click.confirm(
-                f"Remove marketplace '{source.name}' ({source.owner}/{source.repo})?",
+                f"Remove marketplace '{source.name}' ({source.display_source})?",
                 default=False,
             )
             if not confirmed:

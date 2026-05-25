@@ -363,7 +363,7 @@ def _fetch_git(
     """
     _validate_ref(source.ref, source.name)
 
-    from ..cache.git_cache import GitCache
+    from ..cache.git_cache import GitCache, _sanitize_url
     from ..cache.paths import get_cache_root
 
     org = source.owner or None
@@ -382,13 +382,16 @@ def _fetch_git(
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
         # caller's _auto_detect_path probe can try the next candidate path.
-        stderr = (getattr(exc, "stderr", b"") or b"").decode("utf-8", errors="replace")
-        if "not found" in stderr.lower() or "does not exist" in stderr.lower():
+        # Sanitize stderr in case a custom credential helper echoed a secret
+        # back through git's stderr stream.
+        stderr_raw = (getattr(exc, "stderr", b"") or b"").decode("utf-8", errors="replace")
+        if "not found" in stderr_raw.lower() or "does not exist" in stderr_raw.lower():
             return None
+        stderr = _sanitize_url(stderr_raw)
         raise MarketplaceFetchError(source.name, f"git fetch failed: {stderr or exc}") from exc
     except Exception as exc:
         logger.debug("Generic-git fetch failed for '%s'", source.name, exc_info=True)
-        raise MarketplaceFetchError(source.name, str(exc)) from exc
+        raise MarketplaceFetchError(source.name, _sanitize_url(str(exc))) from exc
 
     target = Path(checkout_dir) / file_path
     if not target.exists():
@@ -453,6 +456,8 @@ def _fetch_local_via_git_show(
     source: MarketplaceSource, file_path: str, git_dir: Path
 ) -> dict | None:
     """Use ``git show <ref>:<file>`` against a bare repo or .git directory."""
+    from ..utils.git_env import git_subprocess_env
+
     cmd = [
         "git",
         "--git-dir",
@@ -468,6 +473,7 @@ def _fetch_local_via_git_show(
             capture_output=True,
             check=False,
             timeout=30,
+            env=git_subprocess_env(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise MarketplaceFetchError(source.name, f"git show failed for {file_path}: {exc}") from exc
