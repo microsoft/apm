@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Deterministic Artifactory boundary probe: at install time, `_resolve_artifactory_boundary` HEAD-probes the candidate archive URLs and rebuilds the dependency reference at the proxy-verified split. Covers both explicit-FQDN (`host/artifactory/key/owner/repo/...`) and bare-shorthand-under-proxy deps. Distinguishes "missing repo" from auth (401/403) errors; uses `allow_redirects=False` so the bearer token can't leak cross-host. Mirrors the native GitLab probing pattern but without a separate metadata API.
+
+### Changed
+
+- Parse-time Artifactory boundary detection no longer uses directory-marker heuristics (`skills/`, `prompts/`, `agents/`, `collections/`, `instructions/`). The install-time resolver is authoritative for the (owner, repo, virtual_path) split; parse-time defaults to a simple all-as-repo / structural-file-extension rule. The `_VIRTUAL_PATH_ROOT_SEGMENTS`, `_ARTIFACTORY_VIRTUAL_MARKERS`, and `_ARTIFACTORY_VIRTUAL_FILE_EXTENSIONS` constants are removed.
+
 ### Fixed
 
+- `apm install` through a registry proxy now supports nested-group repos (3+ path segments, e.g. `group/subgroup/project`). Previously every trailing segment past `owner/repo` was treated as an in-repo virtual sub-path, so the downloader requested the wrong archive URL and the install failed with HTTP 404 from the proxy. Behavior is gated on `PROXY_REGISTRY_ONLY` so direct (non-proxy) installs keep the legacy two-segment shape. Affects `parse_artifactory_path`, `build_artifactory_archive_url`, `_detect_virtual_package`, the shorthand resolvers in `DependencyReference`, and `ArtifactoryOrchestrator._split_owner_repo` / `download_subdirectory`.
+- URL-form Artifactory deps no longer round-trip with the `artifactory/<key>` prefix folded into `repo_url`. The duplicated prefix caused the downloader to construct double-prefixed archive URLs (`/artifactory/key/artifactory/key/owner/repo/...`) and 404. `_validate_url_repo_path` now strips the Artifactory VCS prefix before returning the bare `owner/repo` slug; the prefix is still recovered separately via `_extract_artifactory_prefix`.
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
 
 ## [0.14.2] - 2026-05-22

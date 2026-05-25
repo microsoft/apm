@@ -40,14 +40,20 @@ def resolve_parsed_dependency_reference(
     try_resolve_gitlab_direct_shorthand: Callable[..., Any],
     auth_resolver: Any,
     verbose: bool,
+    resolve_artifactory_boundary: Callable[..., Any] | None = None,
 ) -> tuple[Any, bool]:
     """Parse or probe *package* into a ``DependencyReference``.
 
-    Returns ``(dep_ref, direct_gitlab_virtual_resolved)`` where the second flag
-    is True when GitLab direct shorthand probing produced a virtual path entry.
+    Returns ``(dep_ref, direct_virtual_resolved)`` where the second flag is
+    True when a probe (GitLab shorthand or Artifactory boundary) rebuilt the
+    dep ref, so the install pipeline persists it as a structured entry.
+
+    For Artifactory deps the optional ``resolve_artifactory_boundary`` is
+    authoritative: it returns the proxy-verified boundary or raises -- there
+    is no silent fallback to the parse-time guess.
 
     Raises:
-        ValueError: When GitLab shorthand probing is required but fails to resolve.
+        ValueError: When GitLab or Artifactory probing fails to resolve.
     """
     dep_ref = (
         marketplace_dep_ref
@@ -66,8 +72,21 @@ def resolve_parsed_dependency_reference(
         if resolved is None:
             raise ValueError(_GITLAB_DIRECT_SHORTHAND_UNRESOLVED)
         dep_ref = resolved
-        direct_gitlab_virtual_resolved = bool(dep_ref.is_virtual and dep_ref.virtual_path)
-        return dep_ref, direct_gitlab_virtual_resolved
+        direct_virtual_resolved = bool(dep_ref.is_virtual and dep_ref.virtual_path)
+        return dep_ref, direct_virtual_resolved
+    if marketplace_dep_ref is None and resolve_artifactory_boundary is not None:
+        # The resolver decides its own applicability -- it short-circuits for
+        # deps that don't route through the Artifactory proxy.  When it rebuilds
+        # the dep_ref, the canonical shorthand can't round-trip the verified
+        # boundary, so persist as a structured ``git:`` + ``path:`` entry.
+        resolved = resolve_artifactory_boundary(
+            package,
+            auth_resolver,
+            verbose=verbose,
+            dep_ref=dep_ref,
+        )
+        if resolved is not dep_ref:
+            return resolved, True
     return dep_ref, False
 
 
