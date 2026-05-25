@@ -324,8 +324,14 @@ def _fetch_gitlab(
     host_info,
     auth_resolver,
 ) -> dict | None:
-    """Fetch marketplace.json from GitLab via REST v4 raw file API."""
-    result = _fetch_via_api(
+    """Fetch marketplace.json from GitLab via REST v4 raw file API.
+
+    ``_fetch_via_api`` already runs ``auth_resolver.try_with_fallback`` and
+    handles 404/auth fallback internally, so there is no separate retry layer
+    here -- adding one would double-wrap ``try_with_fallback`` and risk
+    re-entering the fallback logic.
+    """
+    return _fetch_via_api(
         source,
         file_path,
         url_builder=_gitlab_file_raw_url,
@@ -334,29 +340,6 @@ def _fetch_gitlab(
         host_info=host_info,
         auth_resolver=auth_resolver,
     )
-    # GitLab returns 404 for unauthenticated access to many private projects
-    # (indistinguishable from a missing file). Retry once with auth-first
-    # already on so this rarely changes anything in practice; left for parity
-    # with the previous implementation.
-    if result is None:
-        try:
-            result = auth_resolver.try_with_fallback(
-                source.host,
-                lambda token, _env: _fetch_via_api(
-                    source,
-                    file_path,
-                    url_builder=_gitlab_file_raw_url,
-                    header_builder=_gitlab_headers,
-                    parse_response=_parse_json_text,
-                    host_info=host_info,
-                    auth_resolver=auth_resolver,
-                ),
-                org=source.owner,
-                unauth_first=False,
-            )
-        except Exception as exc:  # pragma: no cover - parity branch
-            raise MarketplaceFetchError(source.name, str(exc)) from exc
-    return result
 
 
 # ---------------------------------------------------------------------------

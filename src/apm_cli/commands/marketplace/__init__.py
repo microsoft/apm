@@ -407,9 +407,10 @@ def _host_kind_to_fetcher_kind(host_kind: str) -> str:
 
 
 # SCP-like SSH form: ``user@host:path``. The path component does not need
-# to start with a slash (that is what makes it SCP-like). Matches what
-# ``git`` itself accepts as a URL.
-_SCP_LIKE_RE = re.compile(r"^(?P<user>[A-Za-z0-9._-]+)@(?P<host>[A-Za-z0-9.-]+):(?P<path>[^\s:]+)$")
+# to start with a slash (that is what makes it SCP-like). Reuses the
+# canonical regex from ``apm_cli.cache.url_normalize`` so SCP parsing here
+# stays consistent with ``DependencyReference`` and policy discovery.
+from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE  # noqa: E402
 
 
 def _looks_like_local_marketplace_source(raw: str) -> bool:

@@ -74,19 +74,25 @@ def test_https_untrusted_host_classified_as_git() -> None:
 def test_https_github_classified_as_github() -> None:
     url, kind, _host = _parse_marketplace_source("https://github.com/owner/repo", host_flag=None)
     assert kind == "github"
-    assert "github.com/owner/repo" in url
+    parsed = urlsplit(url)
+    assert parsed.hostname == "github.com"
+    assert parsed.path == "/owner/repo"
 
 
 def test_owner_repo_shorthand_classified_as_github_by_default() -> None:
     url, kind, _host = _parse_marketplace_source("owner/repo", host_flag=None)
     assert kind == "github"
-    assert "owner/repo" in url
+    parsed = urlsplit(url)
+    assert parsed.hostname == "github.com"
+    assert parsed.path.rstrip("/") == "/owner/repo"
 
 
 def test_host_owner_repo_shorthand_uses_host_flag() -> None:
     url, kind, _host = _parse_marketplace_source("ghe.contoso.com/team/repo", host_flag=None)
     # GHES classification depends on env; the key invariant is that the host is preserved.
-    assert "ghe.contoso.com/team/repo" in url
+    parsed = urlsplit(url)
+    assert parsed.hostname == "ghe.contoso.com"
+    assert parsed.path.rstrip("/") == "/team/repo"
     assert kind in ("github", "git")
 
 
@@ -97,7 +103,9 @@ def test_single_segment_input_rejected() -> None:
 
 def test_explicit_host_flag_combined_with_owner_repo() -> None:
     url, _kind, _host = _parse_marketplace_source("owner/repo", host_flag="ghes.example.com")
-    assert "ghes.example.com/owner/repo" in url
+    parsed = urlsplit(url)
+    assert parsed.hostname == "ghes.example.com"
+    assert parsed.path.rstrip("/") == "/owner/repo"
 
 
 def test_https_ado_url_classified_as_git() -> None:

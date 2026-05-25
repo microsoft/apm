@@ -1,7 +1,14 @@
-"""End-to-end: ``apm marketplace add`` against a generic git URL.
+"""End-to-end: ``apm marketplace add`` against a ``file://`` bare repo URL.
 
-Uses a local bare repo accessed via ``file://`` URL — exercises ``_fetch_git``
-with a real ``GitCache`` subprocess clone end-to-end.
+``file://`` URIs to bare repos classify as ``kind="local"`` (see
+``_looks_like_local_marketplace_source``) and route through the local fetcher
+(``_fetch_local`` -> ``git show``). This test exercises that path end-to-end
+through ``apm marketplace add`` + ``fetch_or_cache``.
+
+For coverage of the generic-git path (``kind="git"`` -> ``_fetch_git`` ->
+``GitCache``), see the unit tests in ``tests/unit/marketplace/test_client_git.py``
+and ``test_resolver_local_git.py``; a hermetic integration test would need a
+running git daemon and is deliberately out of scope here.
 """
 
 from __future__ import annotations
@@ -70,12 +77,13 @@ def _seed_bare_repo(working: Path, bare: Path) -> None:
     )
 
 
-def test_marketplace_add_generic_git_via_file_uri(tmp_path: Path) -> None:
-    """Register a marketplace via a file:// URL pointing at a bare repo.
+def test_marketplace_add_file_uri_to_bare_repo(tmp_path: Path) -> None:
+    """Register a marketplace via a ``file://`` URL pointing at a bare repo.
 
-    The URL doesn't look like a local path (since it ends in ``.git`` and
-    serves as a remote), so it classifies as ``kind="git"`` once exposed via
-    file:// transport and routes through ``_fetch_git`` + ``GitCache``.
+    ``file://`` URIs classify as ``kind="local"`` and route through
+    ``_fetch_local`` (which uses ``git show`` against the bare repo). This
+    is the documented behaviour: any ``file://`` URI -- whether pointing at
+    a bare or working repo -- always routes through the local fetcher.
     """
     working = tmp_path / "src"
     bare = tmp_path / "mkt.git"

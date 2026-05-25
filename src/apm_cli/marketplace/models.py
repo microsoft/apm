@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE
+
 logger = logging.getLogger(__name__)
 
 
-# SCP-like git URL: e.g. git@host:org/repo.git -- captures host, path
-_SCP_LIKE_RE = re.compile(r"^(?P<user>[\w.-]+)@(?P<host>[\w.-]+):(?P<path>[^/].*)$")
+# SCP-like git URL: e.g. git@host:org/repo.git -- reused canonical regex
+# from apm_cli.cache.url_normalize so dependency and marketplace SCP parsing
+# never drift.
 
 
 def _looks_like_local_path(value: str) -> bool:

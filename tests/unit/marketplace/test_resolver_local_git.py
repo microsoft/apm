@@ -9,6 +9,7 @@ Covers:
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,7 +24,9 @@ from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 from apm_cli.models.dependency.reference import DependencyReference
 
 
-def _patch_marketplace(source: MarketplaceSource, plugins: list[MarketplacePlugin]):
+def _patch_marketplace(
+    source: MarketplaceSource, plugins: list[MarketplacePlugin]
+) -> tuple[AbstractContextManager, AbstractContextManager]:
     manifest = MarketplaceManifest(
         name=source.name,
         owner_name="",
@@ -35,7 +38,7 @@ def _patch_marketplace(source: MarketplaceSource, plugins: list[MarketplacePlugi
     )
 
 
-def _plugin(name: str, source) -> MarketplacePlugin:
+def _plugin(name: str, source: object) -> MarketplacePlugin:
     return MarketplacePlugin(name=name, source=source)
 
 
@@ -98,7 +101,9 @@ def test_generic_git_marketplace_relative_source_builds_virtual_path_dep_ref() -
     dep_ref = result.dependency_reference
     assert dep_ref.virtual_path == "skills/my-skill"
     assert dep_ref.host == "gitea.example.com"
-    assert "org/repo" in dep_ref.repo_url
+    # repo_url here is the owner/repo identifier, not a full URL; assert on
+    # exact equality rather than substring (CodeQL py/incomplete-url-substring-sanitization).
+    assert dep_ref.repo_url == "org/repo"
 
 
 def test_local_marketplace_absolute_github_source_keeps_github_canonical(tmp_path: Path) -> None:
@@ -109,8 +114,11 @@ def test_local_marketplace_absolute_github_source_keeps_github_canonical(tmp_pat
     with p1, p2:
         result = resolve_marketplace_plugin("absolute", "local-mkt")
 
-    # Absolute github source still resolves to an owner/repo canonical
-    assert "foo/bar" in result.canonical
+    # Absolute github source still resolves to an owner/repo canonical.
+    # Canonical is not a URL but a colon-separated identifier; split and
+    # compare structured segments to avoid substring-style URL matching.
+    parts = result.canonical.split(":")
+    assert any(seg.endswith("foo/bar") for seg in parts)
 
 
 def test_ado_marketplace_relative_source_builds_virtual_path_dep_ref() -> None:
