@@ -192,3 +192,41 @@ too: `apm update` refreshes dependencies to the latest matching refs
 fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
 binary itself, use `apm self-update`.
 :::
+
+## Explain a transitive dependency: `apm deps why`
+
+After `apm install`, `apm_modules/` may contain transitive packages that
+you did not declare directly. To answer "who pulled this in?", use
+`apm deps why <pkg>`:
+
+```
+apm deps why shared-utils
+apm deps why acme-org/shared-utils
+apm deps why acme-org/shared-utils --json
+apm deps why shared-utils --global
+```
+
+The lockfile is the source of truth -- the command is fully offline,
+walks `resolved_by` parents bottom-up, and prints one chain per direct
+dependency that transitively required the package:
+
+```
+[i] acme-org/shared-utils@1.4.2  (transitive)
+
+    acme-org/big-skills   [declared in apm.yml]
+     +-- acme-org/shared-utils
+```
+
+`<pkg>` accepts the same identifier styles as `apm deps info`: a bare
+basename (when unique), `owner/repo`, or a full repo URL. Pass `--json`
+for scripting:
+
+```json
+{
+  "package": {"repo_url": "acme-org/shared-utils", "is_direct": false, "...": "..."},
+  "paths": [{"chain": [{"repo_url": "acme-org/big-skills", "is_direct": true}, ...]}]
+}
+```
+
+Exit codes: `0` on success, `1` when the package is not installed or the
+query is ambiguous, `2` when no lockfile exists yet (run `apm install`).

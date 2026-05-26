@@ -10,6 +10,7 @@ from ._utils import (
     _is_nested_under_package,
 )
 from .cli import clean, deps, info, list_packages, tree, update
+from .why import why
 
 __all__ = [  # noqa: RUF022
     # CLI commands
@@ -19,6 +20,7 @@ __all__ = [  # noqa: RUF022
     "clean",
     "update",
     "info",
+    "why",
     # Utility functions (used by tests)
     "_is_nested_under_package",
     "_count_primitives",
