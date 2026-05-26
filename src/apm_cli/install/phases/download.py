@@ -42,6 +42,7 @@ def run(ctx: InstallContext) -> None:
     apm_modules_dir = ctx.apm_modules_dir
     downloader = ctx.downloader
     callback_downloaded = ctx.callback_downloaded
+    callback_failures = ctx.callback_failures
 
     # Phase 4 (#171): Parallel package downloads using ThreadPoolExecutor
     # Pre-download all non-cached packages in parallel for wall-clock speedup.
@@ -60,6 +61,15 @@ def run(ctx: InstallContext) -> None:
         )
         # Skip local packages -- they are copied, not downloaded
         if _pd_ref.is_local:
+            continue
+        # Skip deps that already failed during BFS resolution (#1111 C2).
+        # Without this, registry failures fall through to the git downloader
+        # and hang on a non-existent github.com/{owner}/{repo} clone (~180s).
+        if _pd_key in callback_failures:
+            continue
+        # Registry-sourced deps are fetched in resolve.py's callback; the git
+        # downloader must never handle them here.
+        if getattr(_pd_ref, "source", None) == "registry":
             continue
         # Skip if already downloaded during BFS resolution
         if _pd_key in callback_downloaded:

@@ -71,6 +71,7 @@ def run_policy_preflight(
     no_policy: bool = False,
     logger,
     dry_run: bool = False,
+    registries: dict[str, str] | None = None,
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -149,6 +150,7 @@ def run_policy_preflight(
         policy=policy,
         mcp_deps=mcp_deps,
         fail_fast=(enforcement == "block"),
+        registries=registries,
     )
 
     if not audit_result.passed:

@@ -132,10 +132,17 @@ def _find_entry_index(packages, name: str) -> int:
 
 
 def _validate_source(source: str) -> None:
-    """Validate that *source* has ``owner/repo`` shape or ``./...`` local path."""
+    """Validate that *source* has one of the accepted shapes.
+
+    Accepts ``owner/repo``, ``host.tld/owner/repo``, ``https://host.tld/
+    owner/repo[.git]`` (remote forms), or ``./<path>`` (local).
+    """
     if not SOURCE_RE.match(source):
         raise MarketplaceYmlError(
-            f"'source' must match '<owner>/<repo>' or './<path>' shape, got '{source}'"
+            f"'source' must be one of "
+            f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
+            f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>', "
+            f"got '{source}'"
         )
     try:
         validate_path_segments(source, context="source", allow_current_dir=True)

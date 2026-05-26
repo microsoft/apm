@@ -21,6 +21,7 @@ apm outdated [OPTIONS]
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
 - **Marketplace deps**: compare the installed ref against the marketplace entry's current `source.ref`.
+- **Registry deps** (experimental `registries` feature): compare the lockfile's exact `version` against the highest semver on the registry that satisfies the manifest range (same resolution semantics as `apm install`). Manifest ranges come from the root `apm.yml` and from installed packages' `apm.yml` files (transitive deps). When a registry lockfile entry has no manifest range, `apm outdated` compares against the highest published version and labels the source `(lockfile)`.
 
 Local dependencies and Artifactory-hosted deps are skipped. Legacy `apm.lock` files are migrated to `apm.lock.yaml` automatically on read.
 
@@ -31,7 +32,7 @@ To apply the suggested updates, run `apm install --update` (see [Related](#relat
 | Option | Description |
 |---|---|
 | `-g, --global` | Check user-scope dependencies in `~/.apm/` instead of the current project. |
-| `-v, --verbose` | For outdated tag-pinned deps, also list up to 10 newer available tags. |
+| `-v, --verbose` | For outdated tag-pinned or registry deps, also list up to 10 newer available versions/tags. |
 | `-j, --parallel-checks N` | Max concurrent remote checks. Default `4`. `0` forces sequential. |
 
 ## Examples
@@ -51,6 +52,8 @@ Sample output:
   acme/agent-skills             v1.2.0    v1.4.1        outdated    git tags
   acme/prompt-pack              main      9c1ab2f0      outdated    git branch
   acme/lint-rules               v0.3.0    v0.3.0        up-to-date  git tags
+  nadavy/e2e-demo               1.0.1     1.1.1         outdated    registry: corp
+  microsoft/apm-review-panel    0.1.1     0.1.2         outdated    registry: corp (lockfile)
   pirate-skill@apm-marketplace  v0.2.1    v0.3.0 (...)  outdated    marketplace: apm-marketplace
 
   [!] 2 outdated dependencies found
@@ -79,8 +82,15 @@ apm outdated -j 8
 | Status | Meaning |
 |---|---|
 | `up-to-date` | Locked ref matches the remote. |
-| `outdated` | A newer tag (or branch tip SHA) is available. |
-| `unknown` | The remote could not be queried, or the ref could not be resolved. |
+| `outdated` | A newer tag, branch tip SHA, or registry version in the manifest range is available. |
+| `unknown` | The remote could not be queried, or the ref could not be resolved. For registry deps, also check auth (`APM_REGISTRY_TOKEN_{NAME}`) and that the registry URL is configured. |
+
+Registry `Source` values:
+
+| Source pattern | Meaning |
+|---|---|
+| `registry: NAME` | Compared using the manifest semver range from `apm.yml` (root or an installed package). |
+| `registry: NAME (lockfile)` | No manifest range found; compared against the highest published version on the registry. |
 
 ## Exit codes
 
@@ -96,3 +106,4 @@ apm outdated -j 8
 - [`apm install`](../install/) -- pass `--update` to upgrade outdated deps and rewrite the lockfile.
 - [`apm view`](../view/) -- inspect a single package's metadata or available versions.
 - [`apm audit`](../audit/) -- security scan over installed primitives, suitable for CI gating.
+- [Registries guide](../../guides/registries/) -- declare registries, publish flat archives, and consume registry-sourced deps.

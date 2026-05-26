@@ -81,7 +81,7 @@ If no `--target`, no `targets:` in `apm.yml`, and no harness signal is present, 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace add OWNER/REPO` | Register a marketplace (also accepts `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, or full HTTPS URL) | `-n NAME`, `-b BRANCH`, `--host HOST` |
+| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS URL (any git host -- GitHub, GitLab, ADO, Gitea, self-hosted), SSH URL (`git@host:org/repo.git`), local filesystem path, or `file://` URI. | `-n NAME`, `-r REF`, `--host HOST` |
 | `apm marketplace list` | List registered marketplaces | -- |
 | `apm marketplace browse NAME` | Browse marketplace plugins | -- |
 | `apm marketplace update [NAME]` | Update marketplace index | -- |

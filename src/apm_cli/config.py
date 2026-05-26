@@ -193,6 +193,111 @@ def unset_copilot_cowork_skills_dir() -> None:
     _invalidate_config_cache()
 
 
+def _get_registries_section() -> dict:
+    """Return the ``registries`` section from config.json as a dict."""
+    regs = get_config().get("registries", {})
+    return regs if isinstance(regs, dict) else {}
+
+
+def get_registry_config(name: str) -> "dict | None":
+    """Return the config.json entry for registry *name*, or None."""
+    entry = _get_registries_section().get(name)
+    return entry if isinstance(entry, dict) else None
+
+
+def set_registry_url(name: str, url: str) -> None:
+    """Write registry.<name>.url to config.json."""
+    regs = dict(_get_registries_section())
+    entry = dict(regs.get(name) or {})
+    entry["url"] = url
+    regs[name] = entry
+    update_config({"registries": regs})
+
+
+def set_registry_token(name: str, token: str) -> None:
+    """Write registry.<name>.token to config.json."""
+    regs = dict(_get_registries_section())
+    entry = dict(regs.get(name) or {})
+    entry["token"] = token
+    regs[name] = entry
+    update_config({"registries": regs})
+
+
+def unset_registry_url(name: str) -> None:
+    """Remove registry.<name>.url from config.json."""
+    regs = dict(_get_registries_section())
+    entry = dict(regs.get(name) or {})
+    entry.pop("url", None)
+    if entry:
+        regs[name] = entry
+    else:
+        regs.pop(name, None)
+    update_config({"registries": regs})
+
+
+def unset_registry_token(name: str) -> None:
+    """Remove registry.<name>.token from config.json."""
+    regs = dict(_get_registries_section())
+    entry = dict(regs.get(name) or {})
+    entry.pop("token", None)
+    if entry:
+        regs[name] = entry
+    else:
+        regs.pop(name, None)
+    update_config({"registries": regs})
+
+
+def unset_registry(name: str) -> None:
+    """Remove the entire registry.<name> entry from config.json."""
+    regs = dict(_get_registries_section())
+    if name in regs:
+        del regs[name]
+        update_config({"registries": regs})
+
+
+def get_config_json_default_registry() -> str | None:
+    """Return the registry name marked ``default: true`` in config.json."""
+    found: str | None = None
+    for name, body in _get_registries_section().items():
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not isinstance(body, dict):
+            continue
+        if body.get("default") is True:
+            found = name.strip()
+    return found
+
+
+def set_registry_default(name: str, is_default: bool) -> None:
+    """Mark *name* as the user-scoped default registry in config.json."""
+    regs = dict(_get_registries_section())
+    if is_default:
+        for reg_name, body in list(regs.items()):
+            if not isinstance(body, dict):
+                continue
+            if reg_name == name:
+                continue
+            if body.pop("default", None) is not None:
+                regs[reg_name] = body if body else regs[reg_name]
+        entry = dict(regs.get(name) or {})
+        entry["default"] = True
+        regs[name] = entry
+    else:
+        entry = dict(regs.get(name) or {})
+        entry.pop("default", None)
+        if entry:
+            regs[name] = entry
+        else:
+            regs.pop(name, None)
+    update_config({"registries": regs})
+
+
+def is_registry_default(name: str) -> bool:
+    """Return whether *name* is marked as the config.json default registry."""
+    cfg = get_registry_config(name)
+    return bool(cfg and cfg.get("default") is True)
+
+
 def get_apm_temp_dir() -> str | None:
     """Return the effective temporary directory for APM operations.
 

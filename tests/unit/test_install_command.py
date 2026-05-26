@@ -889,7 +889,8 @@ class TestInstallGlobalFlag:
                 ):
                     result = self.runner.invoke(cli, ["install", "--global"])
                 assert result.exit_code == 1
-                assert "apm.yml" in result.output
+                # Rich may soft-wrap long paths; join wrapped segments for substring checks.
+                assert "apm.yml" in result.output.replace("\n", "")
             finally:
                 os.chdir(self.original_dir)
 

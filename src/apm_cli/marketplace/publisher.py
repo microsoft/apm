@@ -49,11 +49,12 @@ from ._git_utils import redact_token as _redact_token
 from ._io import atomic_write
 from .errors import MarketplaceError, MarketplaceYmlError  # noqa: F401
 from .git_stderr import translate_git_stderr
+from .migration import load_marketplace_config
 from .ref_resolver import RefResolver
 from .resolver import parse_marketplace_ref
 from .semver import parse_semver
 from .tag_pattern import render_tag
-from .yml_schema import load_marketplace_yml
+from .yml_schema import load_marketplace_yml  # noqa: F401  (kept for back-compat)
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,8 @@ class MarketplacePublisher:
     Parameters
     ----------
     marketplace_root:
-        Path to the marketplace repository root (must contain
+        Path to the marketplace repository root (must contain an
+        ``apm.yml`` with a ``marketplace`` block, or the legacy
         ``marketplace.yml``).
     ref_resolver:
         Optional ``RefResolver`` instance (reserved for future use).
@@ -314,10 +316,9 @@ class MarketplacePublisher:
         self._yml = None
 
     def _load_yml(self):
-        """Lazy-load marketplace.yml."""
+        """Lazy-load marketplace config (apm.yml or legacy marketplace.yml)."""
         if self._yml is None:
-            yml_path = self._root / "marketplace.yml"
-            self._yml = load_marketplace_yml(yml_path)
+            self._yml = load_marketplace_config(self._root)
         return self._yml
 
     # -- plan ---------------------------------------------------------------
@@ -332,9 +333,10 @@ class MarketplacePublisher:
     ) -> PublishPlan:
         """Compute a publish plan.
 
-        Reads the local ``marketplace.yml`` to discover the marketplace
-        name and version, validates all targets, and computes a
-        deterministic branch name and commit message.
+        Reads the local marketplace config (``apm.yml`` or legacy
+        ``marketplace.yml``) to discover the marketplace name and version,
+        validates all targets, and computes a deterministic branch name
+        and commit message.
 
         Parameters
         ----------
@@ -356,7 +358,8 @@ class MarketplacePublisher:
         Raises
         ------
         MarketplaceYmlError
-            If ``marketplace.yml`` cannot be loaded or is invalid.
+            If the marketplace config (``apm.yml`` or legacy
+            ``marketplace.yml``) cannot be loaded or is invalid.
         PathTraversalError
             If any target's ``path_in_repo`` is a path traversal.
         """

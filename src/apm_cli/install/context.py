@@ -96,7 +96,8 @@ class InstallContext:
     # Pre-integrate inputs (populated by caller before integrate phase)
     # ------------------------------------------------------------------
     diagnostics: Any = None  # DiagnosticCollector
-    registry_config: Any = None  # RegistryConfig
+    registry_config: Any = None  # RegistryConfig (proxy registry; pre-existing)
+    registry_resolver: Any = None  # RegistryPackageResolver -- dedicated registry resolver
     managed_files: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------

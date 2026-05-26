@@ -333,6 +333,13 @@ marketplace:
       description: Plugin shipped alongside this repo
       source: ./plugins/local-tool       # local path (no remote fetch)
       version: 0.1.0
+
+    - name: enterprise-plugin
+      description: Hosted on GitHub Enterprise
+      source: ghe.corp.example.com/platform/agents   # host.tld/owner/repo
+      version: "^0.3.0"
+      # Equivalent full URL form (trailing .git is stripped):
+      # source: https://ghe.corp.example.com/platform/agents.git
 ```
 
 Schema rules:
@@ -342,6 +349,12 @@ Schema rules:
 - `ref` takes precedence over `version`.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
+- `source` accepts three remote forms: `owner/repo` (default host),
+  `host.tld/owner/repo` (non-default host shorthand), or
+  `https://host.tld/owner/repo[.git]` (full URL).  Non-default hosts
+  resolve auth via the standard APM token chain
+  (`docs/getting-started/authentication.md`); the default-host token is
+  never forwarded.
 - `versioning.strategy` is optional. When present, it is consumed by
   the `apm pack --check-versions` release gate to enforce alignment
   between each local package's `version:` field and the marketplace
