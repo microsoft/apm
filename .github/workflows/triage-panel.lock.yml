@@ -1,4 +1,4 @@
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"0b68b44fb670abe12eaf997be982c14c2e77d77aa472dd225c0e47f5c60c4f8b","compiler_version":"v0.76.1","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"81b598766ed96e8792d98abc5c3b63de6afc7129c129fba622aebd3159b05b6b","compiler_version":"v0.76.1","strict":true,"agent_id":"copilot"}
 # gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GH_AW_PLUGINS_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"de0fac2e4500dabe0009e67214ff5f5447ce83dd","version":"v6.0.2"},{"repo":"actions/create-github-app-token","sha":"1b10c78c7865c340bc4f6099eb2f838309f1e8c3","version":"v3.1.1"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e","version":"v6.4.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"46d564922b082d0db93244972e8005ea6904ee5f","version":"v0.76.1"},{"repo":"microsoft/apm-action","sha":"b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd","version":"v1.7.2"},{"repo":"ruby/setup-ruby","sha":"97ecb7b512899eb71ab1bf2310a624c6f1589ac6","version":"v1.308.0"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.25.55"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.25.55"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.25.55"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.3.19"},{"image":"ghcr.io/github/github-mcp-server:v1.0.4","digest":"sha256:e3816a476a977cfb836e7d221510011436c654d11861db66ecfd826601aba6a4","pinned_image":"ghcr.io/github/github-mcp-server:v1.0.4@sha256:e3816a476a977cfb836e7d221510011436c654d11861db66ecfd826601aba6a4"},{"image":"node:lts-alpine","digest":"sha256:2bdb65ed1dab192432bc31c95f94155ca5ad7fc1392fb7eb7526ab682fa5bf14","pinned_image":"node:lts-alpine@sha256:2bdb65ed1dab192432bc31c95f94155ca5ad7fc1392fb7eb7526ab682fa5bf14"}]}
 #    ___                   _   _      
 #   / _ \                 | | (_)     
@@ -234,20 +234,20 @@ jobs:
         run: |
           bash "${RUNNER_TEMP}/gh-aw/actions/create_prompt_first.sh"
           {
-          cat << 'GH_AW_PROMPT_1c99dfd35e12728a_EOF'
+          cat << 'GH_AW_PROMPT_52cf44d07ca55c61_EOF'
           <system>
-          GH_AW_PROMPT_1c99dfd35e12728a_EOF
+          GH_AW_PROMPT_52cf44d07ca55c61_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/xpia.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/temp_folder_prompt.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/markdown.md"
           cat "${RUNNER_TEMP}/gh-aw/prompts/safe_outputs_prompt.md"
-          cat << 'GH_AW_PROMPT_1c99dfd35e12728a_EOF'
+          cat << 'GH_AW_PROMPT_52cf44d07ca55c61_EOF'
           <safe-output-tools>
           Tools: add_comment(max:12), add_labels(max:70), remove_labels(max:12), assign_milestone(max:12), dispatch_workflow(max:10), missing_tool, missing_data, noop
           </safe-output-tools>
-          GH_AW_PROMPT_1c99dfd35e12728a_EOF
+          GH_AW_PROMPT_52cf44d07ca55c61_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/mcp_cli_tools_prompt.md"
-          cat << 'GH_AW_PROMPT_1c99dfd35e12728a_EOF'
+          cat << 'GH_AW_PROMPT_52cf44d07ca55c61_EOF'
           <github-context>
           The following GitHub context information is available for this workflow:
           {{#if github.actor}}
@@ -276,15 +276,15 @@ jobs:
           {{/if}}
           </github-context>
           
-          GH_AW_PROMPT_1c99dfd35e12728a_EOF
+          GH_AW_PROMPT_52cf44d07ca55c61_EOF
           cat "${RUNNER_TEMP}/gh-aw/prompts/github_mcp_tools_with_safeoutputs_prompt.md"
-          cat << 'GH_AW_PROMPT_1c99dfd35e12728a_EOF'
+          cat << 'GH_AW_PROMPT_52cf44d07ca55c61_EOF'
           </system>
           
           
           
           {{#runtime-import .github/workflows/triage-panel.md}}
-          GH_AW_PROMPT_1c99dfd35e12728a_EOF
+          GH_AW_PROMPT_52cf44d07ca55c61_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -532,9 +532,9 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/gh-aw/safeoutputs"
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
-          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_16a2213146d64cf9_EOF'
+          cat > "${RUNNER_TEMP}/gh-aw/safeoutputs/config.json" << 'GH_AW_SAFE_OUTPUTS_CONFIG_3545316e6429cb60_EOF'
           {"add_comment":{"max":12},"add_labels":{"allowed":["theme/governance","theme/portability","theme/security","area/audit-policy","area/ci-cd","area/cli","area/content-security","area/distribution","area/docs-site","area/enterprise","area/lockfile","area/marketplace","area/mcp-config","area/mcp-trust","area/multi-target","area/package-authoring","area/testing","type/architecture","type/automation","type/bug","type/docs","type/feature","type/performance","type/refactor","type/release","priority/high","priority/low","status/accepted","status/blocked","status/in-flight","status/needs-design","status/triaged","good first issue","help wanted","test/triage-validation"],"max":70,"target":"*"},"assign_milestone":{"max":12},"create_report_incomplete_issue":{},"dispatch_workflow":{"max":10,"workflow_files":{"project-sync":".yml"},"workflows":["project-sync"]},"missing_data":{},"missing_tool":{},"noop":{"max":1,"report-as-issue":"true"},"remove_labels":{"allowed":["status/needs-triage"],"max":12,"target":"*"},"report_incomplete":{}}
-          GH_AW_SAFE_OUTPUTS_CONFIG_16a2213146d64cf9_EOF
+          GH_AW_SAFE_OUTPUTS_CONFIG_3545316e6429cb60_EOF
       - name: Generate Safe Outputs Tools
         env:
           GH_AW_TOOLS_META_JSON: |
@@ -802,7 +802,7 @@ jobs:
           
           mkdir -p /home/runner/.copilot
           GH_AW_NODE=$(which node 2>/dev/null || command -v node 2>/dev/null || echo node)
-          cat << GH_AW_MCP_CONFIG_eb317b92490aeaa0_EOF | "$GH_AW_NODE" "${RUNNER_TEMP}/gh-aw/actions/start_mcp_gateway.cjs"
+          cat << GH_AW_MCP_CONFIG_524aea80c57e1b3c_EOF | "$GH_AW_NODE" "${RUNNER_TEMP}/gh-aw/actions/start_mcp_gateway.cjs"
           {
             "mcpServers": {
               "github": {
@@ -819,7 +819,9 @@ jobs:
                     "approval-labels": ${{ steps.parse-guard-vars.outputs.approval_labels }},
                     "blocked-users": ${{ steps.parse-guard-vars.outputs.blocked_users }},
                     "min-integrity": "none",
-                    "repos": "all",
+                    "repos": [
+                      "microsoft/apm"
+                    ],
                     "trusted-users": ${{ steps.parse-guard-vars.outputs.trusted_users }}
                   }
                 }
@@ -833,7 +835,7 @@ jobs:
                 "guard-policies": {
                   "write-sink": {
                     "accept": [
-                      "*"
+                      "private:microsoft/apm"
                     ]
                   }
                 }
@@ -846,7 +848,7 @@ jobs:
               "payloadDir": "${MCP_GATEWAY_PAYLOAD_DIR}"
             }
           }
-          GH_AW_MCP_CONFIG_eb317b92490aeaa0_EOF
+          GH_AW_MCP_CONFIG_524aea80c57e1b3c_EOF
       - name: Mount MCP servers as CLIs
         id: mount-mcp-clis
         continue-on-error: true

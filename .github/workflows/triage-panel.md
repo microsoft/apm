@@ -125,7 +125,14 @@ tools:
     #       spam filter) are enforced in the prompt, not in the
     #       integrity filter; and
     #   (c) write actions are still gated by safe-outputs allow-lists.
+    #
+    # `allowed-repos` is pinned to the current repo so the integrity
+    # exemption does not also widen the read-scope to every repo the
+    # workflow token can reach. Without it, omitting `allowed-repos`
+    # defaults to `"all"` (per gh-aw integrity reference) -- a
+    # gratuitous blast-radius expansion if the agent is prompt-injected.
     min-integrity: none
+    allowed-repos: ["microsoft/apm"]
   bash: true
 
 network:
