@@ -1112,6 +1112,7 @@ class TestOpenCodeAgentConversion:
             "  - Read\n"
             "  - Glob\n"
             "  - Grep\n"
+            "  -  Bash  \n"
             "model: sonnet\n"
             "---\n\n"
             "# Agent body\n"
@@ -1125,6 +1126,7 @@ class TestOpenCodeAgentConversion:
         assert "  Read: true" in content
         assert "  Glob: true" in content
         assert "  Grep: true" in content
+        assert "  Bash: true" in content
         assert "name: cc-correctness" in content
         assert "description: Finds correctness bugs" in content
         assert "model: sonnet" in content
@@ -1152,7 +1154,7 @@ class TestOpenCodeAgentConversion:
         self.integrator._write_opencode_agent(source, target)
 
         content = target.read_text()
-        assert "tools" not in content
+        assert "tools:" not in content
         assert "name: simple" in content
         assert "# Simple" in content
 
