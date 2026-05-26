@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- First-class LSP server support in the install pipeline: `dependencies.lsp` in `apm.yml`, `.lsp.json` auto-discovery from plugins, transitive collection, deduplication, stale cleanup, and lockfile persistence. (#1424) -- by @stbenjam
+
 ### Fixed
 
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
