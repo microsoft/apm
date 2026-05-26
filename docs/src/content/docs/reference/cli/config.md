@@ -45,7 +45,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, and `registry.<name>.{url,token,default}`. Other boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
 
 ## Configuration keys
 
@@ -53,6 +53,8 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | --- | --- | --- | --- |
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
+| `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH→HTTPS or HTTPS→SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
+| `prefer-ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
 | `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. Requires the `copilot-cowork` experimental flag for `set`. |
 | `registry.<name>.url` | URL | — | Base URL for registry `<name>`. Requires `registries` experimental flag. |
 | `registry.<name>.token` | string | — | Bearer token for registry `<name>`. Stored in `~/.apm/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
@@ -66,9 +68,16 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 2. Value in `~/.apm/config.json`
 3. Built-in default (system temp / platform auto-detection)
 
+`allow-protocol-fallback` and `prefer-ssh` follow the layered transport precedence:
+
+1. CLI flag (`--allow-protocol-fallback`, `--ssh`) -- highest priority
+2. Environment variable (`APM_ALLOW_PROTOCOL_FALLBACK=1`, `APM_GIT_PROTOCOL=ssh`)
+3. Value in `~/.apm/config.json` (`apm config set ...`)
+4. Built-in default (`false` / no preference)
+
 Registry tokens are resolved as:
 
-1. `APM_REGISTRY_TOKEN_<NAME>` environment variable (uppercase name, `-`/`.` → `_`)
+1. `APM_REGISTRY_TOKEN_<NAME>` environment variable (uppercase name, `-`/`.` -> `_`)
 2. `registry.<name>.token` in `~/.apm/config.json`
 3. Unauthenticated (APM surfaces a remediation hint on 401/403)
 
@@ -97,6 +106,22 @@ Read and write `auto-integrate`:
 ```bash
 apm config get auto-integrate
 apm config set auto-integrate false
+```
+
+Persist SSH transport preference (no more `--ssh` on every install):
+
+```bash
+apm config set prefer-ssh true
+apm config get prefer-ssh
+# Remove the persisted preference:
+apm config unset prefer-ssh
+```
+
+Persist cross-protocol fallback (useful when migrating from SSH to HTTPS or vice versa):
+
+```bash
+apm config set allow-protocol-fallback true
+apm config get allow-protocol-fallback
 ```
 
 Pin a writable temp directory on Windows:
@@ -141,11 +166,12 @@ With URL, token, and default set in `config.json`, a project can omit the top-le
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
-Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `copilot_cowork_skills_dir`); CLI keys use kebab-case. The CLI translates between the two.
+Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `copilot_cowork_skills_dir`); CLI keys use kebab-case. The CLI translates between the two.
 
 ## Related
 
-- [`apm install`](../install/) -- consumes `temp-dir` for clone/download work.
+- [`apm install`](../install/) -- consumes `temp-dir` for clone/download work and `allow-protocol-fallback` / `prefer-ssh` for transport selection.
 - [`apm compile`](../compile/) -- affected by `auto-integrate`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
+- [Environment variables](../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK`, `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys.
 - [Private registries](../../../guides/private-registries/) -- full private registry setup guide.

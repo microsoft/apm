@@ -1,8 +1,16 @@
 """Configuration management for APM."""
 
+import contextlib
 import json
 import os
 from typing import Optional  # noqa: F401
+
+# ---------------------------------------------------------------------------
+# Public env-var names (re-declared here to avoid a circular import with the
+# transport_selection module which also defines them).
+# ---------------------------------------------------------------------------
+_ENV_ALLOW_PROTOCOL_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
+_ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
 
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -11,16 +19,24 @@ _config_cache: dict | None = None
 
 
 def ensure_config_exists():
-    """Ensure the configuration directory and file exist."""
-    os.makedirs(CONFIG_DIR, exist_ok=True)
+    """Ensure the configuration directory and file exist.
+
+    The directory is created with mode ``0o700`` (owner-only) and the
+    initial config file with mode ``0o600`` to prevent other users on a
+    shared system from reading persisted tokens or transport preferences.
+    Both restrictions are silently ignored on Windows.
+    """
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
 
     if not os.path.exists(CONFIG_FILE):
         try:
-            fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"default_client": "vscode"}, f)
         except FileExistsError:
             pass
+        with contextlib.suppress(NotImplementedError, OSError):
+            os.chmod(CONFIG_FILE, 0o600)
 
 
 def get_config():
@@ -129,18 +145,155 @@ def set_temp_dir(path: str) -> None:
     update_config({"temp_dir": resolved})
 
 
+def _unset_config_key(key: str) -> None:
+    """Remove *key* from the config file atomically.
+
+    No-op when *key* is not present.  Invalidates the in-process cache
+    before and after the write so subsequent reads see the updated state.
+
+    Args:
+        key: The JSON key to remove from ``~/.apm/config.json``.
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if key in config:
+        del config[key]
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
 def unset_temp_dir() -> None:
     """Remove the ``temp_dir`` key from the config file.
 
     No-op if the key is not present.
     """
-    _invalidate_config_cache()
-    config = get_config()
-    if "temp_dir" in config:
-        del config["temp_dir"]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    _invalidate_config_cache()
+    _unset_config_key("temp_dir")
+
+
+# ---------------------------------------------------------------------------
+# Protocol transport preferences (issue #1243)
+# ---------------------------------------------------------------------------
+
+
+def get_allow_protocol_fallback() -> bool:
+    """Get the allow-protocol-fallback setting.
+
+    Returns:
+        bool: Whether cross-protocol fallback is enabled (default: False).
+    """
+    return get_config().get("allow_protocol_fallback", False)
+
+
+def set_allow_protocol_fallback(enabled: bool) -> None:
+    """Set the allow-protocol-fallback setting.
+
+    Args:
+        enabled: Whether to enable cross-protocol fallback.
+    """
+    update_config({"allow_protocol_fallback": enabled})
+
+
+def get_prefer_ssh() -> bool:
+    """Get the prefer-ssh transport preference setting.
+
+    Returns:
+        bool: Whether SSH is preferred for shorthand dependencies (default: False).
+    """
+    return get_config().get("prefer_ssh", False)
+
+
+def set_prefer_ssh(enabled: bool) -> None:
+    """Set the prefer-ssh transport preference setting.
+
+    Args:
+        enabled: Whether to prefer SSH for shorthand (owner/repo) dependencies.
+    """
+    update_config({"prefer_ssh": enabled})
+
+
+def unset_allow_protocol_fallback() -> None:
+    """Remove the ``allow_protocol_fallback`` key from the config file.
+
+    No-op if the key is not present.  After this call
+    :func:`get_apm_allow_protocol_fallback` will fall through to
+    ``APM_ALLOW_PROTOCOL_FALLBACK`` env var and then the built-in
+    default (``False``).
+    """
+    _unset_config_key("allow_protocol_fallback")
+
+
+def unset_prefer_ssh() -> None:
+    """Remove the ``prefer_ssh`` key from the config file.
+
+    No-op if the key is not present.  After this call
+    :func:`get_apm_protocol_pref` will fall through to the
+    ``APM_GIT_PROTOCOL`` env var and then the built-in default (``None``).
+    """
+    _unset_config_key("prefer_ssh")
+
+
+def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
+    """Parse ``APM_ALLOW_PROTOCOL_FALLBACK`` as a tri-state value.
+
+    Args:
+        raw: Raw environment variable value, or ``None`` when unset.
+
+    Returns:
+        ``True`` for explicit truthy values (``1``, ``true``, ``yes``, ``on``),
+        ``False`` for explicit falsy values (``0``, ``false``, ``no``, ``off``),
+        or ``None`` when the variable is unset, empty, or unrecognised.
+    """
+    if raw is None:
+        return None
+    normalized = raw.strip().lower()
+    if normalized == "":
+        return None
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+def get_apm_allow_protocol_fallback() -> bool:
+    """Return the effective allow-protocol-fallback flag.
+
+    Resolution order:
+      1. ``APM_ALLOW_PROTOCOL_FALLBACK`` environment variable
+         (``"1"``/``"true"``/``"yes"``/``"on"`` => True;
+          ``"0"``/``"false"``/``"no"``/``"off"`` => False)
+      2. ``allow_protocol_fallback`` value from ``~/.apm/config.json``
+      3. ``False`` (default)
+
+    Returns:
+        ``True`` when cross-protocol fallback is enabled, otherwise ``False``.
+    """
+    env_value = _parse_allow_protocol_fallback_env(os.environ.get(_ENV_ALLOW_PROTOCOL_FALLBACK))
+    if env_value is not None:
+        return env_value
+    return get_allow_protocol_fallback()
+
+
+def get_apm_protocol_pref() -> str | None:
+    """Return the effective protocol preference string.
+
+    Resolution order:
+      1. ``APM_GIT_PROTOCOL`` environment variable
+         (``"ssh"``, ``"https"``, or ``"http"`` — ``"http"`` is treated
+         as an alias for ``"https"`` by the transport selector)
+      2. ``prefer_ssh`` boolean in ``~/.apm/config.json`` (maps to ``"ssh"`` when True)
+      3. ``None`` (let the transport selector use git insteadOf rules)
+
+    Returns:
+        ``"ssh"``, ``"https"``, ``"http"``, or ``None``.
+    """
+    env_val = os.environ.get(_ENV_GIT_PROTOCOL, "").strip().lower()
+    if env_val in ("ssh", "https", "http"):
+        return env_val
+    if get_prefer_ssh():
+        return "ssh"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -184,13 +337,7 @@ def unset_copilot_cowork_skills_dir() -> None:
 
     No-op if the key is not present.
     """
-    _invalidate_config_cache()
-    config = get_config()
-    if "copilot_cowork_skills_dir" in config:
-        del config["copilot_cowork_skills_dir"]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    _invalidate_config_cache()
+    _unset_config_key("copilot_cowork_skills_dir")
 
 
 def _get_registries_section() -> dict:
