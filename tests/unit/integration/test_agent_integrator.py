@@ -1211,13 +1211,16 @@ class TestOpenCodeAgentConversion:
         """Symlink source raises ValueError."""
         import os
 
+        import pytest
+
         real = self.root / "real.agent.md"
         real.write_text("---\ntools:\n  - Foo\n---\n\nBody\n")
         link = self.root / "link.agent.md"
-        os.symlink(real, link)
+        try:
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlink creation not supported on this platform")
         target = self.root / "out.md"
-
-        import pytest
 
         with pytest.raises(ValueError, match="symlink"):
             self.integrator._write_opencode_agent(link, target)
