@@ -1220,6 +1220,20 @@ class TestOpenCodeAgentConversion:
         with pytest.raises(ValueError, match="symlink"):
             self.integrator._write_opencode_agent(link, target)
 
+    def test_handles_non_dict_frontmatter(self):
+        """Non-dict YAML frontmatter (e.g. bare list) is treated as empty."""
+        source = self.root / "badfm.agent.md"
+        # frontmatter that parses as a YAML list, not a mapping
+        source.write_text("---\n- one\n- two\n---\n\n# Body\n")
+        target = self.root / "badfm.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        # Should not crash; frontmatter becomes empty
+        assert "---" in content
+        assert "# Body" in content
+
     def test_integrate_via_target_dispatch(self):
         """End-to-end: opencode target triggers tools conversion."""
         from apm_cli.integration.targets import KNOWN_TARGETS

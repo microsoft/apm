@@ -393,6 +393,12 @@ class AgentIntegrator(BaseIntegrator):
                 fm = yaml.safe_load(fm_match.group(1)) or {}
             except Exception:
                 fm = {}
+            if not isinstance(fm, dict):
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        f"Non-dict frontmatter in {source.name}, treating as empty",
+                    )
+                fm = {}
         else:
             body = content
             fm = {}
@@ -407,22 +413,16 @@ class AgentIntegrator(BaseIntegrator):
             if isinstance(tools, list):
                 fm["tools"] = {t: True for t in tools if isinstance(t, str)}
             elif isinstance(tools, str):
-                fm["tools"] = {
-                    t.strip(): True
-                    for t in tools.split(",")
-                    if t.strip()
-                }
+                fm["tools"] = {t.strip(): True for t in tools.split(",") if t.strip()}
             if diagnostics is not None:
                 diagnostics.info(
-                    f"Converted tools field from {type(tools).__name__} "
-                    f"to object in {source.name}",
+                    f"Converted tools field from {type(tools).__name__} to object in {source.name}",
                 )
 
-        fm_yaml = yaml.safe_dump(
-            fm, default_flow_style=False, allow_unicode=True
-        ).rstrip("\n")
+        fm_yaml = yaml.safe_dump(fm, default_flow_style=False, allow_unicode=True).rstrip("\n")
         result = f"---\n{fm_yaml}\n---\n" + body
         result, links_resolved = self.resolve_links(result, source, target)
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(result, encoding="utf-8")
         return links_resolved
 
