@@ -360,7 +360,7 @@ class InstructionIntegrator(BaseIntegrator):
         apply_to = ""
 
         # Parse existing frontmatter with yaml.safe_load (consistent with
-        # _write_windsurf_agent_skill and all other frontmatter parsers).
+        # all other frontmatter parsers across integrators).
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
             body = content[fm_match.end() :]
