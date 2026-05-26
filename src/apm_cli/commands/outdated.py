@@ -9,26 +9,15 @@ import logging
 import os
 import re
 import sys
-from dataclasses import dataclass, field
 from typing import List  # noqa: F401, UP035
 
 import click
 
+from ..deps.outdated_row import OutdatedRow
+
 logger = logging.getLogger(__name__)
 
 TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+")
-
-
-@dataclass(frozen=True)
-class OutdatedRow:
-    """One row of ``apm outdated`` output."""
-
-    package: str
-    current: str
-    latest: str
-    status: str
-    extra_tags: list[str] = field(default_factory=list)
-    source: str = ""
 
 
 def _is_tag_ref(ref: str) -> bool:
@@ -158,13 +147,18 @@ def _check_marketplace_ref(dep, verbose):
     )
 
 
-def _check_one_dep(dep, downloader, verbose):
+def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
     """Check a single dependency against remote refs.
 
     Returns an ``OutdatedRow`` instance.
 
     This function is safe to call from a thread pool.
     """
+    if dep.source == "registry":
+        from ..deps.registry.outdated import check_registry_locked_dep
+
+        return check_registry_locked_dep(dep, registry_ctx, verbose=verbose)
+
     # Try marketplace-based check first for marketplace-sourced deps
     marketplace_result = _check_marketplace_ref(dep, verbose)
     if marketplace_result is not None:
@@ -376,8 +370,16 @@ def outdated(global_, verbose, parallel_checks):
         logger.success("No remote dependencies to check")
         return
 
+    registry_ctx = None
+    if any(dep.source == "registry" for dep in checkable):
+        from ..deps.registry.outdated import load_registry_outdated_context
+
+        registry_ctx = load_registry_outdated_context(project_root, lockfile)
+
     # Check deps with progress feedback and optional parallelism
-    rows = _check_deps_with_progress(checkable, downloader, verbose, parallel_checks, logger)
+    rows = _check_deps_with_progress(
+        checkable, downloader, verbose, parallel_checks, logger, registry_ctx
+    )
 
     if not rows:
         logger.success("No remote dependencies to check")
@@ -410,7 +412,7 @@ def outdated(global_, verbose, parallel_checks):
         table.add_column("Current", style="white", min_width=10)
         table.add_column("Latest", style="white", min_width=10)
         table.add_column("Status", min_width=12)
-        table.add_column("Source", style="dim", min_width=14)
+        table.add_column("Source", style="dim", min_width=20, no_wrap=True)
 
         status_styles = {
             "up-to-date": "green",
@@ -456,7 +458,9 @@ def outdated(global_, verbose, parallel_checks):
         logger.progress("Some dependencies could not be checked (branch/commit refs)")
 
 
-def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks, logger):
+def _check_deps_with_progress(
+    checkable, downloader, verbose, parallel_checks, logger, registry_ctx=None
+):
     """Check all deps with Rich progress bar and optional parallelism."""
     rows = []
     total = len(checkable)
@@ -485,6 +489,7 @@ def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks, l
                     parallel_checks,
                     progress,
                     logger,
+                    registry_ctx,
                 )
             else:
                 task_id = progress.add_task(
@@ -494,7 +499,7 @@ def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks, l
                 for dep in checkable:
                     short = dep.get_unique_key().split("/")[-1]
                     progress.update(task_id, description=f"Checking {short}")
-                    result = _check_one_dep(dep, downloader, verbose)
+                    result = _check_one_dep(dep, downloader, verbose, registry_ctx)
                     rows.append(result)
                     progress.advance(task_id)
     except ImportError:
@@ -506,15 +511,18 @@ def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks, l
                 downloader,
                 verbose,
                 parallel_checks,
+                registry_ctx,
             )
         else:
             for dep in checkable:
-                rows.append(_check_one_dep(dep, downloader, verbose))
+                rows.append(_check_one_dep(dep, downloader, verbose, registry_ctx))
 
     return rows
 
 
-def _check_parallel(checkable, downloader, verbose, max_workers, progress, logger):
+def _check_parallel(
+    checkable, downloader, verbose, max_workers, progress, logger, registry_ctx=None
+):
     """Run checks in parallel with Rich progress display."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -531,7 +539,7 @@ def _check_parallel(checkable, downloader, verbose, max_workers, progress, logge
         for dep in checkable:
             short = dep.get_unique_key().split("/")[-1]
             task_id = progress.add_task(f"Checking {short}", total=None)
-            fut = executor.submit(_check_one_dep, dep, downloader, verbose)
+            fut = executor.submit(_check_one_dep, dep, downloader, verbose, registry_ctx)
             futures[fut] = (dep, task_id)
 
         for fut in as_completed(futures):
@@ -549,7 +557,7 @@ def _check_parallel(checkable, downloader, verbose, max_workers, progress, logge
     return [results[dep.get_unique_key()] for dep in checkable if dep.get_unique_key() in results]
 
 
-def _check_parallel_plain(checkable, downloader, verbose, max_workers):
+def _check_parallel_plain(checkable, downloader, verbose, max_workers, registry_ctx=None):
     """Run checks in parallel without Rich (plain fallback)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -557,7 +565,8 @@ def _check_parallel_plain(checkable, downloader, verbose, max_workers):
     results = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_check_one_dep, dep, downloader, verbose): dep for dep in checkable
+            executor.submit(_check_one_dep, dep, downloader, verbose, registry_ctx): dep
+            for dep in checkable
         }
         for fut in as_completed(futures):
             dep = futures[fut]

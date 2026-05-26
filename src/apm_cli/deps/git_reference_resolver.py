@@ -316,6 +316,40 @@ class GitReferenceResolver:
                 ref_name=effective_ref,
             )
 
+        # Semver range resolution: enumerate remote tags, pick the highest match.
+        # Non-semver refs fall through to the existing branch/commit/clone path.
+        if ref:
+            from ..deps.registry.semver import is_semver_range, pick_best
+
+            if is_semver_range(ref):
+                remote_refs = self.list_remote_refs(dep_ref)
+                # Build version-string → (tag_name, sha) map.
+                # Strip the common 'v' prefix (e.g. 'v1.2.3' → '1.2.3').
+                candidates: dict[str, tuple[str, str]] = {}
+                for rr in remote_refs:
+                    if rr.ref_type != GitReferenceType.TAG:
+                        continue
+                    raw_tag = rr.name
+                    version_str = raw_tag[1:] if raw_tag.startswith("v") else raw_tag
+                    from ..marketplace.semver import parse_semver
+
+                    if parse_semver(version_str) is not None:
+                        candidates[version_str] = (raw_tag, rr.commit_sha)
+                best_version = pick_best(ref, list(candidates.keys()))
+                if best_version is None:
+                    available = sorted(candidates.keys())[:10]
+                    raise ValueError(
+                        f"No git tag in {dep_ref.repo_url!r} satisfies semver range {ref!r}. "
+                        f"Available semver tags: {available}"
+                    )
+                best_tag, best_sha = candidates[best_version]
+                return ResolvedReference(
+                    original_ref=ref,
+                    ref_type=GitReferenceType.TAG,
+                    ref_name=best_tag,
+                    resolved_commit=best_sha,
+                )
+
         is_likely_commit = bool(ref) and re.match(r"^[a-f0-9]{7,40}$", ref.lower()) is not None
 
         temp_dir = None

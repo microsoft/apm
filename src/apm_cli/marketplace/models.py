@@ -64,6 +64,16 @@ class MarketplacePlugin:
     tags: tuple[str, ...] = ()
     source_marketplace: str = ""  # Populated during resolution
 
+    # Dedicated registry routing per docs/proposals/registry-api.md §4.5.
+    # When set, the plugin resolves through the named APM registry (rather
+    # than the existing Git resolver). ``version`` is interpreted as a
+    # semver range. ``registry == ""`` (default) keeps existing semantics:
+    # the plugin resolves via Git and ``version`` is a Git ref/tag.
+    # The discriminator is a separate field (not piggybacking on ``source``)
+    # to avoid colliding with the existing source-location semantics where
+    # ``source`` is a string path or ``{type: github, repo: ...}`` dict.
+    registry: str = ""
+
     def matches_query(self, query: str) -> bool:
         """Return True if the plugin matches a search query (case-insensitive)."""
         q = query.lower()
@@ -160,6 +170,40 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
         logger.debug("Plugin '%s' has no source or repository field", name)
         return None
 
+    # Optional dedicated-registry routing (design §4.5). When ``registry``
+    # is set, ``version`` is interpreted as a semver range and the plugin
+    # resolves via the dedicated-registry resolver. The marketplace.json
+    # parser is intentionally permissive — invalid values are downgraded
+    # to "no registry routing" and a debug log line, so a malformed entry
+    # doesn't break a whole marketplace fetch.
+    registry_name = ""
+    raw_registry = entry.get("registry")
+    if raw_registry is not None:
+        if isinstance(raw_registry, str) and raw_registry.strip():
+            registry_name = raw_registry.strip()
+        else:
+            logger.debug(
+                "Plugin '%s' has invalid 'registry' field (expected non-empty string), ignoring",
+                name,
+            )
+
+    if registry_name and version:
+        # Validate semver range for registry-routed plugins. A bad ref
+        # surfaces here as a debug log + downgrade to "no registry"
+        # rather than a hard fail, since one malformed plugin shouldn't
+        # poison a whole marketplace.
+        from apm_cli.deps.registry.semver import is_semver_range
+
+        if not is_semver_range(version):
+            logger.debug(
+                "Plugin '%s' has registry='%s' but version '%s' is not a "
+                "semver range; ignoring registry routing for this entry",
+                name,
+                registry_name,
+                version,
+            )
+            registry_name = ""
+
     return MarketplacePlugin(
         name=name,
         source=source,
@@ -167,6 +211,7 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
         version=version,
         tags=tags,
         source_marketplace=source_name,
+        registry=registry_name,
     )
 
 

@@ -45,7 +45,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Only `temp-dir` and `copilot-cowork-skills-dir` are unsettable; boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, and `registry.<name>.{url,token,default}`. Other boolean keys are reset by `set`-ing them to their default.
 
 ## Configuration keys
 
@@ -54,6 +54,9 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Only `temp-
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
 | `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. Requires the `copilot-cowork` experimental flag for `set`. |
+| `registry.<name>.url` | URL | — | Base URL for registry `<name>`. Requires `registries` experimental flag. |
+| `registry.<name>.token` | string | — | Bearer token for registry `<name>`. Stored in `~/.apm/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
+| `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
 
 ### Resolution order
 
@@ -62,6 +65,24 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Only `temp-
 1. Environment variable (`APM_TEMP_DIR`, `APM_COPILOT_COWORK_SKILLS_DIR`)
 2. Value in `~/.apm/config.json`
 3. Built-in default (system temp / platform auto-detection)
+
+Registry tokens are resolved as:
+
+1. `APM_REGISTRY_TOKEN_<NAME>` environment variable (uppercase name, `-`/`.` → `_`)
+2. `registry.<name>.token` in `~/.apm/config.json`
+3. Unauthenticated (APM surfaces a remediation hint on 401/403)
+
+Registry URLs are merged at install time (highest wins):
+
+1. `apm-policy.yml`
+2. Project `apm.yml` `registries:` block
+3. Workspace `~/.apm/apm.yml`
+4. `registry.<name>.url` in `~/.apm/config.json`
+
+Default registry selection (highest wins):
+
+1. `registries.default` in project `apm.yml`
+2. The registry entry in `~/.apm/config.json` with `"default": true` (set via `registry.<name>.default true`)
 
 ## Examples
 
@@ -100,6 +121,20 @@ apm config set copilot-cowork-skills-dir ~/Library/CloudStorage/OneDrive-Contoso
 apm config unset copilot-cowork-skills-dir
 ```
 
+Configure a private registry (experimental):
+
+```bash
+apm experimental enable registries
+apm config set registry.corp-main.url https://artifactory.corp.example.com/artifactory/api/apm/corp-main-local
+apm config set registry.corp-main.token eyJ...
+apm config set registry.corp-main.default true
+apm config get registry.corp-main.url
+apm config get registry.corp-main.default
+apm config unset registry.corp-main.token
+```
+
+With URL, token, and default set in `config.json`, a project can omit the top-level `registries:` block from `apm.yml` and still route shorthand deps through `corp-main`. See [Private registries](../../../guides/private-registries/).
+
 ## Configuration file
 
 - **Location:** `~/.apm/config.json`
@@ -112,4 +147,5 @@ Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `copilot_cowork
 
 - [`apm install`](../install/) -- consumes `temp-dir` for clone/download work.
 - [`apm compile`](../compile/) -- affected by `auto-integrate`.
-- [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir`.
+- [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
+- [Private registries](../../../guides/private-registries/) -- full private registry setup guide.

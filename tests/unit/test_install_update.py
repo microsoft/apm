@@ -442,6 +442,7 @@ class TestRefChangedDetection:
         locked_dep = Mock()
         locked_dep.resolved_ref = resolved_ref
         locked_dep.resolved_commit = resolved_commit
+        locked_dep.source = None
         return locked_dep
 
     def test_no_drift_when_refs_match(self):

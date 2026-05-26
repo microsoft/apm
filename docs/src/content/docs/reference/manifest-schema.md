@@ -50,6 +50,7 @@ target:        <enum | list<enum>>
 type:          <enum>
 scripts:       <map<string, string>>
 includes:      <enum | list<string>>
+registries:    <map<string, RegistryEntry> & {default?: <string>}>
 dependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
@@ -247,6 +248,37 @@ policy:
 
 Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../../enterprise/policy-reference/).
 
+### 3.11. `registries`
+
+::::caution[Experimental]
+The `registries:` field and registry-routed APM dependency forms require `apm experimental enable registries`.
+::::
+
+| | |
+|---|---|
+| **Type** | `map<string, RegistryEntry>` with optional `default: <string>` key |
+| **Required** | OPTIONAL |
+| **Description** | Declares REST-based APM registries for the project. Strictly additive — absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../../guides/registries/#user-level-config). |
+
+```yaml
+registries:
+  jf-skills:
+    url: https://artifactory.example.com/artifactory/api/skills/jf-skills-local
+  default: jf-skills           # OPTIONAL — name of one of the configured entries
+```
+
+| Sub-key | Type | Required | Constraint | Semantic |
+|---|---|---|---|---|
+| `<name>` | `RegistryEntry` | at least one when block is non-empty | Name uses lowercase letters, digits, `-`, `.` | Registered registry. |
+| `<name>.url` | `string` | REQUIRED per entry | MUST start with `https://` or `http://`; no trailing slash required | Base URL the client appends `/v1/...` paths to. |
+| `default` | `string` | OPTIONAL | MUST name one of the configured entries | When set, plain string-shorthand APM deps and object-form deps without an explicit `registry:` key route through this registry. Project value wins over `registry.<name>.default` in `~/.apm/config.json`. |
+
+Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
+
+**Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
+
+For full client semantics — auth, lockfile fields, and routing rules — see the [Registries guide](../../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](../registry-http-api/).
+
 ---
 
 ## 4. Dependencies
@@ -276,7 +308,9 @@ shorthand_form  = [host "/"] owner "/" repo ["/" virtual_path] ["#" ref]
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
-`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port because `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
+When a default registry is configured — via `registries.default` in `apm.yml` or `registry.<name>.default true` in `~/.apm/config.json` — plain `shorthand_form` entries with a `#<selector>` route through that registry instead of Git.
+
+`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port — `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
 
 | Segment | Required | Pattern | Description |
 |---|---|---|---|
@@ -357,6 +391,28 @@ Monorepo sibling reference (`git: parent`):
 ```
 
 The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. `ref` and `alias` overrides are accepted; when `ref` is omitted the parent's resolved ref is inherited.
+
+Registry dependency (whole package or virtual sub-path):
+
+```yaml
+# Whole package via the default registry
+- id: acme/toolkit
+  version: ^2.0.0
+
+# Whole package routed to a named registry
+- registry: jf-skills              # OPTIONAL — defaults to the effective default registry
+  id: acme/toolkit                 # REQUIRED — owner/repo identity at the registry
+  version: ^2.0.0                  # REQUIRED — opaque version selector (semver when supported)
+
+# Virtual package (sub-path inside a published package)
+- registry: jf-skills
+  id: acme/prompt-pack
+  path: prompts/review.prompt.md   # OPTIONAL — omit to install the whole package
+  version: 1.4.0
+  alias: review                    # OPTIONAL
+```
+
+`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string — opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. When `registry:` is omitted, a default registry MUST be configured — in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
 
 #### 4.1.3. Virtual Packages
 

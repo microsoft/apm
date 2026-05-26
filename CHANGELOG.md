@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add experimental registry resolver and `apm-policy.yml` source-mandate enforcement. Git-based dependencies are unchanged. Enable with `apm experimental enable registries`; configure per-registry credentials via `apm config set registry.<name>.{url,token}`; mandate registry usage in `apm-policy.yml` via `registry_source: {require: [...], allow_non_registry: false}`. Framing: APM dependency governance — controlled sources, locked versions, and byte-level SHA-256 verification. Package signing, SBOM generation, and SLSA provenance are not included at v1.
+
 ### Fixed
 
 - `apm install` now re-resolves a dependency when its ref pin is changed in `apm.yml`; previously the locked commit always won, silently ignoring the edit -- by @sergio-sisternes-epam (#1473)
