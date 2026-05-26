@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -96,7 +95,9 @@ def _local_path_from_source(value: str) -> str:
         except ValueError:
             return value
         return parsed.path or value
-    return str(Path(value).expanduser())
+    # Plain path: expand ~ only. Avoid Path(...) round-trip which would
+    # rewrite POSIX separators to backslashes on Windows.
+    return os.path.expanduser(value)
 
 
 @dataclass(frozen=True)
