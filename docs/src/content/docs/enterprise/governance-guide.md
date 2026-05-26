@@ -76,6 +76,7 @@ The scope matrix below is the contract. Every row maps a security or operational
 | Required packages present | `dependencies.require` | `required-packages`, `required-packages-deployed` | Yes | Yes |
 | Required package version | `dependencies.require[].version` | `required-package-version` | Yes | Yes |
 | Transitive depth cap | `dependencies.max_depth` | `transitive-depth` | Yes (when `< 50`) | Yes |
+| Pinned dep constraints | `dependencies.require_pinned_constraint` | `dependency-pinned-constraint` | Yes (when `true`) | Yes |
 | MCP server allowlist | `mcp.allow` | `mcp-allowlist` | Yes (direct + transitive) | Yes |
 | MCP server denylist | `mcp.deny` | `mcp-denylist` | Yes (direct + transitive) | Yes |
 | MCP transport allowlist | `mcp.transport.allow` | `mcp-transport` | Yes | Yes |
@@ -185,7 +186,7 @@ Policies can extend other policies up to 5 levels deep (`MAX_CHAIN_DEPTH = 5`, e
 graph TD
     Hub["enterprise-hub-org/.github/<br/>apm-policy.yml<br/>broad allow lists,<br/>enforcement: warn"] --> Org["contoso/.github/<br/>apm-policy.yml<br/>extends: enterprise-hub-org<br/>adds deny + tightens<br/>enforcement: block"]
     Org --> Repo["contoso/web-app/<br/>apm.yml policy stanza<br/>policy.hash pin,<br/>fetch_failure_default: block"]
-    Hub --> Merge["[*] merge_policies()<br/>tighten-only:<br/>allow=intersect, deny=union,<br/>enforcement=max(...),<br/>max_depth=min(...)"]
+    Hub --> Merge["[*] merge_policies()<br/>tighten-only:<br/>allow=intersect, deny=union,<br/>enforcement=max(...),<br/>max_depth=min(...),<br/>require_pinned_constraint=OR"]
     Org --> Merge
     Repo --> Merge
     Merge --> Effective["Effective policy<br/>used by all 4<br/>enforcement points"]

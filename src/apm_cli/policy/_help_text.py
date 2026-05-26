@@ -18,9 +18,9 @@ POLICY_SOURCE_FORMS_HELP = (
 )
 
 # One-line help for ``policy.dependencies.require_pinned_constraint``.
-# Surfaced by ``apm policy explain`` / future ``--why`` flags and kept
-# alongside POLICY_SOURCE_FORMS_HELP so docs/tests share one source of
-# truth.  ASCII only per .github/instructions/encoding.instructions.md.
+# Kept alongside POLICY_SOURCE_FORMS_HELP so docs/tests share one
+# source of truth.  ASCII only per
+# .github/instructions/encoding.instructions.md.
 REQUIRE_PINNED_CONSTRAINT_HELP = (
     "When true, every direct APM dep must declare a bounded constraint "
     "(exact version, '^'/'~'/bounded range, literal tag, or SHA). "

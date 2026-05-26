@@ -56,6 +56,11 @@ _LITERAL_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([-+][0-9A-Za-z.\-+]+)?$")
 # Wildcard token in any range component.
 _WILDCARD_TOKEN_RE = re.compile(r"(^|\s)[\*xX](\s|$)")
 
+# Partial-wildcard semver component (``1.2.x`` / ``1.2.*``) inside a
+# multi-component range; treated as bounded because it carries an
+# implicit upper edge.
+_PARTIAL_WILDCARD_RE = re.compile(r"^\d+\.\d+\.[xX*]$")
+
 
 def _has_wildcard(spec: str) -> bool:
     """Detect ``*`` / ``x`` / ``X`` as a standalone token in *spec*.
@@ -96,7 +101,7 @@ def _classify_range(spec: str) -> UnboundedReason | None:
             has_upper = True
         elif p.startswith(">=") or p.startswith(">"):
             has_lower_only = True
-        elif p.startswith(("^", "~")) or re.match(r"^\d+\.\d+\.[xX*]$", p):
+        elif p.startswith(("^", "~")) or _PARTIAL_WILDCARD_RE.match(p):
             has_upper = True
         else:
             # Bare exact version inside a multi-component spec is

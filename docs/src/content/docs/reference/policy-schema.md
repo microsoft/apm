@@ -72,7 +72,7 @@ Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` 
 | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
-| `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep must declare a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
+| `require_pinned_constraint` | boolean        | `false`          | When `true`, every APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Transitive deps are also classified and pass when their parent manifests pinned them. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
 
 ### `require_pinned_constraint` reference
 

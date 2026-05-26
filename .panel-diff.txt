@@ -1,0 +1,1135 @@
+diff --git a/docs/src/content/docs/reference/policy-schema.md b/docs/src/content/docs/reference/policy-schema.md
+index 7e051ad45..26b2f4a90 100644
+--- a/docs/src/content/docs/reference/policy-schema.md
++++ b/docs/src/content/docs/reference/policy-schema.md
+@@ -72,6 +72,39 @@ Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml`
+ | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
+ | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
+ | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
++| `require_pinned_constraint` | boolean        | `false`          | When `true`, every direct APM dep must declare a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
++
++### `require_pinned_constraint` reference
++
++Examples (with `require_pinned_constraint: true` and `enforcement: block`):
++
++```yaml
++# apm.yml
++dependencies:
++  apm:
++    - acme/skills              # FAIL: no ref (NO_REF)
++    - other/lib@>=1.0.0        # FAIL: unbounded upper (OPEN_UPPER)
++    - third/lib#*              # FAIL: wildcard (WILDCARD)
++    - acme/lib#main            # FAIL: bare branch (BARE_BRANCH)
++    - fourth/lib#^1.2.0        # OK: caret range
++    - fifth/lib#~1.2.3         # OK: tilde range
++    - sixth/lib#1.5.3          # OK: exact version
++    - seventh/lib#v1.5.3       # OK: literal tag
++    - eighth/lib#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # OK: SHA
++    - ./packages/local         # OK: local-path dep (no version surface)
++```
++
++Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
++
++```text
++[x] Policy violation: dependency-pinned-constraint
++    4 dependency(ies) use unbounded constraints
++    (hint: pin to a semver range, literal tag, or SHA)
++    - acme/skills: no ref; resolves to default branch
++    - other/lib: unbounded upper; pair with '<X.Y' or use a caret range
++    - third/lib: wildcard '*' matches any version
++    - acme/lib: bare branch 'main' tracks a moving tip
++```
+ 
+ Patterns are matched against `<owner>/<repo>` (or `<host>/<owner>/<repo>`). Wildcards via shell-style globs, e.g. `contoso/*`.
+ 
+@@ -141,6 +174,7 @@ inherited list (see the tri-state table below).
+ | `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
+ | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
+ | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
++| `dependencies.require_pinned_constraint` | Logical OR -- once a parent enables it, child cannot relax.            |
+ | `mcp.self_defined`          | Stricter wins (`deny` > `warn` > `allow`).                                       |
+ | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
+ | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
+diff --git a/packages/apm-guide/.apm/skills/apm-usage/governance.md b/packages/apm-guide/.apm/skills/apm-usage/governance.md
+index 9f231a312..938be9663 100644
+--- a/packages/apm-guide/.apm/skills/apm-usage/governance.md
++++ b/packages/apm-guide/.apm/skills/apm-usage/governance.md
+@@ -28,6 +28,7 @@ dependencies:
+   require: []                           # required packages
+   require_resolution: project-wins      # project-wins | policy-wins | block
+   max_depth: 50                         # transitive depth limit
++  require_pinned_constraint: false      # when true, ban unbounded dep ranges (NO_REF, '*', bare branch, '>=X' without upper bound)
+ 
+ mcp:
+   allow: []                             # allowed server patterns
+@@ -90,6 +91,7 @@ list (removing entries the parent set). All other fields obey the rules below:
+ | Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
+ | `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
+ | `max_depth` | `min(parent, child)` |
++| `require_pinned_constraint` | Logical OR (once enabled, child cannot relax) |
+ | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
+ | `source_attribution` | `parent OR child` (either enables) |
+ 
+@@ -382,6 +384,7 @@ Violation classes:
+ | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
+ | `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
+ | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
++| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version, caret/tilde/bounded semver range, literal `vX.Y.Z` tag, or a full SHA. Roll out enforcement with `warn` before `block`. |
+ | `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
+ | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
+ | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |
+diff --git a/src/apm_cli/policy/_constraint_pinning.py b/src/apm_cli/policy/_constraint_pinning.py
+new file mode 100644
+index 000000000..e83238851
+--- /dev/null
++++ b/src/apm_cli/policy/_constraint_pinning.py
+@@ -0,0 +1,199 @@
++"""Classification of dependency constraint pinning.
++
++A dependency is "pinned" when its declared constraint is bounded:
++
++* Local-path deps (no version to pin).
++* Registry deps that already carry a semver range (the registry
++  resolver also pins via ``resolved_hash`` in the lockfile).
++* Exact semver versions (``1.2.3``).
++* Caret / tilde / bounded semver ranges (``^1.2.3``, ``~1.2.3``,
++  ``>=1.0 <2.0``, ``1.x``).
++* Literal tag refs (``v1.2.3``, ``v1.2.3-beta.1``).
++* Full 40-char SHA refs.
++
++A dependency is "unbounded" when any of the following hold:
++
++* ``NO_REF``           -- ref is missing / empty (tracks default branch).
++* ``BARE_BRANCH``      -- ref is a branch name (anything that does not
++  parse as a semver range and is not a SHA or literal tag).
++* ``WILDCARD``         -- range is ``*``, ``x``, ``X``.
++* ``OPEN_UPPER``       -- range opens upward without a paired upper
++  bound (e.g. ``>=1.0.0`` alone).
++* ``GREATER_THAN_ONLY``-- range is a bare ``>X.Y.Z``.
++
++The classification is deterministic and operates on the declared
++constraint string only; no remote calls and no subprocess.  Used by
++``policy.dependencies.require_pinned_constraint`` (see
++``policy_checks.py::_check_pinned_constraints``).
++"""
++
++from __future__ import annotations
++
++import re
++from enum import Enum
++from typing import TYPE_CHECKING
++
++if TYPE_CHECKING:
++    from apm_cli.models.dependency.reference import DependencyReference
++
++
++class UnboundedReason(str, Enum):
++    """Why a dependency's constraint is considered unbounded."""
++
++    NO_REF = "no-ref"
++    BARE_BRANCH = "bare-branch"
++    WILDCARD = "wildcard"
++    OPEN_UPPER = "open-upper"
++    GREATER_THAN_ONLY = "greater-than-only"
++
++
++# Full 40-char hex SHA (git object id).
++_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
++
++# Literal version tag: ``v1.2.3`` / ``v1.2.3-rc.1`` / ``v1.2.3+meta``.
++_LITERAL_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([-+][0-9A-Za-z.\-+]+)?$")
++
++# Wildcard token in any range component.
++_WILDCARD_TOKEN_RE = re.compile(r"(^|\s)[\*xX](\s|$)")
++
++
++def _has_wildcard(spec: str) -> bool:
++    """Detect ``*`` / ``x`` / ``X`` as a standalone token in *spec*.
++
++    The registry-side ``X.Y.x`` partial wildcard (e.g. ``1.2.x``) does
++    NOT count as unbounded -- it carries an implicit upper bound on
++    the next-higher minor.  Only top-level wildcards trigger this.
++    """
++    stripped = spec.strip()
++    return bool(_WILDCARD_TOKEN_RE.search(stripped))
++
++
++def _classify_range(spec: str) -> UnboundedReason | None:
++    """Inspect a syntactically-valid semver range for unbounded shape.
++
++    Returns ``None`` when the range is bounded (caret, tilde, exact,
++    paired upper bound, ``X.Y.x`` partial).
++    """
++    if _has_wildcard(spec):
++        return UnboundedReason.WILDCARD
++
++    parts = spec.strip().split()
++    # Caret, tilde, exact, partial-wildcard ranges are always bounded.
++    if len(parts) == 1:
++        part = parts[0]
++        if part.startswith(">="):
++            return UnboundedReason.OPEN_UPPER
++        if part.startswith(">"):
++            return UnboundedReason.GREATER_THAN_ONLY
++        return None
++
++    # Multi-component: bounded iff at least one component pins the
++    # upper edge (``<`` or ``<=``) or one is a caret/tilde/wildcard.
++    has_upper = False
++    has_lower_only = False
++    for p in parts:
++        if p.startswith(("<=", "<")):
++            has_upper = True
++        elif p.startswith(">=") or p.startswith(">"):
++            has_lower_only = True
++        elif p.startswith(("^", "~")) or re.match(r"^\d+\.\d+\.[xX*]$", p):
++            has_upper = True
++        else:
++            # Bare exact version inside a multi-component spec is
++            # treated as the upper bound (e.g. ``>=1.0 1.5.0`` is
++            # nonsensical but not unbounded in shape).
++            has_upper = True
++
++    if has_lower_only and not has_upper:
++        return UnboundedReason.OPEN_UPPER
++    return None
++
++
++def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | None:
++    """Return ``None`` if *dep*'s constraint is pinned, otherwise the reason.
++
++    Classification order (first match wins):
++
++    1. Local-path dep              -> ``None`` (no version surface).
++    2. Registry dep + semver range -> range-shape check.
++    3. Empty / missing ref         -> ``NO_REF``.
++    4. 40-char hex SHA             -> ``None``.
++    5. Literal ``v\\d+\\.\\d+\\.\\d+`` tag -> ``None``.
++    6. Parses as semver range      -> range-shape check.
++    7. Else                        -> ``BARE_BRANCH``.
++    """
++    # 1. Local-path deps have no constraint surface to pin.
++    if getattr(dep, "is_local", False):
++        return None
++
++    ref = getattr(dep, "reference", None)
++    source = getattr(dep, "source", None)
++
++    # Lazy import: avoid pulling marketplace.semver into policy import graph.
++    from apm_cli.deps.registry.semver import is_semver_range
++
++    # 2. Registry deps: the ref IS the semver range (or a single version).
++    if source == "registry":
++        if ref is None or not ref.strip():
++            # A registry dep without a constraint is itself unbounded.
++            return UnboundedReason.NO_REF
++        if is_semver_range(ref):
++            return _classify_range(ref)
++        # Registry resolver rejects non-semver refs at parse time, but
++        # defence-in-depth: treat anything else as a bare branch.
++        return UnboundedReason.BARE_BRANCH
++
++    # 3. Empty / missing ref.
++    if ref is None or not ref.strip():
++        return UnboundedReason.NO_REF
++
++    spec = ref.strip()
++
++    # 4. Full SHA -> deterministic pin (covers marketplace SHA-pinning too).
++    if _SHA_RE.match(spec):
++        return None
++
++    # 5. Literal v-prefixed tag -> pinned.
++    if _LITERAL_TAG_RE.match(spec):
++        return None
++
++    # 5b. Bare wildcard tokens ('*', 'x', 'X') -- handled before the
++    # semver-range probe because the registry grammar rejects them as
++    # standalone components, but they unambiguously express "any
++    # version" and deserve a wildcard hint rather than a bare-branch one.
++    if spec in {"*", "x", "X"}:
++        return UnboundedReason.WILDCARD
++
++    # 6. Semver range (includes ``^1.2.3``, ``~1.2``, ``>=1 <2``,
++    #    ``1.x``, plain ``1.2.3``).
++    if is_semver_range(spec):
++        return _classify_range(spec)
++
++    # 7. Anything else is a bare branch name (``main``, ``develop``,
++    #    ``feature/foo``).
++    return UnboundedReason.BARE_BRANCH
++
++
++def is_pinned_constraint(dep: DependencyReference) -> bool:
++    """Return ``True`` when *dep*'s constraint is bounded / pinned."""
++    return classify_unbounded_reason(dep) is None
++
++
++def humanize_reason(reason: UnboundedReason, dep: DependencyReference) -> str:
++    """Render a one-line actionable hint for the given reason.
++
++    Emitted in ``[x]``/``[!]`` policy diagnostics; ASCII only per
++    ``.github/instructions/encoding.instructions.md``.
++    """
++    ref = getattr(dep, "reference", None) or ""
++    if reason is UnboundedReason.NO_REF:
++        return "no ref; resolves to default branch"
++    if reason is UnboundedReason.BARE_BRANCH:
++        return f"bare branch '{ref}' tracks a moving tip"
++    if reason is UnboundedReason.WILDCARD:
++        return f"wildcard '{ref}' matches any version"
++    if reason is UnboundedReason.OPEN_UPPER:
++        return "unbounded upper; pair with '<X.Y' or use a caret range"
++    if reason is UnboundedReason.GREATER_THAN_ONLY:
++        return f"bare '{ref}' has no upper bound; pair with '<X.Y'"
++    return "unbounded constraint"
+diff --git a/src/apm_cli/policy/_help_text.py b/src/apm_cli/policy/_help_text.py
+index 41b9292ae..5bfcaeefc 100644
+--- a/src/apm_cli/policy/_help_text.py
++++ b/src/apm_cli/policy/_help_text.py
+@@ -16,3 +16,15 @@
+     "'owner/repo' (defaults to github.com), an https:// URL, or a "
+     "local file path."
+ )
++
++# One-line help for ``policy.dependencies.require_pinned_constraint``.
++# Surfaced by ``apm policy explain`` / future ``--why`` flags and kept
++# alongside POLICY_SOURCE_FORMS_HELP so docs/tests share one source of
++# truth.  ASCII only per .github/instructions/encoding.instructions.md.
++REQUIRE_PINNED_CONSTRAINT_HELP = (
++    "When true, every direct APM dep must declare a bounded constraint "
++    "(exact version, '^'/'~'/bounded range, literal tag, or SHA). "
++    "Unbounded refs (missing ref, '*', bare branch, bare '>=X.Y') are "
++    "reported through 'policy.enforcement' (warn | block). "
++    "Default: false. Recommend rolling out with 'enforcement: warn' first."
++)
+diff --git a/src/apm_cli/policy/inheritance.py b/src/apm_cli/policy/inheritance.py
+index f732b1d73..1449717ed 100644
+--- a/src/apm_cli/policy/inheritance.py
++++ b/src/apm_cli/policy/inheritance.py
+@@ -144,6 +144,12 @@ def _merge_dependencies(parent: DependencyPolicy, child: DependencyPolicy) -> De
+             _RESOLUTION_LEVELS, parent.require_resolution, child.require_resolution
+         ),
+         max_depth=min(parent.max_depth, child.max_depth),
++        # Strict-wins: once a parent (org) policy enables the pin
++        # requirement, a child cannot relax it. This matches
++        # ``allow``/``deny``/``require`` semantics where the child can
++        # only narrow, never broaden.
++        require_pinned_constraint=parent.require_pinned_constraint
++        or child.require_pinned_constraint,
+     )
+ 
+ 
+diff --git a/src/apm_cli/policy/parser.py b/src/apm_cli/policy/parser.py
+index 3739a8128..09252af90 100644
+--- a/src/apm_cli/policy/parser.py
++++ b/src/apm_cli/policy/parser.py
+@@ -119,6 +119,9 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
+                 errors.append(f"dependencies.max_depth must be a positive integer, got '{md}'")
+             elif md <= 0:
+                 errors.append(f"dependencies.max_depth must be a positive integer, got {md}")
++        rpc = deps.get("require_pinned_constraint")
++        if rpc is not None and not isinstance(rpc, bool):
++            errors.append(f"dependencies.require_pinned_constraint must be a boolean, got '{rpc}'")
+ 
+     # mcp.self_defined
+     mcp = data.get("mcp")
+@@ -186,6 +189,9 @@ def _build_policy(data: dict) -> ApmPolicy:
+         else _parse_tuple(deps_data["require"]),
+         require_resolution=deps_data.get("require_resolution", DependencyPolicy.require_resolution),
+         max_depth=deps_data.get("max_depth", DependencyPolicy.max_depth),
++        require_pinned_constraint=bool(
++            deps_data.get("require_pinned_constraint", DependencyPolicy.require_pinned_constraint)
++        ),
+     )
+ 
+     mcp_data = data.get("mcp") or {}
+diff --git a/src/apm_cli/policy/policy_checks.py b/src/apm_cli/policy/policy_checks.py
+index 8ee709465..e62ebb37d 100644
+--- a/src/apm_cli/policy/policy_checks.py
++++ b/src/apm_cli/policy/policy_checks.py
+@@ -827,6 +827,62 @@ def _check_registry_source(
+     )
+ 
+ 
++def _check_pinned_constraints(
++    deps: list[DependencyReference],
++    policy: DependencyPolicy,
++) -> CheckResult:
++    """Check: every direct dep declares a bounded constraint.
++
++    Skipped (passes vacuously) when
++    ``policy.require_pinned_constraint`` is ``False`` -- the default.
++
++    Operates on the **declared** constraint (``dep.reference``), not
++    the resolved one, so authors learn before the install completes
++    that a moving ref slipped past review.
++
++    Runs on the same dep set as the other dependency checks (the
++    resolved set, which includes transitives). The classification
++    is shape-only, so transitive deps that ARE pinned in their
++    parent's manifest will pass; only declared-unbounded shows up.
++    See ``_constraint_pinning.py`` for classification rules.
++    """
++    from ._constraint_pinning import classify_unbounded_reason, humanize_reason
++
++    check_name = "dependency-pinned-constraint"
++    if not policy.require_pinned_constraint:
++        return CheckResult(
++            name=check_name,
++            passed=True,
++            message="Pinned-constraint requirement disabled",
++        )
++
++    violations: list[str] = []
++    for dep in deps:
++        reason = classify_unbounded_reason(dep)
++        if reason is None:
++            continue
++        key = dep.get_canonical_dependency_string()
++        hint = humanize_reason(reason, dep)
++        violations.append(f"{key}: {hint}")
++
++    if not violations:
++        return CheckResult(
++            name=check_name,
++            passed=True,
++            message="All dependencies use pinned constraints",
++        )
++
++    return CheckResult(
++        name=check_name,
++        passed=False,
++        message=(
++            f"{len(violations)} dependency(ies) use unbounded constraints "
++            "(hint: pin to a semver range, literal tag, or SHA)"
++        ),
++        details=violations,
++    )
++
++
+ # -- Aggregate runners ---------------------------------------------
+ 
+ 
+@@ -924,6 +980,12 @@ def _run(check: CheckResult) -> bool:
+     if _run(_check_registry_source(deps_list, policy.registry_source, registries)):
+         return result
+ 
++    # -- Pinned-constraint check (7b) ------------------------------
++    # Property check on declared refs; runs alongside allow/deny/require.
++    # Cheap (O(N) string classification, no I/O) so it always runs.
++    if _run(_check_pinned_constraints(deps_list, policy.dependencies)):
++        return result
++
+     # -- MCP checks (8-11) ----------------------------------------
+     # When mcp_deps is None (not provided), skip MCP checks entirely.
+     # When mcp_deps is an empty list (provided but no MCP deps), still
+diff --git a/src/apm_cli/policy/schema.py b/src/apm_cli/policy/schema.py
+index a5f8720e7..ff6ea5ea8 100644
+--- a/src/apm_cli/policy/schema.py
++++ b/src/apm_cli/policy/schema.py
+@@ -35,6 +35,13 @@ class DependencyPolicy:
+     require: tuple[str, ...] | None = None  # None = no opinion; () = explicit empty
+     require_resolution: str = "project-wins"  # project-wins | policy-wins | block
+     max_depth: int = 50
++    # When True, every direct APM dep must declare a bounded constraint
++    # (exact version, caret/tilde range, bounded range, literal tag,
++    # SHA, or local path). Unbounded refs ('*', bare '>=X', missing ref,
++    # bare branch name) are reported as policy violations and routed
++    # through ``policy.enforcement`` (off | warn | block). See
++    # ``policy/_constraint_pinning.py`` for classification rules.
++    require_pinned_constraint: bool = False
+ 
+     @property
+     def effective_deny(self) -> tuple[str, ...]:
+diff --git a/tests/integration/test_policy_pinned_constraint_e2e.py b/tests/integration/test_policy_pinned_constraint_e2e.py
+new file mode 100644
+index 000000000..2fa27b785
+--- /dev/null
++++ b/tests/integration/test_policy_pinned_constraint_e2e.py
+@@ -0,0 +1,126 @@
++"""End-to-end install tests for ``policy.dependencies.require_pinned_constraint``.
++
++Mirrors the call pattern of ``test_policy_install_e2e.py`` but focused on
++the pinned-constraint policy field added by #1491.
++"""
++
++from __future__ import annotations
++
++import os
++from pathlib import Path
++from unittest.mock import patch
++
++import pytest
++import yaml
++from click.testing import CliRunner
++
++from apm_cli.policy.discovery import PolicyFetchResult
++from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
++
++_PATCH_DISCOVER_GATE = "apm_cli.policy.discovery.discover_policy_with_chain"
++_PATCH_DISCOVER_PREFLIGHT = "apm_cli.policy.install_preflight.discover_policy_with_chain"
++_PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
++_PATCH_DOWNLOADER = "apm_cli.deps.github_downloader.GitHubPackageDownloader"
++
++
++def _fetch(policy: ApmPolicy) -> PolicyFetchResult:
++    return PolicyFetchResult(
++        policy=policy,
++        source="org:test-org/.github",
++        cached=False,
++        error=None,
++        cache_age_seconds=None,
++        cache_stale=False,
++        fetch_error=None,
++        outcome="found",
++    )
++
++
++def _write_apm_yml(path: Path, deps: list) -> None:
++    data = {
++        "name": "test-project",
++        "version": "1.0.0",
++        "dependencies": {"apm": deps},
++    }
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
++
++
++def _policy(enforcement: str) -> ApmPolicy:
++    return ApmPolicy(
++        enforcement=enforcement,
++        dependencies=DependencyPolicy(require_pinned_constraint=True),
++    )
++
++
++@pytest.fixture()
++def project(tmp_path):
++    orig_cwd = os.getcwd()
++    project_dir = tmp_path / "pinned-e2e"
++    project_dir.mkdir()
++    (project_dir / ".github").mkdir()
++    (project_dir / ".github" / "copilot-instructions.md").write_text("# test\n")
++    os.chdir(project_dir)
++    yield project_dir, CliRunner()
++    os.chdir(orig_cwd)
++
++
++def _invoke_install(runner: CliRunner):
++    from apm_cli.cli import cli
++
++    return runner.invoke(cli, ["install"])
++
++
++class TestRequirePinnedConstraintE2E:
++    @patch(_PATCH_UPDATES, return_value=None)
++    @patch(_PATCH_DOWNLOADER)
++    @patch(_PATCH_DISCOVER_PREFLIGHT)
++    @patch(_PATCH_DISCOVER_GATE)
++    def test_block_mode_aborts_install_on_unbounded_dep(
++        self, mock_gate, mock_preflight, mock_dl, mock_updates, project
++    ):
++        project_dir, runner = project
++        _write_apm_yml(
++            project_dir / "apm.yml",
++            deps=["test-org/some-skills"],  # NO_REF
++        )
++        fetch = _fetch(_policy("block"))
++        mock_gate.return_value = fetch
++        mock_preflight.return_value = fetch
++
++        result = _invoke_install(runner)
++
++        assert result.exit_code != 0, (
++            f"Expected non-zero exit, got {result.exit_code}\n{result.output}"
++        )
++        out = result.output.lower()
++        # Diagnostic detail must mention the offending dep and the reason.
++        assert "test-org/some-skills" in out, out
++        assert "no ref" in out or "unbounded" in out or "pinned" in out, out
++        assert not (project_dir / "apm.lock.yaml").exists(), (
++            "Lockfile should NOT exist after blocked install"
++        )
++
++    @patch(_PATCH_UPDATES, return_value=None)
++    @patch(_PATCH_DOWNLOADER)
++    @patch(_PATCH_DISCOVER_PREFLIGHT)
++    @patch(_PATCH_DISCOVER_GATE)
++    def test_warn_mode_emits_warning_without_aborting(
++        self, mock_gate, mock_preflight, mock_dl, mock_updates, project
++    ):
++        project_dir, runner = project
++        _write_apm_yml(
++            project_dir / "apm.yml",
++            deps=["test-org/some-skills"],
++        )
++        fetch = _fetch(_policy("warn"))
++        mock_gate.return_value = fetch
++        mock_preflight.return_value = fetch
++
++        result = _invoke_install(runner)
++
++        # Install should not abort because of the pinning violation.
++        assert "blocked by org policy" not in result.output.lower(), result.output
++        # Warning must surface the violation.
++        out = result.output.lower()
++        assert "test-org/some-skills" in out, out
+diff --git a/tests/unit/policy/test_integration_pinned_constraint.py b/tests/unit/policy/test_integration_pinned_constraint.py
+new file mode 100644
+index 000000000..b055a2af9
+--- /dev/null
++++ b/tests/unit/policy/test_integration_pinned_constraint.py
+@@ -0,0 +1,202 @@
++"""Integration tests for ``require_pinned_constraint`` flowing through the
++four policy-check entry points.
++
++Covers:
++- ``run_dependency_policy_checks`` (gate seam: ``policy_gate``,
++  ``policy_target_check``, ``run_policy_preflight`` all go through this)
++- ``run_policy_checks`` (audit wrapper)
++
++The parametrized ``test_pinned_check_runs_at_all_four_call_sites``
++verifies the check name surfaces (passing or failing) on every
++call site.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from apm_cli.models.apm_package import DependencyReference
++from apm_cli.policy.policy_checks import (
++    run_dependency_policy_checks,
++    run_policy_checks,
++)
++from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
++
++CHECK_NAME = "dependency-pinned-constraint"
++
++
++def _refs(*specs: str) -> list[DependencyReference]:
++    return [DependencyReference.parse(s) for s in specs]
++
++
++def _policy(*, enforcement: str = "block", required: bool = True) -> ApmPolicy:
++    return ApmPolicy(
++        enforcement=enforcement,
++        dependencies=DependencyPolicy(require_pinned_constraint=required),
++    )
++
++
++# ---------------------------------------------------------------------------
++# Enforcement variants
++# ---------------------------------------------------------------------------
++
++
++def test_policy_block_with_pinned_required_aborts_install_on_unbounded():
++    deps = _refs("acme/skills", "other/lib#>=1.0.0", "third/lib#^1.2.0")
++    result = run_dependency_policy_checks(deps, policy=_policy(enforcement="block"), fail_fast=True)
++    assert not result.passed
++    failing = [c for c in result.checks if c.name == CHECK_NAME and not c.passed]
++    assert len(failing) == 1
++    # Both unbounded deps must appear in details.
++    details = " ".join(failing[0].details)
++    assert "acme/skills" in details
++    assert "other/lib" in details
++    assert "third/lib" not in details
++
++
++def test_policy_warn_with_pinned_required_does_not_abort_runner():
++    """The runner doesn't decide block vs warn; it just reports.
++
++    Enforcement routing is the caller's responsibility (policy_gate
++    converts failed checks into warnings under enforcement=warn). The
++    runner still returns the failing check so the caller can render it.
++    """
++    deps = _refs("acme/skills")
++    result = run_dependency_policy_checks(deps, policy=_policy(enforcement="warn"), fail_fast=False)
++    # Check ran and reported the violation.
++    assert not result.passed
++    assert any(c.name == CHECK_NAME and not c.passed for c in result.checks)
++
++
++def test_policy_off_path_emits_no_diagnostic_even_when_unbounded():
++    """When require_pinned_constraint is False the check passes silently.
++
++    (Note: ``enforcement: off`` is handled upstream in policy_gate; at the
++    runner level the relevant knob is the field itself.)
++    """
++    deps = _refs("acme/skills", "other/lib#>=1.0.0")
++    result = run_dependency_policy_checks(deps, policy=_policy(required=False), fail_fast=True)
++    pin_checks = [c for c in result.checks if c.name == CHECK_NAME]
++    assert len(pin_checks) == 1
++    assert pin_checks[0].passed
++    assert "disabled" in pin_checks[0].message.lower()
++
++
++def test_policy_block_with_pinned_false_does_nothing():
++    """Regression trap: disabled field must never produce violations."""
++    deps = _refs("acme/skills", "other/lib")
++    result = run_dependency_policy_checks(deps, policy=_policy(enforcement="block", required=False))
++    assert not any(c.name == CHECK_NAME and not c.passed for c in result.checks)
++
++
++def test_policy_block_emits_actionable_hint_per_dep():
++    deps = _refs("acme/skills", "other/lib#*", "third/lib#>=2.0.0")
++    result = run_dependency_policy_checks(
++        deps, policy=_policy(enforcement="block"), fail_fast=False
++    )
++    failing = next(c for c in result.checks if c.name == CHECK_NAME and not c.passed)
++    joined = "\n".join(failing.details)
++    assert "no ref" in joined  # NO_REF for acme/skills
++    assert "wildcard" in joined  # WILDCARD for other/lib#*
++    assert "unbounded upper" in joined  # OPEN_UPPER for third/lib#>=2.0.0
++    # ASCII-only invariant.
++    for line in failing.details:
++        line.encode("ascii", errors="strict")
++
++
++# ---------------------------------------------------------------------------
++# All-four-call-sites smoke test (parametrized)
++# ---------------------------------------------------------------------------
++
++
++def _run_via_dep_seam(deps, policy):
++    return run_dependency_policy_checks(deps, policy=policy, fail_fast=False)
++
++
++def _run_via_policy_gate_seam(deps, policy):
++    """Mirror the call pattern policy_gate uses (see install/phases/policy_gate.py)."""
++    return run_dependency_policy_checks(
++        deps,
++        lockfile=None,
++        policy=policy,
++        mcp_deps=None,
++        effective_target=None,
++        fetch_outcome="cached",
++        fail_fast=(policy.enforcement == "block"),
++    )
++
++
++def _run_via_target_check_seam(deps, policy):
++    """Mirror the call pattern policy_target_check uses."""
++    return run_dependency_policy_checks(
++        deps,
++        lockfile=None,
++        policy=policy,
++        effective_target="vscode",
++        fetch_outcome="cached",
++        fail_fast=False,
++    )
++
++
++def _run_via_preflight_seam(deps, policy):
++    """Mirror the call pattern install_preflight.run_policy_preflight uses."""
++    return run_dependency_policy_checks(
++        deps,
++        lockfile=None,
++        policy=policy,
++        mcp_deps=[],
++        effective_target=None,
++        fetch_outcome="cached",
++        fail_fast=(policy.enforcement == "block"),
++    )
++
++
++@pytest.mark.parametrize(
++    "runner",
++    [
++        _run_via_dep_seam,
++        _run_via_policy_gate_seam,
++        _run_via_target_check_seam,
++        _run_via_preflight_seam,
++    ],
++    ids=[
++        "run_dependency_policy_checks-direct",
++        "policy_gate-call-pattern",
++        "policy_target_check-call-pattern",
++        "run_policy_preflight-call-pattern",
++    ],
++)
++def test_policy_pinned_check_runs_at_all_four_call_sites(runner):
++    deps = _refs("acme/skills", "other/lib#^1.0.0")
++    result = runner(deps, _policy(enforcement="block"))
++    # Check is present (failing) at every call site.
++    names = [c.name for c in result.checks]
++    assert CHECK_NAME in names
++    failing = [c for c in result.checks if c.name == CHECK_NAME and not c.passed]
++    assert len(failing) == 1
++    assert any("acme/skills" in d for d in failing[0].details)
++
++
++# ---------------------------------------------------------------------------
++# Audit wrapper (run_policy_checks)
++# ---------------------------------------------------------------------------
++
++
++def test_run_policy_checks_audit_surfaces_pinned_violation(tmp_path: Path):
++    apm_yml = tmp_path / "apm.yml"
++    apm_yml.write_text(
++        "name: sample\n"
++        "version: 0.0.1\n"
++        "dependencies:\n"
++        "  apm:\n"
++        "    - acme/skills\n"
++        "    - other/lib#^1.2.0\n",
++        encoding="utf-8",
++    )
++    policy = _policy(enforcement="block")
++    result = run_policy_checks(tmp_path, policy, fail_fast=False)
++    pin = next(c for c in result.checks if c.name == CHECK_NAME)
++    assert not pin.passed
++    assert any("acme/skills" in d for d in pin.details)
+diff --git a/tests/unit/policy/test_pinned_constraint.py b/tests/unit/policy/test_pinned_constraint.py
+new file mode 100644
+index 000000000..217d3cad7
+--- /dev/null
++++ b/tests/unit/policy/test_pinned_constraint.py
+@@ -0,0 +1,255 @@
++"""Tests for ``apm_cli.policy._constraint_pinning.classify_unbounded_reason``.
++
++Table-driven: every classification rule has at least one positive case.
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from apm_cli.models.apm_package import DependencyReference
++from apm_cli.policy._constraint_pinning import (
++    UnboundedReason,
++    classify_unbounded_reason,
++    humanize_reason,
++    is_pinned_constraint,
++)
++
++
++def _dep(
++    spec: str | None,
++    *,
++    source: str | None = None,
++    registry_name: str | None = None,
++    is_local: bool = False,
++) -> DependencyReference:
++    """Build a ``DependencyReference`` with the given ref/source.
++
++    Local deps bypass parser (``DependencyReference.parse`` rejects
++    local paths via ``./`` shorthand differently); construct directly.
++    """
++    if is_local:
++        return DependencyReference(
++            repo_url="_local/sample",
++            is_local=True,
++            local_path="./packages/sample",
++        )
++    if source == "registry":
++        dep = DependencyReference(repo_url="acme/lib", reference=spec)
++        dep.source = "registry"
++        dep.registry_name = registry_name or "default"
++        return dep
++    # Git-source (the legacy default).
++    if spec is None:
++        return DependencyReference.parse("acme/lib")
++    return DependencyReference.parse(f"acme/lib#{spec}")
++
++
++# ---------------------------------------------------------------------------
++# Unbounded cases
++# ---------------------------------------------------------------------------
++
++
++def test_classify_no_ref_returns_no_ref():
++    assert classify_unbounded_reason(_dep(None)) is UnboundedReason.NO_REF
++
++
++def test_classify_empty_ref_returns_no_ref():
++    dep = DependencyReference.parse("acme/lib")
++    dep.reference = ""
++    assert classify_unbounded_reason(dep) is UnboundedReason.NO_REF
++
++
++def test_classify_whitespace_ref_returns_no_ref():
++    dep = DependencyReference.parse("acme/lib")
++    dep.reference = "   "
++    assert classify_unbounded_reason(dep) is UnboundedReason.NO_REF
++
++
++def test_classify_bare_branch_main_returns_bare_branch():
++    assert classify_unbounded_reason(_dep("main")) is UnboundedReason.BARE_BRANCH
++
++
++def test_classify_bare_branch_develop_returns_bare_branch():
++    assert classify_unbounded_reason(_dep("develop")) is UnboundedReason.BARE_BRANCH
++
++
++def test_classify_feature_branch_returns_bare_branch():
++    assert classify_unbounded_reason(_dep("feature/foo")) is UnboundedReason.BARE_BRANCH
++
++
++def test_classify_wildcard_star_returns_wildcard():
++    assert classify_unbounded_reason(_dep("*")) is UnboundedReason.WILDCARD
++
++
++def test_classify_wildcard_x_lowercase_returns_wildcard():
++    assert classify_unbounded_reason(_dep("x")) is UnboundedReason.WILDCARD
++
++
++def test_classify_wildcard_x_uppercase_returns_wildcard():
++    assert classify_unbounded_reason(_dep("X")) is UnboundedReason.WILDCARD
++
++
++def test_classify_open_upper_returns_open_upper():
++    assert classify_unbounded_reason(_dep(">=1.0.0")) is UnboundedReason.OPEN_UPPER
++
++
++def test_classify_greater_than_only_returns_gt_only():
++    assert classify_unbounded_reason(_dep(">1.0.0")) is UnboundedReason.GREATER_THAN_ONLY
++
++
++def test_classify_open_upper_in_multi_component():
++    # ``>=1.0.0 >=2.0.0`` has no upper bound either.
++    assert classify_unbounded_reason(_dep(">=1.0.0 >=2.0.0")) is UnboundedReason.OPEN_UPPER
++
++
++# ---------------------------------------------------------------------------
++# Pinned cases (return None)
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.parametrize(
++    "spec",
++    [
++        "^1.2.3",
++        "^0.0.1",
++        "~1.2.3",
++        "1.2.3",
++        "0.0.1",
++        ">=1.0.0 <2.0.0",
++        ">=1.0.0 <=1.9.9",
++        "1.2.x",
++        "1.2.X",
++        "v1.2.3",
++        "v1.0.0-rc.1",
++        "v1.2.3+build.42",
++    ],
++)
++def test_classify_pinned_specs_return_none(spec):
++    assert classify_unbounded_reason(_dep(spec)) is None
++
++
++def test_classify_caret_range_returns_pinned_none():
++    assert classify_unbounded_reason(_dep("^1.2.3")) is None
++
++
++def test_classify_tilde_range_returns_pinned_none():
++    assert classify_unbounded_reason(_dep("~1.2.3")) is None
++
++
++def test_classify_bounded_range_returns_pinned_none():
++    assert classify_unbounded_reason(_dep(">=1.0.0 <2.0.0")) is None
++
++
++def test_classify_literal_tag_v_prefixed_returns_pinned_none():
++    assert classify_unbounded_reason(_dep("v1.5.3")) is None
++
++
++def test_classify_sha_returns_pinned_none():
++    sha = "a" * 40
++    assert classify_unbounded_reason(_dep(sha)) is None
++
++
++def test_classify_local_dep_returns_pinned_none():
++    assert classify_unbounded_reason(_dep(None, is_local=True)) is None
++
++
++def test_classify_registry_dep_with_exact_version_returns_pinned_none():
++    assert classify_unbounded_reason(_dep("1.2.3", source="registry")) is None
++
++
++def test_classify_registry_dep_with_caret_returns_pinned_none():
++    assert classify_unbounded_reason(_dep("^1.2.0", source="registry")) is None
++
++
++def test_classify_registry_dep_with_open_range_returns_open_upper():
++    assert (
++        classify_unbounded_reason(_dep(">=1.0.0", source="registry")) is UnboundedReason.OPEN_UPPER
++    )
++
++
++def test_classify_registry_dep_missing_ref_returns_no_ref():
++    dep = _dep("1.0.0", source="registry")
++    dep.reference = None
++    assert classify_unbounded_reason(dep) is UnboundedReason.NO_REF
++
++
++# ---------------------------------------------------------------------------
++# Future-uniformity tests (cross-source semver semantics)
++# ---------------------------------------------------------------------------
++
++
++@pytest.mark.xfail(
++    strict=False,
++    reason=(
++        "awaits #1488 (git-source semver routing). The shape-based "
++        "classifier already accepts ``^1.2.0`` regardless of source, so "
++        "this test xpasses today on every supported semver shape. The "
++        "marker stays in place so that once #1488 lands and introduces "
++        "a normalised ``source='git-semver'`` value, a CI failure here "
++        "alerts us to revisit the classification path end-to-end."
++    ),
++)
++def test_classify_git_semver_dep_returns_pinned_none():
++    # Pseudo: when #1488 lands, ``acme/lib#^1.2.0`` will be tagged
++    # source="git-semver" or the resolver will normalize the ref. Either
++    # way, the classifier needs to see "^1.2.0" as a pinned constraint.
++    dep = DependencyReference.parse("acme/lib#^1.2.0")
++    dep.source = "git-semver"  # hypothetical post-#1488 marker
++    assert classify_unbounded_reason(dep) is None
++    # Sentinel that will start failing once the source-discriminator
++    # actually exists post-#1488, signalling time to remove the xfail.
++    raise AssertionError(
++        "remove xfail decorator once #1488 lands and 'git-semver' source "
++        "discriminator is wired in the resolver"
++    )
++
++
++def test_classify_marketplace_dep_with_caret_returns_pinned_none():
++    """Until PR #1422 lands, marketplace deps surface as git-source.
++
++    Pre-#1422, marketplace entries are routed through the git
++    resolver and carry ``source=None`` / ``"git"``. The shape-based
++    classifier still recognises ``^1.2.0`` as pinned because the
++    constraint string is identical regardless of source.
++
++    Post-#1422 (when ``source="marketplace"`` is set), the same
++    classification path applies via the semver-range probe.  This
++    test pins the invariant: shape decides, not source.
++    """
++    dep = DependencyReference.parse("acme/skills#^1.2.0")
++    assert classify_unbounded_reason(dep) is None
++    # Also exercise the post-#1422 marker (treated as git for now).
++    dep.source = "marketplace"
++    assert classify_unbounded_reason(dep) is None
++
++
++# ---------------------------------------------------------------------------
++# Convenience wrappers
++# ---------------------------------------------------------------------------
++
++
++def test_is_pinned_constraint_true_for_caret():
++    assert is_pinned_constraint(_dep("^1.2.3")) is True
++
++
++def test_is_pinned_constraint_false_for_bare_branch():
++    assert is_pinned_constraint(_dep("main")) is False
++
++
++@pytest.mark.parametrize(
++    "reason,must_contain",
++    [
++        (UnboundedReason.NO_REF, "no ref"),
++        (UnboundedReason.BARE_BRANCH, "bare branch"),
++        (UnboundedReason.WILDCARD, "wildcard"),
++        (UnboundedReason.OPEN_UPPER, "unbounded upper"),
++        (UnboundedReason.GREATER_THAN_ONLY, "no upper bound"),
++    ],
++)
++def test_humanize_reason_is_actionable_ascii(reason, must_contain):
++    dep = _dep("main")
++    msg = humanize_reason(reason, dep)
++    assert must_contain in msg
++    # ASCII-only invariant.
++    assert msg.encode("ascii", errors="strict")
+diff --git a/tests/unit/policy/test_policy_checks.py b/tests/unit/policy/test_policy_checks.py
+index 3f2e85391..a7ce875c3 100644
+--- a/tests/unit/policy/test_policy_checks.py
++++ b/tests/unit/policy/test_policy_checks.py
+@@ -884,7 +884,7 @@ def test_returns_all_18_checks(self, tmp_path):
+ 
+         policy = ApmPolicy()
+         result = run_policy_checks(tmp_path, policy)
+-        assert len(result.checks) == 18
++        assert len(result.checks) == 19
+         # Default policy = all checks pass
+         assert result.passed
+ 
+diff --git a/tests/unit/policy/test_schema_pinned_constraint.py b/tests/unit/policy/test_schema_pinned_constraint.py
+new file mode 100644
+index 000000000..1dcd59b13
+--- /dev/null
++++ b/tests/unit/policy/test_schema_pinned_constraint.py
+@@ -0,0 +1,71 @@
++"""Tests for ``policy.dependencies.require_pinned_constraint`` schema + parser."""
++
++from __future__ import annotations
++
++import pytest
++
++from apm_cli.policy.inheritance import merge_policies
++from apm_cli.policy.parser import PolicyValidationError, load_policy
++from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
++
++
++class TestSchemaDefaults:
++    def test_dependency_policy_default_field_value_is_false(self):
++        assert DependencyPolicy().require_pinned_constraint is False
++
++    def test_apm_policy_default_field_value_is_false(self):
++        assert ApmPolicy().dependencies.require_pinned_constraint is False
++
++
++class TestParser:
++    def test_dependency_policy_field_parses_from_yaml(self):
++        policy, _ = load_policy("dependencies:\n  require_pinned_constraint: true\n")
++        assert policy.dependencies.require_pinned_constraint is True
++
++    def test_dependency_policy_field_parses_false_explicitly(self):
++        policy, _ = load_policy("dependencies:\n  require_pinned_constraint: false\n")
++        assert policy.dependencies.require_pinned_constraint is False
++
++    def test_dependency_policy_field_parses_from_yaml_omitted_defaults_false(self):
++        policy, _ = load_policy("dependencies: {}\n")
++        assert policy.dependencies.require_pinned_constraint is False
++
++    def test_non_bool_value_raises_validation_error(self):
++        with pytest.raises(PolicyValidationError) as exc:
++            load_policy("dependencies:\n  require_pinned_constraint: 'yes'\n")
++        assert "require_pinned_constraint" in str(exc.value)
++
++    def test_field_independent_of_other_dependency_settings(self):
++        policy, _ = load_policy(
++            "dependencies:\n  allow:\n    - acme-org/*\n  require_pinned_constraint: true\n"
++        )
++        assert policy.dependencies.allow == ("acme-org/*",)
++        assert policy.dependencies.require_pinned_constraint is True
++
++
++class TestInheritanceMerge:
++    def test_dependency_policy_field_round_trips_through_inheritance_merge(self):
++        parent = ApmPolicy(dependencies=DependencyPolicy(require_pinned_constraint=True))
++        child = ApmPolicy()  # default False
++        merged = merge_policies(parent, child)
++        # Parent's strict requirement wins (strict-wins semantics).
++        assert merged.dependencies.require_pinned_constraint is True
++
++    def test_child_can_enable_when_parent_disabled(self):
++        parent = ApmPolicy()
++        child = ApmPolicy(dependencies=DependencyPolicy(require_pinned_constraint=True))
++        merged = merge_policies(parent, child)
++        assert merged.dependencies.require_pinned_constraint is True
++
++    def test_both_disabled_stays_disabled(self):
++        parent = ApmPolicy()
++        child = ApmPolicy()
++        merged = merge_policies(parent, child)
++        assert merged.dependencies.require_pinned_constraint is False
++
++    def test_child_cannot_relax_parent(self):
++        """Strict-wins: child False cannot override parent True."""
++        parent = ApmPolicy(dependencies=DependencyPolicy(require_pinned_constraint=True))
++        child = ApmPolicy(dependencies=DependencyPolicy(require_pinned_constraint=False))
++        merged = merge_policies(parent, child)
++        assert merged.dependencies.require_pinned_constraint is True
