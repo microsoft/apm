@@ -94,15 +94,15 @@ class TestIsValidAlias:
 
 class TestParseMarketplaceRepo:
     def test_simple_owner_repo(self):
-        owner, repo, host = _parse_marketplace_repo("owner/repo", None)
-        assert owner == "owner"
-        assert repo == "repo"
-        assert host is None
+        url, kind, host = _parse_marketplace_repo("owner/repo", None)
+        assert url == "https://github.com/owner/repo"
+        assert kind == "github"
+        assert host == "github.com"
 
     def test_https_url_parsed(self):
-        owner, repo, host = _parse_marketplace_repo("https://github.com/owner/my-repo", None)
-        assert owner == "owner"
-        assert repo == "my-repo"
+        url, kind, host = _parse_marketplace_repo("https://github.com/owner/my-repo", None)
+        assert url == "https://github.com/owner/my-repo"
+        assert kind == "github"
         assert host == "github.com"
 
     def test_http_url_rejected(self):
@@ -118,10 +118,10 @@ class TestParseMarketplaceRepo:
             _parse_marketplace_repo("only-one", None)
 
     def test_fqdn_prefix_three_segment(self):
-        owner, repo, host = _parse_marketplace_repo("github.example.com/owner/my-repo", None)
+        url, kind, host = _parse_marketplace_repo("github.example.com/owner/my-repo", None)
+        assert url == "https://github.example.com/owner/my-repo"
+        assert kind == "git"
         assert host == "github.example.com"
-        assert owner == "owner"
-        assert repo == "my-repo"
 
     def test_fqdn_prefix_only_two_segments_rejected(self):
         """Line 322-326: HOST/REPO without owner is rejected."""

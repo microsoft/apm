@@ -63,6 +63,39 @@ reproducible across machines and CI.
   path that enforces it. See
   [Governance on the consumer ramp](../governance-on-the-consumer-ramp/).
 
+## Local and self-hosted marketplaces
+
+`apm marketplace add` accepts more than GitHub-hosted repos. The same
+register / browse / install / update workflow works against:
+
+- **Local filesystem paths** -- `apm marketplace add /srv/marketplaces/agent-forge`
+  (or a relative path, or `~/code/marketplace`). Useful for
+  privacy-sensitive packages, offline workflows, and air-gapped
+  environments. Local marketplaces with relative plugin sources
+  install by copying from disk via `LocalDependencySource`.
+- **`file://` URIs** -- `apm marketplace add file:///srv/marketplaces/agent-forge.git`.
+  Behaves the same as a local path.
+- **Generic git URLs** -- any host APM does not classify as
+  GitHub or GitLab family flows through subprocess `git` and
+  `GitCache`. Includes Azure DevOps (auth via `ADO_APM_PAT`),
+  Gitea, Bitbucket Server, and self-hosted git servers.
+- **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
+  is extracted, classified, and routed through the matching
+  fetcher.
+
+For generic-git marketplaces, `marketplace.json` is fetched via a
+sparse-cone clone (only the manifest path is downloaded); APM does
+not forward `GITHUB_APM_PAT` or `GITLAB_APM_TOKEN` to non-GitHub /
+non-GitLab hosts. Authentication falls through to the host's
+`*_APM_PAT` (e.g. `ADO_APM_PAT`) or your local
+`git credential-manager`. See
+[Authentication](../authentication/).
+
+**Lockfile note.** Installs from a local marketplace record a
+local-path source in `apm.lock.yaml`. Lockfiles produced this way
+are machine-specific -- do not commit them into a shared repo. See
+[lockfile reference](../../reference/lockfile-spec/).
+
 ## Where next
 
 - [Install packages](../install-packages/) -- the full `apm install`

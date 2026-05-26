@@ -279,27 +279,25 @@ class TestParseMarketplaceRepo:
     """Tests for _parse_marketplace_repo."""
 
     def test_simple_owner_repo(self) -> None:
-        owner, repo_name, embedded = _parse_marketplace_repo("acme/tools", None)
-        assert owner == "acme"
-        assert repo_name == "tools"
-        assert embedded is None
-
-    def test_https_url(self) -> None:
-        owner, repo_name, embedded = _parse_marketplace_repo("https://github.com/acme/tools", None)
-        assert owner == "acme"
-        assert repo_name == "tools"
+        url, kind, embedded = _parse_marketplace_repo("acme/tools", None)
+        assert url == "https://github.com/acme/tools"
+        assert kind == "github"
         assert embedded == "github.com"
 
-    def test_https_url_strips_dot_git(self) -> None:
-        _owner, repo_name, _embedded = _parse_marketplace_repo(
-            "https://github.com/acme/tools.git", None
-        )
-        assert repo_name == "tools"
+    def test_https_url(self) -> None:
+        url, kind, embedded = _parse_marketplace_repo("https://github.com/acme/tools", None)
+        assert url == "https://github.com/acme/tools"
+        assert kind == "github"
+        assert embedded == "github.com"
+
+    def test_https_url_preserves_dot_git(self) -> None:
+        url, _kind, _embedded = _parse_marketplace_repo("https://github.com/acme/tools.git", None)
+        assert url == "https://github.com/acme/tools.git"
 
     def test_host_shorthand_three_segments(self) -> None:
-        owner, repo_name, embedded = _parse_marketplace_repo("github.com/acme/tools", None)
-        assert owner == "acme"
-        assert repo_name == "tools"
+        url, kind, embedded = _parse_marketplace_repo("github.com/acme/tools", None)
+        assert url == "https://github.com/acme/tools"
+        assert kind == "github"
         assert embedded == "github.com"
 
     def test_http_rejected(self) -> None:
@@ -323,7 +321,7 @@ class TestParseMarketplaceRepo:
             _parse_marketplace_repo("https://github.com/acme/tools", "gitlab.com")
 
     def test_host_flag_normalised(self) -> None:
-        _owner, _repo_name, embedded = _parse_marketplace_repo(
+        _url, _kind, embedded = _parse_marketplace_repo(
             "https://github.com/acme/tools", "github.com"
         )
         assert embedded == "github.com"
@@ -336,10 +334,10 @@ class TestParseMarketplaceRepo:
 
     def test_nested_path_owner(self) -> None:
         """HOST/group/sub/repo -- multi-segment owner path."""
-        _owner, repo_name, embedded = _parse_marketplace_repo(
+        url, _kind, embedded = _parse_marketplace_repo(
             "https://gitlab.example.com/group/sub/repo", None
         )
-        assert repo_name == "repo"
+        assert url == "https://gitlab.example.com/group/sub/repo"
         assert embedded == "gitlab.example.com"
 
 
