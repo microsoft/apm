@@ -7,8 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **BREAKING:** `apm install` against a `*.ghe.com` marketplace now refuses bare cross-repo `repo:` fields in `marketplace.json` before any network request runs, closing a dependency-confusion attack vector. Previously a bare `repo: owner/repo` on an enterprise marketplace could silently resolve to an attacker-controlled namespace on public `github.com`; the install now fail-closes with an actionable error. Qualify the `repo:` field to fix:
+
+  ```yaml
+  # Before (ambiguous -- refused on enterprise marketplaces):
+  source:
+    type: git
+    repo: owner/repo
+
+  # After -- enterprise dep on the same host:
+  source:
+    type: git
+    repo: corp.ghe.com/owner/repo
+
+  # After -- declared cross-host dep on public github.com:
+  source:
+    type: git
+    repo: github.com/owner/repo
+  ```
+
+  (closes #1326) -- by @edenfunf (#1459)
+- `GitCache` now disables git hooks (`core.hooksPath=/dev/null`) and skips submodule recursion on every clone, fetch, and checkout. Hardens APM against malicious upstreams, which is on-path for the new generic-git marketplace support.
+
+### Added
+
+- Add experimental registry resolver and `apm-policy.yml` source-mandate enforcement. Git-based dependencies are unchanged. Enable with `apm experimental enable registries`; configure per-registry credentials via `apm config set registry.<name>.{url,token}`; mandate registry usage in `apm-policy.yml` via `registry_source: {require: [...], allow_non_registry: false}`. Framing: APM dependency governance -- controlled sources, locked versions, and byte-level SHA-256 verification. Package signing, SBOM generation, and SLSA provenance are not included at v1.
+- `marketplace.packages[].source` in `apm.yml` now accepts non-default git hosts via the `host.tld/owner/repo` shorthand or the full `https://host.tld/owner/repo[.git]` URL; per-host auth flows through the standard APM token chain. Unlocks GitHub Enterprise and self-hosted GitLab as first-class marketplace package sources. (#1288)
+- `apm marketplace add` now accepts local filesystem paths, `file://` URIs, SSH URLs, and HTTPS URLs to any git host (Azure DevOps via `ADO_APM_PAT`, GitLab, Gitea, Bitbucket Server, self-hosted). Generic-git registrations fetch `marketplace.json` via `GitCache` and never forward APM tokens; local marketplaces read the manifest directly. `apm install <plugin>@<local-marketplace>` is fully supported, including marketplaces whose `marketplace.json` uses relative plugin sources.
+
 ### Fixed
 
+- `apm install` now re-resolves a dependency when its ref pin is changed in `apm.yml`; previously the locked commit always won, silently ignoring the edit -- by @sergio-sisternes-epam (#1473)
+- `--refresh` flag on `apm install` now actually re-resolves all ref pins (previously accepted but had no effect) -- by @sergio-sisternes-epam (#1473)
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
 
 ## [0.14.2] - 2026-05-22
@@ -62,6 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows installer and `apm self-update` detect Windows Defender / antivirus blocks (HRESULT `0x800700E1`, PUA messages) and surface three actionable recovery options (`Add-MpPreference -ExclusionPath`, `pip --user`, false-positive submission URL) instead of falling through to a generic "failed to run" and a pip fallback that itself dies on unsupported Python. (#1408)
 - Windows installer and `apm self-update` survive AppLocker / App Control for Business (WDAC) policies by staging the release into the allow-listed per-user install root before running the `apm.exe --version` smoke test, and emit AppLocker-specific guidance on `0x80070005` Access Denied instead of silently falling back to pip. (#1390, closes #1389)
 - `apm uninstall <local-path>` on Windows no longer rejects absolute paths (`C:\...\my-pkg`) as "Invalid package format" and silently leaves deployed copilot-app workflow DB rows behind. Local paths are now detected on every platform, so install/uninstall round-trips cleanly. (#1413)
+
+### Changed
+
+- `apm compile --watch` picks up mid-session edits to `apm.yml`'s `target:` / `targets:` on the next file event instead of caching the resolved target until the watcher is restarted; previously the value resolved at startup was reused on every recompile. Follow-up to #1349. (#1403)
+- `apm compile --watch --clean` prints an explicit `[!]` warning that `--clean` is ignored in watch mode and continues; previously the flag was silently dropped. Run `apm compile --clean` separately between watch sessions to remove orphaned outputs. (#1403)
 
 ## [0.14.0] - 2026-05-18
 

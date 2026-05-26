@@ -172,11 +172,22 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                         )
                 plugin["source"] = source_value
             else:
+                # Remote source: emit per the official Claude Code marketplace
+                # schema. When the package was authored with a host-prefixed
+                # source (``host.tld/owner/repo``), emit a real ``https://``
+                # URL so Claude Code can clone from a non-default host (e.g.
+                # GHE) -- the ``github`` shorthand only resolves to github.com.
                 source_obj: dict[str, Any] = OrderedDict()
                 if pkg.subdir:
                     source_obj["source"] = "git-subdir"
-                    source_obj["url"] = pkg.source_repo
+                    if pkg.host:
+                        source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
+                    else:
+                        source_obj["url"] = pkg.source_repo
                     source_obj["path"] = pkg.subdir
+                elif pkg.host:
+                    source_obj["source"] = "url"
+                    source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
                 else:
                     source_obj["source"] = "github"
                     source_obj["repo"] = pkg.source_repo
@@ -267,7 +278,10 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
     if pkg.subdir:
         source_obj: dict[str, Any] = OrderedDict()
         source_obj["source"] = "git-subdir"
-        source_obj["url"] = pkg.source_repo
+        if pkg.host:
+            source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
+        else:
+            source_obj["url"] = pkg.source_repo
         source_obj["path"] = pkg.subdir
         if pkg.ref:
             source_obj["ref"] = pkg.ref
@@ -277,7 +291,10 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
 
     source_obj = OrderedDict()
     source_obj["source"] = "url"
-    source_obj["url"] = pkg.source_repo
+    if pkg.host:
+        source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
+    else:
+        source_obj["url"] = pkg.source_repo
     if pkg.ref:
         source_obj["ref"] = pkg.ref
     if pkg.sha:

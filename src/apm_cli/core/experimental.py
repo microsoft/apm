@@ -82,6 +82,18 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "Workflows tab."
         ),
     ),
+    "marketplace_authoring": ExperimentalFlag(
+        name="marketplace_authoring",
+        description="Enable marketplace authoring commands (init, build, publish, etc.).",
+        default=False,
+        hint="Run 'apm marketplace --help' to see available commands.",
+    ),
+    "registries": ExperimentalFlag(
+        name="registries",
+        description="Enable REST-based APM package registries in apm.yml.",
+        default=False,
+        hint=("Use registries: in apm.yml. See https://microsoft.github.io/apm/guides/registries/"),
+    ),
 }
 
 

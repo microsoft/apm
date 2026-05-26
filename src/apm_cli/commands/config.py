@@ -1,6 +1,7 @@
 """APM config command group."""
 
 import builtins
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ set = builtins.set
 
 _BOOLEAN_TRUE_VALUES = {"true", "1", "yes"}
 _BOOLEAN_FALSE_VALUES = {"false", "0", "no"}
+_REGISTRY_KEY_RE = re.compile(r"^registry\.([a-zA-Z0-9._-]+)\.(url|token|default)$")
 _CONFIG_KEY_DISPLAY_NAMES = {
     "auto_integrate": "auto-integrate",
     "temp_dir": "temp-dir",
@@ -58,6 +60,10 @@ def _valid_config_keys() -> str:
     keys = ["auto-integrate", "temp-dir"]
     if is_enabled("copilot_cowork"):
         keys.append("copilot-cowork-skills-dir")
+    if is_enabled("registries"):
+        keys.append("registry.<name>.url")
+        keys.append("registry.<name>.token")
+        keys.append("registry.<name>.default")
     return ", ".join(keys)
 
 
@@ -190,6 +196,39 @@ def set(key, value):  # noqa: F811
     from ..config import get_temp_dir, set_temp_dir
 
     logger = CommandLogger("config set")
+
+    registry_match = _REGISTRY_KEY_RE.match(key)
+    if registry_match:
+        from ..core.experimental import is_enabled
+
+        if not is_enabled("registries"):
+            logger.error(
+                f"'{key}' requires the registries experimental flag. "
+                "Run: apm experimental enable registries"
+            )
+            sys.exit(1)
+        reg_name, field = registry_match.group(1), registry_match.group(2)
+        from ..config import set_registry_default, set_registry_token, set_registry_url
+
+        if field == "url":
+            set_registry_url(reg_name, value)
+            logger.success(f"registry.{reg_name}.url set")
+        elif field == "token":
+            set_registry_token(reg_name, value)
+            logger.success(f"registry.{reg_name}.token set")
+        else:
+            try:
+                is_default = _parse_bool_value(value)
+            except ValueError as exc:
+                logger.error(str(exc))
+                sys.exit(1)
+            set_registry_default(reg_name, is_default)
+            if is_default:
+                logger.success(f"registry.{reg_name}.default set")
+            else:
+                logger.success(f"registry.{reg_name}.default cleared")
+        return
+
     if key == "copilot-cowork-skills-dir":
         from ..core.experimental import is_enabled
 
@@ -256,6 +295,31 @@ def get(key):
     logger = CommandLogger("config get")
     getters = _get_config_getters()
     if key:
+        registry_match = _REGISTRY_KEY_RE.match(key)
+        if registry_match:
+            from ..core.experimental import is_enabled
+
+            if not is_enabled("registries"):
+                logger.error(
+                    f"'{key}' requires the registries experimental flag. "
+                    "Run: apm experimental enable registries"
+                )
+                sys.exit(1)
+            reg_name, field = registry_match.group(1), registry_match.group(2)
+            from ..config import get_registry_config, is_registry_default
+
+            cfg = get_registry_config(reg_name)
+            if field == "default":
+                val = is_registry_default(reg_name)
+                click.echo(f"{key}: {'true' if val else 'false'}")
+                return
+            val = (cfg or {}).get(field)
+            if val is None:
+                click.echo(f"{key}: Not set")
+            else:
+                click.echo(f"{key}: {val}")
+            return
+
         if key == "copilot-cowork-skills-dir":
             from ..config import get_copilot_cowork_skills_dir
 
@@ -317,6 +381,30 @@ def unset(key):
         apm config unset copilot-cowork-skills-dir
     """
     logger = CommandLogger("config unset")
+
+    registry_match = _REGISTRY_KEY_RE.match(key)
+    if registry_match:
+        from ..core.experimental import is_enabled
+
+        if not is_enabled("registries"):
+            logger.error(
+                f"'{key}' requires the registries experimental flag. "
+                "Run: apm experimental enable registries"
+            )
+            sys.exit(1)
+        reg_name, field = registry_match.group(1), registry_match.group(2)
+        from ..config import set_registry_default, unset_registry_token, unset_registry_url
+
+        if field == "url":
+            unset_registry_url(reg_name)
+            logger.success(f"registry.{reg_name}.url removed")
+        elif field == "token":
+            unset_registry_token(reg_name)
+            logger.success(f"registry.{reg_name}.token removed")
+        else:
+            set_registry_default(reg_name, False)
+            logger.success(f"registry.{reg_name}.default removed")
+        return
 
     if key == "temp-dir":
         from ..config import unset_temp_dir

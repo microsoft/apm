@@ -90,6 +90,7 @@ class InstallService:
             skill_subset_from_cli=request.skill_subset_from_cli,
             legacy_skill_paths=request.legacy_skill_paths,
             plan_callback=request.plan_callback,
+            refresh=request.refresh,
         )
 
     @staticmethod

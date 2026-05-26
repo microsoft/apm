@@ -11,6 +11,12 @@ reproducible installs and for drift detection. Commit it.
 
 ## Purpose
 
+This is a **Working Draft**. The lock file format has two versions in use:
+`"1"` (Git-only projects) and `"2"` (projects with at least one registry-sourced
+dependency). The bump is opportunistic; see [Version bumping](#version-bumping).
+Registry-sourced dependencies require the experimental registries feature
+(`apm experimental enable registries`) before install or replay.
+
 The lockfile gives APM four things:
 
 1. **Reproducibility.** `apm install --frozen` reinstalls the exact commits
@@ -43,9 +49,32 @@ lockfile_version: "1"
 generated_at: "2026-05-10T20:14:00+00:00"
 apm_version: "0.6.4"
 dependencies:
-  - repo_url: github.com/octocat/example-skills
-    resolved_commit: 7f3c9a...
-    # ...
+  - repo_url: https://github.com/acme-corp/security-baseline
+    resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
+    resolved_ref: v2.1.0
+    version: "2.1.0"
+    depth: 1
+    package_type: apm_package
+    deployed_files:
+      - .github/instructions/security.instructions.md
+      - .github/agents/security-auditor.agent.md
+
+  - repo_url: https://github.com/acme-corp/common-prompts
+    resolved_commit: f6e5d4c3b2a1098765432109876543210fedcba9
+    resolved_ref: main
+    depth: 2
+    resolved_by: https://github.com/acme-corp/security-baseline
+    package_type: apm_package
+    deployed_files:
+      - .github/instructions/common-guidelines.instructions.md
+
+  - repo_url: https://github.com/acme-corp/security-baseline
+    source: registry
+    version: "2.1.0"
+    resolved_url: https://registry.example.com/v1/packages/acme/security-baseline/versions/2.1.0/download
+    resolved_hash: "sha256:abc123..."
+    depth: 1
+    package_type: apm_package
 mcp_servers:
   - github
 mcp_configs:
@@ -61,7 +90,7 @@ local_deployed_file_hashes:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `lockfile_version` | string | yes | Schema version. Currently `"1"`. Bumped on breaking format changes. |
+| `lockfile_version` | string | yes | Schema version. `"1"` for Git-only projects; `"2"` when any dependency has `source: "registry"`. |
 | `generated_at` | ISO 8601 string | yes | UTC timestamp of the last write. Ignored by equivalence checks. |
 | `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
@@ -82,7 +111,7 @@ Each item in `dependencies` describes one resolved package.
 | `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
 | `resolved_commit` | string | no | Exact 40-char commit SHA installed. The pin. |
-| `version` | string | no | Resolved semver when the source advertises one. |
+| `version` | string | no | Resolved package version/ref selector. For registry entries this is the exact version selected from the registry, whether semver or not. |
 | `virtual_path` | string | no | Subpath inside the repo for virtual packages (monorepo subpaths). |
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
@@ -91,7 +120,9 @@ Each item in `dependencies` describes one resolved package.
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. |
 | `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Directory entries (trailing `/`) have no hash. |
-| `source` | string | no | `"local"` for path dependencies. Absent for remote deps. |
+| `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
+| `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
+| `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
 | `local_path` | string | no | Original path from `apm.yml` for local deps, relative to project root. |
 | `content_hash` | string | no | SHA-256 of the local package's source tree. Lets APM detect upstream changes to a path dep. |
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
@@ -125,6 +156,23 @@ all "owned" files uniformly. This synthesized entry has:
 The synthesized entry is **not** written back to YAML - the flat
 `local_deployed_*` fields remain the on-disk source of truth. Treat the self
 entry as an implementation detail; do not author it by hand.
+
+## Version bumping
+
+The lock file uses two schema versions:
+
+| Version | Triggered by | Adds |
+|---|---|---|
+| `"1"` | Default for Git-only projects. | Baseline schema. |
+| `"2"` | Any dependency with `source: "registry"`. | `resolved_url`, `resolved_hash`, and the `version` field on registry entries. |
+
+The bump is **opportunistic**: a project that never opts into a registry keeps
+`lockfile_version: "1"` forever, even on a newer client. The first registry
+dep added to the graph promotes the lockfile to `"2"`; if every registry dep is
+later removed, the next write demotes back to `"1"`. Both versions are valid
+on-disk formats; consumers MUST handle either.
+
+For the registry workflow this enables, see the [Registries guide](../../guides/registries/).
 
 ## Pack section
 

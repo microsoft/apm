@@ -1084,20 +1084,18 @@ class TestMarketplaceInternalHelpers:
         """_parse_marketplace_repo parses OWNER/REPO correctly."""
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo_name, embedded_host = _parse_marketplace_repo("acme/plugins", None)
-        assert owner == "acme"
-        assert repo_name == "plugins"
-        assert embedded_host is None
+        url, kind, embedded_host = _parse_marketplace_repo("acme/plugins", None)
+        assert url == "https://github.com/acme/plugins"
+        assert kind == "github"
+        assert embedded_host == "github.com"
 
     def test_parse_marketplace_repo_https_url(self) -> None:
         """_parse_marketplace_repo handles HTTPS URLs."""
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo_name, embedded_host = _parse_marketplace_repo(
-            "https://github.com/acme/plugins", None
-        )
-        assert owner == "acme"
-        assert repo_name == "plugins"
+        url, kind, embedded_host = _parse_marketplace_repo("https://github.com/acme/plugins", None)
+        assert url == "https://github.com/acme/plugins"
+        assert kind == "github"
         assert embedded_host == "github.com"
 
     def test_parse_marketplace_repo_http_rejected(self) -> None:

@@ -34,6 +34,7 @@ from apm_cli.commands.pack import pack_cmd, unpack_cmd
 from apm_cli.commands.plugin import plugin as plugin_cmd
 from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
+from apm_cli.commands.publish import publish_cmd
 from apm_cli.commands.run import preview, run
 from apm_cli.commands.runtime import runtime
 from apm_cli.commands.self_update import self_update
@@ -87,6 +88,7 @@ cli.add_command(
 )
 cli.add_command(pack_cmd, name="pack")
 cli.add_command(unpack_cmd, name="unpack")
+cli.add_command(publish_cmd, name="publish")
 cli.add_command(init)
 cli.add_command(install)
 cli.add_command(uninstall)
