@@ -395,40 +395,45 @@ class AgentIntegrator(BaseIntegrator):
             try:
                 fm = yaml.safe_load(fm_match.group(1)) or {}
             except Exception:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        f"Failed to parse YAML frontmatter in {source.name}, preserving original",
+                    )
                 fm = {}
             if not isinstance(fm, dict):
                 if diagnostics is not None:
                     diagnostics.warn(
-                        f"Non-dict frontmatter in {source.name}, treating as empty",
+                        f"Non-dict frontmatter in {source.name}, preserving original",
                     )
                 fm = {}
         else:
             body = content
             fm = {}
 
-        if not fm_match and not fm:
-            result, links_resolved = self.resolve_links(content, source, target)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(result, encoding="utf-8")
-            return links_resolved
-
         tools = fm.get("tools")
+        conversion_occurred = False
         if tools is not None and not isinstance(tools, dict):
             if isinstance(tools, list):
                 fm["tools"] = {t.strip(): True for t in tools if isinstance(t, str) and t.strip()}
+                conversion_occurred = True
                 if diagnostics is not None:
                     diagnostics.info(
                         f"Converted tools field from list to object in {source.name}",
                     )
             elif isinstance(tools, str):
                 fm["tools"] = {t.strip(): True for t in tools.split(",") if t.strip()}
+                conversion_occurred = True
                 if diagnostics is not None:
                     diagnostics.info(
                         f"Converted tools field from string to object in {source.name}",
                     )
 
-        fm_yaml = yaml.safe_dump(fm, default_flow_style=False, allow_unicode=True).rstrip("\n")
-        result = f"---\n{fm_yaml}\n---\n" + body
+        if conversion_occurred:
+            fm_yaml = yaml.safe_dump(fm, default_flow_style=False, allow_unicode=True).rstrip("\n")
+            result = f"---\n{fm_yaml}\n---\n" + body
+        else:
+            result = content
+
         result, links_resolved = self.resolve_links(result, source, target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(result, encoding="utf-8")
