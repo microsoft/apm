@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from apm_cli.utils import github_host
@@ -352,7 +354,7 @@ def test_unsupported_host_error_with_context():
     assert "Protocol-relative URLs are not supported" in error_msg
 
     # Should still include standard guidance
-    assert "github.com" in error_msg
+    assert re.search(r"\bgithub\.com\b", error_msg)
     assert "GITHUB_HOST" in error_msg
 
 

@@ -16,6 +16,7 @@ Strategy
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -266,7 +267,7 @@ class TestMarketplaceAddUnsupportedHostError:
         msg = _marketplace_add_unsupported_host_error(
             "example.com", "'example.com'", "'example.com'", "generic"
         )
-        assert "github.com" in msg
+        assert re.search(r"\bgithub\.com\b", msg)
         assert "GITHUB_HOST" in msg or "GitLab" in msg
 
 

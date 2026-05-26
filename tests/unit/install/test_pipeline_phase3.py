@@ -13,6 +13,7 @@ test_pipeline_auth_preflight.py:
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -226,7 +227,7 @@ class TestPreflightAuthCheckADOAuthFailure:
         resolver = _make_resolver()
         with pytest.raises(AuthenticationError) as exc_info:
             _preflight_auth_check(ctx, resolver, verbose=False)
-        assert "dev.azure.com" in str(exc_info.value)
+        assert re.search(r"\bdev\.azure\.com\b", str(exc_info.value))
 
 
 # ---------------------------------------------------------------------------
