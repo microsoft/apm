@@ -170,6 +170,10 @@ class AgentIntegrator(BaseIntegrator):
                 links_resolved = self._write_windsurf_agent_skill(
                     source_file, target_path, diagnostics=diagnostics
                 )
+            elif mapping.format_id == "opencode_agent":
+                links_resolved = self._write_opencode_agent(
+                    source_file, target_path, diagnostics=diagnostics
+                )
             else:
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
@@ -362,6 +366,63 @@ class AgentIntegrator(BaseIntegrator):
         result = f"---\n{fm_yaml}\n---\n" + body
         result, links_resolved = self.resolve_links(result, source, target)
         target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(result, encoding="utf-8")
+        return links_resolved
+
+    # ------------------------------------------------------------------
+    # OpenCode agent transformer (list tools -> object tools)
+    # ------------------------------------------------------------------
+
+    def _write_opencode_agent(self, source: Path, target: Path, diagnostics=None) -> int:
+        """Transform an ``.agent.md`` file for OpenCode's schema.
+
+        OpenCode expects the ``tools`` frontmatter field to be an object
+        (``{Read: true, Glob: true}``) rather than a list
+        (``["Read", "Glob"]``).  This method converts list- or
+        comma-separated-string ``tools`` to the object format while
+        preserving all other frontmatter and the markdown body.
+        """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
+        content = source.read_text(encoding="utf-8")
+
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+        else:
+            body = content
+            fm = {}
+
+        if not fm_match and not fm:
+            result, links_resolved = self.resolve_links(content, source, target)
+            target.write_text(result, encoding="utf-8")
+            return links_resolved
+
+        tools = fm.get("tools")
+        if tools is not None and not isinstance(tools, dict):
+            if isinstance(tools, list):
+                fm["tools"] = {t: True for t in tools if isinstance(t, str)}
+            elif isinstance(tools, str):
+                fm["tools"] = {
+                    t.strip(): True
+                    for t in tools.split(",")
+                    if t.strip()
+                }
+            if diagnostics is not None:
+                diagnostics.info(
+                    f"Converted tools field from {type(tools).__name__} "
+                    f"to object in {source.name}",
+                )
+
+        fm_yaml = yaml.safe_dump(
+            fm, default_flow_style=False, allow_unicode=True
+        ).rstrip("\n")
+        result = f"---\n{fm_yaml}\n---\n" + body
+        result, links_resolved = self.resolve_links(result, source, target)
         target.write_text(result, encoding="utf-8")
         return links_resolved
 
