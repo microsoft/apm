@@ -65,7 +65,8 @@ apm install
 
 With no flags, `apm install` reproduces exactly the versions pinned in
 `apm.lock.yaml`. New entries you have added to `apm.yml` get resolved
-and locked; existing ones stay on their locked SHAs.
+and locked; entries whose ref was changed in `apm.yml` are re-resolved
+to the new pin; entries whose spec is unchanged stay on their locked SHAs.
 
 When the lockfile is already satisfied, install prints:
 

@@ -120,7 +120,7 @@ def run(ctx: InstallContext) -> None:
             _cache_root = get_cache_root()
             downloader.persistent_git_cache = GitCache(
                 _cache_root,
-                refresh=getattr(ctx, "refresh", False),
+                refresh=ctx.refresh,
             )
         except (OSError, ValueError):
             pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
@@ -184,8 +184,18 @@ def run(ctx: InstallContext) -> None:
     # This matches the original code's closure over function-level locals.
     scope = ctx.scope
     project_root = ctx.project_root
-    update_refs = ctx.update_refs
+    # --refresh implies re-resolution of all refs (but does NOT discard
+    # lockfile entries for packages not in the manifest, unlike --update
+    # which may restructure the whole graph).
+    update_refs = ctx.update_refs or ctx.refresh
+    if ctx.refresh and ctx.logger:
+        ctx.logger.verbose_detail("[*] --refresh: re-resolving all refs")
     logger = ctx.logger
+
+    # Hoist drift helpers so download_callback avoids per-call sys.modules
+    # lookups and static analysis can see the dependency.
+    from apm_cli.drift import build_download_ref, detect_ref_change
+
     verbose = ctx.verbose  # noqa: F841
 
     def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
@@ -267,25 +277,39 @@ def run(ctx: InstallContext) -> None:
                     _tui.task_failed(dep_ref.get_unique_key())
                 return None
 
-            # T5: Use locked commit if available (reproducible installs)
-            locked_ref = None
-            if existing_lockfile:
-                locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                if (
-                    locked_dep
-                    and locked_dep.resolved_commit
-                    and locked_dep.resolved_commit != "cached"
-                ):
-                    locked_ref = locked_dep.resolved_commit
+            # T5: Use locked commit for reproducibility, unless the manifest
+            # ref has drifted from what the lockfile recorded (spec drift).
+            _locked_dep = (
+                existing_lockfile.get_dependency(dep_ref.get_unique_key())
+                if existing_lockfile
+                else None
+            )
+            _ref_changed = detect_ref_change(dep_ref, _locked_dep, update_refs=update_refs)
 
-            # Build a DependencyReference with the right ref to avoid lossy
-            # str() -> parse() round-trips (#382).
-            from dataclasses import replace as _dc_replace
+            # When ref drifts, signal downstream that a content-hash change
+            # is expected so the supply-chain check in sources.py doesn't
+            # treat a legitimate re-resolution as an attack.
+            if _ref_changed:
+                with callback_lock:
+                    ctx.expected_hash_change_deps.add(dep_ref.get_unique_key())
+                if logger:
+                    _old = (
+                        _locked_dep.resolved_ref or _locked_dep.resolved_commit[:8]
+                        if _locked_dep
+                        else "?"
+                    )
+                    _new = dep_ref.reference or "HEAD"
+                    logger.verbose_detail(
+                        f"  [!] Spec drift: {dep_ref.get_unique_key()} "
+                        f"{_old} -> {_new}, re-resolving"
+                    )
 
-            if locked_ref and not update_refs:
-                download_dep = _dc_replace(dep_ref, reference=locked_ref)
-            else:
-                download_dep = dep_ref
+            download_dep = build_download_ref(
+                dep_ref,
+                existing_lockfile,
+                update_refs=update_refs,
+                ref_changed=_ref_changed,
+            )
 
             # Silent download - no progress display for transitive deps
             result = downloader.download_package(download_dep, install_path)
