@@ -1152,6 +1152,35 @@ class TestCrossRepoMisconfigRisk:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_cross_repo_qualified_to_github_com_no_risk(
+        self, mock_get, mock_fetch, ghe_marketplace_source
+    ):
+        """#1326 cross-host explicit qualification: ``repo: github.com/owner/repo``
+        on a ``*.ghe.com`` marketplace is declared cross-host intent, NOT a
+        dependency-confusion ambiguity. The sentinel must not attach
+        (otherwise the install gate would refuse a legitimate cross-host
+        dependency the operator explicitly declared).
+
+        The same-host idempotency path in ``_needs_canonical_host_prefix``
+        only handles ``repo: corp.ghe.com/owner/repo``; this case is the
+        symmetric escape hatch for cross-host intent at the resolver layer.
+        """
+        plugin = MarketplacePlugin(
+            name="cross-host",
+            source={
+                "type": "github",
+                "repo": "github.com/platform-team/shared-tool",
+                "path": "plugins/cross-host",
+            },
+        )
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("cross-host", "my-marketplace")
+        assert result.cross_repo_misconfig_risk is None
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
     def test_cross_repo_url_form_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
         """Full ``https://`` URL carries its own host; hint inapplicable."""
         plugin = MarketplacePlugin(
@@ -1300,6 +1329,58 @@ class TestCrossRepoMisconfigRisk:
 
         result = resolve_marketplace_plugin("src-key", "my-marketplace")
         assert result.cross_repo_misconfig_risk is not None
+
+    def test_compute_returns_none_on_url_or_scp_repo_field_when_filter_bypassed(
+        self,
+    ):
+        """Defense-in-depth: ``_needs_canonical_host_prefix`` already returns
+        False for URL / SCP shorthand canonicals (its ``":"`` in first-segment
+        clause), so these forms normally short-circuit before reaching the
+        explicit-host guard. This direct-call test simulates a future upstream
+        refactor that lets those forms through and asserts the guard still
+        recognises them as host-qualified -- a bare ``split("/", 1)[0]`` would
+        misclassify ``https:`` / ``git@host:owner`` as non-host first segments
+        and incorrectly attach the sentinel.
+
+        Calls ``_compute_cross_repo_misconfig_risk`` directly with a
+        canonical that bypasses the upstream guard so we can lock the
+        behaviour of the explicit-host extraction step alone.
+        """
+        from apm_cli.marketplace.resolver import _compute_cross_repo_misconfig_risk
+
+        source = MarketplaceSource(
+            name="my-marketplace",
+            owner="myorg",
+            repo="my-marketplace",
+            host="corp.ghe.com",
+            branch="main",
+        )
+
+        for repo_value in (
+            "https://github.com/platform-team/shared-tool",
+            "http://github.com/platform-team/shared-tool",
+            "ssh://github.com/platform-team/shared-tool",
+            "git@github.com:platform-team/shared-tool",
+        ):
+            plugin = MarketplacePlugin(
+                name="cross",
+                source={
+                    "type": "github",
+                    "repo": repo_value,
+                    "path": "plugins/cross",
+                },
+            )
+            # Hand-build a canonical that would bypass the upstream
+            # ``_needs_canonical_host_prefix`` URL/SCP short-circuit (this
+            # shape is not what ``_resolve_github_source`` actually produces
+            # for these inputs; the test is intentionally probing the
+            # explicit-host guard in isolation).
+            canonical = "platform-team/shared-tool/plugins/cross"
+            risk = _compute_cross_repo_misconfig_risk(plugin, source, canonical, None)
+            assert risk is None, (
+                f"explicit-host guard must recognise {repo_value!r} as "
+                "host-qualified even when upstream filters do not catch it"
+            )
 
     def test_compute_returns_none_on_no_slash_repo_field(self):
         """Defensive guard inside the helper: ``repo`` without ``/`` is

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -67,6 +68,7 @@ class APMFileHandler:
         dry_run: bool,
         logger: CommandLogger,
         effective_target: CompileTargetType | None = None,
+        cli_target: str | list[str] | None = None,
     ) -> None:
         self.output = output
         self.chatmode = chatmode
@@ -74,6 +76,11 @@ class APMFileHandler:
         self.dry_run = dry_run
         self.logger = logger
         self.effective_target = effective_target
+        # Raw --target CLI argument retained so ``_recompile`` can
+        # re-run :func:`_resolve_effective_target` against the
+        # current apm.yml on every recompile, letting mid-session
+        # ``targets:`` edits take effect on the next file event.
+        self.cli_target = cli_target
         self.last_compile = 0.0
         self.debounce_delay = 1.0  # 1 second debounce
 
@@ -95,12 +102,28 @@ class APMFileHandler:
             self.logger.progress(f"File changed: {changed_file}", symbol="eyes")
             self.logger.progress("Recompiling...", symbol="gear")
 
+            # When apm.yml itself was the trigger, re-resolve so a
+            # mid-session edit to ``target:`` / ``targets:`` takes
+            # effect on this recompile, then persist the fresh value
+            # so subsequent instruction-file edits do not silently
+            # revert to the startup snapshot.  Match on basename
+            # rather than ``endswith`` so a stray ``backup_apm.yml``
+            # cannot masquerade as the project root manifest.
+            effective_target = self.effective_target
+            if os.path.basename(changed_file) == APM_YML_FILENAME:
+                from .cli import _resolve_effective_target
+
+                effective_target, _reason, _config_target = _resolve_effective_target(
+                    self.cli_target
+                )
+                self.effective_target = effective_target
+
             config = CompilationConfig.from_apm_yml(
                 output_path=self.output if self.output != AGENTS_MD_FILENAME else None,
                 chatmode=self.chatmode,
                 resolve_links=not self.no_links if self.no_links else None,
                 dry_run=self.dry_run,
-                target=self.effective_target,
+                target=effective_target,
             )
 
             compiler = AgentsCompiler(".")
@@ -129,15 +152,20 @@ def _watch_mode(
     effective_target: CompileTargetType | None = None,
     target_label_user: str | list[str] | None = None,
     target_label_config: str | list[str] | None = None,
+    cli_target: str | list[str] | None = None,
 ) -> None:
     """Watch for changes in .apm/ directories and auto-recompile.
 
     ``effective_target`` is the compiler-understood target resolved by
     :func:`apm_cli.commands.compile.cli._resolve_effective_target` (the
     same resolver the one-shot path uses) and is forwarded as ``target=``
-    into every :meth:`CompilationConfig.from_apm_yml` call so watch mode
-    honors ``targets: [claude, cursor]`` instead of silently fanning out
-    to all families on every recompile (#1345).
+    into the initial compile so the startup label matches the one-shot
+    path (#1345).
+
+    ``cli_target`` is the raw ``--target`` argument; recompiles re-run
+    the resolver against the current apm.yml so mid-session edits to
+    ``targets:`` take effect on the next file event without restarting
+    the watcher.
     """
     logger = CommandLogger("compile-watch", verbose=verbose, dry_run=dry_run)
 
@@ -159,6 +187,7 @@ def _watch_mode(
             dry_run,
             logger,
             effective_target=effective_target,
+            cli_target=cli_target,
         )
         observer = Observer()
 

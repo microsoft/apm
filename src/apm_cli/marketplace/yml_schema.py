@@ -69,11 +69,60 @@ _SEMVER_RE = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 
-# Source field accepts either ``owner/repo`` (remote) or ``./...`` (local
-# path within the same repo).  Used by both yml_schema and yml_editor for
-# source field validation.
-SOURCE_RE = re.compile(r"^(?:[^/]+/[^/]+|\./.*)$")
+# Source field accepts:
+#   - ``owner/repo`` (remote, default host)
+#   - ``host.tld/owner/repo`` (remote on a non-default host, shorthand)
+#   - ``https://host.tld/owner/repo`` (remote on a non-default host, full URL)
+#   - ``https://host.tld/owner/repo.git`` (same, with optional ``.git`` suffix)
+#   - ``./...`` (local path within the same repo)
+#
+# Used by both yml_schema and yml_editor for source field validation.
+#
+# The host segment is restricted to RFC-1123 hostname characters
+# (letters, digits, hyphens, dots) and must contain at least one dot
+# (i.e. look like a FQDN, to disambiguate from ``owner/repo``).  Userinfo
+# (``user@host``), port (``host:port``), query strings, fragments, SSH SCP
+# (``git@host:path``) and non-``https`` URL schemes are explicitly rejected
+# to avoid RFC 3986 confused-deputy attacks.
+_HOST_PAT = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]*"
+_OWNER_REPO_PAT = r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+"
+
+SOURCE_RE = re.compile(
+    r"^(?:"
+    rf"https://{_HOST_PAT}/{_OWNER_REPO_PAT}(?:\.git)?"
+    rf"|{_HOST_PAT}/{_OWNER_REPO_PAT}"
+    rf"|{_OWNER_REPO_PAT}"
+    r"|\./.*"
+    r")$"
+)
 LOCAL_SOURCE_RE = re.compile(r"^\./")
+# Matches ``host.tld/owner/repo`` (3 segments, first is FQDN-ish).
+_HOST_PREFIXED_SOURCE_RE = re.compile(rf"^({_HOST_PAT})/({_OWNER_REPO_PAT})$")
+# Matches ``https://host.tld/owner/repo[.git]`` and captures host + owner/repo.
+_HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(?:\.git)?$")
+
+
+def split_host_from_source(source: str) -> tuple[str | None, str]:
+    """Split a host-qualified source into ``(host, owner/repo)``.
+
+    Accepts both shorthand (``host.tld/owner/repo``) and full HTTPS URL
+    (``https://host.tld/owner/repo[.git]``) forms.  Returns ``(None, source)``
+    for the plain ``owner/repo`` shorthand or local ``./...`` paths.
+
+    A trailing ``.git`` suffix on the repo segment is stripped so the
+    returned ``owner/repo`` is normalized regardless of input form.
+    """
+    m = _HTTPS_URL_SOURCE_RE.match(source)
+    if m:
+        host, owner_repo = m.group(1), m.group(2)
+        if owner_repo.endswith(".git"):
+            owner_repo = owner_repo[: -len(".git")]
+        return host, owner_repo
+    m = _HOST_PREFIXED_SOURCE_RE.match(source)
+    if m:
+        return m.group(1), m.group(2)
+    return None, source
+
 
 # Placeholder tokens accepted in ``tag_pattern`` / ``build.tagPattern``.
 _TAG_PLACEHOLDERS = ("{version}", "{name}")
@@ -285,6 +334,10 @@ class PackageEntry:
     category: str | None = None
     # Derived (set by loader, not by user)
     is_local: bool = False
+    # Optional non-default git host parsed from ``source`` of the form
+    # ``host.tld/owner/repo``. ``None`` means use the default host
+    # (``GITHUB_HOST`` env or ``github.com``).
+    host: str | None = None
 
 
 @dataclass(frozen=True)
@@ -383,12 +436,16 @@ def _validate_semver(version: str, *, context: str = "version") -> None:
 def _validate_source(source: str, *, index: int) -> None:
     """Validate ``source`` field shape and path safety.
 
-    Accepts either ``owner/repo`` (remote) or ``./...`` (local path).
+    Accepts ``owner/repo``, ``host.tld/owner/repo``, ``https://host.tld/
+    owner/repo[.git]``, or ``./<path>``.
     """
     ctx = f"packages[{index}].source"
     if not SOURCE_RE.match(source):
         raise MarketplaceYmlError(
-            f"'{ctx}' must match '<owner>/<repo>' or './<path>' shape, got '{source}'"
+            f"'{ctx}' must be one of "
+            f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
+            f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>', "
+            f"got '{source}'"
         )
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     try:
@@ -655,6 +712,11 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
     source = _require_str(raw, "source", context=f"packages[{index}]")
     _validate_source(source, index=index)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
+    # Detect host-prefixed source (e.g. ``host.tld/owner/repo``) and split
+    # the host off so downstream consumers continue to see ``owner/repo``.
+    host: str | None = None
+    if not is_local:
+        host, source = split_host_from_source(source)
 
     # APM-only: subdir (irrelevant for local packages but harmless)
     subdir: str | None = raw.get("subdir")
@@ -807,6 +869,7 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
         repository=repository,
         category=category,
         is_local=is_local,
+        host=host,
     )
 
 

@@ -135,7 +135,7 @@ class TestSchemaHelpers:
 
     @pytest.mark.parametrize("source", ["owner", "owner/repo/extra"])
     def test_validate_source_rejects_invalid_shape(self, source: str) -> None:
-        with pytest.raises(MarketplaceYmlError, match="shape"):
+        with pytest.raises(MarketplaceYmlError, match="must be one of"):
             _validate_source(source, index=0)
 
     @pytest.mark.parametrize("source", ["../repo", "./../repo"])
@@ -381,7 +381,7 @@ class TestParsePackageEntry:
 
     def test_parse_package_entry_rejects_invalid_source(self) -> None:
         entry = _minimal_package_entry() | {"source": "invalid-source"}
-        with pytest.raises(MarketplaceYmlError, match="shape"):
+        with pytest.raises(MarketplaceYmlError, match="must be one of"):
             _parse_package_entry(entry, 0)
 
     def test_parse_package_entry_accepts_local_source_without_ref_or_version(self) -> None:

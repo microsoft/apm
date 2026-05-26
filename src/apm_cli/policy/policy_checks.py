@@ -769,6 +769,64 @@ def _check_unmanaged_files(
     )
 
 
+def _check_registry_source(
+    deps: list[DependencyReference],
+    policy: RegistrySourcePolicy,
+    registries_map: dict[str, str] | None,
+) -> CheckResult:
+    """Check registry source policy (require / allow_non_registry).
+
+    Fail-closed when a required registry name has no URL configured in
+    *registries_map* — that means the registry source is unreachable by
+    definition and the install must not proceed.
+    """
+    check_name = "registry-source"
+    no_op = not policy.require and policy.allow_non_registry
+    if no_op:
+        return CheckResult(name=check_name, passed=True, message="No registry source policy")
+
+    violations: list[str] = []
+
+    # Fail-closed: required registry names must be configured.
+    for req_name in policy.require:
+        if not registries_map or req_name not in registries_map:
+            violations.append(
+                f"required registry '{req_name}' is not configured — "
+                "add it to the 'registries:' block or via 'apm config set registry."
+                f"{req_name}.url <url>'"
+            )
+
+    for dep in deps:
+        key = dep.get_canonical_dependency_string()
+        is_registry = getattr(dep, "source", None) == "registry"
+        registry_name = getattr(dep, "registry_name", None)
+
+        if not policy.allow_non_registry and not is_registry:
+            violations.append(
+                f"{key}: non-registry source not permitted (policy requires registry sources only)"
+            )
+            continue
+
+        if policy.require and is_registry and registry_name not in policy.require:
+            violations.append(
+                f"{key}: sourced from registry '{registry_name}' "
+                f"but policy requires one of {sorted(policy.require)}"
+            )
+
+    if violations:
+        return CheckResult(
+            name=check_name,
+            passed=False,
+            message=f"{len(violations)} registry source violation(s)",
+            details=violations,
+        )
+    return CheckResult(
+        name=check_name,
+        passed=True,
+        message="All dependencies satisfy registry source policy",
+    )
+
+
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -782,6 +840,7 @@ def run_dependency_policy_checks(
     fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
+    registries: dict[str, str] | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -861,7 +920,11 @@ def run_dependency_policy_checks(
     if _run(_check_transitive_depth(lockfile, policy.dependencies)):
         return result
 
-    # -- MCP checks (7-10) ----------------------------------------
+    # -- Registry source check (7) ---------------------------------
+    if _run(_check_registry_source(deps_list, policy.registry_source, registries)):
+        return result
+
+    # -- MCP checks (8-11) ----------------------------------------
     # When mcp_deps is None (not provided), skip MCP checks entirely.
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
@@ -964,6 +1027,7 @@ def run_policy_checks(
         # effective_target=None: target checks handled below from raw_yml
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
+        registries=getattr(manifest, "registries", None),
     )
     result.checks.extend(dep_result.checks)
 

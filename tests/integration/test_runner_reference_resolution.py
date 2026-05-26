@@ -671,7 +671,7 @@ class TestParseFromDict:
 
     def test_missing_git_and_path_raises(self) -> None:
         DR = _dep_ref()
-        with pytest.raises(ValueError, match="'git' or 'path' field"):
+        with pytest.raises(ValueError, match=r"'git', 'path', or 'registry' field"):
             DR.parse_from_dict({"version": "1.0"})
 
     def test_allow_insecure_non_bool_raises(self) -> None:

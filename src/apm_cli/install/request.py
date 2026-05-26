@@ -52,6 +52,11 @@ class InstallRequest:
     # the pipeline, so the failure surfaces without running resolve.
     frozen: bool = False
 
+    # --refresh: re-resolve all refs against upstream (bypass lockfile
+    # pins).  Unlike --update (which restructures the whole graph),
+    # --refresh only forces re-resolution without discarding orphans.
+    refresh: bool = False
+
     # Plan-gate hook: if set, run_install_pipeline invokes this callable
     # AFTER resolve completes and BEFORE downloads begin, passing the
     # computed UpdatePlan.  The callable returns True to proceed or

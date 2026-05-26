@@ -521,6 +521,17 @@ def compile(
 
         # Watch mode
         if watch:
+            # --clean removes orphaned outputs from a previous targets:
+            # configuration and would surprise users if run on every
+            # recompile mid-session; running it only on the initial
+            # compile would re-introduce a watcher-specific code path.
+            # Surface that --clean is ignored here so users can run
+            # `apm compile --clean` separately between watch sessions.
+            if clean:
+                logger.warning(
+                    "--clean is ignored in watch mode; run 'apm compile --clean' "
+                    "separately to remove orphaned outputs."
+                )
             # Resolve the same effective target the one-shot path uses so
             # `targets: [claude, cursor]` does not silently regress to the
             # all-families fanout on every recompile (#1345).
@@ -534,6 +545,7 @@ def compile(
                 effective_target=effective_target,
                 target_label_user=target,
                 target_label_config=config_target,
+                cli_target=target,
             )
             return
 
