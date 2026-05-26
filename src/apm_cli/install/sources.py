@@ -33,6 +33,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
 
+from apm_cli.install.registry_wiring import (
+    get_registry_resolver,
+    registry_resolution_for_cached_registry_dep,
+    resolver_last_registry_resolution,
+)
 from apm_cli.utils.console import _rich_error, _rich_success
 from apm_cli.utils.short_sha import format_short_sha
 
@@ -448,6 +453,17 @@ class CachedDependencySource(DependencySource):
         ):
             _cached_registry = ctx.registry_config
 
+        _cached_resolution = None
+        if dep_ref.source == "registry":
+            from apm_cli.deps.registry.feature_gate import (
+                require_package_registry_enabled,
+            )
+
+            require_package_registry_enabled("Registry-sourced cached installs")
+            _cached_resolution = registry_resolution_for_cached_registry_dep(
+                ctx, dep_ref, dep_key, dep_locked_chk
+            )
+
         ctx.installed_packages.append(
             InstalledPackage(
                 dep_ref=dep_ref,
@@ -456,6 +472,7 @@ class CachedDependencySource(DependencySource):
                 resolved_by=resolved_by,
                 is_dev=_is_dev,
                 registry_config=_cached_registry,
+                registry_resolution=_cached_resolution,
             )
         )
         if install_path.is_dir():
@@ -543,6 +560,60 @@ class FreshDependencySource(DependencySource):
 
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
+            elif dep_ref.source == "registry":
+                from apm_cli.deps.registry.feature_gate import (
+                    require_package_registry_enabled,
+                )
+
+                require_package_registry_enabled("Registry-sourced downloads")
+
+                # Registry-sourced dep: dispatch to the dedicated-registry
+                # resolver instead of the GitHub downloader. This branch
+                # fires when (a) the BFS callback skipped due to existing
+                # install path on a re-install, or (b) parallel pre-download
+                # was skipped (registry deps aren't pre-downloaded).
+                _registry_resolver = get_registry_resolver(ctx)
+                if _registry_resolver is None:
+                    raise RuntimeError(
+                        f"dep {dep_ref.repo_url!r} is registry-sourced but "
+                        f"no registry resolver was constructed (apm.yml may "
+                        f"be missing a 'registries:' block)."
+                    )
+                # Lockfile re-install path: registry_name might be absent —
+                # look it up from the lockfile's resolved_url.
+                from apm_cli.deps.registry.auth import (
+                    dependency_ref_with_registry_name_from_lockfile,
+                )
+
+                _regs = getattr(ctx.apm_package, "registries", None) or {}
+                download_ref = dependency_ref_with_registry_name_from_lockfile(
+                    download_ref,
+                    _regs,
+                    locked_dep=dep_locked_chk,
+                )
+                # Lockfile replay (npm install model): fetch directly from the
+                # locked URL and verify against the locked hash when available
+                # and the manifest range still covers the locked version.
+                if (
+                    not ctx.update_refs
+                    and dep_locked_chk
+                    and dep_locked_chk.resolved_url
+                    and dep_locked_chk.resolved_hash
+                    and dep_locked_chk.version
+                    and not ref_changed
+                ):
+                    package_info = _registry_resolver.download_from_lockfile(
+                        download_ref,
+                        install_path,
+                        resolved_url=dep_locked_chk.resolved_url,
+                        resolved_hash=dep_locked_chk.resolved_hash,
+                        version=dep_locked_chk.version,
+                    )
+                else:
+                    package_info = _registry_resolver.download_package(
+                        download_ref,
+                        install_path,
+                    )
             else:
                 package_info = ctx.downloader.download_package(
                     download_ref,
@@ -569,7 +640,11 @@ class FreshDependencySource(DependencySource):
                     # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
                     _sha = format_short_sha(resolved.resolved_commit)
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
-                if ctx.auth_resolver:
+                # Only emit the per-package git auth diagnostic for git deps.
+                # Registry-sourced deps don't talk to git hosts; resolving
+                # github.com auth here for them is misleading (and can issue
+                # network calls via auth.AuthResolver providers).
+                if ctx.auth_resolver and dep_ref.source in (None, "git"):
                     try:
                         _host = dep_ref.host or "github.com"
                         _org = (
@@ -605,6 +680,14 @@ class FreshDependencySource(DependencySource):
             depth = node.depth if node else 1
             resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
             _is_dev = node.is_dev if node else False
+            # Registry-sourced deps: pull the captured resolution out of
+            # the resolver's per-graph map so the lockfile records
+            # resolved_url + resolved_hash + version (design §6.1).
+            _registry_resolution = (
+                resolver_last_registry_resolution(ctx, dep_key)
+                if dep_ref.source == "registry"
+                else None
+            )
             ctx.installed_packages.append(
                 InstalledPackage(
                     dep_ref=dep_ref,
@@ -612,7 +695,8 @@ class FreshDependencySource(DependencySource):
                     depth=depth,
                     resolved_by=resolved_by,
                     is_dev=_is_dev,
-                    registry_config=ctx.registry_config if not dep_ref.is_local else None,
+                    registry_config=(ctx.registry_config if not dep_ref.is_local else None),
+                    registry_resolution=_registry_resolution,
                 )
             )
             if install_path.is_dir():

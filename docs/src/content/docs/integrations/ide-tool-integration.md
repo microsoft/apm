@@ -21,7 +21,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Codex CLI            | `.codex/`                            | Skills, MCP                            |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
-| Windsurf             | `.windsurf/`                         | Rules + MCP (lossy agent->skill)       |
+| Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).

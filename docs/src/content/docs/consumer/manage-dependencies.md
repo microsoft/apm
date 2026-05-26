@@ -63,21 +63,37 @@ parser. The supported forms:
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
-| Object form | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
+| Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
 
 Object form in YAML:
 
 ```yaml
 dependencies:
   apm:
+    # Git dep with sub-path
     - git: https://gitlab.com/acme/coding-standards.git
       path: instructions/security
       ref: v2.0
       alias: security
+
+    # Registry dep (experimental) — whole package via default registry
+    - id: acme/code-review-prompts
+      version: ^2.0.0
+
+    # Registry dep — named registry, virtual sub-path
+    - registry: corp-main
+      id: acme/prompt-library
+      path: prompts/review.prompt.md
+      version: 1.4.0
 ```
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
+
+For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
+[Private registries](../../guides/private-registries/).
 
 ## Add a dependency
 

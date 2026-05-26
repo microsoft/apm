@@ -18,6 +18,7 @@ from .schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    RegistrySourcePolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -232,6 +233,12 @@ def _build_policy(data: dict) -> ApmPolicy:
         directories = _parse_tuple(uf_data.get("directories")) if "directories" in uf_data else None
         unmanaged_files = UnmanagedFilesPolicy(action=action, directories=directories)
 
+    reg_data = data.get("registry_source") or {}
+    registry_source = RegistrySourcePolicy(
+        require=_parse_tuple(reg_data.get("require")),
+        allow_non_registry=bool(reg_data.get("allow_non_registry", True)),
+    )
+
     return ApmPolicy(
         name=data.get("name", "") or "",
         version=data.get("version", "") or "",
@@ -244,6 +251,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         compilation=compilation,
         manifest=manifest,
         unmanaged_files=unmanaged_files,
+        registry_source=registry_source,
     )
 
 

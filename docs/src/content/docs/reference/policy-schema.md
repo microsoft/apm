@@ -34,11 +34,12 @@ The `<ref>` accepts:
 | `enforcement`      | enum                | `warn`           | no       | `off` / `warn` / `block`. See [Enforcement modes](#enforcement-modes).            |
 | `fetch_failure`    | enum                | `warn`           | no       | `warn` / `block`. Behavior when a remote policy cannot be fetched or parsed.      |
 | `cache`            | object              | `{ttl: 3600}`    | no       | Cache settings for remote policy fetches.                                         |
-| `dependencies`    | object              | see section      | no       | Rules over APM dependencies.                                                       |
+| `dependencies`     | object              | see section      | no       | Rules over APM dependencies.                                                       |
 | `mcp`              | object              | see section      | no       | Rules over MCP servers (direct and transitive).                                   |
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
+| `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
 
@@ -229,6 +230,26 @@ unmanaged_files:
   directories:
     - .github/instructions
     - .github/prompts
+```
+
+## registry_source
+
+::::caution[Experimental]
+Requires `apm experimental enable registries`. Ignored on clients without the flag enabled.
+::::
+
+Mandate that APM dependencies come from configured registries. Checks apply transitively (including transitive deps pulled in by registry packages).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `require` | `list<string>` | `[]` | Registry names that MUST be reachable. APM **fails-closed** if a listed name has no URL in the merged registry map (from project `apm.yml`, workspace `~/.apm/apm.yml`, or `~/.apm/config.json`) — this is intentional: a missing registry config is treated as a policy violation, not a no-op. |
+| `allow_non_registry` | `bool` | `true` | When `false`, APM blocks installation of any dependency not routed through a configured registry. |
+
+```yaml
+registry_source:
+  require:
+    - jf-skills
+  allow_non_registry: false
 ```
 
 ## See also

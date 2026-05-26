@@ -859,8 +859,8 @@ class TestUnmanagedFiles:
 
 
 class TestRunPolicyChecks:
-    def test_returns_all_17_checks(self, tmp_path):
-        """Full run should produce exactly 17 checks."""
+    def test_returns_all_18_checks(self, tmp_path):
+        """Full run should produce exactly 18 checks."""
         _write_apm_yml(
             tmp_path,
             {
@@ -884,7 +884,7 @@ class TestRunPolicyChecks:
 
         policy = ApmPolicy()
         result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 17
+        assert len(result.checks) == 18
         # Default policy = all checks pass
         assert result.passed
 

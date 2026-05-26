@@ -53,6 +53,13 @@ def _path_segment_pattern(is_ado_host: bool) -> str:
     return _ADO_PATH_SEGMENT_RE if is_ado_host else _NON_ADO_PATH_SEGMENT_RE
 
 
+def _is_valid_registry_semver_range(spec: str) -> bool:
+    """Defer importing ``deps.registry`` until call time (avoids import cycles)."""
+    from ...deps.registry.semver import is_semver_range
+
+    return is_semver_range(spec)
+
+
 @dataclass
 class DependencyReference:
     """Represents a reference to an APM dependency."""
@@ -96,6 +103,17 @@ class DependencyReference:
     # identity stays user-agnostic (lockfile pinning + dedup work the same
     # whether a project uses ``git@`` or an EMU/custom SSH account).
     ssh_user: str | None = None
+
+    # Registry resolver fields (optional; default to None/git semantics)
+    # source: which resolver should fetch this dep. None and "git" are equivalent
+    # (legacy default). Set to "registry" by the parser when an entry routes to
+    # a configured registry (via top-level registries: block or
+    # object-form `- registry:` / `- id:` discriminator).
+    # registry_name: name of the registry from apm.yml's registries: block when
+    # source == "registry". Carried in-memory only; never serialized into the
+    # lockfile (the lockfile uses URL-based identity per design §6.1).
+    source: str | None = None
+    registry_name: str | None = None
 
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
@@ -534,6 +552,18 @@ class DependencyReference:
         Raises:
             ValueError: If the entry is missing required fields or has invalid format
         """
+        # Object-form registry package — design §3.2.
+        # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
+        # optional when a ``registries.default:`` is configured).  Mutually
+        # exclusive with ``git:``.
+        if "registry" in entry or "id" in entry:
+            if "git" in entry:
+                raise ValueError(
+                    "Object-style dependency cannot mix 'registry:'/'id:' and 'git:' "
+                    "keys — choose one resolver."
+                )
+            return cls._parse_registry_object_entry(entry)
+
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
             local = entry["path"]
@@ -549,7 +579,9 @@ class DependencyReference:
             return cls.parse(local)
 
         if "git" not in entry:
-            raise ValueError("Object-style dependency must have a 'git' or 'path' field")
+            raise ValueError(
+                "Object-style dependency must have a 'git', 'path', or 'registry' field"
+            )
 
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
@@ -615,6 +647,10 @@ class DependencyReference:
         # Parse the git URL using the standard parser
         dep = cls.parse(git_url)
         dep.allow_insecure = allow_insecure
+        # Object-form ``- git:`` is an explicit Git resolver pin, even when
+        # a top-level ``registries.default`` is set. Mark source so the
+        # default-routing pass in apm_package.py leaves it alone.
+        dep.source = "git"
 
         # Apply overrides from the object fields
         if ref_override is not None:
@@ -803,6 +839,98 @@ class DependencyReference:
             return 2
 
         return n
+
+    @classmethod
+    def _parse_registry_object_entry(cls, entry: dict) -> "DependencyReference":
+        """Parse the object-form registry entry per §3.2.
+
+        Required keys:
+            id:       <owner>/<repo>   # package identity at the registry
+            version:  <any-string>      # opaque version string; registry resolves it
+
+        Optional:
+            registry: <name>           # routes to named registry; omit to use default
+            path:     prompts/foo.md   # virtual sub-path; omit to install the whole package
+            alias:    <name>           # same meaning as in other object forms
+        """
+        from ...deps.registry.feature_gate import require_package_registry_enabled
+
+        require_package_registry_enabled("Object-form registry dependencies")
+
+        _registry_raw = entry.get("registry")
+        registry_name: str | None = None
+        if _registry_raw is not None:
+            if not isinstance(_registry_raw, str) or not _registry_raw.strip():
+                raise ValueError(
+                    "Object-form registry entry: 'registry' must be a non-empty "
+                    "string (the name of an entry in the apm.yml registries: block)"
+                )
+            registry_name = _registry_raw.strip()
+
+        pkg_id = entry.get("id")
+        if not isinstance(pkg_id, str) or not pkg_id.strip():
+            raise ValueError(
+                "Object-form registry entry: 'id' is required and must be a "
+                "non-empty 'owner/repo' string"
+            )
+        pkg_id = pkg_id.strip()
+        if "/" not in pkg_id:
+            raise ValueError(
+                f"Object-form registry entry: 'id' must be 'owner/repo', got {pkg_id!r}"
+            )
+
+        raw_path = entry.get("path")
+        sub_path: str | None = None
+        if raw_path is not None:
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise ValueError(
+                    "Object-form registry entry: 'path' must be a non-empty string "
+                    "when provided (e.g. 'prompts/review.prompt.md')"
+                )
+            sub_path = raw_path.strip().strip("/").replace("\\", "/").strip("/")
+            validate_path_segments(sub_path, context="path")
+
+        version = entry.get("version")
+        if not isinstance(version, str) or not version.strip():
+            raise ValueError("Object-form registry entry: 'version' is required")
+        version = version.strip()
+
+        alias = entry.get("alias")
+        if alias is not None:
+            if not isinstance(alias, str) or not alias.strip():
+                raise ValueError("'alias' field must be a non-empty string")
+            alias = alias.strip()
+            if not re.match(r"^[a-zA-Z0-9._-]+$", alias):
+                raise ValueError(
+                    f"Invalid alias: {alias}. Aliases can only contain "
+                    f"letters, numbers, dots, underscores, and hyphens"
+                )
+
+        # Reject any unknown keys to catch typos early.
+        known = {"registry", "id", "path", "version", "alias"}
+        unknown = set(entry.keys()) - known
+        if unknown:
+            raise ValueError(
+                f"Object-form registry entry has unknown fields: "
+                f"{sorted(unknown)}. Known fields: {sorted(known)}"
+            )
+
+        owner_segments = pkg_id.split("/")
+        validate_path_segments(pkg_id, context="registry id")
+        for seg in owner_segments:
+            if not re.match(r"^[a-zA-Z0-9._-]+$", seg):
+                raise ValueError(f"Invalid registry id segment: {seg!r} in {pkg_id!r}")
+
+        return cls(
+            repo_url=pkg_id,
+            host=default_host(),
+            reference=version,
+            virtual_path=sub_path,
+            is_virtual=sub_path is not None,
+            alias=alias,
+            source="registry",
+            registry_name=registry_name,
+        )
 
     @classmethod
     def _detect_virtual_package(cls, dependency_str: str):

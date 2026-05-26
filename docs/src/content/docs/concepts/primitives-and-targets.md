@@ -90,7 +90,7 @@ Notes per target:
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
 - **opencode** -- OpenCode. No hooks support.
-- **windsurf** -- Windsurf / Cascade. Agents are delivered as auto-invokable skills under `.windsurf/skills/`. Workflows are the harness's name for commands.
+- **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
 
 ## The compatibility matrix
 
@@ -105,7 +105,7 @@ Rows are primitives, columns are harnesses. Cell legend:
 |---|---|---|---|---|---|---|---|
 | instructions | native | native | native | compiled | compiled | compiled | native |
 | prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled |
-| agents | native | native | compiled | compiled | unsupported | native | compiled |
+| agents | native | native | compiled | compiled | unsupported | native | unsupported |
 | skills | native | native | native | native | native | native | native |
 | hooks | native | native | native | native | native | unsupported | native |
 | commands | unsupported | native | compiled | unsupported | compiled | compiled | compiled |

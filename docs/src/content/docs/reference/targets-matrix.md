@@ -25,7 +25,7 @@ see [Primitive types](../primitive-types/).
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
-| windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
+| windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills always deploy to the cross-tool `.agents/skills/` directory by
@@ -158,13 +158,13 @@ Windsurf / Cascade.
 
 - **Detection.** `.windsurf/` directory.
 - **Deploy directory.** `.windsurf/` at project scope; `~/.codeium/windsurf/` at user scope.
-- **Supported primitives.** instructions, agents, skills, commands, hooks, mcp.
+- **Supported primitives.** instructions, skills, commands, hooks, mcp.
 - **File conventions.**
   - instructions: `.windsurf/rules/<name>.md`
-  - agents: `.windsurf/skills/<name>/SKILL.md` (Cascade auto-invokes skill-shaped agents by description)
   - skills: `.windsurf/skills/<name>/SKILL.md`
   - commands: `.windsurf/workflows/<name>.md`
   - hooks: `.windsurf/hooks.json`
+- **Agents.** Not deployed. Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so a separate agents primitive would collide with skills on the same path. Ship personas as skills under `.apm/skills/<name>/SKILL.md` instead.
 - **User scope.** Partial. `instructions` is excluded at user scope; Windsurf stores global memory in a single `~/.codeium/windsurf/memories/global_rules.md` file with a different format.
 
 ## agent-skills

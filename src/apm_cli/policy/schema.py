@@ -123,6 +123,20 @@ class UnmanagedFilesPolicy:
 
 
 @dataclass(frozen=True)
+class RegistrySourcePolicy:
+    """Rules governing which registries APM dependencies may use.
+
+    ``require``: registry names that MUST be the source for all deps.
+    ``allow_non_registry``: when ``False``, any dep that is not
+    registry-sourced (git, local, etc.) is blocked. Applied transitively
+    across the full resolved dep graph.
+    """
+
+    require: tuple[str, ...] = ()
+    allow_non_registry: bool = True
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -137,3 +151,4 @@ class ApmPolicy:
     compilation: CompilationPolicy = field(default_factory=CompilationPolicy)
     manifest: ManifestPolicy = field(default_factory=ManifestPolicy)
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
+    registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
