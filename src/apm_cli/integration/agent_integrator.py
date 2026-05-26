@@ -380,7 +380,10 @@ class AgentIntegrator(BaseIntegrator):
         (``{Read: true, Glob: true}``) rather than a list
         (``["Read", "Glob"]``).  This method converts list- or
         comma-separated-string ``tools`` to the object format while
-        preserving all other frontmatter and the markdown body.
+        keeping the markdown body and non-``tools`` frontmatter keys
+        intact.  YAML comments and key ordering in the frontmatter are
+        not preserved (the frontmatter is re-serialised after the
+        ``tools`` conversion).
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
