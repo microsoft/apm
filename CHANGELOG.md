@@ -37,8 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
 - `apm compile --target claude` omits the "Project Standards" section from `CLAUDE.md` when instructions are already deployed to `.claude/rules/` by `apm install`, avoiding duplicate content in Claude Code's context window. `CLAUDE.md` is still generated for constitution and dependency imports. (closes #1138, #1146)
 - `apm compile --watch` now live-reloads `apm.yml` edits instead of caching the initial snapshot, and warns when combined with `--clean` so a watch session does not silently wipe state on every change. (#1403)
-- Windows: `_local_path_from_source` handles `file://` URI shapes (drive-letter, UNC) so local marketplaces on Windows resolve correctly. (#1484)
-- Windows: `_local_path_from_source` preserves POSIX separators on plain POSIX-shaped inputs (`Path().expanduser()` was rewriting `/home/user` to `\home\user`); local-path pass-through is now cross-platform. (commit 131679f, follow-up to #1484)
+- Windows: `_local_path_from_source` handles `file://` URI shapes (drive-letter, UNC) so local marketplaces on Windows resolve correctly, and preserves POSIX separators on plain POSIX-shaped inputs (`Path().expanduser()` was rewriting `/home/user` to `\home\user`); local-path pass-through is now cross-platform. (#1484)
 - `apm install` rewrites skill-shipped MCP `command` paths for the Claude target so portable installs resolve relative to `.claude/` instead of the source skill's checkout. (#1465)
 - Unstuck 3 flaky integration tests that were intermittently blocking the merge queue. (#1477)
 
