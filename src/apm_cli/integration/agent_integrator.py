@@ -394,7 +394,7 @@ class AgentIntegrator(BaseIntegrator):
             body = content[fm_match.end() :]
             try:
                 fm = yaml.safe_load(fm_match.group(1)) or {}
-            except Exception:
+            except yaml.YAMLError:
                 if diagnostics is not None:
                     diagnostics.warn(
                         f"Failed to parse YAML frontmatter in {source.name}, preserving original",

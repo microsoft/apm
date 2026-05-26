@@ -1226,7 +1226,7 @@ class TestOpenCodeAgentConversion:
             self.integrator._write_opencode_agent(link, target)
 
     def test_handles_non_dict_frontmatter(self):
-        """Non-dict YAML frontmatter (e.g. bare list) is treated as empty."""
+        """Non-dict YAML frontmatter (e.g. bare list) is preserved as-is."""
         source = self.root / "badfm.agent.md"
         # frontmatter that parses as a YAML list, not a mapping
         source.write_text("---\n- one\n- two\n---\n\n# Body\n")
@@ -1235,9 +1235,11 @@ class TestOpenCodeAgentConversion:
         self.integrator._write_opencode_agent(source, target)
 
         content = target.read_text()
-        # Should not crash; frontmatter becomes empty
+        # Should not crash; non-dict frontmatter is preserved as-is
         assert "---" in content
         assert "# Body" in content
+        assert "- one" in content
+        assert "- two" in content
 
     def test_integrate_via_target_dispatch(self):
         """End-to-end: opencode target triggers tools conversion."""
