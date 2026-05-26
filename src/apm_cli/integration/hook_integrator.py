@@ -210,24 +210,29 @@ def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
     for event_name, sidecar_entries in sidecar_data.items():
         if event_name not in hooks or not isinstance(sidecar_entries, list):
             continue
-        # Build a consumable pool of (normalised-content, source) pairs.
-        # Each entry is popped on first match so identical content shared
+        # Build a dict keyed by normalised content -> list of sources.
+        # Each source is popped on first match so identical content shared
         # between APM and the user is only claimed once.
-        pool: list[tuple[dict, str]] = []
+        import json
+        from collections import deque
+
+        pool: dict[str, deque[str]] = {}
         for sc_entry in sidecar_entries:
             if isinstance(sc_entry, dict) and "_apm_source" in sc_entry:
                 cmp = {k: v for k, v in sorted(sc_entry.items()) if k != "_apm_source"}
-                pool.append((cmp, sc_entry["_apm_source"]))
+                cmp_key = json.dumps(cmp, sort_keys=True)
+                pool.setdefault(cmp_key, deque()).append(sc_entry["_apm_source"])
 
         for disk_entry in hooks[event_name]:
             if not isinstance(disk_entry, dict) or "_apm_source" in disk_entry:
                 continue
             disk_cmp = {k: v for k, v in sorted(disk_entry.items()) if k != "_apm_source"}
-            for i, (sc_cmp, source) in enumerate(pool):
-                if disk_cmp == sc_cmp:
-                    disk_entry["_apm_source"] = source
-                    pool.pop(i)
-                    break
+            disk_key = json.dumps(disk_cmp, sort_keys=True)
+            sources = pool.get(disk_key)
+            if sources:
+                disk_entry["_apm_source"] = sources.popleft()
+                if not sources:
+                    del pool[disk_key]
 
 
 # Mapping from hook-file stem suffix to the set of target keys that
@@ -1203,22 +1208,19 @@ class HookIntegrator(BaseIntegrator):
                 # Deduplicate same-package entries by content.
                 # Safety net for edge cases where multiple source files
                 # produce semantically identical entries.
-                seen_content: list[dict] = []
+                import json as _json
+
+                seen_keys: set[str] = set()
                 deduped: list = []
                 for entry in json_config["hooks"][event_name]:
                     if not isinstance(entry, dict):
                         deduped.append(entry)
                         continue
-                    # Build comparison key (all fields except _apm_source)
                     cmp = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
                     source = entry.get("_apm_source")
-                    is_dup = False
-                    for seen in seen_content:
-                        if seen.get("_source") == source and seen.get("_cmp") == cmp:
-                            is_dup = True
-                            break
-                    if not is_dup:
-                        seen_content.append({"_source": source, "_cmp": cmp})
+                    dedup_key = _json.dumps({"s": source, "c": cmp}, sort_keys=True)
+                    if dedup_key not in seen_keys:
+                        seen_keys.add(dedup_key)
                         deduped.append(entry)
                 json_config["hooks"][event_name] = deduped
 

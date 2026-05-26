@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now re-resolves a dependency when its ref pin is changed in `apm.yml`; previously the locked commit always won, silently ignoring the edit -- by @sergio-sisternes-epam (#1473)
+- `--refresh` flag on `apm install` now actually re-resolves all ref pins (previously accepted but had no effect) -- by @sergio-sisternes-epam (#1473)
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
 
 ## [0.14.2] - 2026-05-22

@@ -75,9 +75,14 @@ def detect_ref_change(
 
     Handles all transitions:
 
-    * ref *added*  (``None`` → ``"v1.0.0"``)
-    * ref *removed* (``"main"`` → ``None``)
-    * ref *changed* (``"v1.0.0"`` → ``"v2.0.0"``)
+    * ref *added*  (``None`` -> ``"v1.0.0"``)
+    * ref *removed* (``"main"`` -> ``None``)
+    * ref *changed* (``"v1.0.0"`` -> ``"v2.0.0"``)
+
+    .. note::
+
+       Host changes (e.g. github.com -> ghes.corp.net) are a known non-goal
+       for this function.  A future enhancement may detect host drift.
 
     Args:
         dep_ref: The dependency as declared in the current manifest.
