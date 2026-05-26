@@ -827,6 +827,62 @@ def _check_registry_source(
     )
 
 
+def _check_pinned_constraints(
+    deps: list[DependencyReference],
+    policy: DependencyPolicy,
+) -> CheckResult:
+    """Check: every direct dep declares a bounded constraint.
+
+    Skipped (passes vacuously) when
+    ``policy.require_pinned_constraint`` is ``False`` -- the default.
+
+    Operates on the **declared** constraint (``dep.reference``), not
+    the resolved one, so authors learn before the install completes
+    that a moving ref slipped past review.
+
+    Runs on the same dep set as the other dependency checks (the
+    resolved set, which includes transitives). The classification
+    is shape-only, so transitive deps that ARE pinned in their
+    parent's manifest will pass; only declared-unbounded shows up.
+    See ``_constraint_pinning.py`` for classification rules.
+    """
+    from ._constraint_pinning import classify_unbounded_reason, humanize_reason
+
+    check_name = "dependency-pinned-constraint"
+    if not policy.require_pinned_constraint:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="Pinned-constraint requirement disabled",
+        )
+
+    violations: list[str] = []
+    for dep in deps:
+        reason = classify_unbounded_reason(dep)
+        if reason is None:
+            continue
+        key = dep.get_canonical_dependency_string()
+        hint = humanize_reason(reason, dep)
+        violations.append(f"{key}: {hint}")
+
+    if not violations:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="All dependencies use pinned constraints",
+        )
+
+    return CheckResult(
+        name=check_name,
+        passed=False,
+        message=(
+            f"{len(violations)} dependency(ies) use unbounded constraints "
+            "(hint: pin to a semver range, literal tag, or SHA)"
+        ),
+        details=violations,
+    )
+
+
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -922,6 +978,12 @@ def run_dependency_policy_checks(
 
     # -- Registry source check (7) ---------------------------------
     if _run(_check_registry_source(deps_list, policy.registry_source, registries)):
+        return result
+
+    # -- Pinned-constraint check (7b) ------------------------------
+    # Property check on declared refs; runs alongside allow/deny/require.
+    # Cheap (O(N) string classification, no I/O) so it always runs.
+    if _run(_check_pinned_constraints(deps_list, policy.dependencies)):
         return result
 
     # -- MCP checks (8-11) ----------------------------------------
