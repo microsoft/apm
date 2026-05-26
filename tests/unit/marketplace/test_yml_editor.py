@@ -156,6 +156,28 @@ class TestAddPluginErrors:
         with pytest.raises(MarketplaceYmlError, match="source"):
             add_plugin_entry(yml, source="noslash", version=">=1.0.0")
 
+    def test_invalid_source_error_message_lists_all_forms(self, tmp_path):
+        """Error wording must mention every accepted form so users get a complete hint."""
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        with pytest.raises(MarketplaceYmlError) as exc:
+            add_plugin_entry(yml, source="bogus@host/owner/repo", version=">=1.0.0")
+        msg = str(exc.value)
+        assert "<owner>/<repo>" in msg
+        assert "<host.tld>/<owner>/<repo>" in msg
+        assert "https://" in msg
+        assert "./<path>" in msg
+
+    def test_host_prefixed_source_accepted(self, tmp_path):
+        """yml_editor accepts the same host-prefixed form as the loader."""
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        add_plugin_entry(
+            yml,
+            name="ghe-tool",
+            source="ghe.example.com/acme/tool",
+            ref="v1.0.0",
+        )
+        assert "ghe.example.com/acme/tool" in yml.read_text("utf-8")
+
     def test_path_traversal_in_subdir_raises(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         with pytest.raises(MarketplaceYmlError):
