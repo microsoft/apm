@@ -199,7 +199,7 @@ def _marketplace_host_needs_explicit_git_path(host: str) -> bool:
     ``github.com`` and ``*.ghe.com`` virtual shorthand is reliable. Azure DevOps uses
     a different URL shape and is excluded. Self-managed GitLab FQDNs are often
     classified as ``generic`` by :meth:`AuthResolver.classify_host` when not listed in
-    ``GITLAB_HOST`` / ``APM_GITLAB_HOSTS`` — they still need explicit clone URLs so
+    ``GITLAB_HOST`` / ``APM_GITLAB_HOSTS`` -- they still need explicit clone URLs so
     paths like ``registry/pkg`` are not treated as extra project namespace segments.
     """
     if not host or not str(host).strip():
@@ -208,6 +208,27 @@ def _marketplace_host_needs_explicit_git_path(host: str) -> bool:
     if is_azure_devops_hostname(h):
         return False
     return not is_github_hostname(h)
+
+
+def _source_needs_explicit_git_path(source: MarketplaceSource) -> bool:
+    """Kind-aware variant of :func:`_marketplace_host_needs_explicit_git_path`.
+
+    For URL-first sources, the ``kind`` derivation already encodes the routing
+    decision: any host APM doesn't classify as github-family needs the explicit
+    git+path canonical (mirrors the existing GitLab self-managed pattern), and
+    that now includes Azure DevOps and generic git hosts since their
+    ``marketplace.json`` is fetched via subprocess git instead of an API.
+
+    Local marketplaces handle relative sources via :func:`_resolve_local_relative_source`
+    on the fast path and never reach this helper.
+    """
+    kind = source.kind
+    if kind == "github":
+        return False
+    if kind in ("gitlab", "git"):
+        return True
+    # Fall back to legacy host-based behaviour for any kind we don't recognise
+    return _marketplace_host_needs_explicit_git_path(source.host)
 
 
 def _needs_canonical_host_prefix(canonical: str, host: str) -> bool:
@@ -298,7 +319,21 @@ def _compute_cross_repo_misconfig_risk(
 
 
 def _marketplace_https_git_url(source: MarketplaceSource) -> str:
-    """HTTPS clone URL for the registered marketplace project (same project as ``marketplace.json``)."""
+    """HTTPS clone URL for the registered marketplace project.
+
+    Prefers ``source.url`` (the canonical URL stored in ``marketplaces.json``) when
+    present, falling back to synthesising from legacy owner/repo/host fields. The
+    canonical URL preserves quirky shapes like Azure DevOps' ``_git`` segment and
+    self-managed GitLab nested groups that owner/repo round-tripping cannot
+    reconstruct correctly.
+    """
+    url = (source.url or "").strip()
+    if url and url.startswith(("https://", "http://", "git://", "ssh://")):
+        return url if url.endswith(".git") else f"{url}.git"
+    # SCP-like SSH (git@host:org/repo.git) -- pass through verbatim
+    if url and "@" in url and ":" in url and not url.startswith("file://"):
+        return url
+    # Legacy synth from owner/repo/host
     segments = [p for p in f"{source.owner}/{source.repo}".split("/") if p]
     encoded = "/".join(quote(seg, safe="") for seg in segments)
     return f"https://{source.host}/{encoded}.git"
@@ -500,13 +535,23 @@ def _resolve_relative_source(
     When *plugin_root* is set (from ``metadata.pluginRoot`` in the manifest),
     bare names (no ``/``) are resolved under that directory.
     """
-    # Normalize the relative path (strip leading ./ and trailing /)
+    rel = _normalise_relative_plugin_source(source, plugin_root=plugin_root)
+    if rel and rel != ".":
+        return f"{marketplace_owner}/{marketplace_repo}/{rel}"
+    return f"{marketplace_owner}/{marketplace_repo}"
+
+
+def _normalise_relative_plugin_source(source: str, plugin_root: str = "") -> str:
+    """Normalise + validate a relative plugin source; return the normalised rel path.
+
+    Returns "" or "." when the plugin is the marketplace root.
+    Raises ``ValueError`` for paths that would escape the marketplace root.
+    """
     rel = source.strip("/")
     if rel.startswith("./"):
         rel = rel[2:]
     rel = rel.strip("/")
 
-    # If plugin_root is set and source is a bare name, prepend it
     if plugin_root and rel and rel != "." and "/" not in rel:
         root = plugin_root.strip("/")
         if root.startswith("./"):
@@ -520,8 +565,31 @@ def _resolve_relative_source(
             validate_path_segments(rel, context="relative source path")
         except PathTraversalError as exc:
             raise ValueError(str(exc)) from exc
-        return f"{marketplace_owner}/{marketplace_repo}/{rel}"
-    return f"{marketplace_owner}/{marketplace_repo}"
+    return rel
+
+
+def _resolve_local_relative_source(
+    source: str,
+    marketplace: MarketplaceSource,
+    plugin_root: str = "",
+) -> str:
+    """Resolve a relative source inside a local marketplace to a local-path canonical.
+
+    The returned string starts with ``/`` (or ``~`` / drive letter on supported
+    platforms) so :meth:`DependencyReference.is_local_path` recognises it and
+    install routes it through ``LocalDependencySource``.
+    """
+    rel = _normalise_relative_plugin_source(source, plugin_root=plugin_root)
+    base = marketplace.local_path
+    if not base:
+        raise ValueError(
+            f"Marketplace '{marketplace.name}' is kind=local but has no resolvable "
+            f"filesystem path (url={marketplace.url!r}); cannot resolve relative "
+            f"plugin source '{source}'."
+        )
+    if rel and rel != ".":
+        return f"{base.rstrip('/')}/{rel}"
+    return base
 
 
 def resolve_plugin_source(
@@ -643,6 +711,24 @@ def resolve_marketplace_plugin(
     if plugin is None:
         raise PluginNotFoundError(plugin_name, marketplace_name)
 
+    source_kind = source.kind
+
+    # ---- Local marketplace fast-path ----
+    # Relative plugin sources resolve to a local-path canonical (consumed by
+    # LocalDependencySource); dict sources (github/url/git-subdir/gitlab) keep
+    # their normal resolution because they reference external repos regardless
+    # of where the marketplace lives.
+    if source_kind == "local" and isinstance(plugin.source, str):
+        canonical = _resolve_local_relative_source(
+            plugin.source, source, plugin_root=manifest.plugin_root
+        )
+        return MarketplacePluginResolution(
+            canonical=canonical,
+            plugin=plugin,
+            dependency_reference=None,
+            cross_repo_misconfig_risk=None,
+        )
+
     canonical = resolve_plugin_source(
         plugin,
         marketplace_owner=source.owner,
@@ -651,9 +737,7 @@ def resolve_marketplace_plugin(
     )
 
     dep_ref: DependencyReference | None = None
-    if _marketplace_host_needs_explicit_git_path(source.host) and _is_in_marketplace_source(
-        plugin, source
-    ):
+    if _source_needs_explicit_git_path(source) and _is_in_marketplace_source(plugin, source):
         in_repo_path, path_ref = _extract_in_repo_path_and_ref(
             plugin, plugin_root=manifest.plugin_root
         )

@@ -45,6 +45,32 @@ _log = logging.getLogger(__name__)
 # Full SHA pattern: 40 hex characters
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 
+
+def _safe_git_args() -> list[str]:
+    """Return hardening ``-c`` args prepended to every git subprocess.
+
+    - ``core.hooksPath=/dev/null`` disables any hook script that a
+      malicious upstream might ship (``.git/hooks/post-checkout`` etc.)
+      so a clone or checkout cannot trigger arbitrary code execution.
+    - ``submodule.recurse=false`` prevents any subcommand from
+      recursing into attacker-controlled submodule URLs.
+
+    These flags are scoped per-invocation via ``-c`` and never mutate
+    the user's gitconfig. The cache layer is the single source of
+    truth for git subprocess invocation -- callers must use this
+    helper rather than ad-hoc ``git`` argv construction.
+    """
+    from ..utils.git_env import git_long_paths_args
+
+    return [
+        *git_long_paths_args(),
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "submodule.recurse=false",
+    ]
+
+
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
 # When a caller requests sparse_paths, we use a separate bare keyed at
 # ``<shard>__p`` cloned with ``--filter=blob:none``. The partial bare
@@ -214,7 +240,7 @@ class GitCache:
         # auth-delegated: cache-layer ref resolution runs after lockfile
         # already pinned the commit; no PAT->bearer fallback applies here
         # (env is sanitized, no embedded creds).
-        cmd = [git_exe, "ls-remote", url]
+        cmd = [git_exe, *_safe_git_args(), "ls-remote", url]
         if ref:
             cmd.append(ref)
 
@@ -287,7 +313,7 @@ class GitCache:
 
         Returns the path to the bare repo directory.
         """
-        from ..utils.git_env import get_git_executable, git_long_paths_args, git_subprocess_env
+        from ..utils.git_env import get_git_executable, git_subprocess_env
 
         bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if partial else "")
         bare_dir = self._db_root / bare_shard
@@ -318,7 +344,14 @@ class GitCache:
             os.chmod(str(staged), 0o700)
 
             subprocess_env = env if env is not None else git_subprocess_env()
-            clone_args = [git_exe, *git_long_paths_args(), "clone", "--bare", "--no-tags"]
+            clone_args = [
+                git_exe,
+                *_safe_git_args(),
+                "clone",
+                "--bare",
+                "--no-tags",
+                "--no-recurse-submodules",
+            ]
             if partial:
                 # Promisor partial clone: trees + commits only. Blobs
                 # arrive lazily via the remote when the consumer needs
@@ -368,10 +401,11 @@ class GitCache:
                         subprocess.run(
                             [
                                 git_exe,
-                                *git_long_paths_args(),
+                                *_safe_git_args(),
                                 "clone",
                                 "--bare",
                                 "--no-tags",
+                                "--no-recurse-submodules",
                                 url,
                                 str(staged),
                             ],
@@ -456,7 +490,7 @@ class GitCache:
         get the lock and return immediately. Critical for CI matrix
         builds where multiple jobs hit the same uncached repo.
         """
-        from ..utils.git_env import get_git_executable, git_long_paths_args, git_subprocess_env
+        from ..utils.git_env import get_git_executable, git_subprocess_env
 
         bare_shard = shard_key + (_PARTIAL_BARE_SUFFIX if promisor_url else "")
         bare_dir = self._db_root / bare_shard
@@ -505,11 +539,12 @@ class GitCache:
                 subprocess.run(
                     [
                         git_exe,
-                        *git_long_paths_args(),
+                        *_safe_git_args(),
                         "clone",
                         "--local",
                         "--shared",
                         "--no-checkout",
+                        "--no-recurse-submodules",
                         str(bare_dir),
                         str(staged),
                     ],
@@ -536,7 +571,7 @@ class GitCache:
                         subprocess.run(
                             [
                                 git_exe,
-                                *git_long_paths_args(),
+                                *_safe_git_args(),
                                 "-C",
                                 str(staged),
                                 "config",
@@ -558,13 +593,13 @@ class GitCache:
                         staged,
                         list(sparse_paths),
                         env=subprocess_env,
-                        extra_git_args=git_long_paths_args(),
+                        extra_git_args=_safe_git_args(),
                     )
                 # Checkout the specific SHA
                 subprocess.run(
                     [
                         git_exe,
-                        *git_long_paths_args(),
+                        *_safe_git_args(),
                         "-C",
                         str(staged),
                         "checkout",
@@ -606,7 +641,7 @@ class GitCache:
         subprocess_env = env if env is not None else git_subprocess_env()
         try:
             result = subprocess.run(
-                [git_exe, "-C", str(bare_dir), "cat-file", "-t", sha],
+                [git_exe, *_safe_git_args(), "-C", str(bare_dir), "cat-file", "-t", sha],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -648,7 +683,7 @@ class GitCache:
         # so we don't pull all blobs reachable from the new SHA. Detected
         # via shard-suffix naming convention (cheap, no git config probe).
         is_partial = bare_dir.name.endswith(_PARTIAL_BARE_SUFFIX)
-        fetch_args = [git_exe, "-C", str(bare_dir), "fetch"]
+        fetch_args = [git_exe, *_safe_git_args(), "-C", str(bare_dir), "fetch"]
         if is_partial:
             fetch_args += ["--filter=blob:none"]
         fetch_args += [url, sha]
@@ -664,7 +699,7 @@ class GitCache:
         except subprocess.CalledProcessError:
             # Some servers don't allow fetching by SHA -- fetch all refs
             subprocess.run(
-                [git_exe, "-C", str(bare_dir), "fetch", "--all"],
+                [git_exe, *_safe_git_args(), "-C", str(bare_dir), "fetch", "--all"],
                 capture_output=True,
                 text=True,
                 timeout=120,
