@@ -408,19 +408,24 @@ class AgentIntegrator(BaseIntegrator):
 
         if not fm_match and not fm:
             result, links_resolved = self.resolve_links(content, source, target)
+            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(result, encoding="utf-8")
             return links_resolved
 
         tools = fm.get("tools")
         if tools is not None and not isinstance(tools, dict):
             if isinstance(tools, list):
-                fm["tools"] = {t: True for t in tools if isinstance(t, str)}
+                fm["tools"] = {t.strip(): True for t in tools if isinstance(t, str) and t.strip()}
+                if diagnostics is not None:
+                    diagnostics.info(
+                        f"Converted tools field from list to object in {source.name}",
+                    )
             elif isinstance(tools, str):
                 fm["tools"] = {t.strip(): True for t in tools.split(",") if t.strip()}
-            if diagnostics is not None:
-                diagnostics.info(
-                    f"Converted tools field from {type(tools).__name__} to object in {source.name}",
-                )
+                if diagnostics is not None:
+                    diagnostics.info(
+                        f"Converted tools field from string to object in {source.name}",
+                    )
 
         fm_yaml = yaml.safe_dump(fm, default_flow_style=False, allow_unicode=True).rstrip("\n")
         result = f"---\n{fm_yaml}\n---\n" + body
