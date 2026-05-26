@@ -75,8 +75,22 @@ def _extract_owner_repo_from_url(url: str) -> tuple[str, str]:
 
 
 def _local_path_from_source(value: str) -> str:
-    """Normalise a local-path source to an absolute path string."""
+    """Normalise a local-path source to an absolute path string.
+
+    Handles three ``file://`` shapes so Windows callers get the right answer:
+    - POSIX: ``file:///abs/path`` -> ``/abs/path``
+    - Windows proper: ``file:///C:/path`` -> ``C:/path``
+    - Windows malformed (e.g. ``f"file://{Path}"`` where Path is ``C:\\...``):
+      ``file://C:\\path`` -> ``C:\\path``
+    ``urlsplit`` mis-parses the Windows-shaped forms (treats ``C:`` as a host),
+    so do the strip manually after detecting a drive-letter prefix.
+    """
     if value.startswith("file://"):
+        rest = value[len("file://") :]
+        if len(rest) >= 3 and rest[0] == "/" and rest[1].isalpha() and rest[2] == ":":
+            return rest[1:]
+        if len(rest) >= 2 and rest[0].isalpha() and rest[1] == ":":
+            return rest
         try:
             parsed = urlsplit(value)
         except ValueError:
