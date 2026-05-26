@@ -621,12 +621,17 @@ class FreshDependencySource(DependencySource):
             # Supply-chain protection: verify content hash on fresh
             # downloads when the lockfile already records a hash.
             # Skip when ``ctx.expected_hash_change_deps`` marks this dep
-            # (set by _resolve_download_strategy when branch-ref drift or
-            # the v<=0.12.2 self-heal forces a re-download whose hash is
-            # legitimately expected to differ from the lockfile record).
+            # (set by resolve.py's BFS callback and _resolve_download_strategy
+            # when branch-ref drift or the v<=0.12.2 self-heal forces a
+            # re-download whose hash is legitimately expected to differ from
+            # the lockfile record).
+            # Thread-safety: resolve phase completes before integrate runs,
+            # so the set is stable here.  integrate.py's own .add() is
+            # idempotent (set semantics) and runs single-threaded.
+            _expected_hash_deps = ctx.expected_hash_change_deps
             if (
                 not ctx.update_refs
-                and dep_key not in ctx.expected_hash_change_deps
+                and dep_key not in _expected_hash_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash
                 and dep_key in ctx.package_hashes

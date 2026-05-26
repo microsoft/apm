@@ -52,6 +52,7 @@ class InstallContext:
     dry_run: bool = False
     force: bool = False
     verbose: bool = False
+    refresh: bool = False
     dev: bool = False
     only_packages: list[str] | None = None
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
@@ -105,10 +106,11 @@ class InstallContext:
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
-    # Integrate-internal channel (does NOT cross phase boundaries):
+    # Deps whose content hash is expected to change legitimately:
     # populated by _resolve_download_strategy in phases/integrate.py
-    # (branch-ref `remote_drifted` guard at L195-218 and v<=0.12.2
-    # self-heal block at L234-258), consumed by
+    # (branch-ref `remote_drifted` guard and v<=0.12.2 self-heal block),
+    # and by the BFS callback in phases/resolve.py (spec-drift detection
+    # via detect_ref_change).  Consumed by
     # FreshDependencySource.acquire() in install/sources.py:~624 to
     # suppress the supply-chain hard-block when a fresh-download
     # content_hash legitimately differs from the lockfile-recorded

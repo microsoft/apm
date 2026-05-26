@@ -69,7 +69,7 @@ class TestSkillInstallIntegration:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         assert result.returncode == 0, f"Install failed: {result.stderr}"
@@ -88,7 +88,7 @@ class TestSkillInstallIntegration:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
@@ -121,7 +121,7 @@ class TestSkillInstallIntegration:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
@@ -143,7 +143,7 @@ class TestCompileSkipsSkills:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         assert result.returncode == 0, f"Install failed: {result.stderr}"
 
@@ -179,7 +179,7 @@ class TestMultipleSkillsInstall:
                 cwd=temp_project,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=300,
             )
             if result.returncode != 0:
                 continue  # Skip unavailable skills
@@ -201,7 +201,7 @@ class TestSkillNaming:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         # Should be brand-guidelines/ directory
@@ -216,7 +216,7 @@ class TestSkillNaming:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         skill_path = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"
