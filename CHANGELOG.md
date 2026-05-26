@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm config set prefer-ssh true` / `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users no longer need to re-pass `--ssh` / `--allow-protocol-fallback` (or export env vars in shell profiles) on every `apm install`. Resolution order: CLI flag > `APM_GIT_PROTOCOL` / `APM_ALLOW_PROTOCOL_FALLBACK` env var > `apm config` > built-in default. `apm config unset prefer-ssh` and `apm config unset allow-protocol-fallback` remove the persisted value. (#1243)
+- `apm pack --marketplace=FORMATS` filters which marketplace formats are built in a single run; accepts comma-separated names and sentinels `all`/`none`. (#1317)
+- `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. Env var overrides (`APM_MARKETPLACE_<FORMAT>_PATH`) are planned for v0.15. (#1317)
+- `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [{format, path, ...}]}}`); all logs move to stderr so downstream tooling can `jq` the output safely. (#1317)
+- `marketplace.outputs` in `apm.yml` now accepts a map form keyed by format name (`outputs: {claude: {}, codex: {path: ...}}`), replacing the deprecated list form; the list form still parses with a one-cycle deprecation warning. (#1317)
+- `apm marketplace init` now scaffolds the explicit map-form `outputs: {claude: {}}` so the default state is observable in the manifest. (#1317)
 - Add experimental registry resolver and `apm-policy.yml` source-mandate enforcement. Git-based dependencies are unchanged. Enable with `apm experimental enable registries`; configure per-registry credentials via `apm config set registry.<name>.{url,token}`; mandate registry usage in `apm-policy.yml` via `registry_source: {require: [...], allow_non_registry: false}`. Framing: APM dependency governance -- controlled sources, locked versions, and byte-level SHA-256 verification. Package signing, SBOM generation, and SLSA provenance are not included at v1.
 - `marketplace.packages[].source` in `apm.yml` now accepts non-default git hosts via the `host.tld/owner/repo` shorthand or the full `https://host.tld/owner/repo[.git]` URL; per-host auth flows through the standard APM token chain. Unlocks GitHub Enterprise and self-hosted GitLab as first-class marketplace package sources. (#1288)
 - `apm marketplace add` now accepts local filesystem paths, `file://` URIs, SSH URLs, and HTTPS URLs to any git host (Azure DevOps via `ADO_APM_PAT`, GitLab, Gitea, Bitbucket Server, self-hosted). Generic-git registrations fetch `marketplace.json` via `GitCache` and never forward APM tokens; local marketplaces read the manifest directly. `apm install <plugin>@<local-marketplace>` is fully supported, including marketplaces whose `marketplace.json` uses relative plugin sources.
@@ -42,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now re-resolves a dependency when its ref pin is changed in `apm.yml`; previously the locked commit always won, silently ignoring the edit -- by @sergio-sisternes-epam (#1473)
 - `--refresh` flag on `apm install` now actually re-resolves all ref pins (previously accepted but had no effect) -- by @sergio-sisternes-epam (#1473)
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
+- **Deduplicate Claude Code instructions.** `apm compile --target claude` now omits the "Project Standards" section from `CLAUDE.md` when instructions are already deployed to `.claude/rules/` by `apm install`, avoiding duplicate content in Claude Code's context window. `CLAUDE.md` is still generated for constitution and dependency imports. (#1138)
 
 ## [0.14.2] - 2026-05-22
 

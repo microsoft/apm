@@ -1361,8 +1361,6 @@ def install(  # noqa: PLR0913
         # Resolve transport selection inputs.
         from ..deps.transport_selection import (
             ProtocolPreference,
-            is_fallback_allowed,
-            protocol_pref_from_env,
         )
 
         if use_ssh and use_https:
@@ -1373,9 +1371,16 @@ def install(  # noqa: PLR0913
         elif use_https:
             protocol_pref = ProtocolPreference.HTTPS
         else:
-            protocol_pref = protocol_pref_from_env()
-        # CLI flag OR env var enables fallback.
-        allow_protocol_fallback = allow_protocol_fallback or is_fallback_allowed()
+            # Precedence: APM_GIT_PROTOCOL env var > apm config ssh > git insteadOf
+            from ..config import get_apm_protocol_pref as _get_apm_protocol_pref
+
+            _pref_str = _get_apm_protocol_pref()
+            protocol_pref = ProtocolPreference.from_str(_pref_str)
+        # CLI flag > env var (APM_ALLOW_PROTOCOL_FALLBACK) > apm config > default.
+        # get_apm_allow_protocol_fallback() already encodes env > config > False.
+        from ..config import get_apm_allow_protocol_fallback as _get_apm_apf
+
+        allow_protocol_fallback = allow_protocol_fallback or _get_apm_apf()
 
         # Resolve scope
         from ..core.scope import (

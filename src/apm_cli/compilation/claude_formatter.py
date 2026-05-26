@@ -36,6 +36,7 @@ class ClaudePlacement:
     dependencies: builtins.list[str] = field(default_factory=list)  # @import paths
     coverage_patterns: builtins.set[str] = field(default_factory=set)
     source_attribution: builtins.dict[str, str] = field(default_factory=dict)
+    is_root: bool = False
 
 
 @dataclass
@@ -97,24 +98,40 @@ class ClaudeFormatter:
         try:
             config = config or {}
             source_attribution = config.get("source_attribution", True)
+            skip_instructions = config.get("skip_instructions", False)
 
             # Generate Claude placements from the placement map
             placements = self._generate_placements(
                 placement_map, primitives, source_attribution=source_attribution
             )
 
-            # Generate content for each placement
+            # Generate content for each placement.
+            # When instructions are skipped (already in .claude/rules/), only
+            # emit root CLAUDE.md if it has other content (constitution or
+            # dependencies); subdirectory placements are omitted entirely.
+            has_constitution = bool(read_constitution(self.base_dir))
             content_map = {}
             for placement in placements:
-                content = self._generate_claude_content(placement, primitives)
+                if skip_instructions:
+                    if not placement.is_root:
+                        continue
+                    if not placement.dependencies and not has_constitution:
+                        continue
+                content = self._generate_claude_content(
+                    placement, primitives, skip_instructions=skip_instructions
+                )
                 content_map[placement.claude_path] = content
 
+            # Filter placements to only those that produced content so stats
+            # and downstream consumers see an accurate picture.
+            emitted_placements = [p for p in placements if p.claude_path in content_map]
+
             # Compile statistics
-            stats = self._compile_stats(placements, primitives)
+            stats = self._compile_stats(emitted_placements, primitives)
 
             return ClaudeCompilationResult(
                 success=len(self.errors) == 0,
-                placements=placements,
+                placements=emitted_placements,
                 content_map=content_map,
                 warnings=self.warnings.copy(),
                 errors=self.errors.copy(),
@@ -150,19 +167,20 @@ class ClaudeFormatter:
         """
         placements = []
 
-        # Handle empty placement map with constitution
+        # Handle empty placement map with constitution or dependencies
         if not placement_map:
             constitution = read_constitution(self.base_dir)
-            if constitution:
-                # Create root placement for constitution-only projects
+            dependencies = self._collect_dependencies()
+            if constitution or dependencies:
                 root_path = self.base_dir / "CLAUDE.md"
                 placement = ClaudePlacement(
                     claude_path=root_path,
                     instructions=[],
                     agents=list(primitives.chatmodes),
-                    dependencies=self._collect_dependencies(),
+                    dependencies=dependencies,
                     coverage_patterns=set(),
                     source_attribution={},
+                    is_root=True,
                 )
                 placements.append(placement)
         else:
@@ -196,6 +214,7 @@ class ClaudeFormatter:
                     dependencies=self._collect_dependencies() if is_root else [],
                     coverage_patterns=patterns,
                     source_attribution=source_map,
+                    is_root=is_root,
                 )
 
                 placements.append(placement)
@@ -235,13 +254,18 @@ class ClaudeFormatter:
         return sorted(dependencies)
 
     def _generate_claude_content(
-        self, placement: ClaudePlacement, primitives: PrimitiveCollection
+        self,
+        placement: ClaudePlacement,
+        primitives: PrimitiveCollection,
+        *,
+        skip_instructions: bool = False,
     ) -> str:
         """Generate CLAUDE.md content for a specific placement.
 
         Args:
             placement (ClaudePlacement): Placement result with instructions.
             primitives (PrimitiveCollection): Full primitive collection.
+            skip_instructions (bool): If True, omit the Project Standards section.
 
         Returns:
             str: Generated CLAUDE.md content.
@@ -263,8 +287,7 @@ class ClaudeFormatter:
             sections.append("")
 
         # Constitution section (only for root CLAUDE.md)
-        is_root = placement.claude_path.parent == self.base_dir
-        if is_root:
+        if placement.is_root:
             constitution = read_constitution(self.base_dir)
             if constitution:
                 sections.append("# Constitution")
@@ -272,8 +295,11 @@ class ClaudeFormatter:
                 sections.append(constitution.strip())
                 sections.append("")
 
-        # Project Standards section (grouped by pattern)
-        if placement.instructions:
+        # Project Standards section (grouped by pattern).
+        # Skipped when instructions are already deployed to .claude/rules/ by
+        # `apm install`, since Claude Code reads both locations and would see
+        # duplicate content.
+        if placement.instructions and not skip_instructions:
             sections.append("# Project Standards")
             sections.append("")
 
@@ -285,9 +311,7 @@ class ClaudeFormatter:
                 )
             )
 
-        # Note: CLAUDE.md only contains instructions (Project Standards).
-        # Agents/workflows are NOT included - they go to .github/agents/ as separate files.
-        # This matches AGENTS.md behavior which also only contains instructions.
+        # Agents/workflows go to .github/agents/ as separate files, not here.
 
         # Footer
         sections.append("---")

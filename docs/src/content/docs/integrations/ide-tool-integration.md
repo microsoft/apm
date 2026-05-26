@@ -64,6 +64,8 @@ mcp: in apm.yml      ->   per target: .mcp.json / settings.json / equivalent
 
 Not every target supports every primitive type. When a primitive can't land on a target, APM emits a warning at install time. Skim [Targets matrix](../reference/targets-matrix/) to set expectations before adding a primitive.
 
+> **Deduplication**: When `.claude/rules/` already contains `.md` files (deployed by `apm install`), `apm compile --target claude` omits the instructions section from `CLAUDE.md` to avoid duplicate context. `CLAUDE.md` is still generated if it carries a constitution or dependency imports.
+
 ## Common workflows
 
 ### Add a target to an existing project
