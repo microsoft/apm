@@ -4,52 +4,239 @@ Supports both Copilot CLI and Claude Code marketplace.json formats.
 All dataclasses are frozen for thread-safety.
 """
 
+from __future__ import annotations
+
 import logging
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE
 
 logger = logging.getLogger(__name__)
+
+
+# SCP-like git URL: e.g. git@host:org/repo.git -- reused canonical regex
+# from apm_cli.cache.url_normalize so dependency and marketplace SCP parsing
+# never drift.
+
+
+def _looks_like_local_path(value: str) -> bool:
+    """Heuristic for local filesystem paths and file:// URIs."""
+    if not value:
+        return False
+    if value.startswith("file://"):
+        return True
+    if value.startswith(("/", "./", "../", "~")):
+        return True
+    # Windows drive letter: C:\ or C:/
+    return bool(len(value) >= 3 and value[1:3] in (":\\", ":/") and value[0].isalpha())
+
+
+def _extract_host_from_url(url: str) -> str:
+    """Best-effort host extraction from any URL/path; empty for local paths."""
+    if not url or _looks_like_local_path(url):
+        return ""
+    scp = _SCP_LIKE_RE.match(url)
+    if scp:
+        return scp.group("host")
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return ""
+    return parsed.hostname or ""
+
+
+def _extract_owner_repo_from_url(url: str) -> tuple[str, str]:
+    """Best-effort owner/repo extraction. Empty strings if not derivable."""
+    if not url or _looks_like_local_path(url):
+        return ("", "")
+    scp = _SCP_LIKE_RE.match(url)
+    if scp:
+        path = scp.group("path")
+    else:
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return ("", "")
+        path = parsed.path.lstrip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    segments = [s for s in path.split("/") if s]
+    if len(segments) >= 2:
+        # Multi-segment paths (GHES nested groups, GitLab subgroups) are
+        # preserved by joining all segments except the last into `owner`.
+        return ("/".join(segments[:-1]), segments[-1])
+    if len(segments) == 1:
+        return ("", segments[0])
+    return ("", "")
+
+
+def _local_path_from_source(value: str) -> str:
+    """Normalise a local-path source to an absolute path string."""
+    if value.startswith("file://"):
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return value
+        return parsed.path or value
+    return str(Path(value).expanduser())
 
 
 @dataclass(frozen=True)
 class MarketplaceSource:
     """A registered marketplace repository.
 
-    Stored in ``~/.apm/marketplaces.json``.
+    Stored in ``~/.apm/marketplaces.json``. URL-first model: ``url`` + ``ref``
+    + ``path`` are the canonical fields. Legacy ``owner`` / ``repo`` / ``host``
+    / ``branch`` kwargs are accepted for backward compatibility and are
+    synthesised from / into the URL during construction.
     """
 
     name: str  # Display name (e.g., "acme-tools")
-    owner: str  # GitHub owner
-    repo: str  # GitHub repo
+    url: str = ""  # Canonical URL or local path; synthesised from legacy fields if absent
+    ref: str = "main"  # Git ref (branch, tag, or SHA)
+    path: str = "marketplace.json"  # Path to manifest within the repo
+    # Legacy mirror fields -- populated either by the caller or by __post_init__.
+    # Retained for backward compat with code that reads source.owner / source.repo /
+    # source.host directly, and for one release of dual-emit in to_dict for downgrade.
+    owner: str = ""
+    repo: str = ""
     host: str = "github.com"
-    branch: str = "main"
-    path: str = "marketplace.json"  # Detected on add
+    branch: str = ""  # Legacy alias for ref; if both given, ref wins
+
+    def __post_init__(self) -> None:
+        # Reconcile ref / branch: ref is canonical. If only branch was set, copy it onto ref.
+        if self.branch and self.branch != "main" and (not self.ref or self.ref == "main"):
+            object.__setattr__(self, "ref", self.branch)
+        # Always mirror ref onto branch for legacy readers.
+        if self.ref:
+            object.__setattr__(self, "branch", self.ref)
+
+        # If URL absent but legacy fields are present, synthesise URL.
+        if not self.url:
+            if self.owner and self.repo:
+                host = self.host or "github.com"
+                object.__setattr__(self, "url", f"https://{host}/{self.owner}/{self.repo}")
+            # If neither URL nor legacy fields are usable, leave url empty; callers/tests
+            # that pass only name=... will fail later when something tries to use it.
+
+        # Backfill legacy mirror fields from URL when caller used URL-only signature.
+        if self.url and not self.owner and not self.repo:
+            o, r = _extract_owner_repo_from_url(self.url)
+            if o:
+                object.__setattr__(self, "owner", o)
+            if r:
+                object.__setattr__(self, "repo", r)
+        if self.url and self.host == "github.com":
+            h = _extract_host_from_url(self.url)
+            if h:
+                object.__setattr__(self, "host", h)
+
+    # -- derived properties --------------------------------------------------
+
+    @property
+    def kind(self) -> str:
+        """Derived source kind: ``local`` | ``github`` | ``gitlab`` | ``git``.
+
+        Classification:
+        - Local filesystem path or ``file://`` URI -> ``local``
+        - Host classified by AuthResolver as github/ghe_cloud/ghes -> ``github``
+        - Host classified as gitlab -> ``gitlab``
+        - Anything else (ado, generic, ssh to non-classified host) -> ``git``
+        """
+        if not self.url or _looks_like_local_path(self.url):
+            return "local"
+        host = _extract_host_from_url(self.url)
+        if not host:
+            return "git"
+        # Lazy import to keep models.py free of heavy dependencies
+        from apm_cli.core.auth import AuthResolver
+
+        host_kind = AuthResolver.classify_host(host).kind
+        if host_kind in ("github", "ghe_cloud", "ghes"):
+            return "github"
+        if host_kind == "gitlab":
+            return "gitlab"
+        return "git"
+
+    @property
+    def local_path(self) -> str:
+        """Return the resolved local filesystem path for ``kind == "local"`` sources.
+
+        Returns an empty string for non-local sources.
+        """
+        if self.kind != "local":
+            return ""
+        return _local_path_from_source(self.url)
+
+    @property
+    def display_source(self) -> str:
+        """Compact, kind-aware string for CLI list rendering."""
+        k = self.kind
+        if k in ("github", "gitlab") and self.owner and self.repo:
+            return f"{self.owner}/{self.repo}"
+        if k == "local":
+            lp = self.local_path
+            home = os.path.expanduser("~")
+            if home and lp.startswith(home):
+                return "~" + lp[len(home) :]
+            return lp or self.url
+        # generic git: strip scheme for compactness
+        url = self.url
+        for prefix in ("https://", "http://", "git://"):
+            if url.startswith(prefix):
+                return url[len(prefix) :]
+        return url
+
+    # -- serialisation -------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict for JSON storage."""
-        result: dict[str, Any] = {
-            "name": self.name,
-            "owner": self.owner,
-            "repo": self.repo,
-        }
-        if self.host != "github.com":
-            result["host"] = self.host
-        if self.branch != "main":
-            result["branch"] = self.branch
+        """Serialize to dict for JSON storage.
+
+        Emits the new URL-first shape plus legacy ``owner``/``repo``/``host``/
+        ``branch`` mirror fields for one release so downgrades can still read.
+        """
+        result: dict[str, Any] = {"name": self.name}
+        if self.url:
+            result["url"] = self.url
+        if self.ref and self.ref != "main":
+            result["ref"] = self.ref
         if self.path != "marketplace.json":
             result["path"] = self.path
+        # Legacy mirror -- only when meaningful (suppress empty owner/repo for local sources)
+        if self.owner:
+            result["owner"] = self.owner
+        if self.repo:
+            result["repo"] = self.repo
+        if self.host and self.host != "github.com":
+            result["host"] = self.host
+        if self.branch and self.branch != "main":
+            result["branch"] = self.branch
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MarketplaceSource":
-        """Deserialize from JSON dict."""
+    def from_dict(cls, data: dict[str, Any]) -> MarketplaceSource:
+        """Deserialize from JSON dict.
+
+        Accepts both the new URL-first shape and the legacy
+        ``{name, owner, repo, host?, branch?, path?}`` shape. Legacy entries
+        are upgraded transparently -- the URL is synthesised from the legacy
+        fields and ``ref`` mirrors ``branch``.
+        """
+        url = data.get("url", "")
+        ref = data.get("ref") or data.get("branch") or "main"
         return cls(
             name=data["name"],
-            owner=data["owner"],
-            repo=data["repo"],
-            host=data.get("host", "github.com"),
-            branch=data.get("branch", "main"),
+            url=url,
+            ref=ref,
             path=data.get("path", "marketplace.json"),
+            owner=data.get("owner", ""),
+            repo=data.get("repo", ""),
+            host=data.get("host", "github.com"),
+            branch=data.get("branch", ""),
         )
 
 

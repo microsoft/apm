@@ -913,7 +913,7 @@ def _handle_mcp_install(
 @click.option(
     "--update",
     is_flag=True,
-    help="Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI)",
+    help="Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI). Unlike --refresh, --update restructures the entire dependency graph.",
 )
 @click.option("--dry-run", is_flag=True, help="Show what would be installed without installing")
 @click.option(
@@ -1072,7 +1072,7 @@ def _handle_mcp_install(
     "--refresh",
     is_flag=True,
     default=False,
-    help="Bypass the persistent cache and re-fetch all dependencies from upstream.",
+    help="Re-fetch all dependencies from upstream and re-resolve all ref pins. Use 'apm update' for interactive upgrade planning.",
 )
 @click.option(
     "--legacy-skill-paths",
@@ -1732,6 +1732,7 @@ def _install_apm_packages(ctx, outcome):
                 plan_callback=ctx.plan_callback,
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
+                refresh=ctx.refresh,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
@@ -1959,6 +1960,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     legacy_skill_paths: bool = False,
     frozen: bool = False,
     plan_callback=None,
+    refresh: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1996,5 +1998,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
         legacy_skill_paths=legacy_skill_paths,
         frozen=frozen,
         plan_callback=plan_callback,
+        refresh=refresh,
     )
     return InstallService().run(request)

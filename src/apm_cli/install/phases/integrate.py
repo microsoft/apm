@@ -87,6 +87,13 @@ def _resolve_download_strategy(
         existing_lockfile.get_dependency(dep_ref.get_unique_key()) if existing_lockfile else None
     )
     ref_changed = detect_ref_change(dep_ref, _dep_locked_chk, update_refs=update_refs)
+    # When the manifest ref drifted from the lockfile, the content hash
+    # will legitimately change after re-download.  Mark the dep so the
+    # supply-chain check in sources.py doesn't treat it as an attack.
+    if ref_changed:
+        # resolve.py's BFS callback may have already added this;
+        # set semantics make double-add safe.
+        ctx.expected_hash_change_deps.add(dep_ref.get_unique_key())
     # Phase 5 (#171): Also skip when lockfile SHA matches local HEAD
     # -- but not when the manifest ref has changed (user wants different version).
     lockfile_match = False

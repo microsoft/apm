@@ -318,6 +318,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
     plan_callback=None,
+    refresh: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -429,6 +430,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         skill_subset_from_cli=skill_subset_from_cli,
         early_lockfile=_early_lockfile,
         legacy_skill_paths=legacy_skill_paths,
+        refresh=refresh,
     )
 
     # ------------------------------------------------------------------

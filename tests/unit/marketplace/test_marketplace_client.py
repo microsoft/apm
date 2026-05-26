@@ -596,7 +596,14 @@ class TestDirectFetchHostRouting:
         assert len(captured_urls) == 1
         assert "/api/v3/repos/org/plugins/contents/" in captured_urls[0]
 
-    def test_generic_host_not_gitlab_is_rejected_before_request(self):
+    def test_generic_host_routes_through_git_fetcher(self):
+        """A 'generic' host (e.g. Bitbucket Cloud) now routes to _fetch_git, not rejected.
+
+        Behaviour change: previously APM hard-rejected non-GitHub/non-GitLab hosts
+        to avoid leaking GitHub PATs. Now generic hosts route through GitCache,
+        and AuthResolver itself enforces token scoping (returns token=None for
+        kind="generic"), so no credential leak is possible.
+        """
         source = MarketplaceSource(
             name="bb",
             owner="o",
@@ -604,17 +611,19 @@ class TestDirectFetchHostRouting:
             host="bitbucket.org",
         )
 
+        mock_git = MagicMock(return_value=None)
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
             patch("apm_cli.marketplace.client.requests.get") as mock_get,
-            pytest.raises(MarketplaceFetchError) as excinfo,
+            patch.dict("apm_cli.marketplace.client._FETCHERS", {"git": mock_git}),
         ):
             resolver = AuthResolver()
-            client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+            result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
+            mock_git.assert_called_once()
 
+        # No HTTP request should be issued -- generic git uses subprocess via GitCache.
         mock_get.assert_not_called()
-        assert _quoted_hosts(str(excinfo.value)) == {"bitbucket.org"}
-        assert "not a supported marketplace source" in str(excinfo.value)
+        assert result is None
 
     def test_proxy_success_does_not_call_requests_get(self):
         """PROXY_REGISTRY_URL path: no direct GitHub/GitLab HTTP when proxy returns JSON."""
@@ -713,9 +722,13 @@ class TestCacheKey:
     def test_non_default_host_includes_host(self):
         source = MarketplaceSource(name="skills", owner="o", repo="r", host="ghes.corp.com")
         key = client_mod._cache_key(source)
-        assert key.startswith("ghes.corp.com") or key.startswith("ghes_corp_com")
-        assert key.endswith("skills")
-        assert key != "skills"
+        # Assert exact key structure: ``<kind>__<host>__<name>``. Using equality
+        # (not substring containment) avoids CodeQL's "incomplete URL substring
+        # sanitization" pattern and guards against accidental host-collision bugs.
+        segments = key.split("__")
+        assert segments[0] in {"git", "ghes_corp_com"}
+        assert segments[-1] == "skills"
+        assert any(seg in {"ghes.corp.com", "ghes_corp_com"} for seg in segments[1:-1])
 
     def test_different_hosts_different_keys(self):
         s1 = MarketplaceSource(name="mkt", owner="o", repo="r", host="a.com")
@@ -766,9 +779,16 @@ class TestFetchFileHostKindGuard:
     aimed at an unrelated host, leaking credentials.
     """
 
-    def test_generic_host_rejected_before_request(self):
-        """A 'generic' kind host raises and never fetches."""
-        from unittest.mock import patch
+    def test_generic_host_routes_through_git_fetcher(self):
+        """A 'generic' kind host routes through _fetch_git, never the GitHub API.
+
+        Defense-in-depth: even though _fetch_git no longer issues an
+        Authorization header by classification, this test asserts no
+        requests.get() (the GitHub API surface) is ever called for a
+        non-GitHub/non-GitLab host -- so a future regression that
+        accidentally routed back through the API path would be caught.
+        """
+        from unittest.mock import MagicMock, patch
 
         source = MarketplaceSource(
             name="evil",
@@ -777,17 +797,17 @@ class TestFetchFileHostKindGuard:
             branch="main",
             host="bitbucket.org",
         )
+        mock_git = MagicMock(return_value=None)
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
             patch("apm_cli.marketplace.client.requests.get") as mock_get,
-            pytest.raises(MarketplaceFetchError) as excinfo,
+            patch.dict("apm_cli.marketplace.client._FETCHERS", {"git": mock_git}),
         ):
             client_mod._fetch_file(source, "marketplace.json")
+            mock_git.assert_called_once()
 
-        # No HTTP request should have been issued (no credential leakage).
+        # No HTTP request should have been issued -- generic-git uses GitCache subprocess.
         mock_get.assert_not_called()
-        assert _quoted_hosts(str(excinfo.value)) == {"bitbucket.org"}
-        assert "not a supported marketplace source" in str(excinfo.value)
 
     def test_github_host_passes_guard(self):
         """github.com sources are untouched by the guard."""
