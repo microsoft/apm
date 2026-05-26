@@ -168,6 +168,15 @@ def satisfies_range(version: SemVer, range_spec: str) -> bool:
     return _satisfies_single(version, spec)
 
 
+# Comparison operators -- longest prefix first so ">=" is tested before ">".
+_CMP_OPS: list[tuple[str, object]] = [
+    (">=", lambda v, b: v >= b),
+    (">", lambda v, b: v > b),
+    ("<=", lambda v, b: v <= b),
+    ("<", lambda v, b: v < b),
+]
+
+
 def _satisfies_single(version: SemVer, spec: str) -> bool:
     """Check a single constraint."""
     spec = spec.strip()
@@ -201,19 +210,11 @@ def _satisfies_single(version: SemVer, spec: str) -> bool:
         # ~1.2.3 := >=1.2.3 <1.3.0
         return version >= base and version.major == base.major and version.minor == base.minor
 
-    # Comparison operators
-    if spec.startswith(">="):
-        base = parse_semver(spec[2:])
-        return base is not None and version >= base
-    if spec.startswith(">") and not spec.startswith(">="):
-        base = parse_semver(spec[1:])
-        return base is not None and version > base
-    if spec.startswith("<="):
-        base = parse_semver(spec[2:])
-        return base is not None and version <= base
-    if spec.startswith("<") and not spec.startswith("<="):
-        base = parse_semver(spec[1:])
-        return base is not None and version < base
+    # Comparison operators (table-driven dispatch)
+    for prefix, cmp in _CMP_OPS:
+        if spec.startswith(prefix):
+            base = parse_semver(spec[len(prefix) :])
+            return base is not None and cmp(version, base)
 
     # Wildcard: 1.2.x or 1.2.*
     wildcard_match = re.match(r"^(\d+)\.(\d+)\.[xX*]$", spec)
