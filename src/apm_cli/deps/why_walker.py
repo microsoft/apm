@@ -48,7 +48,14 @@ class WhyPath:
 
 @dataclass(frozen=True)
 class WhyResult:
-    """Result of explaining a target dependency."""
+    """Result of explaining a target dependency.
+
+    NOTE: ``target`` is a borrowed reference to the same
+    :class:`LockedDependency` instance held by the live
+    :class:`LockFile`. Treat it as read-only; mutating it would alter
+    the lockfile object held by the caller. (Frozen WhyResult only
+    freezes its own attributes, not the target it points at.)
+    """
 
     target: LockedDependency
     is_direct: bool
@@ -178,16 +185,25 @@ def resolve_package_query(lockfile: LockFile, query: str) -> LockedDependency:
 
 
 def compute_why(lockfile: LockFile, target: LockedDependency) -> WhyResult:
-    """Invert the ``resolved_by`` edges and collect all paths to *target*.
+    """Walk the single ``resolved_by`` chain from *target* back to a root.
 
-    Returns a :class:`WhyResult` whose ``paths`` is a tuple of one or more
-    :class:`WhyPath` instances ordered deterministically by their stringified
-    chain. When *target* is itself a direct dependency, the result contains
-    one path of length one with ``parent_key=None``.
+    :class:`LockedDependency.resolved_by` records exactly one parent
+    today, so a target produces ONE chain per lockfile record (any
+    "diamond" fan-in is collapsed by the resolver). Returns a
+    :class:`WhyResult` whose ``paths`` is a tuple of one or more
+    :class:`WhyPath` instances ordered deterministically by their
+    stringified chain. The iterative worklist generalises to N paths
+    without API change if ``resolved_by`` ever becomes multi-valued
+    (see #1488 and the constraint-field follow-on).
 
-    Cycles in the lockfile graph (which would indicate a bug in the resolver,
-    not user data, but we defend regardless) are broken by a per-traversal
-    visited set: each ``repo_url`` appears at most once in a single chain.
+    When *target* is itself a direct dependency, the result contains one
+    trivial path with ``parent_key=None``.
+
+    Cycles in the lockfile graph (which would indicate a resolver bug,
+    not user data, but we defend regardless) are broken by a
+    per-traversal visited set: each ``repo_url`` appears at most once
+    in a single chain. A defensive ``max_paths`` cap also bounds
+    worklist growth in the future multi-parent case.
     """
     target_key = target.repo_url
     target_constraint = _dep_constraint(target)
@@ -240,8 +256,15 @@ def compute_why(lockfile: LockFile, target: LockedDependency) -> WhyResult:
 
     # Bound traversal depth as a defensive ceiling against pathological data.
     max_depth = max(64, len(by_url) + 1)
+    # Bound the total number of paths returned (defensive against the
+    # future multi-parent case where a malformed lockfile could produce
+    # factorial fan-in). Today resolved_by is single-valued so this cap
+    # is unreachable; it matters once #1488's resolver lands.
+    max_paths = 256
 
     while worklist:
+        if len(paths) >= max_paths:
+            break
         current, chain, visited = worklist.pop()
         if len(chain) > max_depth:
             # Stop extending this chain; record what we have.

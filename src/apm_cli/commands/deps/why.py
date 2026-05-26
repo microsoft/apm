@@ -38,6 +38,7 @@ from ...deps.why_walker import (
     compute_why,
     resolve_package_query,
 )
+from ...utils.console import set_console_stderr
 
 # Exit codes
 _EXIT_OK = 0
@@ -142,7 +143,7 @@ def _load_lockfile(apm_dir, logger: CommandLogger) -> LockFile | None:
     lockfile_path = get_lockfile_path(apm_dir)
     if not lockfile_path.exists():
         logger.error("no apm.lock.yaml found in this project.")
-        logger.progress("Hint: run 'apm install' first.")
+        logger.info("Hint: run 'apm install' first.")
         return None
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
@@ -185,6 +186,13 @@ _HELP = (
 )
 def why(package: str, global_: bool, as_json: bool) -> None:
     """Entry point for ``apm deps why <pkg>``."""
+    # Stream discipline: under --json, route ALL human-facing output to
+    # stderr so that downstream tools (jq, scripts) can consume stdout
+    # as a clean JSON document. Mirrors the convention established by
+    # `apm pack --json` (commands/pack.py) and by npm / yarn / cargo.
+    if as_json:
+        set_console_stderr(True)
+
     logger = CommandLogger("deps-why")
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     apm_dir = get_apm_dir(scope)
@@ -192,7 +200,7 @@ def why(package: str, global_: bool, as_json: bool) -> None:
     lockfile = _load_lockfile(apm_dir, logger)
     if lockfile is None:
         if as_json:
-            click.echo(json.dumps({"error": "no_lockfile"}))
+            click.echo(json.dumps({"error": "no_lockfile"}), err=True)
         sys.exit(_EXIT_NO_LOCKFILE)
 
     try:
@@ -200,20 +208,24 @@ def why(package: str, global_: bool, as_json: bool) -> None:
     except AmbiguousPackageError as exc:
         if as_json:
             click.echo(
-                json.dumps({"error": "ambiguous", "query": exc.query, "matches": exc.matches})
+                json.dumps({"error": "ambiguous", "query": exc.query, "matches": exc.matches}),
+                err=True,
             )
         else:
             logger.error(f"'{exc.query}' matches multiple packages:")
             for match in exc.matches:
-                click.echo(f"  - {match}")
-            logger.progress("Hint: use the full owner/repo form.")
+                click.echo(f"  - {match}", err=True)
+            logger.info("Hint: use the full owner/repo form.")
         sys.exit(_EXIT_NOT_FOUND)
     except PackageNotInstalledError as exc:
         if as_json:
-            click.echo(json.dumps({"error": "not_installed", "query": exc.query}))
+            click.echo(
+                json.dumps({"error": "not_installed", "query": exc.query}),
+                err=True,
+            )
         else:
             logger.error(f"'{exc.query}' is not installed (not in apm.lock.yaml).")
-            logger.progress("Hint: run 'apm deps list' to see installed packages.")
+            logger.info("Hint: run 'apm deps list' to see installed packages.")
         sys.exit(_EXIT_NOT_FOUND)
 
     result = compute_why(lockfile, target)

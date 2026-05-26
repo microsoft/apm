@@ -205,6 +205,25 @@ class TestWhyErrorPaths:
             assert result.exit_code == 2
             assert "no apm.lock.yaml" in result.output
 
+    def test_why_no_lockfile_json_emits_error_envelope_on_stderr(self, runner):
+        """`apm deps why <pkg> --json` with no lockfile must keep stdout clean
+        (no human logs leaking in) and emit the JSON error envelope to stderr.
+        Regression trap for the panel-flagged --json stream-discipline bug.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with _cwd(tmp_path):
+                result = runner.invoke(
+                    cli,
+                    ["deps", "why", "anything", "--json"],
+                )
+            assert result.exit_code == 2
+            # stdout MUST be clean -- nothing should pollute a `| jq` pipeline.
+            assert result.stdout == ""
+            # The JSON error envelope is routed to stderr.
+            payload = json.loads(result.stderr.strip().splitlines()[-1])
+            assert payload == {"error": "no_lockfile"}
+
 
 # ---------------------------------------------------------------------------
 # --global flag

@@ -79,11 +79,13 @@ def test_compute_why_transitive_dep_with_multiple_paths():
     assert len(result.paths) == 1
 
 
-def test_compute_why_diamond_dependency_lists_both_routes():
+def test_compute_why_diamond_records_single_resolved_by_path():
     # A -> B -> D, A -> C -> D. Walker keys parents by repo_url; the lockfile
-    # records D once. compute_why returns one canonical path, not multiple,
-    # because we walk from a single LockedDependency target upward through
-    # its recorded resolved_by parent.
+    # records D once with a single resolved_by. compute_why returns one
+    # canonical path, not multiple, because we walk from a single
+    # LockedDependency target upward through its one recorded parent.
+    # (Multi-parent fan-in would require a lockfile schema change -- the
+    # iterative worklist is ready for it without an API change.)
     a = _direct("o/a")
     b = _transitive("o/b", resolved_by="o/a")
     c = _transitive("o/c", resolved_by="o/a")
