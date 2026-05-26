@@ -59,6 +59,82 @@ def _require_package_registry_feature_if_needed(registries_map, existing_lockfil
     return needs_registry
 
 
+def _maybe_resolve_git_semver(
+    *,
+    dep_ref,
+    existing_lockfile,
+    update_refs: bool,
+):
+    """Resolve a git-source semver-range ``ref:`` to a concrete tag.
+
+    Returns the :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolution`
+    when resolution ran (and the caller should rewrite ``dep_ref.reference``);
+    returns ``None`` for any dep that should NOT route through the
+    git-semver resolver (local, registry-sourced, proxy-sourced, literal
+    ref, or a lockfile-pinned reinstall without ``--update``).
+
+    Lockfile replay
+    ---------------
+    When a lockfile entry already records ``constraint == dep_ref.reference``
+    and the locked tag still satisfies it, this function rebuilds the
+    :class:`GitSemverResolution` from the lockfile WITHOUT touching the
+    network. This is the npm-style "honour the lock" path -- the locked
+    tag is canonical until the manifest range changes or the user passes
+    ``--update`` / ``--refresh``.
+    """
+    # Only git-source deps with a semver-range reference are eligible.
+    if dep_ref.is_local:
+        return None
+    if getattr(dep_ref, "source", None) == "registry":
+        return None
+    if getattr(dep_ref, "artifactory_prefix", None):
+        return None
+    if dep_ref.ref_kind != "semver":
+        return None
+
+    constraint = dep_ref.reference
+    owner_repo = dep_ref.repo_url
+    package_name = owner_repo.rsplit("/", 1)[-1]
+
+    # Lockfile replay (npm semantics): if the lockfile already records a
+    # resolution for this constraint, return it directly. Saves a
+    # ls-remote call and keeps installs deterministic across machines.
+    if not update_refs and existing_lockfile is not None:
+        locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+        if (
+            locked is not None
+            and locked.constraint == constraint
+            and locked.resolved_tag
+            and locked.resolved_commit
+            and locked.version
+        ):
+            from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+            return GitSemverResolution(
+                constraint=locked.constraint,
+                resolved_version=locked.version,
+                resolved_tag=locked.resolved_tag,
+                resolved_sha=locked.resolved_commit,
+                # The pattern that produced the locked tag is not
+                # persisted (it would just be informational); the empty
+                # string here means "unknown / from lockfile".
+                matched_pattern="",
+                resolved_at=locked.resolved_at or "",
+            )
+
+    # Fresh resolution: call git ls-remote and pick the highest matching tag.
+    from apm_cli.deps.git_semver_resolver import GitSemverResolver
+    from apm_cli.marketplace.ref_resolver import RefResolver
+
+    ref_resolver = RefResolver(host=dep_ref.host)
+    resolver = GitSemverResolver(ref_resolver)
+    return resolver.resolve(
+        owner_repo=owner_repo,
+        package_name=package_name,
+        constraint=constraint,
+    )
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the resolve phase.
 
@@ -387,6 +463,28 @@ def run(ctx: InstallContext) -> None:
                 if _tui is not None:
                     _tui.task_failed(dep_ref.get_unique_key())
                 return None
+
+            # ─── Git-source semver range resolution (issue #1488) ──────
+            # When the manifest carries a semver range as ``ref:`` and
+            # the dep is non-local, non-registry, and non-proxy, resolve
+            # it to a concrete tag BEFORE any git operation. The result
+            # is stashed on ctx so install/sources.py can plumb it into
+            # the lockfile, and the dep_ref's ``reference`` is replaced
+            # with the concrete tag so build_download_ref / clone use a
+            # literal git ref.
+            _semver_resolution = _maybe_resolve_git_semver(
+                dep_ref=dep_ref,
+                existing_lockfile=existing_lockfile,
+                update_refs=update_refs,
+            )
+            if _semver_resolution is not None:
+                with callback_lock:
+                    ctx.git_semver_resolutions[dep_ref.get_unique_key()] = _semver_resolution
+                # Rewrite the dep_ref's ref to the concrete tag so the
+                # rest of the pipeline (drift detection, download, etc.)
+                # operates on a literal git ref. The original constraint
+                # is preserved in the resolution dataclass.
+                dep_ref.reference = _semver_resolution.resolved_tag
 
             # T5: Use locked commit for reproducibility, unless the manifest
             # ref has drifted from what the lockfile recorded (spec drift).

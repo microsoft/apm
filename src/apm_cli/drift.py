@@ -144,6 +144,16 @@ def detect_ref_change(
             locked_dep.version,
         )
 
+    # Git-source semver-range deps (issue #1488): the manifest carries
+    # a semver range (``^1.2.0``) while the lockfile records the
+    # resolved tag (``v1.5.3``) plus the original constraint. Direct
+    # comparison of the range against the tag is a false positive --
+    # instead, treat the dep as unchanged when the lockfile already
+    # stores the same constraint (and we therefore trust its resolution
+    # until the user runs ``--update``).
+    if getattr(dep_ref, "ref_kind", None) == "semver":
+        return dep_ref.reference != locked_dep.constraint
+
     # Git/local deps: direct ref comparison. Handles None→value, value→None,
     # and value→value. No truthiness guard on locked_dep.resolved_ref —
     # None != "v1.0.0" is True.

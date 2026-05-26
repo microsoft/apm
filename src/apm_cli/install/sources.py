@@ -464,6 +464,23 @@ class CachedDependencySource(DependencySource):
                 ctx, dep_ref, dep_key, dep_locked_chk
             )
 
+        # Cached git-source semver dep (#1488): replay the resolution from
+        # either ctx (we resolved earlier in this same run) or the lockfile
+        # so re-writing the lockfile from cache preserves constraint /
+        # resolved_tag / resolved_at instead of dropping them.
+        _cached_semver = ctx.git_semver_resolutions.get(dep_key)
+        if _cached_semver is None and dep_locked_chk and dep_locked_chk.constraint:
+            from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+            _cached_semver = GitSemverResolution(
+                constraint=dep_locked_chk.constraint,
+                resolved_version=dep_locked_chk.version or "",
+                resolved_tag=dep_locked_chk.resolved_tag or "",
+                resolved_sha=dep_locked_chk.resolved_commit or "",
+                matched_pattern="",
+                resolved_at=dep_locked_chk.resolved_at or "",
+            )
+
         ctx.installed_packages.append(
             InstalledPackage(
                 dep_ref=dep_ref,
@@ -473,6 +490,7 @@ class CachedDependencySource(DependencySource):
                 is_dev=_is_dev,
                 registry_config=_cached_registry,
                 registry_resolution=_cached_resolution,
+                git_semver_resolution=_cached_semver,
             )
         )
         if install_path.is_dir():
@@ -688,6 +706,9 @@ class FreshDependencySource(DependencySource):
                 if dep_ref.source == "registry"
                 else None
             )
+            # Git-source semver-range deps (#1488): the resolution was
+            # captured by the BFS download_callback in phases/resolve.py.
+            _git_semver_resolution = ctx.git_semver_resolutions.get(dep_key)
             ctx.installed_packages.append(
                 InstalledPackage(
                     dep_ref=dep_ref,
@@ -697,6 +718,7 @@ class FreshDependencySource(DependencySource):
                     is_dev=_is_dev,
                     registry_config=(ctx.registry_config if not dep_ref.is_local else None),
                     registry_resolution=_registry_resolution,
+                    git_semver_resolution=_git_semver_resolution,
                 )
             )
             if install_path.is_dir():

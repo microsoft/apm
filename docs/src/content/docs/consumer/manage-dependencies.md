@@ -143,6 +143,28 @@ SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
 
+### Pin a semver range
+
+For git-source dependencies you can also pin a semver range as the ref.
+APM resolves the range against the remote's tags at install time and
+records the concrete tag in the lockfile:
+
+```yaml
+dependencies:
+  apm:
+    - acme/widget#^1.2.0      # any 1.x >= 1.2.0
+    - acme/widget#~1.4        # any 1.4.x
+    - acme/widget#>=2.0 <3    # explicit range
+    - acme/widget#1.5.x       # wildcard
+```
+
+APM matches tags against `v{version}` and `{name}--v{version}` patterns
+(with `{version}` as a bare-tag fallback) and picks the highest tag that
+satisfies the range. The original constraint is preserved in the
+lockfile alongside the resolved tag, so `apm install` on a fresh clone
+replays the same tag deterministically. Only `apm install --update` or a
+manifest change re-resolves to a newer tag.
+
 ## Remove a dependency
 
 1. Delete the entry from `apm.yml`.

@@ -115,6 +115,41 @@ class DependencyReference:
     source: str | None = None
     registry_name: str | None = None
 
+    @property
+    def ref_kind(self) -> str | None:
+        """Classify ``reference`` for routing purposes.
+
+        Returns one of:
+
+        * ``"semver"`` -- ``reference`` parses as a valid semver range
+          (``^1.2.0``, ``~2.1``, ``>=1.0 <2.0``, ``1.2.x``, exact ``1.2.3``).
+          The install pipeline resolves it against the remote's tags via
+          :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolver`.
+        * ``"literal"`` -- ``reference`` is a non-empty string that does
+          NOT parse as semver (branch name, tag name with prefix, SHA).
+        * ``None`` -- ``reference`` is unset; downstream uses the remote's
+          default branch.
+
+        Semver routing is opt-in by syntax: any ``ref:`` value that
+        survives the literal-branch / literal-tag / SHA parse intact
+        bypasses the semver resolver, so existing dependencies on
+        ``ref: v1.2.3`` (literal tag with ``v`` prefix) keep their
+        existing behaviour.
+
+        Note: ``"1.2.3"`` (no ``v`` prefix) parses as a semver exact-version
+        constraint, NOT a literal tag.  The git-semver resolver's bare-
+        version fallback pattern covers the "literal ``1.2.3`` tag on the
+        remote" case without breaking semver routing for the same input.
+        """
+        if not self.reference:
+            return None
+        # ``v1.2.3``, ``main``, SHAs, anything-with-prefix is literal.
+        # Only inputs that parse as a *standalone* semver range are
+        # routed through the git-semver resolver.
+        if _is_valid_registry_semver_range(self.reference):
+            return "semver"
+        return "literal"
+
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
