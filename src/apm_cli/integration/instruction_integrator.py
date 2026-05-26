@@ -359,8 +359,8 @@ class InstructionIntegrator(BaseIntegrator):
         body = content
         apply_to = ""
 
-        # Parse existing frontmatter with yaml.safe_load (consistent with
-        # all other frontmatter parsers across integrators).
+        # Parse existing frontmatter with yaml.safe_load to stay consistent
+        # with the other frontmatter parsers across integrators.
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
             body = content[fm_match.end() :]
