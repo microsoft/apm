@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `apm pack --create-tag` (optionally with `--push`) creates -- and pushes -- release git tags from a clean tree after `--check-versions` succeeds, collapsing the bump/tag/push handshake into one command. Tag names come from `marketplace.versioning` (`lockstep` -> `v<version>`; `tag_pattern` -> templated; `per_package` -> `<name>-v<version>`). `--push` requires `--create-tag` and uses explicit refspecs, never `git push --tags`. Refusals are first-class stable codes (`dirty_tree`, `tag_exists`, `version_mismatch`, `no_remote`, `push_without_tag`, `no_check_versions`, `no_marketplace`, `git_failure`) surfaced under `tag_creation.refusal_code` / `tag_push.refusal_code` in `--json` and exit `1`; the existing version-gate (`3`) and drift-gate (`4`) exit codes are unchanged. `--dry-run` previews tag names and push targets without touching git. (#1489)
+- `apm deps why <package>` explains why a transitive dependency is installed by walking the lockfile's `resolved_by` chain back to the user's direct declaration in `apm.yml`. Supports `--global` for user-scope lockfiles and `--json` for scriptable output (JSON to stdout, all logs to stderr; analogue of `npm why` / `yarn why`). Exits `0` on success, `1` when the package isn't installed or the query is ambiguous, `2` when no lockfile exists. (#1490)
 
 ## [0.15.0] - 2026-05-27
 

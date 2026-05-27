@@ -26,6 +26,7 @@ All subcommands operate on the project scope (`./apm_modules/`) by default. Pass
 | `list` | List installed dependencies with per-primitive counts. |
 | `tree` | Render the dependency graph as a tree. |
 | `info PACKAGE` | Show detailed metadata for one installed package. |
+| `why PACKAGE` | Explain why a transitive dependency is installed (analogue of `npm why`). |
 | `update [PACKAGES...]` | Re-resolve git refs and reinstall. |
 | `clean` | Remove the entire `apm_modules/` directory. |
 
@@ -66,6 +67,25 @@ apm deps info PACKAGE
 | Argument | Description |
 |---|---|
 | `PACKAGE` | Name of an installed package under `apm_modules/`. Required. |
+
+### `apm deps why`
+
+Explain why a transitive dependency is installed, by walking the lockfile's `resolved_by` chain from the queried package back to the user's direct declaration in `apm.yml`. The APM analogue of `npm why` / `yarn why` / `cargo tree -i`.
+
+```bash
+apm deps why PACKAGE [OPTIONS]
+```
+
+| Argument | Description |
+|---|---|
+| `PACKAGE` | The installed package to explain. Accepts the same identifier styles as `apm deps info`: unique key (`owner_repo`), repo URL (`https://github.com/owner/repo`), `owner/repo`, or bare basename when unambiguous. |
+
+| Option | Description |
+|---|---|
+| `-g, --global` | Read the user-scope lockfile at `~/.apm/apm.lock.yaml` instead of the project lockfile. |
+| `--json` | Emit a machine-readable JSON document to stdout. All logs and error payloads are routed to stderr so `apm deps why pkg --json \| jq` is safe. |
+
+Exit codes: `0` on success, `1` when the package is not installed or the query matches multiple packages, `2` when no lockfile exists.
 
 ### `apm deps update`
 

@@ -16,6 +16,7 @@
 | `apm prune` | Remove orphaned packages | `--dry-run` |
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
 | `apm deps tree` | Show dependency tree | -- |
+| `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
 | `apm view PKG [FIELD]` | View package details or remote refs | `-g` global, `FIELD=versions` |
 | `apm outdated` | Check locked deps via SHA/semver comparison | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |

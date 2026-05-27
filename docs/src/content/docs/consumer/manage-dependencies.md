@@ -192,3 +192,58 @@ too: `apm update` refreshes dependencies to the latest matching refs
 fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
 binary itself, use `apm self-update`.
 :::
+
+## Explain a transitive dependency: `apm deps why`
+
+After `apm install`, `apm_modules/` may contain transitive packages that
+you did not declare directly. To answer "who pulled this in?", use
+`apm deps why <pkg>`:
+
+:::note[Coming from npm, yarn, or cargo?]
+`apm deps why` is the APM analogue of `npm why` / `yarn why` /
+`cargo tree -i`. Same mental model: ask the lockfile, get back the
+chain that explains why something is on disk.
+:::
+
+```bash
+$ apm deps why shared-utils
+$ apm deps why acme-org/shared-utils
+$ apm deps why acme-org/shared-utils --json
+$ apm deps why -g shared-utils
+```
+
+The [lockfile](#the-lockfile) is the source of truth -- the command is
+fully offline and walks the `resolved_by` parent chain bottom-up. The
+lockfile records a single resolved parent per package, so the output is
+one root-to-target chain (not a fan-out of every theoretical route):
+
+```
+[i] acme-org/shared-utils@1.4.2  (transitive)
+
+    acme-org/big-skills   [declared in apm.yml]
+    +-- acme-org/shared-utils
+```
+
+`<pkg>` accepts four identifier styles, tried in order: unique key
+(`acme-org_shared-utils`), full repo URL
+(`https://github.com/acme-org/shared-utils`), `owner/repo`, or bare
+basename (`shared-utils`) when unambiguous. An ambiguous bare name
+exits `1` and lists the candidates.
+
+Pass `--json` for scripting; the JSON document goes to stdout and all
+logs / hints go to stderr, so `apm deps why pkg --json | jq` is safe:
+
+```json
+{
+  "package": {"repo_url": "acme-org/shared-utils", "is_direct": false, "...": "..."},
+  "paths": [{"chain": [{"repo_url": "acme-org/big-skills", "is_direct": true}, ...]}]
+}
+```
+
+Exit codes: `0` on success, `1` when the package is not installed or the
+query is ambiguous, `2` when no lockfile exists yet (run `apm install`).
+
+See also: [`apm deps tree`](../../reference/cli/deps/#apm-deps-tree) for
+the top-down graph view, and
+[`apm deps info`](../../reference/cli/deps/#apm-deps-info) for full
+metadata of one package.
