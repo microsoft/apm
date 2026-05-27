@@ -75,7 +75,7 @@ include it in `--target` lists when you also want shared
 | Flag | Description |
 |------|-------------|
 | `-o, --output PATH` | Output file path. Only applies in single-file mode (`--single-agents`). Default: `AGENTS.md`. |
-| `--single-agents` | Force single-file compilation (legacy). Writes one combined file at `--output` instead of a distributed per-directory target-file tree. Applies to all targets that use distributed placement (`AGENTS.md`, `CLAUDE.md`). |
+| `--single-agents` | Force single-file compilation (legacy). Writes one combined file at `--output` instead of a distributed per-directory target-file tree. Applies to every target that uses distributed placement. |
 | `--clean` | Remove orphaned AGENTS.md files no longer produced by the current primitive set. |
 
 ### Content

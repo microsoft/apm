@@ -65,8 +65,9 @@ apm compile --dry-run            # print placement decisions without writing fil
 ```
 
 `--validate` is the fastest signal that an instruction parses.
-`--dry-run` shows you exactly which AGENTS.md tree would be written
-where. `--watch` is the tight inner loop while you edit prose.
+`--dry-run` shows you exactly which root-context tree (`AGENTS.md`,
+`CLAUDE.md`, ...) would be written where. `--watch` is the tight inner
+loop while you edit prose.
 
 To preview a script that wraps a `.prompt.md` file, use
 [`apm preview`](../preview-and-validate/) instead. `apm compile` builds

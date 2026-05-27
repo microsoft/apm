@@ -696,7 +696,7 @@ class AgentsCompiler:
             noun = "file" if files_written == 1 else "files"
             self._log(
                 "progress",
-                f"CLAUDE.md compiled ({files_written} {noun}, single-file strategy)",
+                f"CLAUDE.md compiled ({files_written} {noun})",
                 symbol="success",
             )
 
