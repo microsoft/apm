@@ -2,27 +2,24 @@
 
 The Windows installer (install.ps1) writes a `apm.cmd` shim under
 `%LOCALAPPDATA%\\Programs\\apm\\bin\\`. Historically the shim embedded the
-fully-expanded `$releaseDir` path and was saved with `-Encoding ASCII`. On
-Windows accounts whose profile directory contains non-ASCII characters
-(for example a username like "Jose" with an accented 'e'), the ASCII
-encoding mangled or stripped the accented characters, so the shim
-resolved to a non-existent path and cmd.exe reported:
+fully-expanded `$releaseDir` path. On Windows accounts whose profile
+directory contains non-ASCII characters (for example a username like
+"Jose" with an accented 'e'), the lossy encoding that was paired with
+the expanded path mangled or stripped the accented characters, so the
+shim resolved to a non-existent path and cmd.exe reported:
 
     The system cannot find the path specified.
 
-The fix is twofold:
-
-1. Emit the literal token ``%LOCALAPPDATA%`` in the shim payload instead
-   of the expanded profile path whenever the release directory lives
-   under ``$env:LOCALAPPDATA``. cmd.exe expands the token at runtime, so
-   the shim is independent of how the path was encoded on disk.
-2. Stop using ``-Encoding ASCII`` for the shim file. Any custom
-   ``APM_INSTALL_DIR`` outside ``%LOCALAPPDATA%`` is still written
-   verbatim, so it must use a non-lossy encoding that preserves the
-   author's intent on disk.
+The fix is to emit the literal token ``%LOCALAPPDATA%`` in the shim
+payload instead of the expanded profile path whenever the release
+directory lives under ``$env:LOCALAPPDATA``. cmd.exe expands the token
+at runtime, so the shim is independent of how the path was encoded on
+disk -- and the embedded shim target stays purely ASCII even when the
+user's profile path is not, which means the file itself can be written
+with a cmd.exe-safe ASCII encoding.
 
 This module-level test parses install.ps1 directly (no PowerShell host
-required) and locks in both invariants as a regression trap.
+required) and locks in those invariants as a regression trap.
 """
 
 from __future__ import annotations
@@ -69,42 +66,48 @@ def test_shim_uses_localappdata_literal_token() -> None:
     )
 
 
-def test_shim_not_written_with_ascii_encoding() -> None:
-    """Regression for #1509: -Encoding ASCII mangles non-ASCII paths."""
-    block = _shim_block(_read_install_script())
-    assert "-Encoding ASCII" not in block, (
-        "apm.cmd shim must not be written with -Encoding ASCII; the "
-        "encoding strips accented characters from custom install paths "
-        "(issue #1509)."
-    )
+def test_shim_not_written_with_utf16_encoding() -> None:
+    """Regression for windows-CI #1518 follow-up: cmd.exe cannot parse UTF-16LE .cmd.
 
-
-def test_shim_uses_utf16le_with_bom_encoding() -> None:
-    """Shim must be written as UTF-16LE with BOM so cmd.exe auto-detects it.
-
-    UTF-8 (with or without BOM) is not safely interpreted by cmd.exe across
-    OEM/ANSI code pages, which would re-introduce non-ASCII path corruption
-    on a custom APM_INSTALL_DIR (Copilot review on PR #1512).
+    A previous attempt at the #1509 fix wrote the shim as UTF-16LE with
+    BOM via ``System.Text.UnicodeEncoding``, on the assumption that
+    cmd.exe would auto-detect the encoding through the BOM. It does
+    not: invoking a UTF-16 .cmd via PATH surfaces as garbled output
+    (``>\ufffd\ufffd@``) and exit code 1 on real Windows runners.
+    The shim must use an encoding cmd.exe interprets through the
+    system OEM/ANSI code page.
     """
     block = _shim_block(_read_install_script())
+    assert "System.Text.UnicodeEncoding" not in block, (
+        "apm.cmd shim must not be written as UTF-16LE; cmd.exe does not "
+        "auto-detect UTF-16 via BOM when batch files are invoked through "
+        "PATH and the shim becomes unusable."
+    )
     assert "System.Text.UTF8Encoding" not in block, (
-        "apm.cmd shim must not be written with UTF8Encoding; cmd.exe does "
-        "not reliably auto-detect UTF-8 and may garble non-ASCII path "
-        "characters."
+        "apm.cmd shim must not be written as UTF-8 either; cmd.exe "
+        "interprets .cmd files via the active OEM/ANSI code page."
     )
-    assert "System.Text.UnicodeEncoding" in block, (
-        "apm.cmd shim must be written with System.Text.UnicodeEncoding "
-        "(UTF-16LE) so cmd.exe auto-detects the encoding via the BOM."
-    )
-    # UnicodeEncoding(bigEndian=$false, byteOrderMark=$true) -> little-endian
-    # with BOM. Lock the BOM flag in so a future edit cannot silently drop
-    # it.
-    assert re.search(
-        r"New-Object\s+System\.Text\.UnicodeEncoding\s*\(\s*\$false\s*,\s*\$true\s*\)",
-        block,
-    ), (
-        "UnicodeEncoding must be constructed as ($false, $true): little-endian "
-        "with a byte-order mark."
+
+
+def test_shim_written_with_ascii_encoding() -> None:
+    """The shim must be written with ASCII encoding.
+
+    ASCII is the safest encoding for the apm.cmd payload because:
+
+    * The %LOCALAPPDATA% literal token (test_shim_uses_localappdata_literal_token)
+      keeps the embedded shim target ASCII-only even when the user's
+      profile directory contains non-ASCII characters, neutralising
+      the original #1509 mangling vector.
+    * Every other token in the payload (``@echo off``, ``REM`` lines,
+      ``%*``) is ASCII by construction.
+    * cmd.exe reliably parses ASCII .cmd files across every OEM/ANSI
+      code page, whereas UTF-16 (with or without BOM) is not
+      auto-detected on PATH invocation.
+    """
+    block = _shim_block(_read_install_script())
+    assert re.search(r"-Encoding\s+ASCII", block), (
+        "apm.cmd shim must be written with `-Encoding ASCII` (or "
+        "equivalent ASCII-only writer) so cmd.exe parses it reliably."
     )
 
 
