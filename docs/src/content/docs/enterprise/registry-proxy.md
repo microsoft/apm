@@ -122,7 +122,7 @@ at one hosted on GHES, GHE.com, or GitLab self-managed:
 ```bash
 apm marketplace add acme-tools/agents \
   --host ghes.corp.example.com \
-  --branch main
+  --ref main
 ```
 
 The entry is stored in `~/.apm/marketplaces.json`. Auth uses the same
@@ -160,11 +160,11 @@ and `apm cache clean`.
 
 For fully disconnected CI (no proxy reach at all), build a bundle on a
 connected host with `apm pack` and restore offline. See
-[Pack and distribute](../../guides/pack-distribute/).
+[Pack and distribute](../../producer/pack-a-bundle/).
 
 ## See also
 
 - [Authentication](../../consumer/authentication/) -- token resolution order
 - [Private and org packages](../../consumer/private-and-org-packages/) -- per-host PAT scoping
-- [Pack and distribute](../../guides/pack-distribute/) -- air-gapped bundle delivery
+- [Pack and distribute](../../producer/pack-a-bundle/) -- air-gapped bundle delivery
 - [Governance overview](../governance-overview/) -- policy-cache offline story

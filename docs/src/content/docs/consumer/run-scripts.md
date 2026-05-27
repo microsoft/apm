@@ -105,8 +105,8 @@ runtime CLI differs. APM compiles the `.prompt.md` once per invocation
 and hands the compiled text to whichever CLI the script names.
 
 See [primitives and targets](../../concepts/primitives-and-targets/) for
-how a single prompt reaches every harness, and the [agent workflows
-guide](../../guides/agent-workflows/) for end-to-end script patterns.
+how a single prompt reaches every harness, and [authoring prompts](../../producer/author-primitives/prompts/) for
+the prompt-file format that backs these scripts.
 
 :::note[Coming from npm?]
 The `scripts:` shape is intentionally identical to `package.json`. Bare

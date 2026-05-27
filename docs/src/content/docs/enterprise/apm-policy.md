@@ -13,7 +13,7 @@ The `apm-policy.yml` schema, inheritance, and discovery ship today and are usabl
 
 `apm-policy.yml` is a single YAML file that defines what AI agent dependencies, MCP servers, and compilation targets are allowed across an organization. It is the governance pillar of APM — the file your security team owns and your repos inherit.
 
-This page is the mental model. For the full schema, see the [Policy Reference](../policy-reference/). For wiring it into CI, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+This page is the mental model. For the full schema, see the [Policy Reference](../policy-reference/). For wiring it into CI, see the [Enforce in CI guide](../enforce-in-ci/).
 
 ---
 
@@ -51,7 +51,7 @@ Alternative sources, useful for testing or non-GitHub setups:
 - **Local file** — `apm audit --ci --policy ./apm-policy.yml`
 - **HTTPS URL** — `apm audit --ci --policy https://example.com/apm-policy.yml`
 
-See [Alternative policy sources](../../guides/ci-policy-setup/#alternative-policy-sources) for details.
+See [Enforce in CI](../enforce-in-ci/) for alternative policy sources and CI wiring details.
 
 ---
 
@@ -88,13 +88,13 @@ Policy is evaluated at two points. Both use the same policy file and the same me
 
 `apm install` resolves the dependency tree, then runs the policy gate against the resolved set, then writes any files. A blocking violation halts the install with a non-zero exit code; nothing is written to disk. This protects developers who run `apm install` locally — they cannot accidentally deploy a denied package even without CI.
 
-> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. They also skip 16 of the 22 checks when `apm audit --ci` runs in the same shell. See the [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
+> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. The env var also skips all 17 policy checks when `apm audit --ci` runs in the same shell; the 8 baseline lockfile checks still run. See the [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
 
 ### CI time (audit gate)
 
 `apm audit --ci --policy org` runs the same checks (plus 8 baseline lockfile checks) and is intended as a required status check on pull requests. It produces SARIF output that GitHub Code Scanning renders inline on the PR diff.
 
-For setup, see [CI Policy Enforcement](../../guides/ci-policy-setup/).
+For setup, see [Enforce in CI](../enforce-in-ci/).
 
 ---
 
@@ -155,5 +155,5 @@ For lockfile-based forensic recipes, see the [Governance Guide §13: enforcement
 ## Next steps
 
 - **Schema and every field** — [Policy Reference](../policy-reference/)
-- **Wire it into CI with SARIF** — [CI Policy Enforcement](../../guides/ci-policy-setup/)
+- **Wire it into CI with SARIF** — [Enforce in CI](../enforce-in-ci/)
 - **Broader governance model** (lock files, audit trails, compliance scenarios) -- [Governance Guide](../governance-guide/)

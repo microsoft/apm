@@ -39,7 +39,7 @@ lockfile entry already has a `content_hash`, it recomputes the hash
 post-download and aborts the install on mismatch -- the partial
 download is removed and the user is told to use `apm install --update`
 if the change is intentional. Source: `src/apm_cli/install/sources.py`
-lines 621-649.
+(`content_hash` mismatch handling around lines 770-784).
 
 **Cache-hit verification.** On every cache HIT, APM reads the cached
 checkout's `.git/HEAD` and compares it to the lockfile's
@@ -52,7 +52,7 @@ Bundles (the local-file install path used by `apm pack` outputs) get a
 fourth check: every file listed in `pack.bundle_files` is SHA-256
 verified, symlinks anywhere under the bundle root are rejected, and
 files not listed in the manifest are flagged as a tampering signal.
-Source: `src/apm_cli/bundle/local_bundle.py:276-351`
+Source: `src/apm_cli/bundle/local_bundle.py:287-368`
 (`verify_bundle_integrity`).
 
 ## Provenance
@@ -89,7 +89,7 @@ APM has no secret store. The contract is:
   `src/apm_cli/integration/mcp_integrator.py` (runtime wiring).
 - **`apm install` writes `apm_modules/` to `.gitignore` automatically**
   on first install. Source:
-  `src/apm_cli/commands/_helpers.py:437` (`_update_gitignore_for_apm_modules`).
+  `src/apm_cli/commands/_helpers.py:414` (`_update_gitignore_for_apm_modules`).
   This keeps cached source trees out of commits.
 - **`apm.yml` is committed; `.env` is yours.** APM never reads `.env`
   files itself; that is delegated to the agent harness.

@@ -413,12 +413,12 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install apm-cli==X.Y.Z  # REPLACE: pin to current version, see /installation
       - run: apm install
-      - run: apm audit --ci -f sarif --output-file apm-audit.sarif
+      - run: apm audit --ci -f sarif --output apm-audit.sarif
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: apm-audit.sarif }
 ```
 
-For richer customization (matrix builds, monorepo splits, vendored policy paths) see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+For richer customization (matrix builds, monorepo splits, vendored policy paths) see the [Enforce in CI guide](../enforce-in-ci/).
 
 :::caution[Warn mode does not fail CI]
 `apm audit --ci` in warn mode rewrites violations to `passed=True` (audit.py:589-598), so the audit command exits 0 even on policy violations. Visibility is in the SARIF upload + Code Scanning UI, not in branch-protection status. To gate merges on policy violations, you must run in `block` mode.
@@ -430,7 +430,7 @@ For richer customization (matrix builds, monorepo splits, vendored policy paths)
 
 **Circuit-breaker rollout for large fleets.** For 100+ repos, do not flip block org-wide in one commit. Stage: enable `block` for 10% of repos for 1 week (via team-level extends), monitor SARIF alert volume and on-call pages, expand to 50% for 1 week, then 100%. If SARIF volume spikes or on-call escalations cluster, revert to `warn` at the org level (one commit) while you triage.
 
-For step-by-step CI YAML and SARIF upload examples beyond the snippet above, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+For step-by-step CI YAML and SARIF upload examples beyond the snippet above, see the [Enforce in CI guide](../enforce-in-ci/).
 
 ---
 
@@ -606,8 +606,8 @@ policy:
 :::
 
 - [`apm-policy.yml`](../apm-policy/) -- the file's mental model.
-- [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI wiring with YAML.
-- [Policy Reference](../policy-reference/) -- complete schema, the canonical 7+17 check enumeration, the 12-row merge rule table, exit codes.
+- [Enforce in CI](../enforce-in-ci/) -- step-by-step CI wiring with YAML.
+- [Policy Reference](../policy-reference/) -- complete schema, the canonical 8+17 check enumeration, the 12-row merge rule table, exit codes.
 - [Security Model](../security/) -- threat model, MCP trust boundary, content scanning, token handling.
 - [Adoption Playbook](../adoption-playbook/) -- broader APM rollout (governance is one phase).
 - [Lockfile Spec](../../reference/lockfile-spec/) -- lockfile schema for forensic queries.
