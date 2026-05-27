@@ -1088,6 +1088,199 @@ class TestOpenCodeAgentIntegration:
         assert result["errors"] == 0
 
 
+class TestOpenCodeAgentConversion:
+    """Tests for _write_opencode_agent tools list→object conversion."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+        self.integrator = AgentIntegrator()
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_converts_tools_list_to_object(self):
+        """List-format tools becomes an object with true values."""
+        source = self.root / "cc-correctness.agent.md"
+        source.write_text(
+            "---\n"
+            "name: cc-correctness\n"
+            "description: Finds correctness bugs\n"
+            "tools:\n"
+            "  - Read\n"
+            "  - Glob\n"
+            "  - Grep\n"
+            "  -  Bash  \n"
+            "model: sonnet\n"
+            "---\n\n"
+            "# Agent body\n"
+        )
+        target = self.root / "cc-correctness.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        assert "tools:" in content
+        assert "  Read: true" in content
+        assert "  Glob: true" in content
+        assert "  Grep: true" in content
+        assert "  Bash: true" in content
+        assert "name: cc-correctness" in content
+        assert "description: Finds correctness bugs" in content
+        assert "model: sonnet" in content
+        assert "# Agent body" in content
+
+    def test_converts_comma_separated_tools_string(self):
+        """Comma-separated string tools becomes an object."""
+        source = self.root / "agent.agent.md"
+        source.write_text('---\nname: my-agent\ntools: "Read, Glob, Grep"\n---\n\nBody text\n')
+        target = self.root / "agent.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        assert "Read: true" in content
+        assert "Glob: true" in content
+        assert "Grep: true" in content
+
+    def test_preserves_no_tools_field(self):
+        """Absent tools field leaves frontmatter unchanged."""
+        source = self.root / "simple.agent.md"
+        source.write_text("---\nname: simple\ndescription: A simple agent\n---\n\n# Simple\n")
+        target = self.root / "simple.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        assert "tools:" not in content
+        assert "name: simple" in content
+        assert "# Simple" in content
+
+    def test_leaves_tools_object_unchanged(self):
+        """Already-object tools is left as-is."""
+        source = self.root / "already.agent.md"
+        source.write_text("---\nname: already\ntools:\n  Read: true\n  Bash: true\n---\n\n# Body\n")
+        target = self.root / "already.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        assert "Read: true" in content
+        assert "Bash: true" in content
+        assert "tools:" in content
+
+    def test_converts_empty_tools_list_to_empty_object(self):
+        """Empty list becomes empty object {}."""
+        source = self.root / "empty.agent.md"
+        source.write_text("---\nname: empty\ntools: []\n---\n\n# Body\n")
+        target = self.root / "empty.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        assert "tools: {}" in content
+
+    def test_no_frontmatter_copies_verbatim(self):
+        """File without frontmatter is copied verbatim."""
+        source = self.root / "plain.agent.md"
+        source.write_text("# Plain agent\n\nJust instructions.\n")
+        target = self.root / "plain.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        assert target.read_text() == "# Plain agent\n\nJust instructions.\n"
+
+    def test_frontmatter_body_preserved_verbatim(self):
+        """Markdown body after frontmatter is preserved."""
+        source = self.root / "body.agent.md"
+        body = "\n## Instructions\n\n1. Read files\n2. Grep for patterns\n3. Report\n"
+        source.write_text(f"---\nname: checker\ntools:\n  - Read\n  - Grep\n---\n{body}")
+        target = self.root / "body.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        assert "## Instructions" in content
+        assert "1. Read files" in content
+        assert "2. Grep for patterns" in content
+        assert "3. Report" in content
+
+    def test_rejects_symlink_source(self):
+        """Symlink source raises ValueError."""
+        import os
+
+        import pytest
+
+        real = self.root / "real.agent.md"
+        real.write_text("---\ntools:\n  - Foo\n---\n\nBody\n")
+        link = self.root / "link.agent.md"
+        try:
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlink creation not supported on this platform")
+        target = self.root / "out.md"
+
+        with pytest.raises(ValueError, match="symlink"):
+            self.integrator._write_opencode_agent(link, target)
+
+    def test_handles_non_dict_frontmatter(self):
+        """Non-dict YAML frontmatter (e.g. bare list) is preserved as-is."""
+        source = self.root / "badfm.agent.md"
+        # frontmatter that parses as a YAML list, not a mapping
+        source.write_text("---\n- one\n- two\n---\n\n# Body\n")
+        target = self.root / "badfm.md"
+
+        self.integrator._write_opencode_agent(source, target)
+
+        content = target.read_text()
+        # Should not crash; non-dict frontmatter is preserved as-is
+        assert "---" in content
+        assert "# Body" in content
+        assert "- one" in content
+        assert "- two" in content
+
+    def test_integrate_via_target_dispatch(self):
+        """End-to-end: opencode target triggers tools conversion."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.root / ".opencode").mkdir()
+        pkg = self.root / "package"
+        agents_dir = pkg / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "security.agent.md").write_text(
+            "---\nname: security\ntools:\n  - Read\n  - Grep\n---\n\n# Security Agent\n"
+        )
+
+        package = APMPackage(name="test-pkg", version="1.0.0", package_path=pkg)
+        resolved_ref = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        package_info = PackageInfo(
+            package=package,
+            install_path=pkg,
+            resolved_reference=resolved_ref,
+            installed_at="2024-01-01T00:00:00",
+        )
+
+        opencode_target = KNOWN_TARGETS["opencode"]
+        result = self.integrator.integrate_agents_for_target(
+            opencode_target, package_info, self.root
+        )
+
+        assert result.files_integrated == 1
+        deployed = self.root / ".opencode" / "agents" / "security.md"
+        assert deployed.exists()
+        content = deployed.read_text()
+        assert "Read: true" in content
+        assert "Grep: true" in content
+        assert "# Security Agent" in content
+
+
 class TestCodexAgentIntegration:
     """Tests for Codex TOML agent transformation."""
 
