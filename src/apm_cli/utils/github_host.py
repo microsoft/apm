@@ -610,25 +610,105 @@ def is_artifactory_path(path_segments: list) -> bool:
     return len(path_segments) >= 4 and path_segments[0].lower() == "artifactory"
 
 
+def iter_artifactory_boundary_candidates(path_segments: list, shape_filter=None):
+    """Yield ``(prefix, owner, repo, virtual_path)`` candidates shallow-first.
+
+    Mirrors :meth:`DependencyReference.iter_gitlab_direct_shorthand_boundary_candidates`:
+    enumerate every plausible (owner, repo) split and let the caller probe each
+    one against the Artifactory proxy.  The probe (HEAD on the archive URL)
+    decides the real boundary; this iterator only proposes candidates.
+
+    If *shape_filter* is provided, candidates whose ``virtual_path`` fails the
+    filter are skipped.  The candidate with no virtual path (``k == n``) is
+    always yielded as the all-as-repo fallback so callers that need a
+    deterministic answer (no probing) can pick it.
+
+    The ``//`` empty-segment notation explicitly marks the repo / virtual
+    boundary and short-circuits the iterator to a single candidate.
+
+    Returns nothing for non-Artifactory paths.
+    """
+    if not is_artifactory_path(path_segments):
+        return
+    repo_key = path_segments[1]
+    prefix = f"artifactory/{repo_key}"
+    remaining = path_segments[2:]
+    if not remaining:
+        return
+    owner = remaining[0]
+    after_owner = remaining[1:]
+    n = len(after_owner)
+    if n == 0:
+        return
+
+    if "" in after_owner:
+        empty_idx = after_owner.index("")
+        repo_parts = after_owner[:empty_idx]
+        suffix_parts = [s for s in after_owner[empty_idx + 1 :] if s]
+        if repo_parts:
+            yield (
+                prefix,
+                owner,
+                "/".join(repo_parts),
+                "/".join(suffix_parts) if suffix_parts else None,
+            )
+        return
+
+    for k in range(1, n + 1):
+        repo = "/".join(after_owner[:k])
+        suffix_parts = after_owner[k:]
+        suffix = "/".join(suffix_parts) if suffix_parts else None
+        if suffix is not None and shape_filter is not None and not shape_filter(suffix):
+            continue
+        yield (prefix, owner, repo, suffix)
+
+
 def parse_artifactory_path(path_segments: list) -> tuple:
-    """Parse Artifactory path into (prefix, owner, repo, virtual_path).
+    """Parse Artifactory path into ``(prefix, owner, repo, virtual_path)``.
 
-    Input:  ['artifactory', 'github', 'microsoft', 'apm-sample-package']
-    Output: ('artifactory/github', 'microsoft', 'apm-sample-package', None)
+    Parse-time output is intentionally simple and unambiguous: ``owner`` is the
+    first segment after ``artifactory/{key}``, ``repo`` is the next segment,
+    and any further segments become ``virtual_path``.  The authoritative
+    boundary -- needed for nested GitLab subgroup paths behind the Artifactory
+    proxy -- is determined by :func:`apm_cli.install.artifactory_resolver.\
+_resolve_artifactory_boundary`, which probes archive URLs and rebuilds the
+    dependency reference at the verified boundary.
 
-    Input:  ['artifactory', 'github', 'owner', 'repo', 'skills', 'review']
-    Output: ('artifactory/github', 'owner', 'repo', 'skills/review')
+    The ``//`` notation (empty segment) is honored as an explicit, deterministic
+    boundary marker so users can opt out of probing.
 
     Returns None if not a valid Artifactory path.
     """
     if not is_artifactory_path(path_segments):
         return None
     repo_key = path_segments[1]
-    remaining = path_segments[2:]
     prefix = f"artifactory/{repo_key}"
+    remaining = path_segments[2:]
+    if not remaining:
+        return None
     owner = remaining[0]
-    repo = remaining[1]
-    virtual_path = "/".join(remaining[2:]) if len(remaining) > 2 else None
+    after_owner = remaining[1:]
+    if not after_owner:
+        return None
+
+    if "" in after_owner:
+        empty_idx = after_owner.index("")
+        repo_parts = after_owner[:empty_idx]
+        suffix_parts = [s for s in after_owner[empty_idx + 1 :] if s]
+        if not repo_parts:
+            # ``owner//virtual`` has no segments before the explicit boundary,
+            # so there is no repo to install -- reject as invalid rather than
+            # falling through and returning ``repo=''``.
+            return None
+        return (
+            prefix,
+            owner,
+            "/".join(repo_parts),
+            "/".join(suffix_parts) if suffix_parts else None,
+        )
+
+    repo = after_owner[0]
+    virtual_path = "/".join(after_owner[1:]) if len(after_owner) > 1 else None
     return (prefix, owner, repo, virtual_path)
 
 
@@ -661,11 +741,15 @@ def build_artifactory_archive_url(
         Tuple of URLs to try in order
     """
     base = f"{scheme}://{host}/{prefix}/{owner}/{repo}"
+    # GitLab archive filenames use only the project basename, even when the
+    # project sits inside a subgroup (e.g. ``group/sub/pkg`` becomes
+    # ``pkg-{ref}.zip``).  ``rsplit`` keeps the flat case unchanged.
+    repo_basename = repo.rsplit("/", 1)[-1]
     return (
         # GitHub-style: /archive/refs/heads/{ref}.zip
         f"{base}/archive/refs/heads/{ref}.zip",
-        # GitLab-style: /-/archive/{ref}/{repo}-{ref}.zip
-        f"{base}/-/archive/{ref}/{repo}-{ref}.zip",
+        # GitLab-style: /-/archive/{ref}/{basename}-{ref}.zip
+        f"{base}/-/archive/{ref}/{repo_basename}-{ref}.zip",
         # GitHub-style tags fallback
         f"{base}/archive/refs/tags/{ref}.zip",
         # codeload.github.com-style: /zip/refs/heads/{ref}

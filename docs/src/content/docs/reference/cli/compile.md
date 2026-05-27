@@ -75,7 +75,7 @@ include it in `--target` lists when you also want shared
 | Flag | Description |
 |------|-------------|
 | `-o, --output PATH` | Output file path. Only applies in single-file mode (`--single-agents`). Default: `AGENTS.md`. |
-| `--single-agents` | Force single-file compilation (legacy). Writes one combined file at `--output` instead of distributed AGENTS.md tree. |
+| `--single-agents` | Force single-file compilation (legacy). Writes one combined file at `--output` instead of a distributed per-directory target-file tree. Applies to every target that uses distributed placement. |
 | `--clean` | Remove orphaned AGENTS.md files no longer produced by the current primitive set. |
 
 ### Content
@@ -202,9 +202,10 @@ file) and re-run `apm compile`.
 
 There is no `--strategy` flag. Compilation runs in one of two modes:
 
-- **Distributed (default)** -- writes a tree of focused AGENTS.md files
-  next to the code they apply to, plus per-target subdirectories. This
-  is the recommended mode and follows the Minimal Context Principle.
+- **Distributed (default)** -- writes a tree of focused target files
+  (e.g. `AGENTS.md`, `CLAUDE.md`) next to the code they apply to, plus
+  per-target subdirectories. This is the recommended mode and follows
+  the Minimal Context Principle.
 - **Single-file (`--single-agents`)** -- writes one combined file at
   `--output` (default `AGENTS.md`). Use when a harness or workflow
   requires a single context file.
