@@ -1263,13 +1263,19 @@ class HookIntegrator(BaseIntegrator):
                 # by the integrated-counter fix (microsoft/apm#1499): a hook
                 # file that parsed cleanly but contributed zero entries (all
                 # events empty / non-list) used to bump the counter and lie
-                # to the user.  Now we skip it -- log a warning so the
-                # operator can see why a hook file appears in the package
-                # tree but never lands in the merged settings.
+                # to the user.  Now we skip it -- emit a user-visible warning
+                # (the original #1499 symptom was that authors saw nothing
+                # bad AND nothing good, so a structured-logger-only message
+                # would re-introduce the silent-failure UX) and a parallel
+                # _log.warning for operators consuming structured logs.
+                rel_hook = hook_file.name
+                _rich_warning(
+                    f"Hook file {rel_hook} contributed no entries to "
+                    f"{config.target_key} settings; skipped."
+                )
                 _log.warning(
                     "Hook file %s contributed no entries to %s settings "
-                    "(all events empty or non-list); skipping. The file is "
-                    "present in the package but produced an empty merge.",
+                    "(all events empty or non-list); skipping.",
                     hook_file,
                     config.target_key,
                 )
