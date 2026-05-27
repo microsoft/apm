@@ -50,16 +50,20 @@ def _resolve_tag_pattern(current_ref: str, package_name: str) -> str | None:
     if inferred:
         return inferred
     if TAG_RE.match(current_ref or ""):
-        return "v{version}" if (current_ref or "").startswith(("v", "V")) else "{version}"
+        return "v{version}" if (current_ref or "").startswith("v") else "{version}"
     return None
 
 
-def _semver_tag_candidates(tag_refs, pattern: str):
+def _semver_tag_candidates(tag_refs, pattern: str, package_name: str = ""):
     """Return ``(SemVer, tag_name)`` pairs matching *pattern*, highest first."""
     from ..marketplace.semver import SemVer, parse_semver
-    from ..marketplace.tag_pattern import build_tag_regex, parse_tag_version
+    from ..marketplace.tag_pattern import build_tag_regex
 
-    tag_rx = build_tag_regex(pattern)
+    tag_rx = (
+        build_tag_regex(pattern, name=package_name)
+        if "{name}" in pattern and package_name
+        else build_tag_regex(pattern)
+    )
     candidates: list[tuple[SemVer, str]] = []
     for remote_ref in tag_refs:
         match = tag_rx.match(remote_ref.name)
@@ -250,7 +254,7 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
 
         from ..marketplace.tag_pattern import parse_tag_version
 
-        candidates = _semver_tag_candidates(tag_refs, tag_pattern)
+        candidates = _semver_tag_candidates(tag_refs, tag_pattern, package_basename)
         if not candidates:
             return OutdatedRow(
                 package=package_name,
@@ -261,8 +265,12 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
             )
 
         _, latest_tag = candidates[0]
-        current_ver = parse_tag_version(current_ref, tag_pattern) or _strip_v(current_ref)
-        latest_ver = parse_tag_version(latest_tag, tag_pattern) or _strip_v(latest_tag)
+        current_ver = (
+            parse_tag_version(current_ref, tag_pattern, name=package_basename) or _strip_v(current_ref)
+        )
+        latest_ver = (
+            parse_tag_version(latest_tag, tag_pattern, name=package_basename) or _strip_v(latest_tag)
+        )
 
         if is_newer_version(current_ver, latest_ver):
             extra = [name for _, name in candidates[:10]] if verbose else []

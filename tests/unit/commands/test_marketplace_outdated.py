@@ -116,11 +116,32 @@ class TestExtractTagVersionsInference:
         refs = [
             RemoteRef(name="refs/tags/api-governance_v1.0.1", sha=_SHA_A),
             RemoteRef(name="refs/tags/api-governance_v1.0.2", sha=_SHA_B),
+            RemoteRef(name="refs/tags/other-pkg_v9.9.9", sha=_SHA_C),
         ]
         results = _extract_tag_versions(refs, entry, yml, include_prerelease=False)
         tag_names = [tag for _sv, tag in results]
         assert "api-governance_v1.0.1" in tag_names
         assert "api-governance_v1.0.2" in tag_names
+        assert "other-pkg_v9.9.9" not in tag_names
+
+    def test_collect_ignores_other_package_tags_in_monorepo(self):
+        from types import SimpleNamespace
+
+        from apm_cli.commands.marketplace import _extract_tag_versions
+
+        entry = SimpleNamespace(
+            name="apm1",
+            tag_pattern="{name}_v{version}",
+            include_prerelease=False,
+        )
+        yml = SimpleNamespace(build=SimpleNamespace(tag_pattern="v{version}"))
+        refs = [
+            RemoteRef(name="refs/tags/apm1_v1.0.0", sha=_SHA_A),
+            RemoteRef(name="refs/tags/apm2_v1.0.0", sha=_SHA_B),
+        ]
+        results = _extract_tag_versions(refs, entry, yml, include_prerelease=False)
+        tag_names = [tag for _sv, tag in results]
+        assert tag_names == ["apm1_v1.0.0"]
 
 
 # ---------------------------------------------------------------------------

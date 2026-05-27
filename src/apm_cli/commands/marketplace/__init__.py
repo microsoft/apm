@@ -1033,7 +1033,11 @@ def _extract_tag_versions(refs, entry, yml, include_prerelease):
     )
 
     def _collect(pattern: str) -> list:
-        tag_rx = build_tag_regex(pattern)
+        tag_rx = (
+            build_tag_regex(pattern, name=entry.name)
+            if "{name}" in pattern
+            else build_tag_regex(pattern)
+        )
         collected = []
         for sv, tag_name, _ in iter_semver_tags(refs, tag_rx):
             if sv.is_prerelease and not (include_prerelease or entry.include_prerelease):
