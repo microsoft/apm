@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ref:` on git-source dependencies now accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). `apm install` runs `git ls-remote`, picks the highest tag matching the range, and pins the resolved tag, commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `apm install --update` to re-resolve against current remote tags. Two tag patterns are tried in order (`v{version}`, `{name}--v{version}`) with a bare `{version}` fallback. (closes #1488)
+
 ## [0.15.0] - 2026-05-27
 
 ### Security

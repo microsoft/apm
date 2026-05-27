@@ -64,6 +64,7 @@ def _maybe_resolve_git_semver(
     dep_ref,
     existing_lockfile,
     update_refs: bool,
+    auth_resolver=None,
 ):
     """Resolve a git-source semver-range ``ref:`` to a concrete tag.
 
@@ -81,6 +82,19 @@ def _maybe_resolve_git_semver(
     network. This is the npm-style "honour the lock" path -- the locked
     tag is canonical until the manifest range changes or the user passes
     ``--update`` / ``--refresh``.
+
+    Auth
+    ----
+    When ``auth_resolver`` is supplied, the per-dep ``AuthContext`` is
+    resolved before constructing :class:`RefResolver` and its token is
+    embedded in the ``https://`` URL used by ``git ls-remote``. This
+    mirrors the auth path used by the clone step downstream, so a
+    private-repo semver dep that clones successfully also enumerates
+    its tags successfully in CI environments where ``GITHUB_APM_PAT`` /
+    ``ADO_APM_PAT`` are the only credential source (no system
+    credential helper available). Passing ``auth_resolver=None`` (the
+    legacy path) preserves the previous unauthenticated behaviour for
+    public repos and for callers that intentionally skip auth.
     """
     # Only git-source deps with a semver-range reference are eligible.
     if dep_ref.is_local:
@@ -126,7 +140,22 @@ def _maybe_resolve_git_semver(
     from apm_cli.deps.git_semver_resolver import GitSemverResolver
     from apm_cli.marketplace.ref_resolver import RefResolver
 
-    ref_resolver = RefResolver(host=dep_ref.host)
+    # Resolve the per-dep token via AuthResolver so ls-remote uses the
+    # same credential source the downstream clone will use. Without this
+    # threading, ls-remote on a private repo would rely on the host's
+    # git credential helper (present on dev laptops, absent in CI).
+    token: str | None = None
+    if auth_resolver is not None:
+        try:
+            auth_ctx = auth_resolver.resolve_for_dep(dep_ref)
+            token = auth_ctx.token if auth_ctx is not None else None
+        except Exception:
+            # Auth lookup is best-effort here: if it fails the unauth path
+            # remains, the downstream clone will surface the real auth
+            # error with its own actionable diagnostic.
+            token = None
+
+    ref_resolver = RefResolver(host=dep_ref.host, token=token)
     resolver = GitSemverResolver(ref_resolver)
     return resolver.resolve(
         owner_repo=owner_repo,
@@ -476,6 +505,7 @@ def run(ctx: InstallContext) -> None:
                 dep_ref=dep_ref,
                 existing_lockfile=existing_lockfile,
                 update_refs=update_refs,
+                auth_resolver=ctx.auth_resolver,
             )
             if _semver_resolution is not None:
                 with callback_lock:
@@ -538,9 +568,25 @@ def run(ctx: InstallContext) -> None:
             dep_key = dep_ref.get_unique_key()
             is_direct = dep_key in direct_dep_keys
 
+            # Distinguish resolution failures (git-semver no-match) from
+            # download failures: the dep_ref was rewritten to a concrete
+            # tag BEFORE clone, so a NoMatchingTagError means we never
+            # got to the download step. Using "download" as the verb
+            # would mislead users who are debugging an unsatisfied
+            # constraint -- nothing was downloaded yet.
+            from apm_cli.deps.git_semver_resolver import NoMatchingTagError
+
+            if isinstance(e, NoMatchingTagError):
+                if is_direct:
+                    fail_msg = f"No matching tag for {dep_ref.repo_url}: {e}"
+                else:
+                    chain_hint = f" (via {parent_chain})" if parent_chain else ""
+                    fail_msg = (
+                        f"No matching tag for transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
+                    )
             # Distinguish direct vs transitive failure messages so users
             # don't see a misleading "transitive dep" label for top-level deps.
-            if is_direct:
+            elif is_direct:
                 fail_msg = f"Failed to download dependency {dep_ref.repo_url}: {e}"
             else:
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""

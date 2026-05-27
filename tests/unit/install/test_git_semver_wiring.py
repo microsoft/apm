@@ -209,3 +209,121 @@ class TestDriftDetectRefChangeForSemver:
         dep = _make_dep_ref(reference="^1.2.0")
         locked = self._locked(constraint="^1.2.0", resolved_ref="v1.5.3")
         assert detect_ref_change(dep, locked, update_refs=False) is False
+
+
+class TestMaybeResolveGitSemverAuthThreading:
+    """Regression-trap for the auth-blocking panel finding on PR #1496.
+
+    The git-semver resolution path runs ``git ls-remote`` against the
+    dep's remote BEFORE the clone step. Without these tests, the
+    ls-remote call would silently bypass ``AuthResolver`` and rely on
+    the host's git credential helper -- which is absent in CI
+    environments (GitHub Actions, ADO pipelines, containers) where
+    ``GITHUB_APM_PAT`` / ``ADO_APM_PAT`` are the only token source.
+    Private-repo semver-range deps would then fail with a cryptic
+    ``repository not found`` instead of using the configured token.
+    """
+
+    def test_token_threaded_into_ref_resolver_when_auth_resolver_supplied(self):
+        """When an auth_resolver is passed, its per-dep token must reach RefResolver."""
+        dep = _make_dep_ref(reference="^1.2.0")
+
+        # Mock auth_resolver that returns a known token for this dep.
+        auth_ctx = MagicMock()
+        auth_ctx.token = "ghp_testtoken_abc123"
+        auth_resolver = MagicMock()
+        auth_resolver.resolve_for_dep.return_value = auth_ctx
+
+        # Capture the kwargs RefResolver receives.
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as rr_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=False,
+                auth_resolver=auth_resolver,
+            )
+
+        auth_resolver.resolve_for_dep.assert_called_once_with(dep)
+        rr_cls.assert_called_once()
+        _, kwargs = rr_cls.call_args
+        assert kwargs.get("token") == "ghp_testtoken_abc123", (
+            "RefResolver must receive the token resolved from AuthResolver "
+            "so ls-remote against private repos uses the configured PAT "
+            "instead of relying on the system git credential helper."
+        )
+        assert kwargs.get("host") == "github.com"
+
+    def test_no_auth_resolver_passes_none_token(self):
+        """Backward-compat: callers that don't supply auth_resolver still work."""
+        dep = _make_dep_ref(reference="^1.2.0")
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as rr_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=False,
+            )
+
+        rr_cls.assert_called_once()
+        _, kwargs = rr_cls.call_args
+        assert kwargs.get("token") is None
+
+    def test_auth_resolver_exception_falls_back_to_unauth(self):
+        """If AuthResolver raises, ls-remote falls back to unauth path.
+
+        The downstream clone will surface the real auth error with its
+        own actionable diagnostic, so swallowing the exception here is
+        safe and avoids double-reporting.
+        """
+        dep = _make_dep_ref(reference="^1.2.0")
+
+        auth_resolver = MagicMock()
+        auth_resolver.resolve_for_dep.side_effect = RuntimeError("auth lookup failed")
+
+        with (
+            patch("apm_cli.marketplace.ref_resolver.RefResolver") as rr_cls,
+            patch("apm_cli.deps.git_semver_resolver.GitSemverResolver"),
+        ):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=False,
+                auth_resolver=auth_resolver,
+            )
+
+        rr_cls.assert_called_once()
+        _, kwargs = rr_cls.call_args
+        assert kwargs.get("token") is None
+
+    def test_lockfile_replay_path_skips_auth_resolution(self):
+        """Replay path must not call auth_resolver -- no network, no token needed."""
+        dep = _make_dep_ref(reference="^1.2.0")
+        lockfile = LockFile()
+        lockfile.dependencies[dep.get_unique_key()] = LockedDependency(
+            host="github.com",
+            repo_url="acme/widget",
+            source="github",
+            resolved_ref="v1.5.3",
+            resolved_commit="a" * 40,
+            version="1.5.3",
+            constraint="^1.2.0",
+            resolved_tag="v1.5.3",
+            resolved_at="2025-01-15T12:00:00Z",
+        )
+
+        auth_resolver = MagicMock()
+        resolution = _maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=lockfile,
+            update_refs=False,
+            auth_resolver=auth_resolver,
+        )
+
+        assert isinstance(resolution, GitSemverResolution)
+        auth_resolver.resolve_for_dep.assert_not_called()
