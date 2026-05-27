@@ -215,6 +215,21 @@ def _satisfies_single(version: SemVer, spec: str) -> bool:
         base = parse_semver(spec[1:])
         return base is not None and version < base
 
+    # Explicit-equality operator (npm/cargo style): =1.2.3 := exact 1.2.3.
+    # APM follows the node-semver grammar, so pip-style ``==X.Y.Z`` is
+    # NOT recognised; users who write ``==1.2.3`` get a parse-time
+    # rejection via ``is_semver_range`` (see deps/registry/semver.py).
+    if spec.startswith("=") and not spec.startswith("=="):
+        base = parse_semver(spec[1:])
+        if base is None:
+            return False
+        return (
+            version.major == base.major
+            and version.minor == base.minor
+            and version.patch == base.patch
+            and version.prerelease == base.prerelease
+        )
+
     # Wildcard: 1.2.x or 1.2.*
     wildcard_match = re.match(r"^(\d+)\.(\d+)\.[xX*]$", spec)
     if wildcard_match:

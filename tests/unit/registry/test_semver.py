@@ -35,6 +35,12 @@ class TestIsSemverRange:
             "1.2.*",
             "1.0.0-beta.1",
             "1.0.0+build.42",
+            # ``=X.Y.Z`` is the npm- and cargo-style explicit-equality
+            # operator. Treated as a valid (and pinned) range so that
+            # ``require_pinned_constraint: true`` accepts it.
+            "=1.2.3",
+            "=0.0.1",
+            "=1.2.3-beta.1",
         ],
     )
     def test_accepts_valid_ranges(self, spec):
@@ -63,6 +69,12 @@ class TestIsSemverRange:
             "1.x",
             "1.*",
             "*",
+            # pip-style ``==1.2.3`` is NOT part of the node-semver grammar
+            # APM follows; rejecting it points users at the supported
+            # ``=1.2.3`` / bare ``1.2.3`` forms.
+            "==1.2.3",
+            "=garbage",
+            "=1.2",
         ],
     )
     def test_rejects_invalid_refs(self, spec):
