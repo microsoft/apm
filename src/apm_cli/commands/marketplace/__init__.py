@@ -245,80 +245,114 @@ def _check_gitignore_for_marketplace_json(logger):
             return
 
 
-def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str, str | None]:
-    """Parse a marketplace repo argument into ``(owner, repo_name, embedded_host)``.
+def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, str, str | None]:
+    """Parse a marketplace source argument into ``(url, kind, embedded_host)``.
 
-    Accepted forms:
-      * ``OWNER/REPO``                       (2 segments)
-      * ``HOST/OWNER/REPO``                  (3 segments, first is FQDN)
-      * ``HOST/group/sub/.../REPO``          (N>=4 segments, first is FQDN -- GHES nested paths)
-      * ``OWNER/group/sub/.../REPO``         (N>=3 segments, first is NOT a FQDN)
-      * ``https://HOST/owner/.../repo[.git]`` (full HTTPS URL)
-      * ``http://HOST/owner/.../repo[.git]``  (full HTTP URL -- rejected with explicit error)
+    Accepted forms (auto-detected, in order of test):
 
-    Returns ``(owner, repo_name, embedded_host)`` where ``embedded_host`` is the
-    host carried by the input itself (``HOST/...`` shorthand or HTTPS URL host)
-    or ``None`` for bare ``OWNER/REPO`` shorthand.
+      * Local filesystem path -- absolute (``/...``), relative (``./...``,
+        ``../...``), home (``~/...``), or Windows drive letter
+        (``C:\\repos\\foo``). Returns ``kind="local"``, ``url`` is the
+        ``file://`` URI form, ``embedded_host=None``.
+      * ``file://`` URI -- same shape as a local path but explicit.
+      * SCP-like SSH (``git@host:org/repo.git``). Returns ``kind`` derived
+        from the host via ``AuthResolver.classify_host``, ``url`` rewritten
+        to the SCP form (subprocess git understands it natively),
+        ``embedded_host=<host>``.
+      * Full HTTPS URL. Returns the URL untouched, ``embedded_host``
+        extracted, ``kind`` classified by host. Hosts that ``AuthResolver``
+        does not recognise as github/gitlab fall through as ``kind="git"``
+        (subprocess git path).
+      * ``OWNER/REPO`` or ``HOST/OWNER/.../REPO`` shorthand. The HOST
+        segment is detected via ``is_valid_fqdn``. Returns a synthesised
+        ``https://`` URL plus the resolved host.
 
-    Raises ``ValueError`` on malformed input. The caller is responsible for
-    enforcing the trusted-host allowlist on the returned ``embedded_host``.
-
-    The returned segments are validated through ``validate_path_segments`` to
-    reject path-traversal sequences (``..``, ``.``, ``~``).
+    Raises ``ValueError`` on malformed input (single-segment, HTTP, empty,
+    or path-traversal sequences in any segment).
     """
     from urllib.parse import urlparse
 
+    from ...core.auth import AuthResolver
     from ...utils.github_host import is_valid_fqdn
 
-    raw = (repo or "").strip()
+    raw = (source or "").strip()
     if not raw:
-        raise ValueError("Empty repository argument")
-
-    # Reject control characters and percent-encoded traversal. urlparse normalizes
-    # the path but does not unescape; we unescape eagerly so the security guards
-    # below see the real bytes the user typed.
-    import urllib.parse as _up
-
+        raise ValueError("Empty source argument")
     if any(ord(c) < 32 for c in raw):
-        raise ValueError("Repository argument contains invalid control characters")
+        raise ValueError("Source argument contains invalid control characters")
 
-    embedded_host: str | None = None
+    # --- Local path detection ---------------------------------------------
+    # Catches absolute (/, ~), relative (./, ../), file:// URIs, and
+    # Windows drive letters (C:\, C:/). Done BEFORE URL parsing so a path
+    # like '/srv/foo' is not misread as a relative HTTP URL.
+    if _looks_like_local_marketplace_source(raw):
+        url = raw if raw.lower().startswith("file://") else f"file://{_expand_local_path(raw)}"
+        return url, "local", None
+
     lowered = raw.lower()
-
     if lowered.startswith("http://"):
-        # Reject HTTP at parse time. APM does not ship an --allow-insecure
-        # escape hatch for marketplace add: a MITM adversary on an HTTP fetch
-        # of marketplace.json could inject attacker-controlled plugin source
-        # URLs, with no audit trail.
         raise ValueError(
             f"Insecure HTTP URL rejected: '{raw}'. Use HTTPS for marketplace registration."
         )
 
+    # --- SCP-like SSH (git@host:org/repo.git) -----------------------------
+    scp_match = _SCP_LIKE_RE.match(raw)
+    if scp_match:
+        host = scp_match.group("host").lower()
+        path = scp_match.group("path")
+        # Validate the path component does not carry traversal markers.
+        for seg in (s for s in path.split("/") if s):
+            validate_path_segments(seg, context="marketplace SSH path", reject_empty=True)
+        host_info = AuthResolver.classify_host(host)
+        kind = _host_kind_to_fetcher_kind(host_info.kind)
+        return raw, kind, host
+
+    # --- HTTPS URL --------------------------------------------------------
     if lowered.startswith("https://"):
         parsed = urlparse(raw)
         embedded_host = (parsed.hostname or "").strip().lower()
         if not embedded_host:
             raise ValueError(f"HTTPS URL is missing a host: '{raw}'")
-        # urlparse leaves the path percent-encoded; decode for segment splitting
-        # so traversal markers like '%2E%2E' are caught by validate_path_segments.
-        path = _up.unquote(parsed.path or "")
-        if path.endswith(".git"):
-            path = path[:-4]
-        segments = [seg for seg in path.split("/") if seg]
-    else:
-        # Mirror the HTTPS branch: decode percent-encoded sequences before splitting
-        # so '%2E%2E' becomes '..' and is caught by validate_path_segments below.
-        raw_decoded = _up.unquote(raw)
-        segments = [seg for seg in raw_decoded.split("/") if seg]
+        # Validate path segments for traversal markers.
+        from urllib.parse import unquote as _unquote
 
+        path_segments = [s for s in _unquote(parsed.path or "").split("/") if s]
+        for seg in path_segments:
+            validate_path_segments(seg, context="marketplace URL path", reject_empty=True)
+        if not path_segments:
+            raise ValueError(f"HTTPS URL is missing a repo path: '{raw}'")
+        host_info = AuthResolver.classify_host(embedded_host)
+        kind = _host_kind_to_fetcher_kind(host_info.kind)
+        if kind in ("github", "gitlab") and len(path_segments) < 2:
+            # GitHub / GitLab URLs are owner/repo-shaped; a single
+            # path segment is ambiguous (no owner). Generic git URLs
+            # (kind == "git") MAY legitimately have a single segment
+            # (e.g. self-hosted ``https://gitea.example.com/repo``).
+            raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO' in the URL path.")
+        if host_flag and host_flag.strip().lower() != embedded_host:
+            import shlex as _shlex
+
+            raise ValueError(
+                f"Conflicting host: --host '{host_flag}' does not match "
+                f"'{embedded_host}' in '{raw}'.\n"
+                f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
+            )
+        return raw, kind, embedded_host
+
+    # --- Shorthand (OWNER/REPO or HOST/OWNER/.../REPO) --------------------
+    from urllib.parse import unquote as _unquote
+
+    raw_decoded = _unquote(raw)
+    segments = [seg for seg in raw_decoded.split("/") if seg]
     if len(segments) < 2:
         raise ValueError(
             f"Invalid format: '{raw}'. "
-            f"Expected 'OWNER/REPO', 'HOST/OWNER/REPO', or a full HTTPS URL."
+            f"Expected 'OWNER/REPO', 'HOST/OWNER/REPO', a full HTTPS URL, "
+            f"a local path, or an SSH URL."
         )
 
-    if embedded_host is None and is_valid_fqdn(segments[0]):
-        # Shorthand carries an explicit host (e.g. 'gitlab.com/org/repo').
+    embedded_host: str | None = None
+    if is_valid_fqdn(segments[0]):
         if len(segments) < 3:
             raise ValueError(
                 f"Invalid format: '{raw}'. When the first segment is a host FQDN, "
@@ -332,11 +366,11 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
     if not owner_segments or not repo_name:
         raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO'.")
 
-    # Reject conflicting --host BEFORE security validation so the user gets the
-    # clearest possible error.
+    owner_path = "/".join(owner_segments)
+    validate_path_segments(owner_path, context="marketplace owner path", reject_empty=True)
+    validate_path_segments(repo_name, context="marketplace repo name", reject_empty=True)
+
     if embedded_host and host_flag and host_flag.strip().lower() != embedded_host:
-        # shlex.quote prevents shell-metacharacter injection in the
-        # copy-paste suggestion (round-4 supply-chain nit).
         import shlex as _shlex
 
         raise ValueError(
@@ -345,14 +379,69 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
             f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
         )
 
-    # validate_path_segments rejects '.', '..', '~' and cross-platform backslash
-    # variants in any single segment. Validate the joined owner path and the
-    # repo name independently so the error messages are precise.
-    owner_path = "/".join(owner_segments)
-    validate_path_segments(owner_path, context="marketplace owner path", reject_empty=True)
-    validate_path_segments(repo_name, context="marketplace repo name", reject_empty=True)
+    from ...utils.github_host import default_host
 
-    return owner_path, repo_name, embedded_host
+    resolved_host = (host_flag or "").strip().lower() or embedded_host or default_host()
+    host_info = AuthResolver.classify_host(resolved_host)
+    kind = _host_kind_to_fetcher_kind(host_info.kind)
+    url = f"https://{resolved_host}/{owner_path}/{repo_name}"
+    return url, kind, resolved_host
+
+
+# Backward-compat alias for any external callers.
+_parse_marketplace_repo = _parse_marketplace_source
+
+
+def _host_kind_to_fetcher_kind(host_kind: str) -> str:
+    """Map ``AuthResolver.classify_host`` kinds to fetcher-table kinds.
+
+    ``github`` / ``ghe_cloud`` / ``ghes`` -> ``"github"`` (Contents API)
+    ``gitlab``                            -> ``"gitlab"`` (REST v4 raw)
+    Everything else (``ado``, ``generic``) -> ``"git"`` (subprocess + GitCache)
+    """
+    if host_kind in ("github", "ghe_cloud", "ghes"):
+        return "github"
+    if host_kind == "gitlab":
+        return "gitlab"
+    return "git"
+
+
+# SCP-like SSH form: ``user@host:path``. The path component does not need
+# to start with a slash (that is what makes it SCP-like). Reuses the
+# canonical regex from ``apm_cli.cache.url_normalize`` so SCP parsing here
+# stays consistent with ``DependencyReference`` and policy discovery.
+from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE  # noqa: E402
+
+
+def _looks_like_local_marketplace_source(raw: str) -> bool:
+    """Heuristic match for local-path marketplace sources.
+
+    Matches: absolute paths (``/...``), explicit relative (``./...``,
+    ``../...``), home (``~``, ``~/...``), ``file://`` URIs, and Windows
+    drive letters (``C:\\`` or ``C:/``). The leading-slash check is
+    POSIX-only; on Windows, absolute paths arrive as drive-letter form.
+    """
+    if not raw:
+        return False
+    if raw.lower().startswith("file://"):
+        return True
+    if raw.startswith(("/", "./", "../", "~/", ".\\", "..\\", "~\\")) or raw == "~":
+        return True
+    # Windows drive letter: C:\foo or C:/foo
+    return len(raw) >= 3 and raw[0].isalpha() and raw[1] == ":" and raw[2] in ("\\", "/")
+
+
+def _expand_local_path(raw: str) -> str:
+    """Expand ``~`` and normalise to an absolute filesystem path string.
+
+    Used when synthesising the ``file://`` URL stored in ``marketplaces.json``
+    for local-kind entries. The result is *not* resolved (no symlink follow)
+    because the fetcher does its own ``ensure_path_within`` guard against
+    the post-``resolve`` location.
+    """
+    import os.path as _osp
+
+    return _osp.abspath(_osp.expanduser(raw))
 
 
 # Host-trust classification is owned by AuthResolver.classify_host (see
@@ -396,26 +485,56 @@ def _marketplace_add_unsupported_host_error(
     )
 
 
-@marketplace.command(help="Register a marketplace")
-@click.argument("repo", required=True)
+_ADD_EPILOG = """
+\b
+Examples:
+  apm marketplace add owner/repo
+  apm marketplace add github.com/owner/repo
+  apm marketplace add https://gitlab.com/group/repo
+  apm marketplace add https://dev.azure.com/org/proj/_git/repo --name apm-mkt
+  apm marketplace add git@gitea.example.com:org/repo.git --name custom
+  apm marketplace add /srv/marketplaces/agent-forge --name agent-forge
+"""
+
+
+@marketplace.command(help="Register a marketplace", epilog=_ADD_EPILOG)
+@click.argument("source", metavar="SOURCE", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
-@click.option("--branch", "-b", default="main", show_default=True, help="Branch to use")
+@click.option("--ref", "-r", default=None, help="Branch, tag, or commit to use (default: main)")
+@click.option("--branch", "-b", default=None, help="Deprecated alias for --ref", hidden=True)
 @click.option("--host", default=None, help="Git host FQDN (default: github.com)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def add(repo, name, branch, host, verbose):
-    """Register a marketplace from OWNER/REPO, HOST/OWNER/.../REPO, or an HTTPS URL."""
+def add(source, name, ref, branch, host, verbose):
+    """Register a marketplace.
+
+    SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
+    HTTPS URL (GitHub, GitLab, Azure DevOps, Gitea, Bitbucket Server, or
+    any self-hosted git server), an SSH URL (``git@host:org/repo.git``),
+    a local filesystem path, or a ``file://`` URI.
+    """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
         from ...marketplace.client import _auto_detect_path, fetch_marketplace
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
-        from ...utils.github_host import default_host, is_valid_fqdn
+        from ...utils.github_host import is_valid_fqdn
+
+        # --ref / --branch reconciliation. --branch stays as a hidden alias
+        # for one release so legacy invocations keep working; passing both
+        # is a hard error so we never silently pick one.
+        if ref is not None and branch is not None:
+            logger.error(
+                "--ref and --branch are mutually exclusive. Use --ref (--branch is a deprecated alias).",
+                symbol="error",
+            )
+            sys.exit(1)
+        effective_ref = ref if ref is not None else (branch if branch is not None else "main")
 
         try:
-            owner, repo_name, embedded_host = _parse_marketplace_repo(repo, host)
+            url, kind, resolved_host = _parse_marketplace_source(source, host)
         except PathTraversalError:
             logger.error(
-                f"Invalid repo path '{repo}': contains a path-traversal sequence. "
+                f"Invalid source '{source}': contains a path-traversal sequence. "
                 f"Remove '..', '.', or '~' from each path segment."
             )
             sys.exit(1)
@@ -423,44 +542,55 @@ def add(repo, name, branch, host, verbose):
             logger.error(str(exc))
             sys.exit(1)
 
-        # Resolve the effective host: explicit --host wins, then host embedded
-        # in the argument (HOST/... shorthand or HTTPS URL), then GITHUB_HOST.
-        if host is not None:
-            normalized_host = host.strip().lower()
-            if not is_valid_fqdn(normalized_host):
-                logger.error(
-                    f"Invalid host: '{host}'. Expected a valid host FQDN "
-                    f"(for example, 'github.com').",
-                    symbol="error",
-                )
-                sys.exit(1)
-            resolved_host = normalized_host
-        elif embedded_host is not None:
-            resolved_host = embedded_host
-        else:
-            resolved_host = default_host()
-
-        # Trusted-host gate. Routes through AuthResolver.classify_host so the
-        # registration-time guard and the fetch-time guard in client.py share a
-        # single classification implementation.
-        from ...core.auth import AuthResolver
-
-        host_info = AuthResolver.classify_host(resolved_host)
-        if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
-            import shlex as _shlex
-
-            quoted_repo = _shlex.quote(repo)
-            quoted_host = _shlex.quote(resolved_host)
+        if host is not None and not is_valid_fqdn(host.strip().lower()):
             logger.error(
-                _marketplace_add_unsupported_host_error(
-                    resolved_host, quoted_repo, quoted_host, host_info.kind
-                )
+                f"Invalid host: '{host}'. Expected a valid host FQDN (for example, 'github.com').",
+                symbol="error",
             )
             sys.exit(1)
 
-        # Hard-fail if the user-supplied --name flag is malformed; the
-        # manifest's name is validated softly below (publisher mistakes
-        # shouldn't break a successful add).
+        # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
+        # / SSH / local-path inputs the host is already embedded; warn that
+        # --host is being ignored rather than silently overriding.
+        if host is not None and kind == "local":
+            logger.warning(
+                "--host is ignored when SOURCE is a local filesystem path.",
+                symbol="warning",
+            )
+        elif (
+            host is not None
+            and host.strip().lower() != (resolved_host or "").lower()
+            and kind in ("git", "github", "gitlab")
+            and (source.startswith(("https://", "git@", "file://")))
+        ):
+            logger.warning(
+                "--host is ignored when SOURCE is a full URL.",
+                symbol="warning",
+            )
+
+        # Trust gate is now scoped to kinds that would forward an APM token
+        # via header injection. The subprocess git path (kind == "git")
+        # never forwards GITHUB_APM_PAT / GITLAB_APM_TOKEN -- AuthResolver
+        # only emits credentials matching the classified host. Local-kind
+        # fetches use no credentials at all.
+        if kind in ("github", "gitlab"):
+            from ...core.auth import AuthResolver
+
+            host_info = AuthResolver.classify_host(resolved_host or "")
+            if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
+                # Should not happen because _host_kind_to_fetcher_kind already
+                # mapped non-trusted kinds to "git", but defend in depth.
+                import shlex as _shlex
+
+                quoted_repo = _shlex.quote(source)
+                quoted_host = _shlex.quote(resolved_host or "")
+                logger.error(
+                    _marketplace_add_unsupported_host_error(
+                        resolved_host or "", quoted_repo, quoted_host, host_info.kind
+                    )
+                )
+                sys.exit(1)
+
         if name is not None and not _is_valid_alias(name):
             logger.error(
                 f"Invalid marketplace name: '{name}'. "
@@ -470,42 +600,39 @@ def add(repo, name, branch, host, verbose):
             )
             sys.exit(1)
 
-        # Probe for the marketplace.json location. The probe source's name
-        # is a placeholder -- _auto_detect_path only consults host/owner/repo.
+        # Surface progress before the slow probe + fetch (5-30s for generic-git)
+        # so the user sees activity instead of staring at a blank terminal.
+        provisional_label = name or _default_alias_from_url(url)
+        logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
+
+        # Probe for marketplace.json location. The probe source's name is a
+        # placeholder -- _auto_detect_path only consults url/ref/path/kind.
+        probe_name = provisional_label
         probe_source = MarketplaceSource(
-            name=name or repo_name,
-            owner=owner,
-            repo=repo_name,
-            branch=branch,
-            host=resolved_host,
+            name=probe_name,
+            url=url,
+            ref=effective_ref,
         )
         detected_path = _auto_detect_path(probe_source)
 
         if detected_path is None:
             logger.error(
-                f"No marketplace.json found in '{owner}/{repo_name}'. "
+                f"No marketplace.json found in '{probe_source.display_source}'. "
                 f"Checked: marketplace.json, .github/plugin/marketplace.json, "
                 f".claude-plugin/marketplace.json",
                 symbol="error",
             )
             sys.exit(1)
 
-        # Fetch and validate the manifest before logging start, so that the
-        # success/start lines display the *final* alias the user must use.
         fetch_source = MarketplaceSource(
-            name=name or repo_name,
-            owner=owner,
-            repo=repo_name,
-            branch=branch,
-            host=resolved_host,
+            name=probe_name,
+            url=url,
+            ref=effective_ref,
             path=detected_path,
         )
         manifest = fetch_marketplace(fetch_source, force_refresh=True)
         plugin_count = len(manifest.plugins)
 
-        # Resolve final alias: --name flag > manifest.name (if valid) > repo name.
-        # Track which tier won so we can report it in verbose mode and emit a
-        # warning when a publisher-declared name had to be rejected.
         manifest_name = (manifest.name or "").strip()
         if name is not None:
             display_name = name
@@ -514,7 +641,7 @@ def add(repo, name, branch, host, verbose):
             display_name = manifest_name
             alias_source = f"manifest.name ('{manifest_name}')"
         else:
-            display_name = repo_name
+            display_name = probe_name
             if manifest_name and not _is_valid_alias(manifest_name):
                 logger.warning(
                     f"Manifest declares name '{manifest_name}' which is not a "
@@ -522,34 +649,27 @@ def add(repo, name, branch, host, verbose):
                     f"Falling back to repo name.",
                     symbol="warning",
                 )
-                alias_source = f"repo name (manifest.name '{manifest_name}' invalid)"
+                alias_source = f"derived name (manifest.name '{manifest_name}' invalid)"
             else:
-                alias_source = "repo name (manifest.name missing)"
+                alias_source = "derived name (manifest.name missing)"
 
-        # Defense-in-depth: repo names from GitHub already satisfy the alias
-        # regex, so this invariant should always hold by the time we register.
         assert _is_valid_alias(display_name), (  # noqa: S101
             f"Resolved marketplace alias '{display_name}' failed validation"
         )
 
-        logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
-        logger.verbose_detail(f"    Repository: {owner}/{repo_name}")
-        logger.verbose_detail(f"    Branch: {branch}")
-        if resolved_host != "github.com":
-            logger.verbose_detail(f"    Host: {resolved_host}")
+        logger.verbose_detail(f"    Source: {fetch_source.display_source}")
+        logger.verbose_detail(f"    Kind: {kind}")
+        logger.verbose_detail(f"    Ref: {effective_ref}")
         logger.verbose_detail(f"    Detected path: {detected_path}")
         logger.verbose_detail(f"    Alias source: {alias_source}")
 
-        # Persist with the final alias.
-        source = MarketplaceSource(
+        final_source = MarketplaceSource(
             name=display_name,
-            owner=owner,
-            repo=repo_name,
-            branch=branch,
-            host=resolved_host,
+            url=url,
+            ref=effective_ref,
             path=detected_path,
         )
-        add_marketplace(source)
+        add_marketplace(final_source)
 
         logger.success(
             f"Marketplace '{display_name}' registered ({plugin_count} plugins)",
@@ -558,9 +678,7 @@ def add(repo, name, branch, host, verbose):
         if manifest.description:
             logger.verbose_detail(f"    {manifest.description}")
 
-        # Surface the install syntax only when the alias is something the user
-        # could not have predicted from OWNER/REPO. Silence is fine otherwise.
-        if name is None and display_name != repo_name:
+        if name is None and display_name != probe_name:
             logger.progress(
                 f"Install plugins with: apm install <plugin>@{display_name}",
                 symbol="info",
@@ -571,6 +689,27 @@ def add(repo, name, branch, host, verbose):
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
+
+def _default_alias_from_url(url: str) -> str:
+    """Derive a default marketplace alias from a parsed URL.
+
+    Strips ``.git`` suffix, trailing slashes, and uses the last
+    path-segment. For ``file://`` URLs the alias falls back to the
+    final filesystem segment.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url) if "://" in url else None
+    if parsed and parsed.path:
+        tail = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    else:
+        tail = url.rstrip("/").rsplit("/", 1)[-1]
+    if tail.endswith(".git"):
+        tail = tail[:-4]
+    # Defensive: alias regex disallows '.' at end + arbitrary characters,
+    # but it tolerates dots and dashes inside which covers normal repo names.
+    return tail or "marketplace"
 
 
 @marketplace.command(name="list", help="List registered marketplaces")
@@ -585,7 +724,8 @@ def list_cmd(verbose):
 
         if not sources:
             logger.progress(
-                "No marketplaces registered. Use 'apm marketplace add OWNER/REPO' to register one.",
+                "No marketplaces registered. Use 'apm marketplace add SOURCE' to register one "
+                "(OWNER/REPO, HTTPS URL, SSH URL, or local path).",
                 symbol="info",
             )
             return
@@ -595,7 +735,7 @@ def list_cmd(verbose):
             # Colorama fallback
             logger.progress(f"{len(sources)} marketplace(s) registered:", symbol="info")
             for s in sources:
-                logger.tree_item(f"  {s.name}  ({s.owner}/{s.repo})")
+                logger.tree_item(f"  {s.name}  ({s.display_source})")
             return
 
         from rich.table import Table
@@ -607,12 +747,12 @@ def list_cmd(verbose):
             border_style="cyan",
         )
         table.add_column("Name", style="bold white", no_wrap=True)
-        table.add_column("Repository", style="white")
-        table.add_column("Branch", style="cyan")
+        table.add_column("Source", style="white")
+        table.add_column("Ref", style="cyan")
         table.add_column("Path", style="dim")
 
         for s in sources:
-            table.add_row(s.name, f"{s.owner}/{s.repo}", s.branch, s.path)
+            table.add_row(s.name, s.display_source, s.ref, s.path)
 
         console.print()
         console.print(table)
@@ -757,7 +897,7 @@ def remove(name, yes, verbose):
                 )
                 sys.exit(1)
             confirmed = click.confirm(
-                f"Remove marketplace '{source.name}' ({source.owner}/{source.repo})?",
+                f"Remove marketplace '{source.name}' ({source.display_source})?",
                 default=False,
             )
             if not confirmed:

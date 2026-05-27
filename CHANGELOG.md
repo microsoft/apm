@@ -23,13 +23,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` through a registry proxy now supports nested-group repos (3+ path segments, e.g. `group/subgroup/project`). Previously every trailing segment past `owner/repo` was treated as an in-repo virtual sub-path, so the downloader requested the wrong archive URL and the install failed with HTTP 404 from the proxy. Behavior is gated on `PROXY_REGISTRY_ONLY` so direct (non-proxy) installs keep the legacy two-segment shape. Affects `parse_artifactory_path`, `build_artifactory_archive_url`, `_detect_virtual_package`, the shorthand resolvers in `DependencyReference`, and `ArtifactoryOrchestrator._split_owner_repo` / `download_subdirectory`.
 - URL-form Artifactory deps no longer round-trip with the `artifactory/<key>` prefix folded into `repo_url`. The duplicated prefix caused the downloader to construct double-prefixed archive URLs (`/artifactory/key/artifactory/key/owner/repo/...`) and 404. `_validate_url_repo_path` now strips the Artifactory VCS prefix before returning the bare `owner/repo` slug; the prefix is still recovered separately via `_extract_artifactory_prefix`.
+
+## [0.15.0] - 2026-05-27
+
+### Security
+
+- **BREAKING:** `apm install` against a `*.ghe.com` marketplace now refuses bare cross-repo `repo:` fields in `marketplace.json` before any network request runs, closing a dependency-confusion attack vector where `repo: owner/repo` could silently resolve to an attacker-controlled namespace on public `github.com`. Qualify with `corp.ghe.com/owner/repo` for same-host enterprise deps or `github.com/owner/repo` for declared cross-host deps. (closes #1326) -- by @edenfunf (#1459)
+
+### Added
+
+- `apm config set prefer-ssh true` / `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users stop re-passing `--ssh` / `--allow-protocol-fallback` on every `apm install`. Resolution order: CLI flag > env var > `apm config` > default. (closes #1243, #1308)
+- Experimental package registry resolver and `apm-policy.yml` source-mandate enforcement -- controlled sources, locked versions, byte-level SHA-256 verification. Git-based dependencies unchanged. Enable with `apm experimental enable registries`; configure per-registry credentials via `apm config set registry.<name>.{url,token}`; mandate via `registry_source: {require: [...], allow_non_registry: false}`. Package signing, SBOM, and SLSA provenance are out of scope for v1. (#1471)
+- `marketplace.packages[].source` in `apm.yml` accepts non-default git hosts via the `host.tld/owner/repo` shorthand or the full `https://host.tld/owner/repo[.git]` URL for `apm pack`, unlocking GitHub Enterprise and self-hosted GitLab as first-class marketplace package sources. (#1288)
+- `apm marketplace add` now accepts local filesystem paths, `file://` URIs, SSH URLs, and HTTPS URLs to any git host (Azure DevOps via `ADO_APM_PAT`, GitLab, Gitea, Bitbucket Server, self-hosted). Generic-git registrations fetch `marketplace.json` via `GitCache` and never forward APM tokens; local marketplaces read the manifest directly. Same change hardens `GitCache` against malicious upstreams: every clone/fetch/checkout sets `core.hooksPath=/dev/null` and skips submodule recursion. (#1476)
+
+### Changed
+
+- `apm compile` internals: deduplicated compilation config and registry-cursor refactor; no user-visible behaviour change but reduces drift between paths. (#1367)
+- `triage-panel` skill: replace invalid `difc:` block with `tools.github.min-integrity` so the gh-aw workflow lints clean and integrity gating actually applies. (#1487)
+- `triage-panel` skill: DIFC read-integrity exemption for external issues so triage can read community-reported issue bodies without the gate blocking. (#1462)
+- CodeQL integration tests now assert on parsed URL components instead of substrings, removing a class of false-positive matches and matching the repo test convention. (#1492)
+
+### Performance
+
+- Scaling guards on variant-key and cache-lookup paths, wired into the CI integration gate so per-dep resolution regressions fail PRs instead of slipping to main. (#1439)
+
+### Fixed
+
+- `apm install` re-resolves a dependency when its ref pin changes in `apm.yml` and `--refresh` actually re-resolves all pins (previously accepted but no-op) -- by @sergio-sisternes-epam (#1473)
 - Copilot, Codex, Cursor, Claude, Windsurf, OpenCode, and Gemini adapters handle MCP v0.1 `runtimeArguments`/`packageArguments` with `variables` (no `type` key), matching the VS Code fix from #1444. (#1461, closes #1452, thanks @sergio-sisternes-epam)
+- `apm compile --target claude` omits the "Project Standards" section from `CLAUDE.md` when instructions are already deployed to `.claude/rules/` by `apm install`, avoiding duplicate content in Claude Code's context window. `CLAUDE.md` is still generated for constitution and dependency imports. (closes #1138, #1146)
+- `apm compile --watch` now live-reloads `apm.yml` edits instead of caching the initial snapshot, and warns when combined with `--clean` so a watch session does not silently wipe state on every change. (#1403)
+- Windows: `_local_path_from_source` handles `file://` URI shapes (drive-letter, UNC) so local marketplaces on Windows resolve correctly, and preserves POSIX separators on plain POSIX-shaped inputs (`Path().expanduser()` was rewriting `/home/user` to `\home\user`); local-path pass-through is now cross-platform. (#1484)
+- `apm install` rewrites skill-shipped MCP `command` paths for the Claude target so portable installs resolve relative to `.claude/` instead of the source skill's checkout. (#1465)
+- Unstuck 3 flaky integration tests that were intermittently blocking the merge queue. (#1477)
 
 ## [0.14.2] - 2026-05-22
 
 ### Added
 
 - **Experimental:** `copilot-app` target scopes workflows to a real project row via loopback WS IPC (App running) or direct SQLite (App closed); `--global` workflow installs emit a one-time CWD-pivot warning. (#1431)
+- `apm pack --marketplace=FORMATS` filters which marketplace formats build in a single run; accepts comma-separated names and `all`/`none` sentinels. (#1324)
+- `apm pack --marketplace-path FORMAT=PATH` overrides the output path for a specific marketplace format at invocation time. (#1324)
+- `apm pack --json` emits a stable JSON contract to stdout (`{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`); all logs move to stderr so downstream tooling can `jq` the output. (#1324)
+- `marketplace.outputs` in `apm.yml` accepts a map form keyed by format name (`outputs: {claude: {}, codex: {path: ...}}`), replacing the deprecated list form; the list form still parses with a one-cycle deprecation warning. `apm marketplace init` now scaffolds the explicit map form. (#1324)
 
 ### Changed
 
@@ -76,6 +113,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows installer and `apm self-update` detect Windows Defender / antivirus blocks (HRESULT `0x800700E1`, PUA messages) and surface three actionable recovery options (`Add-MpPreference -ExclusionPath`, `pip --user`, false-positive submission URL) instead of falling through to a generic "failed to run" and a pip fallback that itself dies on unsupported Python. (#1408)
 - Windows installer and `apm self-update` survive AppLocker / App Control for Business (WDAC) policies by staging the release into the allow-listed per-user install root before running the `apm.exe --version` smoke test, and emit AppLocker-specific guidance on `0x80070005` Access Denied instead of silently falling back to pip. (#1390, closes #1389)
 - `apm uninstall <local-path>` on Windows no longer rejects absolute paths (`C:\...\my-pkg`) as "Invalid package format" and silently leaves deployed copilot-app workflow DB rows behind. Local paths are now detected on every platform, so install/uninstall round-trips cleanly. (#1413)
+
+### Changed
+
+- `apm compile --watch` picks up mid-session edits to `apm.yml`'s `target:` / `targets:` on the next file event instead of caching the resolved target until the watcher is restarted; previously the value resolved at startup was reused on every recompile. Follow-up to #1349. (#1403)
+- `apm compile --watch --clean` prints an explicit `[!]` warning that `--clean` is ignored in watch mode and continues; previously the flag was silently dropped. Run `apm compile --clean` separately between watch sessions to remove orphaned outputs. (#1403)
 
 ## [0.14.0] - 2026-05-18
 

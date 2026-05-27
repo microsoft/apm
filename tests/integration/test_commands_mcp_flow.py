@@ -1243,29 +1243,37 @@ class TestFindDuplicateNames:
 
 
 class TestParseMarketplaceRepo:
-    """_parse_marketplace_repo — URL and shorthand parsing."""
+    """_parse_marketplace_repo -- URL and shorthand parsing.
+
+    The function is a URL-first parser: it returns ``(url, kind, host)``
+    where ``url`` is the canonical fetch URL (synthesised for shorthand
+    inputs, returned verbatim for HTTPS), ``kind`` is the fetcher kind
+    (``github``/``gitlab``/``git``/``local``), and ``host`` is the
+    embedded or resolved host FQDN.
+    """
 
     def test_simple_owner_repo(self) -> None:
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo, host = _parse_marketplace_repo("myorg/myrepo", None)
-        assert owner == "myorg"
-        assert repo == "myrepo"
-        assert host is None
+        url, kind, host = _parse_marketplace_repo("myorg/myrepo", None)
+        assert url == "https://github.com/myorg/myrepo"
+        assert kind == "github"
+        assert host == "github.com"
 
     def test_https_url(self) -> None:
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo, host = _parse_marketplace_repo("https://github.com/myorg/myrepo", None)
-        assert owner == "myorg"
-        assert repo == "myrepo"
+        url, kind, host = _parse_marketplace_repo("https://github.com/myorg/myrepo", None)
+        assert url == "https://github.com/myorg/myrepo"
+        assert kind == "github"
         assert host == "github.com"
 
-    def test_https_url_strips_git_suffix(self) -> None:
+    def test_https_url_preserves_git_suffix(self) -> None:
+        """HTTPS URLs are returned verbatim; subprocess git handles .git."""
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        _, repo, _ = _parse_marketplace_repo("https://github.com/org/myrepo.git", None)
-        assert repo == "myrepo"
+        url, _, _ = _parse_marketplace_repo("https://github.com/org/myrepo.git", None)
+        assert url == "https://github.com/org/myrepo.git"
 
     def test_http_url_rejected(self) -> None:
         from apm_cli.commands.marketplace import _parse_marketplace_repo
@@ -1301,9 +1309,9 @@ class TestParseMarketplaceRepo:
         """HOST/OWNER/REPO shorthand when first segment is valid FQDN."""
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo, host = _parse_marketplace_repo("github.com/myorg/myrepo", None)
-        assert owner == "myorg"
-        assert repo == "myrepo"
+        url, kind, host = _parse_marketplace_repo("github.com/myorg/myrepo", None)
+        assert url == "https://github.com/myorg/myrepo"
+        assert kind == "github"
         assert host == "github.com"
 
 

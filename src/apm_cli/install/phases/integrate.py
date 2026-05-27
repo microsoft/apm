@@ -57,7 +57,14 @@ def _resolve_download_strategy(
     # npm-like behavior: Branches always fetch latest, only tags/commits use cache
     # Resolve git reference to determine type
     resolved_ref = None
-    if dep_ref.get_unique_key() not in ctx.pre_downloaded_keys:
+    # Registry-sourced deps don't have a git reference to resolve — calling
+    # ``resolve_git_reference`` on them would issue ``git ls-remote`` against
+    # the dep's notional host (default github.com), which can trigger an SSH
+    # key-acceptance prompt or a wasted network call. Skip the git probe
+    # entirely for non-git sources.
+    _source = getattr(dep_ref, "source", None)
+    is_git_source = not isinstance(_source, str) or _source in (None, "git")
+    if is_git_source and dep_ref.get_unique_key() not in ctx.pre_downloaded_keys:
         # Resolve when there is an explicit ref, OR when update_refs
         # is True AND we have a non-cached lockfile entry to compare
         # against (otherwise resolution is wasted work -- the package
@@ -87,6 +94,13 @@ def _resolve_download_strategy(
         existing_lockfile.get_dependency(dep_ref.get_unique_key()) if existing_lockfile else None
     )
     ref_changed = detect_ref_change(dep_ref, _dep_locked_chk, update_refs=update_refs)
+    # When the manifest ref drifted from the lockfile, the content hash
+    # will legitimately change after re-download.  Mark the dep so the
+    # supply-chain check in sources.py doesn't treat it as an attack.
+    if ref_changed:
+        # resolve.py's BFS callback may have already added this;
+        # set semantics make double-add safe.
+        ctx.expected_hash_change_deps.add(dep_ref.get_unique_key())
     # Phase 5 (#171): Also skip when lockfile SHA matches local HEAD
     # -- but not when the manifest ref has changed (user wants different version).
     lockfile_match = False
@@ -134,6 +148,16 @@ def _resolve_download_strategy(
                     if _should_skip_redownload(locked_dep, install_path):
                         lockfile_match = True
                         lockfile_match_via_content_hash_only = True
+        elif (
+            locked_dep
+            and getattr(locked_dep, "source", None) == "registry"
+            and not ref_changed
+            and not update_refs
+        ):
+            # Registry deps have no resolved_commit; use content_hash as the
+            # skip-download signal (mirrors the git content-hash fallback above).
+            if _should_skip_redownload(locked_dep, install_path):
+                lockfile_match = True
 
     # Self-heal pipeline (PR #1158).
     #

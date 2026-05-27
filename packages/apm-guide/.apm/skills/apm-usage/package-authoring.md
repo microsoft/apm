@@ -333,6 +333,13 @@ marketplace:
       description: Plugin shipped alongside this repo
       source: ./plugins/local-tool       # local path (no remote fetch)
       version: 0.1.0
+
+    - name: enterprise-plugin
+      description: Hosted on GitHub Enterprise
+      source: ghe.corp.example.com/platform/agents   # host.tld/owner/repo
+      version: "^0.3.0"
+      # Equivalent full URL form (trailing .git is stripped):
+      # source: https://ghe.corp.example.com/platform/agents.git
 ```
 
 Schema rules:
@@ -342,6 +349,12 @@ Schema rules:
 - `ref` takes precedence over `version`.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
+- `source` accepts three remote forms: `owner/repo` (default host),
+  `host.tld/owner/repo` (non-default host shorthand), or
+  `https://host.tld/owner/repo[.git]` (full URL).  Non-default hosts
+  resolve auth via the standard APM token chain
+  (`docs/getting-started/authentication.md`); the default-host token is
+  never forwarded.
 - `versioning.strategy` is optional. When present, it is consumed by
   the `apm pack --check-versions` release gate to enforce alignment
   between each local package's `version:` field and the marketplace
@@ -350,6 +363,37 @@ Schema rules:
   or `per_package` (each package versions independently, gate only
   checks that `version:` is present). Omit entirely to skip the gate.
 - Unknown keys raise a schema error -- do not invent fields.
+
+### Cross-repo plugin sources on enterprise marketplaces
+
+When a marketplace published on a `*.ghe.com` host references a plugin
+in a different repo via the YAML mapping form of `source:` -- with
+nested `type:` and `repo:` keys (rather than the simple `source: owner/repo`
+string) -- the `repo:` field **must be host-qualified**. A bare
+`owner/repo` value is refused at install time because it cannot be
+disambiguated from a public-github.com dependency-confusion attempt
+(see CHANGELOG entry for #1326). Two valid forms:
+
+```yaml
+plugins:
+  - name: shared-tool
+    source:
+      type: github
+      # Enterprise dep (most common): host-qualify to the marketplace host
+      repo: corp.ghe.com/platform-team/shared-tool
+      path: plugins/shared
+
+  - name: opensource-helper
+    source:
+      type: github
+      # Declared cross-host dep: host-qualify to github.com explicitly
+      repo: github.com/opensource-org/helper
+      path: plugins/helper
+```
+
+In-marketplace plugins (`source: ./...` or `source: owner/marketplace-repo`
+when it matches the marketplace project) are unaffected -- the resolver
+backfills the host automatically.
 
 ### Build semantics
 

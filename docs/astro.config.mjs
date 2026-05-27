@@ -201,6 +201,8 @@ export default defineConfig({
 						{ label: 'Security and supply chain', slug: 'enterprise/security-and-supply-chain' },
 						{ label: 'Drift detection', slug: 'enterprise/drift-detection' },
 						{ label: 'Registry proxy and air-gapped', slug: 'enterprise/registry-proxy' },
+						{ label: 'Registries', slug: 'guides/registries' },
+						{ label: 'Private registries', slug: 'guides/private-registries' },
 						{ label: 'GitHub rulesets', slug: 'enterprise/github-rulesets' },
 					],
 				},

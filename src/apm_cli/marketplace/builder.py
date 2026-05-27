@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -92,6 +93,7 @@ class ResolvedPackage:
     requested_version: str | None  # original APM-only range (for diagnostics)
     tags: tuple[str, ...]
     is_prerelease: bool  # True if the resolved ref was a prerelease semver
+    host: str | None = None  # non-default git host parsed from apm.yml source
 
 
 @dataclass(frozen=True)
@@ -310,6 +312,11 @@ class MarketplaceBuilder:
         self._host: str = default_host() or "github.com"
         self._host_info: HostInfo | None = None
         self._auth_resolved: bool = False
+        # Per-host RefResolver cache, keyed by host override on PackageEntry.
+        # Pre-warmed on the main thread before workers spawn; lock guards
+        # against future refactors that allow worker-side cache misses.
+        self._host_resolvers: dict[str, RefResolver] = {}
+        self._host_resolvers_lock = threading.Lock()
 
     @classmethod
     def from_config(
@@ -362,6 +369,75 @@ class MarketplaceBuilder:
                 token=self._github_token,
             )
         return self._resolver
+
+    def _effective_host(self, host: str | None) -> str | None:
+        """Normalize ``host`` for marketplace.json emission.
+
+        Returns ``None`` when ``host`` matches the active default host so
+        an explicit ``github.com/owner/repo`` source in apm.yml emits the
+        same shorthand (``source: github``, ``repo: owner/repo``) shape as
+        the bare ``owner/repo`` form.  Non-default hosts pass through
+        unchanged and downstream mappers emit ``source: url`` /
+        ``source: git-subdir`` with the full HTTPS URL.
+        """
+        if host is None or host == self._host:
+            return None
+        return host
+
+    def _get_resolver_for_host(self, host: str | None) -> RefResolver:
+        """Return a RefResolver bound to *host* (default when ``None``).
+
+        Non-default hosts go through ``AuthResolver.resolve(host)`` so that
+        ``GITHUB_APM_PAT``, ``GITHUB_APM_PAT_{ORG}``, ``GITHUB_TOKEN`` and
+        ``GH_TOKEN`` are consulted before falling back to ambient git
+        credentials (SSH key / credential helper).  Per-host resolvers are
+        cached for the lifetime of the build so each unique host pays the
+        auth-resolution cost only once.
+        """
+        if host is None or host == self._host:
+            return self._get_resolver()
+        with self._host_resolvers_lock:
+            cached = self._host_resolvers.get(host)
+            if cached is not None:
+                return cached
+            token = self._resolve_token_for_host(host)
+            logger.debug(
+                "Creating per-host RefResolver for %s (token=%s)",
+                host,
+                "set" if token else "unset",
+            )
+            resolver = RefResolver(
+                timeout_seconds=self._options.timeout_seconds,
+                offline=self._options.offline,
+                host=host,
+                token=token,
+            )
+            self._host_resolvers[host] = resolver
+            return resolver
+
+    def _resolve_token_for_host(self, host: str) -> str | None:
+        """Resolve an auth token for a non-default *host* via ``AuthResolver``.
+
+        Returns ``None`` -- letting ``git`` fall back to ambient credentials
+        -- when offline, when no token is configured for the host, or when
+        ``AuthResolver`` raises.  Never raises.
+        """
+        if self._options.offline:
+            return None
+        try:
+            from ..core.auth import AuthResolver  # lazy import
+
+            resolver = self._auth_resolver
+            if resolver is None:
+                resolver = AuthResolver()
+                self._auth_resolver = resolver
+            ctx = resolver.resolve(host)  # type: ignore[union-attr]
+            if ctx.token:
+                logger.debug("Resolved token for host %s (source=%s)", host, ctx.source)
+                return ctx.token
+        except Exception:
+            logger.debug("Could not resolve token for host %s", host, exc_info=True)
+        return None
 
     def _ensure_auth(self) -> None:
         """Lazily resolve host classification and GitHub token.
@@ -441,7 +517,7 @@ class MarketplaceBuilder:
                 is_prerelease=False,
             )
         yml = self._load_yml()
-        resolver = self._get_resolver()
+        resolver = self._get_resolver_for_host(entry.host)
         owner_repo = entry.source
 
         if entry.ref is not None:
@@ -471,6 +547,7 @@ class MarketplaceBuilder:
                 requested_version=entry.version,
                 tags=entry.tags,
                 is_prerelease=sv.is_prerelease if sv else False,
+                host=self._effective_host(entry.host),
             )
 
         refs = resolver.list_remote_refs(owner_repo)
@@ -491,6 +568,7 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
+                    host=self._effective_host(entry.host),
                 )
 
         # Try as full refname
@@ -510,6 +588,7 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
+                    host=self._effective_host(entry.host),
                 )
 
         # Try as branch name
@@ -526,6 +605,7 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=False,
+                    host=self._effective_host(entry.host),
                 )
 
         # HEAD special case
@@ -584,6 +664,7 @@ class MarketplaceBuilder:
             requested_version=version_range,
             tags=entry.tags,
             is_prerelease=best_sv.is_prerelease,
+            host=self._effective_host(entry.host),
         )
 
     # -- concurrent resolution ----------------------------------------------
@@ -613,6 +694,12 @@ class MarketplaceBuilder:
         # spawning workers -- avoids a race on _ensure_auth() and
         # matches the pattern used in _prefetch_metadata().
         self._get_resolver()
+        # Pre-warm any per-host resolvers needed by entries that override the
+        # default host via the ``host.tld/owner/repo`` source form.  Done on
+        # the main thread so workers never race to create the same resolver.
+        for entry in entries:
+            if entry.host:
+                self._get_resolver_for_host(entry.host)
 
         with ThreadPoolExecutor(max_workers=min(self._options.concurrency, len(entries))) as pool:
             future_to_index = {
@@ -656,54 +743,71 @@ class MarketplaceBuilder:
         ``None`` on any error.  This is purely cosmetic enrichment --
         failures are silently logged at debug level and never propagate.
 
-        When a GitHub token is available (via ``self._github_token``), it
-        is included as an ``Authorization`` header so private repos can be
-        accessed.
+        When a token is available for the package's host, it is included
+        as an ``Authorization`` header so private repos can be accessed.
+        A token resolved for the builder's default host is never sent to
+        another host.
 
-        For non-github.com GitHub-family hosts (GHES, GHE Cloud), uses the
-        GitHub REST API instead of raw.githubusercontent.com (which is only
-        available for github.com).  For non-GitHub hosts, metadata
-        enrichment is skipped.
+        Each package is fetched from its own host: ``github.com``
+        packages use the fast ``raw.githubusercontent.com`` CDN; GHES
+        and GHE Cloud packages use the GitHub REST API on the package's
+        host.  For non-GitHub-class hosts, metadata enrichment is
+        skipped.
         """
         try:
             path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
             file_path = f"{path_prefix}apm.yml"
 
-            # Determine URL strategy based on host kind
-            host_kind = self._host_info.kind if self._host_info else "github"
+            # Resolve the effective host for this package and its
+            # classification.  Falls back to the builder default when the
+            # package did not carry an explicit host override.
+            effective_host = pkg.host or self._host
+            if pkg.host is None or pkg.host == self._host:
+                host_info = self._host_info
+                token = self._github_token
+            else:
+                from ..core.auth import AuthResolver  # lazy import
+
+                try:
+                    host_info = AuthResolver.classify_host(effective_host)
+                except Exception:
+                    host_info = None
+                token = self._resolve_token_for_host(effective_host)
+
+            host_kind = host_info.kind if host_info else "github"
 
             if host_kind not in ("github", "ghe_cloud", "ghes"):
                 # Non-GitHub hosts -- skip metadata enrichment
                 logger.debug(
                     "Skipping metadata fetch for %s (non-GitHub host: %s)",
                     pkg.name,
-                    self._host,
+                    effective_host,
                 )
                 return None
 
-            if host_kind == "ghe_cloud" and not self._github_token:
+            if host_kind == "ghe_cloud" and not token:
                 logger.debug(
                     "Skipping metadata fetch for %s (GHE Cloud requires auth)",
                     pkg.name,
                 )
                 return None
 
-            if self._host == "github.com":
+            if effective_host == "github.com":
                 # github.com -- use fast raw.githubusercontent.com CDN
                 url = f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
                 req = urllib.request.Request(url)  # noqa: S310
-                if self._github_token:
-                    req.add_header("Authorization", f"token {self._github_token}")
+                if token:
+                    req.add_header("Authorization", f"token {token}")
             else:
-                # GHES / GHE Cloud -- use REST API
+                # GHES / GHE Cloud -- use REST API on the package's host
                 api_base = (
-                    self._host_info.api_base if self._host_info else None
-                ) or f"https://{self._host}/api/v3"
+                    host_info.api_base if host_info else None
+                ) or f"https://{effective_host}/api/v3"
                 url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
                 req = urllib.request.Request(url)  # noqa: S310
                 req.add_header("Accept", "application/vnd.github.raw")
-                if self._github_token:
-                    req.add_header("Authorization", f"token {self._github_token}")
+                if token:
+                    req.add_header("Authorization", f"token {token}")
 
             with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
                 raw = resp.read().decode("utf-8")
@@ -999,9 +1103,17 @@ class MarketplaceBuilder:
             ),
         )
 
-        # Cleanup resolver
+        # Cleanup default + per-host resolvers so long-lived builder
+        # instances do not leak caches or thread locks across builds.
         if self._resolver is not None:
             self._resolver.close()
+        with self._host_resolvers_lock:
+            for host_resolver in self._host_resolvers.values():
+                try:
+                    host_resolver.close()
+                except Exception:  # pragma: no cover - close is best-effort
+                    logger.debug("Failed to close per-host RefResolver", exc_info=True)
+            self._host_resolvers.clear()
 
         return BuildReport(
             outputs=report.outputs,

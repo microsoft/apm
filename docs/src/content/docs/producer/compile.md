@@ -115,12 +115,14 @@ Per target, with the rules shape on disk after compile:
 | Target | Root context file | Per-rule output | Compile required? |
 |---|---|---|---|
 | `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively |
-| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- `CLAUDE.md` is the entry point |
+| `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
+
+> **Claude deduplication**: When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the instructions section from `CLAUDE.md` to avoid duplicate content in Claude Code's context window. `CLAUDE.md` is still generated if it carries a constitution or dependency `@import` paths.
 
 ## compile vs install
 
@@ -136,6 +138,20 @@ so a normal `apm install` on a clean checkout already produces
 correct AGENTS.md / CLAUDE.md / GEMINI.md output. Reach for
 `apm compile` directly when you are iterating on instructions and
 do not want install's side effects.
+
+:::note[Claude Code deduplication]
+<a id="claude-code-deduplication"></a>
+When `.claude/rules/` is already populated with instructions,
+`apm compile --target claude` automatically omits the instructions
+section from `CLAUDE.md` to avoid duplicate content in Claude Code's
+context window. The directory can be populated by either
+`apm install --target claude` or by an earlier `apm compile --target claude`
+run -- both write per-file instruction rules into `.claude/rules/`.
+`CLAUDE.md` is still generated when it carries a constitution or
+dependency `@import` paths. If `.claude/rules/` is later removed,
+re-running `apm compile` restores the instructions section to
+`CLAUDE.md`.
+:::
 
 ## Pitfalls
 

@@ -1244,7 +1244,8 @@ class TestAutoDiscover:
         # Should have been called with ghe.corp.com/contoso/.github
         assert mock_fetch.called
         call_arg = mock_fetch.call_args[0][0]
-        assert "ghe.corp.com" in call_arg
+        host, _, _ = call_arg.partition("/")
+        assert host == "ghe.corp.com"
 
 
 class TestPolicyCaching:

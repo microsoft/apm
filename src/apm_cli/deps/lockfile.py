@@ -3,11 +3,13 @@
 Provides deterministic, reproducible installs by capturing exact resolved versions.
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
@@ -45,6 +47,13 @@ class LockedDependency:
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
+
+    # Registry resolver fields (design §6.1).
+    # Populated when source == "registry"; absent otherwise. resolved_hash is
+    # the sole non-negotiable trust anchor on every install — bytes are fetched
+    # from resolved_url and re-verified against this digest.
+    resolved_url: str | None = None
+    resolved_hash: str | None = None
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -101,10 +110,14 @@ class LockedDependency:
             result["allow_insecure"] = True
         if self.skill_subset:
             result["skill_subset"] = sorted(self.skill_subset)
+        if self.resolved_url:
+            result["resolved_url"] = self.resolved_url
+        if self.resolved_hash:
+            result["resolved_hash"] = self.resolved_hash
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LockedDependency":
+    def from_dict(cls, data: dict[str, Any]) -> LockedDependency:
         """Deserialize from dict.
 
         Handles backwards compatibility:
@@ -155,6 +168,8 @@ class LockedDependency:
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
+            resolved_url=data.get("resolved_url"),
+            resolved_hash=data.get("resolved_hash"),
         )
 
     @classmethod
@@ -166,7 +181,8 @@ class LockedDependency:
         resolved_by: str | None,
         is_dev: bool = False,
         registry_config=None,
-    ) -> "LockedDependency":
+        registry_resolution=None,
+    ) -> LockedDependency:
         """Create from a DependencyReference with resolution info.
 
         Args:
@@ -176,10 +192,15 @@ class LockedDependency:
             resolved_by: Parent repo URL, or ``None`` for direct dependencies.
             is_dev: Whether this is a dev-only dependency.
             registry_config: Optional :class:`~apm_cli.deps.registry_proxy.RegistryConfig`
-                used for this download.  When provided, ``host`` is set to the
-                pure FQDN (e.g. ``"art.example.com"``) and ``registry_prefix``
-                is set to the URL path prefix (e.g. ``"artifactory/github"``),
-                ensuring correct auth routing on subsequent installs.
+                used for this download (Artifactory VCS proxy — pre-existing
+                concept, distinct from the new dedicated-registry resolver).
+                When provided, ``host`` is set to the pure FQDN and
+                ``registry_prefix`` to the URL path prefix.
+            registry_resolution: Optional :class:`~apm_cli.deps.registry.resolver.RegistryResolution`
+                produced by the dedicated-registry resolver. When provided,
+                ``source`` is set to ``"registry"`` and ``resolved_url`` /
+                ``resolved_hash`` / ``version`` are populated from it (the
+                trust anchor for re-installs per design §6.1).
         """
         if registry_config is not None:
             host = registry_config.host
@@ -187,6 +208,16 @@ class LockedDependency:
         else:
             host = dep_ref.host
             registry_prefix = None
+
+        # Determine source: explicit registry resolution wins; else local;
+        # else inherit from dep_ref.source (which may be "git" or None).
+        if registry_resolution is not None:
+            source = "registry"
+        elif dep_ref.is_local:
+            source = "local"
+        else:
+            source = None
+
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
@@ -194,11 +225,12 @@ class LockedDependency:
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
             resolved_ref=dep_ref.reference,
+            version=(registry_resolution.version if registry_resolution is not None else None),
             virtual_path=dep_ref.virtual_path,
             is_virtual=dep_ref.is_virtual,
             depth=depth,
             resolved_by=resolved_by,
-            source="local" if dep_ref.is_local else None,
+            source=source,
             local_path=dep_ref.local_path if dep_ref.is_local else None,
             is_dev=is_dev,
             is_insecure=dep_ref.is_insecure,
@@ -206,15 +238,33 @@ class LockedDependency:
             skill_subset=sorted(dep_ref.skill_subset)
             if isinstance(getattr(dep_ref, "skill_subset", None), list)
             else [],
+            resolved_url=(
+                registry_resolution.resolved_url if registry_resolution is not None else None
+            ),
+            resolved_hash=(
+                registry_resolution.resolved_hash if registry_resolution is not None else None
+            ),
         )
 
     def to_dependency_ref(self) -> DependencyReference:
-        """Reconstruct a DependencyReference from this locked dependency."""
+        """Reconstruct a DependencyReference from this locked dependency.
+
+        Registry-sourced deps come back with ``source="registry"`` so the
+        install pipeline routes them to the registry resolver. The exact
+        locked version is in ``reference`` (the registry resolver still calls
+        /versions and the hash-check on download enforces the lockfile's
+        intent).
+        """
+        # Registry deps: prefer the locked exact version over resolved_ref so
+        # the resolver picks up the exact-version constraint, not the original
+        # range (e.g. ``^1.2.0`` -> ``1.5.3``).
+        is_registry = self.source == "registry"
+        ref = self.version if (is_registry and self.version) else self.resolved_ref
         return DependencyReference(
             repo_url=self.repo_url,
             host=self.host,
             port=self.port,
-            reference=self.resolved_ref,
+            reference=ref,
             virtual_path=self.virtual_path,
             is_virtual=self.is_virtual,
             artifactory_prefix=self.registry_prefix,
@@ -222,6 +272,7 @@ class LockedDependency:
             local_path=self.local_path,
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
+            source=self.source,
         )
 
 
@@ -239,8 +290,15 @@ class LockFile:
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
 
     def add_dependency(self, dep: LockedDependency) -> None:
-        """Add a dependency to the lock file."""
+        """Add a dependency to the lock file.
+
+        Adding a registry-sourced dep promotes ``lockfile_version`` to
+        ``"2"`` immediately, keeping the in-memory state consistent with
+        what ``to_yaml()`` would emit (design §6.1).
+        """
         self.dependencies[dep.get_unique_key()] = dep
+        if dep.source == "registry" and self.lockfile_version == "1":
+            self.lockfile_version = "2"
 
     def get_dependency(self, key: str) -> LockedDependency | None:
         """Get a dependency by its unique key."""
@@ -258,8 +316,26 @@ class LockFile:
         """Get all dependencies excluding the virtual self-entry."""
         return [d for d in self.get_all_dependencies() if d.local_path != "."]
 
+    def _needs_v2(self) -> bool:
+        """Whether the resolved graph requires lockfile schema v2.
+
+        Per design §6.1 (and invariant §2.1.4): bump opportunistically — only
+        when at least one dep is sourced from a dedicated registry. A project
+        that never opts into the registry keeps v1 forever, even on a newer
+        client.
+        """
+        return any(d.source == "registry" for d in self.dependencies.values())
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
+        # Opportunistic v1<->v2 derivation (design §6.1, invariant §2.1.4):
+        # the lockfile_version field always reflects current content at
+        # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
+        # that mutate ``self.dependencies`` directly or remove the last
+        # registry dep need the field re-derived here so the on-disk
+        # version is correct in both directions.
+        self.lockfile_version = "2" if self._needs_v2() else "1"
+        emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
         # of the flat local_deployed_files / local_deployed_file_hashes
         # fields. It must not be written back into the dependencies list,
@@ -267,7 +343,7 @@ class LockFile:
         _self_dep = self.dependencies.pop(_SELF_KEY, None)
         try:
             data: dict[str, Any] = {
-                "lockfile_version": self.lockfile_version,
+                "lockfile_version": emit_version,
                 "generated_at": self.generated_at,
             }
             if self.apm_version:
@@ -291,7 +367,7 @@ class LockFile:
                 self.dependencies[_SELF_KEY] = _self_dep
 
     @classmethod
-    def from_yaml(cls, yaml_str: str) -> "LockFile":
+    def from_yaml(cls, yaml_str: str) -> LockFile:
         """Deserialize from YAML string."""
         data = yaml.safe_load(yaml_str)
         if not data:
@@ -329,7 +405,7 @@ class LockFile:
         path.write_text(self.to_yaml(), encoding="utf-8")
 
     @classmethod
-    def read(cls, path: Path) -> Optional["LockFile"]:
+    def read(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None if not exists or corrupt."""
         if not path.exists():
             return None
@@ -339,7 +415,7 @@ class LockFile:
             return None
 
     @classmethod
-    def load_or_create(cls, path: Path) -> "LockFile":
+    def load_or_create(cls, path: Path) -> LockFile:
         """Load existing lock file or create a new one."""
         return cls.read(path) or cls()
 
@@ -348,7 +424,7 @@ class LockFile:
         cls,
         installed_packages,
         dependency_graph,
-    ) -> "LockFile":
+    ) -> LockFile:
         """Create a lock file from installed packages.
 
         Args:
@@ -372,6 +448,7 @@ class LockFile:
         lock = cls(apm_version=apm_version)
 
         for entry in installed_packages:
+            registry_resolution = None
             if isinstance(entry, InstalledPackage):
                 dep_ref = entry.dep_ref
                 resolved_commit = entry.resolved_commit
@@ -379,6 +456,7 @@ class LockFile:
                 resolved_by = entry.resolved_by
                 is_dev = entry.is_dev
                 registry_config = getattr(entry, "registry_config", None)
+                registry_resolution = getattr(entry, "registry_resolution", None)
             elif len(entry) >= 5:
                 dep_ref, resolved_commit, depth, resolved_by, is_dev = entry[:5]
                 registry_config = None
@@ -394,6 +472,7 @@ class LockFile:
                 resolved_by=resolved_by,
                 is_dev=is_dev,
                 registry_config=registry_config,
+                registry_resolution=registry_resolution,
             )
             lock.add_dependency(locked_dep)
 
@@ -434,7 +513,7 @@ class LockFile:
         """Save lock file to disk (alias for write)."""
         self.write(path)
 
-    def is_semantically_equivalent(self, other: "LockFile") -> bool:
+    def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP servers, and configs.
 
         Ignores ``generated_at`` and ``apm_version`` so that a no-change

@@ -655,6 +655,190 @@ class TestEdgeCases:
 
 
 # ---------------------------------------------------------------------------
+# Host-prefixed source form (``host.tld/owner/repo``)
+# ---------------------------------------------------------------------------
+
+
+class TestHostPrefixedSource:
+    """``source: host.tld/owner/repo`` splits the host off into ``PackageEntry.host``."""
+
+    def test_default_owner_repo_has_no_host(self, tmp_path: Path):
+        """Plain ``owner/repo`` source leaves ``host`` as None (use default)."""
+        content = _minimal_yml(
+            packages=("packages:\n  - name: tool-a\n    source: acme/tool-a\n    ref: v1.0.0")
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.source == "acme/tool-a"
+        assert entry.host is None
+        assert entry.is_local is False
+
+    def test_local_source_has_no_host(self, tmp_path: Path):
+        """``./path`` local sources never get a host."""
+        content = _minimal_yml(packages=("packages:\n  - name: tool-a\n    source: ./acme"))
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.is_local is True
+        assert entry.host is None
+
+    def test_ghe_host_prefixed_source_split(self, tmp_path: Path):
+        """``host.tld/owner/repo`` splits host out and leaves ``owner/repo``."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: ghe.example.com/acme/agents\n"
+                "    ref: v0.3.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.source == "acme/agents"
+        assert entry.host == "ghe.example.com"
+
+    def test_github_com_host_prefix_accepted(self, tmp_path: Path):
+        """The default host can also be expressed explicitly as a host prefix."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n  - name: tool-a\n    source: github.com/acme/tool-a\n    ref: v1.0.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.source == "acme/tool-a"
+        assert entry.host == "github.com"
+
+    def test_self_hosted_gitlab_host_accepted(self, tmp_path: Path):
+        """Any FQDN-shaped first segment is accepted (e.g. self-hosted GitLab)."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: gitlab.example.org/team/repo\n"
+                "    ref: main"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.source == "team/repo"
+        assert entry.host == "gitlab.example.org"
+
+    def test_four_segment_path_rejected(self, tmp_path: Path):
+        """Source with four slash-separated segments is not a valid form."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: host.tld/extra/owner/repo\n"
+                "    ref: v1.0.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="source"):
+            load_marketplace_yml(yml)
+
+    def test_three_segment_without_dot_rejected(self, tmp_path: Path):
+        """First segment must look like a hostname (contain a dot)."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n  - name: tool-a\n    source: not-a-host/owner/repo\n    ref: v1.0.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="source"):
+            load_marketplace_yml(yml)
+
+    def test_subdir_preserved_with_host_prefix(self, tmp_path: Path):
+        """``subdir`` is independent of the host-prefix split."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: baseline-rules\n"
+                "    source: ghe.example.com/acme/agents\n"
+                "    subdir: packages/baseline-rules\n"
+                "    ref: v0.3.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.host == "ghe.example.com"
+        assert entry.source == "acme/agents"
+        assert entry.subdir == "packages/baseline-rules"
+
+    # -- HTTPS URL form ----------------------------------------------------
+
+    def test_https_url_source_accepted(self, tmp_path: Path):
+        """``https://host.tld/owner/repo`` URL form splits into host + owner/repo."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: https://ghe.example.com/acme/agents\n"
+                "    ref: v0.3.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        entry = load_marketplace_yml(yml).packages[0]
+        assert entry.host == "ghe.example.com"
+        assert entry.source == "acme/agents"
+
+    def test_https_url_source_with_dot_git_suffix_normalized(self, tmp_path: Path):
+        """``.git`` suffix is stripped from URL-form sources."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: https://ghe.example.com/acme/agents.git\n"
+                "    ref: v0.3.0"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        entry = load_marketplace_yml(yml).packages[0]
+        assert entry.host == "ghe.example.com"
+        assert entry.source == "acme/agents"
+
+    # -- Security-relevant rejection cases ---------------------------------
+
+    @pytest.mark.parametrize(
+        "bad_source",
+        [
+            # Userinfo injection: ``user@host`` masquerades as host segment.
+            "evil.com@github.com/owner/repo",
+            "https://evil.com@github.com/owner/repo",
+            # Port in host segment.
+            "github.com:8443/owner/repo",
+            "https://github.com:8443/owner/repo",
+            # SSH SCP form (``git@host:path``) -- not supported, must not
+            # slip through as a 2-segment owner/repo.
+            "git@github.com:acme/agents.git",
+            # Other URL schemes.
+            "http://github.com/owner/repo",
+            "ssh://git@github.com/owner/repo",
+            "git://github.com/owner/repo",
+            # Query / fragment in source.
+            "github.com/owner/repo?ref=main",
+            "github.com/owner/repo#frag",
+            # Whitespace.
+            "github.com /owner/repo",
+        ],
+    )
+    def test_unsafe_source_forms_rejected(self, tmp_path: Path, bad_source: str):
+        """Userinfo / port / SSH / non-https / control-char sources are rejected."""
+        content = _minimal_yml(
+            packages=(f'packages:\n  - name: tool-a\n    source: "{bad_source}"\n    ref: main')
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="source"):
+            load_marketplace_yml(yml)
+
+
+# ---------------------------------------------------------------------------
 # S1: Output path traversal guard
 # ---------------------------------------------------------------------------
 

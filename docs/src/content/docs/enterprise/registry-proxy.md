@@ -14,6 +14,22 @@ APM supports three layered controls for that:
 3. `apm marketplace add --host ...` to register internal marketplaces
    served from GHES, GHE.com, or GitLab self-managed.
 
+:::note[Not to be confused with **Registries**]
+The **registry proxy** documented here transparently fronts an upstream Git
+host (GitHub, GitLab) so dependency clones flow through your enterprise
+infrastructure. Configured per-machine via `PROXY_REGISTRY_*` env vars.
+
+A **dedicated registry** ([Registries guide](../../guides/registries/)) is a
+separate, additive package source that speaks the [Registry HTTP API](../../reference/registry-http-api/)
+directly — no Git host upstream. Configured per-project in `apm.yml` via the
+top-level `registries:` block, and currently requires `apm experimental enable registries`.
+
+Both can be used together; they're orthogonal.
+:::
+
+For the *policy-cache* offline story (a different mechanism), see
+[Governance #9](../governance-guide/#9-air-gapped-and-offline).
+
 For consumer-side token setup, see
 [Authentication](../../consumer/authentication/) and
 [Private and org packages](../../consumer/private-and-org-packages/).

@@ -148,7 +148,8 @@ class TestParseHttpsUrls:
         ref = DR.parse("https://gitlab.com/owner/repo.git")
         canonical = ref.to_canonical()
         # Non-default host must appear in canonical form
-        assert "gitlab.com" in canonical
+        host = canonical.split("/", 1)[0]
+        assert host == "gitlab.com"
 
     def test_http_insecure_url_sets_flag(self) -> None:
         DR = _dep_ref()
@@ -399,7 +400,7 @@ class TestCanonicalAndIdentity:
         DR = _dep_ref()
         ref = DR.parse("https://gitlab.com/owner/repo.git")
         canonical = ref.to_canonical()
-        assert "gitlab.com" in canonical
+        assert canonical.split("/", 1)[0] == "gitlab.com"
 
     def test_canonical_appends_ref(self) -> None:
         DR = _dep_ref()
@@ -671,7 +672,7 @@ class TestParseFromDict:
 
     def test_missing_git_and_path_raises(self) -> None:
         DR = _dep_ref()
-        with pytest.raises(ValueError, match="'git' or 'path' field"):
+        with pytest.raises(ValueError, match=r"'git', 'path', or 'registry' field"):
             DR.parse_from_dict({"version": "1.0"})
 
     def test_allow_insecure_non_bool_raises(self) -> None:
@@ -833,7 +834,7 @@ class TestDisplayNameAndStr:
         DR = _dep_ref()
         ref = DR.parse("https://gitlab.com/owner/repo.git")
         s = str(ref)
-        assert "gitlab.com" in s
+        assert s.split("/", 1)[0] == "gitlab.com"
 
 
 # ============================================================================

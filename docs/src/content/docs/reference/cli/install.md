@@ -95,6 +95,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 - **Frozen mode.** With `--frozen`, install resolves only what is in `apm.lock.yaml`. A direct dependency missing from the lockfile, or a missing lockfile entirely, exits `1`. Orphan lockfile entries (locked but no longer in `apm.yml`) are tolerated; local-path deps are skipped. This is a structural check, not a content check -- run `apm audit --ci` for hash verification.
 - **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped at `--global` and with `--only mcp`.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed from the workspace, gated by per-file content hashes recorded in the lockfile (user-edited files are kept with a warning).
+- **Enterprise marketplace gate.** When installing from a `*.ghe.com` marketplace, bare cross-repo `repo:` fields (e.g. `repo: owner/repo`) are refused before any network request runs, preventing dependency-confusion attacks. Host-qualify the field to proceed: `repo: corp.ghe.com/owner/repo` for an enterprise dep, or `repo: github.com/owner/repo` for a declared cross-host dep.
 - **Security scan.** Source files are scanned for hidden Unicode and other tag-character / bidi-override patterns before deployment. Critical findings block the package; the install exits `1`. Use `--force` to deploy anyway, or run `apm audit --strip` first to remediate.
 - **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
 
@@ -180,11 +181,48 @@ apm install owner/skill-bundle --skill '*'   # reset to all skills
 - **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
 - **Copilot CLI env-var passthrough.** When deploying MCP entries to `~/.copilot/mcp-config.json`, `${env:VAR}` and `<VAR>` placeholders are translated to `${VAR}` so Copilot CLI resolves them at server-start. Plaintext secrets are never written to disk. Other targets currently resolve placeholders at install time.
 
+### Install from a private registry (experimental)
+
+Enable the feature, configure the registry (in `apm.yml` and/or `~/.apm/config.json`), and run install normally. APM resolves registry-sourced deps alongside git deps:
+
+```bash
+apm experimental enable registries
+
+# Option A: apm.yml has a registries: block and registry-routed deps
+apm install
+
+# Option B: workstation config only (no registries: block in apm.yml)
+apm config set registry.corp-main.url https://artifactory.corp.example.com/apm
+apm config set registry.corp-main.token eyJ...
+apm config set registry.corp-main.default true
+apm install
+
+# In CI: use env var for the token, never commit it
+APM_REGISTRY_TOKEN_CORP_MAIN=eyJ... apm install --frozen
+```
+
+See [Private registries](../../../guides/private-registries/) for the full setup guide.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success. All requested dependencies and local content deployed. |
+| `1` | Install failure: security scan blocked a critical finding, auth error, manifest write error, dependency resolution error, `--frozen` with a missing lockfile or a direct dependency absent from `apm.lock.yaml`, or unhandled exception. The diagnostic summary names the cause. |
+| `2` | Usage error: no deployment target detectable (no `--target`, no `targets:` in `apm.yml`, no harness signal in the project), `--ssh` and `--https` both passed, `--frozen` and `--update` both passed, or a Click flag conflict. |
+
+## Notes
+
+- **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate findings, prefer `apm audit --strip`. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
+- **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
+- **Copilot CLI env-var passthrough.** When deploying MCP entries to `~/.copilot/mcp-config.json`, `${env:VAR}` and `<VAR>` placeholders are translated to `${VAR}` so Copilot CLI resolves them at server-start. Plaintext secrets are never written to disk. Other targets currently resolve placeholders at install time.
+
 ## Related
 
 - [`apm update`](../update/) -- refresh dependencies in `apm.yml` to their latest matching refs, with a consent gate.
 - [`apm self-update`](../self-update/) -- upgrade the `apm` CLI binary itself.
 - [`apm prune`](../prune/) -- remove orphaned packages and stale files.
+- [Private registries](../../../guides/private-registries/) -- end-to-end guide for registry-sourced dependencies.
 - [`apm audit`](../audit/) -- explicit security reporting and remediation after install.
 - [`apm targets`](../targets/) -- print which harnesses APM detects in the current directory.
 - [Install packages (consumer guide)](../../../consumer/install-packages/) -- task-oriented walkthrough.

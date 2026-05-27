@@ -16,6 +16,7 @@ Strategy:
 
 from __future__ import annotations
 
+import re
 import subprocess  # noqa: F401 -- keep for potential future use
 from datetime import datetime
 from pathlib import Path
@@ -1322,7 +1323,9 @@ class TestLogTlsFailure:
         exc = RuntimeError("TLS verification failed: bad cert")
         verbose_calls: list[str] = []
         _log_tls_failure("host.example.com", exc, lambda m: verbose_calls.append(m), logger)
-        assert any("host.example.com" in m or "bad cert" in m for m in verbose_calls)
+        assert any(
+            re.search(r"\bhost\.example\.com\b", m) or "bad cert" in m for m in verbose_calls
+        )
 
     def test_without_logger_calls_warning_with_mock(self) -> None:
         """_log_tls_failure always requires a logger; test it calls warning with the right message."""

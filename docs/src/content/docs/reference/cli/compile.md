@@ -159,6 +159,12 @@ re-runs compilation automatically.
 - Watched directories (when present): `.apm/`, `.github/instructions/`,
   `.github/agents/`, `.github/chatmodes/`.
 - Triggers on changes to `.md` files and `apm.yml`.
+- Editing `apm.yml`'s `target:` / `targets:` mid-session takes effect on
+  the next file event; no need to restart the watcher. The CLI `--target`
+  flag, when passed to `apm compile --watch`, still outranks `apm.yml`.
+- `--clean` is ignored in watch mode (a `[!]` warning is printed at
+  startup). Run `apm compile --clean` separately between watch sessions
+  to remove orphaned outputs.
 - 1-second debounce to coalesce rapid edits.
 - Press Ctrl+C to stop.
 - Combine with `--dry-run` to validate placement on every save without

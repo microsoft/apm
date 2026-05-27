@@ -552,8 +552,38 @@ class AgentsCompiler:
             debug=config.debug,
         )
 
+        # Skip instructions in CLAUDE.md when they are already deployed to
+        # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
+        claude_rules_dir = self.base_dir / ".claude" / "rules"
+        skip_instructions = False
+        if claude_rules_dir.is_dir():
+            from ..utils.path_security import PathTraversalError, ensure_path_within
+
+            try:
+                ensure_path_within(claude_rules_dir, self.base_dir)
+            except PathTraversalError:
+                self._log(
+                    "warning",
+                    ".claude/rules/ is a symlink outside the project root -- ignoring",
+                )
+            else:
+                if any(claude_rules_dir.glob("*.md")):
+                    skip_instructions = True
+
+        if skip_instructions:
+            self._log(
+                "progress",
+                "Instructions already in .claude/rules/ -- omitting from CLAUDE.md"
+                " to avoid duplicate context",
+                symbol="info",
+            )
+
         # Format CLAUDE.md files
-        claude_config = {"source_attribution": config.source_attribution, "debug": config.debug}
+        claude_config = {
+            "source_attribution": config.source_attribution,
+            "debug": config.debug,
+            "skip_instructions": skip_instructions,
+        }
         claude_result = claude_formatter.format_distributed(
             primitives, placement_map, claude_config
         )
@@ -568,9 +598,20 @@ class AgentsCompiler:
         # Handle dry-run mode
         if config.dry_run:
             # Generate preview summary
+            count = len(claude_result.placements)
             preview_lines = [
-                f"CLAUDE.md Preview: Would generate {len(claude_result.placements)} files"
+                f"CLAUDE.md Preview: Would generate {count} {'file' if count == 1 else 'files'}"
             ]
+            # Surface the deduplication skip so dry-run is self-explanatory
+            # for scripted consumers (otherwise "Would generate 0 files"
+            # looks like a no-op or a bug). The same skip appears in the
+            # non-dry-run path via the dedicated INFO log line.
+            if skip_instructions:
+                preview_lines.append(
+                    "  (instructions section skipped: .claude/rules/ already "
+                    "populated -- avoids duplicate content in Claude Code's "
+                    "context window)"
+                )
             for claude_path in claude_result.content_map.keys():  # noqa: SIM118
                 rel_path = portable_relpath(claude_path, self.base_dir)
                 preview_lines.append(f"  {rel_path}")
@@ -628,15 +669,25 @@ class AgentsCompiler:
         stats = claude_result.stats.copy()
         stats["claude_files_written"] = files_written
 
+        if files_written == 0 and skip_instructions:
+            self._log(
+                "progress",
+                "CLAUDE.md not generated -- Claude Code reads .claude/rules/ directly,"
+                " no further action needed",
+                symbol="info",
+            )
+
         # Display CLAUDE.md compilation output using standard formatter
         # Get proper compilation results from distributed compiler (has optimization decisions)
+        # Skip formatter output when deduplication filtered out all placements to
+        # avoid contradicting the "not generated" log message above.
         from ..output.formatters import CompilationFormatter
         from ..output.models import CompilationResults
 
         compilation_results = distributed_compiler.get_compilation_results_for_display(
             is_dry_run=config.dry_run
         )
-        if compilation_results:
+        if compilation_results and not (skip_instructions and files_written == 0):
             # Update target name for CLAUDE.md output
             formatter_results = CompilationResults(
                 project_analysis=compilation_results.project_analysis,

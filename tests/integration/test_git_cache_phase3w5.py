@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, _dir_size, _sanitize_url
+from apm_cli.cache.git_cache import GitCache, _dir_size, _safe_git_args, _sanitize_url
 from apm_cli.cache.url_normalize import cache_shard_key
 
 
@@ -239,6 +239,7 @@ class TestLsRemoteResolve:
 
         assert mock_run.call_args.args[0] == [
             "git",
+            *_safe_git_args(),
             "ls-remote",
             "https://example.com/repo.git",
             "main",
@@ -673,6 +674,7 @@ class TestFetchIntoBareLocked:
 
         assert mock_run.call_args_list[0].args[0] == [
             "git",
+            *_safe_git_args(),
             "-C",
             str(bare_dir),
             "fetch",
@@ -696,7 +698,14 @@ class TestFetchIntoBareLocked:
         ):
             cache._fetch_into_bare_locked(bare_dir, "https://example.com/repo.git", "b" * 40)
 
-        assert mock_run.call_args_list[1].args[0] == ["git", "-C", str(bare_dir), "fetch", "--all"]
+        assert mock_run.call_args_list[1].args[0] == [
+            "git",
+            *_safe_git_args(),
+            "-C",
+            str(bare_dir),
+            "fetch",
+            "--all",
+        ]
 
 
 class TestEvictCheckout:

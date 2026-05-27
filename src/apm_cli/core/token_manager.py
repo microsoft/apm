@@ -115,7 +115,7 @@ class GitHubTokenManager:
 
     # Runtime-specific environment variable mappings
     RUNTIME_ENV_VARS = {  # noqa: RUF012
-        "copilot": ["GH_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN"],
+        "copilot": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN"],
         "codex": ["GITHUB_TOKEN"],  # Uses GITHUB_TOKEN directly
         "llm": ["GITHUB_MODELS_KEY"],  # LLM-specific variable for GitHub Models
     }
