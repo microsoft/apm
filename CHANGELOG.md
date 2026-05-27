@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `install.ps1` Windows shim (`apm.cmd`) now embeds the literal `%LOCALAPPDATA%` token (cmd.exe expands at runtime) when the install root lives under the user's local profile, and writes the shim as UTF-16LE with BOM instead of ASCII. Previously, accounts with non-ASCII characters in the profile directory (e.g. an accented username) got an ASCII-mangled path and `apm --version` reported `The system cannot find the path specified.`. The else branch (custom `APM_INSTALL_DIR` outside `%LOCALAPPDATA%`) percent-escapes literal `%` in the path and the shim carries an advisory `REM` so hand-edits do not re-introduce the bug. (closes #1509) (#1512)
 - `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
 - `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
 
