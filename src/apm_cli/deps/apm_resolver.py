@@ -302,11 +302,6 @@ class APMDependencyResolver:
             MarketplaceFetchError: Network/auth error fetching marketplace data.
             ValueError: Invalid marketplace or plugin configuration.
         """
-        from apm_cli.marketplace.errors import (
-            MarketplaceFetchError,
-            MarketplaceNotFoundError,
-            PluginNotFoundError,
-        )
         from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 
         resolution = resolve_marketplace_plugin(

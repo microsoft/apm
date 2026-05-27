@@ -859,7 +859,7 @@ def resolve_marketplace_plugin(
             owner_repo = f"{source.owner}/{source.repo}"
             token = _extract_token(auth_resolver, source.host, org=source.owner)
             try:
-                tag_name, sha = resolve_version_constraint(
+                tag_name, _sha = resolve_version_constraint(
                     plugin_name,
                     owner_repo,
                     version_spec,
