@@ -3,8 +3,10 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch  # noqa: F401
+from unittest.mock import Mock, patch
 
+from apm_cli.marketplace.errors import PluginNotFoundError
+from apm_cli.marketplace.resolver import MarketplacePluginResolution
 from src.apm_cli.deps.apm_resolver import APMDependencyResolver
 from src.apm_cli.deps.dependency_graph import (
     CircularRef,
@@ -14,8 +16,6 @@ from src.apm_cli.deps.dependency_graph import (
     DependencyTree,
     FlatDependencyMap,
 )
-from apm_cli.marketplace.errors import PluginNotFoundError
-from apm_cli.marketplace.resolver import MarketplacePluginResolution
 from src.apm_cli.models.apm_package import APMPackage, DependencyReference
 
 

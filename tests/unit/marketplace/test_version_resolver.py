@@ -1,7 +1,7 @@
 """Unit tests for marketplace version constraint resolution."""
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from apm_cli.marketplace.errors import NoMatchingVersionError
 from apm_cli.marketplace.ref_resolver import RemoteRef
@@ -60,7 +60,7 @@ class TestResolveVersionConstraint(unittest.TestCase):
         refs = _make_refs("2.1.0", "2.1.1", "2.1.5", "2.2.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, sha = resolve_version_constraint(
+        tag, _sha = resolve_version_constraint(
             "secrets-vault", "acme/plugins", "~2.1.0"
         )
         assert tag == "secrets-vault--v2.1.5"
@@ -69,7 +69,7 @@ class TestResolveVersionConstraint(unittest.TestCase):
         refs = _make_refs("2.0.0", "2.1.0", "2.5.3", "3.0.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, sha = resolve_version_constraint(
+        tag, _sha = resolve_version_constraint(
             "secrets-vault", "acme/plugins", "^2.0.0"
         )
         assert tag == "secrets-vault--v2.5.3"
@@ -78,7 +78,7 @@ class TestResolveVersionConstraint(unittest.TestCase):
         refs = _make_refs("1.0.0", "2.0.0", "3.0.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, sha = resolve_version_constraint(
+        tag, _sha = resolve_version_constraint(
             "secrets-vault", "acme/plugins", ">=2.0.0"
         )
         assert tag == "secrets-vault--v3.0.0"
@@ -87,7 +87,7 @@ class TestResolveVersionConstraint(unittest.TestCase):
         refs = _make_refs("2.0.0", "2.1.0", "2.1.1")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, sha = resolve_version_constraint(
+        tag, _sha = resolve_version_constraint(
             "secrets-vault", "acme/plugins", "2.1.0"
         )
         assert tag == "secrets-vault--v2.1.0"
@@ -105,7 +105,7 @@ class TestResolveVersionConstraint(unittest.TestCase):
         refs = _make_refs("2.1.0", "2.2.0-beta.1")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, sha = resolve_version_constraint(
+        tag, _sha = resolve_version_constraint(
             "secrets-vault", "acme/plugins", "^2.0.0"
         )
         assert tag == "secrets-vault--v2.1.0"
@@ -117,7 +117,7 @@ class TestResolveVersionConstraint(unittest.TestCase):
         ]
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, sha = resolve_version_constraint(
+        tag, _sha = resolve_version_constraint(
             "secrets-vault", "acme/plugins", "^2.0.0"
         )
         assert tag == "secrets-vault--v2.1.0"
@@ -158,7 +158,7 @@ class TestResolveVersionConstraint(unittest.TestCase):
         refs = _make_refs("2.1.0", "2.1.1", "2.2.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, sha = resolve_version_constraint(
+        tag, _sha = resolve_version_constraint(
             "secrets-vault", "acme/plugins", "2.1.0"
         )
         assert tag == "secrets-vault--v2.1.0"

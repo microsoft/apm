@@ -101,7 +101,7 @@ def resolve_version_constraint(
         )
 
     candidates.sort(key=lambda c: c[0], reverse=True)
-    best_sv, best_tag, best_sha = candidates[0]
+    _best_sv, best_tag, best_sha = candidates[0]
 
     logger.debug(
         "Version constraint '%s' for %s resolved to tag '%s' (sha=%s)",
