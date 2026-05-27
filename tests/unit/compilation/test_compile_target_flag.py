@@ -1781,12 +1781,26 @@ class TestClaudeMdHonorsSingleFileStrategy:
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_single_file_strategy_emits_only_root_claude_md(self, project_with_subdir_instruction):
+    @pytest.mark.parametrize(
+        "config_kwargs",
+        [
+            {"strategy": "single-file"},
+            {"single_agents": True},
+        ],
+        ids=["strategy-single-file", "single-agents-flag"],
+    )
+    def test_single_file_mode_emits_only_root_claude_md(
+        self, project_with_subdir_instruction, config_kwargs
+    ):
+        # Both strategy='single-file' and single_agents=True must collapse the
+        # CLAUDE.md placement map to a single root file; per-subdir CLAUDE.md
+        # files must not leak when single-file mode is requested via either
+        # surface.
         config = CompilationConfig(
             target="claude",
-            strategy="single-file",
             dry_run=False,
             with_constitution=False,
+            **config_kwargs,
         )
         compiler = AgentsCompiler(str(project_with_subdir_instruction))
         result = compiler.compile(config)
@@ -1796,25 +1810,8 @@ class TestClaudeMdHonorsSingleFileStrategy:
         subdir_claude = project_with_subdir_instruction / "scripts" / "CLAUDE.md"
         assert root_claude.exists(), "root CLAUDE.md should be generated"
         assert not subdir_claude.exists(), (
-            "scripts/CLAUDE.md must NOT be generated when strategy=single-file"
+            "scripts/CLAUDE.md must NOT be generated in single-file mode"
         )
-
-    def test_single_agents_flag_emits_only_root_claude_md(self, project_with_subdir_instruction):
-        # single_agents=True must also force a single root CLAUDE.md.
-        config = CompilationConfig(
-            target="claude",
-            single_agents=True,
-            dry_run=False,
-            with_constitution=False,
-        )
-        compiler = AgentsCompiler(str(project_with_subdir_instruction))
-        result = compiler.compile(config)
-
-        assert result.success, f"compile failed: {result.errors}"
-        root_claude = project_with_subdir_instruction / "CLAUDE.md"
-        subdir_claude = project_with_subdir_instruction / "scripts" / "CLAUDE.md"
-        assert root_claude.exists()
-        assert not subdir_claude.exists()
 
     def test_distributed_strategy_unchanged_behavior(self, project_with_subdir_instruction):
         # Default distributed strategy must still place per-subdirectory.
