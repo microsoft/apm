@@ -56,7 +56,35 @@ manifest:
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
+
+registry_source:                        # experimental: requires `apm experimental enable registries`
+  require: []                           # registry names that MUST be reachable in the merged registry map
+  allow_non_registry: true              # when false, blocks any dep not routed through a configured registry
 ```
+
+## Registry source governance (experimental)
+
+Gate dependency sources to REST-based APM registries declared via the
+`registries:` block in `apm.yml` (or in `~/.apm/config.json`). Applies
+to direct AND transitive dependencies.
+
+```yaml
+# .github/apm-policy.yml
+registry_source:
+  require:
+    - corp-main                         # this registry MUST be reachable
+  allow_non_registry: false             # block any dep not routed through a registry
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `require` | `[]` | Registry names that MUST appear in the merged registry map (project `apm.yml` + workspace `~/.apm/apm.yml` + `~/.apm/config.json`). Fail-closed if a listed name has no URL. |
+| `allow_non_registry` | `true` | When `false`, every dep MUST be routed through a configured registry; git-shorthand and `- git:` deps are blocked at install time. |
+
+The check fires from all four call sites (`policy_gate`,
+`policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
+`apm install`, `apm install <pkg>`, `apm deps update`, and
+`apm audit --ci` all enforce the same gate.
 
 ## Local content governance
 

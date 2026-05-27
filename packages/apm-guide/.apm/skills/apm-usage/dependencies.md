@@ -122,6 +122,75 @@ both protocols.
 - path: ./packages/my-skills                    # local only
 ```
 
+## Registry-sourced APM dependencies (experimental)
+
+Behind `apm experimental enable registries`. Registry deps resolve over the
+REST [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
+alongside the Git resolver -- declare registries in `apm.yml` (or in
+`~/.apm/config.json`) and reference them from `dependencies.apm`. See
+`authentication.md` (Registry tokens) for `APM_REGISTRY_TOKEN_{NAME}`.
+
+```yaml
+registries:
+  jf-skills:
+    url: https://registry.example.com/apm/jf-skills
+  default: jf-skills                       # optional; routes shorthand deps
+
+dependencies:
+  apm:
+    # String shorthand -- requires a default registry; always needs a ref
+    - acme/foo#^1.2.3                      # semver range -> default registry
+    - acme/bar#stable                      # opaque label -> default registry
+
+    # Object form -- whole package via the default registry
+    - id: acme/toolkit
+      version: ^2.0.0
+
+    # Object form -- explicit registry by name
+    - registry: jf-skills
+      id: acme/toolkit
+      version: ^2.0.0
+
+    # Object form -- virtual package (sub-path inside a published package)
+    - registry: jf-skills
+      id: acme/prompt-pack
+      path: prompts/review.prompt.md
+      version: 1.4.0
+      alias: review-prompt                 # optional local alias
+```
+
+Object-form fields:
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `id` | yes | `owner/repo` identity at the registry |
+| `version` | yes | Exact version or semver range; opaque to APM (the registry decides) |
+| `registry` | no | Name from the merged registry map; defaults to the effective default |
+| `path` | no | Sub-path to a file or directory within the published package |
+| `alias` | no | Local alias controlling the install directory name |
+
+Routing rules when a default registry is active:
+
+| Entry form | Routed to |
+|------------|-----------|
+| `owner/repo#<any-ref>` | Default registry |
+| `- id:` object (no `registry:`) | Default registry |
+| `- registry:` object | Named registry |
+| `- git:` object | Git (explicit override) |
+| `- path:` object | Local filesystem |
+
+A shorthand entry with no ref (`acme/foo`) is **rejected** when routed to a
+registry -- a version selector is always required. Use `- git:` to keep a
+dep on Git when a default registry is active. Registry-routed deps add
+`source: registry`, `version`, `resolved_url`, and `resolved_hash`
+(sha256 of the archive bytes) to their lockfile entry, and the lockfile
+opportunistically bumps to `lockfile_version: "2"` only when at least one
+registry dep is present.
+
+The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
+to v2) -- the `@` collides with npm/cargo/pip version syntax, with
+`git@host`, and with marketplace plugin shorthand. Use the object form.
+
 ## Virtual package types
 
 Virtual packages reference a subset of a repository.

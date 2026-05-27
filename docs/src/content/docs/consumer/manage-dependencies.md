@@ -93,7 +93,7 @@ For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
-[Private registries](../../guides/private-registries/).
+[Registries](../../guides/registries/).
 
 ## Add a dependency
 

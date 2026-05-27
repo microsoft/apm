@@ -91,6 +91,25 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
 the correct target-specific form.
 
+### Hook command paths: project-scope stays repo-relative
+
+`apm install` (project-scope, no `-g`) keeps hook `command` paths
+**repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
+`<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
+sidecar, and equivalents for Cursor / Gemini / Windsurf) so clones,
+contributors, and CI runners do not see the installer's machine-local
+absolute prefix. `apm install -g` (user-scope, e.g.
+`~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
+references to absolute paths because the user-scope config is read
+without a fixed cwd. If a referenced hook script is missing at install
+time the installer emits a warning either way; user-scope additionally
+rewrites the unexpanded variable to an absolute source path so the hook
+fails loudly at runtime, while project-scope leaves the variable in
+place to avoid baking the installer's prefix into committed config. To
+clean up an older repo whose committed configs still carry absolutized
+paths, re-run `apm install` -- the new compile rewrites them back to
+repo-relative.
+
 ## Manifest fields: `targets:` validation contract
 
 Two keys control which output runtimes a package compiles and installs to:
@@ -282,6 +301,64 @@ git tag v1.0.0 && git push --tags
 # 6. Consumers install via
 apm install org/my-package#v1.0.0
 ```
+
+## Publishing to a registry (experimental)
+
+REST-based APM registries are an alternative distribution channel to Git
+(and a separate surface from marketplaces). Use `apm publish` to push a
+package version to a registry that implements the [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md).
+
+```bash
+# 1. Enable the feature
+apm experimental enable registries
+
+# 2. Declare the target registry in apm.yml
+cat >> apm.yml <<'EOF'
+registries:
+  corp-main:
+    url: https://registry.example.com/apm/corp-main
+EOF
+
+# 3. Set a publish token (per-registry env var)
+export APM_REGISTRY_TOKEN_CORP_MAIN=eyJ...
+
+# 4. Preview then publish
+apm publish --registry corp-main --dry-run -v
+apm publish --registry corp-main
+```
+
+`apm publish` auto-packs a **flat registry archive** in the project root
+(`{name}-{version}.tar.gz`) containing `apm.yml` and `.apm/` at the
+tarball root. This layout differs from the plugin bundle that
+`apm pack` produces (`{name}-{version}/plugin.json`). Auto-pack skips
+macOS `._*` / `.DS_Store` sidecars.
+
+Auto-pack requires:
+- `apm.yml` with `name:` and `version:` (and `source:` when the registry
+  identity differs from the package name)
+- A `.apm/` directory with at least one primitive
+
+Skill-only or custom layouts: build the tarball yourself and pass
+`--tarball`:
+
+```bash
+tar czf my-skill-0.0.1.tar.gz apm.yml SKILL.md
+apm publish --tarball my-skill-0.0.1.tar.gz --registry corp-main
+```
+
+Upload contract: `PUT /v1/packages/{owner}/{repo}/versions/{version}`.
+Re-publishing an existing version returns `409 Conflict` (registry
+versions are immutable) -- bump `version:` in `apm.yml` to publish again.
+
+**Supported registries:** any backend that implements the
+[Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
+(JFrog Artifactory, custom services). GitHub / Git remotes are NOT
+registries -- they remain the default Git resolver. APM marketplaces
+(`apm pack` + `.claude-plugin/marketplace.json`) are a separate surface.
+
+See `commands.md` for the `apm publish` command reference,
+`authentication.md` for registry token resolution, and `governance.md`
+for the `registry_source` policy field.
 
 ## Marketplace authoring
 

@@ -202,7 +202,7 @@ apm install
 APM_REGISTRY_TOKEN_CORP_MAIN=eyJ... apm install --frozen
 ```
 
-See [Private registries](../../../guides/private-registries/) for the full setup guide.
+See [Registries](../../../guides/registries/) for the full setup guide.
 
 ## Exit codes
 
@@ -223,7 +223,7 @@ See [Private registries](../../../guides/private-registries/) for the full setup
 - [`apm update`](../update/) -- refresh dependencies in `apm.yml` to their latest matching refs, with a consent gate.
 - [`apm self-update`](../self-update/) -- upgrade the `apm` CLI binary itself.
 - [`apm prune`](../prune/) -- remove orphaned packages and stale files.
-- [Private registries](../../../guides/private-registries/) -- end-to-end guide for registry-sourced dependencies.
+- [Registries](../../../guides/registries/) -- end-to-end guide for registry-sourced dependencies.
 - [`apm audit`](../audit/) -- explicit security reporting and remediation after install.
 - [`apm targets`](../targets/) -- print which harnesses APM detects in the current directory.
 - [Install packages (consumer guide)](../../../consumer/install-packages/) -- task-oriented walkthrough.

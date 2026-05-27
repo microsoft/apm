@@ -122,8 +122,6 @@ Per target, with the rules shape on disk after compile:
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
 
-> **Claude deduplication**: When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the instructions section from `CLAUDE.md` to avoid duplicate content in Claude Code's context window. `CLAUDE.md` is still generated if it carries a constitution or dependency `@import` paths.
-
 ## compile vs install
 
 | You want to... | Run |
