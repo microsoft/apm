@@ -83,7 +83,7 @@ Examples (with `require_pinned_constraint: true` and `enforcement: block`):
 dependencies:
   apm:
     - acme/skills              # FAIL: no ref (NO_REF)
-    - other/lib@>=1.0.0        # FAIL: unbounded upper (OPEN_UPPER)
+    - other/lib#>=1.0.0        # FAIL: unbounded upper (OPEN_UPPER)
     - third/lib#*              # FAIL: wildcard (WILDCARD)
     - acme/lib#main            # FAIL: bare branch (BARE_BRANCH)
     - fourth/lib#^1.2.0        # OK: caret range
