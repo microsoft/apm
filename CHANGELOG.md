@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install -g` now correctly integrates hook JSON files authored in the "naked" Claude settings-slice format (event names at top-level, no outer `hooks:` wrap) into `.claude/settings.json`, `.cursor/hooks.json`, and the copilot per-event layout. Previously the file parsed cleanly but produced an empty merge while the user-facing summary still reported `1 hook(s) integrated`. The integrated-hook counter now only increments for files that actually contributed entries, malformed shapes where `hooks` is not a dict fail closed with a warning, and files that contribute zero entries log a warning instead of silently skipping. (closes #1499) (#1516)
 - `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
 - `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
 

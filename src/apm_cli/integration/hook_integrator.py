@@ -385,6 +385,11 @@ class HookIntegrator(BaseIntegrator):
             # scalar (e.g. "description") would mean this is malformed
             # rather than naked, so leave it alone.
             if "hooks" not in data and data and all(isinstance(v, list) for v in data.values()):
+                _log.debug(
+                    "Promoted naked-format hook file %s (top-level event keys: %s) to wrapped shape",
+                    hook_file,
+                    sorted(data.keys()),
+                )
                 data = {"hooks": data}
             # Fail closed on malformed shapes where "hooks" is present but not
             # a dict (e.g. {"hooks": []}).  Downstream code calls .items() on
@@ -1253,6 +1258,21 @@ class HookIntegrator(BaseIntegrator):
 
             if entries_appended_for_file:
                 hooks_integrated += 1
+            else:
+                # Diagnostic for the fail-closed silent-skip path introduced
+                # by the integrated-counter fix (microsoft/apm#1499): a hook
+                # file that parsed cleanly but contributed zero entries (all
+                # events empty / non-list) used to bump the counter and lie
+                # to the user.  Now we skip it -- log a warning so the
+                # operator can see why a hook file appears in the package
+                # tree but never lands in the merged settings.
+                _log.warning(
+                    "Hook file %s contributed no entries to %s settings "
+                    "(all events empty or non-list); skipping. The file is "
+                    "present in the package but produced an empty merge.",
+                    hook_file,
+                    config.target_key,
+                )
 
             # Copy referenced scripts
             for source_file, target_rel in scripts:
