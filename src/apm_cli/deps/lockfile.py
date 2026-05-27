@@ -55,6 +55,21 @@ class LockedDependency:
     resolved_url: str | None = None
     resolved_hash: str | None = None
 
+    # Git-source semver resolution fields (issue #1488).
+    # Populated when a git-source dependency carried a semver range
+    # (e.g. ``^1.2.0``) that the install pipeline resolved against the
+    # remote's tags. Lockfile version stays at "2" -- these fields are
+    # purely additive and forward-compatible with old readers (which
+    # ignore unknown keys via the explicit ``from_dict`` allowlist).
+    constraint: str | None = None
+    resolved_tag: str | None = None
+    resolved_at: str | None = None
+    # Forward-compat carrier: keys we don't recognise are preserved
+    # through a from_dict / to_dict round-trip so an older APM build
+    # reading a lockfile written by a newer build doesn't silently drop
+    # fields when it re-emits.
+    _unknown_fields: dict[str, Any] = field(default_factory=dict)
+
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
         if self.source == "local" and self.local_path:
@@ -114,6 +129,16 @@ class LockedDependency:
             result["resolved_url"] = self.resolved_url
         if self.resolved_hash:
             result["resolved_hash"] = self.resolved_hash
+        if self.constraint:
+            result["constraint"] = self.constraint
+        if self.resolved_tag:
+            result["resolved_tag"] = self.resolved_tag
+        if self.resolved_at:
+            result["resolved_at"] = self.resolved_at
+        # Replay forward-compat unknown fields LAST so they never shadow a
+        # known field that this build understands.
+        for k, v in self._unknown_fields.items():
+            result.setdefault(k, v)
         return result
 
     @classmethod
@@ -144,6 +169,44 @@ class LockedDependency:
             if _p_int is not None and 1 <= _p_int <= 65535:
                 port = _p_int
 
+        # Recognised keys this build knows about. Anything else is captured
+        # as ``_unknown_fields`` so a re-emit preserves forward-introduced
+        # fields rather than silently dropping them. ``deployed_skills`` is
+        # the explicit legacy key handled above; do NOT consider it unknown.
+        _known_keys = {
+            "repo_url",
+            "host",
+            "port",
+            "registry_prefix",
+            "resolved_commit",
+            "resolved_ref",
+            "version",
+            "virtual_path",
+            "is_virtual",
+            "depth",
+            "resolved_by",
+            "package_type",
+            "deployed_files",
+            "deployed_file_hashes",
+            "source",
+            "local_path",
+            "content_hash",
+            "is_dev",
+            "discovered_via",
+            "marketplace_plugin_name",
+            "is_insecure",
+            "allow_insecure",
+            "skill_subset",
+            "resolved_url",
+            "resolved_hash",
+            "constraint",
+            "resolved_tag",
+            "resolved_at",
+            # legacy migration key handled above
+            "deployed_skills",
+        }
+        unknown_fields = {k: v for k, v in data.items() if k not in _known_keys}
+
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
@@ -170,6 +233,10 @@ class LockedDependency:
             skill_subset=list(data.get("skill_subset") or []),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
+            constraint=data.get("constraint"),
+            resolved_tag=data.get("resolved_tag"),
+            resolved_at=data.get("resolved_at"),
+            _unknown_fields=unknown_fields,
         )
 
     @classmethod
@@ -182,6 +249,7 @@ class LockedDependency:
         is_dev: bool = False,
         registry_config=None,
         registry_resolution=None,
+        git_semver_resolution=None,
     ) -> LockedDependency:
         """Create from a DependencyReference with resolution info.
 
@@ -201,7 +269,30 @@ class LockedDependency:
                 ``source`` is set to ``"registry"`` and ``resolved_url`` /
                 ``resolved_hash`` / ``version`` are populated from it (the
                 trust anchor for re-installs per design §6.1).
+            git_semver_resolution: Optional
+                :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolution`
+                produced when a git-source dep had a semver range as ``ref:``.
+                When provided, ``constraint`` / ``resolved_tag`` /
+                ``resolved_at`` are populated and ``resolved_ref`` is set
+                to the concrete tag (issue #1488). Mutually exclusive with
+                ``registry_resolution``.
+
+        Raises:
+            ValueError: When both ``registry_resolution`` and
+                ``git_semver_resolution`` are provided. The two resolution
+                paths are mutually exclusive: a dependency is either
+                registry-sourced (carries ``resolved_url`` / ``resolved_hash``)
+                or git-source with a semver range (carries ``constraint`` /
+                ``resolved_tag`` / ``resolved_at``). Combining both would
+                produce an inconsistent lockfile entry (e.g. ``source=registry``
+                while ``resolved_ref`` is overridden to a git tag).
         """
+        if registry_resolution is not None and git_semver_resolution is not None:
+            raise ValueError(
+                "registry_resolution and git_semver_resolution are mutually "
+                "exclusive: a dependency is either registry-sourced or a "
+                "git-source semver resolution, not both."
+            )
         if registry_config is not None:
             host = registry_config.host
             registry_prefix = registry_config.prefix
@@ -218,14 +309,31 @@ class LockedDependency:
         else:
             source = None
 
+        # When a git-semver resolution is present, prefer the concrete
+        # resolved tag for ``resolved_ref`` (so subsequent installs see a
+        # literal tag, not the original range). The original constraint
+        # is preserved in the dedicated ``constraint`` field.
+        if git_semver_resolution is not None:
+            resolved_ref_val: str | None = git_semver_resolution.resolved_tag
+        else:
+            resolved_ref_val = dep_ref.reference
+
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
             port=dep_ref.port,
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
-            resolved_ref=dep_ref.reference,
-            version=(registry_resolution.version if registry_resolution is not None else None),
+            resolved_ref=resolved_ref_val,
+            version=(
+                registry_resolution.version
+                if registry_resolution is not None
+                else (
+                    git_semver_resolution.resolved_version
+                    if git_semver_resolution is not None
+                    else None
+                )
+            ),
             virtual_path=dep_ref.virtual_path,
             is_virtual=dep_ref.is_virtual,
             depth=depth,
@@ -243,6 +351,15 @@ class LockedDependency:
             ),
             resolved_hash=(
                 registry_resolution.resolved_hash if registry_resolution is not None else None
+            ),
+            constraint=(
+                git_semver_resolution.constraint if git_semver_resolution is not None else None
+            ),
+            resolved_tag=(
+                git_semver_resolution.resolved_tag if git_semver_resolution is not None else None
+            ),
+            resolved_at=(
+                git_semver_resolution.resolved_at if git_semver_resolution is not None else None
             ),
         )
 
@@ -292,12 +409,15 @@ class LockFile:
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
 
-        Adding a registry-sourced dep promotes ``lockfile_version`` to
-        ``"2"`` immediately, keeping the in-memory state consistent with
-        what ``to_yaml()`` would emit (design §6.1).
+        Adding a registry-sourced dep or a git-source dep with semver
+        resolution fields promotes ``lockfile_version`` to ``"2"`` eagerly,
+        keeping the in-memory state consistent with what ``to_yaml()``
+        would emit (design section 6.1; issue #1488).
         """
         self.dependencies[dep.get_unique_key()] = dep
-        if dep.source == "registry" and self.lockfile_version == "1":
+        if self.lockfile_version == "1" and (
+            dep.source == "registry" or dep.constraint or dep.resolved_tag or dep.resolved_at
+        ):
             self.lockfile_version = "2"
 
     def get_dependency(self, key: str) -> LockedDependency | None:
@@ -319,12 +439,19 @@ class LockFile:
     def _needs_v2(self) -> bool:
         """Whether the resolved graph requires lockfile schema v2.
 
-        Per design §6.1 (and invariant §2.1.4): bump opportunistically — only
-        when at least one dep is sourced from a dedicated registry. A project
-        that never opts into the registry keeps v1 forever, even on a newer
-        client.
+        Per design section 6.1 (and invariant 2.1.4): bump opportunistically --
+        only when at least one dep is sourced from a dedicated registry, OR
+        when at least one dep carries git-source semver resolution fields
+        (``constraint`` / ``resolved_tag`` / ``resolved_at`` -- issue #1488).
+        A project that uses neither feature keeps v1 forever, even on a
+        newer client.
         """
-        return any(d.source == "registry" for d in self.dependencies.values())
+        for d in self.dependencies.values():
+            if d.source == "registry":
+                return True
+            if d.constraint or d.resolved_tag or d.resolved_at:
+                return True
+        return False
 
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
@@ -332,8 +459,8 @@ class LockFile:
         # the lockfile_version field always reflects current content at
         # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
         # that mutate ``self.dependencies`` directly or remove the last
-        # registry dep need the field re-derived here so the on-disk
-        # version is correct in both directions.
+        # registry / git-semver dep need the field re-derived here so the
+        # on-disk version is correct in both directions.
         self.lockfile_version = "2" if self._needs_v2() else "1"
         emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
@@ -449,6 +576,7 @@ class LockFile:
 
         for entry in installed_packages:
             registry_resolution = None
+            git_semver_resolution = None
             if isinstance(entry, InstalledPackage):
                 dep_ref = entry.dep_ref
                 resolved_commit = entry.resolved_commit
@@ -457,6 +585,7 @@ class LockFile:
                 is_dev = entry.is_dev
                 registry_config = getattr(entry, "registry_config", None)
                 registry_resolution = getattr(entry, "registry_resolution", None)
+                git_semver_resolution = getattr(entry, "git_semver_resolution", None)
             elif len(entry) >= 5:
                 dep_ref, resolved_commit, depth, resolved_by, is_dev = entry[:5]
                 registry_config = None
@@ -473,6 +602,7 @@ class LockFile:
                 is_dev=is_dev,
                 registry_config=registry_config,
                 registry_resolution=registry_resolution,
+                git_semver_resolution=git_semver_resolution,
             )
             lock.add_dependency(locked_dep)
 

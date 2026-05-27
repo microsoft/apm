@@ -138,10 +138,44 @@ dependencies:
     - acme/playbooks#a1b2c3d4e5f6...            # SHA (immutable)
 ```
 
+For registry-sourced deps or when `policy.dependencies.require_pinned_constraint: true` is on, the ref slot also accepts semver constraints:
+
+| Form | Example | Meaning |
+|---|---|---|
+| Bare exact | `owner/repo#1.2.3` | Pinned to exactly 1.2.3. |
+| Explicit equality | `owner/repo#=1.2.3` | Same as bare exact (npm- and cargo-style). |
+| Caret range | `owner/repo#^1.2.3` | `>=1.2.3, <2.0.0`. |
+| Tilde range | `owner/repo#~1.2.3` | `>=1.2.3, <1.3.0`. |
+| Bounded range | `owner/repo#>=1.2.0 <2.0.0` | Explicit lower and upper bound. |
+
+Pip-style `==1.2.3` is not part of the node-semver grammar APM follows and is rejected as an unbounded ref under `require_pinned_constraint`. Use `=1.2.3` or the bare form instead.
+
 Branches move; tags and SHAs do not. For reproducibility, prefer tags or
 SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
+
+### Pin a semver range
+
+For git-source dependencies you can also pin a semver range as the ref.
+APM resolves the range against the remote's tags at install time and
+records the concrete tag in the lockfile:
+
+```yaml
+dependencies:
+  apm:
+    - acme/widget#^1.2.0      # any 1.x >= 1.2.0
+    - acme/widget#~1.4        # any 1.4.x
+    - acme/widget#>=2.0 <3    # explicit range
+    - acme/widget#1.5.x       # wildcard
+```
+
+APM matches tags against `v{version}` and `{name}--v{version}` patterns
+(with `{version}` as a bare-tag fallback) and picks the highest tag that
+satisfies the range. The original constraint is preserved in the
+lockfile alongside the resolved tag, so `apm install` on a fresh clone
+replays the same tag deterministically. Only `apm install --update` or a
+manifest change re-resolves to a newer tag.
 
 ## Remove a dependency
 
@@ -192,3 +226,58 @@ too: `apm update` refreshes dependencies to the latest matching refs
 fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
 binary itself, use `apm self-update`.
 :::
+
+## Explain a transitive dependency: `apm deps why`
+
+After `apm install`, `apm_modules/` may contain transitive packages that
+you did not declare directly. To answer "who pulled this in?", use
+`apm deps why <pkg>`:
+
+:::note[Coming from npm, yarn, or cargo?]
+`apm deps why` is the APM analogue of `npm why` / `yarn why` /
+`cargo tree -i`. Same mental model: ask the lockfile, get back the
+chain that explains why something is on disk.
+:::
+
+```bash
+$ apm deps why shared-utils
+$ apm deps why acme-org/shared-utils
+$ apm deps why acme-org/shared-utils --json
+$ apm deps why -g shared-utils
+```
+
+The [lockfile](#the-lockfile) is the source of truth -- the command is
+fully offline and walks the `resolved_by` parent chain bottom-up. The
+lockfile records a single resolved parent per package, so the output is
+one root-to-target chain (not a fan-out of every theoretical route):
+
+```
+[i] acme-org/shared-utils@1.4.2  (transitive)
+
+    acme-org/big-skills   [declared in apm.yml]
+    +-- acme-org/shared-utils
+```
+
+`<pkg>` accepts four identifier styles, tried in order: unique key
+(`acme-org_shared-utils`), full repo URL
+(`https://github.com/acme-org/shared-utils`), `owner/repo`, or bare
+basename (`shared-utils`) when unambiguous. An ambiguous bare name
+exits `1` and lists the candidates.
+
+Pass `--json` for scripting; the JSON document goes to stdout and all
+logs / hints go to stderr, so `apm deps why pkg --json | jq` is safe:
+
+```json
+{
+  "package": {"repo_url": "acme-org/shared-utils", "is_direct": false, "...": "..."},
+  "paths": [{"chain": [{"repo_url": "acme-org/big-skills", "is_direct": true}, ...]}]
+}
+```
+
+Exit codes: `0` on success, `1` when the package is not installed or the
+query is ambiguous, `2` when no lockfile exists yet (run `apm install`).
+
+See also: [`apm deps tree`](../../reference/cli/deps/#apm-deps-tree) for
+the top-down graph view, and
+[`apm deps info`](../../reference/cli/deps/#apm-deps-info) for full
+metadata of one package.

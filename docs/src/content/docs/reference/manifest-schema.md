@@ -376,6 +376,10 @@ Remote dependency (git URL plus sub-path):
   alias: acme-sec
 ```
 
+`ref:` accepts either a literal git ref (`main`, `v2.0`, a 40-char commit SHA) or a **semver range** (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). When `ref:` is a semver range, APM resolves it against the remote's tags at install time, matching against `v{version}` and `{name}--v{version}` patterns (with `{version}` as a bare-tag fallback) and selecting the highest tag that satisfies the range.
+
+The lockfile records the original `constraint`, the `resolved_tag`, the resolved `version`, the `resolved_commit`, and a `resolved_at` timestamp so subsequent installs replay the same tag deterministically -- only `apm install --update` or a manifest change re-resolves. When no remote tag satisfies the range, APM surfaces `NoMatchingTagError` with the inspected patterns.
+
 Local path dependency (development only):
 
 ```yaml
