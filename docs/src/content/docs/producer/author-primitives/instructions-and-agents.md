@@ -172,6 +172,17 @@ not receive `.agent.md` files at all -- Cascade auto-invokes any
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
 | gemini | not deployed | Gemini CLI has no agents primitive |
 
+:::caution[Migration]
+Earlier APM versions compiled `.apm/agents/*.agent.md` to
+`.windsurf/skills/<name>/SKILL.md` with `model` and `tools`
+frontmatter stripped. That mapping has been removed: agents no
+longer deploy to Windsurf at all. If you previously relied on it
+and the persona still needs to reach Windsurf, re-author it as a
+skill under `.apm/skills/<name>/SKILL.md` -- Cascade auto-invokes
+skills by their `description` field, which is the same surface
+the agent path was using.
+:::
+
 Source: `src/apm_cli/integration/agent_integrator.py`,
 `src/apm_cli/integration/targets.py`.
 
