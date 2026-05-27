@@ -543,14 +543,24 @@ class AgentsCompiler:
             str(self.base_dir), exclude_patterns=config.exclude
         )
 
-        # Analyze directory structure and determine placement
-        directory_map = distributed_compiler.analyze_directory_structure(primitives.instructions)
-        placement_map = distributed_compiler.determine_agents_placement(
-            primitives.instructions,
-            directory_map,
-            min_instructions=config.min_instructions_per_file,
-            debug=config.debug,
-        )
+        # Honor compilation.strategy=single-file (and the --single-agents flag)
+        # by collapsing all instructions into a single root CLAUDE.md, mirroring
+        # the gate in _compile_agents_md. Without this, single-file mode is
+        # silently ignored for the Claude target and per-subdirectory CLAUDE.md
+        # files are emitted via the distributed placement path (issue #1445).
+        if config.strategy != "distributed" or config.single_agents:
+            placement_map = {self.base_dir: list(primitives.instructions)}
+        else:
+            # Analyze directory structure and determine placement
+            directory_map = distributed_compiler.analyze_directory_structure(
+                primitives.instructions
+            )
+            placement_map = distributed_compiler.determine_agents_placement(
+                primitives.instructions,
+                directory_map,
+                min_instructions=config.min_instructions_per_file,
+                debug=config.debug,
+            )
 
         # Skip instructions in CLAUDE.md when they are already deployed to
         # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
