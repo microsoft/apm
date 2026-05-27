@@ -92,7 +92,7 @@ match per target is enough to activate it.
 | Target | Signal(s) APM looks for | Deploy directory |
 |--------|-------------------------|------------------|
 | `claude` | `.claude/` directory, or `CLAUDE.md` file | `.claude/` |
-| `copilot` | `.github/copilot-instructions.md` file | `.github/` |
+| `copilot` | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory | `.github/` |
 | `cursor` | `.cursor/` directory, or `.cursorrules` file (legacy) | `.cursor/` |
 | `codex` | `.codex/` directory | `.codex/` |
 | `gemini` | `.gemini/` directory, or `GEMINI.md` file | `.gemini/` |

@@ -141,6 +141,8 @@ target:
 
 When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets. `all` cannot be combined with other values.
 
+A plural alias `targets:` (YAML list only) is also accepted and takes precedence over the legacy CSV form when both are declared. Prefer `targets:` in new manifests; `target:` remains supported for backward compatibility.
+
 | Value | Effect |
 |---|---|
 | `vscode` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode). |

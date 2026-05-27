@@ -156,13 +156,14 @@ When the Copilot CLI adapter writes a remote MCP config and the
 server is identified as the GitHub MCP server, APM resolves a token
 and adds an `Authorization: Bearer <token>` header.
 
-The server is identified as "GitHub" by **two** narrow checks
-([copilot.py:1208](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1208)):
+The server is identified as "GitHub" only when it satisfies **both** of
+these narrow checks
+([copilot.py:1004](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1004)):
 
 1. The server name (case-insensitive) is one of:
    `github-mcp-server`, `github`, `github-mcp`,
    `github-copilot-mcp-server`.
-2. Or the parsed URL hostname matches the GitHub host allowlist
+2. **And** the parsed URL hostname matches the GitHub host allowlist
    (`github.com`, `api.github.com`, and registered GHES hostnames).
 
 This is an exact-match allowlist on hostname, not a substring check.
