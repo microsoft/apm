@@ -290,7 +290,7 @@ class AgentIntegrator(BaseIntegrator):
             return
         if not isinstance(fm, dict):
             return
-        for message in validate_opencode_frontmatter(fm, source):
+        for message in validate_opencode_frontmatter(fm, source, package_name=package_name):
             diagnostics.warn(message=message, package=package_name)
 
     # ------------------------------------------------------------------

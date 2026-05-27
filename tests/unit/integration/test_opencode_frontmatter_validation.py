@@ -159,6 +159,61 @@ class TestValidateOpencodeFrontmatter:
         # Annotation is dict | None; calling with None must not raise.
         assert validate_opencode_frontmatter(None, Path("a.md")) == []
 
+    def test_package_qualifier_prefixes_identifier(self):
+        # Multi-package installs benefit from knowing which dependency
+        # shipped the bad frontmatter; the package name appears as a
+        # '<pkg>/<file>' prefix in every warning.
+        msgs = validate_opencode_frontmatter(
+            {"tools": ["Read"]},
+            Path("demo.agent.md"),
+            package_name="acme/security-pack",
+        )
+        assert len(msgs) == 1
+        assert "'acme/security-pack/demo.agent.md'" in msgs[0]
+
+    def test_package_qualifier_omitted_when_not_supplied(self):
+        # Backward compatibility: bare filename when no package given.
+        msgs = validate_opencode_frontmatter(
+            {"tools": ["Read"]},
+            Path("demo.agent.md"),
+        )
+        assert "'demo.agent.md'" in msgs[0]
+
+    def test_package_qualifier_sanitized(self):
+        # ASCII control chars and non-ASCII codepoints in the package
+        # name are stripped/replaced so a malicious package name can
+        # never inject ANSI escapes via the warning channel.
+        msgs = validate_opencode_frontmatter(
+            {"color": "magenta"},
+            Path("a.md"),
+            package_name="evil\x1b[31mpkg",
+        )
+        assert len(msgs) == 1
+        msgs[0].encode("ascii")
+        assert "\x1b" not in msgs[0]
+
+    def test_filename_control_chars_stripped(self):
+        # ASCII control chars in the filename (DEL, ESC, BEL) get
+        # replaced by '?' rather than echoed verbatim, defending the
+        # terminal against agent files crafted to inject escape codes.
+        msgs = validate_opencode_frontmatter(
+            {"color": "magenta"},
+            Path("a\x1b[31mb.agent.md"),
+        )
+        assert len(msgs) == 1
+        msgs[0].encode("ascii")
+        assert "\x1b" not in msgs[0]
+        assert "?" in msgs[0]
+
+    def test_remediation_pointer_in_tools_warning(self):
+        msgs = validate_opencode_frontmatter({"tools": ["Read"]}, Path("a.md"))
+        assert "Fix:" in msgs[0]
+        assert "tools:" in msgs[0]
+
+    def test_remediation_pointer_in_color_warning(self):
+        msgs = validate_opencode_frontmatter({"color": "cyan"}, Path("a.md"))
+        assert "Fix:" in msgs[0]
+
 
 class TestOpencodeInstallEmitsWarnings:
     """End-to-end: integrate_agents_for_target() emits diagnostics.warn()
@@ -196,7 +251,11 @@ class TestOpencodeInstallEmitsWarnings:
 
         assert result.files_integrated == 1
         msgs = _warning_messages(diagnostics)
-        assert any("tools" in m and "demo.agent.md" in m for m in msgs), msgs
+        # Warning must name the offending file AND prefix it with the
+        # owning package so multi-package installs are diagnosable.
+        assert any("tools" in m and "test-pkg/demo.agent.md" in m and "Fix:" in m for m in msgs), (
+            msgs
+        )
 
     def test_tools_as_dict_no_warning(self):
         pkg = self._write_agent("tools:\n  Read: true\n  Grep: false\n")
