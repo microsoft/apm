@@ -109,11 +109,16 @@ directory per active target. Routing is verified in
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |
 
 Five harnesses converge on the cross-tool `.agents/skills/`
-directory. Claude and Windsurf keep harness-native paths because
-their runtimes scan their own roots. The whole skill folder is
-copied (`shutil.copytree`), so `scripts/`, `references/`, `assets/`,
-and `examples/` ride along. Symlinks and the `.apm-pin` cache marker
-are filtered out (`src/apm_cli/security/gate.py:ignore_non_content`).
+directory. Claude keeps its harness-native path because Claude Code's
+default scan is `.claude/skills/`; Windsurf currently uses
+`.windsurf/skills/` for the same reason, though Cascade also
+[discovers `.agents/skills/`](https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes)
+natively for cross-agent compatibility (convergence tracked in
+[#1520](https://github.com/microsoft/apm/issues/1520)). The whole
+skill folder is copied (`shutil.copytree`), so `scripts/`,
+`references/`, `assets/`, and `examples/` ride along. Symlinks and
+the `.apm-pin` cache marker are filtered out
+(`src/apm_cli/security/gate.py:ignore_non_content`).
 
 To restore the pre-convergence layout where every harness gets its
 own `.<harness>/skills/` copy, pass `--legacy-skill-paths` or set
