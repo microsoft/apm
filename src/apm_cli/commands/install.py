@@ -470,6 +470,7 @@ def _resolve_package_references(
                 resolve_artifactory_boundary=_resolve_artifactory_boundary,
                 auth_resolver=auth_resolver,
                 verbose=bool(logger and logger.verbose),
+                logger=logger,
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()

@@ -41,6 +41,7 @@ def resolve_parsed_dependency_reference(
     auth_resolver: Any,
     verbose: bool,
     resolve_artifactory_boundary: Callable[..., Any] | None = None,
+    logger: Any = None,
 ) -> tuple[Any, bool]:
     """Parse or probe *package* into a ``DependencyReference``.
 
@@ -93,6 +94,7 @@ def resolve_parsed_dependency_reference(
             auth_resolver,
             verbose=verbose,
             dep_ref=dep_ref,
+            logger=logger,
         )
         if resolved is not dep_ref:
             return resolved, True
