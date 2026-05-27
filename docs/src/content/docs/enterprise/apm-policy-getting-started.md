@@ -83,6 +83,7 @@ dependencies:
   require: []             # packages every repo must include
   require_resolution: project-wins   # project-wins | policy-wins | block
   max_depth: 50
+  require_pinned_constraint: false   # true = ban unbounded version ranges
 
 mcp:
   allow: null

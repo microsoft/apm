@@ -144,13 +144,18 @@ def run_policy_preflight(
         return fetch_result, False
 
     # -- Enforcement (warn or block) -----------------------------------
+    # ``apm_deps`` here is always the direct-deps list from the caller
+    # (manifest or MCP path) -- forward as direct_dep_keys so the
+    # require_pinned_constraint check skips transitives (#1494 Copilot review).
+    apm_deps_list = list(apm_deps) if apm_deps is not None else []
     audit_result = run_dependency_policy_checks(
-        apm_deps if apm_deps is not None else [],
+        apm_deps_list,
         lockfile=None,
         policy=policy,
         mcp_deps=mcp_deps,
         fail_fast=(enforcement == "block"),
         registries=registries,
+        direct_dep_keys={d.get_unique_key() for d in apm_deps_list},
     )
 
     if not audit_result.passed:

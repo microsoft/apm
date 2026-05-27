@@ -144,6 +144,12 @@ def _merge_dependencies(parent: DependencyPolicy, child: DependencyPolicy) -> De
             _RESOLUTION_LEVELS, parent.require_resolution, child.require_resolution
         ),
         max_depth=min(parent.max_depth, child.max_depth),
+        # Strict-wins: once a parent (org) policy enables the pin
+        # requirement, a child cannot relax it. This matches
+        # ``allow``/``deny``/``require`` semantics where the child can
+        # only narrow, never broaden.
+        require_pinned_constraint=parent.require_pinned_constraint
+        or child.require_pinned_constraint,
     )
 
 
