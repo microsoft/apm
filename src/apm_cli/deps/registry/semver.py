@@ -12,7 +12,7 @@ import re
 
 from apm_cli.marketplace.semver import SemVer, parse_semver, satisfies_range
 
-_RANGE_OPERATORS = (">=", "<=", ">", "<", "^", "~")
+_RANGE_OPERATORS = (">=", "<=", ">", "<", "^", "~", "=")
 _WILDCARD_RE = re.compile(r"^\d+\.\d+\.[xX*]$")
 
 

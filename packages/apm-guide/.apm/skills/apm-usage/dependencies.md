@@ -204,10 +204,21 @@ dependencies:
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|
 | Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
+| Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
 | Commit SHA | `owner/repo#abc123d` | Maximum reproducibility |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
+
+Semver ranges accept `^1.2.0`, `~1.4`, `>=2.0 <3`, or `1.5.x`. At
+install time APM runs `git ls-remote` against the dep and picks the
+highest tag matching the range; the resolved tag, commit SHA, version,
+and original constraint are pinned in the lockfile. Subsequent
+`apm install` runs replay the lockfile without network. Use
+`apm install --update` (or change the manifest constraint) to
+re-resolve against current remote tags. Two tag patterns are tried in
+order: `v{version}` and `{name}--v{version}`, then a bare `{version}`
+fallback.
 
 ## Marketplace ref override
 

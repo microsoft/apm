@@ -28,6 +28,7 @@ dependencies:
   require: []                           # required packages
   require_resolution: project-wins      # project-wins | policy-wins | block
   max_depth: 50                         # transitive depth limit
+  require_pinned_constraint: false      # when true, ban unbounded dep ranges (NO_REF, '*', bare branch, '>=X' without upper bound)
 
 mcp:
   allow: []                             # allowed server patterns
@@ -90,6 +91,7 @@ list (removing entries the parent set). All other fields obey the rules below:
 | Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `max_depth` | `min(parent, child)` |
+| `require_pinned_constraint` | Logical OR (once enabled, child cannot relax) |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `source_attribution` | `parent OR child` (either enables) |
 
@@ -382,6 +384,7 @@ Violation classes:
 | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
 | `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
+| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal `vX.Y.Z` tag, or a full SHA. Roll out enforcement with `warn` before `block`. |
 | `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |

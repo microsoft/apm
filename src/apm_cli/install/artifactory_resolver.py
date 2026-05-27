@@ -66,6 +66,7 @@ class _CandidateStatus:
     )
     MISSING = "missing"  # every URL shape returned 4xx other than 401/403
     AUTH = "auth"  # only 401/403 seen -- cannot tell if the repo exists
+    INCONCLUSIVE = "inconclusive"  # every URL shape raised a transport error (DNS/TLS/timeout)
 
 
 def _candidate_archive_status(
@@ -78,15 +79,22 @@ def _candidate_archive_status(
     verify,
     timeout: int = 15,
     scheme: str = "https",
-) -> str:
+) -> tuple[str, BaseException | None]:
     """Classify one candidate's existence by HEAD-probing every archive URL shape.
 
-    Returns one of :class:`_CandidateStatus` constants.  Distinguishing
-    ``AUTH`` from ``MISSING`` is deliberate: a misconfigured token should
-    surface a different error than a wrong owner/repo split.
+    Returns ``(status, last_exception)`` where ``status`` is one of
+    :class:`_CandidateStatus` constants.  Distinguishing ``AUTH`` from
+    ``MISSING`` is deliberate: a misconfigured token should surface a
+    different error than a wrong owner/repo split.  ``INCONCLUSIVE`` means
+    every URL shape raised a transport error (no HTTP response observed) --
+    the resolver fails closed on this instead of silently locking in a wrong
+    boundary; the last exception is surfaced so the user sees the real
+    underlying network issue.
     """
     urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
     saw_auth = False
+    saw_any_response = False
+    last_exc: BaseException | None = None
     for url in urls:
         try:
             # ``allow_redirects=False`` keeps the Bearer token from leaking to
@@ -95,13 +103,19 @@ def _candidate_archive_status(
             r = requests.head(
                 url, headers=headers, timeout=timeout, verify=verify, allow_redirects=False
             )
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            last_exc = exc
             continue
+        saw_any_response = True
         if 200 <= r.status_code < 400:
-            return _CandidateStatus.EXISTS
+            return _CandidateStatus.EXISTS, None
         if r.status_code in (401, 403):
             saw_auth = True
-    return _CandidateStatus.AUTH if saw_auth else _CandidateStatus.MISSING
+    if not saw_any_response:
+        return _CandidateStatus.INCONCLUSIVE, last_exc
+    if saw_auth:
+        return _CandidateStatus.AUTH, None
+    return _CandidateStatus.MISSING, None
 
 
 def _proxy_probe_headers(
@@ -221,6 +235,7 @@ def _resolve_artifactory_boundary(
     ref = dep_ref.reference or "main"
 
     all_auth = True
+    last_inconclusive_exc: BaseException | None = None
     for cand_prefix, cand_owner, cand_repo, cand_virtual in candidates:
         if verbose:
             path_suffix = f" [path: {cand_virtual}]" if cand_virtual else ""
@@ -228,7 +243,7 @@ def _resolve_artifactory_boundary(
                 f"  artifactory-resolve: probing {host}/{cand_prefix}/{cand_owner}"
                 f"/{cand_repo}#{ref}{path_suffix}"
             )
-        status = _candidate_archive_status(
+        status, exc = _candidate_archive_status(
             host, cand_prefix, cand_owner, cand_repo, ref, headers, verify, scheme=scheme
         )
         if status == _CandidateStatus.EXISTS:
@@ -245,9 +260,24 @@ def _resolve_artifactory_boundary(
             )
         if status == _CandidateStatus.MISSING:
             all_auth = False
+        elif status == _CandidateStatus.INCONCLUSIVE:
+            # Transport error on every URL shape (DNS / TLS / timeout) means
+            # we don't actually know whether the candidate exists -- fail
+            # closed so a wrong boundary can't be silently anchored.
+            all_auth = False
+            if exc is not None:
+                last_inconclusive_exc = exc
 
-    # Every candidate was rejected.  Auth-only rejection deserves a different
-    # error than "the repo doesn't exist" so the user gets an actionable hint.
+    # Every candidate was rejected.  Surface the most-specific failure mode
+    # the user can act on: a network outage that prevented any probe from
+    # completing dominates the "missing repo" vs "auth problem" choice.
+    if last_inconclusive_exc is not None:
+        raise ValueError(
+            f"Artifactory boundary probe could not reach the proxy for any "
+            f"candidate (last error: {last_inconclusive_exc}). "
+            f"Verify network reachability and TLS trust to {host}. "
+            f"(package: {safe_package})"
+        )
     if all_auth:
         raise ValueError(f"{_ARTIFACTORY_BOUNDARY_AUTH} (package: {safe_package})")
     raise ValueError(f"{_ARTIFACTORY_BOUNDARY_UNRESOLVED} (package: {safe_package})")

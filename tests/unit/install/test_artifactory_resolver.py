@@ -206,3 +206,78 @@ class TestErrorDiscrimination:
         msg = self._run_with_status_map(lambda _url: 429)
         assert "did not resolve" in msg
         assert "authentication problem" not in msg
+
+
+# ---------------------------------------------------------------------------
+# INCONCLUSIVE: every URL shape raised a transport error -- fail closed
+# ---------------------------------------------------------------------------
+
+
+class TestInconclusiveFailsClosed:
+    """Network failures (DNS / TLS / timeout) on every probe must raise a
+    network-specific error, not silently mis-classify as MISSING.
+
+    Without this guard, a transient network outage during an ambiguous-boundary
+    install could lock the dependency onto the wrong owner/repo split, or
+    surface a misleading "missing repo" error that sends the user chasing the
+    wrong fix.  Convergent finding from devx-ux-expert and
+    supply-chain-security-expert in the apm-review-panel pass.
+    """
+
+    def test_all_transport_errors_raise_network_specific_error(self):
+        """``requests.RequestException`` from every URL shape -> ValueError
+        mentioning network reachability, not the missing-repo phrasing.
+        """
+        import requests
+
+        package = "art.example.com/artifactory/apm/group/sub/repo"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token="t")
+
+        def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
+            raise requests.ConnectionError("name resolution failed")
+
+        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+            with pytest.raises(ValueError) as excinfo:
+                _resolve_artifactory_boundary(package, auth, verbose=False)
+
+        msg = str(excinfo.value)
+        assert "could not reach the proxy" in msg
+        assert "name resolution failed" in msg
+        # Must NOT surface as a missing-repo error -- that would send the user
+        # chasing the wrong fix when the real issue is the network.
+        assert "did not resolve to a reachable repository archive" not in msg
+
+    def test_partial_transport_failure_does_not_fail_closed(self):
+        """If some URL shapes 404 but the network was reached at least once,
+        the candidate classifies as MISSING (not INCONCLUSIVE) so the install
+        keeps walking the candidate list rather than aborting early.
+        """
+        import requests
+
+        package = "art.example.com/artifactory/apm/group/sub/repo"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token="t")
+
+        state = {"calls": 0}
+
+        def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
+            state["calls"] += 1
+            # First call fails with transport error; subsequent calls return 404.
+            if state["calls"] == 1:
+                raise requests.ConnectionError("transient")
+            resp = MagicMock()
+            resp.status_code = 404
+            return resp
+
+        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+            with pytest.raises(ValueError) as excinfo:
+                _resolve_artifactory_boundary(package, auth, verbose=False)
+
+        msg = str(excinfo.value)
+        # Per-URL-shape transport errors are tolerated as long as at least one
+        # URL shape per candidate produced an HTTP response.  Because every
+        # candidate produced a 404 on at least one URL shape, the resolver
+        # reports the unresolved-boundary error -- not the network error.
+        assert "did not resolve" in msg
+        assert "could not reach the proxy" not in msg

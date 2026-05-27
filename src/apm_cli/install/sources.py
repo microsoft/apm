@@ -67,6 +67,40 @@ def _format_package_type_label(pkg_type) -> str | None:
     }.get(pkg_type)
 
 
+def _rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
+    """Rebuild a ``GitSemverResolution`` from a cached lockfile entry.
+
+    Returns ``None`` unless ALL required fields are present on
+    *dep_locked_chk*:  ``constraint``, ``version``, ``resolved_tag``,
+    and ``resolved_commit``.  Per PR #1496 review thread: gating on
+    just ``constraint`` and back-filling missing fields with empty
+    strings risks propagating an incomplete semver resolution into
+    ``InstalledPackage`` and rewriting the lockfile with empty/missing
+    fields (and an empty ``resolved_ref``).  When the lockfile cache is
+    incomplete we prefer to leave the resolution as ``None`` so the
+    caller falls back to the literal-ref path.
+    """
+    if dep_locked_chk is None:
+        return None
+    if not (
+        dep_locked_chk.constraint
+        and dep_locked_chk.version
+        and dep_locked_chk.resolved_tag
+        and dep_locked_chk.resolved_commit
+    ):
+        return None
+    from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+    return GitSemverResolution(
+        constraint=dep_locked_chk.constraint,
+        resolved_version=dep_locked_chk.version,
+        resolved_tag=dep_locked_chk.resolved_tag,
+        resolved_sha=dep_locked_chk.resolved_commit,
+        matched_pattern="",
+        resolved_at=dep_locked_chk.resolved_at or "",
+    )
+
+
 @dataclass
 class Materialization:
     """Outcome of ``DependencySource.acquire()``.
@@ -464,6 +498,17 @@ class CachedDependencySource(DependencySource):
                 ctx, dep_ref, dep_key, dep_locked_chk
             )
 
+        # Cached git-source semver dep (#1488): replay the resolution from
+        # either ctx (we resolved earlier in this same run) or the lockfile
+        # so re-writing the lockfile from cache preserves constraint /
+        # resolved_tag / resolved_at instead of dropping them. The
+        # lockfile-backed reconstruction is gated on ALL required fields
+        # being present (see ``_rebuild_cached_semver_resolution`` and the
+        # PR #1496 review thread).
+        _cached_semver = ctx.git_semver_resolutions.get(dep_key)
+        if _cached_semver is None:
+            _cached_semver = _rebuild_cached_semver_resolution(dep_locked_chk)
+
         ctx.installed_packages.append(
             InstalledPackage(
                 dep_ref=dep_ref,
@@ -473,6 +518,7 @@ class CachedDependencySource(DependencySource):
                 is_dev=_is_dev,
                 registry_config=_cached_registry,
                 registry_resolution=_cached_resolution,
+                git_semver_resolution=_cached_semver,
             )
         )
         if install_path.is_dir():
@@ -688,6 +734,9 @@ class FreshDependencySource(DependencySource):
                 if dep_ref.source == "registry"
                 else None
             )
+            # Git-source semver-range deps (#1488): the resolution was
+            # captured by the BFS download_callback in phases/resolve.py.
+            _git_semver_resolution = ctx.git_semver_resolutions.get(dep_key)
             ctx.installed_packages.append(
                 InstalledPackage(
                     dep_ref=dep_ref,
@@ -697,6 +746,7 @@ class FreshDependencySource(DependencySource):
                     is_dev=_is_dev,
                     registry_config=(ctx.registry_config if not dep_ref.is_local else None),
                     registry_resolution=_registry_resolution,
+                    git_semver_resolution=_git_semver_resolution,
                 )
             )
             if install_path.is_dir():

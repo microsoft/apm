@@ -884,7 +884,7 @@ class TestRunPolicyChecks:
 
         policy = ApmPolicy()
         result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 18
+        assert len(result.checks) == 19
         # Default policy = all checks pass
         assert result.passed
 

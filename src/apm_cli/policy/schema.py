@@ -35,6 +35,13 @@ class DependencyPolicy:
     require: tuple[str, ...] | None = None  # None = no opinion; () = explicit empty
     require_resolution: str = "project-wins"  # project-wins | policy-wins | block
     max_depth: int = 50
+    # When True, every direct APM dep must declare a bounded constraint
+    # (exact version, caret/tilde range, bounded range, literal tag,
+    # SHA, or local path). Unbounded refs ('*', bare '>=X', missing ref,
+    # bare branch name) are reported as policy violations and routed
+    # through ``policy.enforcement`` (off | warn | block). See
+    # ``policy/_constraint_pinning.py`` for classification rules.
+    require_pinned_constraint: bool = False
 
     @property
     def effective_deny(self) -> tuple[str, ...]:

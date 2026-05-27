@@ -98,6 +98,12 @@ class InstallContext:
     diagnostics: Any = None  # DiagnosticCollector
     registry_config: Any = None  # RegistryConfig (proxy registry; pre-existing)
     registry_resolver: Any = None  # RegistryPackageResolver -- dedicated registry resolver
+    # Per-dep git-source semver resolutions (issue #1488). Keyed by
+    # dep_key (DependencyReference.get_unique_key()), populated by the
+    # BFS download_callback when a git-source dep has ref_kind == "semver",
+    # consumed by install/sources.py to plumb the resolution into the
+    # lockfile via InstalledPackage.git_semver_resolution.
+    git_semver_resolutions: dict[str, Any] = field(default_factory=dict)
     managed_files: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------

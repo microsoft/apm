@@ -72,6 +72,41 @@ Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` 
 | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
+| `require_pinned_constraint` | boolean        | `false`          | When `true`, every APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Transitive deps are also classified and pass when their parent manifests pinned them. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
+
+### `require_pinned_constraint` reference
+
+Examples (with `require_pinned_constraint: true` and `enforcement: block`):
+
+```yaml
+# apm.yml
+dependencies:
+  apm:
+    - acme/skills              # FAIL: no ref (NO_REF)
+    - other/lib#>=1.0.0        # FAIL: unbounded upper (OPEN_UPPER)
+    - third/lib#*              # FAIL: wildcard (WILDCARD)
+    - acme/lib#main            # FAIL: bare branch (BARE_BRANCH)
+    - fourth/lib#^1.2.0        # OK: caret range
+    - fifth/lib#~1.2.3         # OK: tilde range
+    - sixth/lib#1.5.3          # OK: exact version (bare)
+    - sixth_eq/lib#=1.5.3      # OK: exact version (npm/cargo explicit equality)
+    - sixth_pip/lib#==1.5.3    # FAIL: pip-style operator not supported (BARE_BRANCH)
+    - seventh/lib#v1.5.3       # OK: literal tag
+    - eighth/lib#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # OK: SHA
+    - ./packages/local         # OK: local-path dep (no version surface)
+```
+
+Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
+
+```text
+[x] Policy violation: dependency-pinned-constraint
+    4 dependency(ies) use unbounded constraints
+    (hint: pin to a semver range, literal tag, or SHA)
+    - acme/skills: no ref; resolves to default branch
+    - other/lib: unbounded upper; pair with '<X.Y' or use a caret range
+    - third/lib: wildcard '*' matches any version
+    - acme/lib: bare branch 'main' tracks a moving tip
+```
 
 Patterns are matched against `<owner>/<repo>` (or `<host>/<owner>/<repo>`). Wildcards via shell-style globs, e.g. `contoso/*`.
 
@@ -141,6 +176,7 @@ inherited list (see the tri-state table below).
 | `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
+| `dependencies.require_pinned_constraint` | Logical OR -- once a parent enables it, child cannot relax.            |
 | `mcp.self_defined`          | Stricter wins (`deny` > `warn` > `allow`).                                       |
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
