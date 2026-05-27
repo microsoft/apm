@@ -128,8 +128,8 @@ name: security-review
 description: Reviews diffs for OWASP top-10 issues and missing input validation.
 model: gpt-5
 tools:
-  - read
-  - grep
+  Read: true
+  Grep: true
 ---
 
 You are a security reviewer. Your job is to inspect the working diff
@@ -142,11 +142,21 @@ for...
 | `description` | yes | Used by Cascade and Copilot to decide when to surface the agent |
 | `model` | optional | Pinned model the harness should switch to when invoked |
 | `tools` | optional | Whitelist of tools the persona may call |
+| `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
 verbatim. Codex receives a TOML translation. Windsurf drops both
 fields and emits a diagnostic warning at install time -- its skill
 format does not support per-persona model or tool scoping.
+
+OpenCode is the strictest of the verbatim targets: it requires
+`tools` as a `tool-name: boolean` **mapping** (not a list, not a
+string) and `color` to be either a `#rrggbb` hex literal or one of
+its theme names (`primary`, `secondary`, `accent`, `success`,
+`warning`, `error`, `info`). `apm install -t opencode` warns at
+install time when an agent ships shapes OpenCode would reject at
+load time -- the file is still deployed, but the warning names the
+offending package and field so you can fix the source.
 
 ### Body conventions
 
@@ -206,6 +216,14 @@ dedicated persona.
   no equivalent; APM warns and drops them. If those constraints are
   load-bearing, do not target windsurf for that agent -- ship it as
   an instruction instead, or restrict the package's `targets:`.
+- **`tools:` as a list, or a named color, on an OpenCode-targeted
+  agent.** OpenCode's loader rejects `tools: [Read, Grep]` and
+  colors like `cyan`. Use the mapping form (`tools: {Read: true}`)
+  and either a `#rrggbb` hex literal or one of OpenCode's theme
+  names (`primary, secondary, accent, success, warning, error,
+  info`). `apm install -t opencode` will warn at install time when
+  it detects either shape; the file still deploys but OpenCode will
+  refuse to load it.
 - **Agent body that re-states global instructions.** Agents inherit
   the workspace's compiled context. Restate only what the persona
   needs to *override* or *add*; do not duplicate `python-style`

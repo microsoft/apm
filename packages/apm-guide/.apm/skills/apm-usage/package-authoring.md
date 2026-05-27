@@ -240,6 +240,49 @@ instructions: |
 ---
 ```
 
+#### OpenCode target: frontmatter constraints
+
+OpenCode (`target: opencode`, deploys to `.opencode/agents/`) parses
+agent frontmatter through a strict Zod schema and refuses to load
+the agent on any mismatch. APM installs OpenCode agents verbatim
+and emits an install-time warning when it detects either of these
+known incompatibilities -- the file is still copied so you can fix
+it in place, but OpenCode will fail to start until you do.
+
+- `tools:` must be a **mapping of tool-name to boolean**, not a list
+  or comma-separated string:
+
+  ```yaml
+  # OK
+  tools:
+    Read: true
+    Grep: true
+    Edit: false
+
+  # Rejected by OpenCode (Claude/Copilot-style):
+  # tools: [Read, Grep]
+  # tools: "Read, Grep"
+  ```
+
+- `color:` must be either a **hex value** (`#abc` or `#aabbcc`) or
+  one of the OpenCode theme tokens: `primary`, `secondary`, `accent`,
+  `success`, `warning`, `error`, `info`. Free-form names such as
+  `cyan` or `magenta` are rejected:
+
+  ```yaml
+  # OK
+  color: "#aabbcc"
+  color: accent
+
+  # Rejected by OpenCode:
+  # color: cyan
+  ```
+
+If you target multiple agent runtimes from one source file, keep the
+frontmatter to the intersection of their schemas (or maintain
+target-specific copies) until APM ships a per-target frontmatter
+transformer (tracked as Phase 2 of #581 -- contributions welcome).
+
 ### 6. Skill (folder-based, `SKILL.md`)
 
 Reusable capability with supporting resources.

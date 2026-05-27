@@ -14,11 +14,13 @@ from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 class AgentIntegrator(BaseIntegrator):
@@ -171,6 +173,10 @@ class AgentIntegrator(BaseIntegrator):
                     source_file, target_path, diagnostics=diagnostics
                 )
             else:
+                if mapping.format_id == "opencode_agent":
+                    self._warn_opencode_frontmatter(
+                        source_file, diagnostics, package_info.package.name
+                    )
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
@@ -248,6 +254,44 @@ class AgentIntegrator(BaseIntegrator):
         content, links_resolved = self.resolve_links(content, source, target)
         target.write_text(content, encoding="utf-8")
         return links_resolved
+
+    # ------------------------------------------------------------------
+    # OpenCode validate-and-warn (Phase 1 of #581)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _warn_opencode_frontmatter(
+        source: Path,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Emit warnings for OpenCode-incompatible agent frontmatter.
+
+        Phase 1 only: surfaces Zod-fatal shapes (tools as list/string,
+        named colors outside the OpenCode theme enum) so users learn
+        why OpenCode will refuse to load the agent. The file is still
+        copied verbatim; Phase 2 (per-target frontmatter transformer)
+        is tracked separately.
+        """
+        if diagnostics is None:
+            return
+        if source.is_symlink():
+            return
+        try:
+            content = source.read_text(encoding="utf-8")
+        except OSError:
+            return
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if not fm_match:
+            return
+        try:
+            fm = yaml.safe_load(fm_match.group(1)) or {}
+        except yaml.YAMLError:
+            return
+        if not isinstance(fm, dict):
+            return
+        for message in validate_opencode_frontmatter(fm, source, package_name=package_name):
+            diagnostics.warn(message=message, package=package_name)
 
     # ------------------------------------------------------------------
     # Codex agent transformer (MD -> TOML)

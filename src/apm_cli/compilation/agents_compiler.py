@@ -536,21 +536,34 @@ class AgentsCompiler:
         # Create Claude formatter
         claude_formatter = ClaudeFormatter(str(self.base_dir))
 
-        # Get placement map from distributed compiler for consistency
-        from .distributed_compiler import DistributedAgentsCompiler
+        # Honor compilation.strategy=single-file (and the --single-agents flag)
+        # by collapsing all instructions into a single root CLAUDE.md, mirroring
+        # the gate in _compile_agents_md. Without this, single-file mode is
+        # silently ignored for the Claude target and per-subdirectory CLAUDE.md
+        # files are emitted via the distributed placement path (issue #1445).
+        #
+        # DistributedAgentsCompiler is only constructed on the distributed
+        # branch -- single-file mode does not use its placement analysis and
+        # the later display block guards on `distributed_compiler is not None`.
+        distributed_compiler = None
+        if config.strategy != "distributed" or config.single_agents:
+            placement_map = {self.base_dir: list(primitives.instructions)}
+        else:
+            from .distributed_compiler import DistributedAgentsCompiler
 
-        distributed_compiler = DistributedAgentsCompiler(
-            str(self.base_dir), exclude_patterns=config.exclude
-        )
-
-        # Analyze directory structure and determine placement
-        directory_map = distributed_compiler.analyze_directory_structure(primitives.instructions)
-        placement_map = distributed_compiler.determine_agents_placement(
-            primitives.instructions,
-            directory_map,
-            min_instructions=config.min_instructions_per_file,
-            debug=config.debug,
-        )
+            distributed_compiler = DistributedAgentsCompiler(
+                str(self.base_dir), exclude_patterns=config.exclude
+            )
+            # Analyze directory structure and determine placement
+            directory_map = distributed_compiler.analyze_directory_structure(
+                primitives.instructions
+            )
+            placement_map = distributed_compiler.determine_agents_placement(
+                primitives.instructions,
+                directory_map,
+                min_instructions=config.min_instructions_per_file,
+                debug=config.debug,
+            )
 
         # Skip instructions in CLAUDE.md when they are already deployed to
         # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
@@ -676,6 +689,16 @@ class AgentsCompiler:
                 " no further action needed",
                 symbol="info",
             )
+        elif distributed_compiler is None and files_written > 0 and not config.dry_run:
+            # Single-file strategy bypasses the distributed display formatter
+            # (which has no analysis to render). Emit a minimal progress line
+            # so users get a confirmation that single-file mode took effect.
+            noun = "file" if files_written == 1 else "files"
+            self._log(
+                "progress",
+                f"CLAUDE.md compiled ({files_written} {noun})",
+                symbol="success",
+            )
 
         # Display CLAUDE.md compilation output using standard formatter
         # Get proper compilation results from distributed compiler (has optimization decisions)
@@ -684,8 +707,10 @@ class AgentsCompiler:
         from ..output.formatters import CompilationFormatter
         from ..output.models import CompilationResults
 
-        compilation_results = distributed_compiler.get_compilation_results_for_display(
-            is_dry_run=config.dry_run
+        compilation_results = (
+            distributed_compiler.get_compilation_results_for_display(is_dry_run=config.dry_run)
+            if distributed_compiler is not None
+            else None
         )
         if compilation_results and not (skip_instructions and files_written == 0):
             # Update target name for CLAUDE.md output
