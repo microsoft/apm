@@ -765,17 +765,30 @@ try {
     # system cannot find the path specified." on accounts whose profile
     # directory contains non-ASCII characters (issue microsoft/apm#1509).
     $localAppData = $env:LOCALAPPDATA
-    if ($localAppData -and $releaseDir.StartsWith($localAppData, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $relative = $releaseDir.Substring($localAppData.Length).TrimStart('\', '/')
+    $localAppDataTrimmed = if ($localAppData) { $localAppData.TrimEnd('\', '/') } else { $null }
+    # Enforce a path-separator boundary so sibling directories that merely
+    # share a textual prefix (e.g. "C:\Users\x\AppData\LocalStuff\...") are
+    # not rewritten under %LOCALAPPDATA%.
+    $underLocalAppData = $false
+    if ($localAppDataTrimmed) {
+        $prefixWithSep = $localAppDataTrimmed + '\'
+        if ($releaseDir.Equals($localAppDataTrimmed, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $releaseDir.StartsWith($prefixWithSep, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $underLocalAppData = $true
+        }
+    }
+    if ($underLocalAppData) {
+        $relative = $releaseDir.Substring($localAppDataTrimmed.Length).TrimStart('\', '/')
         $shimTarget = "%LOCALAPPDATA%\$relative\apm.exe"
     } else {
         $shimTarget = "$releaseDir\apm.exe"
     }
     $shimContent = "@echo off`r`n`"$shimTarget`" %*`r`n"
-    # Use UTF-8 without BOM (rather than -Encoding ASCII) so any custom
-    # APM_INSTALL_DIR path containing non-ASCII characters survives the
-    # write. cmd.exe tolerates UTF-8 shim payloads without a BOM.
-    [System.IO.File]::WriteAllText($shimPath, $shimContent, (New-Object System.Text.UTF8Encoding($false)))
+    # Write the shim as UTF-16LE with BOM (System.Text.UnicodeEncoding).
+    # cmd.exe auto-detects this encoding via the BOM and preserves any
+    # non-ASCII characters from a custom APM_INSTALL_DIR. UTF-8 (with or
+    # without BOM) is not safely interpreted by cmd.exe across code pages.
+    [System.IO.File]::WriteAllText($shimPath, $shimContent, (New-Object System.Text.UnicodeEncoding($false, $true)))
 
     Add-ToUserPath -PathEntry $binDir
 
