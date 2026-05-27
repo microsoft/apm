@@ -159,6 +159,11 @@ class TestBuildTagRegex:
         assert m is not None
         assert m.group("version") == "2.0.0"
 
+    def test_name_specialized_to_package(self) -> None:
+        rx = build_tag_regex("{name}_v{version}", name="apm1")
+        assert rx.match("apm1_v1.0.0") is not None
+        assert rx.match("apm2_v1.0.0") is None
+
     def test_complex_pattern(self) -> None:
         rx = build_tag_regex("{name}@{version}")
         m = rx.match("tool@3.1.4")
@@ -232,6 +237,10 @@ class TestInferTagPattern:
     def test_name_underscore_v_version(self) -> None:
         assert infer_tag_pattern("api-governance_v1.0.1") == "{name}_v{version}"
 
+    def test_name_underscore_v_scoped_to_package(self) -> None:
+        assert infer_tag_pattern("apm1_v1.0.1", "apm1") == "{name}_v{version}"
+        assert infer_tag_pattern("apm2_v1.0.1", "apm1") is None
+
     def test_name_at_version_not_inferred(self) -> None:
         assert infer_tag_pattern("api-governance@1.0.1") is None
 
@@ -258,7 +267,13 @@ class TestIsVersionTagRef:
 
 class TestParseTagVersion:
     def test_name_underscore_v_version(self) -> None:
-        assert parse_tag_version("api-governance_v1.0.1", "{name}_v{version}") == "1.0.1"
+        assert (
+            parse_tag_version("api-governance_v1.0.1", "{name}_v{version}", name="api-governance")
+            == "1.0.1"
+        )
+
+    def test_pattern_without_version_returns_none(self) -> None:
+        assert parse_tag_version("tool-latest", "{name}-latest") is None
 
 
 class TestInferTagPatternFromRefs:

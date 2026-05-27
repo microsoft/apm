@@ -67,18 +67,22 @@ def render_tag(pattern: str, *, name: str, version: str) -> str:
     return result
 
 
-def build_tag_regex(pattern: str) -> re.Pattern[str]:
+def build_tag_regex(pattern: str, *, name: str | None = None) -> re.Pattern[str]:
     """Return a compiled regex that captures ``{version}`` from a tag.
 
     Literal text in *pattern* is escaped so that special regex characters
     (e.g. dots, parens) are matched verbatim.  ``{version}`` becomes a
     named capture group ``(?P<version>...)`` matching a semver-like
-    string.  ``{name}`` becomes a non-capturing wildcard ``[^/]+``.
+    string.  ``{name}`` becomes a non-capturing wildcard ``[^/]+``, or
+    the literal *name* when provided (for monorepo per-package tags).
 
     Parameters
     ----------
     pattern:
         Tag pattern string, e.g. ``"v{version}"``.
+    name:
+        When set and the pattern contains ``{name}``, match only this
+        package name instead of any ``[^/]+`` segment.
 
     Returns
     -------
@@ -116,7 +120,11 @@ def build_tag_regex(pattern: str) -> re.Pattern[str]:
     )
 
     escaped = escaped.replace(re.escape(_sentinel_version), _VERSION_RX)
-    escaped = escaped.replace(re.escape(_sentinel_name), r"[^/]+")
+    if _PLACEHOLDER_NAME in pattern and name:
+        name_rx = re.escape(name)
+    else:
+        name_rx = r"[^/]+"
+    escaped = escaped.replace(re.escape(_sentinel_name), name_rx)
 
     return re.compile(r"^" + escaped + r"$")
 
@@ -124,12 +132,16 @@ def build_tag_regex(pattern: str) -> re.Pattern[str]:
 def infer_tag_pattern(tag: str, package_name: str = "") -> str | None:
     """Return the first default pattern that matches *tag*, or ``None``.
 
-    *package_name* is accepted for API symmetry with :func:`render_tag` but
-    is not required for matching because ``{name}`` is a wildcard.
+    When *package_name* is set, patterns containing ``{name}`` only match
+    tags for that package (monorepo-safe).
     """
-    del package_name  # reserved for callers that pass the package display name
     for pattern in DEFAULT_TAG_PATTERNS:
-        if build_tag_regex(pattern).match(tag):
+        rx = (
+            build_tag_regex(pattern, name=package_name)
+            if _PLACEHOLDER_NAME in pattern and package_name
+            else build_tag_regex(pattern)
+        )
+        if rx.match(tag):
             return pattern
     return None
 
@@ -146,12 +158,19 @@ def infer_tag_pattern_from_refs(refs: list, package_name: str = "") -> str | Non
     return None
 
 
-def parse_tag_version(tag: str, pattern: str) -> str | None:
+def parse_tag_version(tag: str, pattern: str, *, name: str | None = None) -> str | None:
     """Extract the semver substring from *tag* using *pattern*."""
-    match = build_tag_regex(pattern).match(tag)
+    if _PLACEHOLDER_VERSION not in pattern:
+        return None
+    rx = (
+        build_tag_regex(pattern, name=name)
+        if _PLACEHOLDER_NAME in pattern and name
+        else build_tag_regex(pattern)
+    )
+    match = rx.match(tag)
     if match is None:
         return None
-    return match.group("version")
+    return match.groupdict().get("version")
 
 
 def is_version_tag_ref(ref: str, package_name: str | None = None) -> bool:

@@ -372,6 +372,7 @@ class TestCheckOneDep:
         ref_tags = [
             _make_remote_ref("api-governance_v1.0.2", "tag", "sha2"),
             _make_remote_ref("api-governance_v1.0.1", "tag", "sha1"),
+            _make_remote_ref("other-pkg_v9.9.9", "tag", "sha9"),
         ]
         downloader = MagicMock()
         downloader.list_remote_refs.return_value = ref_tags
@@ -388,6 +389,7 @@ class TestCheckOneDep:
         assert result.status == "outdated"
         assert result.latest == "api-governance_v1.0.2"
         assert result.source == "git tags"
+        assert "other-pkg" not in (result.latest or "")
 
     def test_tag_no_tags_returns_unknown(self):
         from apm_cli.commands.outdated import _check_one_dep
