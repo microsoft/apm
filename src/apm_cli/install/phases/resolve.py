@@ -164,6 +164,58 @@ def _maybe_resolve_git_semver(
     )
 
 
+def _purge_cached_semver_paths_for_update(
+    *,
+    all_apm_deps,
+    apm_modules_dir,
+    logger,
+) -> None:
+    """Pre-purge on-disk install paths for direct git-source semver deps
+    when ``--update`` / ``--refresh`` is set.
+
+    Bug 1 fix (#1496): the BFS resolver short-circuits at
+    ``install_path.exists()`` and never invokes ``download_callback``,
+    which is where ``_maybe_resolve_git_semver`` lives. For git-source
+    semver direct deps we therefore pre-purge the install path so the
+    resolver is forced through the callback, re-runs ``git ls-remote``,
+    and rewrites the lockfile with the latest matching tag. Matches
+    npm / cargo / bundler: ``--update`` is the explicit re-resolve
+    trigger and must not be swallowed by the on-disk cache. Scoped to
+    direct deps to avoid disturbing transitive cached content; the
+    resolver re-walks transitives naturally once a direct dep's
+    callback rewrites its ref. Local, registry, and proxy deps are
+    excluded -- their semver semantics (if any) belong to a different
+    resolver path.
+    """
+    from contextlib import suppress
+
+    from apm_cli.utils.file_ops import robust_rmtree as _rrm
+
+    for _dep in all_apm_deps:
+        if getattr(_dep, "ref_kind", None) != "semver":
+            continue
+        if _dep.is_local:
+            continue
+        if getattr(_dep, "source", None) == "registry":
+            continue
+        if getattr(_dep, "artifactory_prefix", None):
+            continue
+        try:
+            _ip = _dep.get_install_path(apm_modules_dir)
+        except Exception:  # noqa: S112
+            # Path computation failure (e.g. malformed dep) is non-fatal
+            # here -- the resolver will surface a real error downstream.
+            continue
+        if _ip.exists():
+            with suppress(Exception):
+                _rrm(_ip, ignore_errors=True)
+            if logger:
+                logger.verbose_detail(
+                    f"[*] --update: cleared cached install path for "
+                    f"{_dep.get_unique_key()} to force semver re-resolution"
+                )
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the resolve phase.
 
@@ -371,8 +423,27 @@ def run(ctx: InstallContext) -> None:
                 package's directory rather than the root consumer (#857).
         """
         install_path = dep_ref.get_install_path(modules_dir)
+        # Cache short-circuit: skip the rest of the callback when the
+        # install path already exists. Exception: for git-source semver
+        # deps under ``--update`` / ``--refresh`` (``update_refs=True``),
+        # fall through so ``_maybe_resolve_git_semver`` re-runs
+        # ``git ls-remote`` and the lockfile gets rewritten with the
+        # latest matching tag. Matches npm/cargo/bundler: ``--update``
+        # is the explicit re-resolve trigger and must not be swallowed
+        # by the on-disk cache (Bug 1 fix on #1496). The downstream
+        # ``downloader.download_package`` rmtrees and re-clones the
+        # install path when the resolved tag changes, so refetching is
+        # safe.
         if install_path.exists():
-            return install_path
+            _force_semver_resolve = (
+                update_refs
+                and not dep_ref.is_local
+                and getattr(dep_ref, "source", None) != "registry"
+                and not getattr(dep_ref, "artifactory_prefix", None)
+                and getattr(dep_ref, "ref_kind", None) == "semver"
+            )
+            if not _force_semver_resolve:
+                return install_path
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
         # users see the install advancing past silent transitive lookups.
         # Under F7's parallel BFS this callback may run on a worker
@@ -611,6 +682,13 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
+    if update_refs:
+        _purge_cached_semver_paths_for_update(
+            all_apm_deps=ctx.all_apm_deps,
+            apm_modules_dir=apm_modules_dir,
+            logger=ctx.logger,
+        )
+
     resolver = APMDependencyResolver(
         apm_modules_dir=apm_modules_dir,
         download_callback=download_callback,

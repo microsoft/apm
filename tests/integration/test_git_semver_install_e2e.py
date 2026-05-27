@@ -558,10 +558,14 @@ class TestNoMatchingTagError:
         result = _run_install(runner, project, monkeypatch)
 
         combined = (result.output or "") + (result.stderr or "")
-        # The failure must be surfaced loudly in the CLI output: the
-        # error marker plus the actionable diagnostic. (Note: exit code
-        # is not asserted -- the CLI currently exits 0 even on per-dep
-        # install failure; that is a separate, pre-existing concern.)
+        # npm/pip/cargo convention: ANY reported install failure exits
+        # non-zero so CI and scripts can detect failure without parsing
+        # stderr. Regression trap for Bug 2 (#1496 e2e wave): the CLI
+        # used to exit 0 even when "Installation failed with N error(s)"
+        # was printed.
+        assert result.exit_code != 0, (
+            f"install with no-matching-tag must exit non-zero; got 0\n{combined}"
+        )
         assert "failed" in combined.lower(), (
             f"expected an explicit failure marker in output:\n{combined}"
         )
@@ -577,4 +581,139 @@ class TestNoMatchingTagError:
         locked = _find_locked(lockfile, "acme/widget") if lockfile else None
         assert locked is None or not locked.get("resolved_commit"), (
             "failed semver resolution must not write a half-populated lockfile entry"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 (#1496 e2e wave): apm install --update must re-resolve git-semver
+# constraints against the latest remote tags even when the install path
+# already exists on disk. npm/cargo/bundler precedent: --update is the
+# explicit re-resolve trigger; the install-path cache short-circuit must
+# not swallow it.
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateReResolvesGitSemver:
+    def test_update_flag_re_resolves_when_install_path_exists_and_new_tag_published(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """First install pins v1.2.3; new tag v1.5.0 published upstream;
+        ``apm install --update`` must call ls-remote again and the lockfile
+        must record v1.5.0.
+
+        Regression trap for the silent no-op surfaced in the e2e wave on
+        PR #1496: ``download_callback`` returned early on
+        ``install_path.exists()`` before ``_maybe_resolve_git_semver``
+        could run, so ``--update`` never re-resolved the constraint.
+        """
+        project = tmp_path / "bug1-update"
+        _write_apm_yml(project, ["acme/widget#^1.2.0"])
+
+        # Initial remote: tags up through v1.2.3 only.
+        initial_refs = [
+            RemoteRef(name="refs/heads/main", sha="0" * 40),
+            RemoteRef(name="refs/tags/v1.0.0", sha="1" * 40),
+            RemoteRef(name="refs/tags/v1.2.3", sha="2" * 40),
+        ]
+        rr = _RefResolverCallRecorder({"acme/widget": initial_refs})
+        dl = _DownloaderStub({"v1.2.3": "2" * 40, "v1.5.0": "3" * 40})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+
+        first = _run_install(runner, project, monkeypatch)
+        assert first.exit_code == 0, first.output
+
+        # Clear the module-level apm.yml parse cache so the second invocation
+        # re-parses apm.yml from disk. In production each CLI invocation is a
+        # fresh process (empty cache); under CliRunner both invocations share
+        # one Python session, so without this clear the cached APMPackage
+        # instance (whose DependencyReference.reference was mutated to
+        # ``v1.2.3`` by the first run's semver resolver) leaks into the
+        # second run and disguises the cache-pre-purge gate as ineffective.
+        from apm_cli.models.apm_package import clear_apm_yml_cache as _clear_yml
+
+        _clear_yml()
+
+        locked = _find_locked(_read_lockfile(project), "acme/widget")
+        assert locked is not None and locked.get("resolved_tag") == "v1.2.3", (
+            f"first install must lock v1.2.3, got: {locked}"
+        )
+        assert (project / "apm_modules" / "acme" / "widget").exists(), (
+            "first install must materialise the dep so the cache short-circuit "
+            "fires on the second invocation"
+        )
+        assert rr.calls.count("acme/widget") == 1, (
+            f"first install should ls-remote once, got: {rr.calls}"
+        )
+
+        # Upstream publishes v1.5.0. The install path still exists from
+        # the first run -- this is the surface that hid the bug.
+        rr.refs_by_repo["acme/widget"] = [
+            RemoteRef(name="refs/heads/main", sha="0" * 40),
+            RemoteRef(name="refs/tags/v1.0.0", sha="1" * 40),
+            RemoteRef(name="refs/tags/v1.2.3", sha="2" * 40),
+            RemoteRef(name="refs/tags/v1.5.0", sha="3" * 40),
+        ]
+
+        second = _run_install(runner, project, monkeypatch, args=["--update"])
+        assert second.exit_code == 0, second.output
+
+        # --update must trigger a second ls-remote (the silent-no-op bug
+        # would leave this at 1).
+        assert rr.calls.count("acme/widget") == 2, (
+            f"--update must re-resolve via ls-remote, got calls: {rr.calls}"
+        )
+
+        # Lockfile must now record the newly-published highest tag.
+        locked_after = _find_locked(_read_lockfile(project), "acme/widget")
+        assert locked_after is not None
+        assert locked_after.get("resolved_tag") == "v1.5.0", (
+            f"--update must update resolved_tag to v1.5.0, got: {locked_after}"
+        )
+        assert locked_after.get("version") == "1.5.0", (
+            f"--update must update version to 1.5.0, got: {locked_after}"
+        )
+        assert locked_after.get("resolved_commit") == "3" * 40, (
+            f"--update must update resolved_commit, got: {locked_after}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug 2 (#1496 e2e wave): apm install must exit non-zero whenever
+# "Installation failed with N error(s)" is reported. Matches npm / pip /
+# cargo: ANY install failure -> non-zero exit so CI scripts can detect it.
+# The TestNoMatchingTagError class above also pins the exit-code assertion
+# for the per-dep failure path; this class isolates the contract at the
+# summary level.
+# ---------------------------------------------------------------------------
+
+
+class TestInstallExitCodeOnReportedErrors:
+    def test_install_with_unsatisfiable_semver_exits_nonzero(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A direct dep with an unsatisfiable semver constraint produces
+        a reported error -> exit code MUST be non-zero.
+
+        Regression trap for Bug 2 (#1496 e2e wave).
+        """
+        project = tmp_path / "bug2-exit"
+        _write_apm_yml(project, ["acme/widget#^9.9.0"])
+
+        rr = _RefResolverCallRecorder({"acme/widget": _refs_v_prefixed()})
+        dl = _DownloaderStub({})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+
+        result = _run_install(runner, project, monkeypatch)
+
+        combined = (result.output or "") + (result.stderr or "")
+        assert result.exit_code != 0, (
+            f"install with reported errors must exit non-zero; got 0\n{combined}"
         )
