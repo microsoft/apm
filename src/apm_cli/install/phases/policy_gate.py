@@ -117,6 +117,7 @@ def run(ctx: InstallContext) -> None:
         effective_target=None,  # target-aware checks after targets phase
         fetch_outcome=fetch_result.outcome,
         fail_fast=(enforcement == "block"),
+        direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
         **extra_kwargs,
     )
 
