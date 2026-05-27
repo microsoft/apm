@@ -386,6 +386,16 @@ class HookIntegrator(BaseIntegrator):
             # rather than naked, so leave it alone.
             if "hooks" not in data and data and all(isinstance(v, list) for v in data.values()):
                 data = {"hooks": data}
+            # Fail closed on malformed shapes where "hooks" is present but not
+            # a dict (e.g. {"hooks": []}).  Downstream code calls .items() on
+            # this value and would otherwise raise AttributeError mid-merge.
+            if "hooks" in data and not isinstance(data["hooks"], dict):
+                _log.warning(
+                    "Skipping malformed hook file %s: 'hooks' must be a dict, got %s",
+                    hook_file,
+                    type(data["hooks"]).__name__,
+                )
+                return None
             return data
         except (json.JSONDecodeError, OSError):
             return None

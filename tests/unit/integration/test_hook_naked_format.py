@@ -165,3 +165,34 @@ def test_counter_does_not_lie_on_empty_merge(tmp_path: Path) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+def test_malformed_hooks_list_value_does_not_crash(tmp_path: Path) -> None:
+    """A hook file with ``{"hooks": []}`` (list instead of dict) must fail closed.
+
+    Regression trap for the Copilot review on #1516: previously
+    ``_parse_hook_json`` returned the raw dict and downstream
+    ``_rewrite_hooks_data`` / ``_integrate_merged_hooks`` called
+    ``.items()`` on the list, raising AttributeError mid-merge.
+    The parser must now treat the file as invalid (return None),
+    the integration must not crash, and the counter must report 0.
+    """
+    pkg_dir = tmp_path / "pkg"
+    hooks_dir = pkg_dir / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "malformed.json").write_text(json.dumps({"hooks": []}))
+    pkg_info = _make_package_info(pkg_dir, "malformed-pkg")
+
+    project_root = tmp_path / "project"
+    (project_root / ".claude").mkdir(parents=True)
+
+    integrator = HookIntegrator()
+    # Must not raise AttributeError.
+    result = integrator.integrate_package_hooks_claude(pkg_info, project_root)
+
+    assert result.files_integrated == 0, (
+        "Malformed hook file must be skipped, not counted as integrated; "
+        f"got files_integrated={result.files_integrated}"
+    )
+    # Direct parser contract: malformed shape returns None.
+    assert integrator._parse_hook_json(hooks_dir / "malformed.json") is None
