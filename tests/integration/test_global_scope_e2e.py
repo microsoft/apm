@@ -13,6 +13,7 @@ They do NOT require network access -- they validate scope plumbing, path
 resolution, and CLI output using local fixtures only.
 """
 
+import json
 import os
 import platform  # noqa: F401
 import shutil
@@ -507,4 +508,109 @@ class TestGlobalUninstallLifecycle:
         combined = result.stdout + result.stderr
         assert "not found" in combined.lower() or "not in apm.yml" in combined.lower(), (
             f"Expected 'not found' warning: {combined}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Hook integration on the global install pipeline (regression for #1499)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def naked_hook_package(tmp_path):
+    """Package whose only hook file uses the "naked" Claude settings slice.
+
+    Top-level keys are event names (no outer ``hooks:`` wrap), exactly
+    as Claude Code accepts inside its own ``settings.json``. This is the
+    literal repro shape from microsoft/apm#1499.
+    """
+    pkg = tmp_path / "naked-hook-pkg"
+    pkg.mkdir()
+    (pkg / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "naked-hook-pkg",
+                "version": "1.0.0",
+                "description": "Repro package for #1499 naked-format hook regression",
+            }
+        )
+    )
+    hooks_dir = pkg / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    scripts_dir = pkg / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "example.py").write_text("print('hi')\n")
+    (hooks_dir / "session-metrics.json").write_text(
+        '{"Stop": [{"matcher": "", "hooks": [{"type": "command", '
+        '"command": "python3 ${PLUGIN_ROOT}/scripts/example.py", '
+        '"timeout": 20000}]}]}'
+    )
+    return pkg
+
+
+class TestGlobalHookIntegrationNakedFormat:
+    """End-to-end regression for #1499 on the ``apm install -g`` pipeline.
+
+    Drives the real CLI binary against a fake HOME and a package whose
+    only hook file uses the naked Claude settings-slice format. Before
+    the fix the global pipeline reported ``1 hook(s) integrated`` while
+    leaving ``~/.claude/settings.json`` with ``{"hooks": {}}`` and never
+    rewriting ``${PLUGIN_ROOT}`` for the copilot target.
+    """
+
+    def test_claude_settings_receives_naked_stop_entry(
+        self, apm_command, fake_home, naked_hook_package
+    ):
+        """``~/.claude/settings.json`` must carry the Stop entry after global install."""
+        (fake_home / ".claude").mkdir()
+
+        result = _run_apm(
+            apm_command,
+            ["install", "--global", str(naked_hook_package)],
+            fake_home,
+            fake_home,
+        )
+
+        settings_path = fake_home / ".claude" / "settings.json"
+        assert settings_path.exists(), (
+            f"~/.claude/settings.json not created. stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        settings = json.loads(settings_path.read_text())
+        assert settings.get("hooks", {}), (
+            f"~/.claude/settings.json has empty hooks (the #1499 regression). "
+            f"Got: {settings!r}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "Stop" in settings["hooks"], (
+            f"Stop event missing from ~/.claude/settings.json: {settings['hooks']!r}"
+        )
+
+    def test_integrated_counter_does_not_lie_on_empty_merge(self, apm_command, fake_home, tmp_path):
+        """A hook file whose events are all empty must NOT bump the counter.
+
+        Companion regression for #1499: the user-facing summary line
+        ``N hook(s) integrated`` previously incremented even when the
+        merge produced zero entries on disk. The new fail-closed code
+        path now logs a warning AND keeps the counter accurate.
+        """
+        pkg = tmp_path / "empty-events-pkg"
+        pkg.mkdir()
+        (pkg / "apm.yml").write_text(yaml.dump({"name": "empty-events-pkg", "version": "1.0.0"}))
+        hooks_dir = pkg / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        # Naked-format file with an empty event list -- parses cleanly but
+        # contributes zero entries.
+        (hooks_dir / "noop.json").write_text('{"Stop": []}')
+
+        (fake_home / ".claude").mkdir()
+
+        result = _run_apm(
+            apm_command,
+            ["install", "--global", str(pkg)],
+            fake_home,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        assert "1 hook" not in combined, (
+            f"Counter must not report '1 hook(s) integrated' for an empty merge. Got: {combined}"
         )

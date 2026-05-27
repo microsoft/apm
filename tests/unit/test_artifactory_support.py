@@ -107,6 +107,133 @@ class TestParseArtifactoryPath:
         result = parse_artifactory_path(["artifactory", "my-proxy", "team", "project"])
         assert result[0] == "artifactory/my-proxy"
 
+    def test_nested_gitlab_subgroup_simple_parse(self):
+        """Parse is intentionally simple/shallow; the install-time resolver is authoritative.
+
+        For ``apm/acme-group/shared-modules/pkg-utils`` parse picks
+        ``owner=acme-group, repo=shared-modules`` and folds the rest into
+        ``virtual_path``.  ``_resolve_artifactory_boundary`` then HEAD-probes
+        archive URLs and rebuilds the ref at the proxy-verified boundary.
+        """
+        result = parse_artifactory_path(
+            ["artifactory", "apm", "acme-group", "shared-modules", "pkg-utils"]
+        )
+        assert result == ("artifactory/apm", "acme-group", "shared-modules", "pkg-utils")
+
+    def test_nested_subgroup_with_marker_simple_parse(self):
+        """Marker-like segments are no longer parse-time signals; the resolver decides."""
+        result = parse_artifactory_path(
+            ["artifactory", "apm", "group", "subgroup", "repo", "skills", "foo"]
+        )
+        assert result == ("artifactory/apm", "group", "subgroup", "repo/skills/foo")
+
+    def test_nested_subgroup_with_virtual_file_extension(self):
+        """Virtual file extensions are no longer parse-time boundary signals either."""
+        result = parse_artifactory_path(
+            ["artifactory", "apm", "group", "subgroup", "repo", "rules.prompt.md"]
+        )
+        assert result == ("artifactory/apm", "group", "subgroup", "repo/rules.prompt.md")
+
+    def test_double_slash_subdirectory_notation(self):
+        """The ``//subdir`` notation explicitly marks the repo/virtual boundary."""
+        # Mirrors ``art.example.com/artifactory/github/owner/repo//subdir``.
+        result = parse_artifactory_path(["artifactory", "github", "owner", "repo", "", "subdir"])
+        assert result[0] == "artifactory/github"
+        assert result[1] == "owner"
+        assert result[2] == "repo"
+        assert result[3] == "subdir"
+
+    def test_empty_segment_before_boundary_returns_none(self):
+        """``owner//virtual`` has no repo before the explicit boundary -> invalid.
+
+        Regression guard: previously fell through to ``repo=''``, producing a
+        malformed dep ref that broke downstream URL construction.
+        """
+        assert parse_artifactory_path(["artifactory", "github", "owner", "", "subdir"]) is None
+
+    def test_iterator_yields_nothing_for_empty_segment_before_boundary(self):
+        """Same edge case at the iterator layer -- no candidate is yielded."""
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        candidates = list(
+            iter_artifactory_boundary_candidates(["artifactory", "github", "owner", "", "subdir"])
+        )
+        assert candidates == []
+
+
+class TestIterArtifactoryBoundaryCandidates:
+    """Test the candidate iterator that backs the install-time probe."""
+
+    def test_flat_path_yields_single_candidate(self):
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        candidates = list(
+            iter_artifactory_boundary_candidates(["artifactory", "github", "owner", "repo"])
+        )
+        assert candidates == [("artifactory/github", "owner", "repo", None)]
+
+    def test_nested_path_yields_shallow_to_deep(self):
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        candidates = list(
+            iter_artifactory_boundary_candidates(["artifactory", "apm", "group", "sub", "repo"])
+        )
+        # Shallowest (k=1) yielded first; deepest (all-as-repo) last.
+        assert candidates == [
+            ("artifactory/apm", "group", "sub", "repo"),
+            ("artifactory/apm", "group", "sub/repo", None),
+        ]
+
+    def test_shape_filter_accepts_matching_suffixes(self):
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        # Filter only accepts suffixes ending in ``.prompt.md``.
+        def only_prompt_md(v):
+            return v.endswith(".prompt.md")
+
+        candidates = list(
+            iter_artifactory_boundary_candidates(
+                ["artifactory", "apm", "g", "a", "b", "rules.prompt.md"],
+                shape_filter=only_prompt_md,
+            )
+        )
+        # after_owner = [a, b, rules.prompt.md]:
+        #   k=1 suffix='b/rules.prompt.md' -> ends in .prompt.md, accepted.
+        #   k=2 suffix='rules.prompt.md'   -> ends in .prompt.md, accepted.
+        #   k=3 suffix=None                -> filter bypassed (no-suffix fallback).
+        assert ("artifactory/apm", "g", "a", "b/rules.prompt.md") in candidates
+        assert ("artifactory/apm", "g", "a/b", "rules.prompt.md") in candidates
+        assert ("artifactory/apm", "g", "a/b/rules.prompt.md", None) in candidates
+
+    def test_shape_filter_actually_rejects(self):
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        # Reject every non-empty suffix.
+        candidates = list(
+            iter_artifactory_boundary_candidates(
+                ["artifactory", "apm", "g", "a", "b"],
+                shape_filter=lambda _v: False,
+            )
+        )
+        # All k<n candidates have a non-empty suffix and get filtered out;
+        # the k=n fallback (suffix=None) is always yielded.
+        assert candidates == [("artifactory/apm", "g", "a/b", None)]
+
+    def test_explicit_double_slash_short_circuits(self):
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        candidates = list(
+            iter_artifactory_boundary_candidates(
+                ["artifactory", "github", "owner", "repo", "", "subdir"]
+            )
+        )
+        assert candidates == [("artifactory/github", "owner", "repo", "subdir")]
+
+    def test_non_artifactory_yields_nothing(self):
+        from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
+
+        assert list(iter_artifactory_boundary_candidates(["owner", "repo"])) == []
+
 
 class TestBuildArtifactoryArchiveUrl:
     """Test build_artifactory_archive_url URL construction."""
@@ -186,6 +313,26 @@ class TestBuildArtifactoryArchiveUrl:
         )
         assert any("/-/archive/main/repo-main.zip" in u for u in urls), (
             "GitLab-style /-/archive/{ref}/{repo}-{ref}.zip must still be present"
+        )
+
+    def test_gitlab_nested_subgroup_archive_uses_repo_basename(self):
+        """For nested GitLab projects, the archive filename uses the project basename only."""
+        urls = build_artifactory_archive_url(
+            "art.example.com",
+            "artifactory/apm",
+            "acme-group",
+            "shared-modules/pkg-utils",
+            ref="main",
+        )
+        # Repo path stays whole in the URL...
+        assert any(
+            "/artifactory/apm/acme-group/shared-modules/pkg-utils/-/archive/main/" in u
+            for u in urls
+        ), "Nested subgroup path must be preserved in the archive URL"
+        # ...but the archive filename uses only the basename (pkg-utils-main.zip),
+        # matching GitLab's actual archive naming.
+        assert any(u.endswith("/-/archive/main/pkg-utils-main.zip") for u in urls), (
+            "GitLab archive filename must use the repo basename, not the full slug"
         )
 
 
@@ -288,6 +435,341 @@ class TestDependencyReferenceArtifactory:
         dep = DependencyReference.parse("art.example.com/artifactory/my-proxy/team/project")
         assert dep.artifactory_prefix == "artifactory/my-proxy"
         assert dep.repo_url == "team/project"
+
+    def test_parse_nested_gitlab_via_fqdn_simple(self):
+        """FQDN form parses simply/shallow; the install resolver settles the boundary.
+
+        See :func:`apm_cli.install.artifactory_resolver._resolve_artifactory_boundary`
+        for the authoritative probe that rebuilds this ref at the proxy-confirmed
+        boundary.
+        """
+        dep = DependencyReference.parse(
+            "art.example.com/artifactory/apm/acme-group/shared-modules/pkg-utils"
+        )
+        assert dep.host == "art.example.com"
+        assert dep.artifactory_prefix == "artifactory/apm"
+        assert dep.repo_url == "acme-group/shared-modules"
+        assert dep.is_artifactory()
+
+
+# ── DependencyReference shorthand under registry-only mode ──
+
+
+class TestRegistryOnlyNestedShorthand:
+    """Bare shorthand (no FQDN) under PROXY_REGISTRY_ONLY treats 3+ segments
+    as a nested repo path -- enabling GitLab subgroup projects via a proxy
+    (issue: APM cannot install nested GitLab subgroup projects).
+    """
+
+    def test_three_segment_shorthand_kept_whole(self):
+        """``group/subgroup/repo`` is a nested-group project, not a subdir."""
+        with patch.dict(
+            os.environ,
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
+            clear=False,
+        ):
+            dep = DependencyReference.parse("acme-group/shared-modules/pkg-utils")
+        assert dep.repo_url == "acme-group/shared-modules/pkg-utils"
+        assert dep.is_virtual is False
+        assert dep.virtual_path is None
+        # Round-trip canonicalization preserves the full path.
+        assert dep.to_canonical() == "acme-group/shared-modules/pkg-utils"
+
+    def test_three_segment_with_marker_segment_defers_to_resolver(self):
+        """Directory-marker segments (``skills/``, ``prompts/``, ...) are no longer parse-time signals.
+
+        Parse defaults to all-as-repo under registry-only mode; the install-time
+        resolver in :mod:`apm_cli.install.artifactory_resolver` HEAD-probes
+        candidate splits and rebuilds the dep ref at the proxy-verified
+        boundary.  This trades the old marker heuristic for a deterministic
+        probe.
+        """
+        with patch.dict(
+            os.environ,
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
+            clear=False,
+        ):
+            dep = DependencyReference.parse("group/sub/repo/skills/cve-patcher")
+        assert dep.repo_url == "group/sub/repo/skills/cve-patcher"
+        assert dep.is_virtual is False
+        assert dep.virtual_path is None
+
+    def test_three_segment_with_virtual_file_ext_still_virtual(self):
+        """A trailing virtual file extension is structurally a file -- still detected at parse.
+
+        File extensions are unambiguous shape (a ``.prompt.md`` path is by
+        definition a file, not a directory), so parse keeps the last segment
+        as ``virtual_path``.  The shallower repo boundary (if the file lives
+        under a ``prompts/`` directory in a flat-repo project) is settled by
+        the install-time resolver.
+        """
+        with patch.dict(
+            os.environ,
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
+            clear=False,
+        ):
+            dep = DependencyReference.parse("group/sub/repo/rules.prompt.md")
+        assert dep.repo_url == "group/sub/repo"
+        assert dep.is_virtual is True
+        assert dep.virtual_path == "rules.prompt.md"
+
+    def test_two_segment_shorthand_unchanged(self):
+        """Two-segment shorthand keeps the GitHub ``owner/repo`` shape."""
+        with patch.dict(
+            os.environ,
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
+            clear=False,
+        ):
+            dep = DependencyReference.parse("microsoft/apm-sample-package")
+        assert dep.repo_url == "microsoft/apm-sample-package"
+        assert dep.is_virtual is False
+
+    def test_three_segment_shorthand_without_proxy_unchanged(self):
+        """Without registry-only mode, 3-segment shorthand keeps legacy
+        ``owner/repo`` + virtual ``subdir`` semantics.
+        """
+        # Clear any leaked proxy/registry env so we exercise the default path.
+        keys = (
+            "PROXY_REGISTRY_URL",
+            "PROXY_REGISTRY_ONLY",
+            "ARTIFACTORY_BASE_URL",
+            "ARTIFACTORY_ONLY",
+        )
+        saved = {k: os.environ.pop(k, None) for k in keys}
+        try:
+            dep = DependencyReference.parse("owner/repo/some-subdir")
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+        assert dep.repo_url == "owner/repo"
+        assert dep.is_virtual is True
+        assert dep.virtual_path == "some-subdir"
+
+
+# ── Artifactory boundary probe (mirrors native GitLab probing pattern) ──
+
+
+class TestArtifactoryBoundaryResolver:
+    """``_resolve_artifactory_boundary`` definitively settles the dep_ref boundary."""
+
+    def _fake_head(self, ok_url_substring):
+        """Return a fake ``requests.head`` that returns 200 only for matching URLs."""
+
+        def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
+            resp = MagicMock()
+            resp.status_code = 200 if ok_url_substring in url else 404
+            return resp
+
+        return _head
+
+    def test_resolver_picks_deeper_boundary_for_nested_subgroup(self):
+        """Shallow guess 404s, deep boundary 200s -> rebuild at depth."""
+        from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+
+        package = "art.example.com/artifactory/apm/acme-group/shared-modules/pkg-utils"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token=None)
+
+        ok_url = "/artifactory/apm/acme-group/shared-modules/pkg-utils/"
+
+        with patch(
+            "apm_cli.install.artifactory_resolver.requests.head",
+            side_effect=self._fake_head(ok_url),
+        ):
+            resolved = _resolve_artifactory_boundary(package, auth, verbose=False)
+
+        assert resolved.host == "art.example.com"
+        assert resolved.artifactory_prefix == "artifactory/apm"
+        assert resolved.repo_url == "acme-group/shared-modules/pkg-utils"
+        assert resolved.virtual_path is None
+        assert resolved.is_artifactory()
+
+    def test_resolver_picks_shallower_boundary_when_subpath_is_virtual(self):
+        """Shallow boundary 200s -> lock in shallow + virtual_path."""
+        from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+
+        package = "art.example.com/artifactory/apm/group/repo/skills/foo"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token=None)
+
+        ok_url = "/artifactory/apm/group/repo/"
+
+        def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
+            resp = MagicMock()
+            # Only the shallowest archive URL hits 200; deeper paths 404.
+            resp.status_code = 200 if ok_url in url and "/group/repo/skills" not in url else 404
+            return resp
+
+        with patch(
+            "apm_cli.install.artifactory_resolver.requests.head",
+            side_effect=_head,
+        ):
+            resolved = _resolve_artifactory_boundary(package, auth, verbose=False)
+
+        assert resolved.repo_url == "group/repo"
+        assert resolved.virtual_path == "skills/foo"
+        assert resolved.is_virtual
+
+    def test_resolver_no_op_for_non_proxy_routed_dep(self):
+        """Non-Artifactory deps without proxy mode are a no-op (unchanged ref).
+
+        The resolver covers both routing modes (Mode 1 FQDN and Mode 2 bare
+        shorthand under ``PROXY_REGISTRY_ONLY``); deps that don't route through
+        the proxy at all (e.g. a plain ``github.com`` dep with no proxy env)
+        should pass through unchanged so the resolver can be called blindly
+        from the install pipeline.
+        """
+        from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+
+        auth = Mock()
+        # Clear any proxy env to make sure Mode 2 doesn't kick in here either.
+        with patch.dict(os.environ, {}, clear=True):
+            dep = DependencyReference.parse("github.com/owner/repo")
+            resolved = _resolve_artifactory_boundary(
+                "github.com/owner/repo", auth, verbose=False, dep_ref=dep
+            )
+        assert resolved is dep
+
+    def test_resolver_raises_when_no_candidate_matches(self):
+        """All-404 must raise -- deterministic failure, no silent fallback."""
+        from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+
+        package = "art.example.com/artifactory/apm/group/sub/repo"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token=None)
+
+        def _all_404(url, headers=None, timeout=None, verify=None, allow_redirects=None):
+            resp = MagicMock()
+            resp.status_code = 404
+            return resp
+
+        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_404):
+            with pytest.raises(ValueError, match="did not resolve"):
+                _resolve_artifactory_boundary(package, auth, verbose=False)
+
+    def test_resolver_distinguishes_auth_from_missing(self):
+        """All-401 must raise an auth-specific error, not a "not found" one.
+
+        A misconfigured token returning 401 for every probe must surface as an
+        auth problem so the user knows to fix credentials, not the dep path.
+        """
+        from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+
+        package = "art.example.com/artifactory/apm/group/sub/repo"
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token="bad")
+
+        def _all_401(url, headers=None, timeout=None, verify=None, allow_redirects=None):
+            resp = MagicMock()
+            resp.status_code = 401
+            return resp
+
+        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_401):
+            with pytest.raises(ValueError, match="authentication problem"):
+                _resolve_artifactory_boundary(package, auth, verbose=False)
+
+    def test_resolver_returns_unchanged_for_unambiguous_path(self):
+        """A 4-segment path has only one candidate -- return the parse-time ref unchanged."""
+        from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+
+        package = "art.example.com/artifactory/github/owner/repo"
+        dep_ref = DependencyReference.parse(package)
+        auth = Mock()
+        auth.resolve_for_dep.return_value = Mock(token=None)
+
+        with patch("apm_cli.install.artifactory_resolver.requests.head") as mock_head:
+            resolved = _resolve_artifactory_boundary(package, auth, verbose=False, dep_ref=dep_ref)
+
+        assert resolved is dep_ref
+        mock_head.assert_not_called()
+
+    def test_resolver_handles_mode_2_bare_shorthand(self):
+        """Bare shorthand under ``PROXY_REGISTRY_ONLY`` is probed via the registry config.
+
+        The rebuilt ref stays bare (no ``host`` / ``artifactory_prefix`` set);
+        the proxy is still routed via env, not embedded in the dep ref.
+        """
+        from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+
+        package = "group/sub/repo/skills/foo"
+        with patch.dict(
+            os.environ,
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
+            clear=True,
+        ):
+            dep = DependencyReference.parse(package)
+            auth = Mock()
+            auth.resolve_for_dep.return_value = Mock(token=None)
+
+            # Only the shallow boundary (group/sub/repo) exists.
+            ok_marker = "/artifactory/apm/group/sub/repo/"
+
+            def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
+                resp = MagicMock()
+                resp.status_code = (
+                    200 if ok_marker in url and "/group/sub/repo/skills" not in url else 404
+                )
+                return resp
+
+            with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+                resolved = _resolve_artifactory_boundary(package, auth, verbose=False, dep_ref=dep)
+
+        assert resolved.repo_url == "group/sub/repo"
+        assert resolved.virtual_path == "skills/foo"
+        assert resolved.is_virtual
+        # Bare shorthand form preserved -- proxy routing is via env, not
+        # embedded as artifactory_prefix on the ref.
+        assert resolved.artifactory_prefix is None
+        assert resolved.is_artifactory() is False
+
+
+# ── ArtifactoryOrchestrator: multi-segment repo support ──
+
+
+class TestArtifactoryOrchestratorNestedRepo:
+    """``ArtifactoryOrchestrator`` keeps nested-group repo paths intact."""
+
+    def test_split_owner_repo_two_segments(self):
+        """Owner/repo split is unchanged for flat 2-segment paths."""
+        from apm_cli.deps.artifactory_orchestrator import ArtifactoryOrchestrator
+
+        dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo")
+        owner, repo = ArtifactoryOrchestrator._split_owner_repo(dep)
+        assert owner == "owner"
+        assert repo == "repo"
+
+    def test_split_owner_repo_nested_subgroup_after_probe(self):
+        """After a probe-rebuilt ref, subgroup segments are folded into ``repo``."""
+        from apm_cli.deps.artifactory_orchestrator import ArtifactoryOrchestrator
+
+        # Simulate the post-probe dep_ref directly (avoids needing a real proxy).
+        dep = DependencyReference.from_artifactory_boundary_probe(
+            host="art.example.com",
+            prefix="artifactory/apm",
+            owner="acme-group",
+            repo="shared-modules/pkg-utils",
+            virtual_path=None,
+            reference=None,
+        )
+        owner, repo = ArtifactoryOrchestrator._split_owner_repo(dep)
+        assert owner == "acme-group"
+        assert repo == "shared-modules/pkg-utils"
 
 
 # ── token_manager.py: Artifactory token support ──
@@ -790,6 +1272,9 @@ class TestArtifactoryEdgeCases:
             src_dir / "models" / "dependency.py",
             src_dir / "commands" / "install.py",
             src_dir / "core" / "token_manager.py",
+            src_dir / "install" / "artifactory_resolver.py",
+            src_dir / "install" / "package_resolution.py",
+            src_dir / "models" / "dependency" / "reference.py",
         ]
         forbidden = ["checkpoint", "chkp"]
         for py_file in target_files:
