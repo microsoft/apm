@@ -10,12 +10,12 @@ auto-activates inside Copilot or Claude, add a custom agent that pairs with
 it, install both into a project, and ship the result as a plugin. No prompts,
 no `cat <<EOF`, no compile step you do not need.
 
-If you want the conceptual map first, read [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/).
+If you want the conceptual map first, read [Anatomy of an APM Package](/apm/concepts/package-anatomy/).
 Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](/apm/quickstart/).
+- APM installed -- see [Installation](./installation/).
 - A GitHub account and an empty repo for publishing (step 5).
 - A runtime where you can try the result: GitHub Copilot, Claude Code, or
   Cursor.

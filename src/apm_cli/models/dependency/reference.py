@@ -832,6 +832,26 @@ class DependencyReference:
         )
 
     @classmethod
+    def from_artifactory_boundary_probe(
+        cls,
+        host: str,
+        prefix: str,
+        owner: str,
+        repo: str,
+        virtual_path: str | None,
+        reference: str | None,
+    ) -> "DependencyReference":
+        """Build a dependency ref for a resolved Artifactory boundary probe."""
+        return cls(
+            repo_url=f"{owner}/{repo}",
+            host=host,
+            reference=reference,
+            virtual_path=virtual_path,
+            is_virtual=bool(virtual_path),
+            artifactory_prefix=prefix,
+        )
+
+    @classmethod
     def _gitlab_shorthand_repo_segment_count(
         cls,
         path_segments: list[str],
@@ -873,6 +893,39 @@ class DependencyReference:
                 return 3
             return 2
 
+        return n
+
+    @classmethod
+    def _bare_shorthand_repo_segment_count(cls, path_segments: list[str]) -> int:
+        """Return how many leading segments belong to the repo path for bare shorthand.
+
+        For ``owner/repo[/...]`` shorthand without an FQDN, the default is 2
+        segments (GitHub convention).  When registry-only mode is active, the
+        proxy may be fronting a host that allows nested namespaces (GitLab
+        subgroups) -- parse defaults to **all-as-repo** so the deterministic
+        boundary probe in :mod:`apm_cli.install.artifactory_resolver` can
+        rebuild the dependency reference at the proxy-verified split.
+
+        The only parse-time inference kept is **structural**: a path whose
+        last segment ends in a virtual file extension
+        (``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``)
+        is by shape a virtual file dep -- the file is the last segment and
+        the repo is everything before it.  This is not a directory-marker
+        heuristic; the file extension is the type.  The shallower boundary
+        (when the file lives under a known directory like ``prompts/``) is
+        settled by the probe, not by a marker list.
+        """
+        n = len(path_segments)
+        if n < 3:
+            return 2
+
+        from ...deps.registry_proxy import is_enforce_only
+
+        if not is_enforce_only():
+            return 2
+
+        if any(path_segments[-1].endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+            return n - 1
         return n
 
     @classmethod
@@ -1053,7 +1106,13 @@ class DependencyReference:
             else:
                 min_base_segments = len(path_segments)
         else:
-            min_base_segments = 2
+            # Bare shorthand (no FQDN).  Default GitHub-style: owner/repo plus
+            # any tail is treated as a virtual sub-path.  But when registry-only
+            # mode is active, the proxy may be fronting a GitLab instance where
+            # the project lives at an arbitrary subgroup depth -- fold non-marker
+            # segments into the repo path instead of mis-classifying them as
+            # virtual sub-paths (see issue: nested GitLab subgroup support).
+            min_base_segments = cls._bare_shorthand_repo_segment_count(path_segments)
 
         min_virtual_segments = min_base_segments + 1
 
@@ -1228,6 +1287,17 @@ class DependencyReference:
                         "Invalid Azure DevOps virtual package format: expected at least org/project/repo/path"
                     )
                 repo_url = "/".join(parts[:3])
+            elif validated_host is None and virtual_path:
+                # Bare shorthand under registry-only mode may carry a nested
+                # repo path (GitLab subgroup via proxy).  Trust the boundary
+                # already chosen by ``_bare_shorthand_repo_segment_count`` --
+                # everything before the virtual tail belongs to the repo.
+                vparts = [p for p in virtual_path.split("/") if p]
+                tail = len(vparts)
+                if tail > 0 and len(parts) > tail + 1:
+                    repo_url = "/".join(parts[: len(parts) - tail])
+                else:
+                    repo_url = "/".join(parts[:2])
             else:
                 repo_url = "/".join(parts[:2])
 
@@ -1276,6 +1346,10 @@ class DependencyReference:
                 user_repo = "/".join(parts[:3])
             elif host and not is_github_hostname(host) and not is_azure_devops_hostname(host):
                 user_repo = "/".join(parts)
+            elif len(parts) >= 3 and cls._bare_shorthand_repo_segment_count(parts) > 2:
+                # Registry-only mode allows nested-group repo paths
+                # (GitLab via proxy).  Keep the full multi-segment path.
+                user_repo = "/".join(parts[: cls._bare_shorthand_repo_segment_count(parts)])
             else:
                 user_repo = "/".join(parts[:2])
         else:
@@ -1408,6 +1482,14 @@ class DependencyReference:
                 raise ValueError(
                     f"Invalid repository path: expected at least 'user/repo', got '{path}'"
                 )
+            # Strip the Artifactory VCS prefix so ``repo_url`` is the bare
+            # ``owner/repo`` -- otherwise URL round-trip through
+            # ``to_github_url`` -> ``parse`` would carry the prefix in the
+            # repo_url and the orchestrator would double-prefix download URLs.
+            # The prefix itself is recovered separately via
+            # :meth:`_extract_artifactory_prefix`.
+            if is_artifactory_path(path_parts):
+                path_parts = path_parts[2:]
             for pp in path_parts:
                 if any(pp.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                     raise ValueError(

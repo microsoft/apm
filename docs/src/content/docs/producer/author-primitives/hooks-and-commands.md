@@ -56,6 +56,28 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 }
 ```
 
+APM also accepts the "naked" Claude settings-slice shape -- event names at
+the top level with no outer `"hooks":` wrap. This is the literal shape
+Claude Code accepts inside its own `settings.json`, so a hooks slice copied
+straight from there works as a standalone APM hook file:
+
+```json
+{
+  "PreToolUse": [
+    {
+      "hooks": [
+        {"type": "command", "command": "${PLUGIN_ROOT}/scripts/validate.sh", "timeout": 10}
+      ]
+    }
+  ]
+}
+```
+
+Both shapes are normalized internally before merge. A file whose `"hooks"`
+key is present but not a JSON object fails closed with a warning; a file
+that parses cleanly but contributes zero entries also logs a warning so
+authors notice empty merges during development.
+
 The `${PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`, and `${CURSOR_PLUGIN_ROOT}`
 tokens resolve to the installed package root and are rewritten per
 target. Plain `./script.sh` resolves relative to the hook file.

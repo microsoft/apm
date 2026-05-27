@@ -72,7 +72,7 @@ This single command runs the eight baseline lockfile checks PLUS integration
 drift detection (default-on) AND replays
 the install pipeline into a scratch tree to detect missed `apm install`
 runs, hand-edited deployed files, and orphaned files. See the
-[Drift Detection guide](../../guides/drift-detection/) for details and
+[Drift Detection guide](../../enterprise/drift-detection/) for details and
 opt-out (`--no-drift`).
 
 For tamper detection -- catching deployed files modified after the last
@@ -167,7 +167,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (8 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+`apm audit --ci` verifies lockfile consistency in CI (8 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [Enforce in CI guide](../../enterprise/enforce-in-ci/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 
@@ -219,7 +219,7 @@ Or use the apm-action restore mode to unpack a bundle directly:
     bundle: ./agent-config.tar.gz
 ```
 
-See the [Pack & Distribute guide](../../guides/pack-distribute/) for the full workflow.
+See the [Pack a bundle guide](../../producer/pack-a-bundle/) for the full workflow.
 
 ## Best Practices
 

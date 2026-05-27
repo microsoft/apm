@@ -23,6 +23,8 @@ export default defineConfig({
 	// Source keys MUST NOT include `/apm` -- the base is added at build
 	// time and the source would otherwise resolve under `/apm/apm/`.
 	redirects: {
+		// Registries consolidation (v0.15)
+		'/guides/private-registries': '/apm/guides/registries',
 		// Legacy enterprise slugs
 		'/enterprise/teams': '/apm/enterprise/making-the-case',
 		'/enterprise/governance': '/apm/enterprise/governance-guide',
@@ -202,7 +204,6 @@ export default defineConfig({
 						{ label: 'Drift detection', slug: 'enterprise/drift-detection' },
 						{ label: 'Registry proxy and air-gapped', slug: 'enterprise/registry-proxy' },
 						{ label: 'Registries', slug: 'guides/registries' },
-						{ label: 'Private registries', slug: 'guides/private-registries' },
 						{ label: 'GitHub rulesets', slug: 'enterprise/github-rulesets' },
 					],
 				},

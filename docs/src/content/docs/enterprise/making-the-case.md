@@ -242,8 +242,8 @@ With APM, setup reduces to `apm install` (under 30 seconds). Standards updates r
 | Governance | [Bypass contract and install gate](../governance-guide/) |
 | Security Model | [Supply-chain posture](../security/) |
 | CI/CD Integration | [Pipeline setup and enforcement](../../integrations/ci-cd/) |
-| Why APM | [Problem statement and design principles](../../introduction/why-apm/) |
-| How It Works | [Architecture and compilation pipeline](../../introduction/how-it-works/) |
+| Why APM | [What is APM](../../concepts/what-is-apm/) |
+| How It Works | [Lifecycle and compilation pipeline](../../concepts/lifecycle/) |
 | Manifest Schema | [apm.yml reference](../../reference/manifest-schema/) |
 | Org-Wide Packages | [Publishing shared configuration](../../guides/org-packages/) |
 

@@ -53,7 +53,7 @@ For Artifactory registry proxies, use `PROXY_REGISTRY_TOKEN`. See [Registry prox
 
 For dedicated APM registries (`registries:` block in `apm.yml`), use `APM_REGISTRY_TOKEN_{NAME}`. See [Registry tokens](#registry-tokens) below.
 
-For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Agent Workflows](../../guides/agent-workflows/).
+For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentication (consumer ramp)](../../consumer/authentication/).
 
 ### Configuration variables
 
@@ -504,7 +504,7 @@ URL scheme honored exactly; shorthand uses HTTPS unless
 `git config url.<base>.insteadOf` rewrites it to SSH). For the full
 selection matrix, the `--ssh` / `--https` flags, the `APM_GIT_PROTOCOL`
 env var, and the `--allow-protocol-fallback` escape hatch, see
-[Dependencies: Transport selection](../../guides/dependencies/#transport-selection-ssh-vs-https).
+[Manage dependencies: Transport selection](../../consumer/manage-dependencies/).
 
 :::caution[Custom ports and cross-protocol fallback]
 When `--allow-protocol-fallback` is in effect, APM reuses the

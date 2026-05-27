@@ -106,7 +106,7 @@ MCP servers declared in `apm.yml` (under `mcp:`) are wired into each target's MC
 - `.opencode/mcp.json` (OpenCode)
 - `.windsurf/mcp.json` (Windsurf)
 
-For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../guides/install-and-use/mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
+For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../consumer/install-mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
 
 ## Per-tool reference pages
 
@@ -125,14 +125,14 @@ Pinpoint behaviour, slot layout, and known limits per target:
 | `[x] No harness detected`                     | [Common errors](../troubleshooting/common-errors/)                          |
 | Compile produced no output                    | [Compile zero-output](../troubleshooting/compile-zero-output-warning/)      |
 | Wrong target picked, multiple harnesses       | [`apm targets`](../reference/cli/targets/)                                  |
-| MCP server not appearing in tool              | [MCP servers guide](../guides/install-and-use/mcp-servers/)                 |
+| MCP server not appearing in tool              | [MCP servers guide](../consumer/install-mcp-servers/)                       |
 | Cursor command file dropped                   | [Targets matrix](../reference/targets-matrix/) - `claude_command` transformer |
 
 ## Related resources
 
 - [Targets matrix](../reference/targets-matrix/)
 - [Manifest schema](../reference/manifest-schema/)
-- [MCP servers](../guides/install-and-use/mcp-servers/)
+- [MCP servers](../consumer/install-mcp-servers/)
 - [GitHub Agentic Workflows](./gh-aw/)
 - [Microsoft 365 Copilot Cowork](./copilot-cowork/)
 - [APM in CI/CD](./ci-cd/)

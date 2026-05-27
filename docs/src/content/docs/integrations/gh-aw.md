@@ -51,7 +51,7 @@ Review the pull request using the installed coding standards and skills.
 | `owner/repo/path/to/primitive` | Individual primitive (skill, instruction, plugin, etc.) from any repository, regardless of layout |
 | `owner/repo#ref` or `owner/repo/path/to/primitive#ref` | Pinned to a tag, branch, or commit SHA, for either a full package or a specific primitive |
 
-The per-primitive path form is what makes `github/awesome-copilot/skills/review-and-refactor` work -- the awesome-copilot repo lays skills out at `/skills/<name>/`, not under `.apm/`. Use this form to consume skills from existing repositories without restructuring them. See [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/) for the full source-vs-output model.
+The per-primitive path form is what makes `github/awesome-copilot/skills/review-and-refactor` work -- the awesome-copilot repo lays skills out at `/skills/<name>/`, not under `.apm/`. Use this form to consume skills from existing repositories without restructuring them. See [Package anatomy](../../concepts/package-anatomy/) for the full source-vs-output model.
 
 **How it works:**
 
@@ -129,7 +129,7 @@ For sandboxed environments where network access is restricted during workflow ex
 
 Bundles resolve full dependency trees ahead of time, so workflows need zero network access at runtime.
 
-See the [CI/CD Integration guide](../ci-cd/) and [Pack & Distribute](../../guides/pack-distribute/) for details on building and distributing bundles. For routing live install traffic through an enterprise proxy instead, see [Registry Proxy & Air-gapped](../../enterprise/registry-proxy/).
+See the [CI/CD Integration guide](../ci-cd/) and [Pack and distribute](../../producer/pack-a-bundle/) for details on building and distributing bundles. For routing live install traffic through an enterprise proxy instead, see [Registry Proxy & Air-gapped](../../enterprise/registry-proxy/).
 
 ## Content Scanning
 
@@ -143,6 +143,6 @@ For details on what APM detects, see [Content scanning](../../enterprise/securit
 
 - [gh-aw Documentation](https://github.github.com/gh-aw/)
 - [gh-aw Frontmatter Reference](https://github.github.com/gh-aw/reference/frontmatter/)
-- [APM Compilation Guide](../../guides/compilation/)
+- [APM Compilation Guide](../../producer/compile/)
 - [APM CLI Reference](../../reference/cli/install/)
 - [CI/CD Integration](../ci-cd/)

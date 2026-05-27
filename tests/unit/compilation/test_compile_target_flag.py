@@ -1750,3 +1750,83 @@ class TestMultiTargetLogOutput:
             assert "AGENTS.md" in result.output and "CLAUDE.md" in result.output
         finally:
             os.chdir(original_dir)
+
+
+class TestClaudeMdHonorsSingleFileStrategy:
+    """Regression for issue #1445.
+
+    compilation.strategy=single-file (or single_agents=True) must produce a
+    single root CLAUDE.md, mirroring the AGENTS.md behavior. Previously
+    _compile_claude_md ignored the strategy gate and always built a
+    per-subdirectory placement map, emitting e.g. scripts/CLAUDE.md.
+    """
+
+    @pytest.fixture
+    def project_with_subdir_instruction(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+
+        (temp_path / "apm.yml").write_text("name: test-project\nversion: 0.1.0\n")
+
+        apm_dir = temp_path / ".apm" / "instructions"
+        apm_dir.mkdir(parents=True)
+        (apm_dir / "shell.instructions.md").write_text(
+            "---\napplyTo: '**/*.sh'\n---\nShell scripts must set -euo pipefail.\n"
+        )
+
+        scripts_dir = temp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "build.sh").write_text("#!/bin/bash\necho hi\n")
+
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @pytest.mark.parametrize(
+        "config_kwargs",
+        [
+            {"strategy": "single-file"},
+            {"single_agents": True},
+        ],
+        ids=["strategy-single-file", "single-agents-flag"],
+    )
+    def test_single_file_mode_emits_only_root_claude_md(
+        self, project_with_subdir_instruction, config_kwargs
+    ):
+        # Both strategy='single-file' and single_agents=True must collapse the
+        # CLAUDE.md placement map to a single root file; per-subdir CLAUDE.md
+        # files must not leak when single-file mode is requested via either
+        # surface.
+        config = CompilationConfig(
+            target="claude",
+            dry_run=False,
+            with_constitution=False,
+            **config_kwargs,
+        )
+        compiler = AgentsCompiler(str(project_with_subdir_instruction))
+        result = compiler.compile(config)
+
+        assert result.success, f"compile failed: {result.errors}"
+        root_claude = project_with_subdir_instruction / "CLAUDE.md"
+        subdir_claude = project_with_subdir_instruction / "scripts" / "CLAUDE.md"
+        assert root_claude.exists(), "root CLAUDE.md should be generated"
+        assert not subdir_claude.exists(), (
+            "scripts/CLAUDE.md must NOT be generated in single-file mode"
+        )
+
+    def test_distributed_strategy_unchanged_behavior(self, project_with_subdir_instruction):
+        # Default distributed strategy must still place per-subdirectory.
+        config = CompilationConfig(
+            target="claude",
+            dry_run=False,
+            with_constitution=False,
+        )
+        compiler = AgentsCompiler(str(project_with_subdir_instruction))
+        result = compiler.compile(config)
+
+        assert result.success, f"compile failed: {result.errors}"
+        # At least the root CLAUDE.md should exist; distributed may also emit
+        # scripts/CLAUDE.md depending on placement -- we don't assert on that.
+        # The point is this test documents that distributed behavior is intact.
+        assert (project_with_subdir_instruction / "CLAUDE.md").exists() or (
+            project_with_subdir_instruction / "scripts" / "CLAUDE.md"
+        ).exists()

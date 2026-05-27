@@ -7,7 +7,7 @@ sidebar:
 
 `apm install` and `apm audit` reach out to GitHub, GHES, GitLab, Azure DevOps, and package archives over HTTPS. When the system can't verify the server certificate, the operation fails. This page maps the failure modes to fixes.
 
-Related: [environment variables](../reference/environment-variables/), [install failures](./install-failures/), [security and supply chain](../enterprise/security-and-supply-chain/), [authentication](../enterprise/authentication/).
+Related: [environment variables](../reference/environment-variables/), [install failures](./install-failures/), [security and supply chain](../enterprise/security-and-supply-chain/), [authentication](../getting-started/authentication/).
 
 ## Symptoms
 
@@ -116,7 +116,7 @@ export GITLAB_APM_PAT=<token>
 export GIT_SSL_CAINFO=/path/to/internal-ca.pem
 ```
 
-See [environment variables](../reference/environment-variables/) for the full list and [authentication](../enterprise/authentication/) for token scopes.
+See [environment variables](../reference/environment-variables/) for the full list and [authentication](../getting-started/authentication/) for token scopes.
 
 ## Proxies
 
