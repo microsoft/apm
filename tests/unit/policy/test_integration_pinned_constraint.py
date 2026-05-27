@@ -200,3 +200,70 @@ def test_run_policy_checks_audit_surfaces_pinned_violation(tmp_path: Path):
     pin = next(c for c in result.checks if c.name == CHECK_NAME)
     assert not pin.passed
     assert any("acme/skills" in d for d in pin.details)
+
+
+# ---------------------------------------------------------------------------
+# direct_dep_keys filter: pinned check must NOT flag transitives
+# ---------------------------------------------------------------------------
+
+
+def test_pinned_check_skips_transitive_when_direct_dep_keys_provided():
+    """Regression trap (#1494 Copilot review): callers that distinguish
+    direct vs transitive deps pass ``direct_dep_keys``; the pinned-
+    constraint check must restrict its evaluation to those keys.
+
+    Scenario: direct dep is pinned; transitive dep has an unbounded
+    constraint declared in its own manifest. The consumer cannot
+    rewrite the transitive's constraint, so the check must pass.
+    """
+    direct = DependencyReference.parse("acme/skills#^1.0.0")
+    transitive_unbounded = DependencyReference.parse("third/lib#*")
+    deps = [direct, transitive_unbounded]
+    direct_keys = {direct.get_unique_key()}
+
+    result = run_dependency_policy_checks(
+        deps,
+        policy=_policy(enforcement="block"),
+        fail_fast=False,
+        direct_dep_keys=direct_keys,
+    )
+    pin = next(c for c in result.checks if c.name == CHECK_NAME)
+    assert pin.passed, (
+        f"transitive unbounded dep should be skipped when direct_dep_keys "
+        f"is provided; got details={pin.details}"
+    )
+
+
+def test_pinned_check_flags_direct_unbounded_even_with_pinned_transitive():
+    """Counterpart: when the direct dep is the offender it must still
+    surface; passing ``direct_dep_keys`` must not silence direct deps.
+    """
+    direct_unbounded = DependencyReference.parse("acme/skills")  # NO_REF
+    transitive_pinned = DependencyReference.parse("third/lib#^1.0.0")
+    deps = [direct_unbounded, transitive_pinned]
+    direct_keys = {direct_unbounded.get_unique_key()}
+
+    result = run_dependency_policy_checks(
+        deps,
+        policy=_policy(enforcement="block"),
+        fail_fast=False,
+        direct_dep_keys=direct_keys,
+    )
+    pin = next(c for c in result.checks if c.name == CHECK_NAME and not c.passed)
+    assert any("acme/skills" in d for d in pin.details)
+    assert not any("third/lib" in d for d in pin.details)
+
+
+def test_pinned_check_legacy_no_filter_still_evaluates_all_deps():
+    """Backwards-compat: when ``direct_dep_keys`` is ``None`` (legacy
+    dep-only seam, audit wrapper) every dep is evaluated -- preserves
+    behavior for callers that have no direct-vs-transitive context.
+    """
+    deps = _refs("acme/skills", "other/lib#*")
+    result = run_dependency_policy_checks(
+        deps, policy=_policy(enforcement="block"), fail_fast=False
+    )
+    pin = next(c for c in result.checks if c.name == CHECK_NAME and not c.passed)
+    joined = " ".join(pin.details)
+    assert "acme/skills" in joined
+    assert "other/lib" in joined
