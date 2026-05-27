@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `ref:` on git-source dependencies now accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). `apm install` runs `git ls-remote`, picks the highest tag matching the range, and pins the resolved tag, commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `apm install --update` to re-resolve against current remote tags. Two tag patterns are tried in order (`v{version}`, `{name}--v{version}`) with a bare `{version}` fallback. (closes #1488)
+- `apm deps why <package>` explains why a transitive dependency is installed by walking the lockfile's `resolved_by` chain back to the user's direct declaration in `apm.yml`. Supports `--global` for user-scope lockfiles and `--json` for scriptable output (JSON to stdout, all logs to stderr; analogue of `npm why` / `yarn why`). Exits `0` on success, `1` when the package isn't installed or the query is ambiguous, `2` when no lockfile exists. (#1490)
 
 ### Fixed
 
