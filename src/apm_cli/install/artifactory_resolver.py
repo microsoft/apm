@@ -61,7 +61,9 @@ _ARTIFACTORY_BOUNDARY_AUTH = (
 class _CandidateStatus:
     """Probe outcome for one candidate boundary."""
 
-    EXISTS = "exists"  # at least one URL shape returned 2xx or 3xx (existence proof, redirect inclusive)
+    EXISTS = (
+        "exists"  # at least one URL shape returned 2xx or 3xx (existence proof, redirect inclusive)
+    )
     MISSING = "missing"  # every URL shape returned 4xx other than 401/403
     AUTH = "auth"  # only 401/403 seen -- cannot tell if the repo exists
 
@@ -208,9 +210,7 @@ def _resolve_artifactory_boundary(
 
     candidates = list(iter_artifactory_boundary_candidates(path_segments))
     if not candidates:
-        raise ValueError(
-            f"Artifactory dep '{safe_package}' has no plausible owner/repo split"
-        )
+        raise ValueError(f"Artifactory dep '{safe_package}' has no plausible owner/repo split")
     if len(candidates) == 1:
         # Single candidate -- the parse-time dep_ref is already definitive.
         return dep_ref
@@ -240,7 +240,9 @@ def _resolve_artifactory_boundary(
                 and (dep_ref.virtual_path or None) == cand_virtual
             ):
                 return dep_ref
-            return _rebuild_dep_ref(dep_ref, host, cand_prefix, cand_owner, cand_repo, cand_virtual, is_mode_1)
+            return _rebuild_dep_ref(
+                dep_ref, host, cand_prefix, cand_owner, cand_repo, cand_virtual, is_mode_1
+            )
         if status == _CandidateStatus.MISSING:
             all_auth = False
 

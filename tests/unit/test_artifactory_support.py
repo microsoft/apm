@@ -137,9 +137,7 @@ class TestParseArtifactoryPath:
     def test_double_slash_subdirectory_notation(self):
         """The ``//subdir`` notation explicitly marks the repo/virtual boundary."""
         # Mirrors ``art.example.com/artifactory/github/owner/repo//subdir``.
-        result = parse_artifactory_path(
-            ["artifactory", "github", "owner", "repo", "", "subdir"]
-        )
+        result = parse_artifactory_path(["artifactory", "github", "owner", "repo", "", "subdir"])
         assert result[0] == "artifactory/github"
         assert result[1] == "owner"
         assert result[2] == "repo"
@@ -151,21 +149,14 @@ class TestParseArtifactoryPath:
         Regression guard: previously fell through to ``repo=''``, producing a
         malformed dep ref that broke downstream URL construction.
         """
-        assert (
-            parse_artifactory_path(
-                ["artifactory", "github", "owner", "", "subdir"]
-            )
-            is None
-        )
+        assert parse_artifactory_path(["artifactory", "github", "owner", "", "subdir"]) is None
 
     def test_iterator_yields_nothing_for_empty_segment_before_boundary(self):
         """Same edge case at the iterator layer -- no candidate is yielded."""
         from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
 
         candidates = list(
-            iter_artifactory_boundary_candidates(
-                ["artifactory", "github", "owner", "", "subdir"]
-            )
+            iter_artifactory_boundary_candidates(["artifactory", "github", "owner", "", "subdir"])
         )
         assert candidates == []
 
@@ -177,9 +168,7 @@ class TestIterArtifactoryBoundaryCandidates:
         from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
 
         candidates = list(
-            iter_artifactory_boundary_candidates(
-                ["artifactory", "github", "owner", "repo"]
-            )
+            iter_artifactory_boundary_candidates(["artifactory", "github", "owner", "repo"])
         )
         assert candidates == [("artifactory/github", "owner", "repo", None)]
 
@@ -187,9 +176,7 @@ class TestIterArtifactoryBoundaryCandidates:
         from apm_cli.utils.github_host import iter_artifactory_boundary_candidates
 
         candidates = list(
-            iter_artifactory_boundary_candidates(
-                ["artifactory", "apm", "group", "sub", "repo"]
-            )
+            iter_artifactory_boundary_candidates(["artifactory", "apm", "group", "sub", "repo"])
         )
         # Shallowest (k=1) yielded first; deepest (all-as-repo) last.
         assert candidates == [
@@ -478,7 +465,10 @@ class TestRegistryOnlyNestedShorthand:
         """``group/subgroup/repo`` is a nested-group project, not a subdir."""
         with patch.dict(
             os.environ,
-            {"PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm", "PROXY_REGISTRY_ONLY": "1"},
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
             clear=False,
         ):
             dep = DependencyReference.parse("acme-group/shared-modules/pkg-utils")
@@ -499,7 +489,10 @@ class TestRegistryOnlyNestedShorthand:
         """
         with patch.dict(
             os.environ,
-            {"PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm", "PROXY_REGISTRY_ONLY": "1"},
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
             clear=False,
         ):
             dep = DependencyReference.parse("group/sub/repo/skills/cve-patcher")
@@ -518,7 +511,10 @@ class TestRegistryOnlyNestedShorthand:
         """
         with patch.dict(
             os.environ,
-            {"PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm", "PROXY_REGISTRY_ONLY": "1"},
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
             clear=False,
         ):
             dep = DependencyReference.parse("group/sub/repo/rules.prompt.md")
@@ -530,7 +526,10 @@ class TestRegistryOnlyNestedShorthand:
         """Two-segment shorthand keeps the GitHub ``owner/repo`` shape."""
         with patch.dict(
             os.environ,
-            {"PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm", "PROXY_REGISTRY_ONLY": "1"},
+            {
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/apm",
+                "PROXY_REGISTRY_ONLY": "1",
+            },
             clear=False,
         ):
             dep = DependencyReference.parse("microsoft/apm-sample-package")
@@ -611,11 +610,7 @@ class TestArtifactoryBoundaryResolver:
         def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
             resp = MagicMock()
             # Only the shallowest archive URL hits 200; deeper paths 404.
-            resp.status_code = (
-                200
-                if ok_url in url and "/group/repo/skills" not in url
-                else 404
-            )
+            resp.status_code = 200 if ok_url in url and "/group/repo/skills" not in url else 404
             return resp
 
         with patch(
@@ -661,9 +656,7 @@ class TestArtifactoryBoundaryResolver:
             resp.status_code = 404
             return resp
 
-        with patch(
-            "apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_404
-        ):
+        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_404):
             with pytest.raises(ValueError, match="did not resolve"):
                 _resolve_artifactory_boundary(package, auth, verbose=False)
 
@@ -684,9 +677,7 @@ class TestArtifactoryBoundaryResolver:
             resp.status_code = 401
             return resp
 
-        with patch(
-            "apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_401
-        ):
+        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_401):
             with pytest.raises(ValueError, match="authentication problem"):
                 _resolve_artifactory_boundary(package, auth, verbose=False)
 
@@ -699,12 +690,8 @@ class TestArtifactoryBoundaryResolver:
         auth = Mock()
         auth.resolve_for_dep.return_value = Mock(token=None)
 
-        with patch(
-            "apm_cli.install.artifactory_resolver.requests.head"
-        ) as mock_head:
-            resolved = _resolve_artifactory_boundary(
-                package, auth, verbose=False, dep_ref=dep_ref
-            )
+        with patch("apm_cli.install.artifactory_resolver.requests.head") as mock_head:
+            resolved = _resolve_artifactory_boundary(package, auth, verbose=False, dep_ref=dep_ref)
 
         assert resolved is dep_ref
         mock_head.assert_not_called()
@@ -736,18 +723,12 @@ class TestArtifactoryBoundaryResolver:
             def _head(url, headers=None, timeout=None, verify=None, allow_redirects=None):
                 resp = MagicMock()
                 resp.status_code = (
-                    200
-                    if ok_marker in url and "/group/sub/repo/skills" not in url
-                    else 404
+                    200 if ok_marker in url and "/group/sub/repo/skills" not in url else 404
                 )
                 return resp
 
-            with patch(
-                "apm_cli.install.artifactory_resolver.requests.head", side_effect=_head
-            ):
-                resolved = _resolve_artifactory_boundary(
-                    package, auth, verbose=False, dep_ref=dep
-                )
+            with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+                resolved = _resolve_artifactory_boundary(package, auth, verbose=False, dep_ref=dep)
 
         assert resolved.repo_url == "group/sub/repo"
         assert resolved.virtual_path == "skills/foo"
@@ -768,9 +749,7 @@ class TestArtifactoryOrchestratorNestedRepo:
         """Owner/repo split is unchanged for flat 2-segment paths."""
         from apm_cli.deps.artifactory_orchestrator import ArtifactoryOrchestrator
 
-        dep = DependencyReference.parse(
-            "art.example.com/artifactory/github/owner/repo"
-        )
+        dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo")
         owner, repo = ArtifactoryOrchestrator._split_owner_repo(dep)
         assert owner == "owner"
         assert repo == "repo"
