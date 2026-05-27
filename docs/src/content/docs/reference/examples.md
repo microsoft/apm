@@ -4,7 +4,7 @@ sidebar:
   order: 5
 ---
 
-This guide showcases real-world APM workflows, from simple automation to enterprise-scale AI development patterns. Learn through practical examples that demonstrate the power of structured AI workflows.
+This page shows real-world APM workflows you can copy and adapt, from simple automation to enterprise-scale patterns.
 
 > **Note:** Examples using `apm run` reference APM's prompt-and-script workflow. See [`apm run` scripts](../../consumer/run-scripts/) for the full model.
 

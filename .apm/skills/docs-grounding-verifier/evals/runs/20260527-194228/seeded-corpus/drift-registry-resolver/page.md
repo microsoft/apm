@@ -12,7 +12,7 @@ apm experimental enable registries
 apm install acme/code-review-prompts#^2.0.0
 ```
 
-That is the consumer loop.
+That is the consumer loop. Sections below walk from public install through private credentials, per-dependency routing, the publish workflow, and (briefly) enterprise policy.
 
 ::::caution[Experimental]
 Package registries are behind an experimental flag. Enable them before adding `registries:` or registry-sourced dependencies; the flag gates only the `registries:` block parsing, the registry resolver, and `registry.*` config keys. Existing Git-based dependencies are unaffected.
@@ -364,7 +364,7 @@ For the full governance narrative -- rollout sequencing, audit, drift, and CI ga
 
 ## 7. Known limitations and threat model
 
-### Guarantees
+### What this provides
 
 - **Byte-level reproducibility.** `resolved_hash` in `apm.lock.yaml` pins the SHA-256 of the downloaded archive. Re-installs verify bytes against the lockfile hash before writing to disk; a mismatch aborts the install.
 - **Token containment.** Tokens stored in `~/.apm/config.json` are user-scoped and never committed to a repository.
@@ -482,3 +482,8 @@ apm install
 - [Governance guide](../../enterprise/governance-guide/) -- enterprise rollout, audit, and CI gating.
 - [Security model](../../enterprise/security/) -- threat model and known limitations.
 - [Registry HTTP API](../../reference/registry-http-api/) -- wire contract for registry servers.
+
+
+## Selectors (seeded)
+
+Registry resolution accepts the `#stable` selector to pin the latest stable release.

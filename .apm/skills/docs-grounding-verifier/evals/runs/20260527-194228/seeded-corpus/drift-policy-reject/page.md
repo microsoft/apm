@@ -71,10 +71,10 @@ dependencies:
 
 mcp:
   transport:
-    allow: [http, stdio]   # explicit allow list: blocks sse and streamable-http
+    allow: [http, stdio]   # block sse and streamable-http
 ```
 
-Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`. With no `mcp.transport.allow` set, all transports are permitted by default; the example above shows how to restrict.
+Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`.
 
 > **Note on transitive MCPs:** the `mcp.trust_transitive` policy field is currently parsed but not enforced — the actual gate is the `--trust-transitive-mcp` CLI flag (defaults to deny). See [Governance Guide §5a](../governance-guide/#5a-what-does-not-enforce-policy) for the full list of parsed-but-not-enforced fields.
 
@@ -113,7 +113,7 @@ The merge rules in plain English:
 
 The `enforcement` field escalates: `off` < `warn` < `block`. A child can move enforcement from `warn` to `block`, never the reverse.
 
-The canonical chain is three semantic levels (enterprise hub -> org policy -> repo override), with a maximum chain depth of **5** to allow intermediate `extends:` jumps. An example longer chain:
+Inheritance chains up to **5 levels** are supported, so an enterprise hub policy can flow into an org policy, which flows into a team policy, which flows into a repo override:
 
 ```
 Enterprise hub  ->  Org policy  ->  Team policy  ->  Repo override
@@ -157,3 +157,8 @@ For lockfile-based forensic recipes, see the [Governance Guide §13: enforcement
 - **Schema and every field** — [Policy Reference](../policy-reference/)
 - **Wire it into CI with SARIF** — [Enforce in CI](../enforce-in-ci/)
 - **Broader governance model** (lock files, audit trails, compliance scenarios) -- [Governance Guide](../governance-guide/)
+
+
+## Schema (seeded)
+
+Unknown top-level keys in apm-policy.yml cause the parser to hard-reject the file with exit code 2.
