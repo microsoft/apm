@@ -6,7 +6,14 @@ import re
 
 import pytest
 
-from apm_cli.marketplace.tag_pattern import build_tag_regex, render_tag
+from apm_cli.marketplace.tag_pattern import (
+    build_tag_regex,
+    infer_tag_pattern,
+    infer_tag_pattern_from_refs,
+    is_version_tag_ref,
+    parse_tag_version,
+    render_tag,
+)
 
 # ---------------------------------------------------------------------------
 # render_tag
@@ -219,3 +226,40 @@ class TestRoundTrip:
         assert m is not None, f"Pattern {pattern!r} did not match rendered tag {tag!r}"
         if "{version}" in pattern:
             assert m.group("version") == version
+
+
+class TestInferTagPattern:
+    def test_name_at_version(self) -> None:
+        assert infer_tag_pattern("api-governance@1.0.1") == "{name}@{version}"
+
+    def test_plain_v_prefix(self) -> None:
+        assert infer_tag_pattern("v1.2.3") == "v{version}"
+
+    def test_plain_semver(self) -> None:
+        assert infer_tag_pattern("1.2.3") == "{version}"
+
+    def test_branch_not_matched(self) -> None:
+        assert infer_tag_pattern("main") is None
+
+
+class TestIsVersionTagRef:
+    def test_name_at_version_is_tag(self) -> None:
+        assert is_version_tag_ref("api-governance@1.0.1") is True
+
+    def test_main_is_not_tag(self) -> None:
+        assert is_version_tag_ref("main") is False
+
+
+class TestParseTagVersion:
+    def test_name_at_version(self) -> None:
+        assert parse_tag_version("api-governance@1.0.1", "{name}@{version}") == "1.0.1"
+
+
+class TestInferTagPatternFromRefs:
+    def test_infers_from_remote_ref(self) -> None:
+        class _Ref:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        refs = [_Ref("refs/tags/api-governance@1.0.1")]
+        assert infer_tag_pattern_from_refs(refs, "api-governance") == "{name}@{version}"

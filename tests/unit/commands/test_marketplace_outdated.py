@@ -95,6 +95,35 @@ def yml_cwd(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Tag-pattern inference
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTagVersionsInference:
+    """``_extract_tag_versions`` infers ``{name}@{version}`` when default fails."""
+
+    def test_infers_name_at_version_from_remote_tags(self):
+        from types import SimpleNamespace
+
+        from apm_cli.commands.marketplace import _extract_tag_versions
+
+        entry = SimpleNamespace(
+            name="api-governance",
+            tag_pattern=None,
+            include_prerelease=False,
+        )
+        yml = SimpleNamespace(build=SimpleNamespace(tag_pattern="v{version}"))
+        refs = [
+            RemoteRef(name="refs/tags/api-governance@1.0.1", sha=_SHA_A),
+            RemoteRef(name="refs/tags/api-governance@1.0.2", sha=_SHA_B),
+        ]
+        results = _extract_tag_versions(refs, entry, yml, include_prerelease=False)
+        tag_names = [tag for _sv, tag in results]
+        assert "api-governance@1.0.1" in tag_names
+        assert "api-governance@1.0.2" in tag_names
+
+
+# ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
 

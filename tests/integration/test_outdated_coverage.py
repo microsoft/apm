@@ -47,6 +47,11 @@ class TestIsTagRef:
         assert _is_tag_ref("v1") is False
         assert _is_tag_ref("v1.2") is False
 
+    def test_name_at_version_pattern(self):
+        """Recognizes ``{name}@{version}`` style tags."""
+        assert _is_tag_ref("api-governance@1.0.1") is True
+        assert _is_tag_ref("my-tool@2.0.0") is True
+
     def test_empty_string(self):
         """Empty string returns False."""
         assert _is_tag_ref("") is False

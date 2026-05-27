@@ -18,9 +18,27 @@ from __future__ import annotations
 import re
 
 __all__ = [
+    "DEFAULT_TAG_PATTERNS",
     "build_tag_regex",
+    "infer_tag_pattern",
+    "infer_tag_pattern_from_refs",
+    "is_version_tag_ref",
+    "parse_tag_version",
     "render_tag",
 ]
+
+# Common tag layouts tried when no explicit ``tag_pattern`` is configured.
+DEFAULT_TAG_PATTERNS: tuple[str, ...] = (
+    "v{version}",
+    "{version}",
+    "{name}@{version}",
+    "{name}-v{version}",
+)
+
+_PLAIN_SEMVER_RE = re.compile(
+    r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 
 # Placeholders we recognise.
 _PLACEHOLDER_VERSION = "{version}"
@@ -101,3 +119,45 @@ def build_tag_regex(pattern: str) -> re.Pattern[str]:
     escaped = escaped.replace(re.escape(_sentinel_name), r"[^/]+")
 
     return re.compile(r"^" + escaped + r"$")
+
+
+def infer_tag_pattern(tag: str, package_name: str = "") -> str | None:
+    """Return the first default pattern that matches *tag*, or ``None``.
+
+    *package_name* is accepted for API symmetry with :func:`render_tag` but
+    is not required for matching because ``{name}`` is a wildcard.
+    """
+    del package_name  # reserved for callers that pass the package display name
+    for pattern in DEFAULT_TAG_PATTERNS:
+        if build_tag_regex(pattern).match(tag):
+            return pattern
+    return None
+
+
+def infer_tag_pattern_from_refs(refs: list, package_name: str = "") -> str | None:
+    """Infer a tag pattern from the first semver-like tag in *refs*."""
+    for remote_ref in refs:
+        name = getattr(remote_ref, "name", "") or ""
+        if name.startswith("refs/tags/"):
+            name = name[len("refs/tags/") :]
+        found = infer_tag_pattern(name, package_name)
+        if found:
+            return found
+    return None
+
+
+def parse_tag_version(tag: str, pattern: str) -> str | None:
+    """Extract the semver substring from *tag* using *pattern*."""
+    match = build_tag_regex(pattern).match(tag)
+    if match is None:
+        return None
+    return match.group("version")
+
+
+def is_version_tag_ref(ref: str, package_name: str | None = None) -> bool:
+    """Return True when *ref* names a version tag (plain or patterned)."""
+    if not ref:
+        return False
+    if _PLAIN_SEMVER_RE.match(ref):
+        return True
+    return infer_tag_pattern(ref, package_name or "") is not None
