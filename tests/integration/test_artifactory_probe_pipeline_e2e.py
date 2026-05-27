@@ -22,6 +22,7 @@ boundary.
 from __future__ import annotations
 
 from unittest.mock import MagicMock, Mock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -99,10 +100,17 @@ class TestArtifactoryProbePipelineMode1:
         assert "git" in entry
         assert "path" in entry
         # The git URL must keep the proxy host + the artifactory/<key> prefix
-        # so a future install reproduces the same routing.
-        assert "art.example.com" in entry["git"]
-        assert "artifactory/apm" in entry["git"]
-        assert "group/sub/repo" in entry["git"]
+        # + the probed owner/repo so a future install reproduces the same
+        # routing. Parse the URL into components and assert on each part by
+        # exact match (per the repo's test convention -- URL assertions use
+        # urllib.parse, never substring), so CodeQL's incomplete-URL-substring
+        # heuristic stays quiet and the assertion can't be satisfied by a
+        # spoofed lookalike in the host position.
+        parsed = urlparse(entry["git"])
+        assert parsed.hostname == "art.example.com"
+        # Path is ordered: /artifactory/<key>/<probed owner>/<probed repo>...
+        path_parts = [seg for seg in parsed.path.split("/") if seg]
+        assert path_parts[:5] == ["artifactory", "apm", "group", "sub", "repo"]
         assert entry["path"] == "skills/sec"
 
     def test_unambiguous_path_skips_serialization_overhead(self):
