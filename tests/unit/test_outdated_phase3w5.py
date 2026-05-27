@@ -361,17 +361,17 @@ class TestCheckOneDep:
             result = _check_one_dep(dep, downloader, False)
         assert result.status == "up-to-date"
 
-    def test_name_at_version_tag_outdated(self):
+    def test_name_underscore_v_version_tag_outdated(self):
         from apm_cli.commands.outdated import _check_one_dep
 
         dep = _make_dep(
             key="org/api-governance",
             repo_url="org/api-governance",
-            resolved_ref="api-governance@1.0.1",
+            resolved_ref="api-governance_v1.0.1",
         )
         ref_tags = [
-            _make_remote_ref("api-governance@1.0.2", "tag", "sha2"),
-            _make_remote_ref("api-governance@1.0.1", "tag", "sha1"),
+            _make_remote_ref("api-governance_v1.0.2", "tag", "sha2"),
+            _make_remote_ref("api-governance_v1.0.1", "tag", "sha1"),
         ]
         downloader = MagicMock()
         downloader.list_remote_refs.return_value = ref_tags
@@ -386,7 +386,7 @@ class TestCheckOneDep:
             result = _check_one_dep(dep, downloader, False)
 
         assert result.status == "outdated"
-        assert result.latest == "api-governance@1.0.2"
+        assert result.latest == "api-governance_v1.0.2"
         assert result.source == "git tags"
 
     def test_tag_no_tags_returns_unknown(self):

@@ -31,7 +31,7 @@ __all__ = [
 DEFAULT_TAG_PATTERNS: tuple[str, ...] = (
     "v{version}",
     "{version}",
-    "{name}@{version}",
+    "{name}_v{version}",
     "{name}-v{version}",
 )
 

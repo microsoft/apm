@@ -201,10 +201,10 @@ versions available.
 | `--offline` | Use cached refs only. |
 | `--include-prerelease` | Consider prerelease tags. |
 
-When remote tags use a non-default layout (for example `my-pkg@1.0.1`), set
-`tag_pattern: "{name}@{version}"` on the package entry or under `build:` in
+When remote tags use a non-default layout (for example `my-pkg_v1.0.1`), set
+`tag_pattern: "{name}_v{version}"` on the package entry or under `build:` in
 `apm.yml`. If no tags match the configured pattern, `apm marketplace outdated`
-tries common layouts (`v{version}`, `{name}@{version}`, etc.) automatically.
+tries common layouts (`v{version}`, `{name}_v{version}`, etc.) automatically.
 
 ### `apm marketplace publish`
 
