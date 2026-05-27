@@ -107,6 +107,21 @@ both protocols.
 
 ## Object form (complex cases)
 
+Use the object form when the string shorthand cannot express what you need:
+nested-group repos with virtual paths, custom SSH ports, local path deps,
+aliases, or marketplace dependencies.
+
+Three mutually exclusive keys select the form: `git`, `path`, or `marketplace`.
+
+### Remote (`git`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `git` | REQUIRED | Clone URL (HTTPS, SSH, or FQDN shorthand). The literal `parent` inherits the consuming package's repo. |
+| `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
+| `ref` | OPTIONAL | Branch, tag, or commit SHA. |
+| `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+
 ```yaml
 - git: https://gitlab.com/acme/repo.git
   path: instructions/security                   # virtual sub-path
@@ -118,8 +133,45 @@ both protocols.
 
 - git: ssh://git@bitbucket.example.com:7999/project/repo.git   # custom SSH port
   ref: v1.0
+```
 
-- path: ./packages/my-skills                    # local only
+### Local (`path`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | REQUIRED | Filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+
+Local-path deps inside another local package resolve relative to that
+package's directory, not the project root.
+
+```yaml
+- path: ./packages/my-skills
+```
+
+### Marketplace (`name` + `marketplace`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | REQUIRED | Plugin identifier within the marketplace (`^[a-zA-Z0-9._-]+$`). |
+| `marketplace` | REQUIRED | Registered marketplace name (`^[a-zA-Z0-9._-]+$`). |
+| `version` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`). Resolved against `{name}--v{version}` git tags on the marketplace repo. |
+
+During resolution, marketplace entries are looked up in the marketplace's
+`marketplace.json` and replaced with concrete git coordinates. When `version`
+is a semver range or bare version number, the resolver lists git tags
+matching `{name}--v{version}`, filters by the constraint, and picks the
+highest matching tag. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
+resolution and override the source ref directly. The lockfile records the
+resolved ref, not the marketplace placeholder. Unknown keys in a marketplace
+entry are rejected.
+
+```yaml
+- name: sec-check
+  marketplace: acme-plugins
+
+- name: secrets-vault
+  marketplace: acme-plugins
+  version: "~2.1.0"
 ```
 
 ## Virtual package types

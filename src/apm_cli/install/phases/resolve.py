@@ -470,6 +470,7 @@ def run(ctx: InstallContext) -> None:
     resolver = APMDependencyResolver(
         apm_modules_dir=apm_modules_dir,
         download_callback=download_callback,
+        auth_resolver=ctx.auth_resolver,
     )
 
     dependency_graph = resolver.resolve_dependencies(ctx.apm_dir)
