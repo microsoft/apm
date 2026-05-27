@@ -360,17 +360,32 @@ class HookIntegrator(BaseIntegrator):
     def _parse_hook_json(self, hook_file: Path) -> dict | None:
         """Parse a hook JSON file and return the data dict.
 
+        Accepts both the wrapped format (``{"hooks": {EventName: [...]}}``)
+        and the "naked" Claude-settings hooks-slice format
+        (``{EventName: [...], ...}`` with no outer ``"hooks":`` wrap).
+        The naked shape is what Claude Code accepts inside its own
+        ``settings.json`` and is a common authoring pattern -- silently
+        dropping it produced the empty merge reported in microsoft/apm#1499.
+
         Args:
             hook_file: Path to the hook JSON file
 
         Returns:
-            Optional[Dict]: Parsed JSON dict, or None if invalid
+            Optional[Dict]: Parsed JSON dict (always wrapped), or None if invalid
         """
         try:
             with open(hook_file, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 return None
+            # Normalise naked-format files (no outer "hooks" key but
+            # every top-level value is a list of matcher entries) into
+            # the wrapped shape downstream code expects.  Only promote
+            # when ALL values look like hook entry arrays -- a stray
+            # scalar (e.g. "description") would mean this is malformed
+            # rather than naked, so leave it alone.
+            if "hooks" not in data and data and all(isinstance(v, list) for v in data.values()):
+                data = {"hooks": data}
             return data
         except (json.JSONDecodeError, OSError):
             return None
@@ -1117,8 +1132,9 @@ class HookIntegrator(BaseIntegrator):
             for source_name, norm_name in event_map.items():
                 reverse_map.setdefault(norm_name, set()).add(source_name)
 
+            entries_appended_for_file = False
             for raw_event_name, entries in hooks.items():
-                if not isinstance(entries, list):
+                if not isinstance(entries, list) or not entries:
                     continue
                 event_name = event_map.get(raw_event_name, raw_event_name)
                 if event_name not in json_config["hooks"]:
@@ -1223,8 +1239,10 @@ class HookIntegrator(BaseIntegrator):
                         seen_keys.add(dedup_key)
                         deduped.append(entry)
                 json_config["hooks"][event_name] = deduped
+                entries_appended_for_file = True
 
-            hooks_integrated += 1
+            if entries_appended_for_file:
+                hooks_integrated += 1
 
             # Copy referenced scripts
             for source_file, target_rel in scripts:
