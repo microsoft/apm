@@ -20,6 +20,7 @@ from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 class AgentIntegrator(BaseIntegrator):
@@ -259,7 +260,11 @@ class AgentIntegrator(BaseIntegrator):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _warn_opencode_frontmatter(source: Path, diagnostics, package_name: str) -> None:
+    def _warn_opencode_frontmatter(
+        source: Path,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
         """Emit warnings for OpenCode-incompatible agent frontmatter.
 
         Phase 1 only: surfaces Zod-fatal shapes (tools as list/string,

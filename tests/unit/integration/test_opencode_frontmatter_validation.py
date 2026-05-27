@@ -124,6 +124,41 @@ class TestValidateOpencodeFrontmatter:
         for m in msgs:
             m.encode("ascii")  # raises if non-ASCII
 
+    def test_non_ascii_filename_sanitized(self):
+        msgs = validate_opencode_frontmatter(
+            {"color": "magenta"},
+            Path("cy\u00e1n-agent.md"),
+        )
+        assert len(msgs) == 1
+        # Non-ASCII filename codepoints replaced with '?' so message stays ASCII.
+        msgs[0].encode("ascii")
+        assert "?" in msgs[0]
+
+    def test_non_ascii_color_value_sanitized(self):
+        msgs = validate_opencode_frontmatter(
+            {"color": "magent\u00e1"},
+            Path("a.md"),
+        )
+        assert len(msgs) == 1
+        # ascii() escapes non-ASCII codepoints in the repr.
+        msgs[0].encode("ascii")
+        assert "\\xe1" in msgs[0]
+
+    def test_non_ascii_tool_key_and_value_sanitized(self):
+        msgs = validate_opencode_frontmatter(
+            {"tools": {"R\u00e9ad": "y\u00e8s"}},
+            Path("a.md"),
+        )
+        assert len(msgs) == 1
+        msgs[0].encode("ascii")
+        # Both key and value escaped via ascii() rather than raw !r.
+        assert "\\xe9" in msgs[0]
+        assert "\\xe8" in msgs[0]
+
+    def test_fm_none_accepted_by_signature(self):
+        # Annotation is dict | None; calling with None must not raise.
+        assert validate_opencode_frontmatter(None, Path("a.md")) == []
+
 
 class TestOpencodeInstallEmitsWarnings:
     """End-to-end: integrate_agents_for_target() emits diagnostics.warn()

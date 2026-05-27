@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` against `target: opencode` now warns at install time when an agent's frontmatter has shapes OpenCode's Zod schema rejects (`tools:` as list/string instead of `name -> bool` mapping, or `color:` as a non-hex/non-theme value), so users learn why OpenCode refuses to load the agent instead of seeing only a runtime crash. The file is still copied verbatim; a per-target frontmatter transformer is tracked separately. (Phase 1 of #581, #1513)
 - `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
 - `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
 

@@ -31,7 +31,28 @@ OPENCODE_THEME_COLORS = frozenset(
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
-def validate_opencode_frontmatter(fm: dict, source: Path) -> list[str]:
+def _ascii_safe_name(name: str) -> str:
+    """Return ``name`` with any non-ASCII characters replaced by ``?``.
+
+    Used for filenames interpolated into human-readable warning text
+    (where preserving readability matters more than round-trip fidelity).
+    Keeps diagnostics within the repository's printable-ASCII contract
+    even when an agent file has a non-ASCII filename.
+    """
+    return name.encode("ascii", "replace").decode("ascii")
+
+
+def _ascii_repr(value: object) -> str:
+    """Return an ASCII-only repr of ``value``.
+
+    Drop-in replacement for ``!r`` interpolation: ``ascii()`` escapes
+    any non-ASCII codepoints (e.g. ``'cy\\xe1n'``) so diagnostics never
+    leak raw non-ASCII bytes from user frontmatter into CLI output.
+    """
+    return ascii(value)
+
+
+def validate_opencode_frontmatter(fm: dict | None, source: Path) -> list[str]:
     """Return ASCII warning messages for OpenCode-incompatible fields.
 
     Empty list means no incompatibilities were detected. The caller
@@ -47,7 +68,7 @@ def validate_opencode_frontmatter(fm: dict, source: Path) -> list[str]:
         return []
 
     messages: list[str] = []
-    name = source.name
+    name = _ascii_safe_name(source.name)
 
     if "tools" in fm:
         tools = fm["tools"]
@@ -64,7 +85,7 @@ def validate_opencode_frontmatter(fm: dict, source: Path) -> list[str]:
                 if not isinstance(key, str) or not isinstance(value, bool):
                     messages.append(
                         f"OpenCode agent '{name}' has a non-boolean tool entry "
-                        f"({key!r}: {value!r}); OpenCode requires "
+                        f"({_ascii_repr(key)}: {_ascii_repr(value)}); OpenCode requires "
                         "string-keyed boolean values. "
                         "OpenCode will reject this agent at load time."
                     )
@@ -74,7 +95,7 @@ def validate_opencode_frontmatter(fm: dict, source: Path) -> list[str]:
         color = fm["color"]
         if not _is_valid_opencode_color(color):
             messages.append(
-                f"OpenCode agent '{name}' has color={color!r}; "
+                f"OpenCode agent '{name}' has color={_ascii_repr(color)}; "
                 "OpenCode requires a hex value (e.g. '#aabbcc') or one of "
                 f"{sorted(OPENCODE_THEME_COLORS)}. "
                 "OpenCode will reject this agent at load time."
