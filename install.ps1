@@ -729,7 +729,7 @@ try {
     # there is still a small gap where neither path exists; doing it this
     # way minimizes that gap and lets us roll back if the second rename
     # fails. Concurrent apm invocations during that window will fail and
-    # need a retry — acceptable for an install/self-update operation.
+    # need a retry -- acceptable for an install/self-update operation.
     $backupDir = $null
     if (Test-Path $releaseDir) {
         $backupDir = "$releaseDir.old-" + [System.Guid]::NewGuid().ToString("N")
@@ -802,7 +802,8 @@ try {
     # Write the shim as ASCII. cmd.exe interprets .cmd files via the system
     # OEM/ANSI code page and does NOT reliably auto-detect UTF-16LE (even
     # with a BOM) when batch files are invoked via PATH or double-click; a
-    # UTF-16 shim surfaces as garbled output like ">��@" and exit code 1.
+    # UTF-16 shim surfaces as garbled bytes (the cmd.exe prompt followed
+    # by replacement-character noise) and exit code 1.
     # ASCII is safe for our payload because the %LOCALAPPDATA% literal
     # token (issue #1509) keeps the embedded shim target ASCII-only even
     # when the user's profile directory contains non-ASCII characters.
