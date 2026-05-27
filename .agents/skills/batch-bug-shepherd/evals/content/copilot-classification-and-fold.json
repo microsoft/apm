@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "copilot-classification-and-fold",
+  "summary": "Shepherd-driver Phase X.0 decision policy when copilot-pull-request-reviewer[bot] has left 5 inline comments. Three are LEGIT correctness items, one is a style nit consistent with the rest of the file (LEGIT, fold), one is NOT-LEGIT (the bot asserts a test should assert on a behavior the PR explicitly removed). With the skill loaded, the shepherd-driver classifies every item per assets/copilot-classification-prompt.md, folds the 4 LEGIT items, and records the NOT-LEGIT rationale so the bot is not silently ignored. Without the skill, the orchestrator either skips the Copilot fetch entirely or treats Copilot output as advisory and routes it to the maintainer.",
+  "scenario": {
+    "user_query": "structured fixture: Copilot review on PR #1490 left 5 inline comments. Three identify real defects (off-by-one in slice, missing null guard, error message not wrapped in CommandLogger). One is a style nit: variable name `c` should be `color_enabled` (matches file convention). One asserts that the regression test should also assert the old ANSI-emitting code path is still callable -- but the PR explicitly removed that path. shepherd-driver Phase X.0 decision required.",
+    "ground_truth": {
+      "total_items": 5,
+      "legit_count": 4,
+      "not_legit_count": 1,
+      "folded_count": 4,
+      "dismissed_with_rationale_count": 1,
+      "copilot_rounds_remaining": 1
+    },
+    "expected_phases_with_skill": [
+      "Phase X.0 begins; fetch Copilot review and inline comments via gh api",
+      "every item gets a classification entry (LEGIT or NOT-LEGIT)",
+      "4 items classified LEGIT -> route to fold-vs-defer rubric -> all 4 fold",
+      "1 item classified NOT-LEGIT -> one-line rationale recorded",
+      "classification log surfaces in the final advisory comment Copilot signals reviewed section",
+      "copilot_rounds counter incremented; cap 2 enforced"
+    ]
+  },
+  "fixtures": {
+    "with_skill": "../fixtures/copilot-classification-and-fold.with_skill.md",
+    "without_skill": "../fixtures/copilot-classification-and-fold.without_skill.md"
+  },
+  "rubric": [
+    {"id": "fetch-contract", "pattern": "(?is)gh\\s+api[^\\n]{0,200}(pulls|reviews|comments)", "weight": 1, "description": "Copilot review fetch via gh api is named."},
+    {"id": "classification-prompt-named", "pattern": "(?is)copilot[- ]?classification[- ]?prompt|copilot-classification-prompt\\.md", "weight": 2, "description": "Classification prompt asset is explicitly named."},
+    {"id": "every-item-classified", "pattern": "(?is)(every[^.\\n]{0,40}(item|comment)[^.\\n]{0,40}classification|all\\s+5[^.\\n]{0,40}classif|classification\\s+entry)", "weight": 2, "description": "Every Copilot item gets a classification entry (not silently ignored)."},
+    {"id": "legit-count", "pattern": "(?is)(4\\s+(items?|comments?)\\s+(classified\\s+)?LEGIT|LEGIT[^.\\n]{0,20}(x|=|:)?\\s*4|legit_count[^\\n]{0,10}4)", "weight": 2, "description": "Four items correctly classified LEGIT."},
+    {"id": "not-legit-rationale", "pattern": "(?is)NOT[- ]?LEGIT[^\\n]{0,200}(rationale|removed|explicit|test[^\\n]{0,40}assert)", "weight": 3, "description": "The NOT-LEGIT item carries a one-line rationale pointing at the explicitly-removed path."},
+    {"id": "fold-four", "pattern": "(?is)(fold[^.\\n]{0,40}(4|four)|4\\s+LEGIT[^.\\n]{0,40}fold|fold\\s+all\\s+4|all\\s+4\\s+folded)", "weight": 2, "description": "All four LEGIT items are folded into the PR."},
+    {"id": "log-in-advisory", "pattern": "(?is)copilot\\s+signals\\s+reviewed", "weight": 1, "description": "Classification log surfaces in the final advisory comment 'Copilot signals reviewed' section."},
+    {"id": "copilot-cap-respected", "pattern": "(?is)(copilot_rounds|cap\\s+2|max\\s+2\\s+copilot)", "weight": 1, "description": "Copilot-rounds cap (2 per shepherd-driver run) is referenced."}
+  ]
+}

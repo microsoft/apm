@@ -359,6 +359,40 @@ Removed in this refactor (justification in `design.md`):
 - Honor the lint, ASCII, and ownership-signaling rules
   transitively: every spawn prompt reminds its subagent of them.
 
+## Evals
+
+See `evals/` for the trigger + content eval suite. Two families:
+
+- TRIGGER EVALS (`evals/triggers.json`) score the SKILL.md
+  `description:` against 20 queries (12 train / 8 val). The val
+  split is the SHIP gate: rate >= 0.5 on should-fire AND < 0.5 on
+  near-miss should-not-fire (per genesis Step 8 EVALS GATE).
+- CONTENT EVALS (`evals/content/*.json`) score structured-input
+  fixtures against per-scenario regex rubrics. Two orchestrator-
+  shape scenarios (three-issues-mixed, sweep-bug-queue) plus three
+  decision-policy scenarios that exercise the load-bearing
+  shepherd-driver policies: fold-vs-defer-panel, copilot-
+  classification-and-fold, ci-recovery-lint-bucket.
+
+Run from the worktree root:
+
+```
+python3 .agents/skills/batch-bug-shepherd/scripts/run_evals.py
+```
+
+EVALS GATE: the trigger val split AND every content scenario MUST
+pass before any change to the skill body, the shepherd-driver
+prompt, the fold-vs-defer rubric, the Copilot classification
+prompt, or the CI recovery checklist is shipped. Skills that
+introduce a new decision policy MUST add a matching content
+scenario in the same PR.
+
+Real-task refinement evidence (genesis Step 8) lives at
+`evals/real-task-refinement.md`. It captures the wave-1 (v1
+SKILL.md) -> wave-2 (v2 SKILL.md) comparison that drove the
+default-fold + Copilot-first-class + CI-recovery-first-class edits
+in this refactor.
+
 ## Out of scope
 
 - Authoring panel personas (lives in `apm-review-panel`).
