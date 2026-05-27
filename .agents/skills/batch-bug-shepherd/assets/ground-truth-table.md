@@ -18,8 +18,13 @@ Columns:
     pending-xref
     pending-shepherd
     pending-fix
-    pending-completion
+    pending-shepherd-driver
+    shepherd-driver-iter-1
+    shepherd-driver-iter-2
+    shepherd-driver-iter-3
+    shepherd-driver-iter-4
     ready-to-merge
+    advisory-with-deferred
     superseded
     blocked
     closed-fixed-at-head

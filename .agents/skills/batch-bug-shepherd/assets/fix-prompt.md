@@ -53,6 +53,10 @@ needs the PR number):
 - ASCII only everywhere (code, tests, commit messages, PR body).
 - No emojis, em dashes, unicode boxes.
 - Never push without the lint pair silent.
+- After opening the PR, the orchestrator hands it to a
+  shepherd-driver subagent for the convergence loop (Copilot +
+  panel + CI watch). If first-push CI turns red before that
+  hand-off, follow `ci-recovery-checklist.md` in-session.
 - Never skip the mutation-break gate. A "passing" test that does not
   break under guard deletion is worse than no test, because it
   invites a false sense of coverage.
