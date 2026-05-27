@@ -760,8 +760,22 @@ try {
     }
 
     $shimPath = Join-Path $binDir "apm.cmd"
-    $shimContent = "@echo off`r`n`"$releaseDir\apm.exe`" %*`r`n"
-    Set-Content -Path $shimPath -Value $shimContent -Encoding ASCII
+    # Prefer the literal %LOCALAPPDATA% token over the expanded profile path
+    # so cmd.exe resolves the shim target at runtime. This avoids "The
+    # system cannot find the path specified." on accounts whose profile
+    # directory contains non-ASCII characters (issue microsoft/apm#1509).
+    $localAppData = $env:LOCALAPPDATA
+    if ($localAppData -and $releaseDir.StartsWith($localAppData, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relative = $releaseDir.Substring($localAppData.Length).TrimStart('\', '/')
+        $shimTarget = "%LOCALAPPDATA%\$relative\apm.exe"
+    } else {
+        $shimTarget = "$releaseDir\apm.exe"
+    }
+    $shimContent = "@echo off`r`n`"$shimTarget`" %*`r`n"
+    # Use UTF-8 without BOM (rather than -Encoding ASCII) so any custom
+    # APM_INSTALL_DIR path containing non-ASCII characters survives the
+    # write. cmd.exe tolerates UTF-8 shim payloads without a BOM.
+    [System.IO.File]::WriteAllText($shimPath, $shimContent, (New-Object System.Text.UTF8Encoding($false)))
 
     Add-ToUserPath -PathEntry $binDir
 
