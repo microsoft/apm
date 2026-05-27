@@ -378,6 +378,23 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     # SSH-first chain so existing flows (e.g. SSH-key users on
                     # corporate hosts) keep validating successfully.
                     urls_to_try = [ssh_url, package_url]
+            elif is_gitlab and explicit_scheme == "ssh":
+                # Issue microsoft/apm#1501: honor explicit SSH scheme for GitLab
+                # refs (e.g. ``git@gitlab.com:owner/repo.git#ref``). Without
+                # this branch, GitLab deps unconditionally probe authenticated
+                # HTTPS which raises ``AuthenticationError`` ("No token
+                # available") when the user relies on SSH keys instead of
+                # GITLAB_APM_PAT / GITLAB_TOKEN. The clone path
+                # (``_install_apm_dependencies``) already honors SSH transport
+                # directly, so a dep declared in ``apm.yml`` installs cleanly;
+                # this aligns the direct-CLI validation path with that
+                # behavior. Mirrors the explicit-ssh branch in the generic-host
+                # arm above and respects ``APM_ALLOW_PROTOCOL_FALLBACK=1`` for
+                # symmetry with ``_clone_with_fallback``.
+                ssh_url = ado_downloader._build_repo_url(
+                    dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref
+                )
+                urls_to_try = [ssh_url] if not allow_fallback else [ssh_url, package_url]
             else:
                 urls_to_try = [package_url]
 
