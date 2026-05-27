@@ -119,6 +119,9 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                 errors.append(f"dependencies.max_depth must be a positive integer, got '{md}'")
             elif md <= 0:
                 errors.append(f"dependencies.max_depth must be a positive integer, got {md}")
+        rpc = deps.get("require_pinned_constraint")
+        if rpc is not None and not isinstance(rpc, bool):
+            errors.append(f"dependencies.require_pinned_constraint must be a boolean, got '{rpc}'")
 
     # mcp.self_defined
     mcp = data.get("mcp")
@@ -186,6 +189,9 @@ def _build_policy(data: dict) -> ApmPolicy:
         else _parse_tuple(deps_data["require"]),
         require_resolution=deps_data.get("require_resolution", DependencyPolicy.require_resolution),
         max_depth=deps_data.get("max_depth", DependencyPolicy.max_depth),
+        require_pinned_constraint=bool(
+            deps_data.get("require_pinned_constraint", DependencyPolicy.require_pinned_constraint)
+        ),
     )
 
     mcp_data = data.get("mcp") or {}

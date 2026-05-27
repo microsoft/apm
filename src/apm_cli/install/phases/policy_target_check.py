@@ -77,6 +77,7 @@ def run(ctx: InstallContext) -> None:
         fetch_outcome=ctx.policy_fetch.outcome,
         fail_fast=False,  # ensure target check runs even if dep checks re-pass
         registries=registries_map,
+        direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
     )
 
     # ------------------------------------------------------------------

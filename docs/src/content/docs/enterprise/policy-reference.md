@@ -28,6 +28,7 @@ dependencies:
   require: []                   # Required packages
   require_resolution: project-wins  # project-wins | policy-wins | block
   max_depth: 50                 # Max transitive dependency depth
+  require_pinned_constraint: false  # Ban unbounded version ranges
 
 mcp:
   allow: []                     # Allowed MCP server patterns
@@ -163,6 +164,17 @@ Maximum allowed transitive dependency depth. Default: `50`. Set lower to limit s
 dependencies:
   max_depth: 3  # Direct + 2 levels of transitive
 ```
+
+### `require_pinned_constraint`
+
+Default: `false`. When `true`, every APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (e.g. `v1.5.3`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+
+```yaml
+dependencies:
+  require_pinned_constraint: true
+```
+
+Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
@@ -362,6 +374,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | `required-packages-deployed` | Required packages appear in lockfile with deployed files |
 | `required-package-version` | Required packages with version pins match per `require_resolution` |
 | `transitive-depth` | No dependency exceeds `max_depth` |
+| `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
 
 **MCP:**
 
@@ -420,6 +433,7 @@ A child policy can only tighten constraints — never relax them:
 | `require` | Union — combines required packages |
 | `require_resolution` | Escalates: `project-wins` < `policy-wins` < `block` |
 | `max_depth` | `min(parent, child)` |
+| `require_pinned_constraint` | OR -- once parent sets `true`, child cannot relax |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `manifest.scripts` | Escalates: `allow` < `deny` |
 | `unmanaged_files.action` | Escalates: `ignore` < `warn` < `deny` |
@@ -549,7 +563,7 @@ Install-time enforcement and `apm audit --ci` both resolve the **full multi-leve
 
 Install-time enforcement runs the same rule families documented in [Check reference](#check-reference):
 
-- **Dependencies** — `allow`, `deny`, `require` (presence + optional version pin), `max_depth`.
+- **Dependencies** — `allow`, `deny`, `require` (presence + optional version pin), `max_depth`, `require_pinned_constraint`.
 - **MCP** — `allow`, `deny`, `transport.allow`, `self_defined`, `trust_transitive`.
 - **Compilation** — `target.allow` / `target.enforce` (target-aware, evaluated against the resolved target list).
 - **Manifest** — `required_fields`, `scripts`, `content_types.allow`.
@@ -862,6 +876,7 @@ When `enforcement=block`, any of the following exit `1` and abort before integra
 | `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: <required-dep> -- required by org policy but not declared in apm.yml` (or `... required >=X but apm.yml pins <Y>`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
 | `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <mcp-server> -- transport <t> not in mcp.transport.allow=[<list>]` | Switch the server to an allowed transport, or request `mcp.transport.allow` updates. |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: target <t> -- not in compilation.target.allow=[<list>]` | Re-run with `--target <allowed>`, or update `compilation.target` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |
+| `pinned-constraint` | `require_pinned_constraint: true` and a dep declares an unbounded ref | `Policy violation: N dependency(ies) use unbounded constraints (hint: pin to a semver range, literal tag, or SHA)` plus per-dep `<dep>: <reason>` | Pin each listed dep to a semver range with an upper bound (`^1.2.3`, `>=1.0,<2.0`), a literal tag (`v1.5.3`), or a 40-char SHA. Roll out under `enforcement: warn` first to size the fleet impact. |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | `Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` plus per-server `Policy violation: ...` | Remove the offending dep, request an org policy update, or set `mcp.trust_transitive: true` if the org chooses to allow transitive MCP entries. |
 
 All violation messages above flow through `InstallLogger.policy_violation`; under `block` they print inline as `[x]` errors and exit `1`. Use `apm audit --ci --format json` for the same set of findings in machine-readable form.
