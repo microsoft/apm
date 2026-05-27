@@ -129,6 +129,42 @@ def test_classify_pinned_specs_return_none(spec):
     assert classify_unbounded_reason(_dep(spec)) is None
 
 
+# Regression trap for the ``=1.2.3`` alternate exact-version form
+# (npm- and cargo-style "explicit equality"). Before the fix shipped
+# alongside this test, ``_constraint_pinning.py`` mis-classified these
+# as ``BARE_BRANCH`` because ``is_semver_range`` rejected the leading
+# ``=`` operator, and ``require_pinned_constraint: true`` would block
+# the install with a confusing branch-name diagnostic.
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "=1.2.3",
+        "=0.0.1",
+        "=1.2.3-beta.1",
+        "=1.2.3+build.42",
+    ],
+)
+def test_equals_prefix_exact_version_classified_as_pinned(spec):
+    assert classify_unbounded_reason(_dep(spec)) is None
+    assert is_pinned_constraint(_dep(spec)) is True
+
+
+def test_equals_prefix_exact_version_pinned_on_registry_source():
+    # Same contract for registry-routed deps: ``=1.2.3`` is a pin, not
+    # an unbounded constraint.
+    assert classify_unbounded_reason(_dep("=1.2.3", source="registry")) is None
+
+
+def test_double_equals_prefix_rejected_as_bare_branch():
+    # APM follows the npm/cargo semver grammar where ``=`` is the
+    # explicit-equality operator. The pip-style ``==`` form is NOT
+    # part of node-semver and is intentionally not recognised; it
+    # falls through to ``BARE_BRANCH`` so that a user who wrote
+    # ``==1.2.3`` gets a violation that points them at the supported
+    # syntax instead of silently accepting the wrong dialect.
+    assert classify_unbounded_reason(_dep("==1.2.3")) is UnboundedReason.BARE_BRANCH
+
+
 def test_classify_caret_range_returns_pinned_none():
     assert classify_unbounded_reason(_dep("^1.2.3")) is None
 

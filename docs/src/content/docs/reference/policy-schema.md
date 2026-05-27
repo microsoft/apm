@@ -88,7 +88,9 @@ dependencies:
     - acme/lib#main            # FAIL: bare branch (BARE_BRANCH)
     - fourth/lib#^1.2.0        # OK: caret range
     - fifth/lib#~1.2.3         # OK: tilde range
-    - sixth/lib#1.5.3          # OK: exact version
+    - sixth/lib#1.5.3          # OK: exact version (bare)
+    - sixth_eq/lib#=1.5.3      # OK: exact version (npm/cargo explicit equality)
+    - sixth_pip/lib#==1.5.3    # FAIL: pip-style operator not supported (BARE_BRANCH)
     - seventh/lib#v1.5.3       # OK: literal tag
     - eighth/lib#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # OK: SHA
     - ./packages/local         # OK: local-path dep (no version surface)

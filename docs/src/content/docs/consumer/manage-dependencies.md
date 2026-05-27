@@ -138,6 +138,18 @@ dependencies:
     - acme/playbooks#a1b2c3d4e5f6...            # SHA (immutable)
 ```
 
+For registry-sourced deps or when `policy.dependencies.require_pinned_constraint: true` is on, the ref slot also accepts semver constraints:
+
+| Form | Example | Meaning |
+|---|---|---|
+| Bare exact | `owner/repo#1.2.3` | Pinned to exactly 1.2.3. |
+| Explicit equality | `owner/repo#=1.2.3` | Same as bare exact (npm- and cargo-style). |
+| Caret range | `owner/repo#^1.2.3` | `>=1.2.3, <2.0.0`. |
+| Tilde range | `owner/repo#~1.2.3` | `>=1.2.3, <1.3.0`. |
+| Bounded range | `owner/repo#>=1.2.0 <2.0.0` | Explicit lower and upper bound. |
+
+Pip-style `==1.2.3` is not part of the node-semver grammar APM follows and is rejected as an unbounded ref under `require_pinned_constraint`. Use `=1.2.3` or the bare form instead.
+
 Branches move; tags and SHAs do not. For reproducibility, prefer tags or
 SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
