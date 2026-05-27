@@ -827,6 +827,71 @@ def _check_registry_source(
     )
 
 
+def _check_pinned_constraints(
+    deps: list[DependencyReference],
+    policy: DependencyPolicy,
+    direct_dep_keys: set[str] | None = None,
+) -> CheckResult:
+    """Check: every direct dep declares a bounded constraint.
+
+    Skipped (passes vacuously) when
+    ``policy.require_pinned_constraint`` is ``False`` -- the default.
+
+    Operates on the **declared** constraint (``dep.reference``), not
+    the resolved one, so authors learn before the install completes
+    that a moving ref slipped past review.
+
+    When ``direct_dep_keys`` is provided, the check is restricted to
+    direct dependencies only -- transitives are excluded, since the
+    consumer cannot rewrite a constraint declared in a transitive
+    package's own manifest. Callers that have direct-vs-transitive
+    context (the install pipeline gate, the target-aware re-check,
+    and the install preflight) should always pass it. When ``None``
+    (legacy dep-only seam, or the audit wrapper that already iterates
+    direct-only manifest deps) the check falls back to evaluating
+    every dep in ``deps``.
+
+    See ``_constraint_pinning.py`` for classification rules.
+    """
+    from ._constraint_pinning import classify_unbounded_reason, humanize_reason
+
+    check_name = "dependency-pinned-constraint"
+    if not policy.require_pinned_constraint:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="Pinned-constraint requirement disabled",
+        )
+
+    violations: list[str] = []
+    for dep in deps:
+        if direct_dep_keys is not None and dep.get_unique_key() not in direct_dep_keys:
+            continue
+        reason = classify_unbounded_reason(dep)
+        if reason is None:
+            continue
+        key = dep.get_canonical_dependency_string()
+        hint = humanize_reason(reason, dep)
+        violations.append(f"{key}: {hint}")
+
+    if not violations:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="All dependencies use pinned constraints",
+        )
+
+    return CheckResult(
+        name=check_name,
+        passed=False,
+        message=(
+            f"{len(violations)} dependency(ies) use unbounded constraints "
+            "(hint: pin to a semver range, literal tag, or SHA)"
+        ),
+        details=violations,
+    )
+
+
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -841,6 +906,7 @@ def run_dependency_policy_checks(
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
     registries: dict[str, str] | None = None,
+    direct_dep_keys: set[str] | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -878,6 +944,15 @@ def run_dependency_policy_checks(
         the ``explicit-includes`` check is skipped -- callers that
         do not have manifest information available (e.g. dep-only
         seams) can leave it unset.
+    direct_dep_keys:
+        Optional set of ``DependencyReference.get_unique_key()`` for
+        the direct (manifest-declared) deps. When supplied, the
+        ``require_pinned_constraint`` check only evaluates direct
+        deps -- transitive entries are excluded because the consumer
+        cannot rewrite a constraint declared inside a transitive
+        package's own manifest. When ``None`` (legacy dep-only seam
+        and the audit wrapper that already iterates direct-only
+        manifest deps) every dep in ``deps_to_install`` is evaluated.
 
     Returns
     -------
@@ -922,6 +997,15 @@ def run_dependency_policy_checks(
 
     # -- Registry source check (7) ---------------------------------
     if _run(_check_registry_source(deps_list, policy.registry_source, registries)):
+        return result
+
+    # -- Pinned-constraint check (7b) ------------------------------
+    # Property check on declared refs; runs alongside allow/deny/require.
+    # Cheap (O(N) string classification, no I/O) so it always runs.
+    # When direct_dep_keys is supplied, restrict to direct deps -- a
+    # transitive package with an unbounded ref in its own manifest is
+    # not actionable by the consumer (see Copilot review on #1494).
+    if _run(_check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys)):
         return result
 
     # -- MCP checks (8-11) ----------------------------------------
