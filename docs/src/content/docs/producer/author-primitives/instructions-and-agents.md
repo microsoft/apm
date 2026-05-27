@@ -142,6 +142,7 @@ for...
 | `description` | yes | Used by Cascade and Copilot to decide when to surface the agent |
 | `model` | optional | Pinned model the harness should switch to when invoked |
 | `tools` | optional | Whitelist of tools the persona may call |
+| `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
 verbatim. Codex receives a TOML translation. Windsurf drops both

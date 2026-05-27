@@ -115,7 +115,7 @@ def validate_opencode_frontmatter(
                 "OpenCode requires a hex value (e.g. '#aabbcc') or one of "
                 f"{sorted(OPENCODE_THEME_COLORS)}. "
                 "OpenCode will reject this agent at load time. "
-                "Fix: replace the color with a '#rrggbb' hex literal "
+                "Fix: replace the color with a '#rgb' or '#rrggbb' hex literal "
                 "or one of the listed theme names."
             )
 

@@ -213,6 +213,11 @@ class TestValidateOpencodeFrontmatter:
     def test_remediation_pointer_in_color_warning(self):
         msgs = validate_opencode_frontmatter({"color": "cyan"}, Path("a.md"))
         assert "Fix:" in msgs[0]
+        # Both 3- and 6-char hex literals are accepted by the validator;
+        # the remediation pointer must mention both so users aren't
+        # misled into thinking only '#rrggbb' is allowed.
+        assert "#rgb" in msgs[0]
+        assert "#rrggbb" in msgs[0]
 
 
 class TestOpencodeInstallEmitsWarnings:
@@ -318,6 +323,18 @@ class TestOpencodeInstallEmitsWarnings:
         self.integrator.integrate_agents_for_target(
             KNOWN_TARGETS["opencode"], pkg_info, self.project_root, diagnostics=diagnostics
         )
+
+    def test_diagnostics_none_does_not_crash(self):
+        # Defensive guard: _warn_opencode_frontmatter must early-return
+        # when the install path is called without a DiagnosticCollector,
+        # so a future caller that omits the collector never crashes the
+        # install on otherwise-valid agent files.
+        from apm_cli.integration.agent_integrator import AgentIntegrator
+
+        agent_path = self.project_root / "demo.agent.md"
+        agent_path.write_text("---\ntools:\n  - Read\n---\n\nBody\n")
+        # Must not raise even though the frontmatter would normally warn.
+        AgentIntegrator._warn_opencode_frontmatter(agent_path, None, "test-pkg")
 
     @pytest.mark.parametrize("target_name", ["copilot", "claude", "codex", "windsurf", "cursor"])
     def test_non_opencode_targets_do_not_emit_opencode_warning(self, target_name):

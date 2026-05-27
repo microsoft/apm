@@ -281,7 +281,7 @@ it in place, but OpenCode will fail to start until you do.
 If you target multiple agent runtimes from one source file, keep the
 frontmatter to the intersection of their schemas (or maintain
 target-specific copies) until APM ships a per-target frontmatter
-transformer.
+transformer (tracked as Phase 2 of #581 -- contributions welcome).
 
 ### 6. Skill (folder-based, `SKILL.md`)
 
