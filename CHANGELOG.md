@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING:** `apm install` now exits `1` whenever the diagnostic summary reports `Installation failed with N error(s)`. Previously the command exited `0` even after reporting errors, so CI could not detect failure via exit code. `--force` continues to bypass only the security scan's critical-finding block; it does **not** suppress general install errors (matches `npm` / `pip` / `cargo`). Callers that asserted `exit_code == 0` while errors were reported must update.
+
 ### Added
 
 - `ref:` on git-source dependencies now accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). `apm install` runs `git ls-remote`, picks the highest tag matching the range, and pins the resolved tag, commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `apm install --update` to re-resolve against current remote tags. Two tag patterns are tried in order (`v{version}`, `{name}--v{version}`) with a bare `{version}` fallback. (closes #1488)
+
+### Fixed
+
+- `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
 
 ## [0.15.0] - 2026-05-27
 
