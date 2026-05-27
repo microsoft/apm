@@ -19,8 +19,10 @@ Covers error/edge branches not exercised by the main test_link_resolver.py:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -466,7 +468,9 @@ class TestResolveMarkdownLinks:
     def test_external_url_preserved(self, base_dir: Path) -> None:
         content = "[Example](https://example.com)"
         result = resolve_markdown_links(content, base_dir)
-        assert "https://example.com" in result
+        urls = re.findall(r"https?://[^\s)\]\}]+", result)
+        assert len(urls) == 1
+        assert urlparse(urls[0]).hostname == "example.com"
 
     def test_anchor_link_preserved(self, base_dir: Path) -> None:
         content = "[Section](#heading)"

@@ -17,6 +17,7 @@ Covers branches not hit by existing validation tests:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -102,7 +103,7 @@ class TestLogTlsFailure:
         calls: list[str] = []
         exc = RuntimeError("TLS verification failed: self signed")
         _log_tls_failure("example.com", exc, verbose_log=calls.append, logger=logger)
-        assert any("example.com" in c for c in calls)
+        assert any(re.search(r"\bexample\.com\b", c) for c in calls)
         assert any("TLS" in c or "self signed" in c for c in calls)
 
     def test_verbose_none_skips_verbose_log(self) -> None:
