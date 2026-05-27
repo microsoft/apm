@@ -158,18 +158,18 @@ class TestPromiseBPinnedDepPassesPolicyGate:
     def test_bare_exact_version_does_not_trigger_block(
         self, mock_gate, mock_preflight, mock_dl, mock_updates, project
     ):
-        # NOTE: The bare-version form ``1.2.3`` is the documented
-        # "exact version" pinning form (see #1494 commit message and
-        # tests/unit/policy/test_pinned_constraint.py). The ``=1.2.3``
-        # alternate form is NOT currently recognized as pinned -- the
-        # classifier in ``_constraint_pinning.py`` treats it as a
-        # BARE_BRANCH. Documenting that in this test by using only
-        # the documented form; flagging the ``=1.2.3`` gap in the PR
-        # body for a separate UX issue.
+        # Covers both pin shapes the classifier accepts:
+        #   * ``1.2.3``       -- bare exact version
+        #   * ``=1.2.3``      -- npm/cargo-style explicit-equality
+        # Both must pass the gate under enforcement=block +
+        # require_pinned_constraint=true. The ``=1.2.3`` half is the
+        # regression trap for the bug observed in PR #1505: before the
+        # fix, ``_constraint_pinning.py`` mis-classified ``=1.2.3`` as
+        # ``BARE_BRANCH`` and blocked the install.
         project_dir, runner = project
         _write_apm_yml(
             project_dir / "apm.yml",
-            deps=["test-org/skills#1.2.3"],
+            deps=["test-org/skills#1.2.3", "test-org/other#=1.2.3"],
         )
         fetch = _fetch(_load_fixture("apm-policy-block.yml"))
         mock_gate.return_value = fetch
@@ -180,6 +180,7 @@ class TestPromiseBPinnedDepPassesPolicyGate:
         out = result.output.lower()
         assert "blocked by org policy" not in out, result.output
         assert "unbounded constraint" not in out, result.output
+        assert "bare branch" not in out, result.output
 
 
 # ---------------------------------------------------------------------------
