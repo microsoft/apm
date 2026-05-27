@@ -197,3 +197,37 @@ class TestInstalledPackagePlumbing:
         assert ld.resolved_tag == "v1.5.3"
         assert ld.resolved_ref == "v1.5.3"
         assert ld.version == "1.5.3"
+
+
+class TestMutualExclusivity:
+    """``from_dependency_ref`` enforces resolution-source mutual exclusivity.
+
+    Regression-trap for PR #1496 review thread: the docstring promises
+    ``git_semver_resolution`` is mutually exclusive with
+    ``registry_resolution``, but the constructor previously combined
+    fields from both (e.g. ``source="registry"`` while also setting
+    ``constraint``/``resolved_tag`` and overriding ``resolved_ref``).
+    """
+
+    def test_passing_both_resolution_sources_raises_value_error(self) -> None:
+        from apm_cli.deps.registry.resolver import RegistryResolution
+
+        dep_ref = _make_dep_ref()
+        git_res = _make_resolution()
+        reg_res = RegistryResolution(
+            resolved_url="https://registry.example/pkg/1.0.0.tgz",
+            resolved_hash="sha256-abc",
+            version="1.0.0",
+        )
+
+        import pytest
+
+        with pytest.raises(ValueError, match=r"mutually exclusive"):
+            LockedDependency.from_dependency_ref(
+                dep_ref=dep_ref,
+                resolved_commit="d" * 40,
+                depth=1,
+                resolved_by=None,
+                registry_resolution=reg_res,
+                git_semver_resolution=git_res,
+            )

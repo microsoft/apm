@@ -493,7 +493,7 @@ def run(ctx: InstallContext) -> None:
                     _tui.task_failed(dep_ref.get_unique_key())
                 return None
 
-            # ─── Git-source semver range resolution (issue #1488) ──────
+            # --- Git-source semver range resolution (issue #1488) ---
             # When the manifest carries a semver range as ``ref:`` and
             # the dep is non-local, non-registry, and non-proxy, resolve
             # it to a concrete tag BEFORE any git operation. The result

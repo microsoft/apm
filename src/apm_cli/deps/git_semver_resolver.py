@@ -140,20 +140,29 @@ def iter_semver_tags(
     across all matches, so duplicates resolve to the same concrete tag
     even when patterns overlap.
 
+    ``{name}`` placeholders in *patterns* are expanded with the literal
+    *package_name* (regex-escaped) before regex compilation, so that
+    a pattern like ``{name}--v{version}`` matches only tags scoped to
+    the expected package (e.g. ``some-skills--v1.2.0``) and does not
+    accept tags belonging to other packages (e.g. ``otherpkg--v9.9.9``)
+    in repositories that publish multiple ``{name}--v{version}`` tag
+    families. See issue #1488 review thread.
+
     Non-tag refs (``refs/heads/*``) and peeled-tag refs are skipped.
     """
-    compiled = [(pat, build_tag_regex(pat)) for pat in patterns]
+    expanded = [pat.replace("{name}", package_name) for pat in patterns]
+    compiled = [(pat, build_tag_regex(exp)) for pat, exp in zip(patterns, expanded, strict=True)]
     out: list[tuple[SemVer, str, str, str]] = []
     for ref in refs:
         if not ref.name.startswith(_REFS_TAGS_PREFIX):
             continue
         tag_name = ref.name[len(_REFS_TAGS_PREFIX) :]
         for pattern, rx in compiled:
-            # ``build_tag_regex`` substitutes ``{name}`` with a wildcard
-            # ``[^/]+``.  Matching against the rendered tag is enough --
-            # we don't need to verify the name capture because the
-            # pattern was author-supplied and tag identity is the
-            # authority here, not name shape.
+            # ``build_tag_regex`` receives a pattern where any ``{name}``
+            # has already been substituted with the literal package_name,
+            # so the resulting regex is scoped to this package's tag
+            # family and never accepts tags belonging to a sibling
+            # package in the same repository.
             m = rx.match(tag_name)
             if not m:
                 continue
@@ -167,10 +176,6 @@ def iter_semver_tags(
             out.append((v, tag_name, ref.sha, pattern))
             # Allow same tag to match multiple patterns; the picker
             # de-duplicates by (version, sha).
-    # Silence unused param warning when consumers ignore the package_name.
-    # (Reserved for a future where patterns include {name} placeholders
-    # that need expansion before regex compilation.)
-    _ = package_name
     return out
 
 

@@ -293,3 +293,45 @@ class TestIterSemverTags:
         out = iter_semver_tags(refs, package_name="foo", patterns=DEFAULT_TAG_PATTERNS)
         tags = [t[1] for t in out]
         assert tags == ["v1.0.0"]
+
+    def test_name_placeholder_scoped_to_package_name(self) -> None:
+        """``{name}--v{version}`` must only match tags for the requested package.
+
+        Regression-trap for PR #1496 review thread: previously
+        ``iter_semver_tags`` accepted ``package_name`` but never used it,
+        leaving ``{name}`` as a wildcard (``[^/]+``).  In a repo that
+        publishes multiple ``{name}--v{version}`` tag families, the
+        resolver could then accept a sibling package's tag (e.g.
+        ``otherpkg--v9.9.9``) when asked to resolve ``mypkg``.
+        """
+        refs = _refs_from(
+            ("mypkg--v1.0.0", "a" * 40),
+            ("mypkg--v1.2.0", "b" * 40),
+            ("otherpkg--v9.9.9", "c" * 40),
+        )
+        out = iter_semver_tags(
+            refs,
+            package_name="mypkg",
+            patterns=("{name}--v{version}",),
+        )
+        tags = sorted(t[1] for t in out)
+        assert tags == ["mypkg--v1.0.0", "mypkg--v1.2.0"]
+        assert "otherpkg--v9.9.9" not in tags
+
+    def test_resolver_does_not_pick_sibling_package_tag(self) -> None:
+        """Highest-version picker must ignore tags belonging to other packages."""
+        refs = _refs_from(
+            ("mypkg--v1.0.0", "a" * 40),
+            ("otherpkg--v9.9.9", "c" * 40),
+        )
+        resolver = GitSemverResolver(_ref_resolver_returning(refs))
+
+        result = resolver.resolve(
+            owner_repo="acme/mypkg",
+            package_name="mypkg",
+            constraint=">=1.0.0",
+            tag_patterns=("{name}--v{version}",),
+        )
+
+        assert result.resolved_tag == "mypkg--v1.0.0"
+        assert result.resolved_version == "1.0.0"
