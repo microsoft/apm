@@ -148,9 +148,9 @@ registries:
 
 dependencies:
   apm:
-    # String shorthand -- requires a default registry; always needs a ref
+    # String shorthand -- requires a default registry; always needs a semver ref
     - acme/foo#^1.2.3                      # semver range -> default registry
-    - acme/bar#stable                      # opaque label -> default registry
+    - acme/bar#1.4.0                       # exact semver -> default registry
 
     # Object form -- whole package via the default registry
     - id: acme/toolkit
@@ -174,7 +174,7 @@ Object-form fields:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `id` | yes | `owner/repo` identity at the registry |
-| `version` | yes | Exact version or semver range; opaque to APM (the registry decides) |
+| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
 | `registry` | no | Name from the merged registry map; defaults to the effective default |
 | `path` | no | Sub-path to a file or directory within the published package |
 | `alias` | no | Local alias controlling the install directory name |
@@ -190,12 +190,15 @@ Routing rules when a default registry is active:
 | `- path:` object | Local filesystem |
 
 A shorthand entry with no ref (`acme/foo`) is **rejected** when routed to a
-registry -- a version selector is always required. Use `- git:` to keep a
-dep on Git when a default registry is active. Registry-routed deps add
-`source: registry`, `version`, `resolved_url`, and `resolved_hash`
-(sha256 of the archive bytes) to their lockfile entry, and the lockfile
-opportunistically bumps to `lockfile_version: "2"` only when at least one
-registry dep is present.
+registry -- a semver version selector is always required. Non-semver refs
+(labels, `v`-prefixed tags, branch names) are also rejected for registry
+sources; use `- git:` to keep a dep on Git when a default registry is
+active. Registry-routed deps add `source: registry`, `version`,
+`resolved_url`, and `resolved_hash` (sha256 of the archive bytes) to
+their lockfile entry, and the lockfile is promoted to
+`lockfile_version: "2"` when any dep is registry-sourced OR carries
+git-source semver resolution fields (`constraint` / `resolved_tag` /
+`resolved_at`).
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with

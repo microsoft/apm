@@ -107,7 +107,7 @@ rewrites the unexpanded variable to an absolute source path so the hook
 fails loudly at runtime, while project-scope leaves the variable in
 place to avoid baking the installer's prefix into committed config. To
 clean up an older repo whose committed configs still carry absolutized
-paths, re-run `apm install` -- the new compile rewrites them back to
+paths, re-run `apm install` -- the installer rewrites them back to
 repo-relative.
 
 ## Manifest fields: `targets:` validation contract

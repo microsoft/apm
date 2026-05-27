@@ -178,9 +178,13 @@ env var (`corp-main`, `corp.main`, `Corp-Main` all sanitize to
 `APM_REGISTRY_TOKEN_CORP_MAIN`). Do not declare two registries whose
 names sanitize identically. Prefer hyphenated lowercase names.
 
-Tokens MUST NOT appear in `apm.yml` or `apm-policy.yml` -- a `token:`
-field in repo YAML is rejected at parse time (token trap). Store tokens
-in env vars or `~/.apm/config.json` only.
+Tokens MUST NOT appear in repo YAML. In `apm.yml`, a `token:` field
+under a `registries:` entry is rejected at parse time (token trap). In
+`apm-policy.yml`, a top-level `token:` key is not a recognized policy
+field and surfaces as an "Unknown top-level policy key" warning rather
+than a hard parse error -- but storing tokens there is still
+unsupported and committing one would leak the secret into the repo.
+Store tokens in env vars or `~/.apm/config.json` only.
 
 ## Install validation chain
 

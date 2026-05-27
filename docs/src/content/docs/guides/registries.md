@@ -189,9 +189,14 @@ registries:
 dependencies:
   apm:
     - acme/foo#^1.2.3        # semver range  -> corp-main
-    - acme/bar#stable        # opaque label  -> corp-main
-    - acme/baz#v2.0.0        # v-prefixed    -> corp-main
+    - acme/bar#1.4.0         # exact semver  -> corp-main
+    - acme/baz#~2.0.0        # tilde range   -> corp-main
 ```
+
+Registry-routed deps require a semver version or range. Non-semver refs
+(labels like `stable`/`latest`, `v`-prefixed tags such as `v1.4.2`,
+branch names, SHAs) are rejected at parse time when the entry routes to
+a registry; use `- git:` if you need to keep such a ref.
 
 Routing is unconditional: every still-unrouted shorthand entry with a `#<ref>` is sent through the default registry, regardless of what the ref looks like. Object-form entries (`- git:`, `- path:`, `- id:`) are left alone.
 
@@ -229,13 +234,13 @@ dependencies:
 
 ### Version selectors
 
-Registry-routed entries must specify a version selector -- the registry uses it to look up or range-match against the versions it has published. Version strings are opaque to APM; the registry decides what they mean. Semver ranges are supported when the registry publishes semver-tagged versions:
+Registry-routed entries must specify a **semver** version or range -- the registry uses it to look up an exact match or to range-match against the versions it has published. Non-semver refs (opaque labels, `v`-prefixed tags, branch names, SHAs) are rejected at parse time:
 
 | Selector | Behavior |
 |---|---|
-| `1.0.0`, `v1.4.2` | Exact version string -- matched literally against the registry catalogue |
+| `1.0.0`, `1.4.2` | Exact semver -- matched against the registry catalogue |
 | `^1.0.0`, `~1.2.3`, `>=1.2.0 <2.0.0` | Semver range -- APM picks the highest matching version |
-| `stable`, `latest` | Opaque label -- matched literally; server decides what it resolves to |
+| `stable`, `latest`, `v1.4.2`, branch/SHA | Rejected -- non-semver refs are not allowed for registry-routed deps |
 | unset (no `#<ref>`) | Rejected -- a version is always required for registry-routed dependencies |
 
 Registry-routed deps are byte-for-byte reproducible via `resolved_hash`; Git-routed deps are SHA-reproducible via `resolved_commit`.
@@ -258,7 +263,7 @@ There is no one-time migration prompt. Existing Git shorthand deps begin routing
 
 ## 4. What gets recorded in the lockfile
 
-Registry-sourced dependencies add four fields to their lockfile entry: `source: registry`, `version`, `resolved_url`, and `resolved_hash` (sha256 of the archive bytes). The lockfile bumps to `lockfile_version: "2"` opportunistically -- only when at least one registry dep is present. Projects that never opt into a registry keep `lockfile_version: "1"` forever, even on a newer client.
+Registry-sourced dependencies add four fields to their lockfile entry: `source: registry`, `version`, `resolved_url`, and `resolved_hash` (sha256 of the archive bytes). The lockfile is promoted to `lockfile_version: "2"` when any dep is registry-sourced OR carries git-source semver resolution fields (`constraint`, `resolved_tag`, or `resolved_at` -- issue #1488). Projects that use neither feature keep `lockfile_version: "1"` forever, even on a newer client.
 
 ```yaml
 dependencies:

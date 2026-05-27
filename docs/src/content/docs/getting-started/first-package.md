@@ -15,7 +15,7 @@ Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](/apm/getting-started/installation/).
+- APM installed -- see [Installation](./installation/).
 - A GitHub account and an empty repo for publishing (step 5).
 - A runtime where you can try the result: GitHub Copilot, Claude Code, or
   Cursor.
