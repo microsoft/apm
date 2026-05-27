@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import click
 
+from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
 from apm_cli.install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -461,13 +462,15 @@ def _resolve_package_references(
 
         # Canonicalize input
         try:
-            dep_ref, direct_gitlab_virtual_resolved = resolve_parsed_dependency_reference(
+            dep_ref, direct_virtual_resolved = resolve_parsed_dependency_reference(
                 package,
                 marketplace_dep_ref,
                 dependency_reference_cls=DependencyReference,
                 try_resolve_gitlab_direct_shorthand=_try_resolve_gitlab_direct_shorthand,
+                resolve_artifactory_boundary=_resolve_artifactory_boundary,
                 auth_resolver=auth_resolver,
                 verbose=bool(logger and logger.verbose),
+                logger=logger,
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
@@ -483,7 +486,7 @@ def _resolve_package_references(
                         _seen.add(_s)
                         _normalized.append(_s)
                 dep_ref.skill_subset = _normalized
-            if marketplace_dep_ref is not None or direct_gitlab_virtual_resolved:
+            if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
             reason = str(e)
