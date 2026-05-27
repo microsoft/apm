@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install git@gitlab.com:owner/repo.git#ref` now succeeds for users with an SSH key and no `GITLAB_APM_PAT` / `GITLAB_TOKEN`. The validator previously ignored the explicit SSH transport on GitLab refs and demanded an HTTPS-token probe, which raised `Authentication failed for gitlab.com / No token available` even though the matching `dependencies.apm` entry in `apm.yml` installed cleanly via SSH. The validation path now mirrors the clone path (and the existing generic-host explicit-ssh arm) and honors `APM_ALLOW_PROTOCOL_FALLBACK=1` with SSH-first ordering. GitLab SSH-key users get the same frictionless install experience GitHub SSH users already had, matching `apm.yml` end-to-end. (closes #1501)
 - `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
 - `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
 
