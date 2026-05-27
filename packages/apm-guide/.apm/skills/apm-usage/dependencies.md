@@ -19,6 +19,10 @@ dependencies:
     - git@github.com:microsoft/apm-sample-package.git
     - git@gitlab.com:group/subgroup/repo.git
 
+    # SSH with non-default user (EMU accounts, servers where login != "git")
+    - myuser@host.example.com:owner/repo.git
+    - ssh://myuser@host.example.com/owner/repo.git
+
     # Custom ports (e.g. Bitbucket Datacenter, self-hosted GitLab)
     - ssh://git@bitbucket.example.com:7999/project/repo.git
     - https://git.internal:8443/team/repo.git
@@ -57,6 +61,12 @@ fallback enabled with `--allow-protocol-fallback`).
 - Use the `ssh://` form to specify an SSH port
   (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand
   `git@host:path` **cannot** carry a port -- the `:` is the path separator.
+- A non-`git` SSH user is honored when present in the dep URL
+  (e.g. `myuser@host:owner/repo.git` or `ssh://myuser@host/owner/repo.git`),
+  useful for EMU accounts or servers where the SSH login is not `git`.
+  Validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` with a 64-char cap;
+  percent-encoded userinfo is rejected. The user is presentation-only and
+  not part of dependency identity (does not perturb lockfile dedup).
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
   is set. Port is a transport detail, not part of the package identity --
   the same repo reachable on different ports dedupes to one entry.

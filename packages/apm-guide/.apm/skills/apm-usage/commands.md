@@ -33,7 +33,7 @@
 
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
 2. `apm.yml` `targets:` list (or singular `target:` sugar).
-3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf).
+3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf).
 
 `apm install` prints a one-line provenance summary before any mutation:
 

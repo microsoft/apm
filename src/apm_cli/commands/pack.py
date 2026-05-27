@@ -630,7 +630,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
     logger.warning(
-        "'apm unpack' is deprecated and will be removed in v0.14. "
+        "'apm unpack' is deprecated and will be removed in a future release. "
         "Use 'apm install <bundle-path>' instead.",
     )
     try:

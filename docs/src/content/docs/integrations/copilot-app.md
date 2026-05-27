@@ -132,7 +132,7 @@ There is none. The DB file is local; access is governed by your filesystem permi
 
 ## Schema compatibility
 
-APM guards writes with `PRAGMA user_version` and accepts the closed range `[13, 13]` today. If the App ships a newer schema, APM refuses to write and asks you to update APM rather than risk corruption.
+APM guards writes with `PRAGMA user_version`. Below the supported minimum (`13`) APM refuses to write, because the `workflows` table may not exist. Within the tested range (`13`–`15` today) writes proceed normally. Above the tested maximum APM warns once and continues — additive Copilot App schema bumps are overwhelmingly forward-compatible against APM's narrow write surface (the `workflows` table), so a release-window hard fail would block users for no benefit. If a future schema is found to break reads, that specific version will be added to a known-breaking list and hard-fail again.
 
 ## Concurrency
 
