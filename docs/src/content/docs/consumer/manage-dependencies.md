@@ -213,8 +213,9 @@ $ apm deps why -g shared-utils
 ```
 
 The [lockfile](#the-lockfile) is the source of truth -- the command is
-fully offline, walks `resolved_by` parents bottom-up, and prints one
-chain per direct dependency that transitively required the package:
+fully offline and walks the `resolved_by` parent chain bottom-up. The
+lockfile records a single resolved parent per package, so the output is
+one root-to-target chain (not a fan-out of every theoretical route):
 
 ```
 [i] acme-org/shared-utils@1.4.2  (transitive)

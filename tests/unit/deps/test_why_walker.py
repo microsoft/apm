@@ -62,7 +62,12 @@ def test_compute_why_transitive_dep_with_one_path():
     assert chain[1].parent_key == "acme/big"
 
 
-def test_compute_why_transitive_dep_with_multiple_paths():
+def test_compute_why_target_with_duplicate_repo_url_walks_recorded_parent():
+    # Two records share the same repo_url under different virtual_path keys.
+    # compute_why() operates on a single LockedDependency target and walks
+    # that record's lone recorded resolved_by parent -- it does NOT fan out
+    # to alternative parents that other duplicate records reference, since
+    # the lockfile schema records exactly one resolved_by per record.
     p1 = _direct("acme/big")
     p2 = _direct("acme/other")
     util1 = _transitive("acme/util", resolved_by="acme/big")
@@ -72,8 +77,7 @@ def test_compute_why_transitive_dep_with_multiple_paths():
     util2.is_virtual = True
     lf = _build([p1, p2, util1, util2])
 
-    # Picking util1 only finds the path via acme/big (compute_why operates
-    # on a single target record; multi-route diamond is exercised below).
+    # Picking util1 only finds the path via acme/big.
     result = compute_why(lf, util1)
     assert result.is_direct is False
     assert len(result.paths) == 1

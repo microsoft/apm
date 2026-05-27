@@ -97,6 +97,62 @@ class TestWhyHumanOutput:
             # ASCII tree marker (no Unicode box-drawing)
             assert "+--" in result.output
 
+    def test_why_human_output_has_no_trailing_blank_line(self, runner):
+        # Regression trap (PR #1495 review): _render_human() must not append
+        # its own trailing newline because click.echo() already adds one.
+        # A trailing newline in the returned string causes output to end
+        # with TWO newlines (i.e. one blank line at the end).
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            lf = _make_lockfile(
+                [
+                    LockedDependency(
+                        repo_url="acme/big", version="1.2.4", depth=1, resolved_by=None
+                    ),
+                    LockedDependency(
+                        repo_url="acme/util",
+                        version="1.4.2",
+                        depth=2,
+                        resolved_by="acme/big",
+                    ),
+                ]
+            )
+            _write_lockfile(tmp_path, lf)
+            with _cwd(tmp_path):
+                result = runner.invoke(cli, ["deps", "why", "acme/util"])
+            assert result.exit_code == 0, result.output
+            # Exactly one trailing newline (from click.echo); no blank line.
+            assert result.output.endswith("\n")
+            assert not result.output.endswith("\n\n")
+
+    def test_why_corrupt_chain_human_output_omits_declared_annotation(self, runner):
+        # Regression trap (PR #1495 review): when the recorded resolved_by
+        # parent is missing from the lockfile, the walker emits a truncated
+        # chain whose first edge still has parent_key set (NOT None).
+        # The renderer must NOT label that edge as "declared in apm.yml".
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            lf = _make_lockfile(
+                [
+                    # Note: acme/util references acme/big as parent, but
+                    # acme/big is NOT in the lockfile (corrupt/partial data).
+                    LockedDependency(
+                        repo_url="acme/util",
+                        version="1.4.2",
+                        depth=2,
+                        resolved_by="acme/big",
+                    ),
+                ]
+            )
+            _write_lockfile(tmp_path, lf)
+            with _cwd(tmp_path):
+                result = runner.invoke(cli, ["deps", "why", "acme/util"])
+            assert result.exit_code == 0, result.output
+            # acme/util is transitive (resolved_by != None) but the chain is
+            # truncated; nothing in the output should claim a "declared"
+            # annotation because no real root edge exists.
+            assert "declared in apm.yml" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # JSON output
@@ -132,6 +188,36 @@ class TestWhyJsonOutput:
             assert chain[0]["repo_url"] == "acme/big"
             assert chain[0]["is_direct"] is True
             assert chain[-1]["repo_url"] == "acme/util"
+
+    def test_why_json_corrupt_chain_marks_no_edge_as_direct(self, runner):
+        # Regression trap (PR #1495 review): is_direct must come from the
+        # walker (edge.parent_key is None), not from position (idx == 0).
+        # When the recorded parent is missing from the lockfile, the chain
+        # is truncated and NO edge represents a true direct dependency.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            lf = _make_lockfile(
+                [
+                    # Parent acme/big is intentionally absent.
+                    LockedDependency(
+                        repo_url="acme/util",
+                        version="1.4.2",
+                        depth=2,
+                        resolved_by="acme/big",
+                    ),
+                ]
+            )
+            _write_lockfile(tmp_path, lf)
+            with _cwd(tmp_path):
+                result = runner.invoke(cli, ["deps", "why", "acme/util", "--json"])
+            assert result.exit_code == 0, result.output
+            payload = json.loads(result.output)
+            assert payload["package"]["is_direct"] is False
+            for path in payload["paths"]:
+                for edge in path["chain"]:
+                    assert edge["is_direct"] is False, (
+                        f"no edge in a corrupt/truncated chain should be marked direct; got {edge}"
+                    )
 
     def test_why_json_not_installed_emits_error_payload(self, runner):
         with tempfile.TemporaryDirectory() as tmp:

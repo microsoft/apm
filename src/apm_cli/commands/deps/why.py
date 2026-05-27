@@ -95,12 +95,18 @@ def _render_human(result: WhyResult) -> str:
 
     for path in result.paths:
         for idx, edge in enumerate(path.chain):
-            is_root = idx == 0
+            # Root is determined by the absence of a recorded parent, NOT by
+            # position in the chain: compute_why() may emit truncated chains
+            # (missing parent in lockfile, cycle break, depth-cap hit) where
+            # the first element is NOT a real root. See PR #1495 review.
+            is_root = edge.parent_key is None
             annotation = _edge_annotation(edge, is_root=is_root)
-            prefix = "    " if is_root else ("    " + " " * (idx - 1) + "+-- ")
+            prefix = "    " if idx == 0 else ("    " + " " * (idx - 1) + "+-- ")
             lines.append(f"{prefix}{edge.child_key}{annotation}")
         lines.append("")  # blank line between chains
-    return "\n".join(lines).rstrip() + "\n"
+    # Caller uses click.echo() which appends its own newline; do not add one
+    # here or we emit a trailing blank line.
+    return "\n".join(lines).rstrip()
 
 
 def _render_json(result: WhyResult) -> str:
@@ -119,9 +125,12 @@ def _render_json(result: WhyResult) -> str:
                     {
                         "repo_url": edge.child_key,
                         "constraint": edge.constraint,
-                        "is_direct": idx == 0,
+                        # Directness is recorded by the walker as a missing
+                        # parent_key, not by position: a corrupt or
+                        # depth-capped chain may not start at a true root.
+                        "is_direct": edge.parent_key is None,
                     }
-                    for idx, edge in enumerate(path.chain)
+                    for edge in path.chain
                 ]
             }
             for path in result.paths
