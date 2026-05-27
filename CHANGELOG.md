@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
 - `apm unpack` deprecation banner softened from "will be removed in v0.14" to "will be removed in a future release". The previous wording shipped past v0.14.0 and contradicted reality (the command still ships in v0.15.0). A concrete removal version will be re-stated once a removal milestone is set.
 - `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
-- `apm uninstall` now correctly removes empty `.windsurf/skills/<pkg>/` directories on the `windsurf` target; previously the directory survived after all skill files were removed because two primitives (`agents` and `skills`) shared the same deploy path, routing cleanup through a file-only branch that silently dropped the directory error -- by @yoelabril (#1486)
+- `apm uninstall` now fully cleans `.windsurf/skills/<pkg>/` directories on the `windsurf` target (by @yoelabril, #1486). The deploy path itself will move to `.agents/skills/` per Cascade's native cross-agent discovery -- tracked in #1520.
 
 ## [0.15.0] - 2026-05-27
 
