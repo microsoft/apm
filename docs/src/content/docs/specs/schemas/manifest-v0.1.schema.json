@@ -45,6 +45,7 @@
               "insecure": { "type": "boolean" },
               "aliases": { "type": "array", "items": { "type": "string" } }
             },
+            "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },
             "additionalProperties": false
           }
         ]

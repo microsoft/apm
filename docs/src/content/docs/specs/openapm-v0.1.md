@@ -199,7 +199,7 @@ errata; a renumbering requires a minor version bump as defined in
 [Section 9.2](#92-breaking-vs-non-breaking-change-definition).
 
 Conformance classes are defined normatively in
-[Section 11.1](#111-conformance-classes); the four roles are
+[Section 11.1](#111-conformance-classes-normative); the four roles are
 **Producer**, **Consumer**, **Registry** (one MUST applies in
 v0.1; the wire contract remains reserved), and **Governance**.
 An implementation MUST declare which conformance class(es) it
@@ -236,7 +236,7 @@ type"), the definition section is cross-linked.
 | **Implementation-default host** | The host an implementation uses when the manifest omits `default_host:`. The choice is implementation-defined; see [Section 1.4](#14-terminology-preliminaries). |
 | **Wire-format host** | The host literal as it appears in a dependency identifier or lockfile entry after canonical normalisation. |
 | **Hash envelope** | A digest serialised as `<algo>:<hex>` (for example `sha256:abcd...`). See [req-lk-016](#req-lk-016). |
-| **Conformance class** | One of the four roles defined in [Section 11.1](#111-conformance-classes). |
+| **Conformance class** | One of the four roles defined in [Section 11.1](#111-conformance-classes-normative). |
 | **Conformant** | Satisfies all MUST-level requirements for a claimed conformance class. |
 | **Conforming file** | An OpenAPM file that parses without error under the rules of [Sections 4](#4-manifest-format-apmyml)-[6](#6-policy-format-apm-policyyml). |
 
@@ -894,7 +894,7 @@ The synthesized entry, when present in memory, has:
 
 This isolation prevents the orphan-cleanup logic of one dependency
 from removing files attributed to another (see
-[Section 10.6](#106-unverified-content-cleanup-file-integrators)).
+[Section 10.7](#107-unverified-content-cleanup-file-integrators)).
 
 ### 5.4 Lockfile versions (1, 2) and bumping rules
 
@@ -1444,7 +1444,7 @@ The conformance oracle for this section is
 | `^x.y.z`   | Compatible-with-X: matches `>= x.y.z, < (x+1).0.0` when `x > 0`; `>= 0.y.z, < 0.(y+1).0` when `x == 0` and `y > 0`; `>= 0.0.z, < 0.0.(z+1)` when `x == 0` and `y == 0`. |
 | `~x.y.z`   | Approximately equivalent: `>= x.y.z, < x.(y+1).0`. `~x.y` (no patch) is equivalent to `>= x.y.0, < x.(y+1).0`. |
 | `>=`, `>`, `<=`, `<`, `=` | Comparator-form: standard inequality on semver precedence.                               |
-| `x.y.z`, `*`, `latest` | Wildcard: any version (subject to pre-release exclusion). `latest` is commonly registered as a registry dist-tag; it is not a node-semver range operator. |
+| `x.y.z`, `*` | Wildcard: any version (subject to pre-release exclusion).                                  |
 | Range list (comma or whitespace) | Logical AND: `>=1.0.0, <2.0.0` matches versions satisfying both comparators.     |
 | `\|\|`     | Logical OR: `^1 \|\| ^2` matches versions satisfying either range list.                                 |
 | `x.y.z - a.b.c` | Hyphen range: equivalent to `>= x.y.z, <= a.b.c`.                                                 |
@@ -1790,7 +1790,7 @@ dependencies' versions MUST NOT replace the resolved primitive.
 ### 8.4 Target detection signals (normative)
 
 When the user has not specified a target via `--target` or in the
-manifest's `targets:` field, the consumer auto-detects from
+manifest's `target:` field, the consumer auto-detects from
 filesystem signals. The concrete table of per-target detection
 signals and deploy roots is published in the non-normative
 **"OpenAPM Target Registry v0.1"** companion document (see
@@ -1809,7 +1809,7 @@ identifier and for every vendor-registered identifier
 signal MAY substitute for, or augment, the registered predicate.
 `agent-skills` MUST NOT be auto-detected; it MUST be selected
 explicitly via `--target agent-skills` or via the manifest's
-`targets:` field. When no detection signal fires, the consumer MAY
+`target:` field. When no detection signal fires, the consumer MAY
 fall back to a `minimal` profile that emits `AGENTS.md` only.
 
 ### 8.5 Deploy directory contract (normative)
@@ -2183,7 +2183,7 @@ modes; and the registry HTTP wire envelope (alongside
 
 This specification defines four conformance classes; this section
 is the **sole normative home** for them. The forward pointer in
-[Section 2](#2-scope-and-conformance) is editorial.
+[Section 2](#2-conventions) is editorial.
 
 | Class        | Role                                                                                  |
 |--------------|---------------------------------------------------------------------------------------|
@@ -2543,7 +2543,7 @@ renumbering of conformance classes.
 | [req-mf-001](#req-mf-001)                | MUST    | 4.1     | producer    |
 | [req-mf-002](#req-mf-002)                | MUST    | 4.1     | producer    |
 | [req-mf-003](#req-mf-003)                | MUST    | 4.1     | producer    |
-| [req-mf-004](#req-mf-004)                | MUST    | 4.1     | producer    |
+| [req-mf-004](#req-mf-004)                | SHOULD  | 4.1     | producer    |
 | [req-mf-005](#req-mf-005)                | MUST    | 4.2.1   | producer    |
 | [req-mf-006](#req-mf-006)                | MUST    | 4.1     | consumer    |
 | [req-mf-007](#req-mf-007)                | MUST    | 4.3.1   | consumer    |
@@ -2650,11 +2650,12 @@ This appendix collects editorial notes that were inlined in the
 v0.1 first draft. They are non-normative; the section bodies they
 reference remain authoritative.
 
-**E.1 Manifest top-level `type` field.** [Section 4.2.2](#422-type)
-defines `type` (`agent` or `library`) as informational in v0.1; it
-exists so future minor revisions can attach normative semantics
-(for example, packaging filters per type) without a breaking
-schema change. v0.1 consumers MUST ignore the value.
+**E.1 Manifest top-level `type` field.** [Section 4.2.2](#422-type-advisory)
+defines `type` (with values `instructions`, `skill`, `hybrid`, or
+`prompts`) as informational in v0.1; it exists so future minor
+revisions can attach normative semantics (for example, packaging
+filters per type) without a breaking schema change. v0.1 consumers
+MUST ignore the value.
 
 **E.2 Target identifier reservation.** The target identifiers
 enumerated in the OpenAPM Target Registry companion are reserved

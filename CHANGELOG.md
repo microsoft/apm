@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - OpenAPM v0.1 normative specification at `docs/src/content/docs/specs/openapm-v0.1.md`, JSON Schemas for manifest/lockfile/policy, and conformance fixture seed tree under `tests/fixtures/spec-conformance/` (#1502).
+- `ref:` on git-source dependencies now accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). `apm install` runs `git ls-remote`, picks the highest tag matching the range, and pins the resolved tag, commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `apm install --update` to re-resolve against current remote tags. Two tag patterns are tried in order (`v{version}`, `{name}--v{version}`) with a bare `{version}` fallback. (closes #1488)
+- `apm deps why <package>` explains why a transitive dependency is installed by walking the lockfile's `resolved_by` chain back to the user's direct declaration in `apm.yml`. Supports `--global` for user-scope lockfiles and `--json` for scriptable output (JSON to stdout, all logs to stderr; analogue of `npm why` / `yarn why`). Exits `0` on success, `1` when the package isn't installed or the query is ambiguous, `2` when no lockfile exists. (#1490)
+
+### Fixed
+
+- `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
+- `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
 
 ## [0.15.0] - 2026-05-27
 

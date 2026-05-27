@@ -26,8 +26,8 @@
       "type": "object",
       "properties": {
         "allow": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
-        "deny": { "type": "array", "items": { "type": "string" } },
-        "require": { "type": "array", "items": { "type": "string" } },
+        "deny": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
+        "require": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
         "require_resolution": { "enum": ["project-wins", "policy-wins", "block"] },
         "max_depth": { "type": "integer", "minimum": 1 },
         "require_pinned_constraint": { "type": "boolean" }
