@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognised as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
+- `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
 
 ## [0.15.0] - 2026-05-27
 

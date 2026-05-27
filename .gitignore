@@ -80,3 +80,4 @@ scout-pipeline-result.png
 server.pid
 .docs-rewrite-plan/
 build/apm-*/
+copilot-scratch/
