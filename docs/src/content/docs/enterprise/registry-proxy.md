@@ -111,6 +111,129 @@ rewrites `apm.lock.yaml`.
 | `apm marketplace` (`marketplace.json` fetch) | Yes; falls back to GitHub Contents API unless `PROXY_REGISTRY_ONLY=1` |
 | Policy file fetch (`apm-policy.yml`) | No -- uses the GitHub API directly |
 
+### Nested-group repos (GitLab subgroups behind the proxy)
+
+GitHub uses a fixed `owner/repo` shape, but GitLab projects can sit at any
+subgroup depth (e.g. `group/subgroup/project`). When
+`PROXY_REGISTRY_ONLY=1` is set, APM treats path segments past the second
+as part of the repo slug; the real boundary between repo path and
+in-repo virtual sub-path is then settled at install time by the same
+deterministic boundary probe used for explicit FQDN deps (see
+[Explicit Artifactory FQDN](#explicit-artifactory-fqdn-deterministic-boundary-probe)
+below):
+
+```yaml
+# apm.yml -- 3-segment GitLab project behind a registry proxy
+dependencies:
+  apm:
+    - group/subgroup/project#main          # resolves to the full nested path
+    - group/sub-a/sub-b/project#v1.2.0     # arbitrary depth supported
+```
+
+Virtual sub-paths under nested-group repos work via the probe: parse
+defaults to all-as-repo, then the install-time resolver HEAD-probes
+candidate splits against the proxy and rebuilds the dependency
+reference at the first split whose archive responds 2xx-3xx:
+
+```yaml
+dependencies:
+  apm:
+    # The probe walks shallow-first and lands on the real boundary --
+    # ``group/subgroup/project`` is the repo, ``skills/<name>`` is the
+    # virtual sub-path -- no marker-segment heuristic involved.
+    - group/subgroup/project/skills/<name>
+    # Files ending in ``.prompt.md`` / ``.instructions.md`` /
+    # ``.chatmode.md`` / ``.agent.md`` are structurally a virtual file
+    # at parse time; the probe still confirms which directory the file
+    # sits under is part of the repo path.
+    - group/subgroup/project/<name>.prompt.md
+```
+
+Probe authentication matches the URL being probed: bare-shorthand deps
+(Mode 2) use the proxy's own bearer token from `PROXY_REGISTRY_TOKEN`,
+while explicit-FQDN deps (Mode 1) use the per-host auth resolver -- in
+both cases the audience matches the probed URL, never the upstream Git
+host.
+
+#### Trade-off: lockfile env-dependence
+
+The fold-into-repo behavior is gated on `PROXY_REGISTRY_ONLY` to keep the
+legacy two-segment shape for direct installs. Consequence: the same
+shorthand parses differently with vs. without the env set. For a team
+that always runs through the proxy, this is invisible. For a mixed CI
+fleet, expect lockfile drift if some agents have the env and others
+don't -- pin the env in the same place you pin Python and APM versions.
+
+#### Configuring the upstream remote (GitLab)
+
+When the proxy fronts a private GitLab instance, the proxy itself must
+authenticate upstream -- the client (APM) does not need a token if the
+proxy is configured to accept anonymous reads on its API.
+
+In the Artifactory UI, for the remote pointing at GitLab:
+
+| Field | Value |
+|---|---|
+| URL | `https://<gitlab-host>` (no path prefix) |
+| Repository Path Prefix | *blank* (any value gets prepended to every upstream request) |
+| Username | empty *or* the GitLab username |
+| Password / Token | the raw GitLab PAT value -- no `PRIVATE-TOKEN:` prefix |
+| Token Authentication | enable when the password is a GitLab PAT |
+| VCS Provider | `GitLab` |
+
+The PAT must carry **`read_repository`** scope -- `read_api` alone does
+not permit `/-/archive/` downloads. Verify directly against GitLab
+before saving on the remote:
+
+```bash
+curl -sI -H "PRIVATE-TOKEN: $PAT" \
+  "https://<gitlab-host>/<group>/<project>/-/archive/<ref>/<basename>-<ref>.zip" \
+  | head -3
+# Want: HTTP/1.1 200 OK + Content-Type: application/zip
+```
+
+#### Default branch gotcha
+
+APM defaults to `main` when no ref is provided. GitLab projects whose
+default branch is still `master` will return HTTP 404 for every archive
+URL APM tries. Pin the ref in `apm.yml` (`<repo>#master`) when the
+project hasn't been renamed.
+
+#### Explicit Artifactory FQDN: deterministic boundary probe
+
+When a dep is written with the full proxy URL --
+`<host>/artifactory/<key>/<owner>/<repo>[/<more>]` -- parse time gives a
+simple `owner / first-segment / rest-as-virtual` split. The real
+boundary is settled at install time by an authoritative resolver that
+mirrors APM's native GitLab probing pattern, without a separate metadata
+API:
+
+1. Enumerate every plausible `(owner, repo, virtual_path)` split
+   shallow-first.
+2. `HEAD` each candidate's archive URL on the proxy (no follow on
+   redirects, so the bearer token can't leak cross-host).
+3. The first candidate that responds 2xx-3xx wins; the dependency
+   reference is rebuilt at that boundary and persisted to `apm.yml` as
+   a structured `git:` + `path:` entry.
+
+If every candidate is rejected the resolver raises -- there is no
+silent fallback to the parse-time guess:
+
+| Result | Behaviour |
+|---|---|
+| Single candidate (e.g. `host/artifactory/key/owner/repo`) | Parse-time ref returned unchanged; no HEAD probe issued. |
+| All candidates `4xx` (excluding 401/403) | `ValueError: ... did not resolve to a reachable repository archive` |
+| All candidates `401`/`403` | `ValueError: ... authentication problem, not a missing repo` -- check the token's read scope. |
+
+To opt out of probing -- e.g. when the proxy is offline at install time
+or when you want a deterministic byte-for-byte string -- use the
+explicit `//` boundary marker, which short-circuits the resolver to a
+single candidate:
+
+```text
+<host>/artifactory/<key>/<owner>/<deep>/<slug>//<virtual/path>
+```
+
 When a surface is not proxy-routed and `PROXY_REGISTRY_ONLY=1`, APM
 aborts rather than silently fetching direct.
 
@@ -157,6 +280,10 @@ and `apm cache clean`.
 | `git clone` hangs through the proxy | `HTTPS_PROXY` not set in the env that runs `git` | Export it in the shell that invokes `apm install`; CI secrets often miss this |
 | `DeprecationWarning: ARTIFACTORY_BASE_URL is deprecated` | Legacy env names | Rename to `PROXY_REGISTRY_*` |
 | Plaintext-token warning on proxy startup | Token sent over `http://` | Use `https://`, or set `PROXY_REGISTRY_ALLOW_HTTP=1` if the link is internal-only |
+| `Invalid zip archive` with a body that starts `<!DOCTYPE html>` and is ~17KB | Upstream returned a sign-in page; proxy cached the HTML | Configure upstream credentials on the registry remote, purge the cache, then refetch |
+| 3-segment dep (`group/sub/project`) fails with HTTP 404 from the proxy | APM treated `project` as a virtual sub-path | Set `PROXY_REGISTRY_ONLY=1`; see [Nested-group repos](#nested-group-repos-gitlab-subgroups-behind-the-proxy) |
+| HTTP 404 on every ref of an existing GitLab project | Default branch is `master`, APM defaults to `main` | Pin the ref: `<repo>#master` in `apm.yml` |
+| Upstream URL in `X-Artifactory-Origin-Remote-Path` has a duplicated group name | The remote's "Repository Path Prefix" is prepending a segment that's also in the request | Clear the prefix field on the remote |
 
 For fully disconnected CI (no proxy reach at all), build a bundle on a
 connected host with `apm pack` and restore offline. See
