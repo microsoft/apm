@@ -84,7 +84,6 @@ class MarketplaceGroup(click.Group):
         "init",
         "check",
         "outdated",
-        "doctor",
         "publish",
         "package",
         "migrate",

@@ -1544,6 +1544,7 @@ def install(  # noqa: PLR0913
         _rich_error(str(e))
         if e.diagnostic_context:
             _rich_echo(e.diagnostic_context)
+        _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
         sys.exit(1)
     except DirectDependencyError as e:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
@@ -1750,12 +1751,14 @@ def _install_apm_packages(ctx, outcome):
             _rich_error(str(e))
             if e.diagnostic_context:
                 _rich_echo(e.diagnostic_context)
+            _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
             sys.exit(1)
         except FrozenInstallError as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
             _rich_error(str(e))
             for reason in e.reasons:
                 _rich_echo(reason)
+            _rich_info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
             sys.exit(1)
         except Exception as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
