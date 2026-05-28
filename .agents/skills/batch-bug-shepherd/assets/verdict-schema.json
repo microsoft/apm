@@ -84,13 +84,85 @@
         "pr": { "type": "integer", "minimum": 1 },
         "status": {
           "type": "string",
-          "enum": ["ready-to-merge", "blocked", "superseded"]
+          "enum": ["ready-to-merge", "advisory-with-deferred", "blocked", "superseded"]
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Outer-loop iteration count consumed by the shepherd-driver run. Cap is 4."
+        },
+        "copilot_rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Number of times the shepherd-driver fetched and classified copilot-pull-request-reviewer[bot] review. Cap is 2."
+        },
+        "copilot_findings": {
+          "type": "array",
+          "description": "Per-Copilot-comment classification log. Every Copilot comment seen this run appears here exactly once.",
+          "items": {
+            "type": "object",
+            "required": ["id", "classification", "rationale"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "path": { "type": "string" },
+              "line": { "type": "integer" },
+              "body_excerpt": { "type": "string", "maxLength": 400 },
+              "classification": { "type": "string", "enum": ["LEGIT", "NOT-LEGIT"] },
+              "rationale": { "type": "string", "maxLength": 240 },
+              "resolved_in": { "type": "string", "description": "Commit sha if folded." }
+            }
+          }
+        },
+        "panel_final_verdict": {
+          "type": "string",
+          "enum": ["ship_now", "ship_with_followups", "needs_discussion", "needs_rework"],
+          "description": "CEO stance from the final panel pass in this run."
+        },
+        "folded_items": {
+          "type": "array",
+          "description": "Every panel follow-up or Copilot LEGIT item the shepherd-driver folded into THIS PR per the fold-vs-defer rubric.",
+          "items": {
+            "type": "object",
+            "required": ["source", "summary", "resolved_in"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string", "enum": ["panel", "copilot"] },
+              "id": { "type": "string" },
+              "summary": { "type": "string", "maxLength": 400 },
+              "resolved_in": { "type": "string", "description": "Commit sha." }
+            }
+          }
+        },
+        "deferred_items": {
+          "type": "array",
+          "description": "Items NOT folded because they crossed the stated-scope boundary. Each MUST carry a one-line scope_boundary_crossed note.",
+          "items": {
+            "type": "object",
+            "required": ["source", "summary", "scope_boundary_crossed"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string", "enum": ["panel", "copilot"] },
+              "id": { "type": "string" },
+              "summary": { "type": "string", "maxLength": 400 },
+              "scope_boundary_crossed": { "type": "string", "maxLength": 240 },
+              "suggested_followup_issue": { "type": "string" }
+            }
+          }
+        },
+        "ci_iterations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "description": "CI-recovery fix iterations consumed this run. Cap is 3."
         },
         "superseded_by": { "type": "integer", "minimum": 1 },
         "supersedes": { "type": "integer", "minimum": 1 },
         "ci_evidence": {
           "type": "string",
-          "description": "CI run URL or `gh pr checks` summary; required when status=ready-to-merge."
+          "description": "CI run URL or `gh pr checks` summary; required when status in {ready-to-merge, advisory-with-deferred}."
         },
         "lint_evidence": {
           "type": "string",
@@ -112,12 +184,36 @@
         "blocker": {
           "type": "string",
           "description": "Required when status=blocked. One-paragraph human-readable explanation."
+        },
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Full sha of the last commit the shepherd-driver pushed for this PR. Recorded at terminal so the orchestrator can aggregate the mergeability table against the same revision the advisory describes."
+        },
+        "mergeable": {
+          "type": "string",
+          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"],
+          "description": "GitHub `mergeable` field from `gh pr view --json mergeable`. Captured at terminal per shepherd-driver step X.8."
+        },
+        "merge_state_status": {
+          "type": "string",
+          "enum": ["CLEAN", "BLOCKED", "BEHIND", "DIRTY", "UNSTABLE", "HAS_HOOKS", "UNKNOWN"],
+          "description": "GitHub `mergeStateStatus` from `gh pr view --json mergeStateStatus`. Captured at terminal per shepherd-driver step X.8."
+        },
+        "ci_status": {
+          "type": "string",
+          "enum": ["green", "yellow", "red", "blocked"],
+          "description": "Coarse projection of `statusCheckRollup` at terminal. `green`=all conclusions in {SUCCESS, NEUTRAL, SKIPPED}; `yellow`=any check still pending/in_progress/queued; `red`=any conclusion in {FAILURE, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}; `blocked`=empty rollup or all cancelled."
         }
       },
       "allOf": [
         {
           "if": { "properties": { "status": { "const": "ready-to-merge" } } },
           "then": { "required": ["ci_evidence", "lint_evidence"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "advisory-with-deferred" } } },
+          "then": { "required": ["ci_evidence", "deferred_items"] }
         },
         {
           "if": { "properties": { "status": { "const": "blocked" } } },

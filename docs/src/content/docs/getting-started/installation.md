@@ -278,4 +278,4 @@ pip install --user apm-cli
 
 ## Next steps
 
-See the [Quick Start](../quick-start/) to set up your first project.
+See the [Quickstart](/apm/quickstart/) to set up your first project.

@@ -33,7 +33,7 @@
 
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
 2. `apm.yml` `targets:` list (or singular `target:` sugar).
-3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf).
+3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf).
 
 `apm install` prints a one-line provenance summary before any mutation:
 
@@ -52,6 +52,10 @@ If no `--target`, no `targets:` in `apm.yml`, and no harness signal is present, 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm compile` | Compile agent context | `-o` output, `-t` target (comma-separated; resolution chain `--target` > apm.yml `targets:` > auto-detect), `--all` compile for every canonical target (preferred over deprecated `--target all`), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution` |
+
+`apm compile --watch` live-reloads `apm.yml`: editing `target:` / `targets:` mid-session takes effect on the next file event without restarting the watcher. The CLI `--target` flag, when passed to `apm compile --watch`, still outranks `apm.yml`. Re-resolution is gated on the changed file's basename being `apm.yml`, so `.instructions.md` edits do not pay an extra resolver round-trip and a stray `backup_apm.yml` cannot trigger a reload. `--clean` is ignored in watch mode and the watcher prints an explicit `[!]` warning at startup (`--clean is ignored in watch mode; run 'apm compile --clean' separately to remove orphaned outputs.`); run `apm compile --clean` separately between watch sessions to remove orphans.
+
+When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the Project Standards section from `CLAUDE.md` to avoid Claude Code seeing every instruction twice. Detection is a simple glob (`.claude/rules/*.md`). `CLAUDE.md` is still generated when it carries a constitution block or dependency `@import` paths -- only the instructions section is suppressed. An informational log message is emitted when zero `CLAUDE.md` files are generated because all content was already deployed via rules.
 
 ## Scripts
 
@@ -77,6 +81,35 @@ If no `--target`, no `targets:` in `apm.yml`, and no harness signal is present, 
 | `apm unpack BUNDLE` | **[Deprecated]** Extract a bundle. Use `apm install <bundle-path>` instead -- it deploys directly with integrity verification and target resolution. | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
 
 `apm install <BUNDLE-PATH>` -- when the positional argument resolves to a directory containing `plugin.json` at its root, or to a `.tar.gz`/`.tgz` archive whose extracted root contains `plugin.json`, install switches to local-bundle mode: the bundle is integrity-verified against its embedded `apm.lock.yaml` (`pack.bundle_files`) and deployed into the consumer's resolved target. Target resolution follows the same precedence as registry installs (`--target` > `apm.yml` > directory detection); the bundle itself carries no target binding. Compile-only targets (opencode, codex, gemini) receive instructions staged under `apm_modules/<slug>/.apm/instructions/` and the install emits a hint to run `apm compile` to merge them. Other existing paths (e.g. a source-package directory without `plugin.json`) still flow through the normal local-path dependency-resolver pipeline. Files are recorded under `local_deployed_files` in the project lockfile -- `apm.yml` is **never** mutated. Honours `--target`, `--global`, `--force`, `--dry-run`, `--verbose`, plus `--as ALIAS` (log/display label only). Resolver/MCP/registry/policy flags (`--update`, `--mcp`, `--parallel-downloads`, `--allow-insecure-host`, `--skill`, ...) are rejected with a single consolidated error -- local-bundle install is an imperative deploy and bypasses those subsystems.
+
+## Registry publishing (experimental)
+
+Behind `apm experimental enable registries`. Pushes a package version to a REST-based APM registry declared in `apm.yml`'s `registries:` block.
+
+| Command | Purpose | Key flags |
+|---------|---------|-----------|
+| `apm publish` | Auto-pack a flat registry archive (`apm.yml` + `.apm/` at the tarball root) and upload to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Different layout from `apm pack` (no `plugin.json` wrapper). | `--registry NAME` (required when multiple registries are configured), `--package OWNER/REPO` (override the identity parsed from `source:` in `apm.yml`), `--tarball PATH` (skip auto-pack and upload a pre-built `.tar.gz`), `--dry-run`, `-v`/`--verbose` |
+
+Examples:
+
+```bash
+# Auto-pack and publish when only one registry is configured
+apm publish
+
+# Choose a registry when multiple are configured, preview first
+apm publish --registry corp-main --dry-run -v
+apm publish --registry corp-main
+
+# Publish a pre-built tarball (skill-only or custom layout)
+apm publish --tarball ./build/my-package-1.0.0.tar.gz --registry corp-main
+
+# Override owner/repo when `source:` is absent or wrong
+apm publish --package acme/my-package --registry corp-main
+```
+
+Exit codes: `0` published (or `--dry-run` ok), `1` publish failure (missing `apm.yml`/`.apm/`, auth `401`/`403`, version conflict `409`, server validation `422`, network/registry error, registries feature disabled), `2` usage error (cannot infer `owner/repo`, multiple registries without `--registry`, unknown `--registry` name, invalid flag combination).
+
+Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set registry.<name>.token`); see `authentication.md` for the full registry token chain.
 
 ## Marketplace (consumer)
 
@@ -118,6 +151,8 @@ To build the marketplace, run `apm pack` (it reads `apm.yml` and writes `.claude
 | `apm mcp list` | List MCP servers in project | `--limit N` |
 | `apm mcp search QUERY` | Search MCP registry | `--limit N` |
 | `apm mcp show SERVER` | Show server details | -- |
+
+Self-defined stdio MCP entries declared in `apm.yml` (`env:` / `args:`) have their placeholders resolved at install time on Codex, Gemini, Cursor, and Copilot CLI -- which have no runtime interpolation. All three syntaxes are accepted: `${VAR}`, `${env:VAR}`, and the legacy `<VAR>`. Missing variables fall back to an interactive prompt (suppressed in non-TTY contexts). VS Code targets keep `${env:VAR}` / `${input:VAR}` verbatim because VS Code resolves them natively. See [Manifest schema -- MCP placeholder syntaxes](https://microsoft.github.io/apm/reference/manifest-schema/) for the per-target matrix.
 
 Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL is validated at startup and must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. The registry must implement the [MCP Registry v0.1 spec](https://github.com/modelcontextprotocol/registry) (apm calls `/v0.1/servers/...`); legacy `/v0/`-only registries will return 404. When the override is set and the registry is unreachable during install pre-flight, APM fails closed.
 
@@ -161,10 +196,14 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm config` | Show current configuration | -- |
-| `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `copilot-cowork-skills-dir`) | -- |
-| `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
-| `apm config unset KEY` | Remove a stored config value (`temp-dir`, `copilot-cowork-skills-dir`) | -- |
+| `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`) | -- |
+| `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
+| `apm config unset KEY` | Remove a stored config value (`temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`) | -- |
 | `apm update` | Refresh APM dependencies in the current project: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged), and prompts before mutating anything (default `[y/N]`). Skips the prompt with `--yes`; previews without changes with `--dry-run`. | `--yes`, `--dry-run`, `--verbose` |
 | `apm self-update` | Update the APM CLI itself (or show distributor guidance when self-update is disabled at build time). | `--check` only check |
+
+`apm config set prefer-ssh true` and `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users no longer need to re-pass `--ssh` / `--allow-protocol-fallback` on every `apm install`. Resolution order: CLI flag > `APM_GIT_PROTOCOL` / `APM_ALLOW_PROTOCOL_FALLBACK` env var > `apm config` value > built-in default (`false`). `apm config unset prefer-ssh` and `apm config unset allow-protocol-fallback` remove the persisted value. In `apm config` / `apm config get` (no key), the two transport rows surface only when they have been enabled (the `false`-default rows are suppressed to keep the output noise-free); `apm config get <key>` always returns the effective value. Setting `allow-protocol-fallback=true` while `CI=1` emits a warning because the persisted value affects every subsequent `apm install` on a shared `$HOME`; prefer the env var in CI.
+
+`apm self-update` shares the Windows installer codepath used by `install.ps1`: it stages the new release under `%LOCALAPPDATA%\Programs\apm\releases\<tag>` before running `apm.exe --version`, so an AppLocker / WDAC allow-list rule for `%LOCALAPPDATA%\Programs\apm\*` suffices. When the smoke test fails with HRESULT `0x80070005` (`Access is denied`), the installer emits a specific AppLocker/WDAC diagnostic with three remediations (allow-list rule, set `APM_TEMP_DIR` to an allow-listed path, or fall back to `pip install --user apm-cli`) instead of silently retrying via pip.
 
 `apm config set copilot-cowork-skills-dir <absolute-path>` persists the Cowork skills directory across shells. `apm config get copilot-cowork-skills-dir` and `apm config unset copilot-cowork-skills-dir` remain available even when the `copilot-cowork` flag is disabled so leftover state can still be inspected or cleared. In `apm config` and bare `apm config get`, the `copilot-cowork-skills-dir` entry is shown only when the `copilot-cowork` flag is enabled.

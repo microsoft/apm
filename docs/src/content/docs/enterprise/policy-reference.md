@@ -40,7 +40,7 @@ mcp:
 
 compilation:
   target:
-    allow: []                   # vscode | claude | cursor | opencode | codex | all
+    allow: []                   # copilot | claude | cursor | opencode | codex | gemini | vscode | windsurf | agent-skills | all
     enforce: null               # Enforce specific target (must be present in list)
   strategy:
     enforce: null               # distributed | single-file
@@ -915,5 +915,5 @@ manifest:
 ## Related
 
 - [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
-- [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI setup tutorial
+- [Enforce in CI](../enforce-in-ci/) -- step-by-step CI setup tutorial
 - [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check

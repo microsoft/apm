@@ -603,7 +603,7 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
     name="unpack",
     help=(
         "[Deprecated] Extract an APM bundle into the current project. "
-        "Use 'apm install <bundle-path>' instead -- this command will be removed in v0.14."
+        "Use 'apm install <bundle-path>' instead -- this command will be removed in a future release."
     ),
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
@@ -630,7 +630,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
     logger.warning(
-        "'apm unpack' is deprecated and will be removed in v0.14. "
+        "'apm unpack' is deprecated and will be removed in a future release. "
         "Use 'apm install <bundle-path>' instead.",
     )
     try:

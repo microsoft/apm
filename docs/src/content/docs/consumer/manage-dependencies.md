@@ -62,6 +62,7 @@ parser. The supported forms:
 | HTTPS git URL | `https://gitlab.com/acme/repo.git` | Explicit URL, any host. |
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
+| SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
 | Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
@@ -93,7 +94,7 @@ For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
-[Private registries](../../guides/private-registries/).
+[Registries](../../guides/registries/).
 
 ## Add a dependency
 

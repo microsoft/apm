@@ -40,6 +40,8 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
 | `--marketplace-output PATH` | _(hidden)_ | **Deprecated.** Translates to `--marketplace-path claude=PATH` with a stderr warning. Will be removed in v0.15 (see #1318). |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
+| `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
+| `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp path and diff against the on-disk file. Exits `4` if the working tree is dirty (out-of-date `marketplace.json`). The gate itself never writes to disk. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
 ## Examples
@@ -145,6 +147,8 @@ Configure marketplace artifact paths in `apm.yml`: `marketplace.claude.output` c
 | `0` | Success. Requested artifacts written (or, with `--dry-run`, planned). |
 | `1` | Build or runtime error: network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
 | `2` | `apm.yml` schema validation error. |
+| `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
+| `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file). |
 
 ## Related
 

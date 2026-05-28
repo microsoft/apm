@@ -141,6 +141,8 @@ target:
 
 When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets. `all` cannot be combined with other values.
 
+A plural alias `targets:` (YAML list only) is also accepted and takes precedence over the legacy CSV form when both are declared. Prefer `targets:` in new manifests; `target:` remains supported for backward compatibility.
+
 | Value | Effect |
 |---|---|
 | `vscode` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode). |
@@ -358,7 +360,7 @@ dependencies:
 
 #### 4.1.2. Object Form
 
-REQUIRED when the shorthand is ambiguous (e.g. nested-group repos with virtual paths).
+REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with virtual paths). NOT required for nested-group deps that route through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`): the install-time boundary probe HEAD-walks candidate splits against the proxy and locks in the first one whose archive responds. See [Registry proxy guide](../../enterprise/registry-proxy/#nested-group-repos-gitlab-subgroups-behind-the-proxy).
 
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
@@ -574,7 +576,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
 | `target` | `enum<string>` | `all` | Same values as Section 3.6 | Output target. Defaults to `all` when set explicitly in compilation config. |
-| `strategy` | `enum<string>` | `distributed` | `distributed`, `single-file` | `distributed` generates per-directory `AGENTS.md` files. `single-file` generates one monolithic file. |
+| `strategy` | `enum<string>` | `distributed` | `distributed`, `single-file` | `distributed` generates per-directory target files (e.g. `AGENTS.md`, `CLAUDE.md`). `single-file` generates one monolithic file at `output`. |
 | `single_file` | `bool` | `false` | | Legacy alias. When `true`, overrides `strategy` to `single-file`. |
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
 | `chatmode` | `string` | unset | | Chatmode filter for compilation. |

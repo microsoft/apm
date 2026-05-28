@@ -65,8 +65,9 @@ apm compile --dry-run            # print placement decisions without writing fil
 ```
 
 `--validate` is the fastest signal that an instruction parses.
-`--dry-run` shows you exactly which AGENTS.md tree would be written
-where. `--watch` is the tight inner loop while you edit prose.
+`--dry-run` shows you exactly which root-context tree (`AGENTS.md`,
+`CLAUDE.md`, ...) would be written where. `--watch` is the tight inner
+loop while you edit prose.
 
 To preview a script that wraps a `.prompt.md` file, use
 [`apm preview`](../preview-and-validate/) instead. `apm compile` builds
@@ -121,8 +122,6 @@ Per target, with the rules shape on disk after compile:
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
-
-> **Claude deduplication**: When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the instructions section from `CLAUDE.md` to avoid duplicate content in Claude Code's context window. `CLAUDE.md` is still generated if it carries a constitution or dependency `@import` paths.
 
 ## compile vs install
 

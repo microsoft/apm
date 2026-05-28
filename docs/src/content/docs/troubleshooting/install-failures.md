@@ -100,7 +100,7 @@ curl -u ":${ADO_APM_PAT}" \
 
 A `200` here with a failing `apm install` points at precedence (a higher-priority var is set to a different token). Run `apm install --verbose` to see which source APM picked.
 
-For end-to-end auth setup see [Authentication](../enterprise/authentication/).
+For end-to-end auth setup see [Authentication](../getting-started/authentication/).
 
 ## 2. Network and TLS
 

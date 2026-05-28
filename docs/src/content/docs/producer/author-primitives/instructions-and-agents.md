@@ -128,8 +128,8 @@ name: security-review
 description: Reviews diffs for OWASP top-10 issues and missing input validation.
 model: gpt-5
 tools:
-  - read
-  - grep
+  Read: true
+  Grep: true
 ---
 
 You are a security reviewer. Your job is to inspect the working diff
@@ -142,11 +142,21 @@ for...
 | `description` | yes | Used by Cascade and Copilot to decide when to surface the agent |
 | `model` | optional | Pinned model the harness should switch to when invoked |
 | `tools` | optional | Whitelist of tools the persona may call |
+| `color` | optional | Display color for harnesses that render it (Copilot, Claude, OpenCode). OpenCode requires a `#rgb`/`#rrggbb` hex literal or one of its theme names; see "Common pitfalls" below |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
-verbatim. Codex receives a TOML translation. Windsurf drops both
-fields and emits a diagnostic warning at install time -- its skill
-format does not support per-persona model or tool scoping.
+verbatim. Codex receives a TOML translation. Windsurf and Gemini do
+not receive `.agent.md` files at all -- Cascade auto-invokes any
+`SKILL.md` by its description, and Gemini CLI has no agents primitive.
+
+OpenCode is the strictest of the verbatim targets: it requires
+`tools` as a `tool-name: boolean` **mapping** (not a list, not a
+string) and `color` to be either a `#rrggbb` hex literal or one of
+its theme names (`primary`, `secondary`, `accent`, `success`,
+`warning`, `error`, `info`). `apm install -t opencode` warns at
+install time when an agent ships shapes OpenCode would reject at
+load time -- the file is still deployed, but the warning names the
+offending package and field so you can fix the source.
 
 ### Body conventions
 
@@ -169,8 +179,19 @@ format does not support per-persona model or tool scoping.
 | cursor | `.cursor/agents/<name>.md` | verbatim |
 | opencode | `.opencode/agents/<name>.md` | verbatim |
 | codex | `.codex/agents/<name>.toml` | YAML frontmatter -> TOML; body becomes `developer_instructions` |
-| windsurf | `.windsurf/skills/<name>/SKILL.md` | reformatted as a Cascade skill; `model`/`tools` dropped with a warning |
+| windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
 | gemini | not deployed | Gemini CLI has no agents primitive |
+
+:::caution[Migration]
+Earlier APM versions compiled `.apm/agents/*.agent.md` to
+`.windsurf/skills/<name>/SKILL.md` with `model` and `tools`
+frontmatter stripped. That mapping has been removed: agents no
+longer deploy to Windsurf at all. If you previously relied on it
+and the persona still needs to reach Windsurf, re-author it as a
+skill under `.apm/skills/<name>/SKILL.md` -- Cascade auto-invokes
+skills by their `description` field, which is the same surface
+the agent path was using.
+:::
 
 Source: `src/apm_cli/integration/agent_integrator.py`,
 `src/apm_cli/integration/targets.py`.
@@ -202,10 +223,18 @@ dedicated persona.
   will not bind.
 - **Agent named `default` or `start`.** These collide with script
   resolution in `apm run`. Pick a descriptive name.
-- **`model:` and `tools:` on a Windsurf-targeted agent.** Cascade has
-  no equivalent; APM warns and drops them. If those constraints are
-  load-bearing, do not target windsurf for that agent -- ship it as
-  an instruction instead, or restrict the package's `targets:`.
+- **Targeting an agent at Windsurf or Gemini.** Neither harness has an
+  agents primitive. Cascade auto-invokes skills by description and
+  Gemini folds context into `GEMINI.md`. If a persona must reach those
+  targets, author it as a skill under `.apm/skills/<name>/SKILL.md`.
+- **`tools:` as a list, or a named color, on an OpenCode-targeted
+  agent.** OpenCode's loader rejects `tools: [Read, Grep]` and
+  colors like `cyan`. Use the mapping form (`tools: {Read: true}`)
+  and either a `#rrggbb` hex literal or one of OpenCode's theme
+  names (`primary, secondary, accent, success, warning, error,
+  info`). `apm install -t opencode` will warn at install time when
+  it detects either shape; the file still deploys but OpenCode will
+  refuse to load it.
 - **Agent body that re-states global instructions.** Agents inherit
   the workspace's compiled context. Restate only what the persona
   needs to *override* or *add*; do not duplicate `python-style`

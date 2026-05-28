@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-APM supports four package layouts, each with distinct install semantics.
+APM supports five package layouts, each with distinct install semantics.
 Pick the layout that matches the author's intent -- APM preserves it.
 
 ## Layout summary
@@ -14,6 +14,7 @@ Pick the layout that matches the author's intent -- APM preserves it.
 | `.apm/` (with or without apm.yml) | "I have N independent primitives" | Hoist each primitive into the target's runtime dirs |
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
+| `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
 | `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 
 ## APM package (`.apm/` directory)
@@ -160,6 +161,29 @@ dependencies:
 **When to choose:** you maintain a curated collection of independent skills
 in one repository (e.g. all Azure skills, all Firebase skills). Consumers
 can install the full set or cherry-pick with `--skill`.
+
+## Hook package (`hooks/*.json` only)
+
+A package whose root contains `hooks/*.json` files but no `apm.yml`,
+`SKILL.md`, or `plugin.json`. APM treats the whole directory as a hook
+bundle: each hook JSON is deployed to the target's runtime hooks
+directory.
+
+```
+my-hooks/
++-- hooks/
+    +-- pre-commit.json
+    +-- post-merge.json
+```
+
+**What gets installed:** every file under `hooks/` is deployed to the
+target's hooks runtime path (e.g. `.github/hooks/` for Copilot,
+`.claude/hooks/` for Claude).
+
+**When to choose:** you ship a set of harness hooks with no other
+primitives. If you also ship skills or instructions, prefer the `.apm/`
+layout and put your hooks under `.apm/hooks/` so they install alongside
+the rest.
 
 ## Plugin collection (`plugin.json`)
 

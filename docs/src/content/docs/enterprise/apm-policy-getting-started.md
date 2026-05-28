@@ -151,9 +151,11 @@ parent that says `block`.
 
 Discovery and enforcement run as a preflight on every install path:
 `apm install`, `apm install <pkg>`, `apm install --mcp`,
-`apm install --dry-run`. The same checks run during `apm compile` and
-`apm audit`. See [../../concepts/lifecycle/](../../concepts/lifecycle/)
-for where the gate sits in the install pipeline.
+`apm install --dry-run`. The same checks also run under
+`apm audit --ci --policy <source>`. `apm compile` and `apm run`
+enforce zero policy -- they trust what install placed on disk. See
+[../../concepts/lifecycle/](../../concepts/lifecycle/) for where the
+gate sits in the install pipeline.
 
 For CI gating that runs even when a developer passes `--no-policy`
 locally, wire `apm audit --ci --policy org` into your pipeline. See

@@ -158,7 +158,7 @@ apm config get registry.corp-main.default
 apm config unset registry.corp-main.token
 ```
 
-With URL, token, and default set in `config.json`, a project can omit the top-level `registries:` block from `apm.yml` and still route shorthand deps through `corp-main`. See [Private registries](../../../guides/private-registries/).
+With URL, token, and default set in `config.json`, a project can omit the top-level `registries:` block from `apm.yml` and still route shorthand deps through `corp-main`. See [Registries](../../../guides/registries/).
 
 ## Configuration file
 
@@ -174,4 +174,4 @@ Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `allow_protocol
 - [`apm compile`](../compile/) -- affected by `auto-integrate`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
 - [Environment variables](../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK`, `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys.
-- [Private registries](../../../guides/private-registries/) -- full private registry setup guide.
+- [Registries](../../../guides/registries/) -- full private registry setup guide.

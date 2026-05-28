@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::caution[Deprecated]
-`apm unpack` is deprecated and scheduled for removal in v0.14. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the only deploy path for legacy `--format apm` tarballs (see [Behavior](#behavior)).
+`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the only deploy path for legacy `--format apm` tarballs (see [Behavior](#behavior)).
 :::
 
 ## Synopsis

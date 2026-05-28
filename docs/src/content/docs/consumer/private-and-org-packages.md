@@ -161,8 +161,11 @@ dependencies:
       ref: v1.0.0
 ```
 
-Token: `BITBUCKET_APM_PAT` (HTTPS) or your SSH key (SSH form). Sourcehut
-(`~user` path convention) works the same way.
+Token: your git credential helper (`git credential-manager`, macOS
+Keychain, `gh auth login`, etc.) for the HTTPS form, or your SSH key
+for the SSH form. There is no Bitbucket-specific `*_APM_PAT` -- APM
+shells out to `git` and inherits whatever credentials git already
+knows. Sourcehut (`~user` path convention) works the same way.
 
 ## Pre-fetched bundles (offline / air-gapped)
 

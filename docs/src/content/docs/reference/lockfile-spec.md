@@ -116,7 +116,7 @@ Each item in `dependencies` describes one resolved package.
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
 | `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. |
-| `package_type` | string | no | Kind of package: `apm`, `skill_bundle`, etc. Drives target placement. |
+| `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. |
 | `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Directory entries (trailing `/`) have no hash. |

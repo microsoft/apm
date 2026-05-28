@@ -202,28 +202,14 @@ apm install
 APM_REGISTRY_TOKEN_CORP_MAIN=eyJ... apm install --frozen
 ```
 
-See [Private registries](../../../guides/private-registries/) for the full setup guide.
-
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| `0` | Success. All requested dependencies and local content deployed. |
-| `1` | Install failure: security scan blocked a critical finding, auth error, manifest write error, dependency resolution error, `--frozen` with a missing lockfile or a direct dependency absent from `apm.lock.yaml`, any reported install error (the diagnostic summary closes with `Installation failed with N error(s)`), or unhandled exception. `--force` does **not** suppress general install errors. The diagnostic summary names the cause. |
-| `2` | Usage error: no deployment target detectable (no `--target`, no `targets:` in `apm.yml`, no harness signal in the project), `--ssh` and `--https` both passed, `--frozen` and `--update` both passed, or a Click flag conflict. |
-
-## Notes
-
-- **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** suppress general install errors -- any error reported in the diagnostic summary still exits `1` (matches `npm` / `pip` / `cargo`). It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate findings, prefer `apm audit --strip`. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
-- **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
-- **Copilot CLI env-var passthrough.** When deploying MCP entries to `~/.copilot/mcp-config.json`, `${env:VAR}` and `<VAR>` placeholders are translated to `${VAR}` so Copilot CLI resolves them at server-start. Plaintext secrets are never written to disk. Other targets currently resolve placeholders at install time.
+See [Registries](../../../guides/registries/) for the full setup guide.
 
 ## Related
 
 - [`apm update`](../update/) -- refresh dependencies in `apm.yml` to their latest matching refs, with a consent gate.
 - [`apm self-update`](../self-update/) -- upgrade the `apm` CLI binary itself.
 - [`apm prune`](../prune/) -- remove orphaned packages and stale files.
-- [Private registries](../../../guides/private-registries/) -- end-to-end guide for registry-sourced dependencies.
+- [Registries](../../../guides/registries/) -- end-to-end guide for registry-sourced dependencies.
 - [`apm audit`](../audit/) -- explicit security reporting and remediation after install.
 - [`apm targets`](../targets/) -- print which harnesses APM detects in the current directory.
 - [Install packages (consumer guide)](../../../consumer/install-packages/) -- task-oriented walkthrough.

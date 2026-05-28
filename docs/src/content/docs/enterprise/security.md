@@ -73,7 +73,7 @@ The experimental `registries` feature adds REST-based package sources. When enab
 - **No SBOM or provenance attestations.** The lockfile records resolved version and hash, which is suitable for internal audit, but is not a standards-format SBOM (SPDX/CycloneDX) and does not include SLSA provenance.
 - **SHA-256 floor only.** The hash algorithm is fixed at SHA-256 with no upgrade path to SHA-384/512.
 
-Do not represent this feature as "supply-chain secure," "tamper-proof," "SLSA-compliant," or "signed" in compliance documentation or vendor assessments. The appropriate framing is **APM dependency governance**: controlled sources, locked versions, and byte-level verification.
+APM provides **dependency governance**: controlled sources, locked versions, and byte-level verification of downloaded content. It does not sign packages or emit SLSA-compliant provenance. Treat installed packages with the same diligence you apply to any external dependency, and describe the guarantees as **APM dependency governance** in compliance documentation rather than as supply-chain signing or attestation.
 
 ### HTTP (insecure) dependencies
 
@@ -137,7 +137,7 @@ Content scanning extends beyond install:
 
 - **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
 - **`apm pack`** scans files before bundling. This catches hidden characters before a package is published, preventing authors from accidentally distributing tainted content.
-- **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED and scheduled for removal in v0.14; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../../guides/pack-distribute/).)
+- **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../../producer/pack-a-bundle/).)
 
 ### On-demand scanning
 
