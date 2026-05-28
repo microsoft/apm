@@ -65,6 +65,13 @@ def test_lockfile_dependency_carries_resolved_field():
         assert key in entry_props, f"entry MUST permit `{key}`"
     doc = load_yaml_fixture(*V1)
     assert doc["dependencies"][0].get("resolved_commit")
+    # Canonical-emission ordering pin (round-3 fold): writers MUST
+    # canonicalise `dependencies` in ascending (repo_url, virtual_path)
+    # order so frozen-install diffs are stable across implementations.
+    assert_spec_contains(
+        "MUST be\nordered ascending lexicographically",
+        "MUST canonicalise to the pinned",
+    )
 
 
 @pytest.mark.req("req-lk-006")

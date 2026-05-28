@@ -256,6 +256,8 @@ def test_consumer_resolves_credentials_per_host_class():
     assert_spec_contains(
         "resolve credentials per host class",
         "MUST NOT forward a credential",
+        # Cross-host-class redirect drop (round-3 fold):
+        "MUST drop the originating Authorization header",
     )
 
 

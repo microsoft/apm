@@ -1,0 +1,18 @@
+# Critical paths for the OpenAPM Mode B (silent-extension) detector.
+#
+# A PR adding substantive net-new code under any path below MUST land
+# with a matching spec citation (anchor + manifest row + pytest marker),
+# or an explicit `apm-spec-waiver:` trailer in the PR body or a commit
+# message. See CONTRIBUTING.md (Mode B section) and
+# tests/spec_conformance/mode_b_detector.sh.
+#
+# Editing this allowlist is itself a critical-path edit; reviewers
+# should treat any add/remove here as requiring justification.
+
+src/apm_cli/primitives/
+src/apm_cli/deps/
+src/apm_cli/policy/
+src/apm_cli/registry/
+src/apm_cli/runtime/
+src/apm_cli/install/
+src/apm_cli/integration/

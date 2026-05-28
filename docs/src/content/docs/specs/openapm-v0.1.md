@@ -938,7 +938,14 @@ their absence MUST NOT affect content-equivalence comparison.
 Consumers SHOULD expose a `--no-provenance` (or equivalent) flag
 that suppresses these fields on write. Consumers SHOULD NOT include
 `generated_at` or `apm_version` in lockfiles persisted by
-deployments that have declared privacy sensitivity.
+deployments that have declared privacy sensitivity. When a
+consumer writes a lockfile, the `dependencies` list MUST be
+ordered ascending lexicographically by the tuple (`repo_url`,
+`virtual_path`); entries without `virtual_path` sort as if
+`virtual_path` were the empty string. Two lockfiles differing
+only in entry order are semantically equivalent under this
+requirement, but a write-back MUST canonicalise to the pinned
+order so frozen-install diffs are stable across implementations.
 
 <a id="req-lk-006"></a>
 **[req-lk-006]** A conforming **consumer** implementation MUST
@@ -1137,6 +1144,11 @@ A policy declares an `enforcement` value of `off`, `warn`, or `block`.
 | `warn`  | Violations print warnings, exit code remains 0. Default.                     |
 | `block` | Violations print errors and exit non-zero; install aborts before disk write. |
 
+When `fetch_failure` is unset, the effective value is `warn`. The
+default applies independently of the `enforcement` mode default and
+is the value a conforming governance implementation MUST use when
+the field is absent from the policy document.
+
 <a id="req-pl-002"></a>
 **[req-pl-002]** A conforming **governance** implementation MUST, when
 the effective `enforcement` value is `block` and at least one
@@ -1161,7 +1173,7 @@ The `dependencies` policy block governs APM dependency declarations.
 | `allow`                | List of patterns matched against `<owner>/<repo>`. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)). |
 | `deny`                 | Always wins over `allow`.                                                                 |
 | `require`              | Packages every consumer manifest must include.                                            |
-| `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts.          |
+| `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
 | `require_pinned_constraint` | When true, flags unbounded direct deps as violations.                                 |
 
@@ -1990,7 +2002,13 @@ resolve credentials per host class (as defined in
 [req-sc-006](#req-sc-006)), and MUST NOT forward a credential
 resolved for one host class to a request targeting another host
 class. Credential scope MUST be observable in the consumer's
-diagnostic surface.
+diagnostic surface. When a fetch follows an HTTP redirect (3xx)
+whose target hostname classifies into a different host class than
+the originating request per [req-sc-005](#req-sc-005), the consumer
+MUST drop the originating Authorization header (and any other
+credential material attached for the originating host class) before
+issuing the redirected request. Credentials for the destination
+host class MAY be re-resolved per this requirement.
 
 <a id="req-sc-005"></a>
 **[req-sc-005]** A conforming **consumer** implementation that
@@ -2254,7 +2272,7 @@ conformance statement identifying:
 [req-rs-007](#req-rs-007), [req-rs-008](#req-rs-008),
 [req-rs-009](#req-rs-009), [req-rs-010](#req-rs-010),
 [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
-[req-rs-013](#req-rs-013),
+[req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
@@ -2262,7 +2280,8 @@ conformance statement identifying:
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
-[req-sc-008](#req-sc-008) (SHOULD), [req-cf-001](#req-cf-001).
+[req-sc-008](#req-sc-008) (SHOULD), [req-cf-001](#req-cf-001),
+[req-cf-002](#req-cf-002).
 
 #### 11.3.3 Registry
 
@@ -2271,9 +2290,16 @@ conformance statement identifying:
 (reserved for v0.2 wire normativity) MUST serve archive bytes
 such that the SHA-256 of those bytes equals the digest the
 Registry advertises for the version, and MUST NOT mutate previously
-published `(name, version)` bytes. This is the trust anchor on
-which [req-lk-013](#req-lk-013) and [req-rs-009](#req-rs-009)
-depend; v0.2 will formalise the surrounding HTTP wire envelope.
+published `(name, version)` bytes. When a Registry receives a
+publish request for an `(name, version)` it has previously served,
+the Registry MUST either (a) reject the publish request with a
+diagnostic identifying the existing version, or (b) accept it
+ONLY if the submitted archive bytes are byte-identical to the
+previously-served bytes (idempotent republish). A Registry MUST
+NOT replace the bytes of a previously-served `(name, version)`
+under any circumstance. This is the trust anchor on which
+[req-lk-013](#req-lk-013) and [req-rs-009](#req-rs-009) depend;
+v0.2 will formalise the surrounding HTTP wire envelope.
 
 #### 11.3.4 Governance
 
@@ -2656,6 +2682,7 @@ renumbering of conformance classes.
 | 0.1     | 2026-05-10 | Initial editor's Working Draft.                          |
 | 0.1-r2  | 2026-05-17 | Round-2 adversarial revision. Closed mandatory FOLDs F1-F10: pinned semver dialect (node-semver + semver 2.0.0); tri-modal transitive conflict resolution; vendor-host neutrality (default_host, pluggable policy discovery, host class via PSL+aliases); hash envelope on every stored hash; canonical git tree-hash definition; mirror-tolerant fetch; producer release contract (tag-version alignment, SHOULD-sign); update operation semantics; lockfile_version monotonicity; reserved-slot prose for 11 deferrals (workspaces, x-* extensions, machine-readable conformance, update --aggressive, frozen-default flip, target registry companion, version yank, attestations, registry HTTP, mirror-tolerance, .agents/ partition); inline JSON Schemas in Appendix A; YAML safe subset; archive container binding; credential redaction. Conformance-statement count: 56 -> 83. Companion seed fixture tree shipped under `tests/fixtures/spec-conformance/`. |
 | 0.1.1   | 2026-05-24 | v1.1 editorial+defensive fold. Closed convergent round-2 followups: Section 12.3 CI-binding MUST-for-claim (req-cf-002); req-mf-019 class reclassification (producer -> consumer); three stale heading labels in req-cf-001 and Appendix E.4; depEntry oneOf source-key requirement plus new fixture `manifest/invalid-no-source-key.yml`; normative-count reconciliation across Section 1.3, Appendix C trailer, and this row; bare-hex pattern anchored to exactly 64 hex characters; req-sc-007 redaction scope extended to packed bundles, lockfiles, and audit records, plus producer secret-pattern refuse-to-pack rule; workspaces MUST-NOT-use in v0.1 (req-mf-021); nest-mode reject-in-v0.1 (req-rs-013); tag-name regex tightened to the semver.org 2.0.0 reference grammar; build-metadata tie-break rule (req-rs-014); mirror-tolerance editorial note (replicate-verbatim); req-rg-001 cross-references added in Section 7.5.1 and Section 10.5; bare-hex reader-tolerance deprecation horizon; interoperability informative note Section 6.1.2; conformance-summary precedence rule in Section 11.1; wildcard typo `x.y.x` -> `x.y.z`; resolved_by worked-example fragment in Section 7.4. Statement count: 83 -> 87. Drift-detection scaffolding lands in-spec and in-tree (informative machine-readable manifest at `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`; 4-way orphan_check + spec-conformance pytest suite + generated `CONFORMANCE.{md,json}` at repo root); Section 12.3 language updated to identify HTML anchors as the canonical source. No normative count change. |
+| 0.1.2   | 2026-05-28 | Round-3 spec-guardian editorial fold (no new normative statements; statement count remains 87). Section 11.3.2 Consumer enumeration appended `[req-rs-014]` and `[req-cf-002]` (closing drift vs Appendix C). req-lk-005 extended: writers MUST canonicalise the `dependencies` list in ascending lexicographic order of (`repo_url`, `virtual_path`) so frozen-install diffs are stable across implementations. req-sc-003 extended: consumers MUST drop the originating Authorization header before issuing a cross-host-class redirect (closes the mirror-redirect token-leak surface in Section 10.3). req-rg-001 extended with publish-side idempotency clause: a Registry MUST either reject a republish or accept ONLY if bytes are byte-identical to the previously-served bytes. Section 6.2 + Section 6.3.1 defaults pinned: `fetch_failure` defaults to `warn` and `dependencies.require_resolution` defaults to `project-wins` (mirrored as advisory `"default"` annotations in `policy-v0.1.schema.json`). Manifest schema `conflict_resolution` enum aligned to prose: renamed `intersect` -> `intersection-pick`, dropped `nest` from the v0.1 enum (`nest` remains reserved-for-v0.2 per req-rs-013, now noted via schema `$comment`). Mode B silent-extension detector landed in `.github/workflows/spec-conformance.yml` and `tests/spec_conformance/mode_b_detector.sh`; closes the named sole-implementer rot risk by gating PRs that add substantive code under critical paths (`primitives/`, `deps/`, `policy/`, `registry/`, `runtime/`, `install/`, `integration/`) without a spec citation, with auditable `apm-spec-waiver:` opt-out. |
 
 Errata (none at publication).
 

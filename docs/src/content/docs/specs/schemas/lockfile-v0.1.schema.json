@@ -16,7 +16,7 @@
     "local_deployed_file_hashes": {
       "type": "object",
       "additionalProperties": {
-        "$comment": "Bare-hex form retained for v0.1 reader-tolerance per req-lk-016; v0.2 will require the sha256: envelope exclusively (see oci-r2-nit-2).",
+        "$comment": "Bare-hex form retained for v0.1 reader-tolerance per req-lk-016; v0.2 will require the sha256: envelope exclusively.",
         "type": "string",
         "pattern": "^(sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128}|[0-9a-f]{64})$"
       }

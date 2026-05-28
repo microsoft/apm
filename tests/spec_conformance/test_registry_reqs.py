@@ -47,4 +47,7 @@ def test_registry_trust_anchor_archive_bytes_match_advertised_digest():
     assert_spec_contains(
         "SHA-256 of those bytes equals the digest the\nRegistry advertises",
         "MUST NOT mutate previously",
+        # Publish-side idempotency clause (round-3 fold):
+        "(idempotent republish)",
+        "A Registry MUST\nNOT replace the bytes",
     )

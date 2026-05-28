@@ -35,6 +35,12 @@ jobs:
       - name: Orphan check (anchors == manifest == Appendix C == markers)
         run: uv run --extra dev python -m tests.spec_conformance.orphan_check
 
+      - name: Mode B detector (silent-extension gate on critical paths)
+        env:
+          BASE_REF: origin/${{ github.event.pull_request.base.ref || 'main' }}
+          GH_PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash tests/spec_conformance/mode_b_detector.sh
+
       - name: Conformance test suite
         run: |
           uv run --extra dev pytest tests/spec_conformance \

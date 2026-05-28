@@ -73,7 +73,10 @@
       "properties": {
         "apm": { "type": "array", "items": { "$ref": "#/$defs/depEntry" } },
         "mcp": { "type": "array", "items": { "$ref": "#/$defs/depEntry" } },
-        "conflict_resolution": { "enum": ["intersect", "nest"] }
+        "conflict_resolution": {
+          "enum": ["intersection-pick"],
+          "$comment": "v0.1 admits only `intersection-pick` (the default tri-modal policy clause per sec.7.2). The token `nest` is reserved for v0.2; consumers MUST refuse v0.1 manifests declaring `nest` per req-rs-013."
+        }
       },
       "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },
       "additionalProperties": true

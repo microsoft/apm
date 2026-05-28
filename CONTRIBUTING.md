@@ -387,15 +387,26 @@ Common modes the ritual catches:
 - **Mode A (silent regression)** -- a code change in `src/apm_cli/**`
   breaks an assertion bound to a `req-XXX`. The spec-conformance
   pytest job fails; fix the code, do not touch the spec.
-- **Mode B (silent extension)** -- a new APM behaviour lands with no
-  spec citation. The `@pytest.mark.req` collection step has no id to
-  bind to; orphan_check fails. Author MUST add the anchor, manifest
-  row, and test marker, OR explicitly file a follow-up issue and
-  scope the feature as informational until the spec catches up.
+- **Mode B (silent extension)** -- a new APM behaviour lands under a
+  normative critical path (`primitives/`, `deps/`, `policy/`,
+  `registry/`, `runtime/`, `install/`, `integration/`) with no spec
+  citation. Two gates catch this: (a) `orphan_check` fails if you
+  added a `@pytest.mark.req` marker but forgot the anchor, manifest
+  row, or Appendix C row; (b) the **Mode B detector** fails if you
+  added substantive code under a critical path and added NO spec
+  artifacts at all (no anchor, no manifest row, no marker). The fix
+  is to add the anchor + manifest row + marker, or -- for a true
+  refactor / perf rewrite / internal cleanup with no observable
+  behaviour delta -- add a single line `apm-spec-waiver: <one-line
+  rationale, >= 16 chars>` to the PR body or a commit message. The
+  waiver is echoed verbatim to the CI log and is reviewer-auditable.
+  The critical-path allowlist itself lives at
+  `tests/spec_conformance/critical_paths.txt`; edits to it are
+  themselves critical-path edits.
 - **Mode C (stale spec)** -- the spec prose is wrong about APM's
   intended behaviour. Amend the anchor + Appendix C row + manifest
-  entry; bump the spec patch revision. The same PR carries both the
-  spec edit and the test that proves it.
+  entry. The same PR carries both the spec edit and the test that
+  proves it.
 
 Choosing between modes is a human call. The harness exposes the
 choice; it does not pick.
