@@ -7,7 +7,7 @@ sidebar:
 
 Single source of truth for every environment variable APM reads. Variables are grouped by purpose. Unless noted, scope is **process** (the running `apm` invocation and any child processes it spawns); a small number toggle behaviour for the entire shell **session**.
 
-For CLI flags that pair with these variables, see [CLI commands](./cli-commands/). For token policy and supply-chain guidance, see [Security and supply chain](../enterprise/security-and-supply-chain/).
+For CLI flags that pair with these variables, see the [reference index](./). For token policy and supply-chain guidance, see [Security and supply chain](../enterprise/security-and-supply-chain/).
 
 ## Authentication
 

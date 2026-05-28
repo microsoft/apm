@@ -52,7 +52,7 @@ If you decide APM is not for you:
 1. Delete `apm.yml` and `apm.lock.yaml`.
 2. Your original files are still there, unchanged.
 
-No uninstall script, no cleanup command. Zero risk.
+No repo-wide uninstall script is required. If you installed packages and want APM to remove their managed files first, run `apm uninstall <package>` before deleting the manifest and lockfile.
 
 ## Coming from `npx skills add`
 
@@ -84,15 +84,15 @@ Any public repo that works with `npx skills add owner/repo` also works with
 layouts (the [agentskills.io](https://agentskills.io) convention) as a
 first-class package type; `apm.yml` is optional.
 
-See [Package Types](../../reference/package-types/#skill-collection-skillsnameskillmd) for the full
+See [Package Types](../reference/package-types/#skill-collection-skillsnameskillmd) for the full
 skill collection layout reference.
 
 ## Next steps
 
 - [Quickstart](/apm/quickstart/) -- first-time setup walkthrough
 - [Dependencies](/apm/consumer/manage-dependencies/) -- managing external packages
-- [Manifest schema](../../reference/manifest-schema/) -- full `apm.yml` reference
-- [CLI commands](../../reference/cli/install/) -- complete command reference
+- [Manifest schema](../reference/manifest-schema/) -- full `apm.yml` reference
+- [CLI commands](../reference/cli/install/) -- complete command reference
 
 ## Deprecated targets
 

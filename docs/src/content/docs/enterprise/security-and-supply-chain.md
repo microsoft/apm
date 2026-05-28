@@ -22,7 +22,7 @@ host), and pre-deploy content safety (no hidden Unicode reaches the
 agent). APM does **not** sandbox MCP servers at runtime, does not do
 malware analysis on dependency code, does not sign packages, and does
 not inspect what an agent does once it has read your context. See
-[The three promises](../../concepts/the-three-promises/) for the
+[The three promises](../concepts/the-three-promises/) for the
 canonical framing.
 
 ## Integrity
@@ -71,7 +71,7 @@ detection remains intact -- treat HTTP deps as "I trust the network
 path" assertions, not as "APM made this safe".
 
 For the registry-proxy / air-gap story see
-[Registry proxy](../registry-proxy/).
+[Registry proxy](./registry-proxy/).
 
 ## Secret handling
 
@@ -80,7 +80,7 @@ APM has no secret store. The contract is:
 - **Tokens come from the environment.** `GITHUB_APM_PAT` for GitHub
   hosts, `ADO_APM_PAT` for Azure DevOps. Tokens are scoped per host
   family and never forwarded cross-host. See
-  [Authentication](../../consumer/authentication/).
+  [Authentication](../consumer/authentication/).
 - **MCP `env:` blocks in `apm.yml` are name/value pairs**, intended to
   hold *references* (e.g. `GITHUB_TOKEN: ${GITHUB_TOKEN}`) that the
   harness resolves at agent runtime, not literal secrets. Source:
@@ -143,8 +143,8 @@ target restrictions, MCP transport restrictions). Tighten-only
 inheritance (enterprise -> org -> repo) is enforced in
 `src/apm_cli/policy/inheritance.py`.
 
-For schema and getting started, see [Get started with apm-policy.yml](../apm-policy-getting-started/) and
-[Policy Reference](../policy-reference/).
+For schema and getting started, see [Get started with apm-policy.yml](./apm-policy-getting-started/) and
+[Policy Reference](./policy-reference/).
 
 ## What APM does NOT do
 
@@ -178,10 +178,10 @@ For an org standardising on APM:
 - Wire `apm audit --ci -f sarif -o audit.sarif` into branch protection
   and upload SARIF to GitHub code scanning.
 - Publish an `apm-policy.yml` from your `<org>/.github` repo with an
-  allow list and a transport restriction on MCP. See [Governance overview](../governance-overview/).
+  allow list and a transport restriction on MCP. See [Governance overview](./governance-overview/).
 - Require signed commits on the source repos APM pulls from -- this is
   where APM's trust chain bottoms out.
 - Route all dep traffic through an enterprise proxy with audit
-  logging. See [Registry proxy](../registry-proxy/).
+  logging. See [Registry proxy](./registry-proxy/).
 - Forbid `allow_insecure: true` in `apm.yml` via the policy allow
   list, except where an air-gapped mirror demands it.

@@ -143,7 +143,7 @@ to your project. If the cache is missing the entries the lockfile
 references, the audit fails fast with a "run `apm install` first"
 message rather than guessing.
 
-For the full flag set, see `../../reference/cli/install/`.
+For the full flag set, see [CLI audit](../../reference/cli/audit/).
 
 ## When something is off
 

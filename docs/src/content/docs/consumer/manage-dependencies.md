@@ -175,8 +175,8 @@ APM matches tags against `v{version}` and `{name}--v{version}` patterns
 (with `{version}` as a bare-tag fallback) and picks the highest tag that
 satisfies the range. The original constraint is preserved in the
 lockfile alongside the resolved tag, so `apm install` on a fresh clone
-replays the same tag deterministically. Only `apm install --update` or a
-manifest change re-resolves to a newer tag.
+replays the same tag deterministically. Only `apm update` (or legacy
+`apm install --update`) or a manifest change re-resolves to a newer tag.
 
 ## Remove a dependency
 

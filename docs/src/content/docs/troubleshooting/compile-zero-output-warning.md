@@ -33,7 +33,7 @@ See [`apm targets`](../reference/cli/targets/) and the [manifest schema](../refe
 ### 2. Confirm primitives are discovered
 
 ```bash
-apm deps
+apm deps list
 ```
 
 Each installed package row shows per-type counts (`Prompts`, `Instructions`, `Agents`, `Skills`, `Hooks`). If every column is `-`, the project ships nothing to compile. Either you haven't installed a package yet, or your local `.apm/` tree is empty.
@@ -83,10 +83,10 @@ See [policy schema](../reference/policy-schema/).
 
 ```bash
 apm targets        # what will be written to?
-apm deps           # is the skill counted?
+apm deps list      # is the skill counted?
 ```
 
-If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `target:` in `apm.yml`. If `apm deps` shows the skill but compile still emits nothing, every active target lacks `skills` support (rare -- most targets do support skills via `.agents/SKILL.md`).
+If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `target:` in `apm.yml`. If `apm deps list` shows the skill but compile still emits nothing, every active target lacks `skills` support (rare -- most targets do support skills via `.agents/SKILL.md`).
 
 ### "I targeted `cursor` but my command files don't appear"
 

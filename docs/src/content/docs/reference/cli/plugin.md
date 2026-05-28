@@ -45,14 +45,9 @@ apm plugin init my-skill --target copilot,claude --yes
 
 If you've used `apm init --plugin` before, here's the move: run `apm plugin init` instead. The generated files are byte-for-byte identical.
 
-The legacy `apm init --plugin` flag still works and still produces the same output, but prints a deprecation warning on stderr:
+The legacy `apm init --plugin` flag still works and still produces the same output, but prints a deprecation warning on stderr.
 
-```text
-[!] Deprecation: 'apm init --plugin' is deprecated. Use 'apm plugin init' instead.
-    Legacy flag will be removed in v0.16.
-```
-
-Migrate at your convenience before v0.16.
+Use `apm plugin init` for new plugin projects; keep the legacy flag only for compatibility scripts.
 
 ## Examples
 

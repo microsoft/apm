@@ -89,7 +89,7 @@ apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch
 apm mcp install api --transport http --url https://example.com/mcp
 ```
 
-Common forwarded options (see `apm install --mcp --help` for the full
+Common forwarded options (see `apm install --help` for the full
 list):
 
 | Flag | Description |

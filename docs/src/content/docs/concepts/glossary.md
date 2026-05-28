@@ -22,7 +22,7 @@ Source: `src/apm_cli/deps/lockfile.py`.
 ### apm.yml
 
 The package manifest. A YAML file at the package root that declares
-`name`, `version`, `dependencies`, `scripts`, `target`, and metadata. Both
+`name`, `version`, `dependencies`, `scripts`, `targets` / `target`, and metadata. Both
 the unit of authoring and the unit of consumption -- a directory becomes
 an APM package the moment it has an `apm.yml`.
 
@@ -250,7 +250,7 @@ Source: `src/apm_cli/models/apm_package.py`,
 
 ### target
 
-The `target:` field in `apm.yml`. Names which harnesses the package
+The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
 compiles for (`copilot`, `claude`, `cursor`, `codex`, `gemini`,
 `opencode`, `windsurf`, or `all`). Drives which integrator runs and
 which directories receive output during `apm compile`.

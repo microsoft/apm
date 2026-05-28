@@ -81,7 +81,7 @@ writes a runtime-specific MCP config file. The schemas differ; the
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `~/.claude.json` (`-g`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
-| Codex CLI | `~/.codex/config.toml` | global | TOML `[mcp_servers.*]` |
+| Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `~/.codex/config.toml` (`-g`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
@@ -164,9 +164,10 @@ these narrow checks
    `github-mcp-server`, `github`, `github-mcp`,
    `github-copilot-mcp-server`.
 2. **And** the parsed URL hostname matches the GitHub host allowlist
-   (`github.com`, `api.github.com`, and registered GHES hostnames).
+   (`github.com`, `*.github.com`, `githubcopilot.com` hosts, and
+   registered GHES hostnames).
 
-This is an exact-match allowlist on hostname, not a substring check.
+This is a parsed-host allowlist on hostname, not a substring check.
 A URL like `https://github.com.evil.example` does not match because
 the parsed hostname is `github.com.evil.example`, not `github.com`.
 

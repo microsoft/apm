@@ -12,7 +12,7 @@ explicitly. Instructions shape *how* the model behaves on any given
 file. Agents shape *who* the model becomes when summoned.
 
 Reach across harnesses differs and matters when you choose. See
-[Primitives and targets](../../../concepts/primitives-and-targets/)
+[Primitives and targets](../../concepts/primitives-and-targets/)
 for the full matrix; the gist is below.
 
 ## Instructions
@@ -247,12 +247,12 @@ dedicated persona.
 
 ```bash
 apm compile --validate           # frontmatter + structure check, no writes
-apm compile --target cursor      # see exactly what lands in .cursor/
+apm install --dry-run --target cursor  # preview agent deployment
 apm preview <script>             # if the agent is wired to a script
 ```
 
 For the full primitive catalogue and target matrix, see
-[Primitives and targets](../../../concepts/primitives-and-targets/).
+[Primitives and targets](../../concepts/primitives-and-targets/).
 For prompts and slash-commands, see
-[Prompts](../prompts/). For packing and publishing, see
-[Pack a bundle](../../pack-a-bundle/).
+[Prompts](./prompts/). For packing and publishing, see
+[Pack a bundle](../pack-a-bundle/).
