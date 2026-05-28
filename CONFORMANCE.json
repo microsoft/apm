@@ -1,0 +1,1202 @@
+{
+  "generator": "gen_statement.py v1",
+  "requirements": [
+    {
+      "conformance_class": "consumer",
+      "id": "req-cf-001",
+      "keyword": "MUST",
+      "section": "12.5",
+      "status": "active",
+      "test_count": 6,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_round_trip_is_fixed_point",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[round-trip-unknown-fields.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[v2-with-registry.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[valid-extends.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[valid-minimal.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[x-extension-roundtrip.yml]"
+      ],
+      "waivers": [
+        "Covered by test_round_trip.py stage-2 byte-equality assertion. Imported here for marker coverage in this cluster."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-cf-002",
+      "keyword": "MUST",
+      "section": "12.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_implementations_publish_conformance_statement"
+      ],
+      "waivers": [
+        "CONFORMANCE.{md,json} not yet generated in this checkout. Run `uv run python -m tests.spec_conformance.gen_statement` to regenerate; CI enforces the diff."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-ext-001",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_preserves_x_extension_keys_on_round_trip"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-ext-002",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_namespaces_extension_keys_with_x_prefix"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-001",
+      "keyword": "MUST",
+      "section": "5.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_valid_v2_passes_schema"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-002",
+      "keyword": "MUST",
+      "section": "5.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_declares_apiversion"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-003",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_carries_dependencies_block"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-004",
+      "keyword": "MUST",
+      "section": "5.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_v1_remains_parseable_under_v2_reader"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-005",
+      "keyword": "MUST",
+      "section": "5.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_resolved_field"
+      ],
+      "waivers": [
+        "Resolved-field detail varies by source kind; covered by V2 fixture."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-006",
+      "keyword": "MUST",
+      "section": "5.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-007",
+      "keyword": "SHOULD",
+      "section": "5.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_resolution_metadata"
+      ],
+      "waivers": [
+        "SHOULD requirement; structural."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-008",
+      "keyword": "MUST",
+      "section": "5.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_supports_registry_source"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-009",
+      "keyword": "MUST",
+      "section": "5.6",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_records_registry_url"
+      ],
+      "waivers": [
+        "Registry-URL recording; structural, covered by V2 fixture shape."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-010",
+      "keyword": "MUST",
+      "section": "5.6",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_records_registry_digest"
+      ],
+      "waivers": [
+        "Registry-digest detail; covered structurally by integrity cluster."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-011",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_round_trips_unknown_fields"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-012",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_canonical_tree_sha256_field_present"
+      ],
+      "waivers": [
+        "Active fail-closed extract test deferred. Stub fixture path: tests/fixtures/spec-conformance/integrity/canonical-tree/. v0.1.2 hand-computed tree_sha256 fixture lands here."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-013",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed"
+      ],
+      "waivers": [
+        "Active fail-closed extract test deferred. Stub fixture path: tests/fixtures/spec-conformance/integrity/hash-mismatch.frozen.yaml + archive. v0.1.2 lands the paired archive + hash-mismatch oracle."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-014",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
+      ],
+      "waivers": [
+        "Negative-algorithm test; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-015",
+      "keyword": "MUST",
+      "section": "5.6.4",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_tree_sha256_canonicalisation_invariant"
+      ],
+      "waivers": [
+        "Canonical-tree invariant; partners with req-lk-012 fixture set. v0.1.2 lands hand-computed reference."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-016",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reader_tolerates_bare_hex_hash"
+      ],
+      "waivers": [
+        "Bare-hex reader tolerance fixture deferred. Stub fixture: tests/fixtures/spec-conformance/integrity/bare-hex-reader.yaml."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-017",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_deployed_file_hash_mismatch_fails_closed"
+      ],
+      "waivers": [
+        "Active deployed-file-hash mismatch oracle deferred. Stub fixture: tests/fixtures/spec-conformance/integrity/deployed-file-mismatch.yaml."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-018",
+      "keyword": "SHOULD",
+      "section": "5.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
+      ],
+      "waivers": [
+        "SHOULD requirement; structural."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-001",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_has_required_keys"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-002",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_name_field_is_string"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-003",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_missing_name_rejected"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-004",
+      "keyword": "SHOULD",
+      "section": "4.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_should_carry_description"
+      ],
+      "waivers": [
+        "SHOULD requirement; informational. Producers may omit description; active negative-policy test deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-005",
+      "keyword": "MUST",
+      "section": "4.2.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_dependencies_are_mapping"
+      ],
+      "waivers": [
+        "Seed fixture has no dependencies block to validate shape."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-006",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_missing_source_key"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-007",
+      "keyword": "MUST",
+      "section": "4.3.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_apm_source_field"
+      ],
+      "waivers": [
+        "Resolver integration test; covered structurally by req-rs-001 cluster."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-008",
+      "keyword": "MUST",
+      "section": "4.3.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_pinned_version"
+      ],
+      "waivers": [
+        "Pin-handling integration; see req-rs-006."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-009",
+      "keyword": "MUST",
+      "section": "4.3.4",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_pinned_commit"
+      ],
+      "waivers": [
+        "Commit-pin integration; see req-rs-006."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-010",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_apm_source_string_form"
+      ],
+      "waivers": [
+        "Short-form `apm:` resolution shape covered structurally elsewhere."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-011",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_apm_source_table_form"
+      ],
+      "waivers": [
+        "Table-form `apm:` resolution shape covered structurally elsewhere."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-012",
+      "keyword": "MUST",
+      "section": "4.3.6",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_unknown_source_kind"
+      ],
+      "waivers": [
+        "Negative test requires constructing a malformed manifest beyond the seed fixture set. Deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-013",
+      "keyword": "MUST",
+      "section": "4.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_handles_local_path_source"
+      ],
+      "waivers": [
+        "Local-path source integration; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-014",
+      "keyword": "MUST",
+      "section": "4.2.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_exports_primitive_listing"
+      ],
+      "waivers": [
+        "Producer-side primitive listing; see req-pr-004/005 cluster."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-015",
+      "keyword": "MUST",
+      "section": "4.2.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_primitive_paths_are_relative"
+      ],
+      "waivers": [
+        "Producer-side path constraint; covered structurally by primitive cluster."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-016",
+      "keyword": "MUST",
+      "section": "4.3.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_absolute_paths_in_apm_source"
+      ],
+      "waivers": [
+        "Absolute-path rejection; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-017",
+      "keyword": "MUST",
+      "section": "4.7",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_publishes_apm_yml_at_repo_root"
+      ],
+      "waivers": [
+        "Repo-root constraint; structural, no apm_cli surface to assert against."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-018",
+      "keyword": "MUST",
+      "section": "4.6.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_walks_dependency_graph_breadth_first"
+      ],
+      "waivers": [
+        "Resolution-order detail; integration test deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-019",
+      "keyword": "MUST",
+      "section": "4.2.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_extension_dependency_form"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-020",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_preserves_unknown_top_level_keys"
+      ],
+      "waivers": [
+        "Round-trip cluster; see req-cf-001 (round-trip fixed-point)."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-021",
+      "keyword": "MUST",
+      "section": "4.8",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_publishes_machine_readable_primitive_index"
+      ],
+      "waivers": [
+        "Producer publish surface; deferred to v0.2 producer harness."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-001",
+      "keyword": "MUST",
+      "section": "6.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_valid_extends_passes_schema"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-002",
+      "keyword": "MUST",
+      "section": "6.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_carries_apiversion_or_kind_key"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-003",
+      "keyword": "MUST",
+      "section": "6.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_field_resolves_to_other_policy"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-004",
+      "keyword": "MUST",
+      "section": "6.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_cycle_is_rejected"
+      ],
+      "waivers": [
+        "apm_cli policy-cycle detector wire-up is the v0.1.2 follow-up. Cycle fixture is in place; oracle binding deferred."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-005",
+      "keyword": "MUST",
+      "section": "6.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_rule_set_carries_required_fields"
+      ],
+      "waivers": [
+        "Rule-set shape; covered structurally by valid-extends fixture."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-006",
+      "keyword": "MUST",
+      "section": "6.4",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_resolves_relative_to_policy_root"
+      ],
+      "waivers": [
+        "Path resolution detail; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-007",
+      "keyword": "MUST",
+      "section": "6.3.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_supports_allow_action"
+      ],
+      "waivers": [
+        "Action enum coverage; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-008",
+      "keyword": "MUST",
+      "section": "6.3.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_supports_deny_action"
+      ],
+      "waivers": [
+        "Action enum coverage; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-009",
+      "keyword": "MUST",
+      "section": "6.6",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_evaluator_short_circuits_on_first_deny"
+      ],
+      "waivers": [
+        "Evaluator behaviour; integration test deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-010",
+      "keyword": "MUST",
+      "section": "6.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_apiversion_pinned_to_v0_1"
+      ],
+      "waivers": [
+        "v0.1 policy seed fixtures do not yet carry an apiVersion field; deferred."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-011",
+      "keyword": "MUST",
+      "section": "6.1.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_allow_list_shape"
+      ],
+      "waivers": [
+        "Default-allow shape; structural."
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-012",
+      "keyword": "MUST",
+      "section": "6.1.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_deny_list_shape"
+      ],
+      "waivers": [
+        "Default-deny shape; structural."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-001",
+      "keyword": "MUST",
+      "section": "8.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_loads_primitives_from_resolved_dep"
+      ],
+      "waivers": [
+        "Primitive loading integration; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-002",
+      "keyword": "MUST",
+      "section": "8.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source"
+      ],
+      "waivers": [
+        "Namespacing rule; structural."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-003",
+      "keyword": "MUST",
+      "section": "8.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_rejects_primitive_collisions"
+      ],
+      "waivers": [
+        "Collision-fail-closed; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-pr-004",
+      "keyword": "MUST",
+      "section": "7.8",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index"
+      ],
+      "waivers": [
+        "Producer-publish surface; deferred to v0.2."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-pr-005",
+      "keyword": "SHOULD",
+      "section": "7.8",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_should_carry_primitive_descriptions"
+      ],
+      "waivers": [
+        "SHOULD requirement; structural."
+      ]
+    },
+    {
+      "conformance_class": "registry",
+      "id": "req-rg-001",
+      "keyword": "MUST",
+      "section": "11.3.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_trust_anchor_is_declared"
+      ],
+      "waivers": [
+        "v0.1 registry class ships only this trust-anchor MUST; no wire surface to exercise. Tracked at sec.11.3.3; v0.2 expands."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-001",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_walks_dependency_graph_deterministically"
+      ],
+      "waivers": [
+        "Determinism integration; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-002",
+      "keyword": "MUST",
+      "section": "7.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_emits_lockfile_after_successful_resolution"
+      ],
+      "waivers": [
+        "Resolution -> lockfile integration; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-003",
+      "keyword": "MUST",
+      "section": "7.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_uses_pinned_version_when_present"
+      ],
+      "waivers": [
+        "Pin-honour integration; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-004",
+      "keyword": "MUST",
+      "section": "7.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_resolution_provenance_in_lockfile"
+      ],
+      "waivers": [
+        "Provenance binding; structural."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-005",
+      "keyword": "MUST",
+      "section": "7.6",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_rejects_unresolvable_dependency"
+      ],
+      "waivers": [
+        "Negative resolution path; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-006",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_handles_commit_pin"
+      ],
+      "waivers": [
+        "Commit-pin integration; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-007",
+      "keyword": "MUST",
+      "section": "7.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_semver_dialect_oracle_present_and_well_formed"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-008",
+      "keyword": "MUST",
+      "section": "7.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range"
+      ],
+      "waivers": [
+        "Range-grammar binding; covered structurally by req-rs-007 oracle."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-009",
+      "keyword": "MUST",
+      "section": "7.5.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_tilde_range"
+      ],
+      "waivers": [
+        "Range-grammar binding; covered structurally by req-rs-007 oracle."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-010",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_exact_pin"
+      ],
+      "waivers": [
+        "Exact-pin integration; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-011",
+      "keyword": "MUST",
+      "section": "7.7",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_source_url_in_lockfile"
+      ],
+      "waivers": [
+        "Source-URL recording; covered structurally by lockfile cluster."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-012",
+      "keyword": "MUST",
+      "section": "7.7",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_resolved_ref_in_lockfile"
+      ],
+      "waivers": [
+        "Resolved-ref recording; covered structurally by lockfile cluster."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-013",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_fails_closed_on_ambiguous_resolution"
+      ],
+      "waivers": [
+        "Ambiguity-fail-closed; deferred to v0.1.2."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-014",
+      "keyword": "MUST",
+      "section": "7.3.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_honours_prerelease_inclusion_rules"
+      ],
+      "waivers": [
+        "Prerelease semantics; covered structurally by req-rs-007 oracle shape."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-001",
+      "keyword": "MUST",
+      "section": "10.4",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_https_scheme_supported"
+      ],
+      "waivers": [
+        "Scheme registry test; structural, no fixture surface in v0.1."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-002",
+      "keyword": "MUST",
+      "section": "10.9",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_ssh_scheme_supported"
+      ],
+      "waivers": [
+        "Scheme registry test; structural, no fixture surface in v0.1."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-003",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_oci_scheme_supported"
+      ],
+      "waivers": [
+        "Scheme registry test; structural, no fixture surface in v0.1."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-004",
+      "keyword": "MUST",
+      "section": "10.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_local_scheme_supported"
+      ],
+      "waivers": [
+        "Scheme registry test; structural, no fixture surface in v0.1."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-005",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_git_scheme_supported"
+      ],
+      "waivers": [
+        "Scheme registry test; structural, no fixture surface in v0.1."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-006",
+      "keyword": "MUST",
+      "section": "4.2.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_scheme_must_be_lowercase"
+      ],
+      "waivers": [
+        "Scheme normalisation; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-007",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_unknown_scheme_is_an_error"
+      ],
+      "waivers": [
+        "Negative-scheme test; deferred to v0.1.2 fixture expansion."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-008",
+      "keyword": "SHOULD",
+      "section": "10.3",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_scheme_authority_recommended_form"
+      ],
+      "waivers": [
+        "SHOULD requirement; structural."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-001",
+      "keyword": "MUST",
+      "section": "8.4",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_tag_pin"
+      ],
+      "waivers": [
+        "Tag pin resolution; covered structurally by req-rs cluster."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-002",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_treats_tag_as_immutable"
+      ],
+      "waivers": [
+        "Immutability is enforced post-resolution via lockfile hash, see req-lk-013."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-003",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_records_tag_hash_in_lockfile"
+      ],
+      "waivers": [
+        "Lockfile-tag binding; see req-lk-013/017."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-004",
+      "keyword": "MUST",
+      "section": "4.2.1",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_tag_via_https_or_oci"
+      ],
+      "waivers": [
+        "Scheme-routing for tag fetch; structural."
+      ]
+    }
+  ],
+  "spec_version": "v0.1.1",
+  "summary_by_class": {
+    "consumer": {
+      "active": 12,
+      "skipped": 50,
+      "unbound": 0,
+      "xfail": 0
+    },
+    "governance": {
+      "active": 4,
+      "skipped": 8,
+      "unbound": 0,
+      "xfail": 0
+    },
+    "producer": {
+      "active": 5,
+      "skipped": 7,
+      "unbound": 0,
+      "xfail": 0
+    },
+    "registry": {
+      "active": 0,
+      "skipped": 1,
+      "unbound": 0,
+      "xfail": 0
+    }
+  },
+  "total_requirements": 87
+}

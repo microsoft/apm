@@ -350,6 +350,56 @@ Avoid these anti-patterns:
 - Do not read `is_enabled()` at module import time.
 - Do not persist flag state anywhere other than `~/.apm/config.json` via `update_config`.
 
+## Adding or changing a normative requirement (OpenAPM v0.1)
+
+The OpenAPM v0.1 spec (`docs/src/content/docs/specs/openapm-v0.1.md`)
+and APM the implementation are co-evolved in this repo. APM is the
+sole implementation of the spec. To prevent the spec from rotting
+into a document of lies, every normative change MUST land as three
+coupled edits in the same PR. There is NO automated CI detector for
+"APM behaviour drifted from the spec" beyond the 4-way orphan_check
+gate -- the ritual below is the only safeguard.
+
+Three-step ritual:
+
+1. **Spec edit.** Add or change a `<a id="req-XXX"></a>` anchor with
+   prose in the spec body. Add or change the matching Appendix C row.
+2. **Manifest edit.** Add or change the entry in
+   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
+   so it stays a byte-equivalent projection of the canonical anchors.
+3. **Test edit.** Add or extend a `@pytest.mark.req("req-XXX")` test
+   under `tests/spec_conformance/`. If a real assertion is not yet
+   possible, call `waive("...")` from `_helpers.py` with a one-line
+   rationale; the waiver will surface in `CONFORMANCE.md` as honest
+   debt, not invisible coverage.
+
+After the three edits, regenerate the conformance statement:
+
+```
+uv run --extra dev python -m tests.spec_conformance.gen_statement
+```
+
+and commit the resulting `CONFORMANCE.{md,json}` at repo root. CI
+gates a clean diff.
+
+Common modes the ritual catches:
+
+- **Mode A (silent regression)** -- a code change in `src/apm_cli/**`
+  breaks an assertion bound to a `req-XXX`. The spec-conformance
+  pytest job fails; fix the code, do not touch the spec.
+- **Mode B (silent extension)** -- a new APM behaviour lands with no
+  spec citation. The `@pytest.mark.req` collection step has no id to
+  bind to; orphan_check fails. Author MUST add the anchor, manifest
+  row, and test marker, OR explicitly file a follow-up issue and
+  scope the feature as informational until the spec catches up.
+- **Mode C (stale spec)** -- the spec prose is wrong about APM's
+  intended behaviour. Amend the anchor + Appendix C row + manifest
+  entry; bump the spec patch (0.1.1 -> 0.1.2). The same PR carries
+  both the spec edit and the test that proves it.
+
+Choosing between modes is a human call. The harness exposes the
+choice; it does not pick.
+
 ## License
 
 By contributing to this project, you agree that your contributions will be licensed under the project's [MIT License](LICENSE).

@@ -2398,10 +2398,15 @@ This specification adopts a **hybrid** conformance binding:
 
 A single CI job named `Spec conformance` is RECOMMENDED. The job:
 
-1. Parses the Appendix C table as the canonical statement list
-   (until the machine-readable manifest of
-   [Section 12.6](#126-machine-readable-conformance-manifest-reserved-for-v02)
-   lands in v0.2) and builds the set of declared IDs.
+1. Treats the HTML requirement anchors (`<a id="req-XXX"></a>`) in the
+   spec body as the canonical statement list, and treats both the
+   informative machine-readable manifest at
+   [`docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`](./manifests/openapm-v0.1.requirements.yml)
+   (see [Section 12.6](#126-machine-readable-conformance-manifest-reserved-for-v02))
+   and the [Appendix C](#appendix-c-index-of-normative-statements)
+   table as derived projections that MUST agree with the canonical
+   anchors. The v0.2 promotion will move the manifest from informative
+   to normative.
 2. Walks the conformance suite for ID references (docstrings,
    markers, or fixture directory names) and builds the set of
    referenced IDs.
@@ -2478,6 +2483,18 @@ result aggregation. v0.1 implementations satisfy the
 "enumerable requirements" property via the prose anchors and the
 [Appendix C](#appendix-c-index-of-normative-statements) index
 table.
+
+As of v0.1.1 an **informative** companion manifest ships at
+[`docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`](./manifests/openapm-v0.1.requirements.yml)
+with the shape sketched above (id, keyword, section,
+conformance_class, plus optional fixture/oracle paths and
+round-trip carve-outs). The companion is informative and exists
+to seed the v0.2 normative promotion; it is also the trip wire the
+spec-conformance CI job uses to detect silent drift between the
+canonical spec anchors, the Appendix C reader-aid table, and the
+test marker coverage. Implementations MAY consume it in v0.1 but
+MUST NOT depend on its presence for normative conformance until
+v0.2 lifts the reservation.
 
 ---
 
@@ -2638,7 +2655,7 @@ renumbering of conformance classes.
 |---------|------------|----------------------------------------------------------|
 | 0.1     | 2026-05-10 | Initial editor's Working Draft.                          |
 | 0.1-r2  | 2026-05-17 | Round-2 adversarial revision. Closed mandatory FOLDs F1-F10: pinned semver dialect (node-semver + semver 2.0.0); tri-modal transitive conflict resolution; vendor-host neutrality (default_host, pluggable policy discovery, host class via PSL+aliases); hash envelope on every stored hash; canonical git tree-hash definition; mirror-tolerant fetch; producer release contract (tag-version alignment, SHOULD-sign); update operation semantics; lockfile_version monotonicity; reserved-slot prose for 11 deferrals (workspaces, x-* extensions, machine-readable conformance, update --aggressive, frozen-default flip, target registry companion, version yank, attestations, registry HTTP, mirror-tolerance, .agents/ partition); inline JSON Schemas in Appendix A; YAML safe subset; archive container binding; credential redaction. Conformance-statement count: 56 -> 83. Companion seed fixture tree shipped under `tests/fixtures/spec-conformance/`. |
-| 0.1.1   | 2026-05-24 | v1.1 editorial+defensive fold. Closed convergent round-2 followups: Section 12.3 CI-binding MUST-for-claim (req-cf-002); req-mf-019 class reclassification (producer -> consumer); three stale heading labels in req-cf-001 and Appendix E.4; depEntry oneOf source-key requirement plus new fixture `manifest/invalid-no-source-key.yml`; normative-count reconciliation across Section 1.3, Appendix C trailer, and this row; bare-hex pattern anchored to exactly 64 hex characters; req-sc-007 redaction scope extended to packed bundles, lockfiles, and audit records, plus producer secret-pattern refuse-to-pack rule; workspaces MUST-NOT-use in v0.1 (req-mf-021); nest-mode reject-in-v0.1 (req-rs-013); tag-name regex tightened to the semver.org 2.0.0 reference grammar; build-metadata tie-break rule (req-rs-014); mirror-tolerance editorial note (replicate-verbatim); req-rg-001 cross-references added in Section 7.5.1 and Section 10.5; bare-hex reader-tolerance deprecation horizon; interoperability informative note Section 6.1.2; conformance-summary precedence rule in Section 11.1; wildcard typo `x.y.x` -> `x.y.z`; resolved_by worked-example fragment in Section 7.4. Statement count: 83 -> 87. |
+| 0.1.1   | 2026-05-24 | v1.1 editorial+defensive fold. Closed convergent round-2 followups: Section 12.3 CI-binding MUST-for-claim (req-cf-002); req-mf-019 class reclassification (producer -> consumer); three stale heading labels in req-cf-001 and Appendix E.4; depEntry oneOf source-key requirement plus new fixture `manifest/invalid-no-source-key.yml`; normative-count reconciliation across Section 1.3, Appendix C trailer, and this row; bare-hex pattern anchored to exactly 64 hex characters; req-sc-007 redaction scope extended to packed bundles, lockfiles, and audit records, plus producer secret-pattern refuse-to-pack rule; workspaces MUST-NOT-use in v0.1 (req-mf-021); nest-mode reject-in-v0.1 (req-rs-013); tag-name regex tightened to the semver.org 2.0.0 reference grammar; build-metadata tie-break rule (req-rs-014); mirror-tolerance editorial note (replicate-verbatim); req-rg-001 cross-references added in Section 7.5.1 and Section 10.5; bare-hex reader-tolerance deprecation horizon; interoperability informative note Section 6.1.2; conformance-summary precedence rule in Section 11.1; wildcard typo `x.y.x` -> `x.y.z`; resolved_by worked-example fragment in Section 7.4. Statement count: 83 -> 87. Drift-detection scaffolding lands in-spec and in-tree (informative machine-readable manifest at `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`; 4-way orphan_check + spec-conformance pytest suite + generated `CONFORMANCE.{md,json}` at repo root); Section 12.3 language updated to identify HTML anchors as the canonical source. No normative count change. |
 
 Errata (none at publication).
 
