@@ -176,9 +176,13 @@ def build_md(doc: dict) -> str:
         "waiver below; this is debt, not coverage. A requirement with "
         "`status=xfail` is asserted-but-known-broken.\n\n"
         "## Conformance classes\n\n"
-        "Producer, Consumer, Governance classes are exercised below. "
-        "Registry is waived for v0.1 (the class ships only the trust-anchor "
-        "MUST at sec.11.3.3; no wire surface exists yet; v0.2 expands).\n\n"
+        "All four conformance classes (Producer, Consumer, Registry, "
+        "Governance) carry active coverage in this statement. The "
+        "Registry class is exercised via the trust-anchor invariant "
+        "test in `tests/spec_conformance/test_registry_reqs.py`, "
+        "which hashes the committed Registry-archive fixture and "
+        "asserts equality with the digest the paired lockfile "
+        "advertises (sec.11.3.3, req-rg-001).\n\n"
     )
     summary_section = (
         "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"

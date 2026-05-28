@@ -1,0 +1,26 @@
+# req-rg-001 (registry trust anchor) + req-lk-013 (hash-mismatch fail-closed)
+# req-lk-017 (deployed-file-hash re-verification) + req-lk-012 (tree_sha256 envelope)
+#
+# This lockfile is paired with the archive
+# `integrity/security-baseline-2.3.1.tar.gz` (committed bytes).
+# The values below were computed by:
+#   import hashlib
+#   sha256(archive_bytes) == 06d922a7bced192b9532f50fd37cf02ac149a2583764f7ede8bbbe8f458a7c79
+#   sha256(deployed file inside) == c62747a2802841aa2cfd57ea8696596395dd053ac6cc25386740dbbfad3997f2
+# The conformance test recomputes these from the on-disk file bytes
+# and asserts equality; tampering with either the archive or this
+# lockfile breaks the bind.
+lockfile_version: "2"
+generated_at: "2026-05-10T20:14:00+00:00"
+apm_version: "0.7.0"
+dependencies:
+  - repo_url: registry.example.com/contoso/security-baseline
+    source: registry
+    resolved_url: https://registry.example.com/contoso/security-baseline/2.3.1.tgz
+    resolved_hash: "sha256:06d922a7bced192b9532f50fd37cf02ac149a2583764f7ede8bbbe8f458a7c79"
+    version: "2.3.1"
+    depth: 1
+    deployed_files:
+      - security.instructions.md
+    deployed_file_hashes:
+      security.instructions.md: "sha256:c62747a2802841aa2cfd57ea8696596395dd053ac6cc25386740dbbfad3997f2"

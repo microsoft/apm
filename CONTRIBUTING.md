@@ -394,8 +394,8 @@ Common modes the ritual catches:
   scope the feature as informational until the spec catches up.
 - **Mode C (stale spec)** -- the spec prose is wrong about APM's
   intended behaviour. Amend the anchor + Appendix C row + manifest
-  entry; bump the spec patch (0.1.1 -> 0.1.2). The same PR carries
-  both the spec edit and the test that proves it.
+  entry; bump the spec patch revision. The same PR carries both the
+  spec edit and the test that proves it.
 
 Choosing between modes is a human call. The harness exposes the
 choice; it does not pick.
