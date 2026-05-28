@@ -229,17 +229,6 @@ export default defineConfig({
 					],
 				},
 				{
-					label: 'Specification',
-					items: [
-						// Starlight strips dots from slugs, so openapm-v0.1.md
-						// is reachable at /specs/openapm-v01/. Stable shortlinks
-						// (/spec, /spec/v0.1, /spec/latest) bridge this in the
-						// redirects block above for external citers.
-						{ label: 'OpenAPM v0.1', slug: 'specs/openapm-v01' },
-						{ label: 'Conformance', slug: 'specs/conformance' },
-					],
-				},
-				{
 					label: 'CLI reference',
 					items: [
 						{ label: 'Overview', slug: 'reference' },
@@ -250,7 +239,7 @@ export default defineConfig({
 					],
 				},
 				{
-					label: 'Schemas and specs',
+					label: 'Schema reference',
 					items: [
 						{ label: 'Manifest schema', slug: 'reference/manifest-schema' },
 						{ label: 'Lockfile spec', slug: 'reference/lockfile-spec' },
@@ -262,6 +251,17 @@ export default defineConfig({
 						{ label: 'Environment variables', slug: 'reference/environment-variables' },
 						{ label: 'Examples', slug: 'reference/examples' },
 						{ label: 'Experimental', slug: 'reference/experimental' },
+					],
+				},
+				{
+					label: 'OpenAPM specification',
+					items: [
+						// Starlight strips dots from slugs, so openapm-v0.1.md
+						// is reachable at /specs/openapm-v01/. Stable shortlinks
+						// (/spec, /spec/v0.1, /spec/latest) bridge this in the
+						// redirects block above for external citers.
+						{ label: 'OpenAPM v0.1', slug: 'specs/openapm-v01' },
+						{ label: 'Conformance', slug: 'specs/conformance' },
 					],
 				},
 				{
