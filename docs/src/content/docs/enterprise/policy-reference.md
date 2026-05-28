@@ -548,7 +548,7 @@ dependencies:
 ## Install-time enforcement
 
 :::note[Non-goal: structured output]
-Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../reference/cli/install/) in the CLI reference.
+Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../reference/cli/audit/) in the CLI reference.
 :::
 
 ### 1. What APM policy is

@@ -160,7 +160,7 @@ apm audit -f json -o report.json       # Machine-readable
 apm audit -f markdown -o report.md     # Step summaries
 ```
 
-See [Content scanning with `apm audit`](../reference/cli/install/) for usage details and exit codes.
+See [Content scanning with `apm audit`](../reference/cli/audit/) for usage details and exit codes.
 
 ### Limitations
 
