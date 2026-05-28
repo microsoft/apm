@@ -9,12 +9,14 @@ Preserved variables (user-controlled config for proxy/auth):
 - GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT
 - GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
 
-Stripped variables (ambient git state):
+Stripped variables (ambient state that would bias git operations):
 - GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE
 - GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
 - GIT_COMMON_DIR, GIT_NAMESPACE, GIT_INDEX_VERSION
 - GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
 - GIT_REPLACE_REF_BASE, GIT_GRAFTS_FILE, GIT_SHALLOW_FILE
+- LD_LIBRARY_PATH  (PyInstaller bootloader sets this; bundled shared libs
+  such as libreadline would break git's /bin/sh subprocesses)
 """
 
 from __future__ import annotations
@@ -45,6 +47,14 @@ _STRIP_GIT_VARS: frozenset[str] = frozenset(
         "GIT_REPLACE_REF_BASE",
         "GIT_GRAFTS_FILE",
         "GIT_SHALLOW_FILE",
+        # PyInstaller's bootloader sets LD_LIBRARY_PATH so the bundled
+        # Python can find libpython3.12.  When this leaks into git
+        # subprocesses, bundled shared libs (libreadline, libz,
+        # liblzma, etc.) shadow the system libraries that /bin/sh and
+        # git need, causing symbol lookup errors and clone failures.
+        # See https://github.com/microsoft/apm/issues/462 for the
+        # original OpenSSL instance of this class of bug.
+        "LD_LIBRARY_PATH",
     }
 )
 

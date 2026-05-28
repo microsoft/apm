@@ -107,3 +107,8 @@ class TestGitSubprocessEnv:
             env = git_subprocess_env()
             assert env["HOME"] == "/home/user"
             assert env["PATH"] == "/usr/bin"
+
+    def test_strips_ld_library_path(self) -> None:
+        with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/some/custom/lib"}):
+            env = git_subprocess_env()
+            assert "LD_LIBRARY_PATH" not in env
