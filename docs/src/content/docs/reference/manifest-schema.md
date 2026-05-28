@@ -5,6 +5,8 @@ sidebar:
   order: 1
 ---
 
+> **Normative reference:** this page documents the v0.2 working-draft manifest schema as implemented by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 4 (Manifest)](/apm/specs/openapm-v01/) and published as JSON Schema at [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json).
+
 <dl>
 <dt>Version</dt><dd>0.2 (Working Draft)</dd>
 <dt>Date</dt><dd>2026-05-10</dd>

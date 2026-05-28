@@ -22,9 +22,7 @@ SPEC_PATH = REPO_ROOT / "docs" / "src" / "content" / "docs" / "specs" / "openapm
 MANIFEST_PATH = (
     REPO_ROOT
     / "docs"
-    / "src"
-    / "content"
-    / "docs"
+    / "public"
     / "specs"
     / "manifests"
     / "openapm-v0.1.requirements.yml"

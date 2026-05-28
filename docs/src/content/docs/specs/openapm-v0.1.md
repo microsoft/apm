@@ -5,6 +5,8 @@ sidebar:
   order: 1
 ---
 
+OpenAPM v0.1 is the normative specification of the APM package format, manifest, lockfile, and policy semantics. It is the contract implementers, conformance testers, and enterprise reviewers build against. If you are learning how to USE APM, start with the consumer, producer, or enterprise guides -- this page defines what APM IS, not how to operate it.
+
 ## Status of This Document
 
 This document is an **editor's Working Draft** of OpenAPM, version **0.1**.
@@ -2427,7 +2429,7 @@ A single CI job named `Spec conformance` is RECOMMENDED. The job:
 1. Treats the HTML requirement anchors (`<a id="req-XXX"></a>`) in the
    spec body as the canonical statement list, and treats both the
    informative machine-readable manifest at
-   [`docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`](./manifests/openapm-v0.1.requirements.yml)
+   [`docs/public/specs/manifests/openapm-v0.1.requirements.yml`](/apm/specs/manifests/openapm-v0.1.requirements.yml)
    (see [Section 12.6](#126-machine-readable-conformance-manifest-reserved-for-v02))
    and the [Appendix C](#appendix-c-index-of-normative-statements)
    table as derived projections that MUST agree with the canonical
@@ -2511,7 +2513,7 @@ result aggregation. v0.1 implementations satisfy the
 table.
 
 As of v0.1.1 an **informative** companion manifest ships at
-[`docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`](./manifests/openapm-v0.1.requirements.yml)
+[`docs/public/specs/manifests/openapm-v0.1.requirements.yml`](/apm/specs/manifests/openapm-v0.1.requirements.yml)
 with the shape sketched above (id, keyword, section,
 conformance_class, plus optional fixture/oracle paths and
 round-trip carve-outs). The companion is informative and exists
@@ -2524,6 +2526,24 @@ v0.2 lifts the reservation.
 
 ---
 
+## Citing this specification
+
+External documents, tooling, and conformance statements MUST cite
+this specification using a stable URL. Three shortlinks are
+provided under the published docs site:
+
+| URL                                                  | Resolves to                  | Use when |
+|------------------------------------------------------|------------------------------|----------|
+| `https://microsoft.github.io/apm/spec/v0.1`         | This document (v0.1)         | Toolchain or test fixture pin. Versioned URLs are immortal: a versioned URL never moves, never 404s, never redirects to a different version. |
+| `https://microsoft.github.io/apm/spec/latest`       | Newest ratified version      | Human citation in prose. Toolchains MUST NOT pin to `latest`; pin to a versioned URL. |
+| `https://microsoft.github.io/apm/spec`              | Alias of `latest`            | Short prose citation. Same restriction as `latest` -- do not pin tooling. |
+
+The JSON Schemas published alongside this specification (Appendix
+A) are themselves identified by the `$id` URL embedded in each
+schema. Toolchains MUST pin to the `$id` URL verbatim; the schema
+files are byte-immortal at those URLs for the lifetime of this
+version.
+
 ## Appendix A. Normative JSON Schemas (inline)
 
 The machine-readable schemas backing this specification are
@@ -2531,9 +2551,9 @@ published alongside this document and are normative.
 
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
-| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.schema.json`](./schemas/manifest-v0.1.schema.json) (JSON Schema 2020-12).    |
-| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.schema.json`](./schemas/lockfile-v0.1.schema.json) (JSON Schema 2020-12). |
-| Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](./schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
+| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) (JSON Schema 2020-12).    |
+| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) (JSON Schema 2020-12). |
+| Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
 | Claude-Code marketplace (informational, emitted output) | `tests/fixtures/schemas/claude-code-marketplace.schema.json`         |
 | Claude-Code plugin (informational, emitted output)      | `tests/fixtures/schemas/claude-code-plugin.schema.json`              |
 

@@ -17,8 +17,12 @@ from jsonschema import Draft202012Validator
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC_DIR = REPO_ROOT / "docs" / "src" / "content" / "docs" / "specs"
 SPEC_PATH = SPEC_DIR / "openapm-v0.1.md"
-MANIFEST_PATH = SPEC_DIR / "manifests" / "openapm-v0.1.requirements.yml"
-SCHEMA_PATH = SPEC_DIR / "schemas" / "requirements-v0.1.schema.json"
+# Schemas and the requirements manifest are served as static assets so
+# the schema $id URLs resolve on the published site. They live under
+# docs/public/specs/, not under the Starlight content collection.
+PUBLIC_SPEC_DIR = REPO_ROOT / "docs" / "public" / "specs"
+MANIFEST_PATH = PUBLIC_SPEC_DIR / "manifests" / "openapm-v0.1.requirements.yml"
+SCHEMA_PATH = PUBLIC_SPEC_DIR / "schemas" / "requirements-v0.1.schema.json"
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "spec-conformance"
 COVERAGE_PATH = REPO_ROOT / "build" / "conformance-coverage.json"
 

@@ -25,7 +25,7 @@ cd "$ROOT"
 
 PATHS_FILE="tests/spec_conformance/critical_paths.txt"
 SPEC_BODY="docs/src/content/docs/specs/openapm-v0.1.md"
-SPEC_MANIFEST="docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml"
+SPEC_MANIFEST="docs/public/specs/manifests/openapm-v0.1.requirements.yml"
 BASE="${BASE_REF:-origin/main}"
 THRESHOLD="${MODE_B_THRESHOLD:-20}"
 

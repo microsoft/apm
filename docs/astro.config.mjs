@@ -58,6 +58,15 @@ export default defineConfig({
 		'/guides/drift-detection': '/apm/enterprise/drift-detection',
 		// Legacy reference monolith -> per-command
 		'/reference/cli-commands': '/apm/reference/cli/install',
+		// Stable shortlinks for the OpenAPM specification. Versioned
+		// URLs (/spec/v0.1) are immortal and SHOULD be the citation
+		// target for toolchain pins and external references. /spec and
+		// /spec/latest are aliases of the most recent ratified version
+		// and are intended for human prose citation; tooling MUST NOT
+		// pin to them. Mirrors the OpenAPI and AsyncAPI URL discipline.
+		'/spec': '/apm/specs/openapm-v01/',
+		'/spec/latest': '/apm/specs/openapm-v01/',
+		'/spec/v0.1': '/apm/specs/openapm-v01/',
 	},
 	integrations: [
 		sitemap(),
@@ -217,6 +226,17 @@ export default defineConfig({
 						{ label: 'GitHub Copilot App workflows (Experimental)', slug: 'integrations/copilot-app' },
 						{ label: 'AI runtime compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub rulesets', slug: 'integrations/github-rulesets' },
+					],
+				},
+				{
+					label: 'Specification',
+					items: [
+						// Starlight strips dots from slugs, so openapm-v0.1.md
+						// is reachable at /specs/openapm-v01/. Stable shortlinks
+						// (/spec, /spec/v0.1, /spec/latest) bridge this in the
+						// redirects block above for external citers.
+						{ label: 'OpenAPM v0.1', slug: 'specs/openapm-v01' },
+						{ label: 'Conformance', slug: 'specs/conformance' },
 					],
 				},
 				{

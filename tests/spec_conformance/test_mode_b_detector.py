@@ -214,7 +214,8 @@ def _make_repo(tmp_path: Path) -> Path:
         "src/apm_cli/install",
         "src/apm_cli/integration",
         "tests/spec_conformance",
-        "docs/src/content/docs/specs/manifests",
+        "docs/src/content/docs/specs",
+        "docs/public/specs/manifests",
     ):
         (repo / p).mkdir(parents=True, exist_ok=True)
         (repo / p / ".keep").write_text("")

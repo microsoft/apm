@@ -45,7 +45,9 @@ def load_json_fixture(*parts: str) -> Any:
 
 
 def load_schema(name: str) -> dict[str, Any]:
-    path = SPEC_DIR / "schemas" / name
+    # Schemas live in docs/public/specs/schemas/ so they ship at their
+    # declared $id on the published Starlight site.
+    path = SPEC_DIR.parent.parent.parent.parent / "public" / "specs" / "schemas" / name
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 

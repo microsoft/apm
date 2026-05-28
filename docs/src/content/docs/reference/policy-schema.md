@@ -5,6 +5,8 @@ sidebar:
   order: 5
 ---
 
+> **Normative reference:** this page documents the v0.2 working-draft policy schema as enforced by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 6 (Policy)](/apm/specs/openapm-v01/) and published as JSON Schema at [`policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json).
+
 The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, `apm audit --ci`, `apm policy status`, and the install preflight before any package is written to disk.
 
 For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../../enterprise/apm-policy-getting-started/). For CLI usage of `apm policy status`, see [apm policy](../cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance overview](../../enterprise/governance-overview/).

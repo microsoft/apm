@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/microsoft/apm/spec/schemas/requirements-v0.1.schema.json",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/requirements-v0.1.schema.json",
   "title": "OpenAPM v0.1 Requirements Manifest",
-  "description": "Schema for docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml. The manifest is the machine-readable projection of the HTML req anchors in the spec body. Used by the orphan_check CI gate and the conformance test harness. Ships informatively in v0.1.1 (spec sec.12.6 reservation).",
+  "description": "Schema for docs/public/specs/manifests/openapm-v0.1.requirements.yml. The manifest is the machine-readable projection of the HTML req anchors in the spec body. Used by the orphan_check CI gate and the conformance test harness. Ships informatively in v0.1.1 (spec sec.12.6 reservation).",
   "type": "object",
   "additionalProperties": false,
   "required": ["requirements_format_version", "spec_version", "requirements"],
