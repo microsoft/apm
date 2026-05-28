@@ -97,6 +97,19 @@ def test_policy_evaluator_short_circuits_on_first_deny():
 def test_policy_apiversion_pinned_to_v0_1():
     schema = load_schema("policy-v0.1.schema.json")
     assert schema["$id"].endswith("policy-v0.1.schema.json")
+    # Default-value pins (round-3 fold): the spec names `warn` and
+    # `project-wins` as the effective defaults for `fetch_failure` and
+    # `dependencies.require_resolution`; mirror them in the schema as
+    # advisory `default` annotations so a reverter trips this test.
+    assert schema["properties"]["fetch_failure"]["default"] == "warn"
+    assert (
+        schema["properties"]["dependencies"]["properties"]["require_resolution"]["default"]
+        == "project-wins"
+    )
+    assert_spec_contains(
+        "`fetch_failure` is unset, the effective value is `warn`",
+        "Default `project-wins` when unset",
+    )
 
 
 @pytest.mark.req("req-pl-011")

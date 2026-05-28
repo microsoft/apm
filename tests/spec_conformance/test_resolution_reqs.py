@@ -21,6 +21,7 @@ import pytest
 from tests.spec_conformance._helpers import (
     assert_spec_contains,
     load_json_fixture,
+    load_schema,
 )
 
 # --- req-rs-001..014 ---------------------------------------------------
@@ -141,6 +142,14 @@ def test_resolver_fails_closed_on_ambiguous_resolution():
     assert_spec_contains(
         "conflict_resolution: nest",
         "reserved for v0.2",
+    )
+    # Schema enum pin (round-3 fold): the manifest schema MUST admit
+    # only `intersection-pick` in v0.1; `nest` is reserved for v0.2.
+    schema = load_schema("manifest-v0.1.schema.json")
+    enum = schema["$defs"]["depsBlock"]["properties"]["conflict_resolution"]["enum"]
+    assert enum == ["intersection-pick"], (
+        f"manifest schema conflict_resolution enum MUST be exactly "
+        f"['intersection-pick'] in v0.1; got {enum!r}"
     )
 
 
