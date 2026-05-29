@@ -62,6 +62,43 @@ class TestVersionNotificationIntegration(unittest.TestCase):
             self.assertIn("initialized successfully", result.output)
 
 
+class TestUpdateCheckSkippedOnInvalidCommand(unittest.TestCase):
+    """Test that update check is skipped for unknown/invalid commands."""
+
+    def setUp(self):
+        self.runner = CliRunner()
+
+    @patch("apm_cli.cli._check_and_notify_updates")
+    def test_no_update_check_on_unknown_command(self, mock_check):
+        """Update check must not run when an unknown command is invoked."""
+        from apm_cli.cli import cli
+
+        result = self.runner.invoke(cli, ["invalid"])
+
+        mock_check.assert_not_called()
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("invalid", result.output)
+
+    @patch("apm_cli.cli._check_and_notify_updates")
+    def test_update_check_runs_on_valid_command(self, mock_check):
+        """Update check must still run when a known command is invoked."""
+        from apm_cli.cli import cli
+
+        with self.runner.isolated_filesystem():
+            self.runner.invoke(cli, ["init", "test-project", "--yes"])
+
+        mock_check.assert_called_once()
+
+    @patch("apm_cli.cli._check_and_notify_updates")
+    def test_no_update_check_without_subcommand(self, mock_check):
+        """Update check must not run when no subcommand is given (help display)."""
+        from apm_cli.cli import cli
+
+        self.runner.invoke(cli, [])
+
+        mock_check.assert_not_called()
+
+
 class TestUpdateCommand(unittest.TestCase):
     """Test the update command."""
 
