@@ -81,7 +81,7 @@ writes a runtime-specific MCP config file. The schemas differ; the
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `~/.claude.json` (`-g`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
-| Codex CLI | `~/.codex/config.toml` | global | TOML `[mcp_servers.*]` |
+| Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `~/.codex/config.toml` (`-g`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
@@ -156,16 +156,18 @@ When the Copilot CLI adapter writes a remote MCP config and the
 server is identified as the GitHub MCP server, APM resolves a token
 and adds an `Authorization: Bearer <token>` header.
 
-The server is identified as "GitHub" by **two** narrow checks
-([copilot.py:1208](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1208)):
+The server is identified as "GitHub" only when it satisfies **both** of
+these narrow checks
+([copilot.py:1004](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1004)):
 
 1. The server name (case-insensitive) is one of:
    `github-mcp-server`, `github`, `github-mcp`,
    `github-copilot-mcp-server`.
-2. Or the parsed URL hostname matches the GitHub host allowlist
-   (`github.com`, `api.github.com`, and registered GHES hostnames).
+2. **And** the parsed URL hostname matches the GitHub host allowlist
+   (`github.com`, `*.github.com`, `githubcopilot.com` hosts, and
+   registered GHES hostnames).
 
-This is an exact-match allowlist on hostname, not a substring check.
+This is a parsed-host allowlist on hostname, not a substring check.
 A URL like `https://github.com.evil.example` does not match because
 the parsed hostname is `github.com.evil.example`, not `github.com`.
 

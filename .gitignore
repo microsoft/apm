@@ -12,6 +12,7 @@ __pycache__/
 .Python
 build/build/
 build/apm/
+build/conformance-coverage.json
 *.bak
 develop-eggs/
 dist/

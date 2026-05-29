@@ -106,4 +106,4 @@ Registry `Source` values:
 - [`apm install`](../install/) -- pass `--update` to upgrade outdated deps and rewrite the lockfile.
 - [`apm view`](../view/) -- inspect a single package's metadata or available versions.
 - [`apm audit`](../audit/) -- security scan over installed primitives, suitable for CI gating.
-- [Registries guide](../../guides/registries/) -- declare registries, publish flat archives, and consume registry-sourced deps.
+- [Registries guide](../../../guides/registries/) -- declare registries, publish flat archives, and consume registry-sourced deps.

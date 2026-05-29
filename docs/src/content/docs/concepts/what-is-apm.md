@@ -51,11 +51,11 @@ One `apm.yml`. Seven harnesses. Reproducible AI agent setup. Every developer who
 
 ### Secure by default
 
-Every `apm install` scans for hidden Unicode before agents read it. Agent context is executable -- a prompt is a program for an LLM. APM treats it that way. Each install scans for invisible Unicode that can hijack agent behavior, pins content hashes in the lockfile, and gates transitive MCP servers behind explicit trust prompts. `apm audit` rebuilds context in scratch and diffs against your working tree.
+Every `apm install` scans for hidden Unicode before agents read it. Agent context is executable -- a prompt is a program for an LLM. APM treats it that way. Each install scans for invisible Unicode that can hijack agent behavior, pins content hashes in the lockfile, and blocks transitive MCP servers unless they are explicitly declared or trusted. `apm audit` rebuilds context in scratch and diffs against your working tree.
 
 ### Governed by policy
 
-Org policy enforced at install time, before MCP touches disk. `apm-policy.yml` lets a security team allow-list sources, scopes, and primitives. Every `apm install` runs the policy before writing to disk -- including transitive MCP servers shipped by deep dependencies. Tighten-only inheritance flows enterprise -> org -> repo. `apm audit --ci` wires the same checks into branch protection.
+Org policy enforced at install time, before MCP touches disk. `apm-policy.yml` lets a security team allow-list sources, scopes, and primitives. Every `apm install` runs the policy before writing deployed files -- including transitive MCP servers shipped by deep dependencies. Tighten-only inheritance flows enterprise -> org -> repo. `apm audit --ci` wires the same checks into branch protection.
 
 ## Where to next
 

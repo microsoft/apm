@@ -1,0 +1,7 @@
+# Exercises: req-pl-003
+# Invalid: extends chain cycle (this file extends itself via the cycle).
+# A conforming governance implementation MUST reject this with a diagnostic
+# naming the cycle members.
+name: cycle-leaf
+extends: ./invalid-extends-cycle.yml
+enforcement: warn

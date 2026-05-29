@@ -45,9 +45,9 @@ commands -- are NOT compiled by this command. They are deployed by
 `apm install` directly into the harness directories that consume them
 (`.github/prompts/`, `.agents/skills/`, `.claude/commands/`, etc.).
 For the full reach map, see
-[Primitives and targets](../../concepts/primitives-and-targets/). For
+[Primitives and targets](../concepts/primitives-and-targets/). For
 the place compile takes in the broader flow, see
-[Lifecycle](../../concepts/lifecycle/).
+[Lifecycle](../concepts/lifecycle/).
 
 ## The authoring loop
 
@@ -65,11 +65,12 @@ apm compile --dry-run            # print placement decisions without writing fil
 ```
 
 `--validate` is the fastest signal that an instruction parses.
-`--dry-run` shows you exactly which AGENTS.md tree would be written
-where. `--watch` is the tight inner loop while you edit prose.
+`--dry-run` shows you exactly which root-context tree (`AGENTS.md`,
+`CLAUDE.md`, ...) would be written where. `--watch` is the tight inner
+loop while you edit prose.
 
 To preview a script that wraps a `.prompt.md` file, use
-[`apm preview`](../preview-and-validate/) instead. `apm compile` builds
+[`apm preview`](./preview-and-validate/) instead. `apm compile` builds
 the root context files; `apm preview` shows the rewritten command line
 your script will execute.
 
@@ -106,7 +107,7 @@ order:
 
 Pin `targets:` in `apm.yml` if you want the same compile output on
 every machine. Full rules and the per-target output map live in
-[Primitives and targets](../../concepts/primitives-and-targets/#how-a-target-is-selected).
+[Primitives and targets](../concepts/primitives-and-targets/#how-a-target-is-selected).
 
 ## Where instructions land
 
@@ -122,14 +123,12 @@ Per target, with the rules shape on disk after compile:
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
 
-> **Claude deduplication**: When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the instructions section from `CLAUDE.md` to avoid duplicate content in Claude Code's context window. `CLAUDE.md` is still generated if it carries a constitution or dependency `@import` paths.
-
 ## compile vs install
 
 | You want to... | Run |
 |---|---|
 | Iterate on instructions in `.apm/instructions/` | `apm compile` |
-| Deploy prompts, skills, agents, hooks, commands, MCP | `apm install` (see [Install packages](../../consumer/install-packages/)) |
+| Deploy prompts, skills, agents, hooks, commands, MCP | `apm install` (see [Install packages](../consumer/install-packages/)) |
 | Add a dependency or refresh `apm_modules/` | `apm install` |
 | Verify deployed bytes match the lockfile | `apm audit` |
 
@@ -170,12 +169,12 @@ re-running `apm compile` restores the instructions section to
 - **Hand-edited primitives skip the security scan.** `apm compile`
   does not run the install-time hidden-Unicode scan. After hand-edits,
   run `apm audit` before publishing. See
-  [drift and secure-by-default](../../consumer/drift-and-secure-by-default/).
+  [drift and secure-by-default](../consumer/drift-and-secure-by-default/).
 - **Zero-output success.** If compile reports success but writes no
   files, your project either has no instructions, or every requested
   target was rejected. The CLI surfaces this as a warning -- check
   `targets:` and the contents of `.apm/instructions/`.
 
 Once your instructions compile cleanly into the harnesses you care
-about, package the result with [`apm pack`](../pack-a-bundle/) and
-share it via [a marketplace](../publish-to-a-marketplace/).
+about, package the result with [`apm pack`](./pack-a-bundle/) and
+share it via [a marketplace](./publish-to-a-marketplace/).

@@ -296,7 +296,8 @@ class TestExhaustivenessChecks:
             "agents_cursor",
             "agents_opencode",
             "agents_codex",
-            "agents_windsurf",
+            # NOTE: windsurf no longer exposes an 'agents' primitive
+            # (its content deploys as skills under .windsurf/skills/).
             "commands",  # was commands_claude, aliased
             "commands_cursor",
             "commands_gemini",

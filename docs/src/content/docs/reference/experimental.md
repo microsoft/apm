@@ -11,7 +11,7 @@ sidebar:
 Default APM behaviour never changes based on what is available here. A flag must be explicitly enabled to take effect, and every flag ships disabled.
 
 :::caution[Scope]
-Experimental flags are ergonomic and UX toggles only. They MUST NOT gate security-critical behaviour -- content scanning, path validation, lockfile integrity, token handling, MCP trust, or collision detection are never placed behind a flag. See [Security Model](../../enterprise/security/).
+Experimental flags are ergonomic and UX toggles only. They MUST NOT gate security-critical behaviour -- content scanning, path validation, lockfile integrity, token handling, MCP trust, or collision detection are never placed behind a flag. See [Security Model](../enterprise/security/).
 :::
 
 ## Subcommands

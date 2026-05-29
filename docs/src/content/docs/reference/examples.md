@@ -4,9 +4,9 @@ sidebar:
   order: 5
 ---
 
-This guide showcases real-world APM workflows, from simple automation to enterprise-scale AI development patterns. Learn through practical examples that demonstrate the power of structured AI workflows.
+This page shows real-world APM workflows you can copy and adapt, from simple automation to enterprise-scale patterns.
 
-> **Note:** Examples using `apm run` reference APM's experimental [Agent Workflows](../../guides/agent-workflows/) feature.
+> **Note:** Examples using `apm run` reference APM's prompt-and-script workflow. See [`apm run` scripts](../consumer/run-scripts/) for the full model.
 
 ## Before & After: Traditional vs APM
 
@@ -510,8 +510,8 @@ apm run quality-gate --param threshold="A" --param coverage_min="85%" --param se
 
 Ready to build your own workflows? Check out:
 
-- **[Context Guide](../../introduction/key-concepts/)** - Learn to build custom workflows
-- **[Integrations Guide](../../integrations/ide-tool-integration/)** - Connect with your existing tools
-- **[Getting Started](../../getting-started/installation/)** - Set up your first project
+- **[Key concepts](../concepts/what-is-apm/)** - Learn to build custom workflows
+- **[Integrations Guide](../integrations/ide-tool-integration/)** - Connect with your existing tools
+- **[Getting Started](../getting-started/installation/)** - Set up your first project
 
 Or explore the complete framework at [AI-Native Development Guide](https://danielmeppiel.github.io/awesome-ai-native/)!

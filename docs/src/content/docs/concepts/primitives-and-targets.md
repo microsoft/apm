@@ -90,7 +90,7 @@ Notes per target:
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
 - **opencode** -- OpenCode. No hooks support.
-- **windsurf** -- Windsurf / Cascade. Agents are delivered as auto-invokable skills under `.windsurf/skills/`. Workflows are the harness's name for commands.
+- **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
 
 ## The compatibility matrix
 
@@ -99,13 +99,13 @@ Rows are primitives, columns are harnesses. Cell legend:
 - **native** -- the harness reads this primitive directly from its own format and directory; APM writes the file as-is or in the harness's documented format.
 - **compiled** -- APM transforms the primitive into a different format the harness understands (e.g. a prompt becomes a TOML command, an instruction is folded into `AGENTS.md`).
 - **unsupported** -- APM does not deliver this primitive to this harness.
-- **gated** -- delivered behind a flag or trust prompt.
+- **gated** -- delivered behind an explicit declaration or trust flag.
 
 | Primitive | Copilot | Claude | Cursor | Codex | Gemini | OpenCode | Windsurf |
 |---|---|---|---|---|---|---|---|
 | instructions | native | native | native | compiled | compiled | compiled | native |
 | prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled |
-| agents | native | native | compiled | compiled | unsupported | native | compiled |
+| agents | native | native | compiled | compiled | unsupported | native | unsupported |
 | skills | native | native | native | native | native | native | native |
 | hooks | native | native | native | native | native | unsupported | native |
 | commands | unsupported | native | compiled | unsupported | compiled | compiled | compiled |
@@ -119,7 +119,7 @@ How to read a cell:
 - `agents / gemini = unsupported` -- Gemini CLI has no agents primitive; APM does not deliver `.agent.md` files to it. Their content still reaches Gemini through the compiled `GEMINI.md` if referenced from instructions.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
-- `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies require an explicit trust prompt at install -- effectively `gated` for those, `native` for direct dependencies.
+- `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.
 
 ## Dev-only primitives
 

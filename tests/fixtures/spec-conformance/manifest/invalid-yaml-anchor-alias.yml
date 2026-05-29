@@ -1,0 +1,14 @@
+# req-mf-020 (YAML safe-subset: anchor + alias constructs rejected)
+# This fixture intentionally uses `&anchor` / `*alias` so that a
+# conforming consumer's YAML parse step rejects it. A v0.1 consumer
+# MUST reject this with a diagnostic; PyYAML's `yaml.safe_load`
+# itself permits anchors, so the test asserts apm_cli's parser is
+# wired with anchor-rejection (or that the loader emits a
+# diagnostic). The fixture is also a regression handle for
+# documentation: deleting this file without updating req-mf-020 in
+# the spec is a drift signal.
+defaults: &defaults
+  target: copilot
+name: anchor-alias-rejected
+version: "1.0.0"
+extra: *defaults

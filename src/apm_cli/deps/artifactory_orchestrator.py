@@ -175,12 +175,15 @@ class ArtifactoryOrchestrator:
     @staticmethod
     def _split_owner_repo(dep_ref: DependencyReference) -> tuple[str, str]:
         repo_parts = dep_ref.repo_url.split("/")
-        if len(repo_parts) < 2 or not repo_parts[0] or not repo_parts[1]:
+        if len(repo_parts) < 2 or not all(repo_parts):
             raise ValueError(
                 f"Invalid Artifactory repo reference '{dep_ref.repo_url}': "
                 "expected 'owner/repo' format"
             )
-        return repo_parts[0], repo_parts[1]
+        # Owner is the top-level namespace; the remainder of the path is the
+        # project slug.  For GitLab projects behind an Artifactory VCS proxy
+        # the slug can include subgroups (e.g. ``group/subgroup/project``).
+        return repo_parts[0], "/".join(repo_parts[1:])
 
     @staticmethod
     def _progress(progress_obj, progress_task_id, *, completed: int, total: int = 100) -> None:
@@ -257,7 +260,9 @@ class ArtifactoryOrchestrator:
         subdir_path = dep_ref.virtual_path
         repo_parts = dep_ref.repo_url.split("/")
         owner = repo_parts[0]
-        repo = repo_parts[1] if len(repo_parts) > 1 else repo_parts[0]
+        # Preserve subgroup nesting (GitLab via proxy) by folding everything
+        # past the owner into the repo slug.
+        repo = "/".join(repo_parts[1:]) if len(repo_parts) > 1 else repo_parts[0]
         host, prefix, scheme = proxy_info
 
         self._progress(progress_obj, progress_task_id, completed=10)

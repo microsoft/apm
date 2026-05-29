@@ -13,7 +13,7 @@ pins every file by SHA-256. Build it with one command from a project that has
 apm pack
 ```
 
-This is the producer side of [Deploy a local bundle](../../consumer/deploy-a-bundle/).
+This is the producer side of [Deploy a local bundle](../consumer/deploy-a-bundle/).
 Consumers who receive the artifact run `apm install ./your-bundle` and skip
 the registry resolver entirely.
 
@@ -67,7 +67,7 @@ fields:
 Author your own `plugin.json` at the project root (or under `.github/plugin/`,
 `.claude-plugin/`, or `.cursor-plugin/`) when you need fields APM does not
 synthesise -- otherwise leave it to `apm pack` and keep `apm.yml` as the
-source of truth. See [Package anatomy](../../concepts/package-anatomy/) for
+source of truth. See [Package anatomy](../concepts/package-anatomy/) for
 the full schema.
 
 ## Integrity: how install verifies the bundle
@@ -96,10 +96,10 @@ Three common ways to hand off a bundle:
   `apm install ./<pkg>-<version>.tar.gz`.
 - **Marketplace entry.** If your project also has a `marketplace:` block in
   `apm.yml`, `apm pack` builds `marketplace.json` alongside the bundle. See
-  [Publish to a marketplace](../publish-to-a-marketplace/).
+  [Publish to a marketplace](./publish-to-a-marketplace/).
 
 For the consumer flags that apply (`--target`, `--global`, `--force`,
-`--dry-run`), see [Deploy a local bundle](../../consumer/deploy-a-bundle/).
+`--dry-run`), see [Deploy a local bundle](../consumer/deploy-a-bundle/).
 
 ## Pitfalls
 
@@ -128,9 +128,9 @@ full file list (and any path remappings) without writing anything.
 
 ## What to read next
 
-- [Deploy a local bundle](../../consumer/deploy-a-bundle/) -- the consumer
+- [Deploy a local bundle](../consumer/deploy-a-bundle/) -- the consumer
   side of this hand-off.
-- [Publish to a marketplace](../publish-to-a-marketplace/) -- when a registry
+- [Publish to a marketplace](./publish-to-a-marketplace/) -- when a registry
   entry is a better fit than a bundle.
-- [Package anatomy](../../concepts/package-anatomy/) -- the file layout and
+- [Package anatomy](../concepts/package-anatomy/) -- the file layout and
   schema reference.

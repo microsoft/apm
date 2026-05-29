@@ -13,7 +13,7 @@ Find plugins in a registered marketplace by name or keyword.
 apm search QUERY@MARKETPLACE [OPTIONS]
 ```
 
-`apm search` is a top-level alias for [`apm marketplace search`](../marketplace/). Both commands invoke the same implementation and accept identical arguments and options.
+`apm search` is the top-level marketplace search command. It reuses the marketplace search implementation and accepts the `QUERY@MARKETPLACE` expression and options shown below.
 
 ## Description
 
@@ -67,6 +67,6 @@ apm install code-review@skills
 
 ## Related
 
-- [`apm marketplace`](../marketplace/) -- full marketplace command group (`add`, `list`, `browse`, `refresh`, `remove`, `search`)
+- [`apm marketplace`](../marketplace/) -- full marketplace command group (`add`, `list`, `browse`, `refresh`, `remove`)
 - [`apm install`](../install/) -- install a plugin returned by search
-- [Use marketplaces](../../../consumer/use-marketplaces/) -- consumer guide for registering and consuming marketplaces
+- [Install from marketplaces](../../../consumer/installing-from-marketplaces/) -- consumer guide for registering and consuming marketplaces

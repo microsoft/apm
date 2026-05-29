@@ -1,0 +1,1019 @@
+{
+  "generator": "gen_statement.py v1",
+  "requirements": [
+    {
+      "conformance_class": "consumer",
+      "id": "req-cf-001",
+      "keyword": "MUST",
+      "section": "12.5",
+      "status": "active",
+      "test_count": 6,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_round_trip_clause_present_in_spec",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[round-trip-unknown-fields.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[v2-with-registry.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[valid-extends.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[valid-minimal.yml]",
+        "tests/spec_conformance/test_round_trip.py::test_round_trip_is_fixed_point[x-extension-roundtrip.yml]"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-cf-002",
+      "keyword": "MUST",
+      "section": "12.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_implementations_publish_conformance_statement"
+      ],
+      "waivers": [
+        "CONFORMANCE.{md,json} not yet generated in this checkout. Run `uv run python -m tests.spec_conformance.gen_statement`."
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-ext-001",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_preserves_x_extension_keys_on_round_trip"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-ext-002",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_spec_reserves_x_prefix_for_vendor_extensions_only"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-001",
+      "keyword": "MUST",
+      "section": "5.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_valid_v2_passes_schema"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-002",
+      "keyword": "MUST",
+      "section": "5.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_declares_apiversion"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-003",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_carries_dependencies_block"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-004",
+      "keyword": "MUST",
+      "section": "5.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_v1_remains_parseable_under_v2_reader"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-005",
+      "keyword": "MUST",
+      "section": "5.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_resolved_field"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-006",
+      "keyword": "MUST",
+      "section": "5.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-007",
+      "keyword": "SHOULD",
+      "section": "5.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_resolution_metadata"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-008",
+      "keyword": "MUST",
+      "section": "5.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_supports_registry_source"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-009",
+      "keyword": "MUST",
+      "section": "5.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_records_registry_url"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-010",
+      "keyword": "MUST",
+      "section": "5.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_records_registry_digest"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-011",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_round_trips_unknown_fields"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-012",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_canonical_tree_sha256_field_present"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-013",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-014",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-015",
+      "keyword": "MUST",
+      "section": "5.6.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_tree_sha256_canonicalisation_invariant"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-016",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reader_tolerates_bare_hex_hash"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-017",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_deployed_file_hash_mismatch_fails_closed"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-018",
+      "keyword": "SHOULD",
+      "section": "5.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
+      ],
+      "waivers": [
+        "Publish-timestamp recording is a publisher-side SHOULD that requires registry interaction to exercise end-to-end. The schema affordance (generated_at) is asserted above; full publisher coverage requires the registry wire conformance module which is not in v0.1 scope."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-001",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_required_keys_enforced_by_schema"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-002",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_name_is_non_empty_string"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-003",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_missing_name_rejected_by_schema"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-004",
+      "keyword": "SHOULD",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_version_is_semver_2_0_0"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-005",
+      "keyword": "MUST",
+      "section": "4.2.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_manifest_target_enum_is_pinned"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-006",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_missing_source_key"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-007",
+      "keyword": "MUST",
+      "section": "4.3.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_apm_source_field_has_supported_shapes"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-008",
+      "keyword": "MUST",
+      "section": "4.3.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_pinned_version"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-009",
+      "keyword": "MUST",
+      "section": "4.3.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_pinned_commit"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-010",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_apm_source_short_form_string"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-011",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_apm_source_table_form"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-012",
+      "keyword": "MUST",
+      "section": "4.3.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_unknown_source_kind"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-013",
+      "keyword": "MUST",
+      "section": "4.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_local_path_source"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-014",
+      "keyword": "MUST",
+      "section": "4.2.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_rejects_non_http_registry_scheme"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-015",
+      "keyword": "MUST",
+      "section": "4.2.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_rejects_unknown_registries_keys"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-016",
+      "keyword": "MUST",
+      "section": "4.3.5",
+      "status": "skipped",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_absolute_paths_in_apm_source"
+      ],
+      "waivers": [
+        "Path-shape negative test requires apm_cli's path-policy loader to be invokable from the test harness; the JSON Schema currently models `path` as a free-form string. Tracked as a follow-up: tighten the schema to forbid leading `/` and document the absolute-path rejection in the schema additionalProperties."
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-017",
+      "keyword": "MUST",
+      "section": "4.7",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_publishes_apm_yml_at_repo_root"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-018",
+      "keyword": "MUST",
+      "section": "4.6.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_restricts_policy_hash_algorithm_to_strong_set"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-019",
+      "keyword": "MUST",
+      "section": "4.2.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_supports_default_host_field"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-mf-020",
+      "keyword": "MUST",
+      "section": "4.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_enforces_yaml_safe_subset"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-mf-021",
+      "keyword": "MUST",
+      "section": "4.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_must_not_use_in_v0_1"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-001",
+      "keyword": "MUST",
+      "section": "6.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_valid_extends_passes_schema"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-002",
+      "keyword": "MUST",
+      "section": "6.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_carries_apiversion_or_kind_key"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-003",
+      "keyword": "MUST",
+      "section": "6.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_field_resolves_to_other_policy"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-004",
+      "keyword": "MUST",
+      "section": "6.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_cycle_is_rejected"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-005",
+      "keyword": "MUST",
+      "section": "6.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_rule_set_carries_required_fields"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-006",
+      "keyword": "MUST",
+      "section": "6.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_extends_resolves_relative_to_policy_root"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-007",
+      "keyword": "MUST",
+      "section": "6.3.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_supports_allow_action"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-008",
+      "keyword": "MUST",
+      "section": "6.3.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_supports_deny_action"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-009",
+      "keyword": "MUST",
+      "section": "6.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_evaluator_short_circuits_on_first_deny"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-010",
+      "keyword": "MUST",
+      "section": "6.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_apiversion_pinned_to_v0_1"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-011",
+      "keyword": "MUST",
+      "section": "6.1.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_allow_list_shape"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-012",
+      "keyword": "MUST",
+      "section": "6.1.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_deny_list_shape"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-001",
+      "keyword": "MUST",
+      "section": "8.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_loads_primitives_from_resolved_dep"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-002",
+      "keyword": "MUST",
+      "section": "8.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-003",
+      "keyword": "MUST",
+      "section": "8.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_rejects_primitive_collisions"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-pr-004",
+      "keyword": "MUST",
+      "section": "7.8",
+      "status": "active",
+      "test_count": 10,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[1.2.3+build.42-True]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[2.3.1-True]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[release-1.2.3-False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[v0.0.1-alpha.1-True]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[v01.2.3-False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[v1.2-False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[v1.2.3--False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[v1.2.3-rc.1+build.7-True]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[v1.2.3.4-False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_publishes_primitive_index[v2.3.1-True]"
+      ]
+    },
+    {
+      "conformance_class": "producer",
+      "id": "req-pr-005",
+      "keyword": "SHOULD",
+      "section": "7.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_producer_should_carry_primitive_descriptions"
+      ]
+    },
+    {
+      "conformance_class": "registry",
+      "id": "req-rg-001",
+      "keyword": "MUST",
+      "section": "11.3.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_registry_reqs.py::test_registry_trust_anchor_archive_bytes_match_advertised_digest"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-001",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_walks_dependency_graph_deterministically"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-002",
+      "keyword": "MUST",
+      "section": "7.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_emits_lockfile_after_successful_resolution"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-003",
+      "keyword": "MUST",
+      "section": "7.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_uses_pinned_version_when_present"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-004",
+      "keyword": "MUST",
+      "section": "7.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_resolution_provenance_in_lockfile"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-005",
+      "keyword": "MUST",
+      "section": "7.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_rejects_unresolvable_dependency"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-006",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_handles_commit_pin"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-007",
+      "keyword": "MUST",
+      "section": "7.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_semver_dialect_oracle_present_and_well_formed"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-008",
+      "keyword": "MUST",
+      "section": "7.1",
+      "status": "active",
+      "test_count": 7,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[caret-0_0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[caret-0_2]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[caret-1_x]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[gte-range]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[or-union]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[tilde-0_x]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_caret_range[tilde-1_2]"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-009",
+      "keyword": "MUST",
+      "section": "7.5.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_tilde_range"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-010",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_exact_pin"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-011",
+      "keyword": "MUST",
+      "section": "7.7",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_source_url_in_lockfile"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-012",
+      "keyword": "MUST",
+      "section": "7.7",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_resolved_ref_in_lockfile"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-013",
+      "keyword": "MUST",
+      "section": "7.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_fails_closed_on_ambiguous_resolution"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-rs-014",
+      "keyword": "MUST",
+      "section": "7.3.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_honours_prerelease_inclusion_rules"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-001",
+      "keyword": "MUST",
+      "section": "10.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_sha256_content_hash_on_deployed_files"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-002",
+      "keyword": "MUST",
+      "section": "10.9",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_archive_path_traversal_fails_closed"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-003",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_resolves_credentials_per_host_class"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-004",
+      "keyword": "MUST",
+      "section": "10.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_archive_container_size_and_entry_count_capped"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-005",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-006",
+      "keyword": "MUST",
+      "section": "4.2.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_http_registry_url_without_opt_in"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-007",
+      "keyword": "MUST",
+      "section": "10.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_redacts_credential_material"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-008",
+      "keyword": "SHOULD",
+      "section": "10.3",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-001",
+      "keyword": "MUST",
+      "section": "8.4",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_target_detection_predicate_binding"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-002",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_only_under_registered_roots"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-003",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_skills_to_agents_skills"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-004",
+      "keyword": "MUST",
+      "section": "4.2.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_routes_vendor_target_identifiers_to_handlers"
+      ]
+    }
+  ],
+  "spec_version": "v0.1.1",
+  "summary_by_class": {
+    "consumer": {
+      "active": 61,
+      "skipped": 1,
+      "unbound": 0,
+      "xfail": 0
+    },
+    "governance": {
+      "active": 12,
+      "skipped": 0,
+      "unbound": 0,
+      "xfail": 0
+    },
+    "producer": {
+      "active": 12,
+      "skipped": 0,
+      "unbound": 0,
+      "xfail": 0
+    },
+    "registry": {
+      "active": 1,
+      "skipped": 0,
+      "unbound": 0,
+      "xfail": 0
+    }
+  },
+  "total_requirements": 87
+}

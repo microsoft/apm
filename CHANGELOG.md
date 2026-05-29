@@ -7,19 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **BREAKING:** `apm install` now exits `1` whenever the diagnostic summary reports `Installation failed with N error(s)`. Previously the command exited `0` even after reporting errors, so CI could not detect failure via exit code. `--force` continues to bypass only the security scan's critical-finding block; it does **not** suppress general install errors (matches `npm` / `pip` / `cargo`). Callers that asserted `exit_code == 0` while errors were reported must update.
+## [0.16.0] - 2026-05-28
 
 ### Added
 
-- `ref:` on git-source dependencies now accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). `apm install` runs `git ls-remote`, picks the highest tag matching the range, and pins the resolved tag, commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `apm install --update` to re-resolve against current remote tags. Two tag patterns are tried in order (`v{version}`, `{name}--v{version}`) with a bare `{version}` fallback. (closes #1488)
-- `apm deps why <package>` explains why a transitive dependency is installed by walking the lockfile's `resolved_by` chain back to the user's direct declaration in `apm.yml`. Supports `--global` for user-scope lockfiles and `--json` for scriptable output (JSON to stdout, all logs to stderr; analogue of `npm why` / `yarn why`). Exits `0` on success, `1` when the package isn't installed or the query is ambiguous, `2` when no lockfile exists. (#1490)
+- OpenAPM v0.1 normative spec at `docs/src/content/docs/specs/openapm-v0.1.md` with JSON Schemas for manifest/lockfile/policy and conformance fixtures under `tests/fixtures/spec-conformance/`, so third-party integrators can build conformant tools without reading the rest of the APM docs. (closes #1502, #1517)
+- `ref:` on git-source dependencies now accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). `apm install` resolves the highest matching remote tag and pins the resolved tag, SHA, and constraint in `apm.lock.yaml`; subsequent installs replay offline, `apm install --update` re-resolves. (closes #1488, #1496)
+- `apm deps why <package>` explains why a transitive dependency was installed by walking the lockfile back to your direct declaration in `apm.yml`. Supports `--global` and `--json`; analogue of `npm why` / `yarn why`. (#1495)
+- `policy.dependencies.require_pinned_constraint: true` bans unbounded version ranges across `apm.yml`, blocking accidental drift in governed environments. (#1494)
+- Deterministic Artifactory boundary probe at install time, so nested GitLab group/subgroup repos behind a JFrog proxy install correctly via the bare-shorthand form (previously failed with HTTP 404). Auth errors (401/403) are now distinguishable from missing-repo errors, and bearer tokens cannot leak cross-host via redirect. (#1472)
+
+### Changed
+
+- **BREAKING:** `apm install` now exits `1` whenever the diagnostic summary reports `Installation failed with N error(s)`. Previously it exited `0` even after reporting errors, so CI could not detect failure. `--force` continues to bypass only the security scan's critical-finding block; it does not suppress general install errors (matches `npm` / `pip` / `cargo`). Callers that asserted `exit_code == 0` while errors were reported must update. (#1496)
+- Artifactory parse-time boundary detection no longer relies on directory-name heuristics (`skills/`, `prompts/`, `agents/`, `collections/`, `instructions/`); the install-time HEAD probe is now authoritative for the `(owner, repo, virtual_path)` split. Explicit FQDN refs use a shallow `owner/repo` split; bare shorthand under `PROXY_REGISTRY_ONLY` uses a structural file-extension rule. (#1472)
 
 ### Fixed
 
-- `apm install --update` now re-resolves direct git-source semver dependencies. Previously, when the dependency's install path already existed on disk, the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs; the lockfile kept the previously-resolved tag.
-- `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm- and cargo-style explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are now recognized as pinned constraints; the pip-style `==1.2.3` form is still rejected (not part of node-semver). Follow-up to #1494 / #1505.
+- `install.ps1` on Windows now works on accounts whose profile path contains non-ASCII characters (e.g. an accented username): the generated `apm.cmd` shim embeds the literal `%LOCALAPPDATA%` token instead of a baked, code-page-mangled path. Previously `apm --version` reported `The system cannot find the path specified.` (closes #1509, #1512)
+- `apm.cmd` Windows shim is now written as ASCII so `cmd.exe` parses it correctly when invoked via `PATH`. A previous attempt to write the shim as UTF-16LE broke fresh installs with garbled output and exit code 1. (#1522)
+- `install.ps1` is now strict ASCII, so `apm self-update` on `cp1252` Windows consoles no longer crashes with `UnicodeEncodeError: 'charmap' codec can't encode characters`. (#1523)
+- `apm install --target opencode` now warns at install time when an agent's frontmatter has shapes OpenCode's Zod schema rejects (`tools:` as list/string, non-hex/non-theme `color:`), so users learn why OpenCode refuses the agent instead of hitting only a runtime crash. (Phase 1 of #581, #1513)
+- `apm compile --target claude` now honors `compilation.strategy: single-file` and `--single-agents`, collapsing into one root `CLAUDE.md` instead of silently emitting per-subdirectory files. (closes #1445, #1514)
+- `apm install git@gitlab.com:owner/repo.git#ref` now succeeds for users with an SSH key and no `GITLAB_APM_PAT` / `GITLAB_TOKEN`: the validator honors the explicit SSH transport instead of demanding an HTTPS-token probe. GitLab SSH-key users get parity with GitHub SSH users. (closes #1501, #1515)
+- `apm install -g` now correctly integrates hook JSON files authored in the "naked" Claude settings-slice format (event names at top-level, no outer `hooks:` wrap). Previously the file parsed cleanly but merged nothing while the summary still reported `1 hook(s) integrated`; the counter now reflects actual contributions and malformed shapes fail closed with a warning. (closes #1499, #1516)
+- `apm install --update` now re-resolves direct git-source semver dependencies even when the dependency's install path already exists; previously the BFS resolver short-circuited and `--update` was a silent no-op for git-semver refs. (#1496)
+- `policy.dependencies.require_pinned_constraint: true` no longer misclassifies the npm/cargo explicit-equality form `=1.2.3` as `BARE_BRANCH`. Both `1.2.3` and `=1.2.3` are pinned; pip-style `==1.2.3` is still rejected. (follow-up to #1494, #1506)
+- `apm uninstall` now fully cleans `.windsurf/skills/<pkg>/` directories on the `windsurf` target. (by @yoelabril, #1486)
+- `apm unpack` deprecation banner softened from "will be removed in v0.14" to "will be removed in a future release"; the previous wording shipped past v0.14.0 and contradicted reality. (#1511)
 
 ## [0.15.0] - 2026-05-27
 

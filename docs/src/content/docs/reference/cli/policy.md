@@ -30,7 +30,7 @@ to opt into a CI-friendly contract that exits `1` when no usable policy
 is resolved.
 
 For the `apm-policy.yml` schema and enforcement model, see
-[Policy reference](../../policy-reference/).
+[Policy reference](../../../enterprise/policy-reference/).
 
 ## Subcommands
 
@@ -119,7 +119,7 @@ APM Policy Status
   resolution; honors `--no-policy` to bypass.
 - [`apm audit`](../audit/) -- gate on rule violations with `--ci`;
   complements `apm policy status --check`.
-- [Policy reference](../../policy-reference/) -- canonical
+- [Policy reference](../../../enterprise/policy-reference/) -- canonical
   `apm-policy.yml` schema and enforcement semantics.
 - [Governance overview](../../../enterprise/governance-overview/) --
   how policy fits the broader enterprise governance model.

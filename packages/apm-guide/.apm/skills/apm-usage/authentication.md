@@ -122,6 +122,70 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
 never contacts GitHub directly.
 
+## Registry tokens (experimental)
+
+REST-based APM registries (behind `apm experimental enable registries`) use
+a **separate** credential chain from the GitHub / ADO token chains above.
+Tokens are scoped per registry name as declared in `apm.yml`'s `registries:`
+block (or in `~/.apm/config.json`).
+
+**Env-var naming:** `APM_REGISTRY_TOKEN_{NAME}` where `{NAME}` is the
+registry name uppercased, with `-` and `.` mapped to `_`.
+
+| Registry name | Env var |
+|---------------|---------|
+| `jf-skills` | `APM_REGISTRY_TOKEN_JF_SKILLS` |
+| `corp-main` | `APM_REGISTRY_TOKEN_CORP_MAIN` |
+| `corp.snapshots` | `APM_REGISTRY_TOKEN_CORP_SNAPSHOTS` |
+
+**Auth modes:**
+
+| Env var(s) | Sent as |
+|------------|---------|
+| `APM_REGISTRY_TOKEN_{NAME}` | `Authorization: Bearer <token>` |
+| `APM_REGISTRY_USER_{NAME}` + `APM_REGISTRY_PASS_{NAME}` | `Authorization: Basic <base64(user:pass)>` |
+
+Bearer wins when both forms are set.
+
+**Token precedence (per registry, highest wins):**
+
+1. `APM_REGISTRY_TOKEN_{NAME}` (or `APM_REGISTRY_USER_{NAME}` + `APM_REGISTRY_PASS_{NAME}`) env var
+2. `registry.<name>.token` in `~/.apm/config.json` (via `apm config set`)
+3. Unauthenticated -- APM sends the request anonymously first; remediation
+   pointing at `APM_REGISTRY_TOKEN_<NAME>` is printed only on `401`/`403`
+
+```bash
+# Bearer token for registry "jf-skills"
+export APM_REGISTRY_TOKEN_JF_SKILLS=eyJ...
+
+# Or HTTP Basic
+export APM_REGISTRY_USER_JF_SKILLS=alice@example.com
+export APM_REGISTRY_PASS_JF_SKILLS=secret
+
+# Or stored in user config (never committed)
+apm config set registry.jf-skills.token eyJ...
+```
+
+**Relationship to other chains:** `APM_REGISTRY_*` is a distinct prefix
+from `GITHUB_APM_PAT_*`, `ADO_APM_PAT`, `PROXY_REGISTRY_*`, and
+`ARTIFACTORY_APM_TOKEN`. There is no collision: registry-routed deps go
+through the registry chain only; Git-routed deps continue through the
+GitHub / ADO chains above. A single project with both registry and Git
+deps uses both chains side-by-side.
+
+**Sanitization trap:** distinct registry names can collapse to the same
+env var (`corp-main`, `corp.main`, `Corp-Main` all sanitize to
+`APM_REGISTRY_TOKEN_CORP_MAIN`). Do not declare two registries whose
+names sanitize identically. Prefer hyphenated lowercase names.
+
+Tokens MUST NOT appear in repo YAML. In `apm.yml`, a `token:` field
+under a `registries:` entry is rejected at parse time (token trap). In
+`apm-policy.yml`, a top-level `token:` key is not a recognized policy
+field and surfaces as an "Unknown top-level policy key" warning rather
+than a hard parse error -- but storing tokens there is still
+unsupported and committing one would leak the secret into the repo.
+Store tokens in env vars or `~/.apm/config.json` only.
+
 ## Install validation chain
 
 `apm install <package>` validates a virtual subdirectory package (`owner/repo/path#ref`) before writing it to `apm.yml`. The chain mirrors the actual clone auth path so a credential that succeeds for `git clone` is never false-rejected by the installer:

@@ -21,7 +21,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Codex CLI            | `.codex/`                            | Skills, MCP                            |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
-| Windsurf             | `.windsurf/`                         | Rules + MCP (lossy agent->skill)       |
+| Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
@@ -97,16 +97,17 @@ apm install --target agent-skills
 
 ## MCP server integration
 
-MCP servers declared in `apm.yml` (under `mcp:`) are wired into each target's MCP config on install:
+MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies.mcp:`) are wired into each target's MCP config on install:
 
-- `.claude/settings.json` (Claude Code)
+- `.mcp.json` at the repo root when `.claude/` exists (Claude Code project scope)
 - `.cursor/mcp.json` (Cursor)
-- `.codex/mcp.json` (Codex)
+- `.codex/config.toml` (Codex)
 - `.vscode/mcp.json` (VS Code)
-- `.opencode/mcp.json` (OpenCode)
-- `.windsurf/mcp.json` (Windsurf)
+- `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
+- `.gemini/settings.json` (Gemini)
+- `~/.codeium/windsurf/mcp_config.json` (Windsurf)
 
-For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../guides/install-and-use/mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
+For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../consumer/install-mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
 
 ## Per-tool reference pages
 
@@ -125,14 +126,14 @@ Pinpoint behaviour, slot layout, and known limits per target:
 | `[x] No harness detected`                     | [Common errors](../troubleshooting/common-errors/)                          |
 | Compile produced no output                    | [Compile zero-output](../troubleshooting/compile-zero-output-warning/)      |
 | Wrong target picked, multiple harnesses       | [`apm targets`](../reference/cli/targets/)                                  |
-| MCP server not appearing in tool              | [MCP servers guide](../guides/install-and-use/mcp-servers/)                 |
+| MCP server not appearing in tool              | [MCP servers guide](../consumer/install-mcp-servers/)                       |
 | Cursor command file dropped                   | [Targets matrix](../reference/targets-matrix/) - `claude_command` transformer |
 
 ## Related resources
 
 - [Targets matrix](../reference/targets-matrix/)
 - [Manifest schema](../reference/manifest-schema/)
-- [MCP servers](../guides/install-and-use/mcp-servers/)
+- [MCP servers](../consumer/install-mcp-servers/)
 - [GitHub Agentic Workflows](./gh-aw/)
 - [Microsoft 365 Copilot Cowork](./copilot-cowork/)
 - [APM in CI/CD](./ci-cd/)
