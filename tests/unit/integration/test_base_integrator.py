@@ -664,14 +664,138 @@ class TestInitLinkResolverHomeScoping:
     @patch("apm_cli.integration.base_integrator.discover_primitives")
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
     def test_uses_install_path_when_not_home(self, mock_resolver_cls, mock_discover, tmp_path):
+        """Real installed dependencies (install_path under apm_modules/, NOT
+        equal to project_root) must scan install_path directly."""
         mock_discover.return_value = []
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        # Simulate a real installed package: install_path is a sub-path
+        # of project_root (apm_modules/owner/repo), not the project root.
+        install_path = tmp_path / "apm_modules" / "owner" / "repo"
+        install_path.mkdir(parents=True)
+        pkg_info.install_path = install_path
+
+        bi.init_link_resolver(pkg_info, tmp_path)
+
+        mock_discover.assert_called_once_with(install_path)
+
+
+# ---------------------------------------------------------------------------
+# init_link_resolver -- project-scope local narrowing (#1507)
+# ---------------------------------------------------------------------------
+
+
+class TestInitLinkResolverLocalScoping:
+    """When ``install_path == project_root`` (synthetic ``_local`` package),
+    init_link_resolver must scope discover_primitives to ``.apm/`` and
+    ``.github/`` so a project tree with thousands of unrelated files does
+    not get walked end-to-end. See issue #1507 (13-minute hang).
+    """
+
+    @patch("apm_cli.integration.base_integrator.discover_primitives")
+    @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
+    def test_narrows_to_apm_and_github_when_install_path_is_project_root(
+        self, mock_resolver_cls, mock_discover, tmp_path
+    ):
+        mock_discover.return_value = []
+        (tmp_path / ".apm").mkdir()
+        (tmp_path / ".github").mkdir()
+        # Noise: a giant subtree that must NOT be walked.
+        (tmp_path / "noise").mkdir()
+        (tmp_path / "noise" / "deep").mkdir()
+        (tmp_path / "noise" / "deep" / "irrelevant.txt").write_text("x")
+
         bi = BaseIntegrator()
         pkg_info = MagicMock()
         pkg_info.install_path = tmp_path
 
         bi.init_link_resolver(pkg_info, tmp_path)
 
-        mock_discover.assert_called_once_with(tmp_path)
+        called_roots = [call.args[0] for call in mock_discover.call_args_list]
+        assert tmp_path / ".apm" in called_roots
+        assert tmp_path / ".github" in called_roots
+        # Critically: project_root itself was NOT passed to discover_primitives.
+        assert tmp_path not in called_roots
+        # And no noise subtree was passed either.
+        for root in called_roots:
+            assert "noise" not in Path(root).parts
+
+    @patch("apm_cli.integration.base_integrator.discover_primitives")
+    @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
+    def test_skips_missing_directories(self, mock_resolver_cls, mock_discover, tmp_path):
+        """If only ``.apm/`` exists, only ``.apm/`` is scanned -- no waste
+        from probing a non-existent ``.github/``."""
+        mock_discover.return_value = []
+        (tmp_path / ".apm").mkdir()
+        # No .github/
+
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        pkg_info.install_path = tmp_path
+
+        bi.init_link_resolver(pkg_info, tmp_path)
+
+        called_roots = [call.args[0] for call in mock_discover.call_args_list]
+        assert called_roots == [tmp_path / ".apm"]
+
+    @patch("apm_cli.integration.base_integrator.discover_primitives")
+    @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
+    def test_no_apm_or_github_means_no_walk(self, mock_resolver_cls, mock_discover, tmp_path):
+        """Project root with no .apm/ or .github/ must not walk anything."""
+        mock_discover.return_value = []
+
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        pkg_info.install_path = tmp_path
+
+        bi.init_link_resolver(pkg_info, tmp_path)
+
+        mock_discover.assert_not_called()
+
+    def test_real_walk_does_not_traverse_noise_subtree(self, tmp_path):
+        """End-to-end: with a real (non-mocked) discover_primitives call,
+        confirm files under a noise subtree do NOT get walked. Acts as a
+        regression trap for the original 13-minute hang on large repos.
+
+        Asserts via a spy on the underlying ``os.walk`` driver that no
+        directory outside ``.apm/`` / ``.github/`` is ever visited.
+        """
+        import os
+
+        (tmp_path / ".apm" / "instructions").mkdir(parents=True)
+        (tmp_path / ".apm" / "instructions" / "real.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\nbody\n"
+        )
+        # Noise: a deep subtree that must not be walked at all.
+        (tmp_path / "noise" / "deep" / "deeper").mkdir(parents=True)
+        (tmp_path / "noise" / "deep" / "deeper" / "x.txt").write_text("x")
+        # And a noise file that WOULD match the generic
+        # ``**/*.instructions.md`` pattern if a full-tree walk happened.
+        (tmp_path / "noise" / "looksLike.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\nbody\n"
+        )
+
+        visited_dirs: list[str] = []
+        real_walk = os.walk
+
+        def spy_walk(top, *args, **kwargs):
+            for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+                visited_dirs.append(dirpath)
+                yield dirpath, dirnames, filenames
+
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        pkg_info.install_path = tmp_path
+
+        with patch("apm_cli.primitives.discovery.os.walk", side_effect=spy_walk):
+            bi.init_link_resolver(pkg_info, tmp_path)
+
+        # The noise subtree must never appear in any walked directory.
+        for d in visited_dirs:
+            assert "noise" not in Path(d).parts, f"discovery walked noise subtree: {d}"
+        # And the real instruction under .apm/ should still be findable.
+        # (Sanity check: confirm we did walk the .apm subtree.)
+        assert any(".apm" in Path(d).parts for d in visited_dirs)
 
 
 # Cowork additive tests
