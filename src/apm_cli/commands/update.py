@@ -321,13 +321,16 @@ def _run_dep_update(
         _rich_error(str(e))
         for reason in e.reasons:
             _rich_echo(reason)
-        _rich_info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
+        _rich_info(
+            "Tip: run 'apm outdated' to see what changed, then 'apm update'.",
+            symbol="info",
+        )
         sys.exit(1)
     except AuthenticationError as e:
         _rich_error(str(e))
         if e.diagnostic_context:
             _rich_echo(e.diagnostic_context)
-        _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+        _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except (DirectDependencyError, PolicyViolationError) as e:
         _rich_error(str(e))

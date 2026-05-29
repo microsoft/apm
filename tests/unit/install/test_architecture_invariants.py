@@ -186,18 +186,19 @@ def test_install_py_under_legacy_budget():
     additions are entry-point glue at the Click handler boundary; the
     actual logic lives in ``apm_cli/install/`` (plan, errors, service).
 
-    Issue #1537 (sync/check/status/doctor workflow) raised 2010 -> 2012
-    to add two contextual error-hint lines: an ``apm doctor`` tip on
+    Issue #1537 (sync/check/status/doctor workflow) raised 2010 -> 2014
+    to add two contextual error-hint blocks: an ``apm doctor`` tip on
     ``AuthenticationError`` and an ``apm outdated`` -> ``apm update``
-    tip on ``FrozenInstallError``. Both are entry-point glue (single
-    ``_rich_info`` call per handler) -- no new logic.
+    tip on ``FrozenInstallError``. Both are entry-point glue (one
+    ``_rich_info(..., symbol="info")`` call per handler, expanded to
+    multiple lines by ruff's formatter) -- no new logic.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2012, (
-        f"commands/install.py grew to {n} LOC (budget 2012). "
+    assert n <= 2014, (
+        f"commands/install.py grew to {n} LOC (budget 2014). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
-        "(.github/skills/python-architecture/SKILL.md) and propose an "
+        "(.apm/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."
     )

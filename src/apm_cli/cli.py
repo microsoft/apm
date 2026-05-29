@@ -44,17 +44,18 @@ from apm_cli.commands.uninstall import uninstall
 from apm_cli.commands.update import update
 from apm_cli.commands.view import view as view_cmd
 
-_CLI_EPILOG = """\b
-Common workflows:
-  apm init                       Scaffold a new project
-  apm install                    Install dependencies from apm.yml
-  apm install --frozen           Reproduce lockfile exactly (CI-safe)
-  apm outdated                   See what's drifted from upstream
-  apm update                     Refresh refs and rewrite the lockfile
-  apm audit --ci                 Validate lockfile integrity for CI gates
-  apm doctor                     Diagnose environment problems
-  apm run <script>               Execute a script from apm.yml
-"""
+_CLI_EPILOG = (
+    "\b\n"
+    "Common workflows:\n"
+    "  apm init                       Scaffold a new project\n"
+    "  apm install                    Install dependencies from apm.yml\n"
+    "  apm install --frozen           Reproduce lockfile exactly (CI-safe)\n"
+    "  apm outdated                   See what's drifted from upstream\n"
+    "  apm update                     Refresh refs and rewrite the lockfile\n"
+    "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
+    "  apm doctor                     Diagnose environment problems\n"
+    "  apm run <script>               Execute a script from apm.yml"
+)
 
 
 @click.group(

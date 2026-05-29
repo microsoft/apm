@@ -71,9 +71,9 @@ def test_marketplace_doctor_still_works_with_deprecation_hint(mock_subprocess_su
     """Legacy invocation must keep working and print the migration hint."""
     runner = CliRunner()
     result = runner.invoke(marketplace, ["doctor"])
-    # Deprecation hint is written to stderr; CliRunner merges streams by
-    # default in Click >= 8.2, so it shows up in result.output.
-    combined = result.output
+    # The deprecation hint is emitted with err=True. Click 8.2 separates
+    # stdout/stderr by default, so check both to stay version-agnostic.
+    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
     assert "deprecated" in combined.lower()
     assert "apm doctor" in combined
     # And the diagnostics still run.
