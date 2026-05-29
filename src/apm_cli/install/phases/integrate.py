@@ -158,6 +158,24 @@ def _resolve_download_strategy(
             # skip-download signal (mirrors the git content-hash fallback above).
             if _should_skip_redownload(locked_dep, install_path):
                 lockfile_match = True
+        elif locked_dep and locked_dep.content_hash and not ref_changed and not update_refs:
+            # Unpinned git/virtual deps (#1548): the lockfile recorded a
+            # content_hash but no resolved_commit (e.g. ADO partial-clone
+            # fallback could not pin a SHA, or a virtual-file dep was carved
+            # out without a commit anchor).  Without this branch the second
+            # install would re-download every time, and a non-deterministic
+            # fresh hash trips the supply-chain mismatch check at
+            # sources.py with a false-positive attack alert.
+            #
+            # Cache-skip parity with the resolved_commit branches: when the
+            # on-disk content still hashes to the lockfile-recorded value,
+            # the package is intact -- skip re-download.  This preserves
+            # supply-chain detection because we only suppress the redundant
+            # download when on-disk content is verified unchanged; any real
+            # divergence still falls through to the fresh-download path.
+            if _should_skip_redownload(locked_dep, install_path):
+                lockfile_match = True
+                lockfile_match_via_content_hash_only = True
 
     # Self-heal pipeline (PR #1158).
     #

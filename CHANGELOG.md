@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install` no longer fails the second run with a false-positive `Content hash mismatch ... supply-chain attack` error for unpinned git/virtual-file dependencies whose lockfile entry could not record a `resolved_commit` (e.g. ADO partial-clone fallback paths). When the on-disk content still hashes to the lockfile-recorded value, the redundant re-download is now skipped, mirroring the existing cache-skip parity with pinned and registry deps. Real content divergence still falls through to the supply-chain verification path. (closes #1548) -- by @OskarKlintrot
+
 ## [0.16.0] - 2026-05-28
 
 ### Added
