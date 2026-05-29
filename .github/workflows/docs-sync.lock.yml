@@ -1038,9 +1038,16 @@ jobs:
           # ROW_PRIVATE_KEY values so downstream tolerance is irrelevant.
           pk="${pk%$'\n'}"
           # Defence in depth: the PK is already masked because it came from
-          # a $GH_AW_EXPR_36F7BDB0 reference at compile time, but registering it
-          # again here makes the contract explicit and survives any future
-          # gh-aw template churn that might lose the secret tag.
+          # a secrets-context reference at compile time (gh-aw substitutes
+          # the configured private-key secret into AW_APM_*), but
+          # registering it again here makes the contract explicit and
+          # survives any future gh-aw template churn that might lose the
+          # secret tag. NOTE: do not write GitHub Actions expression syntax
+          # (dollar-doublecurly ... doublecurly) inside this comment.
+          # gh-aw v0.76+ harvests such tokens out of bash run-block bodies
+          # (even inside `#` comments) and hoists them into the step env,
+          # which fails workflow load when the inner expression resolves
+          # to a sequence (e.g. wildcard secrets-context references).
           echo "::add-mask::$pk"
           # Use a random heredoc delimiter to eliminate any chance of a PEM
           # line collision terminating the value early. The official docs
@@ -1054,7 +1061,8 @@ jobs:
             printf '%s\n' "$delim"
           } >> "$GITHUB_ENV"
         env:
-          GH_AW_EXPR_36F7BDB0: ${{ secrets.* }}
+          ROW_INDEX: ${{ matrix.group.index }}
+          ROW_KIND: ${{ matrix.group.kind }}
       - name: Mint installation token
         id: token
         if: ${{ matrix.group.has-app == 'true' }}
