@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm uninstall <pkg>` now scans `devDependencies.apm` in addition to `dependencies.apm`, so packages added with `apm install --dev <pkg>` can actually be removed. Previously dev-only entries reported "not found in apm.yml" and leaked forever. (closes #1549, #PR_NUMBER) -- by @aetos382
+- `apm uninstall <pkg>` now scans `devDependencies.apm` in addition to `dependencies.apm`, so packages added with `apm install --dev <pkg>` can actually be removed. Previously dev-only entries reported "not found in apm.yml" and leaked forever. (closes #1549, #1552) -- by @aetos382
 
 ## [0.16.0] - 2026-05-28
 
