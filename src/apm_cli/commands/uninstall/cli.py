@@ -142,9 +142,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         for package in packages_to_remove:
             if package in dev_deps:
                 dev_deps.remove(package)
+                section = "devDependencies.apm"
             elif package in prod_deps:
                 prod_deps.remove(package)
-            logger.progress(f"Removed {package} from apm.yml")
+                section = "dependencies.apm"
+            logger.progress(f"Removed {package} from {section} in apm.yml")
         data["dependencies"]["apm"] = prod_deps
         data["devDependencies"]["apm"] = dev_deps
         # Drop empty devDependencies wrappers so the manifest stays clean

@@ -89,3 +89,19 @@ class TestUninstallDevDependencies:
         data = _read_apm_yml(tmp_path)
         assert data["dependencies"]["apm"] == ["acme/keep-prod"]
         assert data["devDependencies"]["apm"] == ["acme/keep-dev"]
+
+    def test_uninstall_prod_dependency_does_not_synthesize_dev_section(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Removing a prod dep must not add devDependencies to prod-only manifests."""
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(tmp_path, deps=["microsoft/apm-sample-package"])
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["uninstall", "microsoft/apm-sample-package"])
+
+        assert result.exit_code == 0, result.output
+        data = _read_apm_yml(tmp_path)
+        assert "devDependencies" not in data
