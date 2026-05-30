@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Linux packaged `apm` binaries no longer leak PyInstaller dynamic-library paths into git subprocesses, preventing shared-library symbol lookup failures during shared-cache clones. (closes #1534)
+- Linux standalone `apm` binaries no longer fail git shared-cache clones with shared-library symbol lookup errors caused by PyInstaller dynamic-library paths leaking into child processes. (closes #1534)
 
 ## [0.16.0] - 2026-05-28
 
