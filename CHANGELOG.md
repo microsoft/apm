@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiled context files land" section to the primitives-and-targets
   page and a distributed-layout example in the compile reference.
   Default behavior is unchanged. (closes #1447) -- by @tillig
+  
+### Fixed
+
+- Linux standalone `apm` binaries no longer fail git shared-cache clones with shared-library symbol lookup errors caused by PyInstaller dynamic-library paths leaking into child processes. (closes #1534)
+- Avoid 13-minute `apm install` hangs in large local projects by limiting synthetic `_local` discovery to `.apm/` and `.github/`, while preserving package metadata discovery. (closes #1507) -- by @ioannispoulios
+- `apm install -g <package>#<ref>` now updates an existing unpinned global dependency entry instead of leaving the manifest floating. (#1559)
+- `apm install` now honors manifest `targets:` without falling back to the legacy Copilot target when singular `target:` is absent. (#1560)
 
 ## [0.16.0] - 2026-05-28
 

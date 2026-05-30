@@ -197,6 +197,12 @@ class TestInstallLogger:
         logger.validation_pass("microsoft/repo", already_present=True)
         assert "already in apm.yml" in mock_echo.call_args[0][0]
 
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_validation_pass_existing_updated(self, mock_echo):
+        logger = InstallLogger()
+        logger.validation_pass("microsoft/repo#v1", already_present=True, updated=True)
+        assert "updated ref in apm.yml" in mock_echo.call_args[0][0]
+
     @patch("apm_cli.core.command_logger._rich_error")
     def test_validation_fail(self, mock_error):
         logger = InstallLogger()
