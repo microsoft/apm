@@ -98,7 +98,9 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed from the workspace, gated by per-file content hashes recorded in the lockfile (user-edited files are kept with a warning).
 - **Enterprise marketplace gate.** When installing from a `*.ghe.com` marketplace, bare cross-repo `repo:` fields (e.g. `repo: owner/repo`) are refused before any network request runs, preventing dependency-confusion attacks. Host-qualify the field to proceed: `repo: corp.ghe.com/owner/repo` for an enterprise dep, or `repo: github.com/owner/repo` for a declared cross-host dep.
 - **Security scan.** Source files are scanned for hidden Unicode and other tag-character / bidi-override patterns before deployment. Critical findings block the package; the install exits `1`. Use `--force` to deploy anyway, or run `apm audit --strip` first to remediate.
-- **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
+- **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths and to surface a perf summary line (walks, file matches, cache hits) at the end of the run -- useful when diagnosing slow installs on large monorepos.
+- **Discovery caching.** `discover_primitives` is memoized per unique base directory within a single `apm install` invocation. Multi-target installs reuse the same walk result instead of re-walking the tree once per target. The cache is reset at the start of each `apm install` run.
+- **Skip directories.** The following directories are never walked during primitive discovery: `node_modules`, `.git`, `__pycache__`, `vendor`, `third_party`, `Pods`, `bower_components`, `jspm_packages`, `.gradle`, `target`, `.next`, `.nuxt`, `.cache`, `.turbo`. If your project stores primitives inside one of these paths, relocate them.
 
 ## Examples
 

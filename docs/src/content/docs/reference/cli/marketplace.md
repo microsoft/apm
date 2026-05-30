@@ -25,7 +25,7 @@ apm marketplace validate NAME
 apm marketplace init [--force] [--name N] [--owner O]
 apm marketplace migrate [--force | --dry-run]
 apm marketplace check [--offline]
-apm marketplace doctor
+apm marketplace doctor   # deprecated -- use 'apm doctor' instead
 apm marketplace outdated [--offline] [--include-prerelease]
 apm marketplace publish [--targets FILE] [--dry-run] [--no-pr] [...]
 
@@ -186,10 +186,15 @@ package entry resolves to a reachable git ref.
 |---|---|
 | `--offline` | Schema and cached-ref checks only; no network. |
 
-### `apm marketplace doctor`
+### `apm marketplace doctor` _(deprecated)_
 
-Run environment diagnostics for marketplace publishing: git binary,
-network reachability, auth (`gh`/PAT), and config sanity.
+**Deprecated.** Use [`apm doctor`](../doctor/) instead. This alias still
+works and delegates to `apm doctor`, but prints a deprecation notice and
+is hidden from `apm marketplace --help`. Remove it from scripts and CI
+before a future release removes the alias.
+
+Runs environment diagnostics: git binary, network reachability,
+auth (`gh`/PAT), and config sanity.
 
 ### `apm marketplace outdated`
 

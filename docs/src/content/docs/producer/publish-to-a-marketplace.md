@@ -162,7 +162,7 @@ no `dependencies:` block produce only `marketplace.json`. See
 
 ```bash
 apm marketplace check        # every package's ref/range resolves
-apm marketplace doctor       # local environment diagnostics
+apm doctor                   # local environment diagnostics
 apm marketplace outdated     # packages with newer matching tags
 ```
 
