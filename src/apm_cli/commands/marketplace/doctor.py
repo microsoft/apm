@@ -1,4 +1,4 @@
-"""``apm marketplace doctor`` command."""
+"""``apm doctor`` (and legacy ``apm marketplace doctor``) command implementation."""
 
 from __future__ import annotations
 
@@ -25,11 +25,14 @@ from . import (
 )
 
 
-@marketplace.command(help="Run environment diagnostics for marketplace publishing")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def doctor(verbose):
-    """Check git, network, auth, and marketplace config readiness."""
-    logger = CommandLogger("marketplace-doctor", verbose=verbose)
+def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
+    """Execute the doctor diagnostics and return an exit code.
+
+    Shared between the top-level ``apm doctor`` command and the legacy
+    ``apm marketplace doctor`` alias so both surfaces produce identical
+    output. Returns ``0`` if all critical checks pass, ``1`` otherwise.
+    """
+    logger = CommandLogger(logger_name, verbose=verbose)
     checks = []
 
     # Check 1: git on PATH
@@ -275,4 +278,28 @@ def doctor(verbose):
     # Exit: 0 if checks 1-2 pass; config checks are informational
     critical_checks = [c for c in checks if not c.informational]
     if any(not c.passed for c in critical_checks):
-        sys.exit(1)
+        return 1
+    return 0
+
+
+@marketplace.command(
+    name="doctor",
+    help="DEPRECATED: use 'apm doctor' instead. Run environment diagnostics.",
+    hidden=True,
+)
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+def doctor(verbose):
+    """Deprecated alias for ``apm doctor``.
+
+    Prints a one-line deprecation hint and forwards to :func:`run_doctor`.
+    The command stays functional for one release to give CI pipelines and
+    scripts time to migrate; it is hidden from ``apm marketplace --help``
+    so new users discover the top-level form.
+    """
+    click.echo(
+        "[!] 'apm marketplace doctor' is deprecated; use 'apm doctor' instead.",
+        err=True,
+    )
+    exit_code = run_doctor(verbose, logger_name="marketplace-doctor")
+    if exit_code != 0:
+        sys.exit(exit_code)

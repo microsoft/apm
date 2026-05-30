@@ -15,7 +15,7 @@ from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 # The function under test lives in the commands module.
-from apm_cli.commands.install import _resolve_package_references
+from apm_cli.commands.install import _check_package_conflicts, _resolve_package_references
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -164,6 +164,24 @@ class TestResolvePackageReferencesDuplicateDetection:
         assert validated == ["owner/new-pkg"]
         assert "github.com/owner/new-pkg" in existing
         assert len(existing) == 2
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    def test_existing_unpinned_dependency_is_updated_when_cli_supplies_ref(self, mock_validate):
+        """An explicit CLI ref for an existing dep must replace the unpinned manifest entry."""
+        current_deps = ["danielmeppiel/genesis"]
+        existing = _check_package_conflicts(current_deps)
+
+        valid, invalid, validated, _mkt, _entries, changed = _resolve_package_references(
+            ["danielmeppiel/genesis#v0.4.0"],
+            current_deps,
+            existing,
+        )
+
+        assert invalid == []
+        assert valid == [("danielmeppiel/genesis#v0.4.0", True)]
+        assert validated == []
+        assert changed is True
+        assert current_deps == ["danielmeppiel/genesis#v0.4.0"]
 
 
 class TestResolvePackageReferencesInvalidInput:
