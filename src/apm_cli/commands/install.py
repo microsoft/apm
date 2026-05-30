@@ -326,6 +326,25 @@ def _check_package_conflicts(current_deps):
     return existing_identities
 
 
+def _manifest_has_different_entry_for_identity(
+    current_deps: list, identity: str, canonical: str
+) -> bool:
+    """Return True when apm.yml already has *identity* but not *canonical*."""
+    for dep_entry in current_deps:
+        try:
+            if isinstance(dep_entry, str):
+                existing_ref = DependencyReference.parse(dep_entry)
+            elif isinstance(dep_entry, builtins.dict):
+                existing_ref = DependencyReference.parse_from_dict(dep_entry)
+            else:
+                continue
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if existing_ref.get_identity() == identity:
+            return existing_ref.to_canonical() != canonical
+    return False
+
+
 def _resolve_package_references(
     packages,
     current_deps,
@@ -543,11 +562,14 @@ def _resolve_package_references(
             if not already_in_deps:
                 validated_packages.append(canonical)
                 existing_identities.add(identity)  # prevent duplicates within batch
-            elif canonical in _apm_yml_entries:
-                structured_entry = _apm_yml_entries[canonical]
+            elif canonical in _apm_yml_entries or (
+                dep_ref.reference
+                and _manifest_has_different_entry_for_identity(current_deps, identity, canonical)
+            ):
+                updated_entry = _apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry())
                 merge_structured_entry_into_current_deps(
                     current_deps,
-                    structured_entry,
+                    updated_entry,
                     identity,
                     canonical,
                     dependency_reference_cls=DependencyReference,
