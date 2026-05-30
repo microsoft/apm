@@ -11,6 +11,7 @@ typed errors mid-install, the integrator:
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,6 +41,28 @@ interval: hourly
 mode: interactive
 ---
 Hourly heartbeat body.
+"""
+
+_WORKFLOWS_SCHEMA = """
+CREATE TABLE workflows (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    model TEXT,
+    reasoning_effort TEXT,
+    project_id TEXT,
+    interval TEXT NOT NULL CHECK (
+        interval IN ('manual', 'hourly', 'daily', 'weekly')
+    ),
+    schedule_hour INTEGER NOT NULL DEFAULT 9,
+    schedule_day INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_run_at TEXT,
+    next_run_at TEXT,
+    mode TEXT
+);
 """
 
 
@@ -84,6 +107,53 @@ def fake_db(tmp_path, monkeypatch):
     db_file.touch()
     monkeypatch.setenv("APM_COPILOT_APP_DB", str(db_file))
     return db_file
+
+
+def _seed_workflow_db(path: Path) -> Path:
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.executescript(_WORKFLOWS_SCHEMA)
+        conn.execute("PRAGMA user_version = 13")
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def _seed_conflicting_rows(db_path: Path) -> list[str]:
+    workflow_ids = [
+        db_mod.namespaced_id("acme-org", "demo-pkg", "daily-digest"),
+        db_mod.namespaced_id("acme-org", "demo-pkg", "hourly-heartbeat"),
+    ]
+    conn = sqlite3.connect(str(db_path))
+    try:
+        for workflow_id in workflow_ids:
+            conn.execute(
+                """
+                INSERT INTO workflows (
+                    id, name, prompt, interval, schedule_hour, schedule_day, enabled, mode
+                ) VALUES (?, ?, ?, 'manual', 9, 1, 1, 'interactive')
+                """,
+                (workflow_id, f"User {workflow_id}", "user-authored body"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return workflow_ids
+
+
+def _workflow_prompts(db_path: Path, workflow_ids: list[str]) -> dict[str, str]:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return {
+            workflow_id: conn.execute(
+                "SELECT prompt FROM workflows WHERE id = ?",
+                (workflow_id,),
+            ).fetchone()[0]
+            for workflow_id in workflow_ids
+        }
+    finally:
+        conn.close()
 
 
 class TestDeployErrorSurfacing:
@@ -258,6 +328,66 @@ class TestDeployErrorSurfacing:
         conflict_warns = [w for w in diags.warns if "already exists" in w["message"]]
         assert len(conflict_warns) == 2
         assert "--force" in conflict_warns[0]["message"]
+
+    def test_existing_unmanaged_workflow_rows_are_not_overwritten_in_real_db(
+        self,
+        tmp_path,
+        monkeypatch,
+        copilot_app_target,
+    ):
+        """Existing rows absent from the lockfile are skipped against SQLite."""
+        db_path = _seed_workflow_db(tmp_path / "data.db")
+        monkeypatch.setenv("APM_COPILOT_APP_DB", str(db_path))
+        workflow_ids = _seed_conflicting_rows(db_path)
+        pkg = _make_pkg(tmp_path)
+        diags = _CapturingDiagnostics()
+
+        result = PromptIntegrator().integrate_prompts_for_target(
+            copilot_app_target,
+            pkg,
+            project_root=tmp_path,
+            diagnostics=diags,
+            managed_files=set(),
+        )
+
+        assert result.files_integrated == 0
+        assert result.files_skipped == 2
+        assert _workflow_prompts(db_path, workflow_ids) == {
+            workflow_ids[0]: "user-authored body",
+            workflow_ids[1]: "user-authored body",
+        }
+        conflict_warns = [w for w in diags.warns if "already exists" in w["message"]]
+        assert len(conflict_warns) == 2
+        assert "--force" in conflict_warns[0]["message"]
+
+    def test_force_overwrites_existing_unmanaged_workflow_rows(
+        self,
+        tmp_path,
+        monkeypatch,
+        copilot_app_target,
+    ):
+        """--force is the explicit escape hatch for App workflow row conflicts."""
+        db_path = _seed_workflow_db(tmp_path / "data.db")
+        monkeypatch.setenv("APM_COPILOT_APP_DB", str(db_path))
+        workflow_ids = _seed_conflicting_rows(db_path)
+        pkg = _make_pkg(tmp_path)
+        diags = _CapturingDiagnostics()
+
+        result = PromptIntegrator().integrate_prompts_for_target(
+            copilot_app_target,
+            pkg,
+            project_root=tmp_path,
+            diagnostics=diags,
+            managed_files=set(),
+            force=True,
+        )
+
+        assert result.files_integrated == 2
+        assert result.files_skipped == 0
+        prompts = _workflow_prompts(db_path, workflow_ids)
+        assert prompts[workflow_ids[0]] == "Summarise yesterday's commits."
+        assert prompts[workflow_ids[1]] == "Hourly heartbeat body."
+        assert not [w for w in diags.warns if "already exists" in w["message"]]
 
 
 # ---------------------------------------------------------------------------

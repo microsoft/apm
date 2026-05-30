@@ -773,7 +773,8 @@ def active_targets_user_scope(
        function does not silently fall back when given unknown tokens.
     2. **Directory detection**: profiles whose ``effective_root(user_scope=True)``
        directory exists under ``~/``.
-    3. **Fallback**: ``[copilot]`` -- same default as project scope.
+    3. **Fallback**: ``[copilot-app, copilot]`` when the desktop App DB
+       exists, otherwise ``[copilot]`` -- same default as project scope.
     """
     from pathlib import Path
 
@@ -818,7 +819,12 @@ def active_targets_user_scope(
     ]
     if detected:
         app = KNOWN_TARGETS.get("copilot-app")
-        if app is not None and app.for_scope(user_scope=True) is not None:
+        detected_names = {p.name for p in detected}
+        if (
+            app is not None
+            and app.name not in detected_names
+            and app.for_scope(user_scope=True) is not None
+        ):
             return [app, *detected]
         return detected
 
