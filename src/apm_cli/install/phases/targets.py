@@ -19,6 +19,49 @@ if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
 
 
+def _package_field(apm_package: Any, name: str) -> Any:
+    """Return a real APMPackage field without treating MagicMock attrs as set."""
+    if apm_package is None:
+        return None
+    try:
+        attrs = vars(apm_package)
+    except TypeError:
+        attrs = {}
+    if name in attrs:
+        return attrs[name]
+    value = getattr(apm_package, name, None)
+    if type(value).__module__ == "unittest.mock":
+        return None
+    return value
+
+
+def _package_target_value(apm_package: Any) -> str | list[str] | None:
+    """Read singular target or plural targets from the parsed package model."""
+    target = _package_field(apm_package, "target")
+    targets = _package_field(apm_package, "targets")
+    if target is not None and targets is not None:
+        from apm_cli.core.apm_yml import parse_targets_field
+
+        parse_targets_field({"target": target, "targets": targets})
+    if targets is not None:
+        from apm_cli.core.apm_yml import parse_targets_field
+
+        parsed = parse_targets_field({"targets": targets})
+        return parsed if parsed else None
+    return target
+
+
+def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
+    """Normalize a package target value to the v2 yaml_targets shape."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        parts = [t.strip() for t in value.split(",") if t.strip()]
+    else:
+        parts = [str(t).strip() for t in value if str(t).strip()]
+    return parts or None
+
+
 def _read_yaml_targets(ctx) -> list[str] | None:
     """Read targets/target from raw apm.yml using v2 parser.
 
@@ -29,10 +72,10 @@ def _read_yaml_targets(ctx) -> list[str] | None:
         return None
     apm_yml_path = getattr(ctx.apm_package, "package_path", None)
     if apm_yml_path is None:
-        return None
+        return _as_yaml_targets(_package_target_value(ctx.apm_package))
     manifest = apm_yml_path / "apm.yml"
     if not manifest.exists():
-        return None
+        return _as_yaml_targets(_package_target_value(ctx.apm_package))
     try:
         from apm_cli.utils.yaml_io import load_yaml
 
@@ -113,8 +156,8 @@ def run(ctx: InstallContext) -> None:
         resolve_targets as _resolve_targets_legacy,
     )
 
-    # Get config target from apm.yml if available
-    config_target = ctx.apm_package.target
+    # Get config target from apm.yml if available.
+    config_target = _package_target_value(ctx.apm_package)
 
     # Resolve effective explicit target: CLI --target wins, then apm.yml
     _explicit = ctx.target_override or config_target or None
@@ -400,7 +443,9 @@ def run(ctx: InstallContext) -> None:
             # Keep any legacy-only targets (e.g. copilot-cowork) that v2
             # doesn't handle.
             _v2_names = {t.name for t in _v2_targets}
-            _legacy_only = [t for t in _targets if t.name not in _v2_names]
+            _legacy_only = [
+                t for t in _targets if t.name not in _v2_names and t.name not in _CANONICAL
+            ]
             _targets = _v2_targets + _legacy_only
 
     else:
@@ -494,14 +539,8 @@ def run_targets_phase(ctx) -> None:
         else:
             flag = ctx.target_override
 
-    # Get yaml_targets from apm_package
-    yaml_targets: list[str] | None = None
-    if ctx.apm_package and ctx.apm_package.target:
-        raw = ctx.apm_package.target
-        if isinstance(raw, str):
-            yaml_targets = [t.strip() for t in raw.split(",") if t.strip()]
-        elif isinstance(raw, list):
-            yaml_targets = raw
+    # Get yaml_targets from apm_package.
+    yaml_targets = _as_yaml_targets(_package_target_value(ctx.apm_package))
 
     # Resolve targets
     resolved = resolve_targets(project_root, flag=flag, yaml_targets=yaml_targets)

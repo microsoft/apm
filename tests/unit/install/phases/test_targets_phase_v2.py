@@ -32,6 +32,7 @@ def _make_ctx(
     *,
     target_override: str | None = None,
     yaml_target: str | None = None,
+    yaml_targets: list[str] | None = None,
 ) -> MagicMock:
     ctx = MagicMock()
     ctx.project_root = project_root
@@ -40,6 +41,8 @@ def _make_ctx(
     ctx.target_override = target_override
     ctx.apm_package = MagicMock()
     ctx.apm_package.target = yaml_target
+    if yaml_targets is not None:
+        ctx.apm_package.targets = yaml_targets
     ctx.logger = MagicMock()
     ctx.targets = []
     ctx.integrators = {}
@@ -92,6 +95,21 @@ def test_explicit_creates_missing_dir(tmp_path):
     run_targets_phase(ctx)
 
     assert (project / ".claude").is_dir(), "Explicit --target claude must materialize .claude/"
+
+
+def test_plural_yaml_targets_attribute_creates_only_declared_dir(tmp_path):
+    """targets: from the parsed APMPackage model drives v2 target selection."""
+    from apm_cli.install.phases.targets import run_targets_phase
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, yaml_targets=["claude"])
+    run_targets_phase(ctx)
+
+    assert [target.name for target in ctx.targets] == ["claude"]
+    assert (project / ".claude").is_dir()
+    assert not (project / ".github").exists()
 
 
 @pytest.mark.parametrize(
