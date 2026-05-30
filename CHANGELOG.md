@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` integrate phase no longer walks the entire project tree on local-content discovery: scope is now narrowed to `.apm/` and `.github/` for the synthetic project-scope `_local` package, mirroring the existing `$HOME` narrowing (#830). Previously a 50k+ file monorepo with only a handful of primitives under `.apm/` could hang for 13 minutes before integrate completed. (closes #1507) -- by @ioannispoulios
+- Avoid 13-minute `apm install` hangs in large local projects by limiting synthetic `_local` discovery to `.apm/` and `.github/`, while preserving package metadata discovery. (closes #1507) -- by @ioannispoulios
 
 ## [0.16.0] - 2026-05-28
 

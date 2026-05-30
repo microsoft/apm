@@ -653,6 +653,7 @@ class TestInitLinkResolverHomeScoping:
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
     def test_scopes_to_apm_subdir_when_install_path_is_home(self, mock_resolver_cls, mock_discover):
         mock_discover.return_value = []
+        (Path.home() / ".apm").mkdir(parents=True, exist_ok=True)
         bi = BaseIntegrator()
         pkg_info = MagicMock()
         pkg_info.install_path = Path.home()
@@ -678,6 +679,25 @@ class TestInitLinkResolverHomeScoping:
         bi.init_link_resolver(pkg_info, tmp_path)
 
         mock_discover.assert_called_once_with(install_path)
+
+    @patch("apm_cli.integration.base_integrator.discover_primitives")
+    @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
+    def test_skips_home_apm_when_not_directory(
+        self, mock_resolver_cls, mock_discover, tmp_path, monkeypatch
+    ):
+        """If ~/.apm is a file, home-scoped discovery must not scan it."""
+        mock_discover.return_value = []
+        home_root = tmp_path / "home"
+        home_root.mkdir()
+        (home_root / ".apm").write_text("not a directory")
+        monkeypatch.setattr(Path, "home", lambda: home_root)
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        pkg_info.install_path = home_root
+
+        bi.init_link_resolver(pkg_info, home_root)
+
+        mock_discover.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -712,6 +732,7 @@ class TestInitLinkResolverLocalScoping:
         bi.init_link_resolver(pkg_info, tmp_path)
 
         called_roots = [call.args[0] for call in mock_discover.call_args_list]
+        assert mock_resolver_cls.return_value.package_root == tmp_path
         assert tmp_path / ".apm" in called_roots
         assert tmp_path / ".github" in called_roots
         # Critically: project_root itself was NOT passed to discover_primitives.

@@ -560,7 +560,8 @@ class BaseIntegrator:
             #   otherwise traverse every file in the repo even when
             #   the user only has a handful of primitives under .apm/.
             if install_path == Path.home():
-                scan_roots = [install_path / ".apm"]
+                home_apm_root = install_path / ".apm"
+                scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
                 narrowed_local = False
             elif self._is_root_local_package(package_info, project_root):
                 candidates = [install_path / ".apm", install_path / ".github"]
