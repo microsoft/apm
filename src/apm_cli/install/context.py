@@ -113,6 +113,7 @@ class InstallContext:
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
+    content_hash_verified_deps: set[str] = field(default_factory=set)
     # Deps whose content hash is expected to change legitimately:
     # populated by _resolve_download_strategy in phases/integrate.py
     # (branch-ref `remote_drifted` guard and v<=0.12.2 self-heal block),

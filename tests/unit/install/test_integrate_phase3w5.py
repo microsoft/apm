@@ -257,6 +257,43 @@ class TestResolveDownloadStrategy:
             "must skip re-download (issue #1548)"
         )
 
+    def test_unpinned_git_dep_reuses_preverified_content_hash(self, tmp_path: Path) -> None:
+        """When the download phase already verified content_hash, the sequential
+        strategy must not hash the tree again before choosing the cached path.
+        """
+        from apm_cli.install.phases.integrate import _resolve_download_strategy
+
+        ctx = _make_ctx(tmp_path)
+        ctx.content_hash_verified_deps.add("org/pkg")
+
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = None
+        locked_dep.content_hash = "deadbeef"
+        locked_dep.source = "git"
+        locked_dep.registry_prefix = None
+
+        lf = MagicMock()
+        lf.get_dependency.return_value = locked_dep
+        ctx.existing_lockfile = lf
+
+        dep_ref = _make_dep_ref(reference=None)
+        install_path = tmp_path / "pkg"
+        install_path.mkdir()
+
+        with (
+            patch("apm_cli.drift.detect_ref_change", return_value=False),
+            patch("apm_cli.install.phases.heal.run_heal_chain", return_value=(True, False)),
+            patch(
+                "apm_cli.utils.content_hash.verify_package_hash",
+                side_effect=AssertionError("hash tree should not be recomputed"),
+            ),
+        ):
+            _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
+                ctx, dep_ref, install_path
+            )
+
+        assert skip_download
+
     def test_unpinned_git_dep_redownloads_when_on_disk_hash_differs(self, tmp_path: Path) -> None:
         """Negative gate: the unpinned-skip branch must NOT mask a real mismatch.
         When on-disk content does not hash to the lockfile-recorded value, the
