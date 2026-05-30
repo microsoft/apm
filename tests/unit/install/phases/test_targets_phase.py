@@ -76,7 +76,54 @@ def _make_ctx(
     ctx.logger = MagicMock()
     ctx.targets = []
     ctx.integrators = {}
+    ctx.legacy_skill_paths = False
     return ctx
+
+
+def test_plural_targets_without_singular_does_not_keep_legacy_copilot_fallback(
+    tmp_path: Path,
+) -> None:
+    """targets: [claude] must not inherit legacy greenfield copilot fallback."""
+    from apm_cli.install.phases.targets import run
+    from apm_cli.models.apm_package import APMPackage
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: demo\nversion: 0.1.0\ntargets:\n  - claude\n",
+        encoding="utf-8",
+    )
+    ctx = _make_ctx(tmp_path)
+    ctx.project_root = project
+    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+
+    run(ctx)
+
+    assert [target.name for target in ctx.targets] == ["claude"]
+    assert (project / ".claude").is_dir()
+    assert not (project / ".github").exists()
+
+
+def test_run_conflicting_target_fields_exits_with_usage_code(tmp_path: Path) -> None:
+    """target + targets conflicts must stay on the targets-phase error path."""
+    from apm_cli.install.phases.targets import run
+    from apm_cli.models.apm_package import APMPackage
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: demo\nversion: 0.1.0\ntarget: claude\ntargets:\n  - copilot\n",
+        encoding="utf-8",
+    )
+    ctx = _make_ctx(tmp_path)
+    ctx.project_root = project
+    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+
+    with pytest.raises(SystemExit) as exc_info:
+        run(ctx)
+
+    assert exc_info.value.code == 2
+    ctx.logger.error.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
