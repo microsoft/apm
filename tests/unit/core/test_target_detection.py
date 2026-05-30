@@ -904,7 +904,14 @@ class TestCoworkParserLayer:
         This locks the constant so that adding a new experimental target
         requires an intentional test update.
         """
-        assert frozenset({"copilot-cowork", "copilot-app"}) == EXPERIMENTAL_TARGETS
+        assert frozenset({"copilot-cowork"}) == EXPERIMENTAL_TARGETS
+
+    def test_copilot_app_is_explicit_only_not_experimental(self):
+        """copilot-app is GA but still excluded from the all expansion."""
+        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+        assert "copilot-app" not in EXPERIMENTAL_TARGETS
+        assert "copilot-app" in EXPLICIT_ONLY_TARGETS
 
     # -- Case 7: "all" expansion does NOT include "copilot-cowork" ---------------
 
