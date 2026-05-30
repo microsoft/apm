@@ -9,20 +9,20 @@ Preserved variables (user-controlled config for proxy/auth):
 - GIT_HTTP_USER_AGENT, GIT_TERMINAL_PROMPT
 - GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM
 
-Stripped variables (ambient state that would bias git operations):
+Git state variables stripped after external-process sanitization:
 - GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE
 - GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
 - GIT_COMMON_DIR, GIT_NAMESPACE, GIT_INDEX_VERSION
 - GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
 - GIT_REPLACE_REF_BASE, GIT_GRAFTS_FILE, GIT_SHALLOW_FILE
-- LD_LIBRARY_PATH  (PyInstaller bootloader sets this; bundled shared libs
-  such as libreadline would break git's /bin/sh subprocesses)
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+
+from apm_cli.utils.subprocess_env import external_process_env
 
 # Module-level cached git executable path (resolved once per process)
 _git_executable: str | None = None
@@ -47,14 +47,6 @@ _STRIP_GIT_VARS: frozenset[str] = frozenset(
         "GIT_REPLACE_REF_BASE",
         "GIT_GRAFTS_FILE",
         "GIT_SHALLOW_FILE",
-        # PyInstaller's bootloader sets LD_LIBRARY_PATH so the bundled
-        # Python can find libpython3.12.  When this leaks into git
-        # subprocesses, bundled shared libs (libreadline, libz,
-        # liblzma, etc.) shadow the system libraries that /bin/sh and
-        # git need, causing symbol lookup errors and clone failures.
-        # See https://github.com/microsoft/apm/issues/462 for the
-        # original OpenSSL instance of this class of bug.
-        "LD_LIBRARY_PATH",
     }
 )
 
@@ -91,13 +83,15 @@ def get_git_executable() -> str:
 def git_subprocess_env() -> dict[str, str]:
     """Return a sanitized environment dict for git subprocesses.
 
-    Strips ambient git state variables while preserving user-controlled
+    Restores PyInstaller-managed dynamic-library variables first, then
+    strips ambient git state variables while preserving user-controlled
     configuration (proxy, auth, SSH settings).
 
     Returns:
-        A copy of ``os.environ`` with problematic git variables removed.
+        An external-process-safe copy of ``os.environ`` with problematic
+        git variables removed.
     """
-    return {k: v for k, v in os.environ.items() if k not in _STRIP_GIT_VARS}
+    return {k: v for k, v in external_process_env().items() if k not in _STRIP_GIT_VARS}
 
 
 def reset_git_cache() -> None:
