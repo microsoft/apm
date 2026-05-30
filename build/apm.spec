@@ -279,21 +279,43 @@ a = Analysis(
     # to keep docstrings.
 )
 
-# Exclude bundled OpenSSL shared libraries on Linux.
-# PyInstaller's bootloader sets LD_LIBRARY_PATH to the binary directory in
-# --onedir mode. When apm spawns git, git-remote-https inherits that path
-# and loads the bundled (build-machine) libssl instead of the system one.
-# On distros where system libcurl requires a newer OpenSSL ABI than the
-# build machine provides (e.g. Fedora 43 with OPENSSL_3.2.0), this causes
-# "symbol lookup error" and git clone failures. Excluding these libs lets
-# the system OpenSSL be used instead, which is expected to be available on
-# supported Linux targets. Python's _ssl module still works because it finds
-# system libssl via the standard dynamic linker search path. See:
-# github.com/microsoft/apm/issues/462
+# Exclude non-Python shared libraries from the bundle on Linux.
+# PyInstaller's bootloader in --onedir mode sets LD_LIBRARY_PATH to the
+# binary directory.  When apm spawns git (or any child process), those
+# processes inherit LD_LIBRARY_PATH and load the bundled build-machine
+# libraries instead of the system ones.  If the bundled versions differ
+# from what the child process expects (different ABI, missing symbols),
+# the child fails with "symbol lookup error".
+#
+# Fix #1 (git_env.py) strips LD_LIBRARY_PATH from the git subprocess env
+# as the primary defense.  This exclusion is defense-in-depth: removing
+# the libraries from the bundle entirely so they cannot leak regardless
+# of any env-propagation bug in the future.
+#
+# Python's own _ssl, _hashlib, etc. find system libraries via the
+# standard dynamic linker search path and are unaffected.
+#
+# See: github.com/microsoft/apm/issues/462 (original OpenSSL fix)
+#      github.com/microsoft/apm/issues/1534 (generalized to all non-Python libs)
 if sys.platform == 'linux':
-    _openssl_libs = {'libssl.so.3', 'libcrypto.so.3'}
+    _exclude_libs = {
+        # OpenSSL (original fix, issue #462)
+        "libssl.so.3",
+        "libcrypto.so.3",
+        # Readline + terminfo (breaks /bin/sh, bash, git subprocesses)
+        "libreadline.so.8",
+        "libtinfo.so.6",
+        # Compression (breaks git clone/remote helpers)
+        "libz.so.1",
+        "liblzma.so.5",
+        "libbz2.so.1.0",
+        # General-purpose system libs (break various child processes)
+        "libffi.so.8",
+        "libsqlite3.so.0",
+        "libuuid.so.1",
+    }
     a.binaries = [(name, path, typ) for name, path, typ in a.binaries
-                  if name not in _openssl_libs]
+                  if name not in _exclude_libs]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
