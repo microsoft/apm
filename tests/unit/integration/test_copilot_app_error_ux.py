@@ -225,6 +225,40 @@ class TestDeployErrorSurfacing:
         assert result.files_skipped == 0
         assert diags.warns == []
 
+    def test_existing_unmanaged_workflow_is_not_overwritten_without_force(
+        self,
+        tmp_path,
+        monkeypatch,
+        fake_db,
+        copilot_app_target,
+    ):
+        """Existing workflow rows are protected unless lockfile-managed or forced."""
+        pkg = _make_pkg(tmp_path)
+        diags = _CapturingDiagnostics()
+        deploy_calls = []
+
+        monkeypatch.setattr(db_mod, "workflow_exists", lambda *_args: True)
+
+        def record_deploy(*_args, **_kwargs):
+            deploy_calls.append(True)
+
+        monkeypatch.setattr(db_mod, "deploy_workflow", record_deploy)
+
+        result = PromptIntegrator().integrate_prompts_for_target(
+            copilot_app_target,
+            pkg,
+            project_root=tmp_path,
+            diagnostics=diags,
+            managed_files=set(),
+        )
+
+        assert result.files_integrated == 0
+        assert result.files_skipped == 2
+        assert deploy_calls == []
+        conflict_warns = [w for w in diags.warns if "already exists" in w["message"]]
+        assert len(conflict_warns) == 2
+        assert "--force" in conflict_warns[0]["message"]
+
 
 # ---------------------------------------------------------------------------
 # Option B: dispatch-by-shape regression tests

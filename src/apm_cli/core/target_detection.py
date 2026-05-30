@@ -320,12 +320,12 @@ ALL_CANONICAL_TARGETS = frozenset(
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork", "copilot-app"})
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork"})
 
-#: Stable targets excluded from "all" expansion (cross-client deploy
-#: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
-#: not represent a single client tool.
-EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills"})
+#: Stable targets excluded from "all" expansion (cross-client or dynamic
+#: user-machine deploy locations). Unlike EXPERIMENTAL_TARGETS, these are
+#: GA -- they just do not represent a normal auto-detected project tree.
+EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills", "copilot-app"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {

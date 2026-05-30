@@ -2,9 +2,8 @@
 
 Parser scenarios:
 
-  1. Flag OFF                -> enable-hint printed, exit 0.
-  2. Flag ON, no ``data.db`` -> "Copilot App not detected" error, exit 1.
-  3. Project scope           -> supported (v1.1); no --global required.
+  1. No ``data.db``          -> "Copilot App not detected" error, exit 1.
+  2. Project scope           -> supported (v1.1); no --global required.
 
 Two happy-path tests exercise the full deploy + uninstall cycle against
 a temp SQLite DB seeded with the live workflows schema, proving that
@@ -101,10 +100,8 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestCopilotAppParserE2E:
-    def test_flag_off_emits_enable_hint(
-        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Flag OFF: parser accepts copilot-app, targets phase prints hint, exit 0."""
+    def test_db_missing_errors(self, fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No data.db: actionable error, non-zero exit."""
         cfg = fake_home / ".apm" / "config.json"
         if cfg.exists():
             cfg.unlink()
@@ -115,12 +112,13 @@ class TestCopilotAppParserE2E:
             cli,
             ["install", "--target", "copilot-app", "--global"],
             env={**_BASE_ENV},
-            catch_exceptions=False,
+            catch_exceptions=True,
         )
-        assert result.exit_code == 0, result.output
         assert "is not a valid target" not in (result.output or "")
+        assert "experimental enable" not in (result.output or "")
+        assert result.exit_code != 0, result.output
         normalized = " ".join((result.output or "").split())
-        assert "apm experimental enable copilot-app" in normalized, result.output
+        assert "GitHub Copilot desktop App not detected" in normalized or "data.db" in normalized
 
     def test_flag_on_db_missing_errors(
         self, fake_home: Path, monkeypatch: pytest.MonkeyPatch
@@ -185,6 +183,59 @@ class TestCopilotAppParserE2E:
 
 class TestCopilotAppDeployUninstall:
     """Full install -> verify row exists -> uninstall -> verify row gone."""
+
+    def test_global_install_without_target_deploys_workflow_prompt_when_app_present(
+        self,
+        tmp_path: Path,
+        fake_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Regression for #1482: -g installs scheduled prompts when App DB exists."""
+        db = _seed_db(fake_home / "data.db")
+        monkeypatch.setenv("APM_COPILOT_APP_DB", str(db))
+
+        pkg_dir = tmp_path / "default-target-pkg"
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            textwrap.dedent(
+                """\
+                name: default-target-pkg
+                description: regression test
+                version: 0.0.1
+                """
+            ),
+            encoding="ascii",
+        )
+        (prompts_dir / "daily-digest.prompt.md").write_text(
+            textwrap.dedent(
+                """\
+                ---
+                name: Daily Digest
+                interval: daily
+                schedule_hour: 9
+                schedule_day: 1
+                ---
+                Summarise yesterday's commits.
+                """
+            ),
+            encoding="ascii",
+        )
+
+        runner = CliRunner()
+        install_result = runner.invoke(
+            cli,
+            ["install", str(pkg_dir), "--global"],
+            env={**_BASE_ENV, "APM_COPILOT_APP_DB": str(db)},
+            catch_exceptions=False,
+        )
+        assert install_result.exit_code == 0, install_result.output
+
+        from apm_cli.integration import copilot_app_db as cdb
+
+        ids_after_install = cdb.list_managed_workflow_ids(db)
+        assert len(ids_after_install) == 1, ids_after_install
+        assert "daily-digest" in ids_after_install[0]
 
     def test_install_then_uninstall_roundtrip(
         self,

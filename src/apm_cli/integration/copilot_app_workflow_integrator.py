@@ -270,6 +270,7 @@ class CopilotAppWorkflowIntegrator(BaseIntegrator):
         user_scope: bool,
         force: bool,
         diagnostics,
+        managed_files: set[str] | None = None,
     ) -> IntegrationResult:
         """Deploy workflow-shape prompts as Copilot App workflow rows.
 
@@ -472,11 +473,29 @@ class CopilotAppWorkflowIntegrator(BaseIntegrator):
         # Keeps lockfile ids namespaced and stable.
         # --------------------------------------------------------------
         synthetic_root = db_path.parent / "workflows"
+        normalized_managed = self.normalize_managed_files(managed_files)
         files_integrated = 0
         target_paths: list[Path] = []
         for source_file, post, schedule in parsed:
             prompt_stem = source_file.name.removesuffix(".prompt.md")
             wf_id = namespaced_id(owner, pkg_name, prompt_stem)
+            lockfile_uri = _db_mod.to_lockfile_uri(wf_id)
+            if (
+                not force
+                and normalized_managed is not None
+                and lockfile_uri not in normalized_managed
+                and _db_mod.workflow_exists(db_path, wf_id)
+            ):
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=(
+                            f"Copilot App workflow {prompt_stem!r} already exists and is not "
+                            "managed by APM. Re-run with --force to overwrite it."
+                        ),
+                        package=pkg_name,
+                    )
+                files_skipped += 1
+                continue
             base_name = post.metadata.get("name") or prompt_stem
             display_name = f"{base_name}{repo_suffix}"
             row = WorkflowRow(

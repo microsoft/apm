@@ -32,9 +32,11 @@ Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, and Codex by default (see [Skills convergence](#skills-convergence)
 below). Claude and Windsurf keep target-native skill directories.
 
-`copilot-cowork` (Microsoft 365 Copilot) and `copilot-app` (GitHub
-Copilot desktop App) are gated behind experimental flags and not listed
-above. See [Experimental](./experimental/).
+`copilot-cowork` (Microsoft 365 Copilot) is gated behind an experimental
+flag and not listed above; see [Experimental](./experimental/).
+`copilot-app` (GitHub Copilot desktop App) uses the local App database,
+is excluded from `--target all`, and is described below in
+[copilot-app](#copilot-app).
 
 ## Detection and resolution
 
@@ -61,10 +63,12 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 
-`agent-skills`, `copilot-cowork`, and `copilot-app` are never
-auto-detected. Select them explicitly with `--target`, or list them in
-a project's `apm.yml` `targets:` field so contributors running plain
-`apm install` pick them up automatically.
+`agent-skills` and `copilot-cowork` are never auto-detected. Select them
+explicitly with `--target`, or list them in a project's `apm.yml`
+`targets:` field so contributors running plain `apm install` pick them up
+automatically. At user scope, `copilot-app` is added automatically when
+`~/.copilot/data.db` exists so scheduled prompt workflows install with
+`apm install -g`.
 
 ## copilot
 
@@ -81,6 +85,16 @@ GitHub Copilot (CLI and IDE).
   - hooks: `.github/hooks/<name>.json`
   - generated: `.github/copilot-instructions.md` (compile output)
 - **User scope.** Partial. `prompts` and `instructions` are not supported at user scope; user-scope deploys land under `~/.copilot/`, not `~/.github/`.
+
+## copilot-app
+
+GitHub Copilot desktop App workflows.
+
+- **Detection.** User-scope fallback when `~/.copilot/data.db` exists; explicit with `--target copilot-app`.
+- **Deploy directory.** The App's local `workflows` table in `~/.copilot/data.db`.
+- **Supported primitives.** workflow-shaped prompts only.
+- **File conventions.** `.apm/prompts/<name>.prompt.md` with workflow frontmatter such as `interval: manual`, `daily`, `weekly`, or `hourly`.
+- **User scope.** `apm install -g` deploys scheduled prompt workflows to the App when the database is present. Existing workflow rows that are not tracked by APM are skipped unless `--force` is used.
 
 ## claude
 

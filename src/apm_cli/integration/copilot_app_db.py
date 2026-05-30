@@ -43,9 +43,9 @@ deliver.
 
 Design note
 -----------
-Pure-stdlib (``sqlite3`` is in the standard library).  Always importable
-but functionally inert until the ``copilot_app`` experimental flag is
-enabled by the caller.
+Pure-stdlib (``sqlite3`` is in the standard library). Always importable;
+callers stay inert until a Copilot App database is detected or explicitly
+selected.
 """
 
 from __future__ import annotations
@@ -461,6 +461,26 @@ def _validate_row(row: WorkflowRow) -> None:
         raise ValueError(f"Invalid schedule_day {row.schedule_day}; expected 0..6")
     if row.enabled not in (0, 1):
         raise ValueError(f"Invalid enabled {row.enabled}; expected 0 or 1")
+
+
+def workflow_exists(db_path: Path, workflow_id: str) -> bool:
+    """Return True when *workflow_id* already exists in the App DB."""
+    if not db_path.is_file():
+        raise CopilotAppDbMissingError(
+            f"Copilot App database not found at {db_path}. "
+            f"Install the GitHub Copilot desktop app, or omit "
+            f"'--target copilot-app'."
+        )
+    conn = _connect(db_path)
+    try:
+        _check_user_version(conn)
+        row = conn.execute(
+            "SELECT 1 FROM workflows WHERE id = ? LIMIT 1",
+            (workflow_id,),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
 
 
 def deploy_workflow(db_path: Path, row: WorkflowRow) -> str:

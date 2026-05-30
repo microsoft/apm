@@ -626,7 +626,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_resolver=lambda: _resolve_copilot_app_root(),
-        requires_flag="copilot_app",
         scope_invariant_resolver=True,
     ),
 }
@@ -818,9 +817,17 @@ def active_targets_user_scope(
         and (home / p.effective_root(user_scope=True)).is_dir()
     ]
     if detected:
+        app = KNOWN_TARGETS.get("copilot-app")
+        if app is not None and app.for_scope(user_scope=True) is not None:
+            return [app, *detected]
         return detected
 
-    # --- fallback: copilot is the universal default ---
+    # --- fallback: Copilot is the universal default. If the desktop App
+    # DB is present, include its workflow target first so global scheduled
+    # prompts land there while agents/skills still fall through to copilot.
+    app = KNOWN_TARGETS.get("copilot-app")
+    if app is not None and app.for_scope(user_scope=True) is not None:
+        return [app, KNOWN_TARGETS["copilot"]]
     return [KNOWN_TARGETS["copilot"]]
 
 

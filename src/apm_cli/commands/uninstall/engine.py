@@ -602,12 +602,11 @@ def _sync_integrations_after_uninstall(
         )
         counts["skills"] = result.get("files_removed", 0)
 
-    # Scan sync_managed DIRECTLY for copilot-app-db:// entries.
-    # The copilot-app target is opt-in: resolve_targets() excludes it from the
-    # default user-scope set unless --target copilot-app was passed at install
-    # time and recorded on apm_package.target.  Without this scan, prompts
-    # deployed to ~/.copilot/data.db would never be deleted on uninstall
-    # because the per-target loop above does not iterate copilot-app.
+    # Scan sync_managed DIRECTLY for copilot-app-db:// entries. The App DB
+    # may be unavailable during uninstall, or the package may have been
+    # installed before copilot-app became a user-scope fallback. Without this
+    # scan, prompts deployed to ~/.copilot/data.db could be missed when the
+    # per-target loop above does not iterate copilot-app.
     if sync_managed:
         from ...integration.copilot_app_db import COPILOT_APP_LOCKFILE_PREFIX
 

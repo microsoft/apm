@@ -105,6 +105,7 @@ class PromptIntegrator(BaseIntegrator):
                 user_scope=user_scope,
                 force=force,
                 diagnostics=diagnostics,
+                managed_files=managed_files,
             )
 
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
@@ -185,6 +186,7 @@ class PromptIntegrator(BaseIntegrator):
             user_scope=user_scope,
             force=force,
             diagnostics=diagnostics,
+            managed_files=None,
         )
 
     def _sync_copilot_app(self, managed_files: set[str]) -> dict[str, int]:

@@ -61,34 +61,22 @@ class TestForScope:
 
 
 class TestActiveTargetsGating:
-    def test_absent_when_flag_off_auto_detect(self, tmp_path: Path, inject_config: Any) -> None:
-        inject_config({"experimental": {"copilot_app": False}})
+    def test_project_scope_auto_detect_still_ignores_copilot_app(self, tmp_path: Path) -> None:
         results = active_targets(tmp_path)
         names = [t.name for t in results]
         assert "copilot-app" not in names
 
-    def test_absent_when_flag_off_explicit_target(self, tmp_path: Path, inject_config: Any) -> None:
-        inject_config({"experimental": {"copilot_app": False}})
+    def test_explicit_target_available_without_experimental_flag(self, tmp_path: Path) -> None:
         results = active_targets(tmp_path, explicit_target="copilot-app")
-        assert results == []
+        names = [t.name for t in results]
+        assert "copilot-app" in names
 
-    def test_absent_from_all_when_flag_off(self, tmp_path: Path, inject_config: Any) -> None:
-        inject_config({"experimental": {"copilot_app": False}})
+    def test_absent_from_all_by_default(self, tmp_path: Path) -> None:
         results = active_targets(tmp_path, explicit_target="all")
         names = [t.name for t in results]
         assert "copilot-app" not in names
 
-    def test_absent_from_all_when_flag_on(self, tmp_path: Path, inject_config: Any) -> None:
-        """``--target all`` honors EXPERIMENTAL_TARGETS exclusion regardless of flag."""
-        inject_config({"experimental": {"copilot_app": True}})
-        results = active_targets(tmp_path, explicit_target="all")
-        names = [t.name for t in results]
-        assert "copilot-app" not in names
-
-    def test_absent_when_flag_on_resolver_returns_none(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
-        inject_config({"experimental": {"copilot_app": True}})
+    def test_absent_when_resolver_returns_none(self, tmp_path: Path) -> None:
         with patch(
             "apm_cli.integration.targets._resolve_copilot_app_root",
             return_value=None,
@@ -101,10 +89,7 @@ class TestActiveTargetsGating:
         names = [t.name for t in results]
         assert "copilot-app" not in names
 
-    def test_present_when_flag_on_and_resolver_returns_path(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
-        inject_config({"experimental": {"copilot_app": True}})
+    def test_present_when_resolver_returns_path(self, tmp_path: Path) -> None:
         with patch(
             "apm_cli.integration.targets._resolve_copilot_app_root",
             return_value=tmp_path,
@@ -116,3 +101,14 @@ class TestActiveTargetsGating:
             )
         names = [t.name for t in results]
         assert "copilot-app" in names
+
+    def test_user_scope_fallback_includes_copilot_app_when_app_is_present(
+        self, tmp_path: Path
+    ) -> None:
+        with patch(
+            "apm_cli.integration.targets._resolve_copilot_app_root",
+            return_value=tmp_path,
+        ):
+            results = resolve_targets(tmp_path, user_scope=True)
+        names = [t.name for t in results]
+        assert names[:2] == ["copilot-app", "copilot"]

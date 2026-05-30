@@ -1,5 +1,5 @@
 ---
-title: "GitHub Copilot App workflows (Experimental)"
+title: "GitHub Copilot App workflows"
 description: "Deploy APM prompts with schedule frontmatter as Copilot App workflows backed by the desktop SQLite store."
 sidebar:
   order: 6
@@ -7,21 +7,13 @@ sidebar:
 
 See the [Targets matrix](../../reference/targets-matrix/) for where `copilot-app` fits alongside the other deploy targets.
 
-:::caution[Frontier preview]
-This integration is experimental and off by default. You must enable the `copilot-app` flag before using it.
-
-```bash
-apm experimental enable copilot-app
-```
-
-See the [Experimental flags reference](../../reference/experimental/) for the full `apm experimental` subcommand surface (enable / disable / list).
-
-Until the flag is enabled, the `copilot-app` target stays inert: it is hidden from auto-detection, and explicit `--target copilot-app` installs fail cleanly with the enable hint instead of touching the App's database.
+:::note[App database required]
+The `copilot-app` target is available by default, but it only runs when the GitHub Copilot desktop App database exists at `~/.copilot/data.db` or `APM_COPILOT_APP_DB` points at a valid database. If the database is missing, explicit `--target copilot-app` installs fail cleanly before touching anything.
 :::
 
 ## What you get
 
-Your APM workflows appear in the Copilot App's correct project tab automatically -- no manual workspace tagging. Ship a `.prompt.md` with workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day` at the top level), run `apm install --target copilot-app` inside the repo, and the App lists the workflow under that repo's Workflows tab on next launch. Add `--global` to install from a user-scope `~/.apm/apm.yml`; omit it for project-scoped, team-shared scheduled prompts.
+Your APM workflows appear in the Copilot App's correct project tab automatically -- no manual workspace tagging. Ship a `.prompt.md` with workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day` at the top level), run `apm install --target copilot-app` inside the repo, and the App lists the workflow under that repo's Workflows tab on next launch. Add `--global` to install from a user-scope `~/.apm/apm.yml`; omit it for project-scoped, team-shared scheduled prompts. When `~/.copilot/data.db` exists, `apm install -g` includes `copilot-app` automatically so scheduled prompts are not dropped.
 
 Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) and APM hard-errors with an actionable diagnostic if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface -- whichever its frontmatter shape selects.
 
@@ -70,8 +62,9 @@ UI after install.
 | `apm` action | Effect on `~/.copilot/data.db` |
 |---|---|
 | `apm install` | INSERT row with `enabled = 0` (always disabled on install — you opt in). |
-| `apm install` (already installed, content unchanged) | UPDATE display fields only. `enabled`, `last_run_at`, `next_run_at` are preserved. |
+| `apm install` (existing row is tracked by APM, content unchanged) | UPDATE display fields only. `enabled`, `last_run_at`, `next_run_at` are preserved. |
 | `apm install` (already installed, any execution-affecting field changed) | UPDATE row; reset `enabled = 0`; clear `next_run_at`. |
+| `apm install` (existing row is not tracked by APM) | SKIP without `--force`; APM warns instead of overwriting user-authored App state. |
 | `apm uninstall` | DELETE only APM-namespaced rows (`apm--<owner>--<pkg>--<prompt>`). User-authored rows are never touched. |
 
 Execution-affecting fields are the prompt body, schedule (`interval` / `schedule_hour` / `schedule_day`), `mode`, `model`, and `reasoning_effort`. The reset is by design: you opted in to a specific prompt, so any change to what runs or when is a new consent surface.
@@ -113,9 +106,9 @@ Workflows installed with `apm install --global` run with `CWD=~/.copilot`, not a
 
 The remediation is per-row: attach the workflow to any project from the Workflows tab in the App. Or re-run `apm install` from inside a repo without `--global`.
 
-## Enable and check
+## Check availability
 
-Use `apm experimental enable copilot-app` to turn the target on, `apm experimental list` to see all flags, and `apm experimental disable copilot-app` to turn it off again. See the [Experimental flags reference](../../reference/experimental/) for the complete subcommand surface.
+Run `apm targets` or `apm install --target copilot-app --dry-run` to check whether APM can see the App database. The target is excluded from `--target all` because it writes user-machine App state rather than a project tree.
 
 ## Database resolution
 

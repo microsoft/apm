@@ -212,11 +212,8 @@ def run(ctx: InstallContext) -> None:
             raise SystemExit(1)
 
     # ------------------------------------------------------------------
-    # GitHub Copilot App target gating (mirrors cowork rules above):
-    # explicit --target copilot-app with flag OFF must hint at the
-    # experimental enable command; with flag ON but no ~/.copilot/data.db
-    # must error with an actionable install instruction; without --global
-    # must error because copilot-app is user-scope only.
+    # GitHub Copilot App target gating: explicit --target copilot-app with
+    # no ~/.copilot/data.db must error with an actionable install instruction.
     # ------------------------------------------------------------------
     _user_asked_copilot_app = False
     if _explicit:
@@ -228,24 +225,14 @@ def run(ctx: InstallContext) -> None:
     if _user_asked_copilot_app:
         _copilot_app_resolved = any(t.name == "copilot-app" for t in _targets)
         if not _copilot_app_resolved:
-            from apm_cli.core.experimental import is_enabled as _is_flag_on
-
-            if not _is_flag_on("copilot_app"):
-                if ctx.logger:
-                    ctx.logger.progress(
-                        "The 'copilot-app' target requires an experimental flag. "
-                        "Run: apm experimental enable copilot-app",
-                        symbol="info",
-                    )
-            else:
-                _app_msg = (
-                    "GitHub Copilot desktop App not detected.\n"
-                    "Expected ~/.copilot/data.db but the file is missing.\n"
-                    "Install the app, or omit '--target copilot-app'."
-                )
-                if ctx.logger:
-                    ctx.logger.error(_app_msg, symbol="cross")
-                raise SystemExit(1)
+            _app_msg = (
+                "GitHub Copilot desktop App not detected.\n"
+                "Expected ~/.copilot/data.db but the file is missing.\n"
+                "Install the app, or omit '--target copilot-app'."
+            )
+            if ctx.logger:
+                ctx.logger.error(_app_msg, symbol="cross")
+            raise SystemExit(1)
 
     # NOTE: copilot-app intentionally has no project-scope gate. The DB
     # at ~/.copilot/data.db is a single user-scoped resource, but the
