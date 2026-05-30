@@ -184,12 +184,23 @@ class TestAPMFileHandlerOnModified:
             handler.on_modified(_make_event(path))
         handler._recompile.assert_not_called()
 
-    def test_md_file_triggers_recompile(self) -> None:
-        """A .md file event triggers _recompile."""
+    def test_non_primitive_md_ignored(self) -> None:
+        """Generic .md files (README, CHANGELOG, AGENTS output) are skipped.
+
+        Only files matching APM primitive suffixes trigger recompile.
+        """
         handler = _make_handler()
         handler._recompile = MagicMock()
-        handler.on_modified(_make_event("AGENTS.md"))
-        handler._recompile.assert_called_once_with("AGENTS.md")
+        for path in ["AGENTS.md", "README.md", "CHANGELOG.md", "docs/notes.md"]:
+            handler.on_modified(_make_event(path))
+        handler._recompile.assert_not_called()
+
+    def test_md_file_triggers_recompile(self) -> None:
+        """A primitive .md file event triggers _recompile."""
+        handler = _make_handler()
+        handler._recompile = MagicMock()
+        handler.on_modified(_make_event(".apm/agents/foo.agent.md"))
+        handler._recompile.assert_called_once_with(".apm/agents/foo.agent.md")
 
     def test_apm_yml_triggers_recompile(self) -> None:
         """An apm.yml event triggers _recompile."""
@@ -205,10 +216,10 @@ class TestAPMFileHandlerOnModified:
         handler = _make_handler()
         handler._recompile = MagicMock()
         # First event fires
-        handler.on_modified(_make_event("AGENTS.md"))
+        handler.on_modified(_make_event(".apm/agents/foo.agent.md"))
         assert handler._recompile.call_count == 1
         # Second event within debounce window is suppressed
-        handler.on_modified(_make_event("AGENTS.md"))
+        handler.on_modified(_make_event(".apm/agents/foo.agent.md"))
         assert handler._recompile.call_count == 1  # still 1
 
     def test_event_after_debounce_fires_again(self) -> None:
@@ -216,7 +227,7 @@ class TestAPMFileHandlerOnModified:
         handler = _make_handler()
         handler._recompile = MagicMock()
         handler.last_compile = time.time() - 2.0  # older than debounce_delay
-        handler.on_modified(_make_event("AGENTS.md"))
+        handler.on_modified(_make_event(".apm/agents/foo.agent.md"))
         handler._recompile.assert_called_once()
 
     def test_event_with_no_src_path_attr(self) -> None:

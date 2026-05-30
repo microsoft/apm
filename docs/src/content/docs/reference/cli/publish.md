@@ -15,7 +15,7 @@ apm publish [OPTIONS]
 
 `apm publish` uploads a package version to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`.
 
-By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.tar.gz`) containing `apm.yml` and `.apm/` at the tarball root. This is **not** the plugin bundle layout from [`apm pack`](./pack/) (`{name}-{version}/plugin.json`).
+By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.tar.gz`) containing `apm.yml` and `.apm/` at the tarball root. This is **not** the plugin bundle layout from [`apm pack`](../pack/) (`{name}-{version}/plugin.json`).
 
 Requires the experimental `registries` feature:
 
@@ -115,6 +115,6 @@ Some registries return `201` with an empty body; APM still treats the upload as 
 ## Related
 
 - [Registries (guide)](../../../guides/registries/) — declare registries, auth, default routing, and policy.
-- [`apm pack`](./pack/) — plugin bundles and marketplace artifacts (different layout from registry publish).
-- [`apm install`](./install/) — consumer side; installs registry packages with `resolved_hash` verification.
+- [`apm pack`](../pack/) — plugin bundles and marketplace artifacts (different layout from registry publish).
+- [`apm install`](../install/) — consumer side; installs registry packages with `resolved_hash` verification.
 - [Registry HTTP API](../../registry-http-api/) — wire contract for `PUT …/versions/{version}`.

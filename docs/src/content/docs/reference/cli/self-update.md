@@ -61,7 +61,7 @@ apm self-update
 
 ## Where the new binary lands
 
-The installer writes the binary to the same location the original install script used -- typically `~/.apm/bin/apm` on macOS/Linux and `%LOCALAPPDATA%\Programs\apm\apm.exe` on Windows. Existing configuration under `~/.apm/` and your project files are untouched.
+The installer writes to the same location the install script uses -- by default `/usr/local/bin/apm` on macOS/Linux, and a `%LOCALAPPDATA%\Programs\apm\bin\apm.cmd` shim pointing at the staged Windows release binary. Existing configuration under `~/.apm/` and your project files are untouched.
 
 ## After update
 

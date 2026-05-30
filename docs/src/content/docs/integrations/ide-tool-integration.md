@@ -97,14 +97,15 @@ apm install --target agent-skills
 
 ## MCP server integration
 
-MCP servers declared in `apm.yml` (under `mcp:`) are wired into each target's MCP config on install:
+MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies.mcp:`) are wired into each target's MCP config on install:
 
-- `.claude/settings.json` (Claude Code)
+- `.mcp.json` at the repo root when `.claude/` exists (Claude Code project scope)
 - `.cursor/mcp.json` (Cursor)
-- `.codex/mcp.json` (Codex)
+- `.codex/config.toml` (Codex)
 - `.vscode/mcp.json` (VS Code)
-- `.opencode/mcp.json` (OpenCode)
-- `.windsurf/mcp.json` (Windsurf)
+- `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
+- `.gemini/settings.json` (Gemini)
+- `~/.codeium/windsurf/mcp_config.json` (Windsurf)
 
 For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../consumer/install-mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
 

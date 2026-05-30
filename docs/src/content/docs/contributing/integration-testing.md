@@ -10,7 +10,7 @@ This document describes APM's integration testing strategy to ensure runtime set
 
 APM uses a tiered approach to integration testing:
 
-### 1. **Smoke Tests** (Every CI run)
+### 1. **Smoke Tests** (merge queue, runtime changes, and releases)
 - **Location**: `tests/integration/test_runtime_smoke.py`
 - **Purpose**: Fast verification that runtime setup scripts work
 - **Scope**: 
@@ -19,7 +19,7 @@ APM uses a tiered approach to integration testing:
   - APM runtime detection
   - Workflow compilation without execution
 - **Duration**: ~2-3 minutes per platform
-- **Trigger**: Every push/PR
+- **Trigger**: merge queue integration workflow, runtime-code pushes, scheduled/manual runs, and release validation
 
 ### 2. **End-to-End Golden Scenario Tests** (Releases only)
 - **Location**: `tests/integration/test_golden_scenario_e2e.py`
@@ -167,8 +167,8 @@ Each stage must succeed before proceeding to the next, ensuring only fully valid
 
 All integration tests run on:
 - **Linux**: ubuntu-24.04 (x86_64)
-- **macOS Intel**: macos-13 (x86_64) 
-- **macOS Apple Silicon**: macos-14 (arm64)
+- **macOS Intel**: macos-15-intel (x86_64)
+- **macOS Apple Silicon**: macos-latest (arm64)
 
 **Python Version**: 3.12 (standardized across all environments)
 **Package Manager**: uv (for fast dependency management and virtual environments)

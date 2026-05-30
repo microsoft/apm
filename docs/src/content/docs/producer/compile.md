@@ -45,9 +45,9 @@ commands -- are NOT compiled by this command. They are deployed by
 `apm install` directly into the harness directories that consume them
 (`.github/prompts/`, `.agents/skills/`, `.claude/commands/`, etc.).
 For the full reach map, see
-[Primitives and targets](../../concepts/primitives-and-targets/). For
+[Primitives and targets](../concepts/primitives-and-targets/). For
 the place compile takes in the broader flow, see
-[Lifecycle](../../concepts/lifecycle/).
+[Lifecycle](../concepts/lifecycle/).
 
 ## The authoring loop
 
@@ -70,7 +70,7 @@ apm compile --dry-run            # print placement decisions without writing fil
 loop while you edit prose.
 
 To preview a script that wraps a `.prompt.md` file, use
-[`apm preview`](../preview-and-validate/) instead. `apm compile` builds
+[`apm preview`](./preview-and-validate/) instead. `apm compile` builds
 the root context files; `apm preview` shows the rewritten command line
 your script will execute.
 
@@ -107,7 +107,7 @@ order:
 
 Pin `targets:` in `apm.yml` if you want the same compile output on
 every machine. Full rules and the per-target output map live in
-[Primitives and targets](../../concepts/primitives-and-targets/#how-a-target-is-selected).
+[Primitives and targets](../concepts/primitives-and-targets/#how-a-target-is-selected).
 
 ## Where instructions land
 
@@ -128,7 +128,7 @@ Per target, with the rules shape on disk after compile:
 | You want to... | Run |
 |---|---|
 | Iterate on instructions in `.apm/instructions/` | `apm compile` |
-| Deploy prompts, skills, agents, hooks, commands, MCP | `apm install` (see [Install packages](../../consumer/install-packages/)) |
+| Deploy prompts, skills, agents, hooks, commands, MCP | `apm install` (see [Install packages](../consumer/install-packages/)) |
 | Add a dependency or refresh `apm_modules/` | `apm install` |
 | Verify deployed bytes match the lockfile | `apm audit` |
 
@@ -169,12 +169,12 @@ re-running `apm compile` restores the instructions section to
 - **Hand-edited primitives skip the security scan.** `apm compile`
   does not run the install-time hidden-Unicode scan. After hand-edits,
   run `apm audit` before publishing. See
-  [drift and secure-by-default](../../consumer/drift-and-secure-by-default/).
+  [drift and secure-by-default](../consumer/drift-and-secure-by-default/).
 - **Zero-output success.** If compile reports success but writes no
   files, your project either has no instructions, or every requested
   target was rejected. The CLI surfaces this as a warning -- check
   `targets:` and the contents of `.apm/instructions/`.
 
 Once your instructions compile cleanly into the harnesses you care
-about, package the result with [`apm pack`](../pack-a-bundle/) and
-share it via [a marketplace](../publish-to-a-marketplace/).
+about, package the result with [`apm pack`](./pack-a-bundle/) and
+share it via [a marketplace](./publish-to-a-marketplace/).

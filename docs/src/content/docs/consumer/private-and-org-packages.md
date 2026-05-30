@@ -96,8 +96,8 @@ dependencies:
 
 Token: `ADO_APM_PAT`, or `az login --tenant <id>` (APM picks up the
 Azure CLI bearer). ADO is always auth-required -- no anonymous
-fallback. Azure DevOps Server (on-prem) works the same way once you
-set `GITHUB_HOST` to its FQDN.
+fallback. For Azure DevOps Server (on-prem), use an explicit git URL
+and the same credential helper your shell uses.
 
 ## GitLab
 
@@ -183,8 +183,8 @@ Full pack-and-unpack workflow: [Deploy a bundle](../deploy-a-bundle/).
 
 ADO and GitLab marketplaces use the same auth backends as direct deps
 -- once `ADO_APM_PAT` or `GITLAB_APM_PAT` is set, marketplace fetches
-authenticate. See [Marketplaces](../../guides/marketplaces/) for the
-consumer-side workflow.
+authenticate. See [Installing from marketplaces](../installing-from-marketplaces/)
+for the consumer-side workflow.
 
 ## Out of scope
 

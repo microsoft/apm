@@ -99,7 +99,7 @@ Rows are primitives, columns are harnesses. Cell legend:
 - **native** -- the harness reads this primitive directly from its own format and directory; APM writes the file as-is or in the harness's documented format.
 - **compiled** -- APM transforms the primitive into a different format the harness understands (e.g. a prompt becomes a TOML command, an instruction is folded into `AGENTS.md`).
 - **unsupported** -- APM does not deliver this primitive to this harness.
-- **gated** -- delivered behind a flag or trust prompt.
+- **gated** -- delivered behind an explicit declaration or trust flag.
 
 | Primitive | Copilot | Claude | Cursor | Codex | Gemini | OpenCode | Windsurf |
 |---|---|---|---|---|---|---|---|
@@ -119,7 +119,7 @@ How to read a cell:
 - `agents / gemini = unsupported` -- Gemini CLI has no agents primitive; APM does not deliver `.agent.md` files to it. Their content still reaches Gemini through the compiled `GEMINI.md` if referenced from instructions.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
-- `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies require an explicit trust prompt at install -- effectively `gated` for those, `native` for direct dependencies.
+- `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.
 
 ## Dev-only primitives
 

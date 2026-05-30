@@ -17,9 +17,9 @@ Creates a minimal `apm.yml` in the current directory or in a new
 `PROJECT_NAME` subdirectory. Auto-detects name, author, and description
 so you can start running `apm install` immediately.
 
-The legacy `--plugin` and `--marketplace` flags (which scaffolded a
+The legacy `--plugin` and `--marketplace` flags (which scaffold a
 plugin or marketplace authoring block alongside `apm.yml`) are
-deprecated and will be removed in v0.16; use [`apm plugin init`](../plugin/)
+deprecated but still accepted; use [`apm plugin init`](../plugin/)
 and [`apm marketplace init`](../marketplace/) instead.
 
 ## Arguments
@@ -33,8 +33,8 @@ and [`apm marketplace init`](../marketplace/) instead.
 | Flag | Default | Description |
 |---|---|---|
 | `-y`, `--yes` | off | Skip interactive prompts; use auto-detected defaults. Overwrites an existing `apm.yml` without confirmation. |
-| `--plugin` | off | **Deprecated (removed in v0.16).** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
-| `--marketplace` | off | **Deprecated (removed in v0.16).** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
+| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
+| `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
 | `--target` | (prompt) | Comma-separated target list. Skips the interactive target prompt and writes targets directly. Valid values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`. |
 | `-v`, `--verbose` | off | Show detailed output. |
 
@@ -109,11 +109,10 @@ $ apm init --yes --target copilot,claude,cursor
 
 ## Deprecations
 
-The `--plugin` and `--marketplace` flags are deprecated and will be
-removed in **v0.16**. They remain functional during the deprecation
-window; each invocation prints a one-line warning to stderr pointing
-at the replacement command (`apm plugin init` or `apm marketplace
-init`). Migrate to:
+The `--plugin` and `--marketplace` flags are deprecated but remain
+functional for compatibility. Each invocation prints a one-line warning
+to stderr pointing at the replacement command (`apm plugin init` or
+`apm marketplace init`). Migrate to:
 
 - [`apm plugin init`](../plugin/) -- replaces `apm init --plugin`.
 - [`apm marketplace init`](../marketplace/) -- replaces

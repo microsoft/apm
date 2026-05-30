@@ -68,7 +68,7 @@ Two fields are REQUIRED at parse time: `name` and `version`. All other fields ar
 
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 
-Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](../cli/init/) for the templates.
+Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](./cli/init/) for the templates.
 
 ---
 
@@ -225,9 +225,9 @@ includes: auto
 #   - .apm/skills/my-skill/
 ```
 
-`includes:` is allow-list only. There is no `exclude:` form. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+`includes:` is allow-list only. There is no `exclude:` form. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
-When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
+When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
 ### 3.10. `policy`
 
@@ -250,7 +250,7 @@ policy:
 | `hash` | `string` | unset | `<algo>:<hex-digest>` | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present. MD5 and SHA-1 are rejected at parse time. |
 
-Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../../enterprise/policy-reference/).
+Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../enterprise/policy-reference/).
 
 ### 3.11. `registries`
 
@@ -262,7 +262,7 @@ The `registries:` field and registry-routed APM dependency forms require `apm ex
 |---|---|
 | **Type** | `map<string, RegistryEntry>` with optional `default: <string>` key |
 | **Required** | OPTIONAL |
-| **Description** | Declares REST-based APM registries for the project. Strictly additive — absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../../guides/registries/#user-level-config). |
+| **Description** | Declares REST-based APM registries for the project. Strictly additive — absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../guides/registries/#user-level-config). |
 
 ```yaml
 registries:
@@ -281,7 +281,7 @@ Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
 
 **Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
 
-For full client semantics — auth, lockfile fields, and routing rules — see the [Registries guide](../../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](../registry-http-api/).
+For full client semantics — auth, lockfile fields, and routing rules — see the [Registries guide](../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](./registry-http-api/).
 
 ---
 
@@ -362,7 +362,7 @@ dependencies:
 
 #### 4.1.2. Object Form
 
-REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with virtual paths). NOT required for nested-group deps that route through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`): the install-time boundary probe HEAD-walks candidate splits against the proxy and locks in the first one whose archive responds. See [Registry proxy guide](../../enterprise/registry-proxy/#nested-group-repos-gitlab-subgroups-behind-the-proxy).
+REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with virtual paths). NOT required for nested-group deps that route through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`): the install-time boundary probe HEAD-walks candidate splits against the proxy and locks in the first one whose archive responds. See [Registry proxy guide](../enterprise/registry-proxy/#nested-group-repos-gitlab-subgroups-behind-the-proxy).
 
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
@@ -544,7 +544,7 @@ dependencies:
 | **Required** | OPTIONAL |
 | **Known keys** | `apm`, `mcp` |
 
-Development-only dependencies installed locally but excluded from plugin bundles produced by [`apm pack`](../cli/pack/) (plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
+Development-only dependencies installed locally but excluded from plugin bundles produced by [`apm pack`](./cli/pack/) (plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
 
 ```yaml
 devDependencies:
@@ -553,13 +553,13 @@ devDependencies:
     - owner/lint-rules#v2.0.0
 ```
 
-Created automatically by [`apm plugin init`](../cli/plugin/). Use [`apm install --dev`](../cli/install/) to add packages:
+Created automatically by [`apm plugin init`](./cli/plugin/). Use [`apm install --dev`](./cli/install/) to add packages:
 
 ```bash
 apm install --dev owner/test-helpers
 ```
 
-Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
 Local-path devDependency example:
 
@@ -573,7 +573,7 @@ devDependencies:
 
 ## 6. Compilation
 
-The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) behaviour. All fields have sensible defaults; omitting the entire section is valid.
+The `compilation` key is OPTIONAL. It controls [`apm compile`](./cli/compile/) behaviour. All fields have sensible defaults; omitting the entire section is valid.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
@@ -611,7 +611,7 @@ compilation:
 
 The OPTIONAL `marketplace:` block declares the metadata `apm pack` needs to emit a Claude-Code-compatible plugin marketplace (`marketplace.json`). It is read by `apm marketplace` subcommands and ignored by everything else. Repositories that do not publish a marketplace omit it entirely.
 
-The block was previously a standalone `marketplace.yml` file (still loadable for back-compat); the in-`apm.yml` form is canonical and is what [`apm marketplace init`](../cli/marketplace/) scaffolds.
+The block was previously a standalone `marketplace.yml` file (still loadable for back-compat); the in-`apm.yml` form is canonical and is what [`apm marketplace init`](./cli/marketplace/) scaffolds.
 
 ### 7.1. Inheritance
 
@@ -687,7 +687,7 @@ Remote packages MUST declare at least one of `version` or `ref`. Local packages 
 
 The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
 
-Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
+Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
 
 ### 7.6. Complete Marketplace Block
 
@@ -739,7 +739,7 @@ The legacy standalone `marketplace.yml` (top-level keys, no `marketplace:` wrapp
 
 After successful dependency resolution, a conforming resolver MUST write a lockfile capturing the exact resolved state. The lockfile MUST be a YAML file named `apm.lock.yaml` at the project root and SHOULD be committed to version control.
 
-The full lockfile schema is specified in the [Lockfile specification](../lockfile-spec/). At a minimum, every resolver MUST record `lockfile_version`, `dependencies[].repo_url`, `dependencies[].resolved_commit`, and `dependencies[].deployed_files` so subsequent installs are reproducible and `apm uninstall` can remove every placed file.
+The full lockfile schema is specified in the [Lockfile specification](./lockfile-spec/). At a minimum, every resolver MUST record `lockfile_version`, `dependencies[].repo_url`, `dependencies[].resolved_commit`, and `dependencies[].deployed_files` so subsequent installs are reproducible and `apm uninstall` can remove every placed file.
 
 Resolver behaviour:
 
@@ -757,7 +757,7 @@ Any runtime adopting this format (e.g. GitHub Agentic Workflows, CI systems, IDE
 2. **Resolve `dependencies.apm`** -- For each entry, clone or fetch the git repo (respecting `ref`), locate the `.apm/` directory (or virtual path), and extract primitives.
 3. **Resolve `dependencies.mcp`** -- For each entry, resolve from the MCP registry or validate self-defined transport config per Section 4.2.3.
 4. **Transitive resolution** -- Resolved packages MAY contain their own `apm.yml` with further dependencies, forming a dependency tree. Resolvers MUST resolve transitively. Conflicts are merged at instruction level (by `applyTo` pattern), not file level.
-5. **Write lockfile** -- Record exact commit SHAs and deployed file paths in `apm.lock.yaml` per Section 8 and the [Lockfile specification](../lockfile-spec/).
+5. **Write lockfile** -- Record exact commit SHAs and deployed file paths in `apm.lock.yaml` per Section 8 and the [Lockfile specification](./lockfile-spec/).
 
 ---
 
@@ -827,4 +827,4 @@ marketplace:
 | Version | Date | Changes |
 |---|---|---|
 | 0.1 | 2026-03-06 | Initial Working Draft. |
-| 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to `../cli/<verb>/` paths. ASCII-only enforcement. |
+| 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to reference CLI paths. ASCII-only enforcement. |

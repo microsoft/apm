@@ -116,7 +116,7 @@ Two ways forward:
   `apm pack --format plugin --archive` and install the new artifact.
 - **Unpack.** If you only have the legacy artifact, use `apm unpack
   <bundle>` to extract it. `apm unpack` is deprecated and will be removed
-  in v0.14; prefer repacking when you can.
+  in a future release; prefer repacking when you can.
 
 A plain directory without `plugin.json` is not treated as a bundle at all.
 APM falls through to the dependency resolver and treats the path as a

@@ -165,11 +165,11 @@ See the [Agent Workflows guide](/apm/producer/author-primitives/instructions-and
 
 ## 4. Deploy and use
 
-Run install with no arguments. APM treats your repo as the package and
-deploys its `.apm/` content into the runtime directories your tools read:
+Run install with an explicit target. APM treats your repo as the package and
+deploys its `.apm/` content into the Copilot runtime directories:
 
 ```bash
-apm install
+apm install --target copilot
 ```
 
 Output:
@@ -311,7 +311,7 @@ APM recognizes three layouts. Pick the one that matches what you are shipping:
   it directly without restructuring.
 
 For the full comparison and metadata precedence rules, see
-[Package Types](../../reference/package-types/).
+[Package Types](../reference/package-types/).
 
 ## Next steps
 

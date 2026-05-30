@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install -g <package>#<ref>` now updates an existing unpinned global dependency entry instead of leaving the manifest floating. (#1559)
+- `apm install` now honors manifest `targets:` without falling back to the legacy Copilot target when singular `target:` is absent. (#1560)
 
 ## [0.16.0] - 2026-05-28
 

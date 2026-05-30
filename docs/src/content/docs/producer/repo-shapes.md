@@ -23,7 +23,7 @@ migrate later by moving directories and re-running the same commands.
 | Monorepo-hybrid (advanced) | Root `apm.yml` plus per-plugin `apm.yml` subdirs | Many plugins live alongside the marketplace in one repo. Composition of the two postures above. |
 
 When the layout is ready, ship it with the recipe in
-[Releasing from any CI](../releasing-from-any-ci/).
+[Releasing from any CI](./releasing-from-any-ci/).
 
 ## Single-plugin
 
@@ -160,13 +160,13 @@ marketplace:
 Local-path entries skip remote resolution. Each plugin's own
 `apm.yml` controls its build; the root `apm.yml` controls the
 marketplace index. Pick a versioning strategy that matches how you
-tag releases -- see [Versioning strategies](../versioning-strategies/).
+tag releases -- see [Versioning strategies](./versioning-strategies/).
 
 ## What to read next
 
-- [Versioning strategies](../versioning-strategies/) -- lockstep vs
+- [Versioning strategies](./versioning-strategies/) -- lockstep vs
   per-package and how `apm pack --check-versions` enforces them.
-- [Releasing from any CI](../releasing-from-any-ci/) -- the canonical
+- [Releasing from any CI](./releasing-from-any-ci/) -- the canonical
   release pipeline that ships any of the shapes above.
-- [Publish to a marketplace](../publish-to-a-marketplace/) -- the
+- [Publish to a marketplace](./publish-to-a-marketplace/) -- the
   `apm marketplace init` walkthrough and the registry schema.

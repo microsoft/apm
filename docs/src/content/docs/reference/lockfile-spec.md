@@ -177,7 +177,7 @@ dep added to the graph promotes the lockfile to `"2"`; if every registry dep is
 later removed, the next write demotes back to `"1"`. Both versions are valid
 on-disk formats; consumers MUST handle either.
 
-For the registry workflow this enables, see the [Registries guide](../../guides/registries/).
+For the registry workflow this enables, see the [Registries guide](../guides/registries/).
 
 ## Pack section
 
@@ -227,12 +227,12 @@ check maps to specific lockfile fields:
 | Check | Backed by |
 |---|---|
 | `lockfile-exists` | file presence at project root |
-| `dependency-refs-match` | `resolved_ref` per entry vs. `apm.yml` |
+| `ref-consistency` | `resolved_ref` per entry vs. `apm.yml` |
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
-| `skill-subset-match` | `skill_subset` per `skill_bundle` entry |
-| `mcp-configs-match` | `mcp_servers` and `mcp_configs` |
-| `no-orphan-packages` | `dependencies` keys vs. `apm.yml` |
+| `skill-subset-consistency` | `skill_subset` per `skill_bundle` entry |
+| `config-consistency` | `mcp_servers` and `mcp_configs` |
+| `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically
 directory markers ending in `/`) are skipped by content-integrity. Missing
@@ -250,8 +250,8 @@ Orphan detection works in two directions:
 
 `lockfile_version` is the schema version of the file format itself.
 
-- The current version is `"1"`.
-- APM additively extends entries within version `"1"` - new optional fields
+- The current versions are `"1"` and `"2"`; version `"2"` is emitted for registry-sourced or git-semver-resolved dependencies.
+- APM additively extends entries within each version - new optional fields
   may appear without bumping the version. Older APM clients ignore unknown
   fields.
 - Breaking changes (renames, removals, semantic shifts) require bumping
@@ -301,9 +301,9 @@ local_deployed_file_hashes:
 
 ## See also
 
-- [`apm install`](../cli/install/) - resolves and writes the lockfile
-- [`apm audit`](../cli/audit/) - validates the workspace against the lockfile
-- [`apm prune`](../cli/prune/) - removes orphan packages and files
-- [`apm view`](../cli/view/) - inspect resolved state (`--lock`)
-- [Baseline checks](../baseline-checks/) - the drift checks the lockfile feeds
-- [Manifest schema](../manifest-schema/) - the `apm.yml` it pins
+- [`apm install`](./cli/install/) - resolves and writes the lockfile
+- [`apm audit`](./cli/audit/) - validates the workspace against the lockfile
+- [`apm prune`](./cli/prune/) - removes orphan packages and files
+- [`apm view`](./cli/view/) - inspect resolved state (`--lock`)
+- [Baseline checks](./baseline-checks/) - the drift checks the lockfile feeds
+- [Manifest schema](./manifest-schema/) - the `apm.yml` it pins

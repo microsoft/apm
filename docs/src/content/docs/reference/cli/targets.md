@@ -98,7 +98,7 @@ match per target is enough to activate it.
 | `gemini` | `.gemini/` directory, or `GEMINI.md` file | `.gemini/` |
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
-| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm compile`. | `.agents/skills/` |
+| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:
 

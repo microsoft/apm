@@ -100,7 +100,7 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--verbose`, `-v` | Show detailed output. |
 
 **Trust boundary.** APM forwards its authentication tokens
-(`GITHUB_APM_PAT`, `GITLAB_APM_TOKEN`) only when the marketplace
+(`GITHUB_APM_PAT`, `GITLAB_APM_PAT`) only when the marketplace
 host is classified as GitHub or GitLab family. For any other host
 -- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
 marketplace is fetched via subprocess `git` through `GitCache`,

@@ -8,7 +8,7 @@ based on its `description`, reads `SKILL.md`, and follows the body to
 do a focused task. The format is the cross-tool agent-skills standard
 (SKILL.md plus optional bundled resources). APM is the package manager
 for skills, not the spec; for the full primitive matrix see
-[Primitives and targets](../../../concepts/primitives-and-targets/).
+[Primitives and targets](../../concepts/primitives-and-targets/).
 
 ## Folder layout
 
@@ -93,8 +93,7 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 
 ## Where it lands per target
 
-`apm install` and `apm compile` deploy each skill folder to one
-directory per active target. Routing is verified in
+`apm install` deploys each skill folder to one directory per active target. Routing is verified in
 `src/apm_cli/integration/targets.py`.
 
 | Target            | Deploy directory                             |
@@ -129,18 +128,17 @@ own `.<harness>/skills/` copy, pass `--legacy-skill-paths` or set
 Two commands answer "what will this look like once installed?":
 
 ```bash
-apm compile --validate          # parse frontmatter and structure; no writes
-apm compile --dry-run           # print every placement decision; no writes
-apm compile --target claude     # write only one target so you can diff
+apm install --dry-run --target claude  # preview placement without writes
+apm install --target claude            # write one target so you can diff
+apm audit --file .apm/skills/<name>/SKILL.md
 ```
 
-`apm compile --validate` is the fast lint loop. `--dry-run` shows the
-full routing table for the current set of detected harnesses.
-Targeting a single harness lets you inspect the actual file APM
-would deploy without touching the others. See
-[Compile](../../compile/) and
-[Preview and validate](../../preview-and-validate/) for the broader
-flow, and [Lifecycle](../../../concepts/lifecycle/) for where
+`apm install --dry-run` shows the routing table for the current set
+of detected harnesses. Targeting a single harness lets you inspect the
+actual file APM would deploy without touching the others. See
+[Compile](../compile/) and
+[Preview and validate](../preview-and-validate/) for the broader
+flow, and [Lifecycle](../../concepts/lifecycle/) for where
 compile sits between install and run.
 
 ## Common pitfalls

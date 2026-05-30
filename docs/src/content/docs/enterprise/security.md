@@ -95,7 +95,7 @@ These controls make the decision visible, but they do **not** make HTTP safe:
 - On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
 - APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
 
-For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
+For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](./registry-proxy/).
 
 ## Content scanning
 
@@ -137,7 +137,7 @@ Content scanning extends beyond install:
 
 - **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
 - **`apm pack`** scans files before bundling. This catches hidden characters before a package is published, preventing authors from accidentally distributing tainted content.
-- **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../../producer/pack-a-bundle/).)
+- **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../producer/pack-a-bundle/).)
 
 ### On-demand scanning
 
@@ -160,7 +160,7 @@ apm audit -f json -o report.json       # Machine-readable
 apm audit -f markdown -o report.md     # Step summaries
 ```
 
-See [Content scanning with `apm audit`](../../reference/cli/install/) for usage details and exit codes.
+See [Content scanning with `apm audit`](../reference/cli/audit/) for usage details and exit codes.
 
 ### Limitations
 
@@ -193,7 +193,7 @@ The hash is deterministic — computed over sorted file paths and contents, inde
 
 Lock files generated before this feature omit `content_hash`. APM handles this gracefully — verification is skipped and the hash is populated on the next install.
 
-See the [Lock File Specification](../../reference/lockfile-spec/#44-content-integrity) for field details.
+See the [Lock File Specification](../reference/lockfile-spec/#44-content-integrity) for field details.
 
 ## Path security
 
@@ -248,7 +248,7 @@ APM separates production and development dependencies:
 - **Production dependencies** (`dependencies.apm`) are included in plugin bundles and shared packages.
 - **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output (both plugin format -- the default -- and `--format apm`).
 
-This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
+This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../reference/lockfile-spec/#42-dependency-entries) for field details.
 
 ## Slash command deployment
 
@@ -325,7 +325,7 @@ See [Azure DevOps AAD bearer tokens](#azure-devops-aad-bearer-tokens) above for 
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
-| Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](../policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
+| Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](./policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
 
 ## Frequently asked questions
 
@@ -335,7 +335,7 @@ Not without detection. APM scans all package source files before deployment. Cri
 
 ### How do I audit what APM installed?
 
-The `apm.lock.yaml` file records every dependency (with exact commit SHA) and every file deployed. It is a plain YAML file suitable for automated policy checks, diff review, and compliance tooling. See the [Governance Guide](../governance-guide/) for audit workflows.
+The `apm.lock.yaml` file records every dependency (with exact commit SHA) and every file deployed. It is a plain YAML file suitable for automated policy checks, diff review, and compliance tooling. See the [Governance Guide](./governance-guide/) for audit workflows.
 
 ### Is the APM binary signed?
 

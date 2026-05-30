@@ -10,10 +10,10 @@ harness. Use this page to choose a target, debug an unexpected deploy
 location, or confirm whether a primitive is supported on a given tool.
 
 For background on the target model, see
-[Primitives and targets](../../concepts/primitives-and-targets/). For
-the runtime CLI surface, see [`apm targets`](../cli/targets/) and
-[`apm compile`](../cli/compile/). For the primitive types themselves,
-see [Primitive types](../primitive-types/).
+[Primitives and targets](../concepts/primitives-and-targets/). For
+the runtime CLI surface, see [`apm targets`](./cli/targets/) and
+[`apm compile`](./cli/compile/). For the primitive types themselves,
+see [Primitive types](./primitive-types/).
 
 ## Summary
 
@@ -28,13 +28,13 @@ see [Primitive types](../primitive-types/).
 | windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
-Skills always deploy to the cross-tool `.agents/skills/` directory by
-default (see [Skills convergence](#skills-convergence) below). All other
-primitives land under each target's own root.
+Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
+Gemini, and Codex by default (see [Skills convergence](#skills-convergence)
+below). Claude and Windsurf keep target-native skill directories.
 
 `copilot-cowork` (Microsoft 365 Copilot) and `copilot-app` (GitHub
 Copilot desktop App) are gated behind experimental flags and not listed
-above. See [Experimental](../experimental/).
+above. See [Experimental](./experimental/).
 
 ## Detection and resolution
 
@@ -46,7 +46,7 @@ priority:
 3. Auto-detection from filesystem signals (table below).
 
 If none of the above produce a target, the command falls back to
-`copilot`. Use [`apm targets`](../cli/targets/) to preview the resolved
+`copilot`. Use [`apm targets`](./cli/targets/) to preview the resolved
 list before `compile` or `install`.
 
 ### Detection signal whitelist
@@ -196,12 +196,12 @@ targets: Y)` line so the gate decision is observable. The matrix
 above marks `mcp` supported when an adapter exists; whether the
 config gets written on a given install is a function of the active
 target set, not just adapter availability. See
-[Install MCP servers](../../consumer/install-mcp-servers/) for the
-gate behavior and [`apm mcp`](../cli/mcp/) for the runtime surface.
+[Install MCP servers](../consumer/install-mcp-servers/) for the
+gate behavior and [`apm mcp`](./cli/mcp/) for the runtime surface.
 
 ## See also
 
-- [`apm targets`](../cli/targets/) - inspect resolved targets at runtime.
-- [`apm compile`](../cli/compile/) - target selection and compile flags.
-- [Primitive types](../primitive-types/) - what each primitive is.
-- [Primitives and targets](../../concepts/primitives-and-targets/) - conceptual model.
+- [`apm targets`](./cli/targets/) - inspect resolved targets at runtime.
+- [`apm compile`](./cli/compile/) - target selection and compile flags.
+- [Primitive types](./primitive-types/) - what each primitive is.
+- [Primitives and targets](../concepts/primitives-and-targets/) - conceptual model.

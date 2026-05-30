@@ -15,13 +15,13 @@ verbs.
 
 For the operational concerns that surround a marketplace, see:
 
-- [Repo shapes](../repo-shapes/) -- single-plugin, aggregator, and
+- [Repo shapes](./repo-shapes/) -- single-plugin, aggregator, and
   monorepo-hybrid layouts.
-- [Versioning strategies](../versioning-strategies/) -- lockstep vs
+- [Versioning strategies](./versioning-strategies/) -- lockstep vs
   tag-pattern vs per-package.
-- [Releasing from any CI](../releasing-from-any-ci/) -- the release
+- [Releasing from any CI](./releasing-from-any-ci/) -- the release
   pipeline that ships your tags.
-- [Installing from marketplaces](../../consumer/installing-from-marketplaces/) --
+- [Installing from marketplaces](../consumer/installing-from-marketplaces/) --
   what consumers do with what you publish.
 
 ## End to end
@@ -151,12 +151,12 @@ apm pack --marketplace=claude --json   # JSON output for CI pipelines
 ```
 
 For the release-gate flags (`--check-versions`, `--check-clean`),
-see [Releasing from any CI](../releasing-from-any-ci/).
+see [Releasing from any CI](./releasing-from-any-ci/).
 
 The same `apm pack` run also produces a bundle to `./build/<name>/`
 when `apm.yml` declares `dependencies:`. Marketplace projects with
 no `dependencies:` block produce only `marketplace.json`. See
-[Pack a bundle](../pack-a-bundle/) for the bundle side.
+[Pack a bundle](./pack-a-bundle/) for the bundle side.
 
 ## Validate before you ship
 
@@ -251,16 +251,16 @@ consumers running `apm install --update` on their own cadence.
 Org policy can restrict which marketplaces a consumer is allowed to
 register and which packages it can install from them. That gate runs
 on the consumer side at install time. See
-[Governance overview](../../enterprise/governance-overview/) for the
+[Governance overview](../enterprise/governance-overview/) for the
 producer-side implications (signing, allow-listed sources).
 
 ## Where next
 
-- [Repo shapes](../repo-shapes/) -- pick a layout for your producer
+- [Repo shapes](./repo-shapes/) -- pick a layout for your producer
   repo.
-- [Versioning strategies](../versioning-strategies/) -- how
+- [Versioning strategies](./versioning-strategies/) -- how
   `--check-versions` enforces version alignment.
-- [Releasing from any CI](../releasing-from-any-ci/) -- ship your
+- [Releasing from any CI](./releasing-from-any-ci/) -- ship your
   tagged releases from GitHub Actions, GitLab, Jenkins, or Azure DevOps.
-- [Installing from marketplaces](../../consumer/installing-from-marketplaces/) --
+- [Installing from marketplaces](../consumer/installing-from-marketplaces/) --
   the consumer flow your marketplace feeds into.

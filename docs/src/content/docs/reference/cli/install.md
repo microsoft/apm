@@ -40,7 +40,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 | Flag | Default | Description |
 |---|---|---|
-| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `agent-skills`, `all`. `all` expands to every harness above except `agent-skills`; combine `all,agent-skills` for both. Highest precedence in the chain `--target` > `apm.yml targets:` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
+| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `agent-skills`, `all`; experimental `copilot-cowork` and `copilot-app` are also accepted when enabled. `all` expands to every harness above except `agent-skills`; combine `all,agent-skills` for both. Highest precedence in the chain `--target` > `apm.yml targets:` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
 | `--runtime VALUE` | unset | Legacy alias for `--target` (single value only). Still accepted; prefer `--target`. |
 | `--exclude VALUE` | unset | Skip a single runtime that auto-detect or `targets:` would otherwise enable. |
 | `--only apm\|mcp` | both | Install only APM packages or only MCP servers. |
