@@ -682,6 +682,20 @@ class TestInitLinkResolverHomeScoping:
 
     @patch("apm_cli.integration.base_integrator.discover_primitives")
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
+    def test_scopes_string_home_install_path_to_apm_subdir(self, mock_resolver_cls, mock_discover):
+        """String HOME install paths still use the ~/.apm discovery boundary."""
+        mock_discover.return_value = []
+        (Path.home() / ".apm").mkdir(parents=True, exist_ok=True)
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        pkg_info.install_path = str(Path.home())
+
+        bi.init_link_resolver(pkg_info, Path.home())
+
+        mock_discover.assert_called_once_with(Path.home() / ".apm")
+
+    @patch("apm_cli.integration.base_integrator.discover_primitives")
+    @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
     def test_skips_home_apm_when_not_directory(
         self, mock_resolver_cls, mock_discover, tmp_path, monkeypatch
     ):

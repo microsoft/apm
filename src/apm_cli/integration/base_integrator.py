@@ -545,7 +545,9 @@ class BaseIntegrator:
         """Initialise and register the link resolver for a package."""
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
-            install_path = package_info.install_path
+            install_path = Path(package_info.install_path)
+            project_root = Path(project_root)
+            home_root = Path.home()
             # Determine which directories to scan for primitives.
             # Default: the package's install_path itself (for real
             # installed dependencies under apm_modules/...).
@@ -559,7 +561,7 @@ class BaseIntegrator:
             #   Generic patterns like ``**/*.instructions.md`` would
             #   otherwise traverse every file in the repo even when
             #   the user only has a handful of primitives under .apm/.
-            if install_path == Path.home():
+            if install_path.resolve() == home_root.resolve():
                 home_apm_root = install_path / ".apm"
                 scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
                 narrowed_local = False
@@ -585,7 +587,7 @@ class BaseIntegrator:
             # .apm/ and .github/. Skip only when scan_root was narrowed
             # to ~/.apm/ (user-scope $HOME) so we do not let asset links
             # escape the .apm/ boundary on $HOME packages.
-            if install_path != Path.home() and Path(install_path).is_dir():
+            if install_path.resolve() != home_root.resolve() and install_path.is_dir():
                 if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
                     self.link_resolver.package_root = Path(install_path)
         except Exception:
