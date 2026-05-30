@@ -121,6 +121,31 @@ How to read a cell:
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
 - `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.
 
+## Where compiled context files land
+
+`apm compile` defaults to **distributed** placement: instead of one
+monolithic `AGENTS.md` / `CLAUDE.md` at the repo root, APM writes a
+focused target file next to each directory that has matching
+instructions. The placement is driven by each instruction's `applyTo:`
+glob in its frontmatter. For example, an instruction with
+`applyTo: "scripts/**"` lands in `scripts/AGENTS.md` rather than the
+root file.
+
+This means a fresh `apm compile` may create new `AGENTS.md` /
+`CLAUDE.md` files in subdirectories you did not previously touch.
+That is intentional -- it follows the **Minimal Context Principle**
+so each agent only loads instructions relevant to the directory it is
+working in. If you prefer one combined file at the project root, run
+`apm compile --single-agents` (or set `compilation.single_file: true`
+in `apm.yml`).
+
+To remove distributed files that are no longer produced (e.g. after
+deleting or rescoping an instruction), run `apm compile --clean`.
+
+For the full strategy reference and flag semantics, see
+[`apm compile`](/apm/reference/cli/compile/#strategy-modes) and
+[manifest schema: `compilation.strategy`](/apm/reference/manifest-schema/).
+
 ## Dev-only primitives
 
 Mark a primitive as dev-only when it is useful to the package author but should not ship to consumers: release checklists, internal debugging agents, test-fixture skills, anything tied to your own infrastructure. Author such primitives outside `.apm/` (typically `dev/`) and reference them under `devDependencies` in `apm.yml`. `apm pack` excludes them; `apm install --dev` deploys them locally.

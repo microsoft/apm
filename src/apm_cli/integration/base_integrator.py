@@ -528,27 +528,68 @@ class BaseIntegrator:
     # Link resolution helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_root_local_package(package_info, project_root: Path) -> bool:
+        """Return True when *package_info* represents the project's own
+        synthetic ``_local`` package (install_path == project_root).
+
+        Used to scope discovery to ``.apm/`` and ``.github/`` instead of
+        walking the entire project tree -- see issue #1507.
+        """
+        try:
+            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+        except (OSError, RuntimeError):
+            return False
+
     def init_link_resolver(self, package_info, project_root: Path) -> None:
         """Initialise and register the link resolver for a package."""
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
-            scan_root = package_info.install_path
-            # When install_path is $HOME (user-scope local package),
-            # only scan the .apm/ subdirectory to avoid recursive-
-            # globbing the entire home tree.  See issue #830.
-            if scan_root == Path.home():
-                scan_root = scan_root / ".apm"
-            primitives = discover_primitives(scan_root)
-            self.link_resolver.register_contexts(primitives)
+            install_path = Path(package_info.install_path)
+            project_root = Path(project_root)
+            home_root = Path.home()
+            # Determine which directories to scan for primitives.
+            # Default: the package's install_path itself (for real
+            # installed dependencies under apm_modules/...).
+            #
+            # Narrowing rules:
+            # - $HOME (user-scope local package): scan only ~/.apm/ to
+            #   avoid recursive-globbing the entire home tree (#830).
+            # - Project-scope synthetic _local package (install_path
+            #   equals project_root): scan only ./.apm/ and ./.github/
+            #   to avoid full-tree walks on large monorepos (#1507).
+            #   Generic patterns like ``**/*.instructions.md`` would
+            #   otherwise traverse every file in the repo even when
+            #   the user only has a handful of primitives under .apm/.
+            if install_path.resolve() == home_root.resolve():
+                home_apm_root = install_path / ".apm"
+                scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
+                narrowed_local = False
+            elif self._is_root_local_package(package_info, project_root):
+                candidates = [install_path / ".apm", install_path / ".github"]
+                scan_roots = [p for p in candidates if p.is_dir()]
+                narrowed_local = True
+            else:
+                scan_roots = [install_path]
+                narrowed_local = False
+
+            for root in scan_roots:
+                primitives = discover_primitives(root)
+                self.link_resolver.register_contexts(primitives)
+
             # Generalized in-package asset link rewriting (#1147) needs the
             # authoritative source-package root. Use install_path directly:
             # for installed deps it is apm_modules/<owner>/<repo>/ (or any
             # ADO/virtual subdir variant), for local packages it is the
-            # package's apm_modules/_local/<name>/ copy. Skip when scan_root
-            # was narrowed to .apm/ (user-scope) so we do not let asset
-            # links escape the .apm/ boundary on $HOME packages.
-            if scan_root == package_info.install_path and Path(scan_root).is_dir():
-                self.link_resolver.package_root = Path(scan_root)
+            # package's apm_modules/_local/<name>/ copy. For the project-
+            # scope synthetic _local package, the authoritative root is
+            # the project itself, even though discovery was narrowed to
+            # .apm/ and .github/. Skip only when scan_root was narrowed
+            # to ~/.apm/ (user-scope $HOME) so we do not let asset links
+            # escape the .apm/ boundary on $HOME packages.
+            if install_path.resolve() != home_root.resolve() and install_path.is_dir():
+                if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
+                    self.link_resolver.package_root = Path(install_path)
         except Exception:
             self.link_resolver = None
 

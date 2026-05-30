@@ -75,7 +75,7 @@ apm uninstall https://github.com/acme/my-package.git
 
 What gets removed, in order:
 
-1. The package entry in `apm.yml` under `dependencies.apm`.
+1. The package entry in `apm.yml` under `dependencies.apm` or `devDependencies.apm`.
 2. The package folder under `apm_modules/owner/repo/`.
 3. Transitive dependencies that no remaining package depends on (npm-style pruning, computed from `apm.lock.yaml`).
 4. Every file in the lockfile's `deployed_files` for the removed packages and pruned orphans, across all harness folders (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.codex/`, `.windsurf/`).
