@@ -112,6 +112,22 @@ def test_plural_yaml_targets_attribute_creates_only_declared_dir(tmp_path):
     assert not (project / ".github").exists()
 
 
+def test_run_targets_phase_conflicting_target_fields_exits_with_usage_code(tmp_path: Path) -> None:
+    """run_targets_phase preserves usage-error exit code for target conflicts."""
+    from apm_cli.install.phases.targets import run_targets_phase
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, yaml_target="claude", yaml_targets=["copilot"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_targets_phase(ctx)
+
+    assert exc_info.value.code == 2
+    ctx.logger.error.assert_called_once()
+
+
 @pytest.mark.parametrize(
     ("marker_path", "expected_dir"),
     [

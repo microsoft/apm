@@ -37,18 +37,23 @@ def _package_field(apm_package: Any, name: str) -> Any:
 
 def _package_target_value(apm_package: Any) -> str | list[str] | None:
     """Read singular target or plural targets from the parsed package model."""
+    from apm_cli.core.apm_yml import parse_targets_field
+
     target = _package_field(apm_package, "target")
     targets = _package_field(apm_package, "targets")
     if target is not None and targets is not None:
-        from apm_cli.core.apm_yml import parse_targets_field
-
         parse_targets_field({"target": target, "targets": targets})
     if targets is not None:
-        from apm_cli.core.apm_yml import parse_targets_field
-
         parsed = parse_targets_field({"targets": targets})
         return parsed if parsed else None
     return target
+
+
+def _raise_target_usage_error(ctx: Any, exc: Exception) -> None:
+    """Render target field user errors consistently before exiting."""
+    if ctx.logger:
+        ctx.logger.error(str(exc), symbol="")
+    raise SystemExit(2) from exc
 
 
 def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
@@ -135,6 +140,8 @@ def run(ctx: InstallContext) -> None:
     On return ``ctx.targets`` and ``ctx.integrators`` are populated.
     """
 
+    import click as _click
+
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import (
         detect_target,
@@ -157,7 +164,10 @@ def run(ctx: InstallContext) -> None:
     )
 
     # Get config target from apm.yml if available.
-    config_target = _package_target_value(ctx.apm_package)
+    try:
+        config_target = _package_target_value(ctx.apm_package)
+    except _click.UsageError as exc:
+        _raise_target_usage_error(ctx, exc)
 
     # Resolve effective explicit target: CLI --target wins, then apm.yml
     _explicit = ctx.target_override or config_target or None
@@ -346,18 +356,12 @@ def run(ctx: InstallContext) -> None:
         # Read targets from apm.yml (supports both target: and targets:)
         _v2_yaml: list[str] | None = None
         if _v2_flag is None and not ctx.target_override:
-            import click as _click
-
             try:
                 _v2_yaml = _read_yaml_targets(ctx)
             except _click.UsageError as exc:
                 # ConflictingTargetsError (both target: and targets: in
                 # apm.yml) is a user error -- surface with exit code 2.
-                # The renderer already emits a leading "[x]"; pass an
-                # empty symbol so logger.error doesn't double-prefix.
-                if ctx.logger:
-                    ctx.logger.error(str(exc), symbol="")
-                raise SystemExit(2) from exc
+                _raise_target_usage_error(ctx, exc)
 
         # Skip v2 entirely when all override targets were non-canonical
         # (e.g. copilot-cowork only).  Those are fully handled by the
@@ -524,6 +528,8 @@ def run_targets_phase(ctx) -> None:
     """
     from pathlib import Path
 
+    import click as _click
+
     from apm_cli.core.target_detection import resolve_targets
     from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -540,7 +546,10 @@ def run_targets_phase(ctx) -> None:
             flag = ctx.target_override
 
     # Get yaml_targets from apm_package.
-    yaml_targets = _as_yaml_targets(_package_target_value(ctx.apm_package))
+    try:
+        yaml_targets = _as_yaml_targets(_package_target_value(ctx.apm_package))
+    except _click.UsageError as exc:
+        _raise_target_usage_error(ctx, exc)
 
     # Resolve targets
     resolved = resolve_targets(project_root, flag=flag, yaml_targets=yaml_targets)
