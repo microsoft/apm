@@ -91,7 +91,7 @@ Behind `apm experimental enable registries`. Pushes a package version to a REST-
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm publish` | Auto-pack a flat registry archive (`apm.yml` + `.apm/` + `README.md`/`CHANGELOG.md`/`LICENSE` when present) and upload to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Different layout from `apm pack` (no `plugin.json` wrapper). | `--registry NAME` (required when multiple registries are configured), `--package OWNER/REPO` (**required** - registry package identity, e.g. `acme/my-skill`), `--tarball PATH` (skip auto-pack and upload a pre-built `.tar.gz`), `--dry-run`, `-v`/`--verbose` |
+| `apm publish` | Auto-pack a flat registry archive (`apm.yml` + `.apm/` + `README.md`/`CHANGELOG.md`/`LICENSE` when present) and upload to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Different layout from `apm pack` (no `plugin.json` wrapper). | `--registry NAME` (required when multiple registries are configured), `--package OWNER/REPO` (**required** — registry package identity, e.g. `acme/my-skill`), `--tarball PATH` (skip auto-pack and upload a pre-built `.tar.gz`), `--dry-run`, `-v`/`--verbose` |
 
 Examples:
 
