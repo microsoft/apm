@@ -55,9 +55,9 @@ Examples:
 @click.option(
     "--package",
     "package_id",
-    default=None,
+    required=True,
     metavar="OWNER/REPO",
-    help="Override owner/repo identity (default: parsed from 'source:' in apm.yml).",
+    help="Package identity to publish as (owner/repo, e.g. acme/my-skill).",
 )
 @click.option(
     "--tarball",
@@ -93,7 +93,7 @@ def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
         raise click.ClickException("apm.yml must declare a 'version:' field to publish.")
 
     # ----------------------------------------------------------- owner/repo
-    owner, repo = _resolve_package_id(pkg, package_id)
+    owner, repo = _resolve_package_id(package_id)
 
     # ----------------------------------------------------------- registry
     registries: dict[str, str] = pkg.registries or {}
@@ -143,17 +143,21 @@ def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_package_id(pkg, override: str | None) -> tuple[str, str]:
-    """Return (owner, repo) from --package override or apm.yml source field."""
-    raw = override or pkg.source or ""
-    # strip https://github.com/ and similar prefixes
-    raw = re.sub(r"^https?://[^/]+/", "", raw).strip("/")
+def _resolve_package_id(package_id: str) -> tuple[str, str]:
+    """Parse ``--package OWNER/REPO`` into ``(owner, repo)``.
+
+    Accepts bare ``owner/repo`` or a full URL
+    (``https://github.com/owner/repo``); strips the scheme+host prefix when
+    present.  Raises ``UsageError`` when the value cannot be parsed as a
+    two-segment identity.
+    """
+    raw = re.sub(r"^https?://[^/]+/", "", package_id).strip("/")
     parts = [p for p in raw.split("/") if p]
     if len(parts) >= 2:
         return parts[-2], parts[-1]
     raise click.UsageError(
-        "Cannot infer owner/repo for publish.\n"
-        "Either set 'source: owner/repo' in apm.yml, or pass --package owner/repo."
+        f"--package must be in owner/repo form (got {package_id!r}).\n"
+        "Example: --package acme/my-skill"
     )
 
 

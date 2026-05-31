@@ -284,8 +284,8 @@ dependencies:
 
 ```bash
 # Producer -- package root with apm.yml, .apm/, and (optionally) a registries: block
-apm publish --dry-run -v
-apm publish
+apm publish --package acme/my-skill --dry-run -v
+apm publish --package acme/my-skill
 
 # Consumer -- another repo
 apm install acme/internal-tools#^1.0.0
@@ -297,7 +297,7 @@ Registry archives use the **APM source layout** that `apm install` and the [Regi
 
 **Auto-pack requirements:**
 
-- `apm.yml` with `name:` and `version:` (and `source:` when the registry identity differs from the package name)
+- `apm.yml` with `name:` and `version:`
 - A `.apm/` directory with your primitives (skills, instructions, hooks, etc.)
 
 Auto-pack writes `{name}-{version}.tar.gz` in the project root and skips macOS `._*` / `.DS_Store` sidecars.
@@ -313,22 +313,22 @@ Some registries accept archives without validating `apm.yml` on upload; APM stil
 
 ```bash
 # Auto-pack flat archive and publish to the only configured registry
-apm publish
+apm publish --package acme/my-skill
 
 # Choose a registry when multiple are configured
-apm publish --registry corp-main
+apm publish --package acme/my-skill --registry corp-main
 
 # Publish a pre-built flat tarball (skip auto-pack)
-apm publish --tarball ./build/my-package-1.0.0.tar.gz
+apm publish --package acme/my-skill --tarball ./build/my-package-1.0.0.tar.gz
 
 # Preview what would be uploaded without uploading
-apm publish --dry-run
+apm publish --package acme/my-skill --dry-run
 ```
 
 | Option | Description |
 |---|---|
 | `--registry NAME` | Registry name from the `registries:` block. Required when multiple registries are configured. |
-| `--package OWNER/REPO` | Override owner/repo identity (default: parsed from `source:` in `apm.yml`). |
+| `--package OWNER/REPO` | Package identity to publish as (required, e.g. `acme/my-skill`). |
 | `--tarball PATH` | Path to a pre-built flat `.tar.gz` tarball. Skips auto-pack. |
 | `--dry-run` | Preview without uploading. |
 | `--verbose` / `-v` | Show detailed output. |

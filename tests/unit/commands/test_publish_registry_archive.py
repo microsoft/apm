@@ -1,4 +1,4 @@
-"""Tests for ``apm publish`` flat registry archive packing."""
+"""Tests for ``apm publish`` flat registry archive packing and owner/repo resolution."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from click.exceptions import ClickException
+from click.exceptions import ClickException, UsageError
 
-from apm_cli.commands.publish import _pack_archive
+from apm_cli.commands.publish import _pack_archive, _resolve_package_id
 from apm_cli.models.apm_package import APMPackage
 
 
@@ -64,3 +64,22 @@ class TestPackRegistryArchive:
         pkg = APMPackage(name="demo", version="1.0.0")
         with pytest.raises(ClickException, match="requires a flat APM package"):
             _pack_archive(tmp_path, tmp_path / "apm.yml", pkg, MagicMock(), verbose=False)
+
+
+class TestResolvePackageId:
+    """Unit tests for ``_resolve_package_id`` parsing.
+
+    ``--package`` is enforced as required by Click before the command body
+    runs, so ``_resolve_package_id`` only needs to parse a guaranteed
+    non-None string value into (owner, repo).
+    """
+
+    def test_bare_owner_repo(self) -> None:
+        assert _resolve_package_id("acme/my-skill") == ("acme", "my-skill")
+
+    def test_github_https_url_stripped(self) -> None:
+        assert _resolve_package_id("https://github.com/acme/my-skill") == ("acme", "my-skill")
+
+    def test_malformed_value_raises(self) -> None:
+        with pytest.raises(UsageError, match="owner/repo"):
+            _resolve_package_id("not-a-valid-id")
