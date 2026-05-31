@@ -291,7 +291,7 @@ apm publish --package acme/my-skill
 apm install acme/internal-tools#^1.0.0
 ```
 
-[`apm publish`](../../reference/cli/publish/) reads `apm.yml`, builds a **flat registry archive** (`.tar.gz` with `apm.yml` and `.apm/` at the tarball root), and uploads via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Consumers with a default registry configured install with the same `owner/repo#version` shorthand they would use for GitHub.
+[`apm publish`](../../reference/cli/publish/) reads `apm.yml`, builds a **flat registry archive** (`.tar.gz` with `apm.yml`, `.apm/`, and standard documentation files at the tarball root), and uploads via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Consumers with a default registry configured install with the same `owner/repo#version` shorthand they would use for GitHub.
 
 Registry archives use the **APM source layout** that `apm install` and the [Registry HTTP API section 6](../../reference/registry-http-api/#6-server-validation-rules-publish) expect -- not the plugin bundle wrapper from `apm pack --archive` (`{name}-{version}/plugin.json`). If you already ship marketplace plugin bundles, either repack as a flat archive or pass `--tarball`.
 
@@ -300,7 +300,7 @@ Registry archives use the **APM source layout** that `apm install` and the [Regi
 - `apm.yml` with `name:` and `version:`
 - A `.apm/` directory with your primitives (skills, instructions, hooks, etc.)
 
-Auto-pack writes `{name}-{version}.tar.gz` in the project root and skips macOS `._*` / `.DS_Store` sidecars.
+Auto-pack writes `{name}-{version}.tar.gz` in the project root, includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` when present (case-insensitive, symlinks excluded — matching npm's behaviour), and skips macOS `._*` / `.DS_Store` sidecars.
 
 **Skill-only or custom layouts** -- build the tarball yourself and pass `--tarball`:
 

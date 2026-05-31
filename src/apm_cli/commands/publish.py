@@ -186,6 +186,10 @@ def _resolve_registry_name(name: str | None, registries: dict[str, str]) -> str:
 def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: bool) -> Path:
     """Build a flat registry tarball (``apm.yml`` + ``.apm/`` at archive root).
 
+    Also includes ``README.md``, ``CHANGELOG.md``, and ``LICENSE`` (case-
+    insensitive, no extension required for LICENSE) when present — matching
+    npm's behaviour of bundling standard root-level documentation files.
+
     Registry servers and ``apm install`` expect the APM source layout at the
     tarball root — not the ``apm pack --archive`` plugin bundle wrapper
     (``{name}-{version}/plugin.json``). See registry HTTP API §6.
@@ -214,9 +218,27 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
             return None
         return ti
 
+    # Standard root-level doc files included when present (npm parity).
+    # Matched case-insensitively; LICENSE has no required extension.
+    _DOC_CANDIDATES = ("README.md", "CHANGELOG.md", "LICENSE", "LICENCE")
+
     with tarfile.open(dest, mode="w:gz") as tar:
         tar.add(apm_yml_path, arcname="apm.yml", filter=_tar_filter, recursive=False)
         tar.add(apm_dir, arcname=".apm", filter=_tar_filter)
+        for candidate in _DOC_CANDIDATES:
+            # Case-insensitive match against actual filenames in project root.
+            match = next(
+                (
+                    f
+                    for f in project_root.iterdir()
+                    if f.is_file() and not f.is_symlink() and f.name.lower() == candidate.lower()
+                ),
+                None,
+            )
+            if match:
+                tar.add(match, arcname=match.name, filter=_tar_filter, recursive=False)
+                if verbose:
+                    logger.info(f"  bundling {match.name}")
 
     return dest
 
