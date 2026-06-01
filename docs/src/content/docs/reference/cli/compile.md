@@ -207,10 +207,31 @@ There is no `--strategy` flag. Compilation runs in one of two modes:
 - **Distributed (default)** -- writes a tree of focused target files
   (e.g. `AGENTS.md`, `CLAUDE.md`) next to the code they apply to, plus
   per-target subdirectories. This is the recommended mode and follows
-  the Minimal Context Principle.
+  the Minimal Context Principle. Set `compilation.strategy:
+  single-file` (or `compilation.single_file: true`) in `apm.yml` to
+  opt out.
 - **Single-file (`--single-agents`)** -- writes one combined file at
   `--output` (default `AGENTS.md`). Use when a harness or workflow
   requires a single context file.
+
+### Distributed layout example
+
+For a project with two scoped instructions
+(`applyTo: "scripts/**"` and `applyTo: "tests/**"`) plus a generic
+one (no `applyTo:`), `apm compile` writes:
+
+```
+AGENTS.md            # generic instructions only
+scripts/AGENTS.md    # instructions scoped to scripts/**
+tests/AGENTS.md      # instructions scoped to tests/**
+```
+
+Each agent harness then loads only the file nearest the code it is
+working in. If you did not expect new `AGENTS.md` / `CLAUDE.md` files
+in subdirectories, this is the distributed default in effect; see
+[Where compiled context files land](../../../concepts/primitives-and-targets/#where-compiled-context-files-land)
+for the rationale, or pass `--single-agents` for a single-file
+output.
 
 ## Exit codes
 

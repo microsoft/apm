@@ -51,5 +51,23 @@ DEFAULT_SKIP_DIRS: frozenset[str] = frozenset(
         "dist",
         ".mypy_cache",
         "apm_modules",
+        # Common vendored / generated package locations across ecosystems.
+        # These never contain user-authored primitives and can be huge
+        # (the Kubernetes vendor/ tree alone is ~14k files; CocoaPods'
+        # Pods/ tree, bower_components, jspm_packages, and the various
+        # staging/third_party trees in Google-style monorepos behave the
+        # same way). Pruning at the directory level avoids the per-file
+        # cost in find_primitive_files. See issue #1533.
+        "vendor",
+        "third_party",
+        "Pods",
+        "bower_components",
+        "jspm_packages",
+        ".gradle",
+        "target",
+        ".next",
+        ".nuxt",
+        ".cache",
+        ".turbo",
     }
 )

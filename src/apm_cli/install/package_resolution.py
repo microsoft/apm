@@ -129,6 +129,65 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     return None
 
 
+def manifest_has_different_entry_for_identity(
+    current_deps: builtins.list,
+    identity: str,
+    canonical: str,
+    *,
+    dependency_reference_cls: Any,
+) -> bool:
+    """Return True when apm.yml already has *identity* but not *canonical*."""
+    for dep_entry in current_deps:
+        try:
+            if isinstance(dep_entry, builtins.str):
+                existing_ref = dependency_reference_cls.parse(dep_entry)
+            elif isinstance(dep_entry, builtins.dict):
+                existing_ref = dependency_reference_cls.parse_from_dict(dep_entry)
+            else:
+                continue
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if existing_ref.get_identity() == identity:
+            return existing_ref.to_canonical() != canonical
+    return False
+
+
+def update_existing_dependency_entry_if_needed(
+    current_deps: builtins.list,
+    *,
+    already_in_deps: bool,
+    apm_yml_entries: dict,
+    canonical: str,
+    dep_ref: Any,
+    identity: str,
+    dependency_reference_cls: Any,
+    logger: Any = None,
+) -> bool:
+    """Rewrite an existing manifest dep when the requested ref changed."""
+    should_update = already_in_deps and (
+        canonical in apm_yml_entries
+        or (
+            dep_ref.reference
+            and manifest_has_different_entry_for_identity(
+                current_deps,
+                identity,
+                canonical,
+                dependency_reference_cls=dependency_reference_cls,
+            )
+        )
+    )
+    if should_update:
+        merge_structured_entry_into_current_deps(
+            current_deps,
+            apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry()),
+            identity,
+            canonical,
+            dependency_reference_cls=dependency_reference_cls,
+            logger=logger,
+        )
+    return should_update
+
+
 def merge_structured_entry_into_current_deps(
     current_deps: builtins.list,
     structured_entry: dict,
@@ -183,7 +242,7 @@ def persist_dependency_list_if_changed(
 
         dump_yaml(data, apm_yml_path)
         if logger:
-            logger.success(f"Updated {apm_yml_filename} to preserve marketplace subdirectory entry")
+            logger.success(f"Updated {apm_yml_filename} dependency entries")
     except Exception as e:
         if logger:
             logger.error(f"Failed to write {apm_yml_filename}: {e}")

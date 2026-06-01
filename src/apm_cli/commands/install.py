@@ -48,9 +48,9 @@ from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     dependency_reference_to_yaml_entry,
-    merge_structured_entry_into_current_deps,
     persist_dependency_list_if_changed,
     resolve_parsed_dependency_reference,
+    update_existing_dependency_entry_if_needed,
     user_scope_rejection_reason,
 )
 
@@ -536,24 +536,24 @@ def _resolve_package_references(
             logger=logger,
             dep_ref=dep_ref,
         ):
+            updates_existing_entry = update_existing_dependency_entry_if_needed(
+                current_deps,
+                already_in_deps=already_in_deps,
+                apm_yml_entries=_apm_yml_entries,
+                canonical=canonical,
+                dep_ref=dep_ref,
+                identity=identity,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
+            )
             valid_outcomes.append((canonical, already_in_deps))
             if logger:
-                logger.validation_pass(canonical, already_present=already_in_deps)
+                logger.validation_pass(canonical, already_in_deps, updates_existing_entry)
 
             if not already_in_deps:
                 validated_packages.append(canonical)
                 existing_identities.add(identity)  # prevent duplicates within batch
-            elif canonical in _apm_yml_entries:
-                structured_entry = _apm_yml_entries[canonical]
-                merge_structured_entry_into_current_deps(
-                    current_deps,
-                    structured_entry,
-                    identity,
-                    canonical,
-                    dependency_reference_cls=DependencyReference,
-                    logger=logger,
-                )
-                dependencies_changed = True
+            dependencies_changed = dependencies_changed or updates_existing_entry
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
@@ -1544,6 +1544,7 @@ def install(  # noqa: PLR0913
         _rich_error(str(e))
         if e.diagnostic_context:
             _rich_echo(e.diagnostic_context)
+        _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except DirectDependencyError as e:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
@@ -1750,12 +1751,17 @@ def _install_apm_packages(ctx, outcome):
             _rich_error(str(e))
             if e.diagnostic_context:
                 _rich_echo(e.diagnostic_context)
+            _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
             sys.exit(1)
         except FrozenInstallError as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
             _rich_error(str(e))
             for reason in e.reasons:
                 _rich_echo(reason)
+            _rich_info(
+                "Tip: run 'apm outdated' to see what changed, then 'apm update'.",
+                symbol="info",
+            )
             sys.exit(1)
         except Exception as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)

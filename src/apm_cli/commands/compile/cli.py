@@ -16,7 +16,8 @@ from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
-from ...primitives.discovery import discover_primitives
+from ...primitives.discovery import clear_discovery_cache, discover_primitives
+from ...utils import perf_stats
 from ...utils.console import (
     _rich_error,
     _rich_info,
@@ -491,6 +492,8 @@ def compile(
         # Validation-only mode
         if validate:
             logger.start("Validating APM context...", symbol="gear")
+            clear_discovery_cache()
+            perf_stats.reset()
             compiler = AgentsCompiler(".")
             try:
                 primitives = discover_primitives(".")
@@ -518,6 +521,7 @@ def compile(
                     logger.progress(f"  * {mcp_count} MCP dependencies")
             except Exception:
                 pass
+            perf_stats.render_summary(logger, project_root=".")
             return
 
         # Watch mode
@@ -738,6 +742,11 @@ def compile(
             logger.progress("Using single-file compilation (legacy mode)", symbol="page")
 
         # Perform compilation
+        # Reset discovery memo + perf counters so the single-shot compile
+        # never inherits stale state from a sibling invocation in the
+        # same process (tests, REPL). Mirrors run_install_pipeline.
+        clear_discovery_cache()
+        perf_stats.reset()
         compiler = AgentsCompiler(".")
         result = compiler.compile(config, logger=logger)
         compile_has_critical = result.has_critical_security
@@ -896,7 +905,10 @@ def compile(
                 "Compiled output contains critical hidden characters"
                 " -- run 'apm audit' to inspect, 'apm audit --strip' to clean"
             )
+            perf_stats.render_summary(logger, project_root=".")
             sys.exit(1)
+
+        perf_stats.render_summary(logger, project_root=".")
 
     except ImportError as e:
         logger.error(f"Compilation module not available: {e}")
