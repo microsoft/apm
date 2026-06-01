@@ -89,10 +89,41 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
             plugin["name"] = pkg.name
 
             if is_local:
+                meta = remote_metadata.get(pkg.name, {})
                 if entry.description:
                     plugin["description"] = entry.description
+                    local_desc = meta.get("description", "")
+                    if local_desc and local_desc != entry.description:
+                        override_count += 1
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': using curator "
+                                    f"description (package: "
+                                    f"'{local_desc[:40]}')"
+                                ),
+                            )
+                        )
+                elif meta.get("description"):
+                    plugin["description"] = meta["description"]
                 if entry.version:
                     plugin["version"] = entry.version
+                    local_ver = meta.get("version", "")
+                    if local_ver and local_ver != entry.version:
+                        override_count += 1
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': using curator "
+                                    f"version '{entry.version}' "
+                                    f"(package: '{local_ver}')"
+                                ),
+                            )
+                        )
+                elif meta.get("version"):
+                    plugin["version"] = meta["version"]
             else:
                 meta = remote_metadata.get(pkg.name, {})
                 if entry and entry.description:

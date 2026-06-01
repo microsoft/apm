@@ -685,6 +685,8 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 
 Remote packages MUST declare at least one of `version` or `ref`. Local packages (sources beginning with `./`) skip git resolution and have no version requirement.
 
+When `description` or `version` is omitted from a `packages[]` entry, `apm pack` reads the matching field from the referenced package's own `apm.yml` and uses it in the generated `marketplace.json`. Remote packages are fetched over HTTPS (skipped under `--offline`); local packages are read from disk under the project root. A curator-side value still wins when both are set.
+
 The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
 
 Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
