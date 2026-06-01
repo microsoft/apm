@@ -604,6 +604,67 @@ def _audit_ci_gate(
     sys.exit(0 if ci_result.passed else 1)
 
 
+def _merge_findings(
+    base: dict[str, list[ScanFinding]],
+    extra: dict[str, list[ScanFinding]],
+) -> None:
+    """Merge *extra* findings into *base* in place, grouping by file."""
+    for file_key, findings in extra.items():
+        base.setdefault(file_key, []).extend(findings)
+
+
+def _run_external_scanners(
+    cfg: _AuditConfig,
+    external: tuple[str, ...],
+    external_sarif: str | None,
+    scan_paths: list[Path],
+) -> dict[str, list[ScanFinding]]:
+    """Run opted-in external SARIF-native scanners and return merged findings.
+
+    Fail-closed: the ``external_scanners`` experimental flag must be enabled
+    (exit 2 otherwise) and each adapter must be available (exit 2 otherwise).
+    APM's own content scan is never weakened -- external findings are purely
+    additive.
+    """
+    from ..security.external.base import ExternalScanError
+    from ..security.external.gate import (
+        ExternalScannersFeatureDisabledError,
+        require_external_scanners_enabled,
+    )
+    from ..security.external.registry import resolve_scanner
+
+    logger = cfg.logger
+
+    try:
+        require_external_scanners_enabled("Ingesting external scanners with --external")
+    except ExternalScannersFeatureDisabledError as exc:
+        logger.error(str(exc))
+        sys.exit(2)
+
+    merged: dict[str, list[ScanFinding]] = {}
+    for name in external:
+        try:
+            scanner = resolve_scanner(name, sarif_file=external_sarif)
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(2)
+
+        available, reason = scanner.is_available()
+        if not available:
+            logger.error(f"External scanner '{name}' is unavailable: {reason}")
+            sys.exit(2)
+
+        logger.progress(f"Running external scanner: {name}")
+        try:
+            results = scanner.scan(scan_paths)
+        except ExternalScanError as exc:
+            logger.error(f"External scanner '{name}' failed: {exc}")
+            sys.exit(2)
+        _merge_findings(merged, results)
+
+    return merged
+
+
 def _audit_content_scan(
     cfg: _AuditConfig,
     package: str | None,
@@ -611,6 +672,8 @@ def _audit_content_scan(
     strip: bool,
     dry_run: bool,
     no_drift: bool = False,
+    external: tuple[str, ...] = (),
+    external_sarif: str | None = None,
 ) -> None:
     """Handle default ``apm audit`` -- content integrity scanning.
 
@@ -635,33 +698,44 @@ def _audit_content_scan(
     if file_path:
         # -- File mode: scan a single arbitrary file --
         findings_by_file, files_scanned = _scan_single_file(Path(file_path), logger)
+        scan_paths = [Path(file_path)]
     else:
+        scan_paths = [project_root]
         # -- Package mode: scan from lockfile --
         lockfile_path = get_lockfile_path(project_root)
         if not lockfile_path.exists():
-            logger.progress(
-                "No apm.lock.yaml found -- nothing to scan. Use --file to scan a specific file."
-            )
-            sys.exit(0)
-
-        if package:
-            logger.progress(f"Scanning package: {package}")
-        else:
-            logger.start("Scanning all installed packages...")
-
-        findings_by_file, files_scanned = scan_lockfile_packages(
-            project_root,
-            package_filter=package,
-        )
-
-        if files_scanned == 0:
-            if package:
-                logger.warning(
-                    f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
+            if not external:
+                logger.progress(
+                    "No apm.lock.yaml found -- nothing to scan. Use --file to scan a specific file."
                 )
+                sys.exit(0)
+            # External scanners are an independent source: proceed with an
+            # empty native result set so their findings still surface.
+            findings_by_file, files_scanned = {}, 0
+        else:
+            if package:
+                logger.progress(f"Scanning package: {package}")
             else:
-                logger.progress("No deployed files found in apm.lock.yaml")
-            sys.exit(0)
+                logger.start("Scanning all installed packages...")
+
+            findings_by_file, files_scanned = scan_lockfile_packages(
+                project_root,
+                package_filter=package,
+            )
+
+            if files_scanned == 0 and not external:
+                if package:
+                    logger.warning(
+                        f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
+                    )
+                else:
+                    logger.progress("No deployed files found in apm.lock.yaml")
+                sys.exit(0)
+
+    # -- External scanners (opt-in, additive) -----------------------
+    if external:
+        external_findings = _run_external_scanners(cfg, external, external_sarif, scan_paths)
+        _merge_findings(findings_by_file, external_findings)
 
     # -- Warn if --dry-run used without --strip --
     if dry_run and not strip:
@@ -889,6 +963,24 @@ def _audit_content_scan(
         "use only for performance-constrained CI loops."
     ),
 )
+@click.option(
+    "--external",
+    "external",
+    multiple=True,
+    metavar="NAME",
+    help=(
+        "Ingest findings from an external SARIF-native scanner "
+        "(repeatable). Names: skillspector, sarif. "
+        "Requires 'apm experimental enable external-scanners'. [experimental]"
+    ),
+)
+@click.option(
+    "--external-sarif",
+    "external_sarif",
+    type=click.Path(exists=False),
+    default=None,
+    help="SARIF file to ingest for '--external sarif'. [experimental]",
+)
 @click.pass_context
 def audit(
     ctx,
@@ -905,6 +997,8 @@ def audit(
     no_policy,
     no_fail_fast,
     no_drift,
+    external,
+    external_sarif,
 ):
     """Scan deployed prompt files for hidden Unicode characters.
 
@@ -972,9 +1066,25 @@ def audit(
         if output_format == "markdown":
             logger.error("--ci does not support --format markdown. Use json or sarif.")
             sys.exit(1)
+        if external:
+            logger.error(
+                "--ci does not support --external scanners yet. "
+                "Run external scanners in bare 'apm audit' mode."
+            )
+            sys.exit(1)
 
         _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast, no_drift)
         return  # _audit_ci_gate calls sys.exit; return guards against fall-through
+
+    # -- External scanners are an additive, opt-in content-scan source.
+    # They cannot be combined with --strip/--dry-run (APM only knows how to
+    # strip the Unicode characters its own scanner detects).
+    if external and (strip or dry_run):
+        logger.error("--external cannot be combined with --strip or --dry-run")
+        sys.exit(1)
+    if external_sarif and not external:
+        logger.error("--external-sarif requires '--external sarif'")
+        sys.exit(1)
 
     # -- Content scan mode ------------------------------------------
     if policy_source:
@@ -983,4 +1093,4 @@ def audit(
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
 
-    _audit_content_scan(cfg, package, file_path, strip, dry_run, no_drift)
+    _audit_content_scan(cfg, package, file_path, strip, dry_run, no_drift, external, external_sarif)

@@ -94,6 +94,17 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint=("Use registries: in apm.yml. See https://microsoft.github.io/apm/guides/registries/"),
     ),
+    "external_scanners": ExperimentalFlag(
+        name="external_scanners",
+        description="Ingest external SARIF-native scanners into 'apm audit' findings.",
+        default=False,
+        hint=(
+            "Opt-in per run with 'apm audit --external sarif --external-sarif "
+            "report.sarif' (any SARIF 2.1.0 tool), or '--external skillspector' "
+            "when its CLI is on PATH. See "
+            "https://microsoft.github.io/apm/integrations/external-scanners/"
+        ),
+    ),
 }
 
 
