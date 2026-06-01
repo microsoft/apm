@@ -32,6 +32,7 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 | [Targets matrix](./targets-matrix/)                          | Which primitive types each target (Copilot, Claude, ...) supports |
 | [Baseline checks](./baseline-checks/)                        | The CI checks `apm audit --ci` runs                              |
 | [Environment variables](./environment-variables/)            | Every env var APM reads, with precedence                         |
+| [Marketplace JSON schema](./marketplace-json-schema/)        | `marketplace.json` (Claude/Copilot-compatible)                   |
 | [Primitive types](./primitive-types/)                        | Skill, prompt, instruction, agent, hook, command                 |
 | [Package types](./package-types/)                            | APM packages, plugins, marketplaces                              |
 | [Examples](./examples/)                                      | Worked end-to-end examples                                       |
