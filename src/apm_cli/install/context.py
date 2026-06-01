@@ -143,6 +143,7 @@ class InstallContext:
     policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
     policy_enforcement_active: bool = False
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
+    audit_override: str | None = None  # --audit/--no-audit CLI override (off|warn|block)
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     early_lockfile: Any = None  # LockFile read before pipeline phases (avoids re-read)

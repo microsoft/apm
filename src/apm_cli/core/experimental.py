@@ -96,13 +96,15 @@ FLAGS: dict[str, ExperimentalFlag] = {
     ),
     "external_scanners": ExperimentalFlag(
         name="external_scanners",
-        description="Ingest external SARIF-native scanners into 'apm audit' findings.",
+        description="External SARIF scanner ingestion + optional audit at install time.",
         default=False,
         hint=(
             "Opt-in per run with 'apm audit --external sarif --external-sarif "
             "report.sarif' (any SARIF 2.1.0 tool), or '--external skillspector' "
-            "when its CLI is on PATH. See "
-            "https://microsoft.github.io/apm/integrations/external-scanners/"
+            "when its CLI is on PATH. Also unlocks running 'apm audit' during "
+            "'apm install' -- set the mode with 'apm config set audit-on-install "
+            "warn|block' or an apm-policy.yml 'security.audit.on_install' rule. "
+            "See https://microsoft.github.io/apm/integrations/external-scanners/"
         ),
     ),
 }

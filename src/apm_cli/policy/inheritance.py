@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from .schema import (
     ApmPolicy,
+    AuditPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -23,6 +24,7 @@ from .schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -34,6 +36,7 @@ _RESOLUTION_LEVELS = {"project-wins": 0, "policy-wins": 1, "block": 2}
 _SELF_DEFINED_LEVELS = {"allow": 0, "warn": 1, "deny": 2}
 _UNMANAGED_ACTION_LEVELS = {"ignore": 0, "warn": 1, "deny": 2}
 _SCRIPTS_LEVELS = {"allow": 0, "deny": 1}
+_AUDIT_ON_INSTALL_LEVELS = {"off": 0, "warn": 1, "block": 2}
 
 
 class PolicyInheritanceError(Exception):
@@ -63,6 +66,7 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         compilation=_merge_compilation(parent.compilation, child.compilation),
         manifest=_merge_manifest(parent.manifest, child.manifest),
         unmanaged_files=_merge_unmanaged_files(parent.unmanaged_files, child.unmanaged_files),
+        security=_merge_security(parent.security, child.security),
     )
 
 
@@ -234,6 +238,29 @@ def _merge_unmanaged_files(
     eff_dirs_out: tuple[str, ...] = () if eff_dirs is None else eff_dirs
 
     return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out)
+
+
+def _merge_security(parent: SecurityPolicy, child: SecurityPolicy) -> SecurityPolicy:
+    """Merge the security section: audit tightens but never relaxes.
+
+    ``on_install`` escalates on the off < warn < block ladder with
+    None-transparency (``None`` means "no opinion"; the other side flows
+    through).  ``external`` (required scanners) is union-merged like other
+    require lists -- a child can add scanners but not drop a parent's.
+    """
+    p, c = parent.audit, child.audit
+    if p.on_install is None:
+        on_install = c.on_install
+    elif c.on_install is None:
+        on_install = p.on_install
+    else:
+        on_install = _escalate(_AUDIT_ON_INSTALL_LEVELS, p.on_install, c.on_install)
+    return SecurityPolicy(
+        audit=AuditPolicy(
+            on_install=on_install,
+            external=_merge_list_field(p.external, c.external),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

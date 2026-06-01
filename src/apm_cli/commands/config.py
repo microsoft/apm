@@ -64,6 +64,8 @@ def _valid_config_keys() -> str:
     from ..core.experimental import is_enabled
 
     keys = ["auto-integrate", "temp-dir", "allow-protocol-fallback", "prefer-ssh"]
+    if is_enabled("external_scanners"):
+        keys.append("audit-on-install")
     if is_enabled("copilot_cowork"):
         keys.append("copilot-cowork-skills-dir")
     if is_enabled("registries"):
@@ -279,6 +281,25 @@ def set(key, value):  # noqa: F811
             sys.exit(1)
         return
 
+    if key == "audit-on-install":
+        from ..core.experimental import is_enabled
+
+        if not is_enabled("external_scanners"):
+            logger.error(
+                "audit-on-install requires the external-scanners experimental flag. "
+                "Run: apm experimental enable external-scanners"
+            )
+            sys.exit(1)
+        from ..config import get_audit_on_install, set_audit_on_install
+
+        try:
+            set_audit_on_install(value)
+            logger.success(f"Install-time audit set to: {get_audit_on_install()}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        return
+
     setters = _get_config_setters()
     config_entry = setters.get(key)
     if config_entry is None:
@@ -370,6 +391,12 @@ def get(key):
                 click.echo(f"temp-dir: {value}")
             return
 
+        if key == "audit-on-install":
+            from ..config import get_audit_on_install
+
+            click.echo(f"audit-on-install: {get_audit_on_install()}")
+            return
+
         getter = getters.get(key)
         if getter is None:
             logger.error(f"Unknown configuration key: '{key}'")
@@ -458,6 +485,13 @@ def unset(key):
 
         unset_temp_dir()
         logger.success("Temporary directory configuration removed")
+        return
+
+    if key == "audit-on-install":
+        from ..config import unset_audit_on_install
+
+        unset_audit_on_install()
+        logger.success("Install-time audit configuration removed (defaults to off)")
         return
 
     if key == "allow-protocol-fallback":

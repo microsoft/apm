@@ -144,6 +144,34 @@ class RegistrySourcePolicy:
 
 
 @dataclass(frozen=True)
+class AuditPolicy:
+    """Rules governing the ``apm audit`` content scan, including at install time.
+
+    ``on_install`` semantics (mirrors the ``None = no opinion`` convention so
+    inheritance merge stays transparent):
+      * ``None``    -- no opinion (inherit parent / fall through to config).
+      * ``"off"``   -- never run audit during ``apm install``.
+      * ``"warn"``  -- run audit at install, surface findings, never block.
+      * ``"block"`` -- run audit at install, fail the install on critical findings.
+
+    ``external`` lists external SARIF scanner names (see
+    ``security/external/registry.SUPPORTED_SCANNERS``) that MUST run as part of
+    the install-time audit.  ``None`` = no opinion; ``()`` = explicitly none.
+    Requires the ``external_scanners`` experimental flag to take effect.
+    """
+
+    on_install: str | None = None  # None | off | warn | block
+    external: tuple[str, ...] | None = None  # required external scanners at install
+
+
+@dataclass(frozen=True)
+class SecurityPolicy:
+    """Rules governing APM's security checks (content audit and scanners)."""
+
+    audit: AuditPolicy = field(default_factory=AuditPolicy)
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -159,3 +187,4 @@ class ApmPolicy:
     manifest: ManifestPolicy = field(default_factory=ManifestPolicy)
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
+    security: SecurityPolicy = field(default_factory=SecurityPolicy)

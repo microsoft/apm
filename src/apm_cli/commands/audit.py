@@ -609,8 +609,9 @@ def _merge_findings(
     extra: dict[str, list[ScanFinding]],
 ) -> None:
     """Merge *extra* findings into *base* in place, grouping by file."""
-    for file_key, findings in extra.items():
-        base.setdefault(file_key, []).extend(findings)
+    from ..security.external.runner import merge_findings
+
+    merge_findings(base, extra)
 
 
 def _run_external_scanners(
@@ -624,14 +625,16 @@ def _run_external_scanners(
     Fail-closed: the ``external_scanners`` experimental flag must be enabled
     (exit 2 otherwise) and each adapter must be available (exit 2 otherwise).
     APM's own content scan is never weakened -- external findings are purely
-    additive.
+    additive.  The resolve/validate/run/merge loop is shared with the
+    install-time audit phase via
+    :func:`apm_cli.security.external.runner.run_external_scanners`.
     """
     from ..security.external.base import ExternalScanError
     from ..security.external.gate import (
         ExternalScannersFeatureDisabledError,
         require_external_scanners_enabled,
     )
-    from ..security.external.registry import resolve_scanner
+    from ..security.external.runner import run_external_scanners
 
     logger = cfg.logger
 
@@ -641,28 +644,11 @@ def _run_external_scanners(
         logger.error(str(exc))
         sys.exit(2)
 
-    merged: dict[str, list[ScanFinding]] = {}
-    for name in external:
-        try:
-            scanner = resolve_scanner(name, sarif_file=external_sarif)
-        except ValueError as exc:
-            logger.error(str(exc))
-            sys.exit(2)
-
-        available, reason = scanner.is_available()
-        if not available:
-            logger.error(f"External scanner '{name}' is unavailable: {reason}")
-            sys.exit(2)
-
-        logger.progress(f"Running external scanner: {name}")
-        try:
-            results = scanner.scan(scan_paths)
-        except ExternalScanError as exc:
-            logger.error(f"External scanner '{name}' failed: {exc}")
-            sys.exit(2)
-        _merge_findings(merged, results)
-
-    return merged
+    try:
+        return run_external_scanners(external, external_sarif, scan_paths, logger=logger)
+    except ExternalScanError as exc:
+        logger.error(str(exc))
+        sys.exit(2)
 
 
 def _audit_content_scan(

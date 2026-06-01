@@ -229,6 +229,7 @@ class InstallContext:
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
+    audit_override: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1069,6 +1070,24 @@ def _handle_mcp_install(
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
 @click.option(
+    "--audit",
+    "audit_mode",
+    type=click.Choice(["off", "warn", "block"], case_sensitive=False),
+    default=None,
+    help=(
+        "Run 'apm audit' over deployed files during install: off, warn, or block. "
+        "Overrides config/policy. Requires 'apm experimental enable external-scanners'. "
+        "An org policy 'block' cannot be relaxed below by this flag."
+    ),
+)
+@click.option(
+    "--no-audit",
+    "no_audit",
+    is_flag=True,
+    default=False,
+    help="Disable the install-time audit for this invocation (equivalent to --audit off).",
+)
+@click.option(
     "--refresh",
     is_flag=True,
     default=False,
@@ -1127,6 +1146,8 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    audit_mode,
+    no_audit,
     refresh,
     legacy_skill_paths,
     alias,
@@ -1173,6 +1194,12 @@ def install(  # noqa: PLR0913
             "--frozen and --update are mutually exclusive. "
             "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
         )
+    from ..core.install_audit import resolve_audit_override_from_cli
+
+    try:
+        audit_override = resolve_audit_override_from_cli(no_audit, audit_mode)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1497,6 +1524,7 @@ def install(  # noqa: PLR0913
             allow_protocol_fallback=allow_protocol_fallback,
             trust_transitive_mcp=trust_transitive_mcp,
             no_policy=no_policy,
+            audit_override=audit_override,
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
             refresh=refresh,
@@ -1733,6 +1761,7 @@ def _install_apm_packages(ctx, outcome):
                 protocol_pref=ctx.protocol_pref,
                 allow_protocol_fallback=ctx.allow_protocol_fallback,
                 no_policy=ctx.no_policy,
+                audit_override=ctx.audit_override,
                 legacy_skill_paths=ctx.legacy_skill_paths,
                 frozen=ctx.frozen,
                 plan_callback=ctx.plan_callback,
@@ -1966,6 +1995,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     protocol_pref=None,
     allow_protocol_fallback: "bool | None" = None,
     no_policy: bool = False,
+    audit_override: "str | None" = None,
     skill_subset: "builtins.tuple | None" = None,
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
@@ -2004,6 +2034,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
         no_policy=no_policy,
+        audit_override=audit_override,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         legacy_skill_paths=legacy_skill_paths,

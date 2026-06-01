@@ -314,6 +314,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     protocol_pref=None,
     allow_protocol_fallback: bool | None = None,
     no_policy: bool = False,
+    audit_override: str | None = None,
     skill_subset: tuple | None = None,
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
@@ -435,6 +436,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
         no_policy=no_policy,
+        audit_override=audit_override,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         early_lockfile=_early_lockfile,
@@ -767,6 +769,20 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         from .phases import post_deps_local as _post_deps_local_phase
 
         _run_phase("post_deps_local", _post_deps_local_phase, ctx)
+
+        # ------------------------------------------------------------------
+        # Phase: Optional install-time content audit (external_scanners flag).
+        # Runs after the lockfile + local content are persisted so deployed
+        # files are enumerable, and before finalize.  No-op unless config /
+        # policy opt in (default off).  A ``block`` decision raises
+        # PolicyViolationError, re-raised by the outer handler below.
+        # ------------------------------------------------------------------
+        from .phases import audit as _audit_phase
+
+        try:
+            _run_phase("audit", _audit_phase, ctx)
+        except PolicyViolationError:
+            raise
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
