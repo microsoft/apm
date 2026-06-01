@@ -5,9 +5,12 @@ from __future__ import annotations
 import io
 import os
 import stat
+import sys
 import zipfile
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from apm_cli.deps.download_strategies import DownloadDelegate
 
@@ -26,6 +29,10 @@ def _zip_with_executable_script() -> bytes:
     return buf.getvalue()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows does not honor POSIX execute bits; st_mode & 0o111 is not preserved",
+)
 def test_artifactory_archive_preserves_executable_bits(tmp_path):
     response = SimpleNamespace(status_code=200, content=_zip_with_executable_script())
     host = SimpleNamespace(registry_config=None, artifactory_token=None)
