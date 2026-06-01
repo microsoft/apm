@@ -231,6 +231,24 @@ class InstallContext:
     skill_subset_from_cli: bool = False
 
 
+def _only_packages_from_validation(
+    packages: tuple[str, ...] | None,
+    outcome: _ValidationOutcome | None,
+) -> list[str] | None:
+    """Return canonical package specs for a positional install request."""
+    if not packages:
+        return None
+    if outcome is None:
+        return []
+    seen = builtins.set()
+    selected = []
+    for canonical, _already_present in outcome.valid:
+        if canonical not in seen:
+            seen.add(canonical)
+            selected.append(canonical)
+    return selected
+
+
 # ---------------------------------------------------------------------------
 # Argv `--` boundary helpers (W3 --mcp flag)
 # ---------------------------------------------------------------------------
@@ -1444,7 +1462,6 @@ def install(  # noqa: PLR0913
             sys.exit(1)
 
         # If packages are specified, validate and add them to apm.yml first
-        validated_packages = []
         outcome = None
         if packages:
             # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
@@ -1456,7 +1473,7 @@ def install(  # noqa: PLR0913
                 _manifest_snapshot = manifest_path.read_bytes()
                 _snapshot_manifest_path = manifest_path
 
-            validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
+            _validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
                 packages,
                 dry_run,
                 dev=dev,
@@ -1470,8 +1487,8 @@ def install(  # noqa: PLR0913
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:
                 return
-            # Note: Empty validated_packages is OK if packages are already in apm.yml
-            # We'll proceed with installation from apm.yml to ensure everything is synced
+            # Note: Empty validated_packages is OK if packages are already in apm.yml;
+            # only_packages is derived from validation outcomes below.
 
         # Build install context
         install_ctx = InstallContext(
@@ -1500,7 +1517,7 @@ def install(  # noqa: PLR0913
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
             refresh=refresh,
-            only_packages=builtins.list(validated_packages) if packages else None,
+            only_packages=_only_packages_from_validation(packages, outcome),
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
             legacy_skill_paths=legacy_skill_paths,

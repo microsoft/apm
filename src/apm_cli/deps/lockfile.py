@@ -104,7 +104,7 @@ class LockedDependency:
         if self.package_type:
             result["package_type"] = self.package_type
         if self.deployed_files:
-            result["deployed_files"] = sorted(self.deployed_files)
+            result["deployed_files"] = sorted(dict.fromkeys(self.deployed_files))
         if self.deployed_file_hashes:
             result["deployed_file_hashes"] = dict(sorted(self.deployed_file_hashes.items()))
         if self.source:

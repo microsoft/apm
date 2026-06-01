@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 
 from apm_cli.commands.install import (
     _check_package_conflicts,
@@ -606,3 +607,35 @@ class TestInstallContextDefaults:
         )
         ctx.refresh = True
         assert ctx.refresh is True
+
+
+class TestInstallUpdatePackageScoping:
+    def test_update_existing_named_package_scopes_apm_install_to_that_package(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """--update for an already-declared package must not integrate every dep."""
+        from apm_cli.commands.install import install
+        from apm_cli.models.results import InstallResult
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "name: test\n"
+            "version: 0.1.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - owner/target\n"
+            "    - owner/other\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch("apm_cli.commands.install._validate_package_exists", return_value=True),
+            patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                return_value=InstallResult(installed_count=1, diagnostics=None),
+            ) as install_apm,
+        ):
+            result = CliRunner().invoke(install, ["--update", "owner/target"])
+
+        assert result.exit_code == 0, result.output
+        assert install_apm.call_args.args[3] == ["owner/target"]
