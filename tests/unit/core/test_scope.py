@@ -201,7 +201,6 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["claude"].user_root_dir is None
 
     def test_copilot_unsupported_user_primitives(self):
-        assert "prompts" in KNOWN_TARGETS["copilot"].unsupported_user_primitives
         assert "instructions" in KNOWN_TARGETS["copilot"].unsupported_user_primitives
 
     def test_effective_root_project_scope(self):
@@ -218,9 +217,9 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["claude"].supports_at_user_scope("commands") is True
 
     def test_supports_at_user_scope_partial(self):
-        # Copilot supports agents at user scope but not prompts or instructions
+        # Copilot supports agents and prompts at user scope but not instructions.
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("agents") is True
-        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("prompts") is False
+        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("prompts") is True
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("instructions") is False
 
     def test_supports_at_user_scope_cursor_partial(self):
@@ -295,8 +294,8 @@ class TestScopeWarnings:
 
     def test_warn_message_includes_unsupported_primitives(self):
         msg = warn_unsupported_user_scope()
-        # Copilot excludes prompts and instructions
-        assert "copilot (prompts, instructions)" in msg
+        # Copilot excludes instructions.
+        assert "copilot (instructions)" in msg
         # Cursor excludes instructions
         assert "cursor (instructions)" in msg
         # OpenCode excludes hooks

@@ -93,8 +93,7 @@ class TargetProfile:
 
     unsupported_user_primitives: tuple[str, ...] = ()
     """Primitives that are **not** available at user scope even when the
-    target itself is partially supported (e.g. Copilot CLI cannot deploy
-    prompts at user scope)."""
+    target itself is partially supported."""
 
     user_root_resolver: Callable[[], Path | None] | None = None  # noqa: F821
     """Optional callable that resolves the deploy root at runtime.
@@ -368,7 +367,7 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
-    # instead of ~/.github/.  Prompts and instructions are not supported at user scope.
+    # instead of ~/.github/.  Instructions are not supported at user scope.
     # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
     "copilot": TargetProfile(
         name="copilot",
@@ -391,7 +390,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".copilot",
-        unsupported_user_primitives=("prompts", "instructions"),
+        unsupported_user_primitives=("instructions",),
         generated_files=("copilot-instructions.md",),
         compile_family="vscode",
     ),
