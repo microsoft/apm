@@ -17,7 +17,7 @@ apm outdated [OPTIONS]
 
 `apm outdated` reads `apm.lock.yaml` and queries each remote to detect staleness:
 
-- **Tag-pinned deps** (e.g. `v1.2.3`): semver compare against the latest available remote tag.
+- **Tag-pinned deps** (e.g. `v1.2.3`, `1.2.3`, or patterned tags like `my-pkg_v1.2.3`): semver compare against the latest matching remote tag. Patterned tags (`{name}_v{version}`, `{name}-v{version}`, etc.) are detected automatically from the locked ref.
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
 - **Marketplace deps**: compare the installed ref against the marketplace entry's current `source.ref`.

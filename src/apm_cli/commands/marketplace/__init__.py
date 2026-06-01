@@ -1026,15 +1026,30 @@ def _load_current_versions():
 def _extract_tag_versions(refs, entry, yml, include_prerelease):
     """Extract (SemVer, tag_name) pairs from remote refs for a package entry."""
     from ...marketplace._shared import iter_semver_tags
-    from ...marketplace.tag_pattern import build_tag_regex
+    from ...marketplace.tag_pattern import (
+        build_tag_regex,
+        infer_tag_pattern_from_refs,
+    )
+
+    def _collect(pattern: str) -> list:
+        tag_rx = (
+            build_tag_regex(pattern, name=entry.name)
+            if "{name}" in pattern
+            else build_tag_regex(pattern)
+        )
+        collected = []
+        for sv, tag_name, _ in iter_semver_tags(refs, tag_rx):
+            if sv.is_prerelease and not (include_prerelease or entry.include_prerelease):
+                continue
+            collected.append((sv, tag_name))
+        return collected
 
     pattern = entry.tag_pattern or yml.build.tag_pattern
-    tag_rx = build_tag_regex(pattern)
-    results = []
-    for sv, tag_name, _ in iter_semver_tags(refs, tag_rx):
-        if sv.is_prerelease and not (include_prerelease or entry.include_prerelease):
-            continue
-        results.append((sv, tag_name))
+    results = _collect(pattern)
+    if not results:
+        inferred = infer_tag_pattern_from_refs(refs, entry.name)
+        if inferred and inferred != pattern:
+            results = _collect(inferred)
     return results
 
 
