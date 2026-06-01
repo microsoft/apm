@@ -21,7 +21,7 @@
 | `apm outdated` | Check locked deps via SHA/semver comparison | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
-| `apm deps update [PKGS...]` | Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N` |
+| `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
 ### Install validation chain (virtual subdirectory packages)
 
@@ -199,7 +199,7 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 | `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`) | -- |
 | `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
 | `apm config unset KEY` | Remove a stored config value (`temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`) | -- |
-| `apm update` | Refresh APM dependencies in the current project: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged), and prompts before mutating anything (default `[y/N]`). Skips the prompt with `--yes`; previews without changes with `--dry-run`. | `--yes`, `--dry-run`, `--verbose` |
+| `apm update [PKGS...]` | Refresh APM dependencies: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged), and prompts before mutating anything (default `[y/N]`). Pass `[PKGS...]` to refresh only those deps, or `-g` for user scope (`~/.apm/`). Strict superset of the deprecated `apm deps update`. Skips the prompt with `--yes`; previews with `--dry-run`. | `--yes`, `--dry-run`, `--verbose`, `-g/--global`, `--force`, `--parallel-downloads N`, `--target` (comma-separated) |
 | `apm self-update` | Update the APM CLI itself (or show distributor guidance when self-update is disabled at build time). | `--check` only check |
 
 `apm config set prefer-ssh true` and `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users no longer need to re-pass `--ssh` / `--allow-protocol-fallback` on every `apm install`. Resolution order: CLI flag > `APM_GIT_PROTOCOL` / `APM_ALLOW_PROTOCOL_FALLBACK` env var > `apm config` value > built-in default (`false`). `apm config unset prefer-ssh` and `apm config unset allow-protocol-fallback` remove the persisted value. In `apm config` / `apm config get` (no key), the two transport rows surface only when they have been enabled (the `false`-default rows are suppressed to keep the output noise-free); `apm config get <key>` always returns the effective value. Setting `allow-protocol-fallback=true` while `CI=1` emits a warning because the persisted value affects every subsequent `apm install` on a shared `$HOME`; prefer the env var in CI.

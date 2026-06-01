@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm update` now accepts `-g/--global`, positional `[PACKAGES]...`, `--force`, and `--parallel-downloads`, making it a strict superset of `apm deps update`. A single verb now covers project and user scope, per-package refresh, and collision overwrite -- all behind the same interactive plan with `--dry-run`/`--yes`. (closes #1525)
+
+### Deprecated
+
+- `apm deps update` is deprecated in favor of `apm update`, which now exposes every flag it had. It prints a one-line banner pointing to `apm update` and keeps working for one release; it will be removed in the next breaking release. (closes #1525)
+
 ### Documentation
 
 - Surface the `compilation.strategy: distributed` default in the

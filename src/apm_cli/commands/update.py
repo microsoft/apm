@@ -29,14 +29,22 @@ Flags
 * ``--dry-run``    -- render the plan and exit without prompting.
 * ``--verbose``/``-v`` -- show unchanged deps in the plan and pipeline
   diagnostics.
+* ``--global``/``-g`` -- refresh user-scope dependencies under
+  ``~/.apm/`` instead of the current project (mirrors
+  ``apm install -g``).
+* ``[PACKAGES]...`` -- positional names to refresh only those
+  dependencies; omit to refresh everything.
+* ``--force`` -- overwrite locally-authored files on collision.
+* ``--parallel-downloads`` -- max concurrent package downloads
+  (0 disables parallelism).
 * ``--target``/``-t`` -- agent harness(es) to deploy to (e.g.
   ``claude``, ``copilot``, ``cursor``, ``windsurf``, ``codex``,
   ``opencode``, ``gemini``); comma-separated for multiple targets.
   Overrides ``apm.yml targets:`` and auto-detection.
 
-Other ``apm install`` flags are NOT mirrored here on purpose -- the
-update command stays focused on the refresh-and-confirm loop.
-``apm install --update`` remains the swiss-army-knife escape hatch.
+These flags make ``apm update`` a strict superset of the deprecated
+``apm deps update`` (issue #1525). ``apm install --update`` remains the
+swiss-army-knife escape hatch for the rest of the install surface.
 """
 
 from __future__ import annotations
@@ -56,6 +64,7 @@ from ..install.errors import (
 )
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
+from ._helpers import UnknownPackageError, resolve_requested_packages
 
 
 def _find_apm_yml(start: Path | None = None) -> Path | None:
@@ -97,6 +106,7 @@ def _stdin_is_tty() -> bool:
     name="update",
     help="Refresh APM dependencies to the latest matching refs",
 )
+@click.argument("packages", nargs=-1)
 @click.option(
     "--yes",
     "-y",
@@ -117,6 +127,27 @@ def _stdin_is_tty() -> bool:
     is_flag=True,
     default=False,
     help="Show unchanged deps and detailed pipeline diagnostics",
+)
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    default=False,
+    help="Refresh user-scope dependencies (~/.apm/) instead of the current project",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite locally-authored files on collision",
+)
+@click.option(
+    "--parallel-downloads",
+    type=int,
+    default=4,
+    show_default=True,
+    help="Max concurrent package downloads (0 to disable parallelism)",
 )
 @click.option(
     "--check",
@@ -142,67 +173,92 @@ def _stdin_is_tty() -> bool:
 @click.pass_context
 def update(
     ctx: click.Context,
+    packages: tuple[str, ...],
     assume_yes: bool,
     dry_run: bool,
     verbose: bool,
+    global_: bool,
+    force: bool,
+    parallel_downloads: int,
     check_only: bool,
     target: str | list[str] | None,
 ) -> None:
     """Refresh APM dependencies to the latest matching refs.
 
     Examples:
-        apm update              # Resolve, show plan, prompt, then install
-        apm update --dry-run    # Show plan only, do not change anything
-        apm update --yes        # Skip the prompt (CI-safe)
-        apm update --verbose    # Include unchanged deps in the plan
+        apm update                      # Resolve, show plan, prompt, then install
+        apm update --dry-run            # Show plan only, do not change anything
+        apm update --yes                # Skip the prompt (CI-safe)
+        apm update org/pkg-a org/pkg-b  # Refresh only the named packages
+        apm update -g                   # Refresh user-scope deps (~/.apm/)
     """
-    manifest_path = _find_apm_yml()
-    if manifest_path is None:
-        # Back-compat shim (one-release): when run outside a project,
-        # forward to the renamed self-updater so existing users keep
-        # working while we publicise ``apm self-update``.  Removed in
-        # the release after this one.
-        from apm_cli.commands.self_update import self_update as _self_update_cmd
+    from apm_cli.core.scope import InstallScope, get_apm_dir
 
-        if target is not None:
+    if global_:
+        # User scope: operate on ~/.apm/apm.yml. The cwd manifest walk and
+        # the self-update back-compat shim apply only to project scope.
+        scope = InstallScope.USER
+        manifest_path = get_apm_dir(scope) / "apm.yml"
+        if not manifest_path.is_file():
+            _rich_error(
+                "No apm.yml found in ~/.apm/. Run 'apm install -g <org/repo>' to create one."
+            )
+            sys.exit(1)
+        if check_only:
             _rich_warning(
-                "--target is ignored when forwarding to 'apm self-update' "
-                "(no apm.yml found). Use 'apm self-update' directly.",
+                "--check applies only to the self-update shim and is ignored with --global.",
                 symbol="warning",
             )
-        _rich_warning(
-            "'apm update' refreshes APM dependencies. To update the CLI binary, "
-            "use 'apm self-update'. Forwarding for back-compat (deprecated).",
-            symbol="warning",
-        )
-        ctx.invoke(_self_update_cmd, check=check_only)
-        return
+        project_root = manifest_path.parent
+    else:
+        scope = InstallScope.PROJECT
+        manifest_path = _find_apm_yml()
+        if manifest_path is None:
+            # Back-compat shim (one-release): when run outside a project,
+            # forward to the renamed self-updater so existing users keep
+            # working while we publicise ``apm self-update``.  Removed in
+            # the release after this one.
+            from apm_cli.commands.self_update import self_update as _self_update_cmd
 
-    if check_only:
-        from apm_cli.commands.self_update import self_update as _self_update_cmd
-
-        if target is not None:
+            if target is not None:
+                _rich_warning(
+                    "--target is ignored when forwarding to 'apm self-update' "
+                    "(no apm.yml found). Use 'apm self-update' directly.",
+                    symbol="warning",
+                )
             _rich_warning(
-                "--target is ignored when forwarding to 'apm self-update --check'. "
-                "Use 'apm update --dry-run' to preview dependency changes.",
+                "'apm update' refreshes APM dependencies. To update the CLI binary, "
+                "use 'apm self-update'. Forwarding for back-compat (deprecated).",
                 symbol="warning",
             )
-        _rich_warning(
-            "'apm update --check' is the deprecated self-updater shim. "
-            "Use 'apm update --dry-run' to preview dependency changes, "
-            "or 'apm self-update --check' to check for a new CLI binary. "
-            "Forwarding for back-compat (deprecated).",
-            symbol="warning",
-        )
-        ctx.invoke(_self_update_cmd, check=True)
-        return
+            ctx.invoke(_self_update_cmd, check=check_only)
+            return
 
-    project_root = manifest_path.parent
-    if project_root != Path.cwd().resolve():
-        _rich_info(
-            f"Using apm.yml at {manifest_path} (project root: {project_root})",
-            symbol="info",
-        )
+        if check_only:
+            from apm_cli.commands.self_update import self_update as _self_update_cmd
+
+            if target is not None:
+                _rich_warning(
+                    "--target is ignored when forwarding to 'apm self-update --check'. "
+                    "Use 'apm update --dry-run' to preview dependency changes.",
+                    symbol="warning",
+                )
+            _rich_warning(
+                "'apm update --check' is the deprecated self-updater shim. "
+                "Use 'apm update --dry-run' to preview dependency changes, "
+                "or 'apm self-update --check' to check for a new CLI binary. "
+                "Forwarding for back-compat (deprecated).",
+                symbol="warning",
+            )
+            ctx.invoke(_self_update_cmd, check=True)
+            return
+
+        project_root = manifest_path.parent
+        if project_root != Path.cwd().resolve():
+            _rich_info(
+                f"Using apm.yml at {manifest_path} (project root: {project_root})",
+                symbol="info",
+            )
 
     _run_dep_update(
         assume_yes=assume_yes,
@@ -210,6 +266,10 @@ def update(
         verbose=verbose,
         project_root=project_root,
         target=target,
+        scope=scope,
+        packages=packages,
+        force=force,
+        parallel_downloads=parallel_downloads,
     )
 
 
@@ -220,6 +280,10 @@ def _run_dep_update(
     verbose: bool,
     project_root: Path | None = None,
     target: str | list[str] | None = None,
+    scope=None,
+    packages: tuple[str, ...] = (),
+    force: bool = False,
+    parallel_downloads: int = 4,
 ) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
@@ -227,6 +291,10 @@ def _run_dep_update(
     switched to it before running so install pipeline paths
     (``apm.yml``, ``apm.lock.yaml``, deployed primitives) resolve
     against the discovered project root, not the caller's cwd.
+
+    ``scope`` selects project vs user deployment (defaults to project).
+    ``packages`` narrows the refresh to the named dependencies; ``force``
+    and ``parallel_downloads`` mirror the install-pipeline flags.
     """
     import os
 
@@ -253,6 +321,9 @@ def _run_dep_update(
         _rich_error(f"APM dependency system not available: {e}")
         sys.exit(1)
 
+    if scope is None:
+        scope = InstallScope.PROJECT
+
     try:
         apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
     except (FileNotFoundError, ValueError) as e:
@@ -263,7 +334,19 @@ def _run_dep_update(
         _rich_success("No APM dependencies declared in apm.yml -- nothing to update.")
         return
 
-    logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=False)
+    # Map any positional [PACKAGES] to canonical dependency keys for the
+    # engine's only_packages filter; None means "refresh everything".
+    try:
+        only_packages = resolve_requested_packages(
+            packages,
+            apm_package.get_apm_dependencies() + apm_package.get_dev_apm_dependencies(),
+        )
+    except UnknownPackageError as e:
+        _rich_error(f"Package '{e.token}' not found in apm.yml")
+        _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
+        sys.exit(1)
+
+    logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
 
     plan_state: dict[str, UpdatePlan | bool] = {"plan": None, "proceeded": False}
 
@@ -312,7 +395,10 @@ def _run_dep_update(
             apm_package,
             update_refs=True,
             verbose=verbose,
-            scope=InstallScope.PROJECT,
+            scope=scope,
+            only_packages=only_packages,
+            force=force,
+            parallel_downloads=parallel_downloads,
             logger=logger,
             plan_callback=_plan_callback,
             target=target,
