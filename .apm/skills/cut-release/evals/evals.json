@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "skill": "cut-release",
+  "skill_path": "../SKILL.md",
+  "notes": "Trigger evals only. Content evals are deferred to real-task refinement: the next release cycle exercises the skill end-to-end against a real worktree, and the diff vs without-skill is logged manually. This mirrors the deferred-content pattern in docs-sync/.",
+  "triggers": {
+    "split": "val",
+    "should_fire_rate_min": 0.5,
+    "should_not_fire_rate_max": 0.5,
+    "items": [
+      {"id": "fire-01", "query": "cut a release", "expected": "fire", "split": "train"},
+      {"id": "fire-02", "query": "ship v0.16.0", "expected": "fire", "split": "train"},
+      {"id": "fire-03", "query": "release prep -- bump and open the PR", "expected": "fire", "split": "train"},
+      {"id": "fire-04", "query": "what kind of release do we need now, v0.15.1 or v0.16.0?", "expected": "fire", "split": "train"},
+      {"id": "fire-05", "query": "we have enough merged for a release, can you cut it?", "expected": "fire", "split": "train"},
+      {"id": "fire-06", "query": "open the release PR after sanitizing changelog", "expected": "fire", "split": "val"},
+      {"id": "fire-07", "query": "prepare the next minor", "expected": "fire", "split": "val"},
+      {"id": "fire-08", "query": "bump version and open PR", "expected": "fire", "split": "val"},
+      {"id": "fire-09", "query": "let's ship the release", "expected": "fire", "split": "val"},
+      {"id": "fire-10", "query": "sanitize unreleased and cut", "expected": "fire", "split": "val"},
+
+      {"id": "no-fire-01", "query": "tag v0.16.0", "expected": "no-fire", "split": "train", "notes": "Tagging is the post-merge step; cut-release explicitly stops at PR open."},
+      {"id": "no-fire-02", "query": "publish a blog post about the v0.16.0 release", "expected": "no-fire", "split": "train", "notes": "Announcement work; out of scope."},
+      {"id": "no-fire-03", "query": "what changed since v0.15.0?", "expected": "no-fire", "split": "train", "notes": "Pure enumeration; no release being cut."},
+      {"id": "no-fire-04", "query": "review this PR", "expected": "no-fire", "split": "train", "notes": "apm-review-panel territory."},
+      {"id": "no-fire-05", "query": "update the CHANGELOG entry for #1526", "expected": "no-fire", "split": "train", "notes": "Single-PR doc edit, not a release cut."},
+      {"id": "no-fire-06", "query": "rollback to v0.15.0", "expected": "no-fire", "split": "val", "notes": "Release reversal; different workflow."},
+      {"id": "no-fire-07", "query": "regenerate uv.lock after a dep bump", "expected": "no-fire", "split": "val", "notes": "Lockfile maintenance, not a release."},
+      {"id": "no-fire-08", "query": "set version to 0.16.0 in pyproject.toml", "expected": "no-fire", "split": "val", "notes": "Raw version edit; bypasses the rubric and the changelog."},
+      {"id": "no-fire-09", "query": "draft release notes for the website", "expected": "no-fire", "split": "val", "notes": "Marketing copy; out of scope."},
+      {"id": "no-fire-10", "query": "triage the open issues", "expected": "no-fire", "split": "val", "notes": "apm-triage-panel territory."}
+    ]
+  },
+  "stop_list": [
+    "tag the release",
+    "tag v",
+    "git tag",
+    "blog post",
+    "release notes for",
+    "rollback",
+    "regenerate uv.lock",
+    "review this pr",
+    "triage"
+  ]
+}
