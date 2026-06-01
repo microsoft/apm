@@ -14,6 +14,7 @@ import logging
 import re
 import shutil
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional  # noqa: F401, UP035
 
@@ -767,12 +768,18 @@ class MCPIntegrator:
         if not lock_path.exists():
             return
         try:
+            existing_lockfile = LockFile.read(lock_path)
+            if existing_lockfile is None:
+                return
             lockfile = LockFile.read(lock_path)
             if lockfile is None:
                 return
             lockfile.mcp_servers = sorted(mcp_server_names)
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
+            if lockfile.is_semantically_equivalent(existing_lockfile):
+                return
+            lockfile.generated_at = datetime.now(timezone.utc).isoformat()
             lockfile.save(lock_path)
         except Exception:
             _log.debug(
