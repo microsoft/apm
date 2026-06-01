@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-06-01
+
+### Added
+
+- `apm doctor` is now a top-level command (promoted from `marketplace doctor`) that diagnoses environment problems such as runtime setup, PATH wiring, and configuration, so users can health-check an install without remembering the `marketplace` namespace. (#1539)
+
+### Fixed
+
+- `apm install -g --target copilot` now deploys prompt primitives to `~/.copilot/prompts/` while continuing to filter unsupported user-scope instructions. (closes #1482, #1570)
+- Linux standalone `apm` binaries no longer fail git shared-cache clones with shared-library symbol lookup errors caused by PyInstaller dynamic-library paths leaking into child processes. (closes #1534)
+- Avoid 13-minute `apm install` hangs in large local projects by limiting synthetic `_local` discovery to `.apm/` and `.github/`, while preserving package metadata discovery. (closes #1507) -- by @ioannispoulios
+- `apm install -g <package>#<ref>` now updates an existing unpinned global dependency entry instead of leaving the manifest floating. (#1559)
+- `apm install` no longer rewrites `apm.lock.yaml` when MCP dependencies are unchanged, keeping no-op installs byte-stable. (#1568)
+- `apm install` now honors manifest `targets:` without falling back to the legacy Copilot target when singular `target:` is absent. (#1560)
+- `apm install` now preserves executable permission bits when materializing package files through the reflink copy fast path and Artifactory ZIP extraction, so installed executables stay runnable. (closes #1563, #1566)
+- `apm install` summary now reflects actual file mutations: a re-install with identical deployed files reports `No changes -- install state already up to date` instead of falsely claiming `Installed 1 APM dependency`. (closes #1557, #1569)
+- `apm install --update <pkg>` no longer falls through to all manifest dependencies when the positional request already validates as present; lockfile serialization also de-duplicates `deployed_files` paths. (closes #1558, #1567)
+- `apm install` no longer fails on a second run with a false-positive `Content hash mismatch ... supply-chain attack` error for unpinned git or virtual-file dependencies; the redundant re-download is skipped when the on-disk hash matches the lockfile. (closes #1548, #1553)
+- `apm uninstall <pkg>` now scans `devDependencies.apm`, so packages added with `apm install --dev` can be removed instead of leaking in `apm.yml`. (closes #1549, #1552)
+
+### Performance
+
+- `apm install` is substantially faster on large projects and monorepos: primitive discovery is memoized across (integrator, target) pairs, the per-file `Path.resolve()` call is dropped, and skipped directories are expanded (up to 30-40x faster in the worst cases). (closes #1533, #1538)
+
 ### Documentation
 
 - Surface the `compilation.strategy: distributed` default in the
@@ -16,15 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiled context files land" section to the primitives-and-targets
   page and a distributed-layout example in the compile reference.
   Default behavior is unchanged. (closes #1447) -- by @tillig
-  
-### Fixed
-
-- `apm install -g --target copilot` now deploys prompt primitives to `~/.copilot/prompts/` while continuing to filter unsupported user-scope instructions. (closes #1482, #1570)
-- Linux standalone `apm` binaries no longer fail git shared-cache clones with shared-library symbol lookup errors caused by PyInstaller dynamic-library paths leaking into child processes. (closes #1534)
-- Avoid 13-minute `apm install` hangs in large local projects by limiting synthetic `_local` discovery to `.apm/` and `.github/`, while preserving package metadata discovery. (closes #1507) -- by @ioannispoulios
-- `apm install -g <package>#<ref>` now updates an existing unpinned global dependency entry instead of leaving the manifest floating. (#1559)
-- `apm install` no longer rewrites `apm.lock.yaml` when MCP dependencies are unchanged, keeping no-op installs byte-stable. (#1568)
-- `apm install` now honors manifest `targets:` without falling back to the legacy Copilot target when singular `target:` is absent. (#1560)
 
 ## [0.16.0] - 2026-05-28
 
