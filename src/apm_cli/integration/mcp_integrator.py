@@ -10,6 +10,7 @@ The existing adapters (client/, package_manager/) and registry operations
 """
 
 import builtins
+import copy
 import logging
 import re
 import shutil
@@ -771,13 +772,12 @@ class MCPIntegrator:
             existing_lockfile = LockFile.read(lock_path)
             if existing_lockfile is None:
                 return
-            lockfile = LockFile.read(lock_path)
-            if lockfile is None:
-                return
+            lockfile = copy.deepcopy(existing_lockfile)
             lockfile.mcp_servers = sorted(mcp_server_names)
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
             if lockfile.is_semantically_equivalent(existing_lockfile):
+                _log.debug("MCP lockfile unchanged -- skipping write")
                 return
             lockfile.generated_at = datetime.now(timezone.utc).isoformat()
             lockfile.save(lock_path)

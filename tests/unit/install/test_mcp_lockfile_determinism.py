@@ -24,30 +24,38 @@ class _FixedDatetime:
         return cls.instant.astimezone(tz)
 
 
-def _write_manifest_with_mcp(project_root: Path) -> APMPackage:
-    (project_root / "packages" / "dep" / ".apm" / "instructions").mkdir(parents=True)
+def _write_manifest_with_mcp(
+    project_root: Path,
+    *,
+    server_name: str = "atlassian",
+    server_url: str = "https://mcp.atlassian.com/v1/mcp",
+) -> APMPackage:
+    (project_root / "packages" / "dep" / ".apm" / "instructions").mkdir(
+        parents=True,
+        exist_ok=True,
+    )
     (project_root / "packages" / "dep" / "apm.yml").write_text(
         'name: dep\nversion: "1.0.0"\n',
         encoding="utf-8",
     )
     deployed_file = project_root / ".github" / "instructions" / "dep.instructions.md"
-    deployed_file.parent.mkdir(parents=True)
+    deployed_file.parent.mkdir(parents=True, exist_ok=True)
     deployed_file.write_text(
         '---\napplyTo: "**"\n---\n# Dep\n',
         encoding="utf-8",
     )
     (project_root / "apm.yml").write_text(
-        """
+        f"""
 name: repro
 version: "1.0.0"
 dependencies:
   apm:
     - ./packages/dep
   mcp:
-    - name: atlassian
+    - name: {server_name}
       registry: false
       transport: http
-      url: https://mcp.atlassian.com/v1/mcp
+      url: {server_url}
 """.lstrip(),
         encoding="utf-8",
     )
@@ -111,3 +119,39 @@ def test_unchanged_mcp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
 
     assert second_lock.generated_at == first_lock.generated_at
     assert second_bytes == first_bytes
+
+
+def test_changed_mcp_dependencies_update_lockfile(tmp_path: Path) -> None:
+    """The no-write optimization still persists changed MCP inputs."""
+    package = _write_manifest_with_mcp(tmp_path)
+    first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    second_instant = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
+
+    _run_lockfile_phase_and_mcp_persist(tmp_path, package, first_instant)
+    lock_path = get_lockfile_path(tmp_path)
+    first_bytes = lock_path.read_bytes()
+    first_lock = LockFile.read(lock_path)
+    assert first_lock is not None
+    assert first_lock.mcp_servers == ["atlassian"]
+
+    changed_package = _write_manifest_with_mcp(
+        tmp_path,
+        server_name="github",
+        server_url="https://api.githubcopilot.com/mcp/",
+    )
+    _run_lockfile_phase_and_mcp_persist(tmp_path, changed_package, second_instant)
+    second_bytes = lock_path.read_bytes()
+    second_lock = LockFile.read(lock_path)
+    assert second_lock is not None
+
+    assert second_lock.generated_at == second_instant.isoformat()
+    assert second_lock.mcp_servers == ["github"]
+    assert second_lock.mcp_configs == {
+        "github": {
+            "name": "github",
+            "registry": False,
+            "transport": "http",
+            "url": "https://api.githubcopilot.com/mcp/",
+        }
+    }
+    assert second_bytes != first_bytes

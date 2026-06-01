@@ -191,9 +191,16 @@ class LockfileBuilder:
         return lockfile
 
     def _preserve_existing_mcp_state(self, lockfile: LockFile) -> None:
+        """Keep MCP fields until MCPIntegrator reconciles them later in install."""
         if self.ctx.existing_lockfile:
             lockfile.mcp_servers = list(self.ctx.existing_lockfile.mcp_servers)
             lockfile.mcp_configs = dict(self.ctx.existing_lockfile.mcp_configs)
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "Preserved existing MCP state in apm.lock.yaml "
+                    f"({len(lockfile.mcp_servers)} server(s), "
+                    f"{len(lockfile.mcp_configs)} config(s))"
+                )
 
     def _write_if_changed(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> None:
         # Re-read the on-disk lockfile for the semantic comparison.
