@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   
 ### Fixed
 
+- `apm install -g --target copilot` now deploys prompt primitives to `~/.copilot/prompts/` while continuing to filter unsupported user-scope instructions. (closes #1482, #1570)
 - Linux standalone `apm` binaries no longer fail git shared-cache clones with shared-library symbol lookup errors caused by PyInstaller dynamic-library paths leaking into child processes. (closes #1534)
 - Avoid 13-minute `apm install` hangs in large local projects by limiting synthetic `_local` discovery to `.apm/` and `.github/`, while preserving package metadata discovery. (closes #1507) -- by @ioannispoulios
 - `apm install -g <package>#<ref>` now updates an existing unpinned global dependency entry instead of leaving the manifest floating. (#1559)
