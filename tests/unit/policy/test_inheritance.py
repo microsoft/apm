@@ -14,6 +14,7 @@ from apm_cli.policy.inheritance import (
 )
 from apm_cli.policy.schema import (
     ApmPolicy,
+    AuditPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -22,6 +23,7 @@ from apm_cli.policy.schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -712,6 +714,36 @@ class TestEdgeCases(unittest.TestCase):
     def test_name_fallback_to_parent(self):
         result = merge_policies(ApmPolicy(name="parent"), ApmPolicy(name=""))
         self.assertEqual(result.name, "parent")
+
+
+class TestSecurityAuditMerge(unittest.TestCase):
+    """security.audit merges as a floor: tightens, never relaxes."""
+
+    @staticmethod
+    def _p(on_install=None, external=None):
+        return ApmPolicy(
+            security=SecurityPolicy(audit=AuditPolicy(on_install=on_install, external=external))
+        )
+
+    def test_parent_floor_holds_over_weaker_child(self):
+        result = merge_policies(self._p("block"), self._p("warn"))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_child_can_tighten_over_parent(self):
+        result = merge_policies(self._p("warn"), self._p("block"))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_none_parent_transparency(self):
+        result = merge_policies(self._p(None), self._p("warn"))
+        self.assertEqual(result.security.audit.on_install, "warn")
+
+    def test_none_child_transparency(self):
+        result = merge_policies(self._p("block"), self._p(None))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_external_union_merged(self):
+        result = merge_policies(self._p("block", ("skillspector",)), self._p("block", ("sarif",)))
+        self.assertEqual(set(result.security.audit.external), {"skillspector", "sarif"})
 
 
 if __name__ == "__main__":

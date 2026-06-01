@@ -12,12 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit` can now ingest findings from external SARIF 2.1.0 scanners
   (e.g. NVIDIA SkillSpector or any SARIF-emitting tool) via `--external
   <name>` and `--external-sarif <file>`, merging them into APM's own report
-  and exit codes. The capability is behind the new `external-scanners`
-  experimental flag (`apm experimental enable external-scanners`), is
-  one-directional (APM only reads vendor SARIF), and is opt-in entirely from
-  the CLI — install-method-neutral, so it works with the self-contained APM
-  binary with no `pip` extra to install. APM's native content scan always
-  runs; external findings are purely additive.
+  and exit codes. APM's native content scan always runs; external findings
+  are purely additive.
+- `apm install` can now run an optional content audit over freshly deployed
+  files (native hidden-character scan plus any policy-required external
+  scanners) so prompt-injection and hidden-Unicode attacks surface before
+  the integrated context is trusted. Off by default; opt in per-invocation
+  with `apm install --audit warn|block` (or disable with `--no-audit`), set
+  a personal default with `apm config set audit-on-install warn|block`, or
+  mandate it org-wide with an `apm-policy.yml` `security.audit.on_install`
+  rule. Policy acts as a floor: it can raise the mode but a weaker
+  CLI/config value can never relax an org `block` (`--no-policy` opts out of
+  the floor for the invocation). A policy-required external scanner that is
+  not available at install time fails closed with a clear, actionable error.
+- Both capabilities are gated behind the single `external-scanners`
+  experimental flag (`apm experimental enable external-scanners`), are
+  one-directional (APM only reads vendor SARIF), and are install-method
+  neutral — they work with the self-contained APM binary with no `pip`
+  extra to install.
 
 ### Documentation
 

@@ -41,6 +41,7 @@ The `<ref>` accepts:
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
+| `security`         | object              | see section      | no       | Rules over APM's security checks (install-time content audit + external scanners; requires `external-scanners` flag). |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
@@ -151,6 +152,20 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
 
+## security
+
+Rules over APM's security checks. Requires the `external-scanners`
+experimental flag to take effect; ignored otherwise.
+
+| Field                | Type            | Default | Notes                                                                            |
+|----------------------|-----------------|---------|----------------------------------------------------------------------------------|
+| `audit.on_install`   | enum or null    | `null`  | `off` / `warn` / `block`. Minimum install-time audit mode (a **floor**). `null` = no opinion. `warn` records findings; `block` halts installs on critical findings. |
+| `audit.external`     | list of strings | `null`  | External SARIF scanner names (e.g. `skillspector`) that MUST run during the install audit. A required scanner that is unavailable fails the install closed. |
+
+`audit.on_install` is a floor: it can only raise the effective mode chosen by
+`apm install --audit` / `apm config audit-on-install`, never relax it. `apm
+install --no-policy` opts out of the floor for that invocation.
+
 ## Inheritance
 
 `extends:` resolves a parent policy. Maximum chain depth is **5**; cycles are rejected.
@@ -183,6 +198,8 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
+| `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
+| `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
 | `compilation.*.enforce`     | First non-null wins (parent precedence).                                         |
 | `compilation.source_attribution` | Logical OR.                                                                 |
 

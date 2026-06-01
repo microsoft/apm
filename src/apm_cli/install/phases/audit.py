@@ -110,7 +110,11 @@ def run(ctx: InstallContext) -> None:
             package="audit",
             detail=(
                 "Review with 'apm audit' or clean with 'apm audit --strip'."
-                + (" Deployed despite critical findings (--force)." if has_critical and ctx.force else "")
+                + (
+                    " Deployed despite critical findings (--force)."
+                    if has_critical and ctx.force
+                    else ""
+                )
             ),
             severity=severity,
         )

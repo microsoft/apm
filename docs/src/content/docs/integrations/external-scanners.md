@@ -65,6 +65,47 @@ If the CLI is not on `PATH`, APM tells you so and points you back to the
 file-based path above (`--external sarif --external-sarif <file>`), which needs
 no installation.
 
+## Run an audit during `apm install`
+
+The same machinery can run **during install**, scanning the files a package
+just deployed before you start trusting them. This is off by default; the
+`external-scanners` flag must be enabled, and then you choose a mode:
+
+```bash
+# One-off: warn (record findings) or block (halt on critical findings)
+apm install some/package --audit warn
+apm install some/package --audit block
+
+# Disable for a single invocation
+apm install some/package --no-audit
+```
+
+Set a personal default so every install audits without a flag:
+
+```bash
+apm config set audit-on-install warn   # off | warn | block
+```
+
+Organizations can mandate it through `apm-policy.yml`:
+
+```yaml
+security:
+  audit:
+    on_install: block          # off | warn | block
+    external:                  # optional: scanners that MUST run at install
+      - skillspector
+```
+
+Policy is a **floor**: it can raise the effective mode but a weaker
+`--audit`/config value can never relax an org `block`. `apm install
+--no-policy` skips the floor for that invocation. `--audit block` (or
+`--force`) always lets you tighten or override locally.
+
+When policy lists required `external` scanners, they run as part of the
+install audit. If a required scanner is **not available** at install time
+(for example its CLI is not on `PATH`), the install **fails closed** with a
+clear, actionable message rather than silently skipping the check.
+
 ## Notes
 
 - **Additive, never weakening.** APM's native content scan always runs. External
