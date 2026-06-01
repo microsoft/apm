@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 _SELF_KEY = "."
 
 
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    """Return values without duplicates, preserving first-seen order."""
+    return list(dict.fromkeys(values))
+
+
 @dataclass
 class LockedDependency:
     """A resolved dependency with exact commit/version information."""
@@ -104,7 +109,7 @@ class LockedDependency:
         if self.package_type:
             result["package_type"] = self.package_type
         if self.deployed_files:
-            result["deployed_files"] = sorted(dict.fromkeys(self.deployed_files))
+            result["deployed_files"] = sorted(_dedupe_preserving_order(self.deployed_files))
         if self.deployed_file_hashes:
             result["deployed_file_hashes"] = dict(sorted(self.deployed_file_hashes.items()))
         if self.source:
@@ -149,7 +154,7 @@ class LockedDependency:
         - Old ``deployed_skills`` lists are migrated to ``deployed_files``
           paths under ``.github/skills/`` and ``.claude/skills/``.
         """
-        deployed_files = list(data.get("deployed_files", []))
+        deployed_files = _dedupe_preserving_order(list(data.get("deployed_files", [])))
 
         # Migrate legacy deployed_skills -> deployed_files
         old_skills = data.get("deployed_skills", [])
@@ -414,6 +419,7 @@ class LockFile:
         keeping the in-memory state consistent with what ``to_yaml()``
         would emit (design section 6.1; issue #1488).
         """
+        dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
         self.dependencies[dep.get_unique_key()] = dep
         if self.lockfile_version == "1" and (
             dep.source == "registry" or dep.constraint or dep.resolved_tag or dep.resolved_at

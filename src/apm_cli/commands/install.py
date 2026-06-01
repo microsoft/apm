@@ -240,7 +240,7 @@ def _only_packages_from_validation(
         return None
     if outcome is None:
         return []
-    seen = builtins.set()
+    seen = set()
     selected = []
     for canonical, _already_present in outcome.valid:
         if canonical not in seen:

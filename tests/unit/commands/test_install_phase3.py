@@ -628,14 +628,21 @@ class TestInstallUpdatePackageScoping:
             encoding="utf-8",
         )
 
+        service_requests = []
+
+        def capture_request(_self, request):
+            service_requests.append(request)
+            return InstallResult(installed_count=1, diagnostics=None)
+
         with (
-            patch("apm_cli.commands.install._validate_package_exists", return_value=True),
             patch(
-                "apm_cli.commands.install._install_apm_dependencies",
-                return_value=InstallResult(installed_count=1, diagnostics=None),
-            ) as install_apm,
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--update", "owner/target"],
+            ),
+            patch("apm_cli.commands.install._validate_package_exists", return_value=True),
+            patch("apm_cli.install.service.InstallService.run", capture_request),
         ):
             result = CliRunner().invoke(install, ["--update", "owner/target"])
 
         assert result.exit_code == 0, result.output
-        assert install_apm.call_args.args[3] == ["owner/target"]
+        assert service_requests[0].only_packages == ["owner/target"]

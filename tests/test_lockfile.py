@@ -125,6 +125,8 @@ class TestLockedDependency:
             )
         )
 
+        assert lock.get_dependency("owner/repo").deployed_files == ["b.md", "a.md"]
+
         lock_path = tmp_path / "apm.lock.yaml"
         lock.write(lock_path)
 
