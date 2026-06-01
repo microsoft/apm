@@ -90,6 +90,16 @@ def should_exclude(
     return False
 
 
+def matches_glob(rel_path: str, pattern: str) -> bool:
+    """Return True if forward-slash ``rel_path`` matches glob ``pattern``.
+
+    Supports ``**`` recursive segments. Shared by ``compilation.exclude``
+    filtering and instruction ``applyTo`` placement so both stay on a single
+    glob-matching implementation.
+    """
+    return _matches_pattern(rel_path, pattern)
+
+
 def _matches_pattern(rel_path_str: str, pattern: str) -> bool:
     """Check if a relative path string matches a single exclusion pattern.
 
