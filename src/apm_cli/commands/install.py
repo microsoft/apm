@@ -53,6 +53,7 @@ from apm_cli.install.package_resolution import (
     update_existing_dependency_entry_if_needed,
     user_scope_rejection_reason,
 )
+from apm_cli.install.package_selection import only_packages_from_validation
 
 # Re-export local-content leaf helpers so that callers inside this module
 # (e.g. _install_apm_dependencies) and any future test patches against
@@ -229,24 +230,6 @@ class InstallContext:
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
-
-
-def _only_packages_from_validation(
-    packages: tuple[str, ...] | None,
-    outcome: _ValidationOutcome | None,
-) -> list[str] | None:
-    """Return canonical package specs for a positional install request."""
-    if not packages:
-        return None
-    if outcome is None:
-        return []
-    seen = set()
-    selected = []
-    for canonical, _already_present in outcome.valid:
-        if canonical not in seen:
-            seen.add(canonical)
-            selected.append(canonical)
-    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -1517,7 +1500,7 @@ def install(  # noqa: PLR0913
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
             refresh=refresh,
-            only_packages=_only_packages_from_validation(packages, outcome),
+            only_packages=only_packages_from_validation(packages, outcome),
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
             legacy_skill_paths=legacy_skill_paths,
