@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm audit` can now ingest findings from external SARIF 2.1.0 scanners
+  (e.g. NVIDIA SkillSpector or any SARIF-emitting tool) via `--external
+  <name>` and `--external-sarif <file>`, merging them into APM's own report
+  and exit codes. The capability is behind the new `external-scanners`
+  experimental flag (`apm experimental enable external-scanners`), is
+  one-directional (APM only reads vendor SARIF), and is opt-in entirely from
+  the CLI — install-method-neutral, so it works with the self-contained APM
+  binary with no `pip` extra to install. APM's native content scan always
+  runs; external findings are purely additive.
+
 ### Documentation
 
 - Surface the `compilation.strategy: distributed` default in the
