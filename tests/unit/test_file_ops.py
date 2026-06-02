@@ -4,8 +4,8 @@ import errno
 import os
 import shutil
 import stat
-import sys  # noqa: F401
-from pathlib import Path  # noqa: F401
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -243,6 +243,27 @@ class TestRetryOnLock:
 # ---------------------------------------------------------------------------
 # robust_rmtree
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows does not honor POSIX execute bits; st_mode & 0o111 is not preserved",
+)
+def test_robust_copy2_preserves_executable_bits_on_reflink_fast_path(tmp_path):
+    src = tmp_path / "source.sh"
+    dst = tmp_path / "dest.sh"
+    src.write_text("#!/bin/sh\n")
+    src.chmod(0o755)
+
+    def fake_clone(src_path: str, dst_path: str) -> bool:
+        Path(dst_path).write_bytes(Path(src_path).read_bytes())
+        return True
+
+    with patch("apm_cli.utils.reflink.clone_file", side_effect=fake_clone):
+        robust_copy2(src, dst)
+
+    assert dst.read_text() == "#!/bin/sh\n"
+    assert os.stat(dst).st_mode & 0o111 == 0o111
 
 
 class TestRobustRmtree:

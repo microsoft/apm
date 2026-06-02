@@ -101,7 +101,7 @@ def _integrate_materialization(
             ),
             ctx=ctx,
         )
-        for k in (
+        mutation_keys = (
             "prompts",
             "agents",
             "skills",
@@ -109,9 +109,12 @@ def _integrate_materialization(
             "instructions",
             "commands",
             "hooks",
-            "links_resolved",
-        ):
+        )
+        for k in (*mutation_keys, "links_resolved"):
             deltas[k] = int_result[k]
+        # Source-level install deltas are promoted only when primitives changed.
+        if any(int_result[k] > 0 for k in mutation_keys):
+            deltas["installed"] = 1
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
     except Exception as e:
         # Per-source error wording: each DependencySource subclass

@@ -316,7 +316,7 @@ class TestResolveTargetsConsistency:
             targets = resolve_targets(Path(tmp), user_scope=True, explicit_target="all")
             for t in targets:
                 if t.name == "copilot":
-                    assert "prompts" not in t.primitives
+                    assert "prompts" in t.primitives
                     assert "instructions" not in t.primitives
                 if t.name == "cursor":
                     assert "instructions" not in t.primitives

@@ -723,8 +723,11 @@ Use type hints in Python code.
         )
 
         compiler = AgentsCompiler(str(temp_project))
+        # Use source_attribution=True so the footer is included in the output.
         result = compiler.compile(
-            CompilationConfig(target="vscode", dry_run=False, single_agents=True),
+            CompilationConfig(
+                target="vscode", dry_run=False, single_agents=True, source_attribution=True
+            ),
             primitives,
         )
         assert result.success

@@ -812,6 +812,11 @@ class InstallLogger(CommandLogger):
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
             )
+        else:
+            _rich_info(
+                f"No changes -- install state already up to date{timing_suffix}.",
+                symbol="info",
+            )
 
     def install_interrupted(self, elapsed_seconds: float):
         """Log a minimal elapsed-time line when the normal summary did

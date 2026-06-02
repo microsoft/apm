@@ -731,14 +731,14 @@ class TestForScope:
         assert resolved.root_dir == ".claude"
 
     def test_filters_unsupported_primitives(self):
-        """for_scope removes unsupported primitives from the dict."""
+        """for_scope removes only unsupported primitives from the dict."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         copilot = KNOWN_TARGETS["copilot"]
         assert "prompts" in copilot.primitives
         assert "instructions" in copilot.primitives
         resolved = copilot.for_scope(user_scope=True)
-        assert "prompts" not in resolved.primitives
+        assert "prompts" in resolved.primitives
         assert "instructions" not in resolved.primitives
         # Supported primitives remain
         assert "agents" in resolved.primitives

@@ -513,10 +513,13 @@ class TestPackCmdFlags:
         result = CliRunner().invoke(pack_cmd, ["--dry-run", "--marketplace", "all"])
         assert "Unknown marketplace format 'all'" not in (result.output or "")
 
-    def test_marketplace_output_deprecated_flag_warning(self) -> None:
-        """--marketplace-output prints a deprecation warning."""
+    def test_marketplace_output_removed(self) -> None:
+        """--marketplace-output was removed in v0.16 (breaking change, #1318)."""
         result = CliRunner().invoke(pack_cmd, ["--marketplace-output", "out.json", "--dry-run"])
-        assert "deprecated" in (result.output or "").lower() or result.exit_code in (0, 1)
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower() or isinstance(
+            result.exception, SystemExit
+        )
 
     def test_json_output_envelope_shape(self, tmp_path: Path, monkeypatch) -> None:
         """--json mode always returns a JSON envelope, even on no-op."""

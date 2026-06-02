@@ -203,13 +203,11 @@ class TestCopilotInstallUninstallCycle:
             assert not (self.project_root / p).exists(), f"not removed: {p}"
 
     def test_user_scope(self):
-        """At user scope, agents deploy to .copilot/; instructions filtered."""
+        """At user scope, agents and prompts deploy to .copilot/; instructions filtered."""
         target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
         assert target is not None
         assert target.root_dir == ".copilot"
-        # instructions and prompts filtered out at user scope
         assert "instructions" not in target.primitives
-        assert "prompts" not in target.primitives
 
         pkg_info = _make_pkg(self.project_root, instructions=True, agents=True, prompts=True)
 
@@ -231,23 +229,31 @@ class TestCopilotInstallUninstallCycle:
 
         assert agent_result.files_integrated >= 1
         assert inst_result.files_integrated == 0
-        assert prompt_result.files_integrated == 0
+        assert prompt_result.files_integrated >= 1
 
-        deployed = _posix_relpaths(self.project_root, agent_result.target_paths)
+        all_paths = agent_result.target_paths + prompt_result.target_paths
+        deployed = _posix_relpaths(self.project_root, all_paths)
         assert any(p.startswith(".copilot/agents/") for p in deployed)
+        assert any(p == ".copilot/prompts/helper.prompt.md" for p in deployed)
 
         for p in deployed:
             assert (self.project_root / p).exists()
+
+        assert (self.project_root / ".copilot" / "prompts" / "helper.prompt.md").exists()
 
         # .github/ must NOT be touched
         assert not (self.project_root / ".github").exists()
 
         # -- uninstall -----------------------------------------------------
-        sync = agent_integrator.sync_for_target(
+        agent_sync = agent_integrator.sync_for_target(
             target, pkg_info.package, self.project_root, managed_files=deployed
         )
-        assert sync["errors"] == 0
-        assert sync["files_removed"] == len(deployed)
+        prompt_sync = prompt_integrator.sync_for_target(
+            target, pkg_info.package, self.project_root, managed_files=deployed
+        )
+        assert agent_sync["errors"] == 0
+        assert prompt_sync["errors"] == 0
+        assert agent_sync["files_removed"] + prompt_sync["files_removed"] == len(deployed)
         for p in deployed:
             assert not (self.project_root / p).exists()
 

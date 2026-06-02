@@ -15,6 +15,7 @@ Exposes:
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -107,6 +108,7 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            self._preserve_existing_mcp_state(lockfile)
 
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
@@ -188,6 +190,20 @@ class LockfileBuilder:
                     existing.add_dependency(dep)
                 lockfile = existing
         return lockfile
+
+    def _preserve_existing_mcp_state(self, lockfile: LockFile) -> None:
+        """Keep MCP fields until MCPIntegrator reconciles them later in install."""
+        if self.ctx.existing_lockfile:
+            # MCPIntegrator.update_lockfile runs after this phase and reconciles
+            # these carried-forward fields against the current manifest.
+            lockfile.mcp_servers = list(self.ctx.existing_lockfile.mcp_servers)
+            lockfile.mcp_configs = copy.deepcopy(self.ctx.existing_lockfile.mcp_configs)
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "MCP state unchanged -- carrying forward "
+                    f"{len(lockfile.mcp_servers)} server(s), "
+                    f"{len(lockfile.mcp_configs)} config(s)"
+                )
 
     def _write_if_changed(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> None:
         # Re-read the on-disk lockfile for the semantic comparison.

@@ -125,6 +125,10 @@ class DistributedAgentsCompiler:
             debug = config.get("debug", False)
             clean_orphaned = config.get("clean_orphaned", False)
             dry_run = config.get("dry_run", False)
+            # True when apm install has already deployed instructions to
+            # .github/instructions/; omitting them here avoids Copilot reading
+            # duplicate content from both AGENTS.md and .github/instructions/.
+            skip_instructions = config.get("skip_instructions", False)
 
             # Phase 0: Context Link Resolution
             # Register all context files and compile referenced ones
@@ -210,7 +214,10 @@ class DistributedAgentsCompiler:
                 success=len(self.errors) == 0,
                 placements=placements,
                 content_map={
-                    p.agents_path: self._generate_agents_content(p, primitives) for p in placements
+                    p.agents_path: self._generate_agents_content(
+                        p, primitives, skip_instructions=skip_instructions
+                    )
+                    for p in placements
                 },
                 warnings=self.warnings.copy(),
                 errors=self.errors.copy(),
@@ -511,13 +518,20 @@ class DistributedAgentsCompiler:
         return best_dir
 
     def _generate_agents_content(
-        self, placement: PlacementResult, primitives: PrimitiveCollection
+        self,
+        placement: PlacementResult,
+        primitives: PrimitiveCollection,
+        *,
+        skip_instructions: bool = False,
     ) -> str:
         """Generate AGENTS.md content for a specific placement.
 
         Args:
             placement (PlacementResult): Placement result with instructions.
             primitives (PrimitiveCollection): Full primitive collection.
+            skip_instructions (bool): When True, omit instruction content because
+                it is already deployed to .github/instructions/ by ``apm install``
+                (avoids duplicate context for Copilot, which reads both locations).
 
         Returns:
             str: Generated AGENTS.md content.
@@ -540,13 +554,17 @@ class DistributedAgentsCompiler:
 
         sections.append("")
 
-        sections.extend(
-            build_attributed_instructions(
-                placement.instructions,
-                placement.source_attribution,
-                self.base_dir,
+        # Instructions section: skipped when already deployed to .github/instructions/
+        # by ``apm install`` to avoid Copilot reading duplicate content from both
+        # AGENTS.md and .github/instructions/.
+        if not skip_instructions:
+            sections.extend(
+                build_attributed_instructions(
+                    placement.instructions,
+                    placement.source_attribution,
+                    self.base_dir,
+                )
             )
-        )
 
         # Footer
         sections.append("---")

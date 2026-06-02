@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "sweep-bug-queue",
-  "summary": "Maintainer asks to sweep the entire open bug queue. With the skill loaded, the orchestrator runs gh issue list to enumerate candidates, asks for user confirmation when the count exceeds 20, fans out triage subagents in parallel, then proceeds through the full phase contract. Without the skill, the orchestrator either drifts (no confirmation, no plan.md table, serial execution) or refuses with a vague 'too many issues' response.",
+  "summary": "Maintainer asks to sweep the entire open bug queue. With the skill loaded, the orchestrator runs gh issue list to enumerate candidates, asks for user confirmation when the count exceeds 20, fans out triage subagents in parallel, gates LEGIT rows through strategic alignment, then proceeds through cross-reference, greenfield fix, shepherd-driver drive, mergeability, and final-report phases. Without the skill, the orchestrator either drifts (no confirmation, no plan.md table, serial execution) or refuses with a vague too-many-issues response.",
   "scenario": {
     "user_query": "sweep the bug queue and drive whatever's mergeable to a ready-to-ship state",
     "ground_truth": {
@@ -11,10 +11,12 @@
     "expected_phases_with_skill": [
       "phase 0: gh issue list --label bug --state open executed; 25 candidates resolved; user confirmation requested (threshold > 20)",
       "phase 1: parallel triage fan-out post-confirmation",
-      "phase 2: gh pr list cross-reference for every LEGIT row",
-      "phase 3a/3b: shepherd-or-fix fan-out",
-      "phase 4: completion fan-out, cross-session-message only on green",
-      "phase 5: final-report-template rendered"
+      "phase 1.5: strategic-alignment gate fans out apm-ceo subagents per LEGIT row and demotes out-of-scope rows to triaged-deferred",
+      "phase 2: gh pr list cross-reference for every aligned LEGIT row and capture driver inputs for community PRs",
+      "phase 3: greenfield fix fan-out for aligned LEGIT rows without PRs",
+      "phase 4: shepherd-driver drive-to-merge fan-out for community and own-fix PRs; cross-session-message only on green",
+      "phase 5: mergeability gate probes mergeStateStatus, resolves conflicts with --force-with-lease, and partitions post-gate status",
+      "phase 6: final-report-template rendered"
     ]
   },
   "fixtures": {
@@ -22,23 +24,113 @@
     "without_skill": "../fixtures/sweep-bug-queue.without_skill.md"
   },
   "rubric": [
-    {"id": "issue-enum-cli", "pattern": "(?is)gh\\s+issue\\s+list[^\\n]{0,200}(--label\\s+bug|state\\s+open)", "weight": 2, "description": "Candidate enumeration via gh issue list, not by guesswork."},
-    {"id": "user-confirmation", "pattern": "(?is)(confirm|confirmation|threshold[^\\n]{0,40}20|ask\\s+(for\\s+)?confirmation)", "weight": 2, "description": "User confirmation requested when candidate count crosses the sweep-all threshold."},
-    {"id": "ground-truth-table", "pattern": "(?im)^\\s*\\|\\s*issue\\s*\\|\\s*verdict\\s*\\|", "weight": 2, "description": "Ground-truth table initialized in plan.md."},
-    {"id": "parallel-triage", "pattern": "(?is)triage[^.\\n]{0,80}(parallel|fan[- ]?out)", "weight": 2, "description": "Triage explicitly fanned out, not serialized."},
-    {"id": "cross-reference-step", "pattern": "(?is)(gh\\s+pr\\s+list|pr-in-flight|cross[- ]?reference)", "weight": 2, "description": "PR-in-flight cross-reference performed."},
-    {"id": "phase-discipline", "pattern": "(?is)phase\\s*[0-5]", "weight": 1, "description": "Phase contract is named (0..5)."},
-    {"id": "table-reload", "pattern": "(?is)(re[- ]?read|reload)[^.\\n]{0,40}(table|plan\\.md|ground[- ]?truth)", "weight": 1, "description": "Table reload at phase boundaries (B4 PLAN MEMENTO + B8 ATTENTION ANCHOR)."},
-    {"id": "final-report", "pattern": "(?is)final[- ]?report", "weight": 1, "description": "Final report rendered."},
-    {"id": "progress-diagram-header", "pattern": "(?im)^##\\s+Progress\\s*\\(Phase\\s+\\d", "weight": 2, "description": "Operator-visibility contract: a 'Progress (Phase N - <name>)' header anchors each phase boundary render."},
-    {"id": "mermaid-flowchart-rendered", "pattern": "(?is)```mermaid[\\s\\S]+?flowchart\\s+TB[\\s\\S]+?classDef\\s+active", "weight": 2, "description": "Operator-visibility contract: a mermaid flowchart with the active classDef is rendered to chat at the phase boundary."},
-    {"id": "dispatch-table-before-fanout", "pattern": "(?im)^\\s*\\|\\s*subagent_id\\s*\\|\\s*target\\s*\\|", "weight": 2, "description": "Operator-visibility contract: a dispatch table mapping subagent_id to target precedes each fan-out wave."},
-    {"id": "recommended-followups-channel", "pattern": "(?is)recommended[_ -]?followups", "weight": 1, "description": "Schema-honored channel for non-blocking findings flowed from shepherd to completion."},
-    {"id": "fold-defer-classifier", "pattern": "(?is)(fold[/ ]?defer|classif(y|ies)[^.\\n]{0,40}(fold|defer)|fold[^.\\n]{0,40}defer)", "weight": 1, "description": "Completion subagent classifies recommended items as FOLD vs DEFER per the fold-in invariant."},
-    {"id": "tracking-issue-for-defer", "pattern": "(?is)gh\\s+issue\\s+create[\\s\\S]{0,200}(defer|separable|tracking)|deferred[_ ]?followups", "weight": 1, "description": "DEFER items are filed as tracking issues (not silently dropped)."},
-    {"id": "mergeability-probe-cli", "pattern": "(?is)gh\\s+pr\\s+view[^\\n]{0,200}mergeStateStatus", "weight": 2, "description": "Phase 5a probes mergeStateStatus via gh pr view --json (S7 DETERMINISTIC TOOL BRIDGE; never asserted from recall)."},
-    {"id": "force-with-lease-on-push", "pattern": "(?is)git\\s+push[^\\n]{0,80}--force-with-lease", "weight": 2, "description": "Conflict-resolution subagent uses --force-with-lease (never bare --force) per the architecture invariant."},
-    {"id": "post-wave-partition-columns", "pattern": "(?is)(requires[- ]author[- ]action|requires[- ]human[- ]judgment|resolution[- ]failed)", "weight": 2, "description": "Final report names at least one of the new partition columns introduced by the mergeability gate."},
-    {"id": "two-comment-cap", "pattern": "(?is)(second[- ]and[- ]final|exactly\\s+two\\s+comments|two[- ]comment\\s+cap)", "weight": 1, "description": "The two-comment-per-PR cap (one completion confirmation + one resolution confirmation) is honored as a hard rule."}
+    {
+      "id": "issue-enum-cli",
+      "pattern": "(?is)gh\\s+issue\\s+list[^\\n]{0,200}(--label\\s+bug|state\\s+open)",
+      "weight": 2,
+      "description": "Candidate enumeration via gh issue list, not by guesswork."
+    },
+    {
+      "id": "user-confirmation",
+      "pattern": "(?is)(confirm|confirmation|threshold[^\\n]{0,40}20|ask\\s+(for\\s+)?confirmation)",
+      "weight": 2,
+      "description": "User confirmation requested when candidate count crosses the sweep-all threshold."
+    },
+    {
+      "id": "ground-truth-table",
+      "pattern": "(?im)^\\s*\\|\\s*issue\\s*\\|\\s*verdict\\s*\\|",
+      "weight": 2,
+      "description": "Ground-truth table initialized in plan.md."
+    },
+    {
+      "id": "parallel-triage",
+      "pattern": "(?is)triage[^.\\n]{0,80}(parallel|fan[- ]?out)",
+      "weight": 2,
+      "description": "Triage explicitly fanned out, not serialized."
+    },
+    {
+      "id": "cross-reference-step",
+      "pattern": "(?is)(gh\\s+pr\\s+list|pr-in-flight|cross[- ]?reference)",
+      "weight": 2,
+      "description": "PR-in-flight cross-reference performed."
+    },
+    {
+      "id": "phase-discipline",
+      "pattern": "(?is)phase\\s*[0-5]",
+      "weight": 1,
+      "description": "Phase contract is named (0..5)."
+    },
+    {
+      "id": "table-reload",
+      "pattern": "(?is)(re[- ]?read|reload)[^.\\n]{0,40}(table|plan\\.md|ground[- ]?truth)",
+      "weight": 1,
+      "description": "Table reload at phase boundaries (B4 PLAN MEMENTO + B8 ATTENTION ANCHOR)."
+    },
+    {
+      "id": "final-report",
+      "pattern": "(?is)final[- ]?report",
+      "weight": 1,
+      "description": "Final report rendered."
+    },
+    {
+      "id": "progress-diagram-header",
+      "pattern": "(?im)^##\\s+Progress\\s*\\(Phase\\s+\\d",
+      "weight": 2,
+      "description": "Operator-visibility contract: a 'Progress (Phase N - <name>)' header anchors each phase boundary render."
+    },
+    {
+      "id": "mermaid-flowchart-rendered",
+      "pattern": "(?is)```mermaid[\\s\\S]+?flowchart\\s+TB[\\s\\S]+?classDef\\s+active",
+      "weight": 2,
+      "description": "Operator-visibility contract: a mermaid flowchart with the active classDef is rendered to chat at the phase boundary."
+    },
+    {
+      "id": "dispatch-table-before-fanout",
+      "pattern": "(?im)^\\s*\\|\\s*subagent_id\\s*\\|\\s*target\\s*\\|",
+      "weight": 2,
+      "description": "Operator-visibility contract: a dispatch table mapping subagent_id to target precedes each fan-out wave."
+    },
+    {
+      "id": "recommended-followups-channel",
+      "pattern": "(?is)(completion_return|folded[_ -]?items|deferred[_ -]?items)",
+      "weight": 1,
+      "description": "Driver return channel records folded and deferred follow-ups from the drive loop."
+    },
+    {
+      "id": "fold-defer-classifier",
+      "pattern": "(?is)(fold[/ ]?defer|classif(y|ies)[^.\\n]{0,40}(fold|defer)|fold[^.\\n]{0,40}defer)",
+      "weight": 1,
+      "description": "Shepherd-driver classifies findings as FOLD vs DEFER per the fold-in invariant."
+    },
+    {
+      "id": "tracking-issue-for-defer",
+      "pattern": "(?is)gh\\s+issue\\s+create[\\s\\S]{0,200}(defer|separable|tracking)|deferred[_ ]?items",
+      "weight": 1,
+      "description": "DEFER items are filed as tracking issues (not silently dropped)."
+    },
+    {
+      "id": "mergeability-probe-cli",
+      "pattern": "(?is)gh\\s+pr\\s+view[^\\n]{0,200}mergeStateStatus",
+      "weight": 2,
+      "description": "Phase 5a probes mergeStateStatus via gh pr view --json (S7 DETERMINISTIC TOOL BRIDGE; never asserted from recall)."
+    },
+    {
+      "id": "force-with-lease-on-push",
+      "pattern": "(?is)git\\s+push[^\\n]{0,80}--force-with-lease",
+      "weight": 2,
+      "description": "Conflict-resolution subagent uses --force-with-lease (never bare --force) per the architecture invariant."
+    },
+    {
+      "id": "post-wave-partition-columns",
+      "pattern": "(?is)(requires[- ]author[- ]action|requires[- ]human[- ]judgment|resolution[- ]failed)",
+      "weight": 2,
+      "description": "Final report names at least one of the new partition columns introduced by the mergeability gate."
+    },
+    {
+      "id": "two-comment-cap",
+      "pattern": "(?is)(second[- ]and[- ]final|exactly\\s+two\\s+comments|two[- ]comment\\s+cap)",
+      "weight": 1,
+      "description": "The two-comment-per-PR cap (one driver advisory comment + one resolution confirmation when Phase 5 resolves a conflict) is honored as a hard rule."
+    }
   ]
 }

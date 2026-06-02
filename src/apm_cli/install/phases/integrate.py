@@ -338,7 +338,7 @@ def _integrate_root_project(
             logger.verbose_detail(f"Deployed {_local_total} local primitive(s) from .apm/")
 
         return {
-            "installed": 1,
+            "installed": int(_local_total > 0),
             "prompts": _root_result["prompts"],
             "agents": _root_result["agents"],
             "skills": _root_result.get("skills", 0),

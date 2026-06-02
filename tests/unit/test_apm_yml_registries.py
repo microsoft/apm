@@ -305,7 +305,7 @@ class TestDefaultRouting:
         pkg = APMPackage.from_apm_yml(p)
         d = pkg.dependencies["apm"][0]
         assert d.is_local
-        assert d.source is None
+        assert d.source == "local"
 
     def test_dev_dependencies_routed_too(self, write_yml):
         p = write_yml("""

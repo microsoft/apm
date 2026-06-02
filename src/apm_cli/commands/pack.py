@@ -144,14 +144,6 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
     ),
 )
 @click.option(
-    "--marketplace-output",
-    "marketplace_output",
-    type=click.Path(),
-    default=None,
-    hidden=True,
-    help=("[Deprecated] Override Claude output path. Use --marketplace-path claude=PATH instead."),
-)
-@click.option(
     "-m",
     "--marketplace",
     "marketplace_filter",
@@ -203,7 +195,6 @@ def pack_cmd(
     verbose,
     offline,
     include_prerelease,
-    marketplace_output,
     marketplace_filter,
     marketplace_path_overrides,
     json_output,
@@ -220,20 +211,6 @@ def pack_cmd(
         set_console_stderr(True)
 
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
-
-    # -- Deprecation: --marketplace-output → --marketplace-path claude=PATH --
-    if marketplace_output is not None:
-        translated = f"--marketplace-path claude={marketplace_output}"
-        click.echo(
-            f"Warning: --marketplace-output is deprecated and will be removed in v0.15. "
-            f"Use {translated} instead.",
-            err=True,
-        )
-        marketplace_path_overrides = (
-            *marketplace_path_overrides,
-            f"claude={marketplace_output}",
-        )
-        marketplace_output = None
 
     # -- Parse --marketplace-path overrides --
     path_overrides: dict[str, str] = {}
@@ -311,7 +288,6 @@ def pack_cmd(
         bundle_force=force,
         marketplace_offline=offline,
         marketplace_include_prerelease=include_prerelease,
-        marketplace_output=None,
         marketplace_formats=marketplace_formats,
         marketplace_path_overrides=path_overrides if path_overrides else None,
         dry_run=dry_run,
@@ -403,7 +379,6 @@ def pack_cmd(
                     dry_run=True,
                     offline=options.marketplace_offline,
                     include_prerelease=options.marketplace_include_prerelease,
-                    marketplace_output=None,
                 )
                 drift_builder = MarketplaceBuilder.from_config(
                     gate_config, project_root=project_root, options=mkt_opts
