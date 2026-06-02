@@ -196,12 +196,15 @@ class LocalDependencySource(DependencySource):
                     )
                 return None
 
-        # Determine the anchor for relative ``local_path`` (#857). For direct
-        # deps from the root project this is project_root. For transitive
-        # deps declared inside another local package, it is the parent
-        # package's source directory -- captured during resolve via
-        # ``ctx.dep_base_dirs``.
-        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.project_root
+        # Determine the anchor for relative ``local_path`` (#857). For
+        # direct deps from the root project this is ``ctx.source_root``
+        # (which equals ``ctx.project_root`` unless ``apm install --root``
+        # redirects writes -- then it stays at $PWD).  For transitive
+        # deps declared inside another local package, the parent's
+        # source directory was captured during resolve via
+        # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
+        # has nothing to do.
+        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
         result_path = _copy_local_package(
             dep_ref,
             install_path,

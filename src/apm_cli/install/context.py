@@ -34,9 +34,17 @@ class InstallContext:
     # ------------------------------------------------------------------
     project_root: Path
     apm_dir: Path
-
-    # ------------------------------------------------------------------
-    # Inputs: populated by the caller from CLI args / APMPackage
+    # Source root for reads (``apm.yml``, ``.apm/``, local-path
+    # packages).  Equal to ``project_root`` unless ``apm install --root``
+    # redirects writes -- then ``source_root`` stays at ``$PWD`` while
+    # ``project_root`` is the override.
+    #
+    # Resolved at the CLI boundary (``run_install_pipeline``).  When a
+    # caller does not pass it, ``__post_init__`` defaults it to
+    # ``project_root`` -- the correct value whenever ``--root`` is absent.
+    # Phases always read ``ctx.source_root`` (never re-derive from
+    # ``project_root``); only the ``--root`` path makes the two diverge.
+    source_root: Path | None = None
     # ------------------------------------------------------------------
     apm_package: Any = None  # APMPackage
     update_refs: bool = False
@@ -176,3 +184,11 @@ class InstallContext:
     # Legacy skill paths opt-out (convergence §3)
     # ------------------------------------------------------------------
     legacy_skill_paths: bool = False  # --legacy-skill-paths flag or APM_LEGACY_SKILL_PATHS env
+
+    def __post_init__(self) -> None:
+        # ``source_root`` defaults to ``project_root`` (the correct value
+        # whenever ``apm install --root`` is not used).  Only the --root
+        # CLI path passes a distinct source_root; every other caller and
+        # test gets source_root == project_root for free.
+        if self.source_root is None:
+            self.source_root = self.project_root

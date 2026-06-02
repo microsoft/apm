@@ -239,13 +239,21 @@ class CompilationResult:
 class AgentsCompiler:
     """Main compiler for generating AGENTS.md files."""
 
-    def __init__(self, base_dir: str = "."):
+    def __init__(self, base_dir: str = ".", source_dir: str | None = None):
         """Initialize the compiler.
 
         Args:
-            base_dir (str): Base directory for compilation. Defaults to current directory.
+            base_dir (str): Base directory for compilation -- where AGENTS.md /
+                CLAUDE.md outputs are written and the relative root for
+                placement decisions.  Defaults to the current directory.
+            source_dir (Optional[str]): Where primitives (``.apm/``,
+                ``apm_modules/``) and source files are discovered.  Defaults to
+                ``base_dir`` for back-compat; set explicitly when ``apm
+                compile --root`` redirects writes but sources remain in
+                ``$PWD``.
         """
         self.base_dir = Path(base_dir)
+        self.source_dir = Path(source_dir) if source_dir else self.base_dir
         self.warnings: list[str] = []
         self.errors: list[str] = []
         self._logger = None
@@ -285,7 +293,7 @@ class AgentsCompiler:
                 if config.local_only:
                     # Use basic discovery for local-only mode
                     primitives = discover_primitives(
-                        str(self.base_dir),
+                        str(self.source_dir),
                         exclude_patterns=config.exclude,
                     )
                 else:
@@ -293,7 +301,7 @@ class AgentsCompiler:
                     from ..primitives.discovery import discover_primitives_with_dependencies
 
                     primitives = discover_primitives_with_dependencies(
-                        str(self.base_dir),
+                        str(self.source_dir),
                         exclude_patterns=config.exclude,
                     )
 
@@ -422,9 +430,14 @@ class AgentsCompiler:
         errors = self.validate_primitives(primitives)
         self.errors.extend(errors)
 
-        # Create distributed compiler with exclude patterns
+        # Create distributed compiler with exclude patterns.  source_dir
+        # carries through so primitive discovery + project-tree scoring
+        # honor `apm compile --root` (sources stay in $PWD, writes
+        # redirect to base_dir).
         distributed_compiler = DistributedAgentsCompiler(
-            str(self.base_dir), exclude_patterns=config.exclude
+            str(self.base_dir),
+            exclude_patterns=config.exclude,
+            source_dir=str(self.source_dir),
         )
 
         # Skip instructions in AGENTS.md when they are already deployed to
@@ -604,7 +617,7 @@ class AgentsCompiler:
         self.errors.extend(errors)
 
         # Create Claude formatter
-        claude_formatter = ClaudeFormatter(str(self.base_dir))
+        claude_formatter = ClaudeFormatter(str(self.base_dir), source_dir=str(self.source_dir))
 
         # Honor compilation.strategy=single-file (and the --single-agents flag)
         # by collapsing all instructions into a single root CLAUDE.md, mirroring
@@ -622,7 +635,9 @@ class AgentsCompiler:
             from .distributed_compiler import DistributedAgentsCompiler
 
             distributed_compiler = DistributedAgentsCompiler(
-                str(self.base_dir), exclude_patterns=config.exclude
+                str(self.base_dir),
+                exclude_patterns=config.exclude,
+                source_dir=str(self.source_dir),
             )
             # Analyze directory structure and determine placement
             directory_map = distributed_compiler.analyze_directory_structure(
@@ -958,7 +973,10 @@ class AgentsCompiler:
         for primitive in primitives.all_primitives():
             primitive_errors = primitive.validate()
             if primitive_errors:
-                file_path = portable_relpath(primitive.file_path, self.base_dir)
+                # Source files live under source_dir; relativise display
+                # paths against it so `apm compile --root` doesn't render
+                # absolute or `../../` paths in warning messages.
+                file_path = portable_relpath(primitive.file_path, self.source_dir)
 
                 for error in primitive_errors:
                     # Treat validation errors as warnings instead of hard errors
@@ -970,7 +988,7 @@ class AgentsCompiler:
                 primitive_dir = primitive.file_path.parent
                 link_errors = validate_link_targets(primitive.content, primitive_dir)
                 if link_errors:
-                    file_path = portable_relpath(primitive.file_path, self.base_dir)
+                    file_path = portable_relpath(primitive.file_path, self.source_dir)
 
                     for link_error in link_errors:
                         self.warnings.append(f"{file_path}: {link_error}")
@@ -1007,8 +1025,12 @@ class AgentsCompiler:
         Returns:
             TemplateData: Template data for generation.
         """
-        # Build instructions content
-        instructions_content = build_conditional_sections(primitives.instructions)
+        # Build instructions content.  source_dir keeps `<!-- Source: -->`
+        # display paths relative to the user's working directory when
+        # `apm compile --root` redirects writes elsewhere.
+        instructions_content = build_conditional_sections(
+            primitives.instructions, source_dir=self.source_dir
+        )
 
         # Metadata (version only; timestamp intentionally omitted for determinism)
         version = get_version()
@@ -1157,7 +1179,12 @@ class AgentsCompiler:
         sections.append("")
 
         for instruction in instructions:
-            rel_path = portable_relpath(instruction.file_path, self.base_dir)
+            # instruction.file_path is a source-tree file; relativise it
+            # against source_dir so `apm compile --root` never leaks
+            # `../../` or absolute deploy-relative paths into the
+            # `<!-- Source: -->` provenance comments (sources stay in $PWD
+            # while writes redirect to base_dir).
+            rel_path = portable_relpath(instruction.file_path, self.source_dir)
             if config.source_attribution:
                 sections.append(f"<!-- Source: {rel_path} -->")
             sections.append(instruction.content.strip())
@@ -1362,7 +1389,10 @@ class AgentsCompiler:
 
             for instruction in placement.instructions:
                 source = getattr(instruction, "source", "local")
-                inst_path = portable_relpath(instruction.file_path, self.base_dir)
+                # instruction.file_path is a source-tree file; relativise
+                # against source_dir so `apm compile --root` produces
+                # human-readable paths in verbose output.
+                inst_path = portable_relpath(instruction.file_path, self.source_dir)
 
                 self._log(
                     "verbose_detail",
