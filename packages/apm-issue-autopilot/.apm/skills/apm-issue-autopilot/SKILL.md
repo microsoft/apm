@@ -147,9 +147,10 @@ and HEAD sha in plan.md. No labels are written in this phase.
 
 PROBE for apm-triage-panel (above). Then, for EACH issue, spawn ONE
 triage child using
-[assets/triage-prompt.md](assets/triage-prompt.md), at IMPLEMENTER class
-(`claude-sonnet-4.6`) per model-routing.md (Phase 1 triage binding -- the
-paramount front gate is NOT bought at haiku). Each child runs
+[assets/triage-prompt.md](assets/triage-prompt.md), at PLANNER class
+(`claude-opus-4.8`) per model-routing.md (Phase 1 triage binding -- the
+paramount front gate is front-loaded heavy: a wrong accept burns a whole
+downstream pipeline). Each child runs
 the apm-triage-panel rubric in DIRECT mode and returns ONE
 `autopilot-triage-decision` JSON matching
 [assets/autopilot-triage-schema.json](assets/autopilot-triage-schema.json).
@@ -218,7 +219,9 @@ PR. It is the SOLE WRITER of the issue branch:
 
 1. **Ideate** ([assets/ideate-prompt.md](assets/ideate-prompt.md),
    devx-ux-expert) -- frame the brief and derive a testable
-   `acceptance_shape` (the B5 contract).
+   `acceptance_shape` (the B5 contract). Spawn at PLANNER class
+   (`claude-opus-4.8`) per model-routing.md -- front-loaded heavy
+   because this contract is the verification spine for every wave.
 2. **Plan** ([assets/plan-panel-prompt.md](assets/plan-panel-prompt.md),
    python-architect lead + conditional performance / test-coverage /
    supply-chain / auth lenses) -- emit a persisted task DAG matching

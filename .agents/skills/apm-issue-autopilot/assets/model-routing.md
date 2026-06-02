@@ -2,7 +2,11 @@
 
 Phase 4 spawns a heterogeneous set of children (A12 GRADIENT WORKFLOW):
 heavy planning at the front, implementer-class bulk in the middle, cheap
-read-only verification at the back. This file is the SINGLE SOURCE OF
+read-only verification at the back. The heavy front is deliberately
+maximal: the triage gate (Phase 1), Ideate (acceptance_shape contract),
+and the architect (task DAG) all bind to opus -- these three stages
+determine whether the whole pipeline is correctly scoped, so a wrong call
+there poisons everything downstream. This file is the SINGLE SOURCE OF
 TRUTH that binds each spawn to a concrete model so the orchestrator does
 not have to infer a model from a role-class name (role class alone does
 not route -- the spawner needs the concrete SKU).
@@ -35,7 +39,7 @@ and re-verify the SKUs; trivial/reviewer spawns warn-and-continue.
 | Spawn (fan-out)                  | Role class  | Model             | Bind | Why |
 |----------------------------------|-------------|-------------------|------|-----|
 | solution-pipeline child (1/issue)| implementer | claude-sonnet-4.6 | down | drives git/integration, follows plan.json; no novel planning |
-| Ideate (1/issue)                 | implementer | claude-sonnet-4.6 | down | frames the acceptance_shape contract; moderate stakes |
+| Ideate (1/issue)                 | planner     | claude-opus-4.8   | **UP (stakes)** | AUTHORS the acceptance_shape contract (B5) that every wave and the acceptance close are verified against -- a wrong contract mis-verifies the whole issue; front-loaded heavy by deliberate design |
 | Lens advisor (<=4/issue)         | trivial     | claude-haiku-4.5  | down | single-pass advisory checklist, read-only; fixed-schema, so carries a B14b caveman brief (PR#12 Cell E: lenses at reviewer class = +25% cost, 0 quality delta) |
 | Architect synthesis (1/issue +<=2 replans) | planner | claude-opus-4.8 | **UP (stakes)** | produces the task DAG; a wrong plan poisons every wave |
 | Task implementer (<=6/wave)      | per task `role_class` | resolved here | mixed | default implementer; docs->trivial; security/migration->planner via `model_override` |
@@ -79,8 +83,8 @@ below cites that exception, so each is gate-clean.
 
 | Spawn               | Audience | Tier        | Brief mode   | Receipt mode | Justification |
 |---------------------|----------|-------------|--------------|--------------|---------------|
-| Triage child        | INTERNAL | IMPLEMENTER | NORMAL       | JSON_RECEIPT | ambiguous multi-step (open triage rubric; grounds against repo state; resolves decision/confidence/red_flags/brief). Paramount front gate -- see Phase 1 binding below |
-| Ideate              | INTERNAL | IMPLEMENTER | NORMAL       | JSON_RECEIPT | ambiguous multi-step (frames the brief + derives the acceptance_shape contract) |
+| Triage child        | INTERNAL | PLANNER     | NORMAL       | JSON_RECEIPT | ambiguous multi-step (open triage rubric; grounds against repo state; resolves decision/confidence/red_flags/brief). Paramount front gate -- see Phase 1 binding below |
+| Ideate              | INTERNAL | PLANNER     | NORMAL       | JSON_RECEIPT | ambiguous multi-step (authors the acceptance_shape contract every downstream stage is verified against; front-loaded heavy by design) |
 | Lens advisor        | INTERNAL | TRIVIAL     | CAVEMAN_FULL | JSON_RECEIPT | fixed schema {risks, must_tasks}; security escape active |
 | Architect synthesis | INTERNAL | PLANNER     | NORMAL       | JSON_RECEIPT | ambiguous multi-step (genuine planning; the schema constrains output shape, not the reasoning that builds the DAG) |
 | Task implementer    | INTERNAL | IMPLEMENTER | NORMAL       | JSON_RECEIPT | ambiguous multi-step (writes the typed coverage gate + code; returns a status object) |
@@ -112,20 +116,22 @@ per-call reasoning_effort (B16 goes live for it).
 ## Phase 1 triage binding (the paramount front gate)
 
 Triage runs in Phase 1, not Phase 4, so it is not in the per-spawn table
-above; bind it explicitly here. Triage binds to the IMPLEMENTER class
-(claude-sonnet-4.6), NOT trivial/haiku. It runs the OPEN apm-triage-panel
-rubric as judgement (not the fixed-schema GRADING the wave-gate reviewer
-does), grounds every call against the repo at HEAD, and is the gate every
-downstream wave depends on -- a wrong accept wastes a whole pipeline. Per
-A12 you buy quality where stakes are highest, and the front gate is
-maximal-stakes (like the architect), so haiku here would be the GRADIENT
-anti-pattern (cheap where stakes are high). Sonnet is the right buy; opus
-would over-buy a classify-against-rubric task. Escalate-by-default is the
-backstop: on any doubt triage returns `confidence: low` plus `red_flags`
-and the orchestrator routes to the human, never to auto-implementation.
-This is why the declaration table marks triage IMPLEMENTER, not REVIEWER
--- it shares the wave-gate's REVIEWER audience role but not its cheap
-fixed-schema model class.
+above; bind it explicitly here. Triage binds to the PLANNER class
+(claude-opus-4.8) -- front-loaded heavy by deliberate design. It runs the
+OPEN apm-triage-panel rubric as judgement (not the fixed-schema GRADING
+the wave-gate reviewer does), grounds every call against the repo at HEAD,
+and is the gate that decides whether to spend a WHOLE downstream pipeline
+on an issue -- a wrong accept burns a full Ideate/Plan/Implement/shepherd
+run. Per A12 you buy quality where stakes are highest, and the front gate
+is maximal-stakes (it poisons everything downstream if wrong), so it is
+bought at opus alongside Ideate and the architect -- the heavy front of
+the gradient. Haiku or sonnet here would be the GRADIENT anti-pattern
+(cheap where stakes are highest). Escalate-by-default is the backstop: on
+any doubt triage returns `confidence: low` plus `red_flags` and the
+orchestrator routes to the human, never to auto-implementation. This is
+why the declaration table marks triage PLANNER, not REVIEWER -- it shares
+the wave-gate's REVIEWER audience role but sits at the maximal-stakes
+front, not the cheap fixed-schema back.
 
 ## B13 cache-aware-prefix discipline (the gradient's cache lever)
 
