@@ -2,9 +2,14 @@
 
 This file is for AI coding agents. Read it before making any code change.
 
-It documents every rule enforced by CI so agents can comply on the first
-attempt instead of learning from failed runs. Every section maps directly
-to a check that will turn a PR red if violated.
+It documents CI-enforced rules and project conventions so agents can comply
+on the first attempt instead of learning from failed runs. Most sections
+correspond to a CI check; conventions enforced in review are marked as
+"Convention; not CI-gated" so you know exactly what is and is not a hard
+gate.
+
+Human contributor? See [CONTRIBUTING.md](CONTRIBUTING.md) for the full
+contribution workflow.
 
 ---
 
@@ -22,7 +27,8 @@ Verify the CLI works:
 uv run apm --version
 ```
 
-Python version required: **3.12** (set in `pyproject.toml` and all CI jobs).
+Python version: `pyproject.toml` requires **>=3.10**. CI runners use Python
+**3.12**. Write code compatible with >=3.10; do not use 3.12-only syntax.
 Use **uv only** for dependency management -- never invoke `pip` directly.
 
 ---
@@ -50,8 +56,10 @@ uv run --extra dev python -m pylint \
 # 4. Auth-protocol boundary check
 bash scripts/lint-auth-signals.sh
 
-# 5. Run unit tests
-uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal -q
+# 5. Run unit tests with coverage gate
+uv run pytest tests/unit tests/test_console.py \
+  -n auto --dist worksteal \
+  --cov --cov-report term-missing --cov-fail-under=60 -q
 ```
 
 CI also enforces two grep-based rules that ruff cannot catch -- check them
@@ -76,14 +84,18 @@ and 3.3 below.
 
 ### 3.1 General
 
-- Target Python **3.12**; use modern syntax (`list` / `dict` / `X | None`
+- Target Python **>=3.10** (CI runners use 3.12); use modern syntax (`list` / `dict` / `X | None`
   instead of `List` / `Dict` / `Optional[X]`).
 - Use **type hints** on all function parameters and return values.
+  (Convention; not CI-gated.)
 - Write docstrings on all public functions and classes.
+  (Convention; not CI-gated.)
 - Keep every `src/**/*.py` file under **2450 lines**. The current worst
   case is ~2404 lines; tighten over time.
 - No raw `print()` calls in production code -- use `CommandLogger` or the
-  Rich console helpers in `src/apm_cli/core/command_logger.py`.
+  Rich console helpers in `src/apm_cli/utils/console.py`.
+  (Convention; T201 is not in the ruff select list, but reviewers will flag
+  unguarded print calls.)
 
 ### 3.2 YAML I/O rule
 
@@ -133,6 +145,10 @@ rel = portable_relpath(some_path, root)
   | `[i]`  | info                 |
   | `[*]`  | action / processing  |
   | `[>]`  | running / progress   |
+  | `[~]`  | update / refreshed   |
+  | `[-]`  | removed              |
+  | `[=]`  | unchanged / equal    |
+  | `[#]`  | list / metrics       |
 
 - All source code and CLI output must stay within **printable ASCII**
   (U+0020-U+007E). No emojis, no Unicode box-drawing, no curly quotes,
@@ -166,7 +182,8 @@ mechanism.
 - Every **changed** command or flag must have its docs entry updated in
   the same PR.
 - The CLI Consistency Checker workflow (`.github/workflows/cli-consistency-checker.md`)
-  runs weekly and files issues for any drift between help text and docs.
+  runs weekly and files issues for any drift between CLI help text and the
+  reference docs in `docs/src/content/docs/reference/cli/`.
 
 ---
 
@@ -176,7 +193,8 @@ mechanism.
 
 - Hermetic / offline tests: `tests/unit/`
 - End-to-end / network tests: `tests/integration/`
-- The CI unit job runs: `uv run pytest tests/unit tests/test_console.py`
+- The CI unit job runs with sharding and a 60% coverage floor:
+  `uv run pytest tests/unit tests/test_console.py --splits 2 --group N -n 2 --dist worksteal --cov --cov-fail-under=60`
 
 ### 5.2 Markers
 
@@ -237,9 +255,9 @@ assert parsed.hostname == "registry.example.com"
 - **No secrets in source**. Never hard-code tokens, passwords, or API
   keys.
 - **Path traversal**: validate and sanitise all user-supplied paths before
-  use. Helper functions that perform safe path operations live in
-  `src/apm_cli/integration/base_integrator.py` (path security) and
-  `src/apm_cli/utils/paths.py`.
+  use. Use `src/apm_cli/utils/path_security.py` for safe path validation.
+  Additional helpers live in `src/apm_cli/integration/base_integrator.py`
+  and `src/apm_cli/utils/paths.py`.
 - **Subprocess**: the ruff `S603`/`S607` rules are suppressed for
   `src/apm_cli/**` because subprocess calls are intentional in a CLI
   tool -- but every subprocess invocation must still pass only controlled,
