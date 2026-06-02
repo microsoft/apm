@@ -403,26 +403,12 @@ def _resolve_package_references(
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
                     # #1326: dependency-confusion fail-closed gate.
-                    # When the resolver attaches ``CrossRepoMisconfigRisk``,
-                    # the marketplace declared a bare ``owner/repo`` on a
-                    # ``*.ghe.com`` host and the canonical falls back to
-                    # ``github.com`` -- the same syntactic form that an
-                    # attacker pre-staging the namespace on public github.com
-                    # would exploit. Refuse before any outbound validation so
-                    # no probe reaches the potentially-attacker-controlled
-                    # URL (information leak + RCE both shut at one boundary).
-                    # Escape hatch: marketplace.json author host-qualifies
-                    # ``repo:`` (either to the enterprise host for same-host
-                    # intent or to github.com for declared cross-host intent).
-                    # That prevents the sentinel from attaching at resolver
-                    # layer -- no new flag, env var, or schema field needed.
+                    # Bare ``owner/repo`` on *.ghe.com falls back to
+                    # github.com -- refuse before outbound validation so
+                    # no probe reaches a potentially attacker-controlled URL.
+                    # Escape hatch: host-qualify ``repo:`` in marketplace.json.
                     _risk = resolution.cross_repo_misconfig_risk
                     if _risk is not None:
-                        # Two explicit-host options are alternatives, not a
-                        # sequence, so they read clearer as separate bullets.
-                        # ``validation_fail`` prepends the package name; the
-                        # body below is the remediation.  Each list element is
-                        # one logical clause so individual edits stay local.
                         _lead = (
                             f"refused (dependency-confusion risk #1326): bare"
                             f" `repo: {_risk.bare_repo_field}` on enterprise"
