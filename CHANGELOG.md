@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm_cli.models` internals: package-format detection extracted into a composition model (`PackageFormatRegistry` + per-format detectors + `NormalizationPlanner`); `detect_package_type()` is now a thin facade with no user-visible behaviour change. (#1618)
 - `apm compile` no longer emits cosmetic debug comments (APM version, source-file headers, footer) in generated `CLAUDE.md` and `copilot-instructions.md` files by default. The `compilation.source_attribution` flag now defaults to `false` (was `true`), reducing token overhead for every LLM context window that reads these files. Load-bearing markers (`_COPILOT_ROOT_GENERATED_MARKER` and Build ID) are always emitted regardless of the flag. To restore the previous behaviour, set `compilation: source_attribution: true` in `apm.yml`. (closes #1341)
+- **`apm pack` bundle export now strips credential-bearing keys from `.mcp.json`** before embedding `mcpServers` in the bundle's `plugin.json`. Previously, `env`/`environment` blocks and keys containing `token`, `secret`, `password`, `credential`, or `apikey` were passed through verbatim. If your bundle consumers rely on those keys being present in the bundled manifest, replace them with `$ENV_VAR` references and inject the values at MCP-host startup. (#1623)
 ### Removed
 
 - **BREAKING:** `apm pack --marketplace-output PATH` has been removed. This flag was deprecated in v0.14 with a stderr warning and auto-translated to `--marketplace-path claude=PATH`. Use `--marketplace-path claude=PATH` to override the Claude output path. (#1318)
@@ -33,13 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm pack` generates ecosystem-specific `plugin.json` files when `target:`
-  (or `targets:`) includes `claude` or `copilot`, so a package author no longer
-  hand-maintains the manifest -- it is synthesised from `apm.yml` identity
-  fields on every pack. Claude manifests embed `mcpServers` from `.mcp.json`
-  with credential-bearing keys (env blocks, tokens, secrets) stripped before
-  writing; Copilot manifests omit `mcpServers`. An existing `plugin.json` is
-  preserved unless `--force` is passed. (#1623)
+- **Stop hand-maintaining `plugin.json`.** `apm pack` now generates an
+  ecosystem-specific manifest when `target:` (or `targets:`) includes `claude`
+  or `copilot` -- synthesised from `apm.yml` identity fields on every pack, so
+  one APM source tree drops into a Claude Code plugin or a Copilot plugin path
+  with zero hand-editing. Claude manifests embed `mcpServers` from `.mcp.json`
+  with secrets stripped recursively before writing -- credential-bearing keys
+  (`env`/`headers`/`authorization` blocks and `token`/`secret`/`key`-shaped
+  names) at any depth, plus secret-shaped values (`user:pass@host` URLs, inline
+  `--token=` flags) -- so a committed `plugin.json` never leaks them. Copilot
+  manifests omit `mcpServers`. An existing `plugin.json` is preserved unless
+  `--force` is passed. (#1623)
 - `apm install -g` now deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/` and makes them executable, giving Claude Code direct access to plugin-provided binaries. The `bin_deploy` policy field lets enterprise administrators opt out globally (`deny_all: true`) or per-package. (#1544)
 - Teams with existing `AGENTS.md` content can now adopt `apm compile` without
   losing hand-written rules: set `compilation.agents_md.mode: managed_section`

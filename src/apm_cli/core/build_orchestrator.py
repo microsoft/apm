@@ -354,7 +354,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
     if legacy.is_file():
         out.add(OutputKind.MARKETPLACE)
 
-    # Check target: field for plugin-manifest-eligible ecosystems.
+    # Check target: field for 'claude' or 'copilot' (plugin-manifest ecosystems).
     if data:
         from .apm_yml import parse_targets_field
         from .errors import (
@@ -401,11 +401,12 @@ class BuildOrchestrator:
         if not outputs_needed:
             raise BuildError(
                 "apm.yml has neither 'dependencies:' nor 'marketplace:' "
-                "block, and 'target:' does not include a plugin-manifest-eligible "
-                "ecosystem. Nothing to pack. Add dependencies via "
+                "block, and 'target:' does not include 'claude' or "
+                "'copilot'. Nothing to pack. Add dependencies via "
                 "'apm install <pkg>', scaffold a marketplace block "
                 "with 'apm marketplace init', or set 'target:' to "
-                "include 'claude' or 'copilot'."
+                "include 'claude' or 'copilot'. See "
+                "https://microsoft.github.io/apm/reference/cli/pack/."
             )
 
         result = BuildResult()

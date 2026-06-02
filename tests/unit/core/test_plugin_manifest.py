@@ -180,7 +180,80 @@ class TestBuildPluginManifest:
         manifest = build_plugin_manifest(tmp_path, apm, "claude")
         srv = manifest["mcpServers"]["srv"]
         assert "apiKey" not in srv
+        # headers is a sensitive block name -- stripped wholesale, not preserved.
+        assert "headers" not in srv
         assert srv["command"] == "node"
+
+    def test_claude_strips_nested_credential_keys(self, tmp_path: Path) -> None:
+        # A credential hiding under a nested object (config.token) and inside a
+        # nested headers block (headers.Authorization) must both be removed --
+        # a shallow top-level pass would leak them.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node",
+                            "config": {"token": "leak", "region": "eu"},
+                            "transport": {
+                                "headers": {"Authorization": "Bearer leak"},
+                                "url": "https://api.example.com",
+                            },
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        srv = manifest["mcpServers"]["srv"]
+        raw = json.dumps(manifest)
+        assert "leak" not in raw
+        assert "Bearer" not in raw
+        # Non-secret siblings survive the recursion.
+        assert srv["config"] == {"region": "eu"}
+        assert srv["transport"]["url"] == "https://api.example.com"
+        assert "headers" not in srv["transport"]
+
+    def test_claude_redacts_secret_values(self, tmp_path: Path) -> None:
+        # Secrets embedded in otherwise-innocuous values (a basic-auth URL and
+        # an inline --token flag in args) are redacted even though their keys
+        # carry no credential signal.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node",
+                            "args": ["--token=sk-supersecret", "--verbose"],
+                            "url": "https://alice:hunter2@api.example.com/v1",
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        raw = json.dumps(manifest)
+        assert "sk-supersecret" not in raw
+        assert "hunter2" not in raw
+        # Non-secret args survive; the flag name is kept, only its value scrubbed.
+        srv = manifest["mcpServers"]["srv"]
+        assert "--verbose" in srv["args"]
+        assert any("--token=" in a for a in srv["args"])
+
+    def test_server_name_with_key_substring_survives(self, tmp_path: Path) -> None:
+        # Sensitivity applies to keys INSIDE a server object, never to the
+        # server name itself -- a server called "my-keychain" must not vanish.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"my-keychain": {"command": "node"}}}),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        assert manifest["mcpServers"]["my-keychain"] == {"command": "node"}
 
 
 # ---------------------------------------------------------------------------

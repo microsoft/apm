@@ -151,6 +151,49 @@ class TestPackCmd:
         manifest = json_mod.loads(raw)
         assert manifest["mcpServers"]["srv"] == {"command": "node"}
 
+    def test_pack_preserves_existing_plugin_json_without_force(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """An existing plugin.json is preserved (warn + skip) when --force is absent."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 2.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8")
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+        # The hand-authored file is left untouched.
+        preserved = json_mod.loads(out.read_text(encoding="utf-8"))
+        assert preserved == {"name": "hand-authored", "version": "0.0.1"}
+
+    def test_pack_force_overwrites_existing_plugin_json(self, runner, tmp_path, monkeypatch):
+        """`apm pack --force` replaces an existing plugin.json with the generated one."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 2.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8")
+
+        result = runner.invoke(pack_cmd, ["--force"])
+        assert result.exit_code == 0
+        # The generated manifest now reflects apm.yml identity, not the old file.
+        manifest = json_mod.loads(out.read_text(encoding="utf-8"))
+        assert manifest["name"] == "my-plugin"
+        assert manifest["version"] == "2.0.0"
+
     def test_pack_marketplace_output_flag_removed(self, runner, tmp_path, monkeypatch):
         """The legacy --marketplace-output flag was removed in favour of --marketplace-path."""
         monkeypatch.chdir(tmp_path)

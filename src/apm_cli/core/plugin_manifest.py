@@ -22,11 +22,29 @@ routing and the final write step.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from ..utils.console import _rich_info, _rich_success, _rich_warning
 from ..utils.path_security import ensure_path_within
+
+
+def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
+    """Dispatch a user-facing message to *logger* if present, else the console.
+
+    Collapses the repeated ``if logger: logger.X(msg) else: _rich_X(msg)``
+    branch that every status line in this module would otherwise duplicate.
+    *level* is one of ``"info"``, ``"warning"``, or ``"success"``; *symbol* is a
+    key into :data:`apm_cli.utils.console.STATUS_SYMBOLS`.
+    """
+    if logger is not None:
+        # Loggers have no "success" method -- map it onto info.
+        getattr(logger, "info" if level == "success" else level)(message)
+        return
+    _console = {"info": _rich_info, "warning": _rich_warning, "success": _rich_success}[level]
+    _console(message, symbol=symbol)
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -53,14 +71,28 @@ PLUGIN_ECOSYSTEM_PATHS: dict[str, str] = {
 # name matches an entry here (or contains one of the substrings below) is
 # stripped before the manifest is serialised -- a committed plugin.json must
 # never leak secrets that were resolved at MCP-host startup from .mcp.json.
-_SENSITIVE_MCP_KEY_NAMES: frozenset[str] = frozenset({"env", "environment"})
+_SENSITIVE_MCP_KEY_NAMES: frozenset[str] = frozenset(
+    {"env", "environment", "headers", "authorization"}
+)
 _SENSITIVE_MCP_KEY_SUBSTRINGS: tuple[str, ...] = (
     "token",
     "secret",
     "password",
     "credential",
     "apikey",
+    "key",
 )
+
+# Secret-bearing VALUE patterns, redacted regardless of the key that holds them:
+# a URL with embedded ``user:pass@host`` userinfo, and a CLI flag that assigns a
+# credential inline (e.g. ``--token=sk-abc`` in an ``args`` array). The key name
+# carries no signal in these cases, so the value itself must be scrubbed.
+_URL_USERINFO_RE = re.compile(r"\b([a-zA-Z][\w+.-]*://)([^/?#\s@]+)@")
+_INLINE_SECRET_ARG_RE = re.compile(
+    r"(--?[\w.-]*(?:token|secret|password|credential|apikey|key)[\w.-]*=)(\S+)",
+    re.IGNORECASE,
+)
+_REDACTED = "***REDACTED***"
 
 
 def _is_sensitive_mcp_key(key: str) -> bool:
@@ -69,6 +101,41 @@ def _is_sensitive_mcp_key(key: str) -> bool:
     if normalized in _SENSITIVE_MCP_KEY_NAMES:
         return True
     return any(token in normalized for token in _SENSITIVE_MCP_KEY_SUBSTRINGS)
+
+
+def _redact_secret_values(text: str) -> tuple[str, bool]:
+    """Return (*scrubbed text*, *changed?*) with embedded secrets redacted."""
+    scrubbed = _URL_USERINFO_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}@", text)
+    scrubbed = _INLINE_SECRET_ARG_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}", scrubbed)
+    return scrubbed, scrubbed != text
+
+
+def _sanitize_value(value: Any, path: str, dropped: list[str]) -> Any:
+    """Recursively strip credential keys and redact secret values under *value*.
+
+    Mutating-credential surfaces hide at any depth -- ``headers.Authorization``,
+    a nested ``config.apiKey``, or a ``user:pass@host`` URL buried in an ``args``
+    array -- so a single top-level pass is insufficient. Every dropped key or
+    redacted value is recorded in *dropped* (dotted/indexed path) for the
+    consequence-led warning.
+    """
+    if isinstance(value, dict):
+        cleaned: dict = {}
+        for key, val in value.items():
+            child = f"{path}.{key}" if path else str(key)
+            if _is_sensitive_mcp_key(str(key)):
+                dropped.append(child)
+                continue
+            cleaned[key] = _sanitize_value(val, child, dropped)
+        return cleaned
+    if isinstance(value, list):
+        return [_sanitize_value(item, f"{path}[{i}]", dropped) for i, item in enumerate(value)]
+    if isinstance(value, str):
+        scrubbed, changed = _redact_secret_values(value)
+        if changed:
+            dropped.append(path)
+        return scrubbed
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -83,12 +150,14 @@ def collect_mcp_servers(project_root: Path, *, logger: Any = None) -> dict:
     parsed.
 
     Each server object is sanitised before it is returned: any key that may
-    carry a live credential (``env``/``environment`` blocks and any key whose
-    name contains ``token``, ``secret``, ``password``, ``credential``, or
-    ``apikey`` -- case-insensitive) is dropped. ``.mcp.json`` routinely embeds
-    secrets so an MCP host can inject them at startup; copying them verbatim
-    into a committed ``plugin.json`` would exfiltrate them into the distributed
-    artefact. A loud warning is emitted for every key dropped.
+    carry a live credential (``env``/``environment``/``headers``/``authorization``
+    blocks and any key whose name contains ``token``, ``secret``, ``password``,
+    ``credential``, ``apikey``, or ``key`` -- case-insensitive) is dropped at any
+    nesting depth, and secret-shaped values (``user:pass@host`` URLs, inline
+    ``--token=`` flags) are redacted. ``.mcp.json`` routinely embeds secrets so
+    an MCP host can inject them at startup; copying them verbatim into a
+    committed ``plugin.json`` would exfiltrate them into the distributed
+    artefact. A loud warning is emitted for every key dropped or value redacted.
     """
     mcp_file = project_root / ".mcp.json"
     if not mcp_file.is_file() or mcp_file.is_symlink():
@@ -106,30 +175,25 @@ def collect_mcp_servers(project_root: Path, *, logger: Any = None) -> dict:
 
 
 def _sanitize_mcp_servers(servers: dict, *, logger: Any = None) -> dict:
-    """Strip credential-bearing keys from every server object in *servers*."""
+    """Strip credential keys and redact secret values across all server objects.
+
+    Server names (the top-level keys) are NOT credential-tested -- a server
+    named ``my-keychain`` must survive -- but every value beneath each server is
+    recursed into via :func:`_sanitize_value`.
+    """
     cleaned: dict = {}
     dropped: list[str] = []
     for server_name, server in servers.items():
-        if not isinstance(server, dict):
-            cleaned[server_name] = server
-            continue
-        safe_server = {}
-        for key, value in server.items():
-            if _is_sensitive_mcp_key(str(key)):
-                dropped.append(f"{server_name}.{key}")
-                continue
-            safe_server[key] = value
-        cleaned[server_name] = safe_server
+        cleaned[server_name] = _sanitize_value(server, str(server_name), dropped)
 
     if dropped:
         _warn = (
-            "Stripped credential-bearing keys from .mcp.json before writing "
-            "plugin.json (these would be committed as plaintext secrets): " + ", ".join(dropped)
+            "Secrets withheld from plugin.json so they are never committed as "
+            "plaintext -- stripped from .mcp.json before writing: "
+            + ", ".join(dropped)
+            + ". Use $ENV_VAR references in .mcp.json to keep secrets out of the manifest."
         )
-        if logger:
-            logger.warning(_warn)
-        else:
-            _rich_warning(_warn, symbol="warning")
+        _emit("warning", _warn, logger, "warning")
     return cleaned
 
 
@@ -174,19 +238,13 @@ def find_or_synthesize_plugin_json(
                 f"Found plugin.json at {plugin_json_path} but could not parse it: {exc}. "
                 "Falling back to synthesis from apm.yml."
             )
-            if logger:
-                logger.warning(_warn_msg)
-            else:
-                _rich_warning(_warn_msg, symbol="warning")
+            _emit("warning", _warn_msg, logger, "warning")
 
     elif not suppress_missing_warning:
         # Synthesis from apm.yml is the APM-native happy path for plugin
         # authoring, not a defect -- so this is info, not a warning.
         _info_msg = "No plugin.json found; synthesising from apm.yml."
-        if logger:
-            logger.info(_info_msg)
-        else:
-            _rich_info(_info_msg, symbol="info")
+        _emit("info", _info_msg, logger, "info")
 
     return synthesize_plugin_json_from_apm_yml(apm_yml_path)
 
@@ -277,10 +335,7 @@ def write_plugin_manifest(
     rel_path = PLUGIN_ECOSYSTEM_PATHS.get(ecosystem)
     if rel_path is None:
         _warn = f"Unknown plugin ecosystem {ecosystem!r}; skipping plugin.json generation."
-        if logger:
-            logger.warning(_warn)
-        else:
-            _rich_warning(_warn, symbol="warning")
+        _emit("warning", _warn, logger, "warning")
         return None
 
     output_path = project_root / rel_path
@@ -291,42 +346,29 @@ def write_plugin_manifest(
 
     if dry_run:
         _msg = f"Would write plugin manifest to {output_path}"
-        if logger:
-            logger.info(_msg)
-        else:
-            _rich_info(_msg, symbol="preview")
+        _emit("info", _msg, logger, "info")
         return None
 
     if output_path.exists():
         if not force:
             _skip_warn = (
                 f"{output_path} already exists; skipping plugin.json generation. "
-                "Re-run with --force to allow overwriting, or commit the generated "
-                "file to silence this warning in CI."
+                "Re-run with --force to overwrite it."
             )
-            if logger:
-                logger.warning(_skip_warn)
-            else:
-                _rich_warning(_skip_warn, symbol="warning")
+            _emit("warning", _skip_warn, logger, "warning")
             return None
 
-        _overwrite_warn = (
+        _overwrite_msg = (
             f"Overwriting {output_path} with generated manifest from apm.yml (--force)."
         )
-        if logger:
-            logger.warning(_overwrite_warn)
-        else:
-            _rich_warning(_overwrite_warn, symbol="warning")
+        _emit("info", _overwrite_msg, logger, "info")
 
     # Generated content under .github/ is granted elevated trust by GitHub
     # Actions -- surface the write so operators with branch-protection on
     # .github/ paths are not surprised.
     if rel_path.startswith(".github/"):
         _gh_note = f"Writing generated plugin manifest under .github/: {output_path}"
-        if logger:
-            logger.info(_gh_note)
-        else:
-            _rich_info(_gh_note, symbol="info")
+        _emit("info", _gh_note, logger, "info")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # Re-check containment after mkdir to shrink the TOCTOU window -- a parent
@@ -339,9 +381,6 @@ def write_plugin_manifest(
     )
 
     _success = f"Generated plugin manifest: {output_path}"
-    if logger:
-        logger.info(_success)
-    else:
-        _rich_success(_success, symbol="check")
+    _emit("success", _success, logger, "check")
 
     return output_path

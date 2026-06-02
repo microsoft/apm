@@ -31,7 +31,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--format plugin\|apm` | `plugin` | Bundle format. `plugin` emits a Claude Code plugin directory with `plugin.json` and plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). |
 | `--archive` | off | Produce a `.tar.gz` archive instead of a directory. Bundle only. |
 | `-o`, `--output PATH` | `./build` | Bundle output directory. Does not affect the `marketplace.json` path. |
-| `--force` | off | On collision in `plugin` format, last writer wins instead of first. Bundle only. |
+| `--force` | off | Allow overwriting on collision. In `plugin` bundle format, last writer wins instead of first; for generated `plugin.json` manifests, overwrites an existing file instead of preserving it. |
 | `--dry-run` | off | Print what would be packed without writing anything. |
 | `--verbose`, `-v` | off | Show per-file paths and detailed packer output. |
 | `--offline` | off | Marketplace: resolve version ranges from cached refs only; skip `git ls-remote`. |
@@ -132,21 +132,36 @@ Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs`
 
 ### Plugin manifests
 
-When `apm.yml` declares a `target:` (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json`:
+Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
 
 | Ecosystem | Output path |
 |---|---|
 | `claude` | `.claude-plugin/plugin.json` |
 | `copilot` | `.github/plugin/plugin.json` |
 
+`target:` and `targets:` are mutually exclusive: declaring both is a build error (exit `1`). An empty `targets:` list or an unrecognised ecosystem token is likewise rejected before any artifact is written.
+
 The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). Per-ecosystem differences:
 
-- **Claude:** includes `mcpServers` sourced from `.mcp.json` if that file is present in the project root. Credential-bearing keys (`env`/`environment` blocks and any key whose name contains `token`, `secret`, `password`, `credential`, or `apikey`) are stripped before writing, so a committed `plugin.json` never leaks secrets resolved at MCP-host startup. A warning lists every key dropped.
+- **Claude:** includes `mcpServers` sourced from `.mcp.json` if that file is present in the project root.
 - **Copilot:** omits `mcpServers`.
 
-If a `plugin.json` already exists at the target path it is **preserved**: `apm pack` warns and skips the write. Re-run with `--force` to overwrite it (the same flag that governs bundle collisions), or commit the generated file to silence the warning in CI. The `--dry-run` flag prevents any writes -- the manifest content is computed but not persisted.
+#### Credential stripping (Claude `mcpServers`)
 
+`.mcp.json` routinely embeds secrets that an MCP host injects at startup, so they are removed before the manifest is written -- a committed `plugin.json` never leaks them. Stripping is recursive and applies at any nesting depth:
+
+- Credential-bearing keys are dropped: `env`/`environment`/`headers`/`authorization` blocks, plus any key whose name contains `token`, `secret`, `password`, `credential`, `apikey`, or `key`.
+- Secret-shaped values are redacted even when the key name is innocuous: `user:pass@host` URL userinfo and inline `--token=...` style flags inside an `args` array.
+
+A warning lists everything dropped or redacted, led by the consequence (secrets withheld from commit).
+
+#### Overwrite and dry-run
+
+If a `plugin.json` already exists at the target path it is **preserved**: `apm pack` warns and skips the write. Re-run with `--force` to overwrite it (the same flag that governs bundle collisions). The `--dry-run` flag prevents any writes -- the manifest content is computed but not persisted.
+
+:::note[Planned]
 The generated manifest is intentionally minimal. Enrichment fields (`homepage`, `repository`, `keywords`, `author.url`) are planned for a follow-up release ([#1621](https://github.com/microsoft/apm/issues/1621)).
+:::
 
 Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the generated file is never accidentally included in the bundle export.
 
