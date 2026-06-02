@@ -42,6 +42,7 @@ are part of your contract:
 - `ci-recovery-checklist.md`          -- post-push watch contract
 - `.apm/instructions/linting.instructions.md` -- the push gate
 - `../apm-review-panel/SKILL.md`      -- panel composition contract
+- `../pr-description-skill/SKILL.md`   -- superseding-PR body author (Path B)
 
 ## Loop shape
 
@@ -72,17 +73,39 @@ Hard caps:
 Before checkout or any Copilot/panel work, PROBE the transitive
 dependency deterministically (A9 SUPERVISED EXECUTION; do not assume
 from recall). Fail fast here rather than discovering a missing panel
-mid-loop after edits have begun:
+mid-loop after edits have begun. Probe ALL load-bearing panel assets,
+not just SKILL.md, and anchor at `$REPO_ROOT` (a relative `../` probe
+is brittle once you `cd $REPO_ROOT` in Step 0):
 
 ```
-test -f ../apm-review-panel/SKILL.md \
-  && echo "apm-review-panel present" \
+P=$REPO_ROOT/.agents/skills/apm-review-panel
+test -f $P/SKILL.md \
+  && test -f $P/assets/panelist-return-schema.json \
+  && test -f $P/assets/ceo-return-schema.json \
+  && test -f $P/assets/recommendation-template.md \
+  && echo "apm-review-panel present (inline-executable)" \
   || echo "MISSING apm-review-panel"
+
+D=$REPO_ROOT/.agents/skills/pr-description-skill
+test -f $D/SKILL.md \
+  && test -f $D/assets/pr-body-template.md \
+  && echo "pr-description-skill present (inline-executable)" \
+  || echo "MISSING pr-description-skill"
 ```
 
-On a MISS, return immediately with `status: blocked` and
-`blocker: "apm-review-panel skill not reachable; cannot shepherd."`.
-Do NOT check out the PR or freelance panel review.
+On an apm-review-panel MISS, return immediately with `status: blocked`
+and `blocker: "apm-review-panel assets not reachable; cannot
+shepherd."`. Do NOT check out the PR or freelance panel review. A PASS
+here means the panel is INLINE-EXECUTABLE regardless of whether the
+`skill` tool is later available (see Step X.1.1) -- you have its
+authoritative contract and schemas on disk.
+
+The pr-description-skill probe is load-bearing ONLY for Path B (Step
+X.5) -- opening a superseding PR. A MISS does NOT block the shepherd
+loop (Path A needs no new PR body). If you reach Path B with
+pr-description-skill missing, return `status: blocked` with
+`blocker: "pr-description-skill not reachable; cannot author
+superseding PR body."` rather than hand-rolling a body.
 
 ### Step 0 -- check out the PR
 
@@ -125,22 +148,63 @@ this run, mark `copilot_drained: true` and skip future fetches.
    section (Finalize). Reservations never silently disappear: if the
    panel judges one already satisfied, it still appears in the
    advisory with a one-line "addressed by ..." note.
-1. ACTIVATE: invoke the `apm-review-panel` skill by name. If the
-   harness reports the skill is unavailable, abort with
-   `status: blocked` and `blocker: "apm-review-panel skill not
-   available in this harness; cannot shepherd."`. Do NOT freelance
-   panel review.
-2. LOAD: treat the panel SKILL.md as authoritative for the panel
-   contract.
-3. RUN: execute the panel against PR_NUMBER. The panel posts ONE
-   recommendation comment per its own single-writer contract. Per
-   its idempotency, subsequent panel runs on the same PR rewrite the
-   same comment surface -- you do NOT need to clean up prior
-   in-loop panel comments.
-4. EXTRACT from the CEO return:
+1. ACTIVATE the panel. There are TWO valid execution paths; pick by
+   what the harness actually offers, and treat the inline path as
+   FIRST-CLASS, not an emergency fallback:
+
+   a. FAST-PATH (if the `skill` tool is present in YOUR context):
+      invoke the `apm-review-panel` skill by name and let it run.
+
+   b. INLINE EXECUTION (the NORMAL path for a shepherd subagent):
+      you are usually spawned two levels deep, and the runtime
+      propagates the `task` tool (so you CAN fan out) but does NOT
+      propagate the `skill` tool. The `skill` one-liner being
+      unavailable is EXPECTED here -- it is NOT an error and NOT a
+      reason to block. In that case YOU act as the panel orchestrator:
+      load `$REPO_ROOT/.agents/skills/apm-review-panel/SKILL.md` as the
+      authoritative contract and EXECUTE its published fan-out yourself
+      via `task` -- spawn each mandatory persona, every conditional
+      persona (active or stubbed per the panel's own activation rubric,
+      so the schema stays uniform), and the `apm-ceo` synthesizer;
+      schema-validate each panelist return against
+      `assets/panelist-return-schema.json` and the CEO return against
+      `assets/ceo-return-schema.json` (re-spawn a malformed persona per
+      the panel's cap); render the single recommendation comment from
+      `assets/recommendation-template.md`. Running the panel's OWN
+      SKILL.md verbatim is NOT re-implementing panel internals (see
+      Hard rules) -- inventing a substitute review WOULD be.
+
+   WRITE BOUNDARY -- the panel ALWAYS posts its result to the PR. The
+   panel run (fast-path OR inline) is not done until its recommendation
+   comment is live on GitHub via `gh`. This is MANDATORY, not optional:
+   a panel run that computes a stance but posts nothing has not
+   completed. Posting rules:
+   - EXACTLY ONE recommendation comment PER panel run. Within a single
+     run you are the panel's single writer; the panelist and CEO
+     subagents return JSON ONLY and never touch PR state (so inline and
+     skill-tool runs produce the identical single-comment surface).
+   - One comment PER LOOP ITERATION is EXPECTED and fine. The shepherd
+     reinforcement loop re-runs the panel each iteration; each run posts
+     its OWN fresh comment, so the PR carries the visible review trail
+     across the loop. Do NOT suppress later iterations' comments to
+     preserve a single surface -- the per-iteration comments ARE the
+     convergence record. (Only the WITHIN-a-run single-emission rule
+     above is idempotent; across iterations, N runs post N comments.)
+
+   BLOCK ONLY when the Step 0.0 asset probe MISSED (panel genuinely
+   absent). Do NOT block merely because the `skill` tool is absent. If
+   the `skill` tool IS present but the panel run fails (schema drift,
+   missing asset surfaced mid-run, runtime error), do NOT silently
+   swap to inline as if nothing happened -- retry the failing surface
+   ONCE, and if it still fails, return `status: blocked` with the
+   concrete error so a real panel regression is not masked.
+2. EXTRACT from the CEO return:
    - `panel_final_verdict` = the CEO stance.
    - `panel_followups` = `recommended_followups` (each carries
      `from_persona`, `summary`, `why`, and optional `blocking`).
+   - `panel_execution` = `skill-tool` or `inline` (which path ran).
+   - `panel_personas` = the list of persona names you fanned out
+     (for the routing receipt / parent audit).
 
 ### Step X.2 -- merge follow-ups + apply fold-vs-defer rubric
 
@@ -225,9 +289,36 @@ git checkout -b supersede/pr-$PR_NUMBER
 git cherry-pick <original-sha-range>
 # your fold commits are already on this branch
 git push -u origin supersede/pr-$PR_NUMBER
+```
+
+Author the superseding PR body with the `pr-description-skill`
+dependency (do NOT hand-roll the body). Two valid execution paths,
+same FAST-PATH / INLINE discipline as the panel (Step X.1):
+
+a. FAST-PATH (if the `skill` tool is present): invoke the
+   `pr-description-skill` skill by name; give it the branch, base
+   `main`, the cherry-picked + fold diff, the commit messages, the
+   linked issue (`Closes #$ISSUE_NUMBER`, `supersedes #$PR_NUMBER`),
+   the CHANGELOG entry, and the lint/CI validation evidence. It
+   returns a body-file path.
+
+b. INLINE EXECUTION (the NORMAL path for a shepherd subagent, where
+   the `skill` tool is absent): load
+   `$REPO_ROOT/.agents/skills/pr-description-skill/SKILL.md` as the
+   authoritative contract and follow it IN-THREAD (it is a
+   single-thread skill -- no fan-out) to write the body file,
+   validating any mermaid via its bundled deterministic check. Seed
+   the supersede framing from the `pr-comment-templates.md` SUPERSEDE
+   block, but the FULL body is authored by pr-description-skill.
+
+Then open the PR with the validated body file (A9 SUPERVISED
+EXECUTION -- verify the file exists and is non-empty before the call):
+
+```
+test -s "$PR_BODY_FILE" || { echo "empty PR body; aborting Path B"; exit 1; }
 gh pr create --repo microsoft/apm --base main \
    --title "fix: <short> (supersedes #$PR_NUMBER, closes #$ISSUE_NUMBER)" \
-   --body "<see pr-comment-templates.md SUPERSEDE block>"
+   --body-file "$PR_BODY_FILE"
 ```
 
 Then close the original with the courteous handoff comment from
@@ -261,20 +352,23 @@ On cap hit: `status: blocked` with failing job + log excerpt in
   notes.
 
 In this case: re-run the apm-review-panel ONE LAST TIME so the
-visible comment reflects the converged state, then post (or let the
-panel post) the comment. Move to "Finalize" below.
+visible comment reflects the converged state. That final run posts its
+own recommendation comment to the PR (per the Step X.1 WRITE BOUNDARY:
+the panel always posts its result via `gh`). Move to "Finalize" below.
 
 **Terminal `status: advisory-with-deferred`** when:
 
 - Iteration cap (4) is hit, AND
 - Foldable items remain unresolved.
 
-In this case: the live panel comment plus the resolved log is the
-final state. Do NOT post a separate reply comment. The unfolded
-items and their deferral rationale are carried in the single final
-advisory comment's "Deferred" list (see "Finalize" below) -- this
-keeps the per-PR comment count within the two-comment cap and
-preserves the single-writer interlock on the advisory surface.
+In this case: re-run the apm-review-panel one last time so its final
+recommendation comment reflects the converged (capped) state, carrying
+the unfolded items and their deferral rationale in that comment's
+"Deferred" list (see "Finalize" below). The panel posts this final
+comment per the Step X.1 WRITE BOUNDARY. As within any run, the
+panelist/CEO subagents never post -- only the single per-run panel
+comment lands, so the iteration adds exactly one comment, not a reply
+chain.
 
 **Next iteration** otherwise: go back to Step X.0.
 
@@ -333,8 +427,11 @@ most one short clause (e.g. `pending required review`,
 
 ### Finalize (terminal step)
 
-1. Post (or let the panel post) the final advisory comment. The
-   comment carries (rendered per `pr-comment-templates.md`):
+1. The terminal panel run (Step X.7) has ALREADY posted the final
+   advisory comment to the PR via `gh` -- the panel always posts its
+   result (Step X.1 WRITE BOUNDARY); there is no separate "let the
+   panel post" branch. Confirm the comment is live. The comment carries
+   (rendered per `pr-comment-templates.md`):
    - Headline + CEO arbitration.
    - "Reservations carried from strategic-alignment" list, if
      `PANEL_PRIOR.reservations` was supplied -- one line per
@@ -379,9 +476,28 @@ most one short clause (e.g. `pending required review`,
   "head_sha": "40-char sha of the last-pushed commit",
   "mergeable": "MERGEABLE|CONFLICTING|UNKNOWN",
   "merge_state_status": "CLEAN|BLOCKED|BEHIND|DIRTY|UNSTABLE|HAS_HOOKS|UNKNOWN",
-  "ci_status": "green|yellow|red|blocked"
+  "ci_status": "green|yellow|red|blocked",
+  "panel_execution": "skill-tool|inline",
+  "panel_personas": ["python-architect", "..."],
+  "routing_receipt": {
+    "spawn": "shepherd-<pr>",
+    "requested_model": "claude-sonnet-4.6",
+    "role_class": "implementer",
+    "brief_mode": "normal"
+  }
 }
 ```
+
+FIELD NAMES ARE EXACT. The schema sets `additionalProperties: false`,
+so a renamed/aliased field FAILS validation and forces a re-spawn. The
+two observed drift aliases are wrong:
+
+- valid:   `{ "status": "ready-to-merge", "pr": 1584 }`
+- INVALID: `{ "terminal_state": "ready-to-merge", "pr_number": 1584 }`
+
+Use `status` (NOT `terminal_state`) and `pr` (NOT `pr_number`).
+`panel_execution`, `panel_personas`, and `routing_receipt` are optional
+(parent-audit observability) but, when present, must match the schema.
 
 ## Hard rules
 
@@ -399,7 +515,12 @@ most one short clause (e.g. `pending required review`,
   in the return and the orchestrator strips it.
 - Never apply verdict labels (no panel-approved / panel-rejected).
 - Never auto-merge.
-- Never re-implement apm-review-panel internals.
+- Never re-implement apm-review-panel internals. EXECUTING the panel's
+  own published SKILL.md + schemas verbatim (the Step X.1.1 inline path)
+  is NOT re-implementing -- it is running the panel as authored.
+  Re-implementing means inventing a substitute review (your own persona
+  set, your own rubric, your own comment shape) instead of loading and
+  running the panel's contract. Never do that.
 
 ## On failure
 

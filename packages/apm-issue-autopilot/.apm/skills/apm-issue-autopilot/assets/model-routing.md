@@ -113,6 +113,31 @@ cost gradient is expressed entirely through B12 SKU selection. If a
 GPT-5-class SKU ever replaces any row above, THAT row must declare a
 per-call reasoning_effort (B16 goes live for it).
 
+## Routing receipt (parent-auditable B12 audit edge)
+
+The per-spawn JSON_RECEIPT above feeds the pipeline child internally,
+but the ORCHESTRATOR cannot see nested routing without reading child
+transcripts (the dogfood cost-observability gap: triage=opus and
+shepherd=sonnet were confirmable, but nested Ideate/Plan opus-escalation
+and haiku CAVEMAN compression were not). Close the gap by bubbling a
+machine-readable routing receipt up every return edge:
+
+- Each spawner records, for every child it spawns, a receipt
+  `{ spawn, requested_model, role_class, brief_mode, child_echo_model? }`.
+  `requested_model` is AUTHORITATIVE (the SKU passed to `task`);
+  `child_echo_model` is the child's self-report and is advisory only
+  (a child cannot prove the SKU it actually ran under).
+- The pipeline child AGGREGATES its descendants' receipts into a
+  `routing_receipts` array on its `implement-result` return.
+- The shepherd-driver child returns its OWN `routing_receipt` (its model)
+  plus `panel_execution` (`skill-tool` | `inline`) and `panel_personas`
+  on its `completion_return` (see shepherd-driver completion-schema.json).
+- The orchestrator records these on the row so B12/B14b adherence is
+  auditable from plan.md alone -- never from a transcript re-read.
+
+Receipts are observability, not a gate: a missing receipt is a soft
+signal to inspect, not a hard failure.
+
 ## Phase 1 triage binding (the paramount front gate)
 
 Triage runs in Phase 1, not Phase 4, so it is not in the per-spawn table

@@ -1,6 +1,6 @@
 lockfile_version: '1'
-generated_at: '2026-06-01T22:16:47.506396+00:00'
-apm_version: 0.16.0
+generated_at: '2026-06-02T15:27:38.838864+00:00'
+apm_version: 0.16.1
 dependencies:
 - repo_url: _local/apm-issue-autopilot
   package_type: apm_package
@@ -22,6 +22,14 @@ dependencies:
   - .agents/skills/apm-triage-panel
   source: local
   local_path: ../apm-triage-panel
+- repo_url: _local/pr-description-skill
+  depth: 2
+  resolved_by: _local/apm-issue-autopilot
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/pr-description-skill
+  source: local
+  local_path: ../pr-description-skill
 - repo_url: _local/shepherd-driver
   depth: 2
   resolved_by: _local/apm-issue-autopilot
@@ -51,7 +59,6 @@ local_deployed_files:
 - .agents/skills/docs-impact-localizer
 - .agents/skills/docs-sync
 - .agents/skills/oss-growth
-- .agents/skills/pr-description-skill
 - .agents/skills/python-architecture
 - .agents/skills/supply-chain-security
 - .github/agents/agentic-workflows.agent.md

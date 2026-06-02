@@ -81,9 +81,14 @@ HALLUCINATION and PHANTOM DEPENDENCY).
 
 This skill itself COMPOSES [apm-review-panel](../apm-review-panel/SKILL.md).
 A consuming orchestrator inherits that transitive dependency; the
-spawned shepherd-driver subagent PROBES for it at preflight
-(`test -f ../apm-review-panel/SKILL.md`) and returns `status: blocked`
-on a miss before any checkout (see the spawn body Step 0.0).
+spawned shepherd-driver subagent PROBES for it at preflight (all
+load-bearing panel assets under
+`$REPO_ROOT/.agents/skills/apm-review-panel/`) and returns
+`status: blocked` ONLY on a genuine asset MISS, before any checkout
+(see the spawn body Step 0.0). Note: a missing `skill` TOOL is NOT a
+miss -- in the normal subagent context the panel is executed INLINE
+from its on-disk SKILL.md + schemas (Step X.1.1), which is a
+first-class path, not a fallback.
 
 ## Convergence loop contract (per PR)
 
@@ -93,7 +98,10 @@ body):
 1. Phase X.0 -- fetch + classify `copilot-pull-request-reviewer[bot]`
    inline review per
    [assets/copilot-classification-prompt.md](assets/copilot-classification-prompt.md).
-2. Phase X.1 -- invoke the `apm-review-panel` skill against the PR.
+2. Phase X.1 -- run the `apm-review-panel` against the PR: via the
+   `skill` tool if present, otherwise (the normal subagent case)
+   execute it INLINE from its on-disk SKILL.md + schemas. Both paths
+   produce the same single recommendation comment.
 3. Phase X.2 -- merge follow-ups (LEGIT Copilot + panel
    `recommended_followups`) and apply the fold-vs-defer rubric per
    [assets/fold-vs-defer-rubric.md](assets/fold-vs-defer-rubric.md).
@@ -129,8 +137,9 @@ matching [assets/completion-schema.json](assets/completion-schema.json):
   remaining (rare); each deferred item carries a scope-boundary note.
 - `superseded` -- push fell back to a superseding PR (records
   `superseded_by`).
-- `blocked` -- CI cap hit, panel unavailable, or unresolvable scope
-  conflict (records a one-paragraph `blocker`).
+- `blocked` -- CI cap hit, panel assets genuinely absent (Step 0.0
+  probe miss -- NOT merely the `skill` tool being unavailable), or
+  unresolvable scope conflict (records a one-paragraph `blocker`).
 
 The orchestrator schema-validates every return. On malformed, re-spawn
 ONCE; on a second malformed return, mark the row blocked and continue.
