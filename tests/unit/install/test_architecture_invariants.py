@@ -205,7 +205,7 @@ def test_install_py_under_legacy_budget():
     assert install_py.is_file()
     n = _line_count(install_py)
     assert n <= 2045, (
-        f"commands/install.py grew to {n} LOC (budget 2014). "
+        f"commands/install.py grew to {n} LOC (budget 2045). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.apm/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

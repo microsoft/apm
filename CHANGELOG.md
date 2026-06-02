@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (e.g. NVIDIA SkillSpector or any SARIF-emitting tool) via `--external
   <name>` and `--external-sarif <file>`, merging them into APM's own report
   and exit codes. APM's native content scan always runs; external findings
-  are purely additive.
+  are purely additive. (#1579)
 - `apm install` can now run an optional content audit over freshly deployed
   files (native hidden-character scan plus any policy-required external
   scanners) so prompt-injection and hidden-Unicode attacks surface before
@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule. Policy acts as a floor: it can raise the mode but a weaker
   CLI/config value can never relax an org `block` (`--no-policy` opts out of
   the floor for the invocation). A policy-required external scanner that is
-  not available at install time fails closed with a clear, actionable error.
+  not available at install time fails closed with a clear, actionable error. (#1579)
 - Both capabilities are gated behind the single `external-scanners`
   experimental flag (`apm experimental enable external-scanners`), are
   one-directional (APM only reads vendor SARIF), and are install-method

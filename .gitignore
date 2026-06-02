@@ -82,3 +82,4 @@ server.pid
 .docs-rewrite-plan/
 build/apm-*/
 copilot-scratch/
+.local/

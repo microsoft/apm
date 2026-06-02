@@ -95,11 +95,16 @@ def run(ctx: InstallContext) -> None:
     if blocking:
         from apm_cli.install.errors import PolicyViolationError
 
+        policy_hint = (
+            " Use '--no-policy' to bypass the org floor for this invocation."
+            if decision.source == "policy"
+            else ""
+        )
         raise PolicyViolationError(
             f"Install-time audit blocked: {summary}. "
             f"Run 'apm audit --strip' to clean hidden characters, or "
-            f"'apm install --no-audit' / '--force' to override "
-            f"(mode set by {decision.source})."
+            f"'apm install --force' to override "
+            f"(mode set by {decision.source}).{policy_hint}"
         )
 
     # warn mode, or block downgraded by --force: record without halting.
