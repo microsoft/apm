@@ -96,6 +96,17 @@ class InstructionIntegrator(BaseIntegrator):
         deploy_dir.mkdir(parents=True, exist_ok=True)
 
         fmt = mapping.format_id
+
+        if fmt == "copilot_user_instructions":
+            return self._integrate_copilot_user_instructions(
+                instruction_files,
+                deploy_dir,
+                project_root,
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+            )
+
         needs_rename = fmt in ("cursor_rules", "claude_rules", "windsurf_rules")
 
         files_integrated = 0
@@ -166,20 +177,25 @@ class InstructionIntegrator(BaseIntegrator):
         if not mapping:
             return {"files_removed": 0, "errors": 0}
         effective_root = mapping.deploy_root or target.root_dir
-        prefix = f"{effective_root}/{mapping.subdir}/"
-        legacy_dir = project_root / effective_root / mapping.subdir
-        if mapping.format_id == "cursor_rules":
-            legacy_pattern = "*.mdc"
-        elif mapping.format_id == "windsurf_rules":
-            # Do not use a broad legacy glob for Windsurf rules to avoid
-            # deleting user-authored .md files under .windsurf/rules/.
+        if mapping.format_id == "copilot_user_instructions":
+            prefix = f"{effective_root}/copilot-instructions.md"
             legacy_pattern = None
-        elif mapping.format_id == "claude_rules":
-            # Do not use a broad legacy glob for Claude rules to avoid
-            # deleting user-authored .md files under .claude/rules/.
-            legacy_pattern = None
+            legacy_dir = None
         else:
-            legacy_pattern = "*.instructions.md"
+            prefix = f"{effective_root}/{mapping.subdir}/"
+            legacy_dir = project_root / effective_root / mapping.subdir
+            if mapping.format_id == "cursor_rules":
+                legacy_pattern = "*.mdc"
+            elif mapping.format_id == "windsurf_rules":
+                # Do not use a broad legacy glob for Windsurf rules to avoid
+                # deleting user-authored .md files under .windsurf/rules/.
+                legacy_pattern = None
+            elif mapping.format_id == "claude_rules":
+                # Do not use a broad legacy glob for Claude rules to avoid
+                # deleting user-authored .md files under .claude/rules/.
+                legacy_pattern = None
+            else:
+                legacy_pattern = "*.instructions.md"
         return self.sync_remove_files(
             project_root,
             managed_files,
@@ -187,6 +203,69 @@ class InstructionIntegrator(BaseIntegrator):
             legacy_glob_dir=legacy_dir,
             legacy_glob_pattern=legacy_pattern,
             targets=[target],
+        )
+
+    # ------------------------------------------------------------------
+    # Copilot user-scope concat support
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _strip_frontmatter(content: str) -> str:
+        """Strip YAML frontmatter from instruction content.
+
+        Returns only the body text following the closing ``---`` delimiter.
+        If no frontmatter is present, returns the content unchanged.
+        """
+        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        if fm_match:
+            return content[fm_match.end() :]
+        return content
+
+    def _integrate_copilot_user_instructions(
+        self,
+        instruction_files: list[Path],
+        deploy_dir: Path,
+        project_root: Path,
+        *,
+        force: bool = False,
+        managed_files: set[str] | None = None,
+        diagnostics=None,
+    ) -> IntegrationResult:
+        """Concatenate all instruction files into ~/.copilot/copilot-instructions.md.
+
+        Copilot CLI at user scope reads a single file rather than individual
+        ``*.instructions.md`` files.  This method strips YAML frontmatter from
+        each source file and joins the bodies with a blank-line separator.
+        """
+        target_path = deploy_dir / "copilot-instructions.md"
+        rel_path = portable_relpath(target_path, project_root)
+
+        bodies: list[str] = []
+        for source_file in instruction_files:
+            content = source_file.read_text(encoding="utf-8")
+            body = self._strip_frontmatter(content).strip()
+            if body:
+                bodies.append(body)
+
+        if not bodies:
+            return IntegrationResult(0, 0, 0, [])
+
+        deploy_dir.mkdir(parents=True, exist_ok=True)
+        combined = "\n\n".join(bodies) + "\n"
+
+        # Byte-identity check is not applicable for multi-source concat;
+        # go directly to collision detection.
+        if self.check_collision(
+            target_path, rel_path, managed_files, force, diagnostics=diagnostics
+        ):
+            return IntegrationResult(0, 0, 1, [])
+
+        target_path.write_text(combined, encoding="utf-8")
+        return IntegrationResult(
+            files_integrated=1,
+            files_updated=0,
+            files_skipped=0,
+            target_paths=[target_path],
         )
 
     # ------------------------------------------------------------------
