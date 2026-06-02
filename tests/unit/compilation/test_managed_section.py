@@ -251,3 +251,25 @@ class TestManagedSectionWriteIntegration:
         compiler.config = config
         with pytest.raises(ManagedSectionError):
             compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
+
+    def test_write_output_file_managed_section_file_not_found(self, tmp_path):
+        """When mode=managed_section and the target file doesn't exist, raise a clear ValueError."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        start = "<!-- apm:start -->"
+        end = "<!-- apm:end -->"
+        output_file = tmp_path / "AGENTS.md"
+        # File does NOT exist
+
+        config = CompilationConfig(
+            output_path=str(output_file),
+            agents_md_mode="managed_section",
+            agents_md_start_marker=start,
+            agents_md_end_marker=end,
+            dry_run=False,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler.config = config
+        with pytest.raises(ValueError, match=r"(?i)does not exist"):
+            compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
