@@ -210,10 +210,13 @@ if [ -e "$APM_INSTALL_DIR" ] && [ ! -w "$APM_INSTALL_DIR" ]; then
 fi
 
 # Resolve auth token (needed for both API and download paths)
+# Precedence: GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN (mirrors version_checker.py)
 if [ -n "$GITHUB_APM_PAT" ]; then
     AUTH_HEADER_VALUE="$GITHUB_APM_PAT"
 elif [ -n "$GITHUB_TOKEN" ]; then
     AUTH_HEADER_VALUE="$GITHUB_TOKEN"
+elif [ -n "$GH_TOKEN" ]; then
+    AUTH_HEADER_VALUE="$GH_TOKEN"
 fi
 
 # When VERSION is provided, skip GitHub API and compute download URL directly
@@ -228,8 +231,14 @@ if [ -z "$TAG_NAME" ]; then
 # Get latest release info
 echo -e "${YELLOW}Fetching latest release information...${NC}"
 
-# Try to fetch release info without authentication first (for public repos)
-LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$APM_REPO/releases/latest")
+# Fetch release info; include Authorization header when a token is already resolved
+# (AUTH_HEADER_VALUE set earlier from GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN precedence).
+# This avoids anonymous rate-limiting behind shared IPs / corporate NAT.
+if [ -n "$AUTH_HEADER_VALUE" ]; then
+    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "https://api.github.com/repos/$APM_REPO/releases/latest")
+else
+    LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$APM_REPO/releases/latest")
+fi
 CURL_EXIT_CODE=$?
 
 # Check if the response indicates authentication is required (private repo)

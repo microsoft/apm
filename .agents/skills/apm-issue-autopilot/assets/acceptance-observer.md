@@ -15,9 +15,38 @@ only place a PR is opened in Phase 4 (task children never open PRs).
    assert the output via a urllib-safe assertion, check the file/link
    exists, confirm the benchmark bound). Do NOT assert satisfaction
    from recall -- every condition is checked with a tool.
-4. All conditions hold -> push the issue branch and open ONE PR with
-   `gh pr create`, body linking the issue (`Closes #N`), summarizing
-   the waves and the coverage gates proven. Return the PR number.
+4. All conditions hold -> push the issue branch, then author the PR
+   body with the `pr-description-skill` dependency (do NOT hand-roll
+   the body) and open ONE PR with `gh pr create --body-file`.
+
+   Author the body via the FAST-PATH / INLINE discipline (the `skill`
+   tool is usually absent in this pipeline subagent, so INLINE is the
+   normal path):
+   a. FAST-PATH (if the `skill` tool is present): invoke the
+      `pr-description-skill` skill by name. Give it the issue branch,
+      base `main`, the integrated diff, the wave commit messages, the
+      linked issue (`Closes #N`), the CHANGELOG entry if any, and the
+      acceptance-gate evidence (which `acceptance_shape` conditions
+      were proven, by which deterministic check). It returns a
+      body-file path.
+   b. INLINE EXECUTION (normal here): load
+      `$REPO_ROOT/.agents/skills/pr-description-skill/SKILL.md` as the
+      authoritative contract and follow it IN-THREAD (single-thread
+      skill, no fan-out) to write the body file, validating any mermaid
+      via its bundled deterministic check.
+
+   Then open the PR (A9 SUPERVISED EXECUTION -- verify the body file
+   exists and is non-empty first):
+
+   ```
+   test -s "$PR_BODY_FILE" || { echo "empty PR body; cannot open PR"; exit 1; }
+   gh pr create --repo microsoft/apm --base main \
+      --title "<type>: <short> (closes #N)" --body-file "$PR_BODY_FILE"
+   ```
+
+   The body MUST link the issue (`Closes #N`) and summarize the waves
+   and the coverage gates proven -- pr-description-skill produces this
+   from the inputs above. Return the PR number.
 5. A condition fails -> this is a gate-equivalent failure. RE-PLAN from
    the EARLIEST wave whose tasks are responsible for that condition (map
    the failing `acceptance_shape` item to the task/wave whose

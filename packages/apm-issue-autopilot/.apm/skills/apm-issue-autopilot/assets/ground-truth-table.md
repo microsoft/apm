@@ -48,6 +48,15 @@ state enum:
   escalated-to-maintainer declined duplicate deferred auto-handed-off
 
 Lines stay under 200 chars. ASCII only.
+
+CELL-WRITE RULE (prevents the dogfood table-escaping blowup): write
+each cell as a ONE-LINE, sanitized ASCII summary. NEVER backslash-
+escape Markdown metacharacters (`|` `_` `*` backtick) -- the renderer
+does not need it and the escapes corrupt the table. If a child-return
+value contains a literal pipe `|` or a newline, REPLACE it with ` / `
+(or a space) before writing the cell. Keep rich/multi-line detail
+(blocker paragraphs, full session refs) in the child return or a PR
+comment, never inside a table cell.
 -->
 
 # Ground-truth table

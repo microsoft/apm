@@ -137,6 +137,29 @@
           "type": "string",
           "enum": ["green", "yellow", "red", "blocked"],
           "description": "Coarse projection of `statusCheckRollup` at terminal. `green`=all conclusions in {SUCCESS, NEUTRAL, SKIPPED}; `yellow`=any check still pending/in_progress/queued; `red`=any conclusion in {FAILURE, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}; `blocked`=empty rollup or all cancelled."
+        },
+        "panel_execution": {
+          "type": "string",
+          "enum": ["skill-tool", "inline"],
+          "description": "Which apm-review-panel execution path ran (shepherd-driver-prompt.md Step X.1.1). `skill-tool`=activated via the `skill` tool fast-path; `inline`=panel SKILL.md+schemas executed by this subagent via `task` (the normal subagent-context path). Optional parent-audit field."
+        },
+        "panel_personas": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Persona names fanned out for the panel run (e.g. python-architect, apm-ceo). Optional parent-audit field; lets the orchestrator confirm the inline panel ran the full persona set without reading the child transcript."
+        },
+        "routing_receipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "B12 parent-audit receipt for THIS shepherd subagent's own model (model-routing.md `Routing receipt` section). Optional observability, not a gate.",
+          "required": ["requested_model", "role_class"],
+          "properties": {
+            "spawn": { "type": "string", "description": "Spawn label, e.g. shepherd-<pr>." },
+            "requested_model": { "type": "string", "description": "Authoritative SKU the parent passed to `task` for this subagent." },
+            "role_class": { "type": "string", "enum": ["planner", "implementer", "reviewer", "trivial"] },
+            "brief_mode": { "type": "string", "enum": ["normal", "caveman_full"] },
+            "child_echo_model": { "type": "string", "description": "Model the child self-reports; advisory only (a child cannot prove the SKU it ran under)." }
+          }
         }
       },
       "allOf": [

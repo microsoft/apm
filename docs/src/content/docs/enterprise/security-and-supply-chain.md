@@ -87,10 +87,11 @@ APM has no secret store. The contract is:
   `src/apm_cli/install/mcp/entry.py`,
   `src/apm_cli/integration/mcp_integrator_install.py` (orchestration) and
   `src/apm_cli/integration/mcp_integrator.py` (runtime wiring).
-- **`apm install` writes `apm_modules/` to `.gitignore` automatically**
+- **`apm install` (project scope) writes `apm_modules/` to `.gitignore` automatically**
   on first install. Source:
   `src/apm_cli/commands/_helpers.py:414` (`_update_gitignore_for_apm_modules`).
-  This keeps cached source trees out of commits.
+  This keeps cached source trees out of commits. Global installs (`apm install -g`)
+  do **not** modify `.gitignore` in the current working directory.
 - **`apm.yml` is committed; `.env` is yours.** APM never reads `.env`
   files itself; that is delegated to the agent harness.
 
