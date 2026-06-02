@@ -280,7 +280,7 @@ class TestExpandParentRepoDecl:
 
 
 # ---------------------------------------------------------------------------
-# build_dependency_tree – root parse error
+# build_dependency_tree - root parse error
 # ---------------------------------------------------------------------------
 
 
@@ -553,7 +553,7 @@ class TestEffectiveBaseDir:
 
 
 # ---------------------------------------------------------------------------
-# _try_load_dependency_package – low-level path tests
+# _try_load_dependency_package - low-level path tests
 # ---------------------------------------------------------------------------
 
 

@@ -9,7 +9,7 @@ and ``command_integrator`` treated content-identical files as
 on the next install.
 
 ``skill_integrator._promote_sub_skills`` already had this short-circuit
-(``target.exists()`` + ``_dirs_equal`` -> append + continue). These tests
+(``target.exists()`` + ``is_skill_dir_identical_to_source``). These tests
 lock in the symmetric behavior across non-skill primitives.
 
 Scenarios per integrator:
@@ -27,6 +27,7 @@ from pathlib import Path
 
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -445,3 +446,123 @@ class TestIntegratePackageAgentsAdopt:
         # User content preserved -- adopt didn't fire (divergent), and
         # check_collision's force=False kept the file.
         assert claude_target.read_bytes() == user_body
+
+
+# ---------------------------------------------------------------------------
+# try_adopt_identical helper -- BaseIntegrator refactor (issue #1314, item 3)
+# ---------------------------------------------------------------------------
+
+
+class TestTryAdoptIdentical:
+    """``try_adopt_identical`` is a static helper that encapsulates the
+    is_content_identical_to_source + append + return-True pattern so all
+    call sites collapse to a single predicate call.
+    """
+
+    def test_identical_files_appends_and_returns_true(self, tmp_path: Path) -> None:
+        body = b"# identical\n"
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        source.write_bytes(body)
+        target.write_bytes(body)
+
+        target_paths: list[Path] = []
+        result = BaseIntegrator.try_adopt_identical(target, source, target_paths)
+
+        assert result is True
+        assert target in target_paths
+
+    def test_divergent_files_returns_false_and_does_not_append(self, tmp_path: Path) -> None:
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        source.write_bytes(b"source bytes\n")
+        target.write_bytes(b"different bytes\n")
+
+        target_paths: list[Path] = []
+        result = BaseIntegrator.try_adopt_identical(target, source, target_paths)
+
+        assert result is False
+        assert target_paths == []
+
+    def test_missing_target_returns_false(self, tmp_path: Path) -> None:
+        source = tmp_path / "source"
+        source.write_bytes(b"x\n")
+        missing = tmp_path / "missing"
+
+        target_paths: list[Path] = []
+        result = BaseIntegrator.try_adopt_identical(missing, source, target_paths)
+
+        assert result is False
+        assert target_paths == []
+
+
+# ---------------------------------------------------------------------------
+# CommandIntegrator copilot-target adopt (issue #1314, item 6)
+# ---------------------------------------------------------------------------
+
+
+class TestCommandIntegratorAdopt:
+    """The adopt check in ``integrate_commands_for_target`` fires *before*
+    format dispatch. When the on-disk file happens to be byte-identical to
+    the source (e.g. user manually placed the file, or a future copy-through
+    format is added), adopt fires and the file is NOT re-written.
+
+    This test class mirrors ``TestPromptIntegratorAdopt`` for commands.
+    """
+
+    def _build(self, tmp_path: Path, body: bytes) -> tuple[Path, Path, PackageInfo]:
+        pkg_dir = tmp_path / "pkg"
+        prompts_src = pkg_dir / ".apm" / "prompts"
+        prompts_src.mkdir(parents=True)
+        (prompts_src / "cmd.prompt.md").write_bytes(body)
+
+        commands_dir = tmp_path / ".claude" / "commands"
+        commands_dir.mkdir(parents=True)
+        target = commands_dir / "cmd.md"
+
+        return pkg_dir, target, _make_package_info(pkg_dir)
+
+    def test_adopt_fires_before_format_dispatch_when_bytes_identical(self, tmp_path: Path) -> None:
+        """Adopt check fires before format dispatch when source and on-disk
+        file are byte-identical (proves the check is wired, not dead-code).
+        """
+        body = b"---\ndescription: cmd\n---\n# Cmd\n"
+        _pkg_dir, target, pkg_info = self._build(tmp_path, body)
+        # Pre-place the target with the SAME bytes as the source file.
+        # This simulates a scenario where the on-disk file matches the source
+        # (e.g. a copy-through format or a manually placed file).
+        target.write_bytes(body)
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        assert target in result.target_paths, (
+            "Adopt must fire when target bytes match source bytes -- "
+            "the adopt check runs before format dispatch."
+        )
+        assert result.files_adopted == 1
+        assert result.files_integrated == 0
+
+    def test_divergent_content_skipped_not_adopted(self, tmp_path: Path) -> None:
+        """When on-disk bytes differ from source, adopt does not fire."""
+        body = b"---\ndescription: cmd\n---\n# Cmd\n"
+        user_body = b"# User-authored command\n"
+        _pkg_dir, target, pkg_info = self._build(tmp_path, body)
+        target.write_bytes(user_body)
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        # User content preserved; adopt did not fire.
+        assert target.read_bytes() == user_body
+        assert result.files_adopted == 0

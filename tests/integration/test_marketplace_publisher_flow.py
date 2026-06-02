@@ -170,7 +170,7 @@ def _make_manifest(
 
 
 # ---------------------------------------------------------------------------
-# Section 1 – Pure helper functions (commands/__init__.py)
+# Section 1 - Pure helper functions (commands/__init__.py)
 # ---------------------------------------------------------------------------
 
 
@@ -272,7 +272,7 @@ class TestMarketplaceAddUnsupportedHostError:
 
 
 # ---------------------------------------------------------------------------
-# Section 2 – _parse_marketplace_repo
+# Section 2 - _parse_marketplace_repo
 # ---------------------------------------------------------------------------
 
 
@@ -343,7 +343,7 @@ class TestParseMarketplaceRepo:
 
 
 # ---------------------------------------------------------------------------
-# Section 3 – _load_targets_file
+# Section 3 - _load_targets_file
 # ---------------------------------------------------------------------------
 
 
@@ -431,7 +431,7 @@ class TestLoadTargetsFile:
 
 
 # ---------------------------------------------------------------------------
-# Section 4 – ConsumerTarget validation (publisher.py)
+# Section 4 - ConsumerTarget validation (publisher.py)
 # ---------------------------------------------------------------------------
 
 
@@ -466,7 +466,7 @@ class TestConsumerTarget:
 
 
 # ---------------------------------------------------------------------------
-# Section 5 – _sanitise_branch_segment (publisher.py)
+# Section 5 - _sanitise_branch_segment (publisher.py)
 # ---------------------------------------------------------------------------
 
 
@@ -489,12 +489,12 @@ class TestSanitiseBranchSegment:
 
 
 # ---------------------------------------------------------------------------
-# Section 6 – PublishState (publisher.py)
+# Section 6 - PublishState (publisher.py)
 # ---------------------------------------------------------------------------
 
 
 class TestPublishState:
-    """Tests for PublishState – state file write/read lifecycle."""
+    """Tests for PublishState - state file write/read lifecycle."""
 
     def test_load_from_missing_path_returns_fresh(self, tmp_path: Path) -> None:
         state = PublishState.load(tmp_path / "nonexistent")
@@ -592,7 +592,7 @@ class TestPublishState:
 
 
 # ---------------------------------------------------------------------------
-# Section 7 – MarketplacePublisher.plan (publisher.py)
+# Section 7 - MarketplacePublisher.plan (publisher.py)
 # ---------------------------------------------------------------------------
 
 
@@ -688,7 +688,7 @@ class TestMarketplacePublisherPlan:
 
 
 # ---------------------------------------------------------------------------
-# Section 8 – MarketplacePublisher.execute + _process_single_target
+# Section 8 - MarketplacePublisher.execute + _process_single_target
 # ---------------------------------------------------------------------------
 
 
@@ -957,7 +957,7 @@ dependencies:
 
 
 # ---------------------------------------------------------------------------
-# Section 9 – MarketplacePublisher.safe_force_push (publisher.py)
+# Section 9 - MarketplacePublisher.safe_force_push (publisher.py)
 # ---------------------------------------------------------------------------
 
 
@@ -1006,7 +1006,7 @@ class TestSafeForPush:
 
 
 # ---------------------------------------------------------------------------
-# Section 10 – CLI commands via CliRunner
+# Section 10 - CLI commands via CliRunner
 # ---------------------------------------------------------------------------
 
 
@@ -1291,7 +1291,7 @@ class TestMarketplaceGroupBuildDeprecated:
 
 
 # ---------------------------------------------------------------------------
-# Section 11 – PublishPlan field assertions
+# Section 11 - PublishPlan field assertions
 # ---------------------------------------------------------------------------
 
 
@@ -1332,7 +1332,7 @@ class TestPublishPlan:
 
 
 # ---------------------------------------------------------------------------
-# Section 12 – PublishOutcome enum
+# Section 12 - PublishOutcome enum
 # ---------------------------------------------------------------------------
 
 
@@ -1357,7 +1357,7 @@ class TestPublishOutcomeEnum:
 
 
 # ---------------------------------------------------------------------------
-# Section 13 – _check_gitignore_for_marketplace_json
+# Section 13 - _check_gitignore_for_marketplace_json
 # ---------------------------------------------------------------------------
 
 
@@ -1429,7 +1429,7 @@ class TestCheckGitignoreForMarketplaceJson:
 
 
 # ---------------------------------------------------------------------------
-# Section 14 – _load_yml_or_exit (indirectly via CWD + sys.exit mocking)
+# Section 14 - _load_yml_or_exit (indirectly via CWD + sys.exit mocking)
 # ---------------------------------------------------------------------------
 
 

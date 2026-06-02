@@ -82,7 +82,7 @@ def mcp():
         "  apm mcp install api --transport http --url https://example.com/mcp"
     ),
     epilog=(
-        "Common options (see `apm install --mcp --help` for full list):\n"
+        "Common options (see `apm install --help` for full list):\n"
         "  --transport [stdio|http|sse|streamable-http]\n"
         "  --url URL           Server URL for remote transports\n"
         "  --env KEY=VALUE     Environment variable (repeatable)\n"

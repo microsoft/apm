@@ -221,7 +221,7 @@ def main():
         _time.sleep(ms / 1000)
         return True
 
-    # Sequential: 10 tasks × 50ms each = ~500ms
+    # Sequential: 10 tasks x 50ms each = ~500ms
     def _seq_10():
         for _ in range(10):
             _simulated_work(50)
@@ -231,7 +231,7 @@ def main():
     results[key] = (med, lo, hi)
     print(f"  {key:45s}  median={med:8.2f}ms  min={lo:8.2f}ms  max={hi:8.2f}ms")
 
-    # Parallel: 10 tasks × 50ms, 4 workers → ~150ms (ceil(10/4) × 50ms)
+    # Parallel: 10 tasks x 50ms, 4 workers → ~150ms (ceil(10/4) x 50ms)
     def _par_10():
         with ThreadPoolExecutor(max_workers=4) as executor:
             futs = [executor.submit(_simulated_work, 50) for _ in range(10)]

@@ -117,10 +117,32 @@ my-monorepo/
     plugin-a/
       apm.yml                      # plugin-a's manifest
       .apm/
+        agents/
+          expert.agent.md
+        instructions/
+          style.instructions.md
+        skills/
+          my-skill/
+            SKILL.md
     plugin-b/
       apm.yml
       .apm/
+        prompts/
+          review.prompt.md
+        hooks/
+          pre-tool.json
 ```
+
+> **Important -- use `.apm/<type>/` for every primitive in each plugin.**
+> `apm pack` accepts primitives from both `.apm/<type>/` and root
+> convention directories (e.g. `instructions/` at the plugin root), but
+> `apm install` only discovers instructions, commands, and prompts under
+> `.apm/<type>/`. Authoring `packages/plugin-a/instructions/style.instructions.md`
+> instead of `packages/plugin-a/.apm/instructions/style.instructions.md`
+> will produce a bundle that packs correctly but installs silently
+> incomplete. See [Pack a bundle -- source layout and install-time
+> discovery](./pack-a-bundle/#source-layout-and-install-time-discovery)
+> for the full per-primitive scan-path reference.
 
 Scaffold:
 

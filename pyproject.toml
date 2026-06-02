@@ -88,8 +88,6 @@ ignore = [
     "S602",     # subprocess-popen-with-shell -- intentional in CLI wrapping git/pip
     # --- Deferred rules: enable in dedicated future PRs ---
     "SIM102",   # collapsible-if -- 28 violations, auto-fixable style improvement
-    "RUF003",   # ambiguous-unicode-character-comment -- 14 violations, review against ASCII convention
-    "RUF002",   # ambiguous-unicode-character-docstring -- 8 violations, same as above
 ]
 
 [tool.ruff.lint.pylint]
