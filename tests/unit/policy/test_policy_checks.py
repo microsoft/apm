@@ -217,6 +217,16 @@ class TestRequiredPackagesDeployed:
         assert not result.passed
         assert "org/pkg" in result.details[0]
 
+    def test_fail_message_includes_no_policy_hint(self):
+        """The error message includes a --no-policy recovery hint so users in
+        the catch-22 know how to self-heal without reading the docs."""
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = DependencyPolicy(require=["org/pkg"])
+        result = _check_required_packages_deployed(deps, lock, policy)
+        assert not result.passed
+        assert "--no-policy" in result.message
+
     def test_skip_if_not_in_manifest(self):
         """Required package not in manifest -- check 3 handles that."""
         deps = _make_dep_refs(["other/pkg"])

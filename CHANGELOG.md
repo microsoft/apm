@@ -10,10 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Custom-port credential errors now include a ready-to-run `git credential fill` verification command and a link to the auth troubleshooting docs, so users can diagnose miskeyed helpers without guessing. (closes #799)
+- `apm install` now shows a recovery hint (`apm install --no-policy`) when the `required-packages-deployed` policy check fails, so users know how to unblock without hunting for the flag. (closes #1314)
+- `apm install -g` now deploys `instructions` primitives for the Copilot target by concatenating all `*.instructions.md` files from each installed package into `~/.copilot/copilot-instructions.md`, the single file Copilot CLI reads at user scope. Previously this primitive type was silently skipped for global installs. Each package's contribution is wrapped in an HTML provenance comment so the file is auditable and multi-package installs accumulate correctly. (closes #650)
 - `apm compile --target copilot` (and `agents`) no longer writes instructions into `AGENTS.md` when `apm install` has already deployed them to `.github/instructions/`, eliminating duplicate context that Copilot would read from both locations. Mirrors the equivalent dedup behaviour that was already in place for the Claude path (`.claude/rules/`). (closes #1550, refs #1445)
 
 ### Changed
 
+- `apm_cli.models` internals: package-format detection extracted into a composition model (`PackageFormatRegistry` + per-format detectors + `NormalizationPlanner`); `detect_package_type()` is now a thin facade with no user-visible behaviour change. (#1618)
 - `apm compile` no longer emits cosmetic debug comments (APM version, source-file headers, footer) in generated `CLAUDE.md` and `copilot-instructions.md` files by default. The `compilation.source_attribution` flag now defaults to `false` (was `true`), reducing token overhead for every LLM context window that reads these files. Load-bearing markers (`_COPILOT_ROOT_GENERATED_MARKER` and Build ID) are always emitted regardless of the flag. To restore the previous behaviour, set `compilation: source_attribution: true` in `apm.yml`. (closes #1341)
 ### Removed
 

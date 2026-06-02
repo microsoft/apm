@@ -1244,7 +1244,7 @@ class AgentsCompiler:
                     config.agents_md_end_marker,
                 )
             except ManagedSectionError as exc:
-                raise ManagedSectionError(f"{target}: {exc}") from exc
+                raise ManagedSectionError(f"[{target}] {exc}") from exc
         elif config.agents_md_mode != "full":
             raise ValueError(
                 f"Unknown agents_md.mode {config.agents_md_mode!r}. "
