@@ -306,6 +306,10 @@ class TargetProfile:
                 }
             else:
                 filtered = self.primitives
+            if self.user_primitive_overrides:
+                merged = dict(filtered)
+                merged.update(self.user_primitive_overrides)
+                filtered = merged
             return replace(
                 self,
                 primitives=filtered,

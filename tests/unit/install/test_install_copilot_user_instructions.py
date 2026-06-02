@@ -200,6 +200,48 @@ class TestCopilotUserInstructionsIntegration:
         assert not out_file.exists()
         assert result.files_integrated == 0
 
+    def test_multi_package_instructions_all_concatenated(self):
+        """Instructions from two packages must both appear in copilot-instructions.md.
+
+        Regression test for the multi-package collision bug: the second package's
+        instructions must not be silently dropped because the file already exists
+        after the first package's integration.
+        """
+        pkg_a_dir = self.home / "pkg-a"
+        (pkg_a_dir / ".apm" / "instructions").mkdir(parents=True, exist_ok=True)
+        (pkg_a_dir / ".apm" / "instructions" / "a.instructions.md").write_text(
+            "# Package A\n\nAlways use type hints.\n", encoding="utf-8"
+        )
+        pkg_a = _make_package_info(pkg_a_dir, name="pkg-a")
+
+        pkg_b_dir = self.home / "pkg-b"
+        (pkg_b_dir / ".apm" / "instructions").mkdir(parents=True, exist_ok=True)
+        (pkg_b_dir / ".apm" / "instructions" / "b.instructions.md").write_text(
+            "# Package B\n\nAlways sanitize inputs.\n", encoding="utf-8"
+        )
+        pkg_b = _make_package_info(pkg_b_dir, name="pkg-b")
+
+        copilot = KNOWN_TARGETS["copilot"]
+        user_profile = copilot.for_scope(user_scope=True)
+
+        self.integrator.integrate_instructions_for_target(user_profile, pkg_a, self.home)
+        self.integrator.integrate_instructions_for_target(user_profile, pkg_b, self.home)
+
+        out_file = self.home / ".copilot" / "copilot-instructions.md"
+        content = out_file.read_text(encoding="utf-8")
+        assert "# Package A" in content, "Package A instructions must be present"
+        assert "Always use type hints." in content
+        assert "# Package B" in content, "Package B instructions must be present"
+        assert "Always sanitize inputs." in content
+
+    def test_strip_frontmatter_strips_crlf_line_endings(self):
+        """_strip_frontmatter must handle Windows CRLF line endings."""
+        crlf_content = "---\r\napplyTo: '**'\r\n---\r\n\r\n# Body content\r\n"
+        result = InstructionIntegrator._strip_frontmatter(crlf_content)
+        assert "# Body content" in result
+        assert "applyTo:" not in result
+        assert "---" not in result
+
     def test_project_scope_unaffected(self):
         """Project-scope integration still deploys individual .instructions.md files."""
         pkg_info = self._make_pkg(
