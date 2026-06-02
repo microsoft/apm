@@ -586,6 +586,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](./cli/compile/) b
 | `source_attribution` | `bool` | `false` | | Include source-file origin comments in compiled output (opt-in). |
 | `exclude` | `list<string>` or `string` | `[]` | Glob patterns | Directories to skip during compilation (e.g. `apm_modules/**`). |
 | `placement` | `object` | unset | | Placement tuning. See Section 6.1. |
+| `agents_md` | `object` | unset | | AGENTS.md output tuning. See Section 6.2. |
 
 ### 6.1. `compilation.placement`
 
@@ -603,6 +604,28 @@ compilation:
     - "tmp/**"
   placement:
     min_instructions_per_file: 1
+```
+
+### 6.2. `compilation.agents_md`
+
+Controls how `apm compile` writes the `AGENTS.md` output file. All fields are OPTIONAL; omitting the entire sub-object keeps the default full-overwrite behaviour. Use `managed_section` mode when your `AGENTS.md` contains hand-written content you want to preserve across recompiles.
+
+| Field | Type | Default | Constraint | Description |
+|---|---|---|---|---|
+| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` overwrites the entire file on every compile. `managed_section` replaces only the block between `start_marker` and `end_marker`, leaving surrounding content untouched. |
+| `start_marker` | `string` | `<!-- apm:start -->` | Non-empty, distinct from `end_marker` | Opening HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
+| `end_marker` | `string` | `<!-- apm:end -->` | Non-empty, distinct from `start_marker` | Closing HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
+
+Both markers must appear **exactly once** in the file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content.
+
+See [Managed-section mode](../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
+
+```yaml
+compilation:
+  agents_md:
+    mode: managed_section
+    start_marker: "<!-- apm:start -->"
+    end_marker: "<!-- apm:end -->"
 ```
 
 ---

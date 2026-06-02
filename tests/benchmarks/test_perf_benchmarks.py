@@ -2,8 +2,8 @@
 
 Covers the bottlenecks identified in issue #171:
 - Primitive conflict detection (O(m) after fix, was O(m²))
-- Cycle detection (O(V+E) after fix, was O(V×D))
-- get_nodes_at_depth() (O(1) after fix, was O(V × max_depth))
+- Cycle detection (O(V+E) after fix, was O(VxD))
+- get_nodes_at_depth() (O(1) after fix, was O(V x max_depth))
 - from_apm_yml() parse caching
 - Inheritance chain caching
 
@@ -104,7 +104,7 @@ class TestPrimitiveConflictDetectionPerf:
 
 @pytest.mark.benchmark
 class TestDepthIndexPerf:
-    """Verify O(1) depth lookups (was O(V × max_depth) before #171)."""
+    """Verify O(1) depth lookups (was O(V x max_depth) before #171)."""
 
     def test_get_nodes_at_depth_large_tree(self):
         """100 packages across 10 depths — lookups should be instant."""
@@ -134,7 +134,7 @@ class TestDepthIndexPerf:
 
 @pytest.mark.benchmark
 class TestCycleDetectionPerf:
-    """Verify O(V+E) cycle detection (was O(V×D) before #171)."""
+    """Verify O(V+E) cycle detection (was O(VxD) before #171)."""
 
     def test_no_cycles_deep_chain(self):
         """50-node linear chain — O(V+E) detection."""

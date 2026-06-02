@@ -69,6 +69,7 @@ def _make_integrators() -> dict[str, Any]:
     skill_result.target_paths = []
     skill_result.skill_created = False
     skill_result.sub_skills_promoted = 0
+    skill_result.bin_deployed = 0
     integrators: dict[str, Any] = {
         k: MagicMock()
         for k in [
@@ -257,6 +258,7 @@ class TestIntegratePackagePrimitivesFormatTargetCollapse:
         skill_result.target_paths = skill_paths
         skill_result.skill_created = bool(skill_paths)
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
 
         ctx = MagicMock()
         ctx.verbose = verbose
@@ -361,6 +363,7 @@ class TestIntegratePackagePrimitivesSubSkills:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
 
         logger = MagicMock()
         copilot = KNOWN_TARGETS["copilot"]
@@ -403,6 +406,7 @@ class TestSkillPathOutsideProject:
         skill_result.target_paths = [cowork_skill]
         skill_result.skill_created = True
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
 
         cowork_target = _make_cowork_target(cowork_root)
 
@@ -459,6 +463,7 @@ class TestIntegrateLocalContent:
             skill_result.target_paths = []
             skill_result.skill_created = False
             skill_result.sub_skills_promoted = 0
+            skill_result.bin_deployed = 0
             integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
             with patch("apm_cli.integration.dispatch.get_dispatch_table", return_value={}):
                 return integrate_package_primitives(pkg_info, *args, **kwargs)

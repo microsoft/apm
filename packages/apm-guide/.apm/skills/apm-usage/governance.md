@@ -60,6 +60,10 @@ unmanaged_files:
 registry_source:                        # experimental: requires `apm experimental enable registries`
   require: []                           # registry names that MUST be reachable in the merged registry map
   allow_non_registry: true              # when false, blocks any dep not routed through a configured registry
+
+bin_deploy:                             # marketplace_plugin bin/ executable deployment (Claude, global installs)
+  deny_all: false                       # when true, suppress bin/ deploy for every plugin
+  deny: []                              # canonical strings (owner/name) whose bin/ must not deploy
 ```
 
 ## Registry source governance (experimental)
@@ -85,6 +89,33 @@ The check fires from all four call sites (`policy_gate`,
 `policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
 `apm install`, `apm install <pkg>`, `apm deps update`, and
 `apm audit --ci` all enforce the same gate.
+
+## Plugin bin/ deployment governance
+
+When a `marketplace_plugin` package ships a `bin/` directory, a global
+install (`apm install -g`) deploys those executables into
+`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
+commands (the skills-directory plugin contract). Deployment is
+Claude-only and user-scope only; project-scope installs never deploy
+executables.
+
+```yaml
+# .github/apm-policy.yml
+bin_deploy:
+  deny_all: true                        # block every plugin's bin/ deploy org-wide
+  # or target specific packages:
+  deny:
+    - myorg/untrusted-plugin            # canonical owner/name string
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `deny_all` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin`, regardless of `deny`. |
+| `deny` | `[]` | Canonical package strings (`owner/name`) whose bin/ executables must not deploy. |
+
+Deployed executables are placed on Claude Code's `PATH` and invoked
+without further confirmation, so use this field to opt out in
+environments where plugin executables are not trusted by default.
 
 ## Local content governance
 

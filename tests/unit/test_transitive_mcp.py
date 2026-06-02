@@ -42,7 +42,7 @@ def _isolated_targets():
 
 
 # ---------------------------------------------------------------------------
-# APMPackage – MCP dict parsing
+# APMPackage - MCP dict parsing
 # ---------------------------------------------------------------------------
 class TestAPMPackageMCPParsing:
     """Ensure apm_package preserves both string and dict MCP entries."""
@@ -818,7 +818,7 @@ class TestCheckSelfDefinedServersNeeding:
 
 
 # ---------------------------------------------------------------------------
-# _install_mcp_dependencies – self-defined skip logic
+# _install_mcp_dependencies - self-defined skip logic
 # ---------------------------------------------------------------------------
 @pytest.mark.usefixtures("_bypass_target_gate")
 class TestInstallSelfDefinedSkipLogic:

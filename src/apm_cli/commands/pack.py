@@ -403,11 +403,13 @@ def pack_cmd(
                                 logger.info(f"    {out.path}  [unchanged]")
                             elif out.status == "missing":
                                 logger.info(f"    {out.path}  [missing on disk; would be created]")
+                                _emit_drift_recipe(logger, out.path)
                             else:
                                 count = len(out.differences)
                                 logger.info(f"    {out.path}  [drift: {count} differences]")
                                 for line in render_diff_lines(out):
                                     logger.info(line)
+                                _emit_drift_recipe(logger, out.path)
                     for msg in d_report.error_messages():
                         gate_errors.append({"code": "marketplace_drift", "message": msg})
 
@@ -450,6 +452,30 @@ def pack_cmd(
         ctx.exit(3)
     if drift_gate_failed:
         ctx.exit(4)
+
+
+def _emit_drift_recipe(logger, out_path: str) -> None:
+    """Emit the canonical recovery recipe when marketplace.json drift is detected.
+
+    Teaches producers the amend+force-with-lease pattern so they can fix the
+    drift without a noisy follow-up commit.
+    """
+    logger.info("")
+    logger.info("    To recover cleanly (fold into the current commit):")
+    logger.info("")
+    logger.info("      apm pack                       # regenerate locally")
+    logger.info(f"      git add -- {out_path}")
+    logger.info("      git commit --amend --no-edit   # fold into the current commit")
+    logger.info("      git push --force-with-lease    # safe re-push")
+    logger.info("")
+    logger.info("    Or as a follow-up commit:")
+    logger.info("")
+    logger.info(f"      apm pack && git add -- {out_path}")
+    logger.info("      git commit -m 'chore(marketplace): regen'")
+    logger.info("")
+    logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")
+    logger.info("    so consumers can resolve packages without running 'apm pack'. CI")
+    logger.info("    enforces that the checked-in copy matches the apm.yml source of truth.")
 
 
 def _render_bundle_result(logger, pack_result, fmt, target, dry_run):

@@ -4,7 +4,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm init [NAME]` | Initialize a new APM project | `-y` skip prompts, `--plugin` plugin authoring mode, `--marketplace` seed apm.yml with a `marketplace:` block |
+| `apm init [NAME]` | Initialize a new APM project | `-y` skip prompts, `--plugin` plugin authoring mode, `--marketplace` seed apm.yml with a `marketplace:` block. After init, Next Steps contextually suggests `agentrc init` (if agentrc is in PATH) or prints a tip link when no agent instruction files exist. |
 
 ## Dependency management
 
@@ -51,11 +51,11 @@ If no `--target`, no `targets:` in `apm.yml`, and no harness signal is present, 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm compile` | Compile agent context | `-o` output, `-t` target (comma-separated; resolution chain `--target` > apm.yml `targets:` > auto-detect), `--all` compile for every canonical target (preferred over deprecated `--target all`), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution` |
+| `apm compile` | Compile agent context | `-o` output, `-t` target (comma-separated; resolution chain `--target` > apm.yml `targets:` > auto-detect), `--all` compile for every canonical target (preferred over deprecated `--target all`), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution`, `--no-dedup` / `--force-instructions` (opt out of Claude deduplication) |
 
 `apm compile --watch` live-reloads `apm.yml`: editing `target:` / `targets:` mid-session takes effect on the next file event without restarting the watcher. The CLI `--target` flag, when passed to `apm compile --watch`, still outranks `apm.yml`. Re-resolution is gated on the changed file's basename being `apm.yml`, so `.instructions.md` edits do not pay an extra resolver round-trip and a stray `backup_apm.yml` cannot trigger a reload. `--clean` is ignored in watch mode and the watcher prints an explicit `[!]` warning at startup (`--clean is ignored in watch mode; run 'apm compile --clean' separately to remove orphaned outputs.`); run `apm compile --clean` separately between watch sessions to remove orphans.
 
-When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the Project Standards section from `CLAUDE.md` to avoid Claude Code seeing every instruction twice. Detection is a simple glob (`.claude/rules/*.md`). `CLAUDE.md` is still generated when it carries a constitution block or dependency `@import` paths -- only the instructions section is suppressed. An informational log message is emitted when zero `CLAUDE.md` files are generated because all content was already deployed via rules.
+When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the Project Standards section from `CLAUDE.md` to avoid Claude Code seeing every instruction twice. Detection is a simple glob (`.claude/rules/*.md`). `CLAUDE.md` is still generated when it carries a constitution block or dependency `@import` paths -- only the instructions section is suppressed. An informational log message is emitted when zero `CLAUDE.md` files are generated because all content was already deployed via rules. Pass `--no-dedup` (alias: `--force-instructions`) to override this behaviour and always include the instructions section in `CLAUDE.md`.
 
 ## Scripts
 
@@ -205,5 +205,7 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 `apm config set prefer-ssh true` and `apm config set allow-protocol-fallback true` persist transport preferences to `~/.apm/config.json` so SSH-only and corporate GHES users no longer need to re-pass `--ssh` / `--allow-protocol-fallback` on every `apm install`. Resolution order: CLI flag > `APM_GIT_PROTOCOL` / `APM_ALLOW_PROTOCOL_FALLBACK` env var > `apm config` value > built-in default (`false`). `apm config unset prefer-ssh` and `apm config unset allow-protocol-fallback` remove the persisted value. In `apm config` / `apm config get` (no key), the two transport rows surface only when they have been enabled (the `false`-default rows are suppressed to keep the output noise-free); `apm config get <key>` always returns the effective value. Setting `allow-protocol-fallback=true` while `CI=1` emits a warning because the persisted value affects every subsequent `apm install` on a shared `$HOME`; prefer the env var in CI.
 
 `apm self-update` shares the Windows installer codepath used by `install.ps1`: it stages the new release under `%LOCALAPPDATA%\Programs\apm\releases\<tag>` before running `apm.exe --version`, so an AppLocker / WDAC allow-list rule for `%LOCALAPPDATA%\Programs\apm\*` suffices. When the smoke test fails with HRESULT `0x80070005` (`Access is denied`), the installer emits a specific AppLocker/WDAC diagnostic with three remediations (allow-list rule, set `APM_TEMP_DIR` to an allow-listed path, or fall back to `pip install --user apm-cli`) instead of silently retrying via pip.
+
+`apm self-update` (and the startup version-checker) honours the same env vars as `install.sh` for air-gapped and GitHub Enterprise Server (GHE) environments: `GITHUB_URL` overrides the GitHub base URL and API host (`{GITHUB_URL}/api/v3` for GHE), `APM_REPO` overrides the repository (default `microsoft/apm`), and `VERSION` pins a release and skips the GitHub API call entirely. Example: `GITHUB_URL=https://gh.corp.com APM_REPO=corp/apm VERSION=v1.2.3 apm self-update`.
 
 `apm config set copilot-cowork-skills-dir <absolute-path>` persists the Cowork skills directory across shells. `apm config get copilot-cowork-skills-dir` and `apm config unset copilot-cowork-skills-dir` remain available even when the `copilot-cowork` flag is disabled so leftover state can still be inspected or cleared. In `apm config` and bare `apm config get`, the `copilot-cowork-skills-dir` entry is shown only when the `copilot-cowork` flag is enabled.

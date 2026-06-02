@@ -112,6 +112,11 @@ class CompilationConfig:
     clean_orphaned: bool = False  # Remove orphaned AGENTS.md files
     exclude: list[str] = None  # Glob patterns for directories to exclude during compilation
 
+    # Deduplication opt-out (issue #1463): when True, instructions are always
+    # included in CLAUDE.md regardless of .claude/rules/ contents.
+    # Mirrors --no-dedup / --force-instructions CLI flag.
+    no_dedup: bool = False
+
     # Managed-section mode (issue #1540): update only the APM-owned block
     # inside an existing AGENTS.md instead of overwriting the whole file.
     # Set compilation.agents_md.mode: managed_section in apm.yml to enable.
@@ -632,18 +637,27 @@ class AgentsCompiler:
 
         # Skip instructions in CLAUDE.md when they are already deployed to
         # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
-        skip_instructions = _detect_deployed_instructions(
-            self.base_dir / ".claude" / "rules",
-            self.base_dir,
-            lambda msg: self._log("warning", msg),
-        )
-        if skip_instructions:
+        # --no-dedup / --force-instructions lets users opt out of this behaviour.
+        if config.no_dedup:
+            skip_instructions = False
             self._log(
                 "progress",
-                "Instructions already in .claude/rules/ -- omitting from CLAUDE.md"
-                " to avoid duplicate context",
+                "Including instructions in CLAUDE.md (--no-dedup overrides deduplication)",
                 symbol="info",
             )
+        else:
+            skip_instructions = _detect_deployed_instructions(
+                self.base_dir / ".claude" / "rules",
+                self.base_dir,
+                lambda msg: self._log("warning", msg),
+            )
+            if skip_instructions:
+                self._log(
+                    "progress",
+                    "Instructions already in .claude/rules/ -- omitting from CLAUDE.md"
+                    " to avoid duplicate context",
+                    symbol="info",
+                )
 
         # Format CLAUDE.md files
         claude_config = {
@@ -1244,7 +1258,7 @@ class AgentsCompiler:
                     config.agents_md_end_marker,
                 )
             except ManagedSectionError as exc:
-                raise ManagedSectionError(f"{target}: {exc}") from exc
+                raise ManagedSectionError(f"[{target}] {exc}") from exc
         elif config.agents_md_mode != "full":
             raise ValueError(
                 f"Unknown agents_md.mode {config.agents_md_mode!r}. "

@@ -32,22 +32,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extra to install.
 ### Fixed
 
+- `apm pack --check-clean` now emits a copy-pasteable recovery recipe when `marketplace.json` drifts from source: `git commit --amend --no-edit` + `git push --force-with-lease` to fold the diff into the current commit, or a follow-up commit variant. Producers get the right command at the point of failure without consulting external docs. (closes #1381)
+- `apm mcp install --help` epilog now references `apm install --help` instead of the invalid `apm install --mcp --help` flag combination that always raised a UsageError. (closes #1586)
+- Custom-port credential errors now include a ready-to-run `git credential fill` verification command and a link to the auth troubleshooting docs, so users can diagnose miskeyed helpers without guessing. (closes #799)
+- `apm install` now shows a recovery hint (`apm install --no-policy`) when the `required-packages-deployed` policy check fails, so users know how to unblock without hunting for the flag. (closes #1314)
+- `apm install -g` now deploys `instructions` primitives for the Copilot target by concatenating all `*.instructions.md` files from each installed package into `~/.copilot/copilot-instructions.md`, the single file Copilot CLI reads at user scope. Previously this primitive type was silently skipped for global installs. Each package's contribution is wrapped in an HTML provenance comment so the file is auditable and multi-package installs accumulate correctly. (closes #650)
 - `apm compile --target copilot` (and `agents`) no longer writes instructions into `AGENTS.md` when `apm install` has already deployed them to `.github/instructions/`, eliminating duplicate context that Copilot would read from both locations. Mirrors the equivalent dedup behaviour that was already in place for the Claude path (`.claude/rules/`). (closes #1550, refs #1445)
 
 ### Changed
 
+- `apm_cli.models` internals: package-format detection extracted into a composition model (`PackageFormatRegistry` + per-format detectors + `NormalizationPlanner`); `detect_package_type()` is now a thin facade with no user-visible behaviour change. (#1618)
 - `apm compile` no longer emits cosmetic debug comments (APM version, source-file headers, footer) in generated `CLAUDE.md` and `copilot-instructions.md` files by default. The `compilation.source_attribution` flag now defaults to `false` (was `true`), reducing token overhead for every LLM context window that reads these files. Load-bearing markers (`_COPILOT_ROOT_GENERATED_MARKER` and Build ID) are always emitted regardless of the flag. To restore the previous behaviour, set `compilation: source_attribution: true` in `apm.yml`. (closes #1341)
 ### Removed
 
 - **BREAKING:** `apm pack --marketplace-output PATH` has been removed. This flag was deprecated in v0.14 with a stderr warning and auto-translated to `--marketplace-path claude=PATH`. Use `--marketplace-path claude=PATH` to override the Claude output path. (#1318)
 
+### Performance
+
+- `apm install --update` no longer re-downloads a dependency when the in-flight
+  resolution callback already fetched it at the correct SHA, eliminating a
+  redundant network round-trip per up-to-date dependency in update mode.
+  (closes #551)
+
 ### Added
 
+- `apm install -g` now deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/` and makes them executable, giving Claude Code direct access to plugin-provided binaries. The `bin_deploy` policy field lets enterprise administrators opt out globally (`deny_all: true`) or per-package. (#1544)
 - Teams with existing `AGENTS.md` content can now adopt `apm compile` without
   losing hand-written rules: set `compilation.agents_md.mode: managed_section`
   in `apm.yml` to update only the APM-owned block between configurable markers.
   Missing or duplicate markers raise a loud error so no content is silently
   lost. (closes #1540)
+- `apm compile --no-dedup` (alias: `--force-instructions`) forces the instructions
+  section into `CLAUDE.md` even when `.claude/rules/` is already populated. Useful
+  for debugging or when both copies are intentionally wanted. Affects the Claude
+  target only; Copilot deduplication is always on and has no opt-out flag.
+  (closes #1463)
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
 - `install.sh` and `apm self-update` now send a conditional `Authorization` header on GitHub release-lookup API calls when `GITHUB_APM_PAT`, `GITHUB_TOKEN`, or `GH_TOKEN` is set, improving reliability for users on shared IPs and corporate NAT that hit anonymous rate limits. Anonymous fallback is preserved when no token is configured. (closes #1582)
 
