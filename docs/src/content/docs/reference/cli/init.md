@@ -104,6 +104,14 @@ $ apm init --yes --target copilot,claude,cursor
   pre-checks targets read from its existing `target:` field.
 - **Codex hint:** if `.codex/` is present, suggests
   `--target agent-skills` to also deploy skills to `.agents/skills/`.
+- **agentrc suggestion:** when no agent instruction files are found
+  (`.github/copilot-instructions.md`, `AGENTS.md`, `.github/instructions/`),
+  the Next Steps panel suggests generating agent instructions:
+  - `agentrc` in PATH: prepends `Generate agent instructions: agentrc init`
+    as the first next step.
+  - `agentrc` not in PATH: prints a tip line with a link to
+    `https://github.com/microsoft/agentrc`.
+  - Instructions already exist: no mention (suppressed entirely).
 - **Exit codes:** `0` on success or user-aborted prompt; `1` on invalid
   project or plugin name, or unhandled error.
 
