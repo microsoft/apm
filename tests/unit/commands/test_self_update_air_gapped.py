@@ -103,3 +103,33 @@ class TestInstallerUrlAirGap:
                 url = _get_update_installer_url()
         parsed = urlparse(url)
         assert parsed.path.endswith("install.sh")
+
+    def test_github_url_with_trailing_slash_is_normalised(self) -> None:
+        """GITHUB_URL with a trailing slash must not produce double-slash in the URL."""
+        env = self._clean_env()
+        env["GITHUB_URL"] = "https://gh.corp.com/"
+        with patch.dict("os.environ", env, clear=True):
+            with patch(
+                "apm_cli.commands.self_update._is_windows_platform",
+                return_value=False,
+            ):
+                from apm_cli.commands.self_update import _get_update_installer_url
+
+                url = _get_update_installer_url()
+        assert "//" not in url.split("://", 1)[1], f"Double slash in URL: {url}"
+
+    def test_default_windows_url_no_env_vars(self) -> None:
+        """Without env vars on Windows, returns the public aka.ms shortlink."""
+        from urllib.parse import urlparse
+
+        env = self._clean_env()
+        with patch.dict("os.environ", env, clear=True):
+            with patch(
+                "apm_cli.commands.self_update._is_windows_platform",
+                return_value=True,
+            ):
+                from apm_cli.commands.self_update import _get_update_installer_url
+
+                url = _get_update_installer_url()
+        parsed = urlparse(url)
+        assert parsed.hostname == "aka.ms"

@@ -40,7 +40,7 @@ for air-gapped networks and GitHub Enterprise Server (GHE):
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `GITHUB_URL` | `https://github.com` | Base URL of the GitHub host. When set to a GHE host (e.g. `https://gh.corp.com`), the version-check API uses `{GITHUB_URL}/api/v3` and the installer script is fetched from `{GITHUB_URL}/{APM_REPO}/raw/main/install.sh`. |
+| `GITHUB_URL` | `https://github.com` | Base URL of the GitHub host. When set to a GHE host (e.g. `https://gh.corp.com`), the version-check API uses `{GITHUB_URL}/api/v3` and the installer script is fetched from `{GITHUB_URL}/{APM_REPO}/raw/main/install.sh` (Unix) or `install.ps1` (Windows). |
 | `APM_REPO` | `microsoft/apm` | Repository in `owner/repo` form. Overrides the default when using a fork or an internal mirror. |
 | `VERSION` | _(unset)_ | Pin a specific release (e.g. `v1.2.3`). Skips the GitHub API call entirely -- required for fully offline setups. The pinned version is passed through to the installer subprocess. |
 
