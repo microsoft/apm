@@ -604,16 +604,6 @@ def _audit_ci_gate(
     sys.exit(0 if ci_result.passed else 1)
 
 
-def _merge_findings(
-    base: dict[str, list[ScanFinding]],
-    extra: dict[str, list[ScanFinding]],
-) -> None:
-    """Merge *extra* findings into *base* in place, grouping by file."""
-    from ..security.external.runner import merge_findings
-
-    merge_findings(base, extra)
-
-
 def _run_external_scanners(
     cfg: _AuditConfig,
     external: tuple[str, ...],
@@ -721,7 +711,9 @@ def _audit_content_scan(
     # -- External scanners (opt-in, additive) -----------------------
     if external:
         external_findings = _run_external_scanners(cfg, external, external_sarif, scan_paths)
-        _merge_findings(findings_by_file, external_findings)
+        from ..security.external.runner import merge_findings
+
+        merge_findings(findings_by_file, external_findings)
 
     # -- Warn if --dry-run used without --strip --
     if dry_run and not strip:

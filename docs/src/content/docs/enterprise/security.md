@@ -162,6 +162,10 @@ apm audit -f markdown -o report.md     # Step summaries
 
 See [Content scanning with `apm audit`](../reference/cli/audit/) for usage details and exit codes.
 
+:::tip[External scanners (Experimental)]
+`apm audit` can also ingest findings from **third-party SARIF scanners** (Semgrep, CodeQL, NVIDIA SkillSpector, etc.) so a single audit run reports both APM's native findings and external tool results. See [External scanners](../integrations/external-scanners/) for setup.
+:::
+
 ### Limitations
 
 Content scanning detects hidden Unicode characters. It does not detect:

@@ -1,3 +1,6 @@
+# Local tool state (gh CLI, etc.)
+.local/
+
 # Project-specific files
 APPROACH.md
 next-steps.md

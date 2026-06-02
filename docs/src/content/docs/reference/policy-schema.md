@@ -165,7 +165,8 @@ experimental flag to take effect; ignored otherwise.
 
 `audit.on_install` is a floor: it can only raise the effective mode chosen by
 `apm install --audit` / `apm config audit-on-install`, never relax it. `apm
-install --no-policy` opts out of the floor for that invocation.
+install --force` downgrades a `block` to `warn` for that invocation; `apm
+install --no-policy` skips the policy floor entirely.
 
 ## Inheritance
 

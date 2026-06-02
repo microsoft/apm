@@ -33,6 +33,15 @@ def run(ctx: InstallContext) -> None:
         return
 
     logger = ctx.logger
+
+    # Warn when policy silently overrides --no-audit.
+    cli_override = getattr(ctx, "audit_override", None)
+    if cli_override == "off" and decision.mode != "off" and logger is not None:
+        logger.warning(
+            f"Policy overrides --no-audit to '{decision.mode}' "
+            f"(set by {decision.source}). "
+            f"Use '--no-policy' to skip the policy floor."
+        )
     project_root = ctx.project_root
 
     # ------------------------------------------------------------------
@@ -95,16 +104,16 @@ def run(ctx: InstallContext) -> None:
     if blocking:
         from apm_cli.install.errors import PolicyViolationError
 
-        policy_hint = (
-            " Use '--no-policy' to bypass the org floor for this invocation."
-            if decision.source == "policy"
-            else ""
-        )
         raise PolicyViolationError(
             f"Install-time audit blocked: {summary}. "
             f"Run 'apm audit --strip' to clean hidden characters, or "
-            f"'apm install --force' to override "
-            f"(mode set by {decision.source}).{policy_hint}"
+            f"'apm install --force' to override"
+            + (
+                ", or '--no-policy' to skip the policy floor"
+                if "policy" in decision.source.lower()
+                else ""
+            )
+            + f" (mode set by {decision.source})."
         )
 
     # warn mode, or block downgraded by --force: record without halting.

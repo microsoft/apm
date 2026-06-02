@@ -14,15 +14,15 @@ off by default. The CLI surface may change. Enable it explicitly before use.
 :::
 
 `apm audit` ships with its own content scanner for hidden-Unicode attacks. You
-can additionally fold in findings from **any SARIF 2.1.0 scanner** — for
-example [NVIDIA SkillSpector](https://sarifweb.azurewebsites.net/) or a
-generic tool such as Semgrep or CodeQL — so a single `apm audit` run reports
-APM's native findings *and* the external tool's findings through the same
-text / JSON / SARIF / markdown output and exit codes.
+can additionally fold in findings from **any SARIF 2.1.0 scanner** -- for
+example NVIDIA SkillSpector or a generic tool such as Semgrep or CodeQL -- so
+a single `apm audit` run reports APM's native findings *and* the external
+tool's findings through the same text / JSON / SARIF / markdown output and
+exit codes.
 
 This is a **one-directional** integration: APM only *reads* the SARIF the
 external tool produces. APM publishes nothing back, and this is not a vendor
-partnership — any SARIF-emitting tool works.
+partnership -- any SARIF-emitting tool works.
 
 ## Enable the feature
 
@@ -48,13 +48,13 @@ apm audit --external sarif --external-sarif report.sarif
 ```
 
 External findings merge into APM's report and drive the exit code using the
-same severity scale (SARIF `error` → critical → exit **1**, `warning` →
-exit **2**, `note` → info, non-gating).
+same severity scale (SARIF `error` -> critical -> exit **1**, `warning` ->
+exit **2**, `note` -> info, non-gating).
 
 ## Invoke a scanner CLI on PATH
 
 When a scanner exposes a CLI that emits SARIF, APM can invoke it directly.
-SkillSpector is supported by name — APM runs it when the `skillspector`
+SkillSpector is supported by name -- APM runs it when the `skillspector`
 executable is resolvable on your `PATH`:
 
 ```bash
