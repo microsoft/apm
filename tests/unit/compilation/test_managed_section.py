@@ -341,5 +341,7 @@ class TestManagedSectionWriteIntegration:
 
         compiler = AgentsCompiler(str(tmp_path))
         compiler.config = config
-        with pytest.raises(ManagedSectionError, match=r"(?i)does not exist yet.*compilation\.agents_md\.mode"):
+        with pytest.raises(
+            ManagedSectionError, match=r"(?i)does not exist yet.*compilation\.agents_md\.mode"
+        ):
             compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
