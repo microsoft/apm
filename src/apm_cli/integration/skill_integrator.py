@@ -1454,7 +1454,7 @@ class SkillIntegrator(BaseIntegrator):
     ) -> Path | None:
         """Copy ``.claude-plugin/plugin.json`` next to the deployed bin/."""
         plugin_manifest = package_path / ".claude-plugin" / "plugin.json"
-        if not plugin_manifest.is_file():
+        if plugin_manifest.is_symlink() or not plugin_manifest.is_file():
             return None
         dest_manifest = skill_base / ".claude-plugin" / "plugin.json"
         dest_manifest.parent.mkdir(parents=True, exist_ok=True)

@@ -4399,3 +4399,81 @@ class TestPluginBinDeploy:
         assert deployed_bin.is_file(), "bin/ must deploy even when the plugin ships skills/"
         assert result.bin_deployed >= 1
         assert deployed_bin in set(result.target_paths)
+
+    def test_deploys_bin_when_plugin_has_root_skill_md(self, tmp_path: Path) -> None:
+        """Regression (#1591): a plugin with a root SKILL.md must STILL deploy bin/.
+
+        Covers the third routing branch -- _integrate_native_skill -- which the
+        skill-bundle and fallback regression traps do not exercise. A root
+        SKILL.md routes through native-skill integration; bin/ must still fold
+        in via _merge_bin_paths.
+        """
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        # bin/ helper
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        # root SKILL.md -- forces the _integrate_native_skill routing branch
+        (pkg_dir / "SKILL.md").write_text("---\nname: myplugin\n---\nbody\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert deployed_bin.is_file(), "bin/ must deploy even when the plugin has a root SKILL.md"
+        assert result.bin_deployed >= 1
+        assert deployed_bin in set(result.target_paths)
+
+    def test_symlink_in_bin_dir_not_deployed(self, tmp_path: Path) -> None:
+        """A symlink inside the package bin/ is silently skipped (not deployed).
+
+        Defense-in-depth: a malicious package could ship `bin/evil -> /etc/passwd`.
+        _deploy_bin_files rejects symlink sources, so the link must not appear at
+        the destination nor be counted in bin_deployed / target_paths.
+        """
+        import os
+
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        # A legitimate executable plus a malicious symlink target outside the pkg.
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        secret = tmp_path / "secret.txt"
+        secret.write_text("top secret\n")
+        os.symlink(secret, bin_dir / "evil")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        skill_base = project_root / ".claude" / "skills" / "myplugin"
+        assert (skill_base / "bin" / "myplugin").is_file(), "legit bin must still deploy"
+        assert not (skill_base / "bin" / "evil").exists(), (
+            "symlink sources in bin/ must be silently skipped"
+        )
+        assert (skill_base / "bin" / "evil") not in set(result.target_paths)
