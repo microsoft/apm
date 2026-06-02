@@ -849,7 +849,7 @@ class TestApmModulesExclusion:
         # 50 packages x sub-directory each = 150+ dirs if not excluded.
         # Real project has at most ~5 dirs (root, src, src/components, tests, docs).
         assert len(optimizer._directory_cache) <= 10, (
-            f"Cache has {len(optimizer._directory_cache)} dirs — apm_modules likely not excluded"
+            f"Cache has {len(optimizer._directory_cache)} dirs -- apm_modules likely not excluded"
         )
 
     def test_os_walk_prunes_apm_modules(self, project_with_apm_modules):
