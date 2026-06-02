@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING:** `apm pack --marketplace-output PATH` has been removed. This flag was deprecated in v0.14 with a stderr warning and auto-translated to `--marketplace-path claude=PATH`. Use `--marketplace-path claude=PATH` to override the Claude output path. (#1318)
+
 ### Added
 
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.

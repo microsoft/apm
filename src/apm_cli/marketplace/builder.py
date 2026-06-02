@@ -256,7 +256,6 @@ class BuildOptions:
     allow_head: bool = False
     continue_on_error: bool = False
     offline: bool = False
-    marketplace_output: Path | None = None
     # Backwards-compatible spelling for callers that predate ``apm pack``.
     output_override: Path | None = None
     dry_run: bool = False
@@ -459,8 +458,6 @@ class MarketplaceBuilder:
     # -- output path --------------------------------------------------------
 
     def _output_path(self) -> Path:
-        if self._options.marketplace_output is not None:
-            return self._options.marketplace_output
         if self._options.output_override is not None:
             return self._options.output_override
         yml = self._load_yml()

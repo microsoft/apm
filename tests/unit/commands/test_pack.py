@@ -37,9 +37,9 @@ def test_pack_help_recommends_manifest_marketplace_output_config() -> None:
     result = CliRunner().invoke(pack_cmd, ["--help"])
 
     assert result.exit_code == 0
-    # The new --marketplace-path flag is shown in help
+    # The --marketplace-path flag is shown in help
     assert "--marketplace-path" in result.output
-    # The deprecated --marketplace-output is hidden
+    # The removed --marketplace-output flag is gone entirely
     assert "--marketplace-output" not in result.output
     assert "--claude-output" not in result.output
 

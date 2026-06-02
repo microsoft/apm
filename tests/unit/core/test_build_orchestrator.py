@@ -255,45 +255,6 @@ class TestMarketplaceProducer:
         assert not claude_output.exists()
         assert codex_output.exists()
 
-    def test_marketplace_output_override_applies_only_to_claude_profile(self, tmp_path: Path):
-        apm = tmp_path / "apm.yml"
-        _write(
-            apm,
-            "name: x\n"
-            "version: 0.1.0\n"
-            "description: y\n"
-            "marketplace:\n"
-            "  owner:\n"
-            "    name: o\n"
-            "  outputs: [claude, codex]\n"
-            "  claude:\n"
-            "    output: build/claude-config.json\n"
-            "  codex:\n"
-            "    output: build/codex-config.json\n"
-            "  packages:\n"
-            "    - name: local-tool\n"
-            "      source: ./plugins/local-tool\n"
-            "      category: Productivity\n",
-        )
-        override = tmp_path / "override" / "claude.json"
-        opts = BuildOptions(
-            project_root=tmp_path,
-            apm_yml_path=apm,
-            marketplace_offline=True,
-            marketplace_output=override,
-        )
-
-        result = MarketplaceProducer().produce(opts, logger=None)
-
-        codex_output = tmp_path / "build" / "codex-config.json"
-        assert result.payload is not None
-        assert [output.profile for output in result.payload.outputs] == ["claude", "codex"]
-        assert override in result.outputs
-        assert codex_output in result.outputs
-        assert override.exists()
-        assert codex_output.exists()
-        assert not (tmp_path / "build" / "claude-config.json").exists()
-
     def test_manifest_config_controls_each_marketplace_output_path(self, tmp_path: Path):
         apm = tmp_path / "apm.yml"
         _write(

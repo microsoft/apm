@@ -535,7 +535,7 @@ only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`
 `--target`, `--force`) are silent no-ops.
 
 Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
-`--include-prerelease`, `--marketplace-output PATH`, `-v`.
+`--include-prerelease`, `--marketplace-path FORMAT=PATH`, `-v`.
 
 Exit codes: `0` success, `1` build error, `2` schema error.
 
