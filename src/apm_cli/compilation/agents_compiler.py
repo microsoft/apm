@@ -1253,7 +1253,7 @@ class AgentsCompiler:
                 raise ManagedSectionError(
                     f"{target} does not exist yet. "
                     "Create it with the managed-section markers first, "
-                    "or use mode: full for initial generation."
+                    "or set agents_md.mode: full in apm.yml for initial generation."
                 )
             existing = target.read_text(encoding="utf-8")
             try:
