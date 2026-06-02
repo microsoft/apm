@@ -207,7 +207,11 @@ def _check_required_packages_deployed(
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
-        message=f"{len(not_deployed)} required package(s) not deployed",
+        message=(
+            f"{len(not_deployed)} required package(s) not deployed. "
+            "Hint: re-run with --no-policy to bypass this check and repair the "
+            "lockfile, then reinstall normally."
+        ),
         details=not_deployed,
     )
 

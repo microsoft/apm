@@ -235,6 +235,23 @@ class BaseIntegrator:
         except OSError:
             return False
 
+    @staticmethod
+    def try_adopt_identical(target_path: Path, source_path: Path, target_paths: list) -> bool:
+        """Adopt *target_path* when it is byte-identical to *source_path*.
+
+        Encapsulates the ``is_content_identical_to_source`` + append pattern
+        so secondary call sites in agent/prompt/hook integrators share a
+        single predicate call instead of repeating the three-line block.
+
+        Returns ``True`` and appends *target_path* to *target_paths* when the
+        files are identical; returns ``False`` and leaves *target_paths*
+        unchanged otherwise.
+        """
+        if BaseIntegrator.is_content_identical_to_source(target_path, source_path):
+            target_paths.append(target_path)
+            return True
+        return False
+
     def _check_adopt_or_skip(
         self,
         target_path: Path,
