@@ -237,6 +237,45 @@ class TestPackCmd:
         assert manifest["name"] == "my-plugin"
         assert manifest["version"] == "2.0.0"
 
+    def test_pack_json_reports_plugin_manifest_outcomes(self, runner, tmp_path, monkeypatch):
+        """`apm pack --json` machine-reports written vs skipped plugin manifests.
+
+        CI consumers must distinguish a fresh write from a preserved (skipped)
+        file without scraping stderr -- the JSON envelope carries a
+        plugin_manifests section with written/skipped/dry_run path lists.
+        """
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+
+        # First run: nothing on disk -> the manifest is written.
+        result = runner.invoke(pack_cmd, ["--json"])
+        assert result.exit_code == 0
+        # Logger lines route to stderr (mixed by CliRunner); parse from the JSON.
+        env_start = result.output.find("{")
+        assert env_start >= 0, f"No JSON found in output: {result.output!r}"
+        envelope = json_mod.loads(result.output[env_start:])
+        written = envelope["plugin_manifests"]["written"]
+        assert any(p.endswith(".claude-plugin/plugin.json") for p in written)
+        assert envelope["plugin_manifests"]["skipped"] == []
+
+        # Second run without --force: the existing file is preserved (skipped).
+        result2 = runner.invoke(pack_cmd, ["--json"])
+        assert result2.exit_code == 0
+        env2_start = result2.output.find("{")
+        assert env2_start >= 0, f"No JSON found in output: {result2.output!r}"
+        envelope2 = json_mod.loads(result2.output[env2_start:])
+        assert envelope2["plugin_manifests"]["written"] == []
+        assert any(
+            p.endswith(".claude-plugin/plugin.json")
+            for p in envelope2["plugin_manifests"]["skipped"]
+        )
+
     def test_pack_marketplace_output_flag_removed(self, runner, tmp_path, monkeypatch):
         """The legacy --marketplace-output flag was removed in favour of --marketplace-path."""
         monkeypatch.chdir(tmp_path)

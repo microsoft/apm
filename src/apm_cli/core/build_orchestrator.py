@@ -297,6 +297,9 @@ class PluginManifestProducer:
 
         outputs: list[Path] = []
         warnings: list[str] = []
+        written: list[str] = []
+        skipped: list[str] = []
+        dry_run_paths: list[str] = []
 
         for ecosystem in ecosystems:
             manifest = build_plugin_manifest(
@@ -305,6 +308,8 @@ class PluginManifestProducer:
                 ecosystem,
                 logger=logger,
             )
+            rel_path = PLUGIN_ECOSYSTEM_PATHS.get(ecosystem, "")
+            target_path = str(options.project_root / rel_path) if rel_path else ecosystem
             output_path = write_plugin_manifest(
                 options.project_root,
                 manifest,
@@ -313,13 +318,21 @@ class PluginManifestProducer:
                 force=options.bundle_force,
                 logger=logger,
             )
-            if output_path is not None:
+            if options.dry_run:
+                # write returns None in dry-run; the path would have been written.
+                dry_run_paths.append(target_path)
+            elif output_path is not None:
                 outputs.append(output_path)
+                written.append(str(output_path))
+            else:
+                # Non-dry-run None means an existing file was preserved (no --force).
+                skipped.append(target_path)
 
         return ProducerResult(
             kind=OutputKind.PLUGIN_MANIFEST,
             outputs=outputs,
             warnings=warnings,
+            payload={"written": written, "skipped": skipped, "dry_run": dry_run_paths},
         )
 
 

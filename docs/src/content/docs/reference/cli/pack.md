@@ -152,6 +152,8 @@ target: claude
 apm pack   # writes .claude-plugin/plugin.json
 ```
 
+Use `targets: [claude, copilot]` instead to emit both `.claude-plugin/plugin.json` and `.github/plugin/plugin.json` from the one source tree in a single `apm pack`.
+
 `target:` and `targets:` are mutually exclusive: declaring both is a build error (exit `1`). An empty `targets:` list or an unrecognised ecosystem token is likewise rejected before any artifact is written.
 
 The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). Per-ecosystem differences:

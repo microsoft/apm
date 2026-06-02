@@ -337,6 +337,63 @@ class TestBuildPluginManifest:
         assert "API_KEY=" in srv["command"]
         assert "-H" in srv["args"]
 
+    def test_claude_redacts_single_string_space_flag(self, tmp_path: Path) -> None:
+        # The space-separated "--token VALUE" form carried inside ONE string --
+        # either a whole command line or a single args element -- must be
+        # redacted. The list-context lookahead only fires across separate array
+        # elements, so this guards the single-string bypass.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "npx server --token generic-space-secret-12345",
+                            "args": ["--password hunter2-inline-value"],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        raw = json.dumps(manifest)
+        assert "generic-space-secret-12345" not in raw
+        assert "hunter2-inline-value" not in raw
+        # The flag names survive; only their trailing values are scrubbed.
+        srv = manifest["mcpServers"]["srv"]
+        assert "--token" in srv["command"]
+        assert any("--password" in a for a in srv["args"])
+
+    def test_claude_redacts_lowercase_env_and_more_token_prefixes(self, tmp_path: Path) -> None:
+        # Lowercase env-prefix assignments and additional provider token prefixes
+        # (GitLab, npm, PyPI) must be redacted -- an uppercase-only or
+        # GitHub/OpenAI-only rule would leak them.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "api_key=lowercasesecretvalue node srv",
+                            "args": [
+                                "glpat-abcdefghijklmnopqrstuvwx",
+                                "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+                            ],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        raw = json.dumps(manifest)
+        assert "lowercasesecretvalue" not in raw
+        assert "glpat-abcdefghijklmnopqrstuvwx" not in raw
+        assert "npm_abcdefghijklmnopqrstuvwxyz0123456789" not in raw
+        # The lowercase variable name is preserved; only its value is scrubbed.
+        assert "api_key=" in manifest["mcpServers"]["srv"]["command"]
+
 
 # ---------------------------------------------------------------------------
 # TestWritePluginManifest

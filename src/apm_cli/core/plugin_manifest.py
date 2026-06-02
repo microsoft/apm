@@ -102,15 +102,26 @@ _INLINE_SECRET_ARG_RE = re.compile(
     r"(--?[\w.-]*(?:token|secret|password|credential|apikey|key)[\w.-]*=)(\S+)",
     re.IGNORECASE,
 )
+# Space-separated ``--token VALUE`` carried inside ONE string, e.g. a whole
+# command line ``npx server --token sk-abc`` or a single args element
+# ``"--token sk-abc"``. The list-context lookahead only fires when the flag and
+# value are SEPARATE array elements; this catches the single-string shape.
+_SPACE_SECRET_ARG_RE = re.compile(
+    r"(--?[\w.-]*(?:token|secret|password|credential|apikey|api-key|key)[\w.-]*\s+)(\S+)",
+    re.IGNORECASE,
+)
 # Shell env-assignment of a credential-named variable (no leading dashes), e.g.
-# ``API_KEY=sk-abc npx server`` -- keep the variable name, scrub the value.
+# ``API_KEY=sk-abc npx server`` -- keep the variable name, scrub the value. Case
+# -insensitive so lowercase ``api_key=...`` assignments are caught too.
 _ENV_ASSIGN_SECRET_RE = re.compile(
-    r"\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|APIKEY|API_KEY|KEY)[A-Z0-9_]*=)(\S+)"
+    r"\b([A-Za-z0-9_]*(?:token|secret|password|credential|apikey|api_key|key)[A-Za-z0-9_]*=)(\S+)",
+    re.IGNORECASE,
 )
 # ``Authorization: Bearer <token>`` / ``Basic <token>`` schemes in any string.
 _AUTH_SCHEME_RE = re.compile(r"\b(Bearer|Basic)\s+([A-Za-z0-9._~+/=-]{8,})", re.IGNORECASE)
 # Bare provider tokens (no surrounding structure) recognised by their prefix --
-# GitHub PAT/OAuth, OpenAI, Slack, AWS access-key, Google API key.
+# GitHub PAT/OAuth, OpenAI, Slack, AWS access-key, Google API key, GitLab PAT,
+# npm automation token, PyPI upload token.
 _KNOWN_SECRET_TOKEN_RE = re.compile(
     r"\b(?:"
     r"gh[posur]_[A-Za-z0-9]{20,}"
@@ -119,6 +130,9 @@ _KNOWN_SECRET_TOKEN_RE = re.compile(
     r"|xox[baprs]-[A-Za-z0-9-]{10,}"
     r"|A(?:KIA|SIA)[A-Z0-9]{12,}"
     r"|AIza[A-Za-z0-9_-]{30,}"
+    r"|glpat-[A-Za-z0-9_-]{20,}"
+    r"|npm_[A-Za-z0-9]{20,}"
+    r"|pypi-[A-Za-z0-9_-]{20,}"
     r")\b"
 )
 # Flag NAME that takes a secret as the NEXT array element (space-separated form),
@@ -143,6 +157,7 @@ def _redact_secret_values(text: str) -> tuple[str, bool]:
     """Return (*scrubbed text*, *changed?*) with embedded secrets redacted."""
     scrubbed = _URL_USERINFO_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}@", text)
     scrubbed = _INLINE_SECRET_ARG_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}", scrubbed)
+    scrubbed = _SPACE_SECRET_ARG_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}", scrubbed)
     scrubbed = _ENV_ASSIGN_SECRET_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}", scrubbed)
     scrubbed = _AUTH_SCHEME_RE.sub(lambda m: f"{m.group(1)} {_REDACTED}", scrubbed)
     scrubbed = _KNOWN_SECRET_TOKEN_RE.sub(_REDACTED, scrubbed)
