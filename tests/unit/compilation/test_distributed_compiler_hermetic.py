@@ -796,7 +796,7 @@ class TestGetCompilationResultsForDisplay:
 
 
 # ---------------------------------------------------------------------------
-# compile_distributed – integration-style
+# compile_distributed - integration-style
 # ---------------------------------------------------------------------------
 
 

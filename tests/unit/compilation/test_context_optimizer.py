@@ -846,7 +846,7 @@ class TestApmModulesExclusion:
         optimizer = ContextOptimizer(base_dir=str(project_with_apm_modules))
         optimizer._analyze_project_structure()
 
-        # 50 packages × sub-directory each = 150+ dirs if not excluded.
+        # 50 packages x sub-directory each = 150+ dirs if not excluded.
         # Real project has at most ~5 dirs (root, src, src/components, tests, docs).
         assert len(optimizer._directory_cache) <= 10, (
             f"Cache has {len(optimizer._directory_cache)} dirs — apm_modules likely not excluded"

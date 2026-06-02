@@ -1,4 +1,4 @@
-"""Tests for ``apm_cli.marketplace.yml_editor`` – round-trip YAML editor."""
+"""Tests for ``apm_cli.marketplace.yml_editor`` - round-trip YAML editor."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ packages:
 
 
 # ---------------------------------------------------------------------------
-# add_plugin_entry – happy paths
+# add_plugin_entry - happy paths
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +116,7 @@ class TestAddPluginHappy:
 
 
 # ---------------------------------------------------------------------------
-# add_plugin_entry – error paths
+# add_plugin_entry - error paths
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +190,7 @@ class TestAddPluginErrors:
 
 
 # ---------------------------------------------------------------------------
-# add_plugin_entry – comment preservation
+# add_plugin_entry - comment preservation
 # ---------------------------------------------------------------------------
 
 
@@ -218,7 +218,7 @@ class TestAddPluginCommentPreservation:
 
 
 # ---------------------------------------------------------------------------
-# update_plugin_entry – happy paths
+# update_plugin_entry - happy paths
 # ---------------------------------------------------------------------------
 
 
@@ -284,7 +284,7 @@ class TestUpdatePluginHappy:
 
 
 # ---------------------------------------------------------------------------
-# update_plugin_entry – error paths
+# update_plugin_entry - error paths
 # ---------------------------------------------------------------------------
 
 
@@ -306,7 +306,7 @@ class TestUpdatePluginErrors:
 
 
 # ---------------------------------------------------------------------------
-# remove_plugin_entry – happy paths
+# remove_plugin_entry - happy paths
 # ---------------------------------------------------------------------------
 
 
@@ -327,7 +327,7 @@ class TestRemovePluginHappy:
 
 
 # ---------------------------------------------------------------------------
-# remove_plugin_entry – error paths
+# remove_plugin_entry - error paths
 # ---------------------------------------------------------------------------
 
 

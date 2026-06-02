@@ -764,7 +764,7 @@ class DependencyReference:
     ) -> tuple[str, list[str], str | None] | None:
         """If *package* is bare host/path shorthand, return (host, path_segments, ref_str).
 
-        Returns ``None`` for ``https://``, ``git@``, or non–GitLab-class hosts.
+        Returns ``None`` for ``https://``, ``git@``, or non-GitLab-class hosts.
         """
         s = package.strip()
         ref_out: str | None = None

@@ -597,7 +597,7 @@ class TestApmYmlDeclaresdependencies:
 
 
 # ---------------------------------------------------------------------------
-# validate_apm_package – top-level dispatcher
+# validate_apm_package - top-level dispatcher
 # ---------------------------------------------------------------------------
 
 
@@ -808,7 +808,7 @@ class TestEnumValues:
 
 
 # ---------------------------------------------------------------------------
-# _validate_apm_package_with_yml – direct path
+# _validate_apm_package_with_yml - direct path
 # ---------------------------------------------------------------------------
 
 
