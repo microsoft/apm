@@ -90,6 +90,13 @@ class CompilationConfig:
     clean_orphaned: bool = False  # Remove orphaned AGENTS.md files
     exclude: list[str] = None  # Glob patterns for directories to exclude during compilation
 
+    # Managed-section mode (issue #1540): update only the APM-owned block
+    # inside an existing AGENTS.md instead of overwriting the whole file.
+    # Set agents_md_mode = "managed_section" in apm.yml to enable.
+    agents_md_mode: str = "full"
+    agents_md_start_marker: str = "<!-- apm:start -->"
+    agents_md_end_marker: str = "<!-- apm:end -->"
+
     def __post_init__(self):
         """Handle CLI flag precedence after initialization."""
         if self.single_agents:
@@ -158,6 +165,15 @@ class CompilationConfig:
                     elif isinstance(exclude_patterns, str):
                         # Support single pattern as string
                         config.exclude = [exclude_patterns]
+
+                # Managed-section mode (issue #1540)
+                agents_md_config = compilation_config.get("agents_md", {})
+                if "mode" in agents_md_config:
+                    config.agents_md_mode = agents_md_config["mode"]
+                if "start_marker" in agents_md_config:
+                    config.agents_md_start_marker = agents_md_config["start_marker"]
+                if "end_marker" in agents_md_config:
+                    config.agents_md_end_marker = agents_md_config["end_marker"]
 
         except Exception as exc:
             _logger.debug("Config loading failed, using defaults: %s", exc)
@@ -502,7 +518,7 @@ class AgentsCompiler:
         # Write output file (constitution injection handled externally in CLI)
         output_path = str(self.base_dir / config.output_path)
         if not config.dry_run:
-            self._write_output_file(output_path, content)
+            self._write_output_file_with_config(output_path, content, config)
 
         # Compile statistics
         stats = self._compile_stats(primitives, template_data)
@@ -1151,13 +1167,48 @@ class AgentsCompiler:
             return result
 
     def _write_output_file(self, output_path: str, content: str) -> None:
-        """Write the generated content to the output file.
+        """Write the generated content to the output file (full-file mode).
 
         Args:
             output_path (str): Path to write the output.
             content (str): Content to write.
         """
         from .output_writer import CompiledOutputWriter
+
+        try:
+            CompiledOutputWriter().write(Path(output_path), content)
+        except OSError as e:
+            self.errors.append(f"Failed to write output file {output_path}: {e!s}")
+
+    def _write_output_file_with_config(
+        self, output_path: str, content: str, config: "CompilationConfig"
+    ) -> None:
+        """Write generated content, honouring agents_md_mode from config.
+
+        In ``full`` mode (default) the entire file is replaced.
+        In ``managed_section`` mode only the text between the configured
+        start/end markers is replaced; everything else is preserved.
+
+        Args:
+            output_path (str): Path to write the output.
+            content (str): Generated content for this compilation.
+            config (CompilationConfig): Compilation configuration.
+        """
+        from .managed_section import ManagedSectionError, apply_managed_section
+        from .output_writer import CompiledOutputWriter
+
+        if config.agents_md_mode == "managed_section":
+            target = Path(output_path)
+            existing = target.read_text(encoding="utf-8") if target.exists() else ""
+            try:
+                content = apply_managed_section(
+                    existing,
+                    content,
+                    config.agents_md_start_marker,
+                    config.agents_md_end_marker,
+                )
+            except ManagedSectionError:
+                raise
 
         try:
             CompiledOutputWriter().write(Path(output_path), content)
