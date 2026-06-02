@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm install` and `apm compile` now accept `--root DIR` to redirect every
+  generated artifact -- `apm_modules/`, `apm.lock.yaml`, `.gitignore`, and
+  integrated harness files (install) or `AGENTS.md` and per-target files
+  (compile) -- under `DIR`, while `apm.yml`, `.apm/`, and local-path
+  dependencies still resolve from the current working directory. This
+  mirrors `pip install --target` and `npm install --prefix`: useful for
+  scratch builds, CI artifact staging, and read-only source trees. `DIR` is
+  created if missing (refused under `--dry-run`); the redirect is reverted
+  on every exit path so it never leaks across invocations. `--root` is
+  rejected with `--global` (install) and `--watch` (compile). Thanks to
+  @srid (juspay) for the feature and original implementation. (closes #888)
 - `apm audit` can now ingest findings from external SARIF 2.1.0 scanners
   (e.g. NVIDIA SkillSpector or any SARIF-emitting tool) via `--external
   <name>` and `--external-sarif <file>`, merging them into APM's own report
