@@ -324,7 +324,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |
-| `deny` | `list<string>` | `[]` | Package canonical strings (e.g. `owner/name`) whose bin/ executables must not be deployed. Entries must be lowercase and must match the canonical form returned by `apm list` (e.g. `myorg/myplugin`, not `MyOrg/MyPlugin`). |
+| `deny` | `list<string>` | `[]` | Package canonical strings whose bin/ executables must not be deployed. Entries are matched case-sensitively; copy each string verbatim from `apm deps list` (e.g. `myorg/myplugin`). |
 
 ```yaml
 bin_deploy:
