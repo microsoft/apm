@@ -225,6 +225,9 @@ in the current directory. To target explicitly, see the
 > plain `agents`-protocol hosts). Gemini also receives commands, skills,
 > hooks, and MCP via `apm install`. Copilot, Claude Code, and Cursor read
 > the per-skill directories directly -- no compile step needed.
+> If your project commits those generated files, set `targets:` in `apm.yml`
+> to keep the committed set consistent across machines. See
+> [Pin committed output with targets:](/apm/reference/cli/compile/#pin-committed-output-with-targets).
 
 Now open Copilot or Claude in this project. Ask "draft a PR description for
 my last commit". The `pr-description` skill activates on its own. To get the
