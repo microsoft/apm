@@ -4200,6 +4200,16 @@ class TestPluginBinDeploy:
         assert deployed_bin in tp_files, "deployed bin not in target_paths"
         assert deployed_manifest in tp_files, "plugin.json not in target_paths"
 
+        # Verify user-only execute: S_IXUSR set, S_IXGRP and S_IXOTH cleared.
+        import os
+        import stat as _stat
+
+        if os.name == "posix":
+            mode = deployed_bin.stat().st_mode
+            assert mode & _stat.S_IXUSR, "owner execute bit must be set"
+            assert not (mode & _stat.S_IXGRP), "group execute bit must NOT be set"
+            assert not (mode & _stat.S_IXOTH), "other execute bit must NOT be set"
+
     def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
         """bin_deploy.deny list suppresses deployment for the matching package."""
         from apm_cli.core.scope import InstallScope

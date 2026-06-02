@@ -1345,7 +1345,9 @@ class SkillIntegrator(BaseIntegrator):
         Bash tool PATH.  The contract is Claude-specific by design; other
         harnesses have no equivalent, so only Claude targets are considered.
 
-        Each binary is made executable (chmod 0o755) on POSIX systems.
+        Each binary is made executable (user-only +x, stripping group/other
+        execute bits) on POSIX systems.  The deployed root is user-scoped
+        (~/.claude/skills/), so tighter-than-0o755 permissions are correct.
 
         Returns ``(deployed_paths, skip_reason)``.  ``skip_reason`` is non-None
         ONLY when the package ships a bin/ but it could not be deployed for an
@@ -1505,6 +1507,12 @@ class SkillIntegrator(BaseIntegrator):
 
         Skips the copy when an identical file already exists (unless *force*),
         keeping repeated installs quiet and idempotent.
+
+        When *make_executable* is True, only the owner (user) execute bit is
+        set; group and other execute bits are explicitly cleared.  Deployed
+        files live under ~/.claude/skills/ which is user-scoped, so there is
+        no reason to grant group/other execute access regardless of what the
+        source package shipped.
         """
         import os
         import stat
@@ -1517,7 +1525,8 @@ class SkillIntegrator(BaseIntegrator):
         shutil.copy2(src_file, dest_file)
         if make_executable and os.name == "posix":
             current = dest_file.stat().st_mode
-            dest_file.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            # User-only execute: set S_IXUSR, clear group and other execute bits.
+            dest_file.chmod((current & ~(stat.S_IXGRP | stat.S_IXOTH)) | stat.S_IXUSR)
         if logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")
 
