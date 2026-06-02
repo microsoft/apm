@@ -66,6 +66,122 @@ byte-identical to the verbose version). Triage, Ideate, the architect
 synthesis, the task implementers, and the pipeline child are NOT caveman
 (open-ended or prose-output contracts -- outside the gate).
 
+## PER-SPAWN DECLARATION TABLE (audience boundary, B14c CAVEMAN CHANNEL)
+
+All Phase 4 children are INTERNAL: their receipts feed the pipeline child
+and the orchestrator, never the maintainer directly. The pipeline child's
+PR body and the Phase 7 final report are the EXTERNAL decompression edge
+(normal prose). Genesis gate (audience-boundary): an INTERNAL spawn may
+ship a NORMAL, uncompressed brief ONLY when its justification is one of
+{security warning, irreversible op, ambiguous multi-step, judgement-
+without-schema}; otherwise the brief MUST be caveman. Every NORMAL row
+below cites that exception, so each is gate-clean.
+
+| Spawn               | Audience | Tier        | Brief mode   | Receipt mode | Justification |
+|---------------------|----------|-------------|--------------|--------------|---------------|
+| Triage child        | INTERNAL | IMPLEMENTER | NORMAL       | JSON_RECEIPT | ambiguous multi-step (open triage rubric; grounds against repo state; resolves decision/confidence/red_flags/brief). Paramount front gate -- see Phase 1 binding below |
+| Ideate              | INTERNAL | IMPLEMENTER | NORMAL       | JSON_RECEIPT | ambiguous multi-step (frames the brief + derives the acceptance_shape contract) |
+| Lens advisor        | INTERNAL | TRIVIAL     | CAVEMAN_FULL | JSON_RECEIPT | fixed schema {risks, must_tasks}; security escape active |
+| Architect synthesis | INTERNAL | PLANNER     | NORMAL       | JSON_RECEIPT | ambiguous multi-step (genuine planning; the schema constrains output shape, not the reasoning that builds the DAG) |
+| Task implementer    | INTERNAL | IMPLEMENTER | NORMAL       | JSON_RECEIPT | ambiguous multi-step (writes the typed coverage gate + code; returns a status object) |
+| Wave-gate verifier  | INTERNAL | REVIEWER    | CAVEMAN_FULL | JSON_RECEIPT | fixed schema {verdict, failures}; security/destructive escape active |
+| Acceptance close    | INTERNAL | --          | INLINE       | --           | runs inline in the pipeline child; not a separate spawn |
+| Pipeline child      | INTERNAL | IMPLEMENTER | NORMAL       | JSON_RECEIPT | ambiguous multi-step (orchestrates the per-issue pipeline); its EXTERNAL PR body is the prose decompression edge |
+
+Every spawn returns exactly one JSON object, so the receipt mode is
+JSON_RECEIPT across the board -- brief mode and receipt mode are
+INDEPENDENT axes (a NORMAL brief can still demand a JSON receipt).
+NORMAL-prose decompression happens at exactly two EXTERNAL edges: the
+pipeline child -> the PR body, and the orchestrator -> the Phase 2 digest
+plus the Phase 7 report.
+
+Brief mode is the AUDIENCE-BOUNDARY axis (how compressed the brief is)
+and is ORTHOGONAL to role class (which model). Both haiku spawns ship
+CAVEMAN_FULL, not CAVEMAN_ULTRA: each carries an ESCAPE-TO-NORMAL clause
+plus a multi-field schema, so ULTRA (single-anchor pure classifier) would
+strip the escape contract. The pipeline child is the synthesizer that
+decompresses INTERNAL JSON receipts into the EXTERNAL PR body (B14c).
+
+B16 EFFORT GOVERNOR is N/A for the currently selected Claude bindings:
+Copilot's Claude SKUs fold reasoning effort into the SKU choice (haiku /
+sonnet / opus), with no per-call reasoning_effort knob to govern, so the
+cost gradient is expressed entirely through B12 SKU selection. If a
+GPT-5-class SKU ever replaces any row above, THAT row must declare a
+per-call reasoning_effort (B16 goes live for it).
+
+## Phase 1 triage binding (the paramount front gate)
+
+Triage runs in Phase 1, not Phase 4, so it is not in the per-spawn table
+above; bind it explicitly here. Triage binds to the IMPLEMENTER class
+(claude-sonnet-4.6), NOT trivial/haiku. It runs the OPEN apm-triage-panel
+rubric as judgement (not the fixed-schema GRADING the wave-gate reviewer
+does), grounds every call against the repo at HEAD, and is the gate every
+downstream wave depends on -- a wrong accept wastes a whole pipeline. Per
+A12 you buy quality where stakes are highest, and the front gate is
+maximal-stakes (like the architect), so haiku here would be the GRADIENT
+anti-pattern (cheap where stakes are high). Sonnet is the right buy; opus
+would over-buy a classify-against-rubric task. Escalate-by-default is the
+backstop: on any doubt triage returns `confidence: low` plus `red_flags`
+and the orchestrator routes to the human, never to auto-implementation.
+This is why the declaration table marks triage IMPLEMENTER, not REVIEWER
+-- it shares the wave-gate's REVIEWER audience role but not its cheap
+fixed-schema model class.
+
+## B13 cache-aware-prefix discipline (the gradient's cache lever)
+
+A12 GRADIENT WORKFLOW composes B12 + B16 + B13 + backbone + B4; B13 is the
+largest cost lever and carries no quality tradeoff, so the gradient MUST
+honor cache discipline or it trips the GRADIENT WITHOUT CACHE DISCIPLINE
+anti-pattern (the implementer middle runs N times). On Copilot the harness
+owns the cache breakpoints, so B13 here is INVALIDATOR HYGIENE, not
+breakpoint placement:
+
+- ROUTE AT SPAWN START. Every child's model is bound once, at its `task`
+  spawn (the per-spawn table above); never switch a model mid-session
+  inside one child. A mid-session model switch is a cache invalidator. The
+  verifier escalation (haiku -> sonnet) sidesteps THAT invalidator because
+  it is a FRESH spawn, not an in-session switch -- but a fresh spawn still
+  pays a fresh-spawn prefix cost, so the escalation stays trigger-gated
+  (below) rather than running by default.
+- STABLE REGION = THE LOADED BODIES. The dominant cacheable prefix is not
+  a brief's own header but the bodies each child LOADS: the apm-triage-
+  panel rubric, the typed-coverage lens, the adopted persona. Keep THOSE
+  byte-stable across spawns that load them. The per-spawn `Inputs` block
+  (issue body, candidate diff, task slice) is small and bounded by design,
+  so its position is a minor factor -- but do NOT inline a large volatile
+  blob (a full diff, a file dump) into a brief header ahead of the rubric;
+  reference it by `gh` / `git` or keep it inside the bounded Inputs block.
+- NO VOLATILE CONTENT IN THE CACHED REGION. Keep timestamps, run ids, and
+  head shas out of the stable brief prefix and the loaded bodies; they
+  belong in the bounded Inputs block or come from a `gh` / `git` call.
+  (The `Verified:` date stamps in this file are maintenance metadata,
+  never part of a spawn-brief prefix.)
+- ORCHESTRATOR SUFFIX HYGIENE (parent-level B13 x B4). The A11
+  reconciliation loop is long-lived across the batch; if it accumulates
+  the full per-issue transcript its context grows until the harness
+  COMPACTS -- and a compaction is itself a cache invalidator at the parent
+  level. Keep the orchestration instructions fixed at the top, reload only
+  bounded plan.md / plan.json slices at each phase boundary (B4 PLAN
+  MEMENTO, B8 ATTENTION ANCHOR), and page or summarize finished-issue
+  state out of the working window instead of carrying it forward.
+
+## B15 tool-subset status (read-only children: DECLARED-NOT-BOUND)
+
+The read-only children (triage, lens advisor, wave-gate verifiers) use a
+tiny tool subset (gh / git read, ruff, file read) yet inherit the harness
+full catalogue -- the IMPLICIT FULL SURFACE cost grows as the operator
+installs MCP servers. The Copilot binding site for a tool allowlist is
+`.agent.md` frontmatter; SKILL.md cannot carry `tools:`, and the personas
+these children adopt (python-architect, devx-ux-expert) are SHARED across
+skills, so this skill MUST NOT unilaterally narrow them. B15 is therefore
+DECLARED-NOT-BOUND, and that gap is an ACCEPTED RESIDUAL cost/risk, not a
+fix: the implicit full surface stays billable and reachable. The clean
+future binding is a dedicated read-only `.agent.md` persona that carries a
+`tools:` allowlist AND that these children actually INVOKE at spawn (not
+merely "adopt" in prose) -- only an invoked binding narrows the real
+surface. Until that persona exists, the subset is a documented
+expectation, tracked as future work, not an enforced frontmatter field.
+
 ## Wave-gate verifier escalation (reviewer haiku -> implementer sonnet)
 
 The verifiers default to claude-haiku-4.5, but scope-drift detection over

@@ -147,7 +147,9 @@ and HEAD sha in plan.md. No labels are written in this phase.
 
 PROBE for apm-triage-panel (above). Then, for EACH issue, spawn ONE
 triage child using
-[assets/triage-prompt.md](assets/triage-prompt.md). Each child runs
+[assets/triage-prompt.md](assets/triage-prompt.md), at IMPLEMENTER class
+(`claude-sonnet-4.6`) per model-routing.md (Phase 1 triage binding -- the
+paramount front gate is NOT bought at haiku). Each child runs
 the apm-triage-panel rubric in DIRECT mode and returns ONE
 `autopilot-triage-decision` JSON matching
 [assets/autopilot-triage-schema.json](assets/autopilot-triage-schema.json).
@@ -306,7 +308,9 @@ Never auto-close an escalated issue.
   authoritative role-class -> concrete-model table + per-spawn bindings +
   verifier escalation; the pipeline resolves every Phase 4 spawn's model
   here. Also records the B14b CAVEMAN BRIEF layer (lens advisors +
-  wave-gate verifiers ship compressed, fixed-schema briefs).
+  wave-gate verifiers ship compressed, fixed-schema briefs), the B14c
+  audience-boundary PER-SPAWN DECLARATION TABLE, the B13 cache-aware-
+  prefix discipline, and the B15/B16 status for this harness.
 - [assets/task-implement-prompt.md](assets/task-implement-prompt.md) --
   ONE task per child in its own worktree; loads the typed coverage gate
   by task type; no PR, no further fan-out.
