@@ -1249,8 +1249,12 @@ class AgentsCompiler:
 
         if config.agents_md_mode == "managed_section":
             target = Path(output_path)
-            existing = target.read_text(encoding="utf-8") if target.exists() else ""
             try:
+                if not target.exists():
+                    raise ManagedSectionError(
+                        f"{target.name} does not exist yet. Create it with markers first, or use mode: full for initial generation."
+                    )
+                existing = target.read_text(encoding="utf-8")
                 content = apply_managed_section(
                     existing,
                     content,
