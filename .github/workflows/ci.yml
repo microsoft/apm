@@ -280,35 +280,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Installs the APM CLI and adds `apm` to PATH.
-      # setup-only: true skips `apm install` so managed files on disk are
-      # not overwritten before the audit runs. This preserves the committed
-      # state so content-integrity can detect any tampered file hashes.
-      # apm-version is pinned to 0.16.1: the action default (0.14.0) predates
-      # the transitive local-path orphan fix and false-flags this repo's
-      # nested local-sibling deps (shepherd-driver -> apm-review-panel, etc.)
-      # as orphaned packages. 0.16+ resolves transitive local deps correctly.
-      - uses: microsoft/apm-action@v1
+      # Dogfood the repo's OWN apm (built from this branch), not a published
+      # binary. A self-check that runs a stale released apm structurally
+      # cannot validate the fixes the repo ships: this repo's new local-path
+      # packages (./packages/*) depend on the local-dep source-tagging and
+      # transitive-resolution fixes that land IN this tree but predate any
+      # release. The published action (0.14.0 default; 0.16.1 too) false-flags
+      # those deps on ref-consistency and no-orphaned-packages. `uv run` syncs
+      # the project and runs the in-tree apm. No `apm install` is run, so the
+      # committed managed files are preserved and content-integrity can still
+      # detect tampered file hashes.
+      - uses: astral-sh/setup-uv@v6
         with:
-          setup-only: true
-          apm-version: '0.16.1'
+          enable-cache: true
 
       # Gate A: lockfile / install fidelity (consumer-side).
       # Verifies every file in lockfile.deployed_files exists, ref consistency
       # between apm.yml and apm.lock.yaml, no orphan packages, and
       # content-integrity (SHA-256 hashes against deployed_file_hashes in the
       # lockfile) on deployed package content. --no-drift skips the
-      # install-replay because there is no warm cache (setup-only did not
-      # run apm install); content-integrity still catches tampered files.
+      # install-replay because there is no warm cache (no apm install ran);
+      # content-integrity still catches tampered files.
       - name: apm audit --ci --no-drift
-        run: apm audit --ci --no-drift
+        run: uv run apm audit --ci --no-drift
 
       # Gate B: regeneration drift (producer-side) -- legacy bash fallback.
-      # NOTE: With setup-only: true this step is a guaranteed no-op.
-      # apm install did not run and the working tree is unchanged, so the
-      # git status check always finds nothing. It is kept so the pattern is
-      # visible; a full install+audit workflow would rely on this step to
-      # detect hand-edits to regenerated .github/ files.
+      # NOTE: No `apm install` runs in this job, so this step is a guaranteed
+      # no-op: the working tree is unchanged and the git status check always
+      # finds nothing. It is kept so the pattern is visible; a full
+      # install+audit workflow would rely on this step to detect hand-edits
+      # to regenerated .github/ files.
       - name: Check APM integration drift (legacy bash fallback, see #1071)
         run: |
           if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
