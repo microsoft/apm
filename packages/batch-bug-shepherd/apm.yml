@@ -1,28 +1,25 @@
 name: batch-bug-shepherd
 version: 0.1.0
-description: Drive a batch of suspected bugs from raw issue list to mergeable PR queue -- triage in parallel, detect in-flight PRs, shepherd via apm-review-panel, dispatch fix sessions, complete with mutation-break + lint gates.
+description: Drive a batch of suspected bugs from raw issue list to mergeable PR queue -- triage in parallel, gate against PRINCIPLES.md, detect in-flight PRs, dispatch greenfield fixes, then drive every PR to merge via shepherd-driver with mutation-break + lint gates.
 author: Microsoft
 license: MIT
 
-# Composes the apm-review-panel skill as the per-PR review primitive.
+# Manually-invoked outer-loop bug-queue orchestrator. Composes one
+# APM skill:
+#  - shepherd-driver : the per-PR drive-to-merge engine (review panel,
+#                      fold-vs-defer, push, CI watch, conflict
+#                      resolution). Transitively pulls apm-review-panel.
 #
-# NOTE: We intentionally do NOT declare apm-review-panel as a manifest
-# dep here. APM <= 0.14.1 (the version pinned by microsoft/apm-action@v1)
-# flags the resulting transitive local-path entry as orphaned in the
-# root lockfile because its key (`../apm-review-panel`) does not match
-# the root's direct entry (`./packages/apm-review-panel`). The fix
-# lands in the consumer-side `no-orphaned-packages` check in this same
-# PR; once a release including it ships, the manifest dep below can be
-# re-enabled to give us the belt + suspenders pattern described in
-# genesis-plan-v2.md step 3.5.
-#
-# Backstop today: the runtime activate-by-name probe in
-# `assets/shepherd-prompt.md` ensures the harness loads apm-review-panel
-# at shepherd-spawn time. The root manifest also declares both packages
-# directly, so any consumer installing batch-bug-shepherd alongside it
-# already has apm-review-panel on disk.
+# Belt + suspenders (genesis step 3.5 = BOTH): the manifest dep below
+# declares the edge (local-path key resolves relative to THIS package
+# dir per apm-usage dependencies.md), and the SKILL.md body keeps a
+# runtime probe for `../shepherd-driver` at the deploy site as a
+# backstop ("Composition with shepherd-driver"). Real edges are
+# declared because the <= 0.14.1 orphaned-lockfile bug is fixed from
+# 0.16 onward.
 dependencies:
-  apm: []
+  apm:
+    - ../shepherd-driver
   mcp: []
 
 scripts: {}

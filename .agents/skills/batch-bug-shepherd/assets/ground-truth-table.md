@@ -12,23 +12,30 @@ Columns:
 - pr_in_flight: yes | no | n/a (n/a until cross-reference done).
 - author: GitHub handle of the PR author (community contributor or
   internal).
+- worktree: slug/path of the git worktree provisioned for this row's
+  fix or drive child (Worktree-isolation invariant). Empty for
+  read-only / not-yet-provisioned rows; Phase 6 tears down only the
+  worktrees recorded here.
 - status: workflow stage for this row. Allowed values:
     pending-triage
     triaged
+    triaged-deferred
     pending-xref
     pending-shepherd
     pending-fix
-    pending-shepherd-driver
-    shepherd-driver-iter-1
-    shepherd-driver-iter-2
-    shepherd-driver-iter-3
-    shepherd-driver-iter-4
+    pending-completion
     ready-to-merge
-    advisory-with-deferred
     superseded
     blocked
     closed-fixed-at-head
     closed-not-a-bug
+- strategic_verdict: Phase 1.5 verdict (aligned | aligned-with-reservations
+  | out-of-scope | wrong-direction | n/a). `n/a` for rows that never
+  reached Phase 1.5 (UNCLEAR / FIXED-AT-HEAD / NOT-A-BUG triage verdicts).
+- strategic_rationale: short text (<= 200 chars). For demoted rows:
+  `<cited_principle>: <one-line rationale>`. For aligned-with-reservations
+  rows: `<cited_principle>; reservations: <semicolon-joined list>`.
+  Empty for plain `aligned` and `n/a`.
 - notes: short freeform; cite session refs, commit shas, blocker text.
 
 Lines stay under 200 chars to remain readable in narrow terminals.
@@ -37,6 +44,6 @@ ASCII only.
 
 # Ground-truth table
 
-| issue | verdict | pr | pr_in_flight | author | status | notes |
-|-------|---------|----|--------------|--------|--------|-------|
-| #___ | pending-triage | | | | pending-triage | seeded from <list-or-sweep>; awaiting wave 1 |
+| issue | verdict | pr | pr_in_flight | author | worktree | status | strategic_verdict | strategic_rationale | notes |
+|-------|---------|----|--------------|--------|----------|--------|-------------------|---------------------|-------|
+| #___ | pending-triage | | | | | pending-triage | n/a | | seeded from <list-or-sweep>; awaiting wave 1 |

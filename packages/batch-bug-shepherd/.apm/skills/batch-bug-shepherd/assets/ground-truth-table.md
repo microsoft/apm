@@ -12,6 +12,10 @@ Columns:
 - pr_in_flight: yes | no | n/a (n/a until cross-reference done).
 - author: GitHub handle of the PR author (community contributor or
   internal).
+- worktree: slug/path of the git worktree provisioned for this row's
+  fix or drive child (Worktree-isolation invariant). Empty for
+  read-only / not-yet-provisioned rows; Phase 6 tears down only the
+  worktrees recorded here.
 - status: workflow stage for this row. Allowed values:
     pending-triage
     triaged
@@ -40,6 +44,6 @@ ASCII only.
 
 # Ground-truth table
 
-| issue | verdict | pr | pr_in_flight | author | status | strategic_verdict | strategic_rationale | notes |
-|-------|---------|----|--------------|--------|--------|-------------------|---------------------|-------|
-| #___ | pending-triage | | | | pending-triage | n/a | | seeded from <list-or-sweep>; awaiting wave 1 |
+| issue | verdict | pr | pr_in_flight | author | worktree | status | strategic_verdict | strategic_rationale | notes |
+|-------|---------|----|--------------|--------|----------|--------|-------------------|---------------------|-------|
+| #___ | pending-triage | | | | | pending-triage | n/a | | seeded from <list-or-sweep>; awaiting wave 1 |
