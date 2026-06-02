@@ -249,7 +249,10 @@ benchmark) for its task type, never opens a PR, and never spawns
 children. The orchestrator then applies the Phase 3 ownership signaling
 to the new PR. Rows WITH an in-flight PR skip Phase 4 and go straight
 to Phase 5. On a `status: escalate|blocked` return, write the reason to
-the row and surface it in Phase 7 (no PR opened).
+the row and surface it in Phase 7 (no PR opened). On a `pr-opened`
+return, also record the child's `routing_receipts` array in the row's
+notes (B12 cost audit) so the Ideate=opus / architect=opus front-load
+is auditable from plan.md alone, never from a child transcript.
 
 ### Phase 5 - shepherd-driver fan-out (drive to merge)
 
@@ -265,7 +268,11 @@ On each terminal return: schema-validate, then write `head_sha` and
 the `mergeable/merge_state_status/ci_status` projection into the row's
 `head_sha` and `merge_state` columns (the crash-survivable A11 stop
 evidence), and remove ONLY the `status/shepherding` labels listed in
-the row's `labels_added` column (assignment stays).
+the row's `labels_added` column (assignment stays). Also record the
+return's `panel_execution` (`skill-tool`|`inline`), `panel_personas`,
+and `routing_receipt` in the row's notes -- the inline panel path is
+EXPECTED in subagent context, so `panel_execution: inline` is a normal
+healthy value, not a degradation.
 
 ### Phase 6 - conflict-resolution
 

@@ -34,10 +34,38 @@ the resolved model to each `task` spawn; never let the spawner infer a
 model from a role-class name. The concrete SKUs are named inline at each
 spawn for convenience but model-routing.md is the source of truth.
 
+### Routing receipts (B12 parent-audit edge)
+
+For EVERY child you spawn (Ideate, lens advisors, architect, each task
+implementer, each wave-gate verifier), record a routing receipt so the
+orchestrator can audit B12/B14b adherence WITHOUT reading child
+transcripts (the dogfood cost-observability gap). A receipt is:
+
+```
+{ "spawn": "<ideate|lens|architect|task-<id>|wave<W>-verifier>",
+  "requested_model": "<the SKU you passed to task>",
+  "role_class": "planner|implementer|reviewer|trivial",
+  "brief_mode": "normal|caveman_full",
+  "child_echo_model": "<the model the child self-reports, or omit>" }
+```
+
+`requested_model` is AUTHORITATIVE (it is what you passed to `task`);
+`child_echo_model` is the child's self-report and is advisory only (a
+child cannot prove the model it ran under). Aggregate all receipts into
+the `routing_receipts` array of your return so the orchestrator sees the
+whole per-issue routing tree in one object.
+
 ## Stage 1 - Ideate
 
 Spawn ONE Ideate child ([ideate-prompt.md](ideate-prompt.md),
-devx-ux-expert) at IMPLEMENTER class (`claude-sonnet-4.6`). On
+devx-ux-expert) at PLANNER class (`claude-opus-4.8`) per
+[model-routing.md](model-routing.md) (Ideate row + the Phase 1 binding
+rationale). Ideate is FRONT-LOADED HEAVY by deliberate design: the
+`acceptance_shape` it authors is the verification spine every wave is
+graded against, so a weak contract poisons the whole pipeline. Do NOT
+downgrade this spawn to IMPLEMENTER/`claude-sonnet-4.6` -- that is the
+A12 gradient anti-pattern (cheap where stakes are highest) and
+contradicts the authoritative table. On
 `status: ok`, persist its `design_brief` and
 `acceptance_shape` into plan.md under this issue. On `status:
 escalate`, STOP and return that escalate up to the orchestrator.
@@ -117,10 +145,14 @@ Exactly one JSON object (drop-in with the legacy implement-result):
 ```
 { "kind":"implement-result","issue":<n>,"status":"pr-opened",
   "pr":<num>,"coverage_gate":"<aggregate>",
-  "plan_ref":"<anchor>","waves":<count>,"replans":<n> }
+  "plan_ref":"<anchor>","waves":<count>,"replans":<n>,
+  "routing_receipts":[ {"spawn":"ideate","requested_model":"claude-opus-4.8","role_class":"planner","brief_mode":"normal"}, ... ] }
 ```
 
 or `status: "escalate" | "blocked"` with a one-paragraph `reason`.
+`routing_receipts` is best-effort observability (not schema-enforced);
+include it on every non-escalate return so the orchestrator can audit
+the front-load (Ideate=opus, architect=opus, lenses/verifiers=haiku).
 
 ## Hard rules
 

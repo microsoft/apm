@@ -35,7 +35,9 @@ On success:
   "pr": <num>,
   "coverage_gate": "<aggregate: gates proven across tasks>",
   "plan_ref": "<anchor in plan.md>",
-  "waves": <count>, "replans": <replan_count> }
+  "waves": <count>, "replans": <replan_count>,
+  "routing_receipts": [ <one per child spawned this pipeline; see
+    solution-pipeline-prompt.md "Routing receipts"> ] }
 ```
 
 On terminal failure:

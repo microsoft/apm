@@ -72,17 +72,26 @@ Hard caps:
 Before checkout or any Copilot/panel work, PROBE the transitive
 dependency deterministically (A9 SUPERVISED EXECUTION; do not assume
 from recall). Fail fast here rather than discovering a missing panel
-mid-loop after edits have begun:
+mid-loop after edits have begun. Probe ALL load-bearing panel assets,
+not just SKILL.md, and anchor at `$REPO_ROOT` (a relative `../` probe
+is brittle once you `cd $REPO_ROOT` in Step 0):
 
 ```
-test -f ../apm-review-panel/SKILL.md \
-  && echo "apm-review-panel present" \
+P=$REPO_ROOT/.agents/skills/apm-review-panel
+test -f $P/SKILL.md \
+  && test -f $P/assets/panelist-return-schema.json \
+  && test -f $P/assets/ceo-return-schema.json \
+  && test -f $P/assets/recommendation-template.md \
+  && echo "apm-review-panel present (inline-executable)" \
   || echo "MISSING apm-review-panel"
 ```
 
 On a MISS, return immediately with `status: blocked` and
-`blocker: "apm-review-panel skill not reachable; cannot shepherd."`.
-Do NOT check out the PR or freelance panel review.
+`blocker: "apm-review-panel assets not reachable; cannot shepherd."`.
+Do NOT check out the PR or freelance panel review. A PASS here means
+the panel is INLINE-EXECUTABLE regardless of whether the `skill` tool
+is later available (see Step X.1.1) -- you have its authoritative
+contract and schemas on disk.
 
 ### Step 0 -- check out the PR
 
@@ -125,22 +134,54 @@ this run, mark `copilot_drained: true` and skip future fetches.
    section (Finalize). Reservations never silently disappear: if the
    panel judges one already satisfied, it still appears in the
    advisory with a one-line "addressed by ..." note.
-1. ACTIVATE: invoke the `apm-review-panel` skill by name. If the
-   harness reports the skill is unavailable, abort with
-   `status: blocked` and `blocker: "apm-review-panel skill not
-   available in this harness; cannot shepherd."`. Do NOT freelance
-   panel review.
-2. LOAD: treat the panel SKILL.md as authoritative for the panel
-   contract.
-3. RUN: execute the panel against PR_NUMBER. The panel posts ONE
-   recommendation comment per its own single-writer contract. Per
-   its idempotency, subsequent panel runs on the same PR rewrite the
-   same comment surface -- you do NOT need to clean up prior
-   in-loop panel comments.
-4. EXTRACT from the CEO return:
+1. ACTIVATE the panel. There are TWO valid execution paths; pick by
+   what the harness actually offers, and treat the inline path as
+   FIRST-CLASS, not an emergency fallback:
+
+   a. FAST-PATH (if the `skill` tool is present in YOUR context):
+      invoke the `apm-review-panel` skill by name and let it run.
+
+   b. INLINE EXECUTION (the NORMAL path for a shepherd subagent):
+      you are usually spawned two levels deep, and the runtime
+      propagates the `task` tool (so you CAN fan out) but does NOT
+      propagate the `skill` tool. The `skill` one-liner being
+      unavailable is EXPECTED here -- it is NOT an error and NOT a
+      reason to block. In that case YOU act as the panel orchestrator:
+      load `$REPO_ROOT/.agents/skills/apm-review-panel/SKILL.md` as the
+      authoritative contract and EXECUTE its published fan-out yourself
+      via `task` -- spawn each mandatory persona, every conditional
+      persona (active or stubbed per the panel's own activation rubric,
+      so the schema stays uniform), and the `apm-ceo` synthesizer;
+      schema-validate each panelist return against
+      `assets/panelist-return-schema.json` and the CEO return against
+      `assets/ceo-return-schema.json` (re-spawn a malformed persona per
+      the panel's cap); render the single recommendation comment from
+      `assets/recommendation-template.md`. Running the panel's OWN
+      SKILL.md verbatim is NOT re-implementing panel internals (see
+      Hard rules) -- inventing a substitute review WOULD be.
+
+   WRITE BOUNDARY for inline mode: you ARE the panel's single writer
+   for this run, so you post EXACTLY ONE recommendation comment
+   (rewriting the same surface on subsequent iterations, per the
+   panel's single-emission/idempotency discipline); the panelist and
+   CEO subagents return JSON ONLY and never touch PR state. This is the
+   same comment surface a skill-tool run would produce -- inline mode
+   does not add a second panel comment.
+
+   BLOCK ONLY when the Step 0.0 asset probe MISSED (panel genuinely
+   absent). Do NOT block merely because the `skill` tool is absent. If
+   the `skill` tool IS present but the panel run fails (schema drift,
+   missing asset surfaced mid-run, runtime error), do NOT silently
+   swap to inline as if nothing happened -- retry the failing surface
+   ONCE, and if it still fails, return `status: blocked` with the
+   concrete error so a real panel regression is not masked.
+2. EXTRACT from the CEO return:
    - `panel_final_verdict` = the CEO stance.
    - `panel_followups` = `recommended_followups` (each carries
      `from_persona`, `summary`, `why`, and optional `blocking`).
+   - `panel_execution` = `skill-tool` or `inline` (which path ran).
+   - `panel_personas` = the list of persona names you fanned out
+     (for the routing receipt / parent audit).
 
 ### Step X.2 -- merge follow-ups + apply fold-vs-defer rubric
 
@@ -379,9 +420,28 @@ most one short clause (e.g. `pending required review`,
   "head_sha": "40-char sha of the last-pushed commit",
   "mergeable": "MERGEABLE|CONFLICTING|UNKNOWN",
   "merge_state_status": "CLEAN|BLOCKED|BEHIND|DIRTY|UNSTABLE|HAS_HOOKS|UNKNOWN",
-  "ci_status": "green|yellow|red|blocked"
+  "ci_status": "green|yellow|red|blocked",
+  "panel_execution": "skill-tool|inline",
+  "panel_personas": ["python-architect", "..."],
+  "routing_receipt": {
+    "spawn": "shepherd-<pr>",
+    "requested_model": "claude-sonnet-4.6",
+    "role_class": "implementer",
+    "brief_mode": "normal"
+  }
 }
 ```
+
+FIELD NAMES ARE EXACT. The schema sets `additionalProperties: false`,
+so a renamed/aliased field FAILS validation and forces a re-spawn. The
+two observed drift aliases are wrong:
+
+- valid:   `{ "status": "ready-to-merge", "pr": 1584 }`
+- INVALID: `{ "terminal_state": "ready-to-merge", "pr_number": 1584 }`
+
+Use `status` (NOT `terminal_state`) and `pr` (NOT `pr_number`).
+`panel_execution`, `panel_personas`, and `routing_receipt` are optional
+(parent-audit observability) but, when present, must match the schema.
 
 ## Hard rules
 
@@ -399,7 +459,12 @@ most one short clause (e.g. `pending required review`,
   in the return and the orchestrator strips it.
 - Never apply verdict labels (no panel-approved / panel-rejected).
 - Never auto-merge.
-- Never re-implement apm-review-panel internals.
+- Never re-implement apm-review-panel internals. EXECUTING the panel's
+  own published SKILL.md + schemas verbatim (the Step X.1.1 inline path)
+  is NOT re-implementing -- it is running the panel as authored.
+  Re-implementing means inventing a substitute review (your own persona
+  set, your own rubric, your own comment shape) instead of loading and
+  running the panel's contract. Never do that.
 
 ## On failure
 
