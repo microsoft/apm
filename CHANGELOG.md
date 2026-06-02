@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `apm.yml` to update only the APM-owned block between configurable markers.
   Missing or duplicate markers raise a loud error so no content is silently
   lost. (closes #1540)
+- `apm compile --no-dedup` (alias: `--force-instructions`) forces the instructions
+  section into `CLAUDE.md` even when `.claude/rules/` is already populated. Useful
+  for debugging or when both copies are intentionally wanted. Affects the Claude
+  target only; Copilot deduplication is always on and has no opt-out flag.
+  (closes #1463)
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
 - `install.sh` and `apm self-update` now send a conditional `Authorization` header on GitHub release-lookup API calls when `GITHUB_APM_PAT`, `GITHUB_TOKEN`, or `GH_TOKEN` is set, improving reliability for users on shared IPs and corporate NAT that hit anonymous rate limits. Anonymous fallback is preserved when no token is configured. (closes #1582)
 

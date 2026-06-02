@@ -396,8 +396,9 @@ def _resolve_effective_target(
     default=False,
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
-        "already populated. Overrides the PR-#1146 deduplication that normally omits "
-        "the section to avoid duplicate context in Claude Code. Alias: --force-instructions."
+        "already populated. Overrides the default deduplication that normally omits "
+        "the section to avoid duplicate context in Claude Code. Affects the Claude "
+        "target only. Alias: --force-instructions."
     ),
 )
 @click.option(

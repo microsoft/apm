@@ -146,7 +146,8 @@ automatically omits the instructions section from `AGENTS.md` to avoid
 duplicate context in Copilot's context window. `AGENTS.md` is still generated
 when it carries a constitution or dependency `@import` paths. If
 `.github/instructions/` is later cleared, re-running `apm compile` restores
-the instructions section to `AGENTS.md`.
+the instructions section to `AGENTS.md`. This behaviour has no opt-out flag;
+it is always active when `.github/instructions/` contains `.instructions.md` files.
 :::
 
 :::note[Claude Code deduplication]
@@ -169,6 +170,9 @@ both copies), pass `--no-dedup` (alias: `--force-instructions`):
 ```bash
 apm compile --target claude --no-dedup
 ```
+
+This flag affects the Claude path only. Copilot deduplication (see
+[Copilot deduplication](#copilot-deduplication)) is always on and has no opt-out.
 :::
 
 ## Managed-section mode

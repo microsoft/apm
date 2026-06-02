@@ -642,8 +642,7 @@ class AgentsCompiler:
             skip_instructions = False
             self._log(
                 "progress",
-                "--no-dedup set: including instructions in CLAUDE.md regardless of"
-                " .claude/rules/ contents",
+                "Including instructions in CLAUDE.md (--no-dedup overrides deduplication)",
                 symbol="info",
             )
         else:
