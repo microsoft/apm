@@ -234,6 +234,13 @@ backend:
 | `libsecret` (Linux) | Yes (port in URI) |
 | `gh auth git-credential` | No -- but only used for GitHub hosts, which do not use custom ports |
 
+To verify what your helper returns for a custom-port host, use the
+helper-agnostic command APM itself calls:
+
+```sh
+printf 'protocol=https\nhost=<host>:<port>\n\n' | git credential fill
+```
+
 If APM resolves the wrong credential for a custom-port host, confirm your
 helper keys by `host:port`; otherwise either switch helpers or store the
 credential under a fully qualified `https://<host>:<port>/` URL.

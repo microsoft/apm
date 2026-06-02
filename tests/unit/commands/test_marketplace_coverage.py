@@ -86,7 +86,7 @@ class TestMarketplaceInitWriteError:
 
 
 # ---------------------------------------------------------------------------
-# marketplace/plugin/__init__.py – _yml_path
+# marketplace/plugin/__init__.py - _yml_path
 # ---------------------------------------------------------------------------
 
 

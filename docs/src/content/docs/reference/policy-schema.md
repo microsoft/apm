@@ -42,6 +42,7 @@ The `<ref>` accepts:
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
+| `bin_deploy`       | object              | see section      | no       | Control whether `marketplace_plugin` bin/ executables are deployed to `~/.claude/skills/<name>/bin/`. |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
 
@@ -288,6 +289,36 @@ registry_source:
   require:
     - jf-skills
   allow_non_registry: false
+```
+
+## bin_deploy
+
+Controls whether `apm install -g` deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/`, alongside the package's `.claude-plugin/plugin.json`. Here `<name>` is the package's install directory name (typically the repository name).
+
+This realizes Claude Code's "skills-directory plugin" contract: a folder under a skills directory that contains `.claude-plugin/plugin.json` loads as `<name>@skills-dir`, and its root `bin/` is added to the Bash tool's `PATH`. The package's `.claude-plugin/plugin.json` is required for Claude to load the folder as a plugin; APM copies it alongside `bin/` when the package ships one. The contract is Claude-specific, so deployment only targets Claude. Restart Claude Code (or run `/reload-plugins`) after install for new executables to be picked up.
+
+**Security note:** deployed executables are made executable (the execute bit is set for user, group, and other) and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments.
+
+**Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
+
+**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |
+| `deny` | `list<string>` | `[]` | Package canonical strings (e.g. `owner/name`) whose bin/ executables must not be deployed. |
+
+```yaml
+bin_deploy:
+  # Block all bin/ deploys organisation-wide:
+  deny_all: true
+```
+
+```yaml
+bin_deploy:
+  # Allow bin/ deploys except for one specific package:
+  deny:
+    - myorg/untrusted-plugin
 ```
 
 ## See also

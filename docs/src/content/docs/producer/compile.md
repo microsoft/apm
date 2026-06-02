@@ -146,7 +146,8 @@ automatically omits the instructions section from `AGENTS.md` to avoid
 duplicate context in Copilot's context window. `AGENTS.md` is still generated
 when it carries a constitution or dependency `@import` paths. If
 `.github/instructions/` is later cleared, re-running `apm compile` restores
-the instructions section to `AGENTS.md`.
+the instructions section to `AGENTS.md`. This behaviour has no opt-out flag;
+it is always active when `.github/instructions/` contains `.instructions.md` files.
 :::
 
 :::note[Claude Code deduplication]
@@ -161,6 +162,17 @@ run -- both write per-file instruction rules into `.claude/rules/`.
 dependency `@import` paths. If `.claude/rules/` is later removed,
 re-running `apm compile` restores the instructions section to
 `CLAUDE.md`.
+
+To opt out of the deduplication and always include the instructions
+section in `CLAUDE.md` (for debugging or when you intentionally want
+both copies), pass `--no-dedup` (alias: `--force-instructions`):
+
+```bash
+apm compile --target claude --no-dedup
+```
+
+This flag affects the Claude path only. Copilot deduplication (see
+[Copilot deduplication](#copilot-deduplication)) is always on and has no opt-out.
 :::
 
 ## Managed-section mode
@@ -169,6 +181,9 @@ By default `apm compile` overwrites `AGENTS.md` entirely. If your team
 keeps hand-written content in `AGENTS.md` alongside APM-managed rules,
 use **managed-section mode** to update only the APM-owned block while
 leaving everything else untouched.
+
+For the full `apm.yml` key reference for `compilation.agents_md`, see
+[the `compilation.agents_md` section in the manifest schema](../reference/manifest-schema/#62-compilationagents_md).
 
 **1. Add markers to `AGENTS.md`:**
 
@@ -192,8 +207,10 @@ The default markers are `<!-- apm:start -->` and `<!-- apm:end -->`, so
 you can omit `start_marker` and `end_marker` if you use those verbatim.
 
 **Constraints:**
+- Managed-section mode requires a pre-existing `AGENTS.md` containing both markers; if the file is absent the marker check fails with a markers-not-found error telling you to add them.
 - Both markers must be present in the file exactly once (missing or
   duplicate markers raise a loud error so no content is silently lost).
+- The start marker must appear before the end marker; reversed order raises a loud error.
 - `start_marker` and `end_marker` must be distinct non-empty strings.
 - Content outside the markers is preserved verbatim across every compile
   run; only the block between the markers is replaced.

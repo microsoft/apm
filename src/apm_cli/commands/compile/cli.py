@@ -389,6 +389,26 @@ def _resolve_effective_target(
     default=False,
     help="Compile for all canonical targets. Equivalent to --target all.",
 )
+@click.option(
+    "--no-dedup/--no-force-instructions",
+    "no_dedup",
+    is_flag=True,
+    default=False,
+    help=(
+        "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
+        "already populated. Overrides the default deduplication that normally omits "
+        "the section to avoid duplicate context in Claude Code. Affects the Claude "
+        "target only. Alias: --force-instructions."
+    ),
+)
+@click.option(
+    "--force-instructions",
+    "no_dedup",
+    is_flag=True,
+    default=False,
+    help="Alias for --no-dedup.",
+    hidden=True,
+)
 @click.pass_context
 def compile(
     ctx,
@@ -406,6 +426,7 @@ def compile(
     clean,
     legacy_skill_paths,
     compile_all,
+    no_dedup,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -687,6 +708,7 @@ def compile(
             debug=verbose,
             clean_orphaned=clean,
             target=effective_target,
+            no_dedup=no_dedup,
         )
         config.with_constitution = with_constitution
 

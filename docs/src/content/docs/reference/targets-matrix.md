@@ -80,7 +80,7 @@ GitHub Copilot (CLI and IDE).
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.github/hooks/<name>.json`
   - generated: `.github/copilot-instructions.md` (compile output)
-- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`; `instructions` are not supported at user scope. User-scope deploys land under `~/.copilot/`, not `~/.github/`.
+- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`; `instructions` from all packages are concatenated into `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file at user scope). User-scope deploys land under `~/.copilot/`, not `~/.github/`.
 
 ## claude
 
