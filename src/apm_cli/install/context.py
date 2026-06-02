@@ -44,7 +44,7 @@ class InstallContext:
     # ``project_root`` -- the correct value whenever ``--root`` is absent.
     # Phases always read ``ctx.source_root`` (never re-derive from
     # ``project_root``); only the ``--root`` path makes the two diverge.
-    source_root: Path = None  # type: ignore[assignment]
+    source_root: Path | None = None
     # ------------------------------------------------------------------
     apm_package: Any = None  # APMPackage
     update_refs: bool = False

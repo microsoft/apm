@@ -708,15 +708,16 @@ def run(ctx: InstallContext) -> None:
     # Resolver reads ``<anchor>/apm.yml``. Preserve the original
     # ``ctx.apm_dir`` anchor for every non-``--root`` install (zero
     # behavior change: USER -> ``~/.apm``, PROJECT -> deploy root == cwd).
-    # ONLY when ``apm install --root`` is active (source-root override
-    # set) does the manifest read diverge to ``ctx.source_root`` ($PWD),
-    # so sources keep resolving from the user's working directory while
-    # writes land under the override. ``apm_modules_dir`` is already
-    # pinned on the resolver above, so this arg selects only where
-    # ``apm.yml`` is read -- never where ``apm_modules/`` is written.
-    from apm_cli.core.scope import get_source_root_override
-
-    manifest_anchor = ctx.source_root if get_source_root_override() is not None else ctx.apm_dir
+    # When ``ctx.source_root`` differs from ``ctx.project_root`` (set by
+    # ``apm install --root`` via the pipeline), the manifest read diverges
+    # to ``ctx.source_root`` ($PWD) so sources keep resolving from the
+    # user's working directory while writes land under the deploy root.
+    # Using the ctx field (rather than the global ContextVar) makes this
+    # branch reachable for any caller that sets source_root directly.
+    # ``apm_modules_dir`` is already pinned on the resolver above, so
+    # this arg selects only where ``apm.yml`` is read -- never where
+    # ``apm_modules/`` is written.
+    manifest_anchor = ctx.source_root if ctx.source_root != ctx.project_root else ctx.apm_dir
     dependency_graph = resolver.resolve_dependencies(manifest_anchor)
     ctx.dependency_graph = dependency_graph
 

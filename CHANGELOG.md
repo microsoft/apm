@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   created if missing (refused under `--dry-run`); the redirect is reverted
   on every exit path so it never leaks across invocations. `--root` is
   rejected with `--global` (install) and `--watch` (compile). Thanks to
-  @srid (juspay) for the feature and original implementation. (closes #888)
+  @srid (juspay) for the feature and original implementation. (closes #888, #1628)
 - `apm audit` can now ingest findings from external SARIF 2.1.0 scanners
   (e.g. NVIDIA SkillSpector or any SARIF-emitting tool) via `--external
   <name>` and `--external-sarif <file>`, merging them into APM's own report

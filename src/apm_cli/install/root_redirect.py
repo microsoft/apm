@@ -68,9 +68,10 @@ def install_root_redirect(
                 "to let install/compile create it."
             )
     else:
-        # ``resolve()`` collapses any symlinks in the parent chain before
-        # ``mkdir(parents=True)`` so we create the intended directory and
-        # never silently follow a planted symlink to write elsewhere.
+        # ``resolve()`` canonicalises the path (expands ``..`` components,
+        # makes it absolute, and follows any symlinks) before
+        # ``mkdir(parents=True)``, giving us a stable absolute path that
+        # matches what ``os.chdir`` will record as the new cwd.
         target = target.resolve()
         target.mkdir(parents=True, exist_ok=True)
     original = Path.cwd()
