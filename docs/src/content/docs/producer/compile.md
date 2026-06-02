@@ -161,6 +161,14 @@ run -- both write per-file instruction rules into `.claude/rules/`.
 dependency `@import` paths. If `.claude/rules/` is later removed,
 re-running `apm compile` restores the instructions section to
 `CLAUDE.md`.
+
+To opt out of the deduplication and always include the instructions
+section in `CLAUDE.md` (for debugging or when you intentionally want
+both copies), pass `--no-dedup` (alias: `--force-instructions`):
+
+```bash
+apm compile --target claude --no-dedup
+```
 :::
 
 ## Managed-section mode
