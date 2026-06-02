@@ -339,7 +339,8 @@ def build_download_ref(
             reg_replay = _registry_replay_overrides_from_lock(locked_dep)
             if reg_replay is not None:
                 overrides.update(reg_replay)
-            # Use locked commit SHA for byte-for-byte reproducibility.
+            # Use locked commit SHA for byte-for-byte reproducibility
+            # (bypassed during --update, also guarded by the helper itself).
             elif _should_use_locked_ref(locked_dep.resolved_commit, update_refs):
                 overrides["reference"] = locked_dep.resolved_commit
             # For proxy deps without a commit SHA (Artifactory zip archives),

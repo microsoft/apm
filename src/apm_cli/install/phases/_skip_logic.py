@@ -47,5 +47,11 @@ def _should_use_locked_ref(locked_ref: str | None, update_refs: bool) -> bool:
     * ``locked_ref`` is absent or falsy -- no SHA was recorded.
     * ``locked_ref == "cached"`` -- sentinel meaning no real SHA is stored.
     * ``update_refs`` is True -- the user explicitly requested re-resolution.
+
+    Note: in ``build_download_ref`` (drift.py) the caller already gates the
+    entire locked-dep block on ``not update_refs`` (outer guard at L314), so
+    the ``not update_refs`` check here is redundant at that call site.  It is
+    kept intentionally so the helper is self-contained and correct when called
+    from future contexts that lack the outer guard.
     """
     return bool(locked_ref) and locked_ref != "cached" and not update_refs
