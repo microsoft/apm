@@ -1517,17 +1517,23 @@ class SkillIntegrator(BaseIntegrator):
         import os
         import stat
 
+        skip_copy = False
         if dest_file.exists() and not force:
             src_hash = hashlib.sha256(src_file.read_bytes()).hexdigest()
             dst_hash = hashlib.sha256(dest_file.read_bytes()).hexdigest()
-            if src_hash == dst_hash:
-                return
-        shutil.copy2(src_file, dest_file)
+            skip_copy = src_hash == dst_hash
+
+        if not skip_copy:
+            shutil.copy2(src_file, dest_file)
+
         if make_executable and os.name == "posix":
             current = dest_file.stat().st_mode
             # User-only execute: set S_IXUSR, clear group and other execute bits.
+            # Runs for both fresh copies and idempotent re-installs so that files
+            # previously deployed by older APM versions are hardened in-place.
             dest_file.chmod((current & ~(stat.S_IXGRP | stat.S_IXOTH)) | stat.S_IXUSR)
-        if logger:
+
+        if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")
 
     def sync_integration(
