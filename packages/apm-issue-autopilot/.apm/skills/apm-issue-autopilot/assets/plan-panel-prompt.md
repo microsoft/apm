@@ -58,7 +58,14 @@ Produce a task DAG per [plan-schema.json](plan-schema.json):
    without conflict by construction. If two tasks would collide, add a
    dep so they land in different waves -- never the same wave.
 3. Staff each task: `python-architect` by default; `devx-ux-expert`
-   for a pure surface/UX/help-text/output task.
+   for a pure surface/UX/help-text/output task. Also set each task's
+   `role_class` (the B12 routing class the pipeline maps to a concrete
+   model via [model-routing.md](model-routing.md)): `implementer` by
+   default; `trivial` for a docs-only or pure-text task; `planner` ONLY
+   for a security / auth / supply-chain / schema-migration task, which
+   ALSO requires a `model_override` carrying a one-line
+   `stakes_justification`. Do not over-route -- most tasks are
+   `implementer`.
 4. Give each task an `acceptance` (its coverage gate), a `checkpoint`
    (what the wave gate verifies after integration), and a REQUIRED
    `files_hint` (the complete set of files/globs it may touch -- the

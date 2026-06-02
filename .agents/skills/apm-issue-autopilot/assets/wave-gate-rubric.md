@@ -43,6 +43,29 @@ half-merged state. Use a disposable candidate branch:
 
 ## Verifier children (read-only, spawned in parallel)
 
+Both verifiers are spawned at REVIEWER class -- `claude-haiku-4.5`
+first-pass (B12; they grade a concrete candidate diff against the plan
+plus the pipeline's deterministic lint/test evidence). They ESCALATE to
+`claude-sonnet-4.6` per the rule below; resolve the model via
+[model-routing.md](model-routing.md).
+
+### Verifier escalation (haiku -> sonnet)
+
+Before fanning in the verdicts, re-run a verifier at `claude-sonnet-4.6`
+(do NOT decide on the haiku verdict alone) when ANY deterministic
+trigger fired in this wave:
+
+- a task touched files outside its `files_hint`;
+- a public API / function signature changed;
+- an auth, security, supply-chain, lockfile, or schema-migration surface
+  was touched;
+- existing test files were rewritten (not merely added to);
+- the integrated diff is large (the pipeline's large-diff threshold);
+- the two verifiers DISAGREE (one pass, one fail).
+
+Fail closed: if a required escalation re-run cannot run, treat the gate
+as FAIL and re-plan.
+
 ### plan-guardian (python-architect)
 
 Adopt python-architect. Inputs: the CANDIDATE branch (checked out in a

@@ -43,6 +43,20 @@
             "description": "Persona that implements this task. Default python-architect; may be devx-ux-expert for surface/UX tasks. Name only -- the repo persona is referenced, never re-implemented.",
             "default": "python-architect"
           },
+          "role_class": {
+            "type": "string",
+            "enum": ["trivial", "implementer", "planner"],
+            "default": "implementer",
+            "description": "B12 model-routing class the pipeline maps to a concrete model via model-routing.md. implementer (default) for normal coding tasks; trivial for docs-only/pure-text tasks; planner ONLY for security/auth/supply-chain/schema-migration tasks (which also require model_override + stakes_justification). The architect sets the class; the pipeline resolves the SKU. Do not over-route."
+          },
+          "model_override": {
+            "type": "string",
+            "description": "Optional explicit concrete model SKU, overriding the role_class mapping. Use ONLY for a high-stakes task; when present, stakes_justification is REQUIRED."
+          },
+          "stakes_justification": {
+            "type": "string",
+            "description": "One line stating why this task's stakes justify model_override. REQUIRED whenever model_override is set."
+          },
           "deps": {
             "type": "array",
             "items": { "type": "string" },
@@ -61,7 +75,13 @@
             "type": "string",
             "description": "What the wave gate verifies for this task after integration."
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": { "required": ["model_override"] },
+            "then": { "required": ["stakes_justification"] }
+          }
+        ]
       }
     },
     "waves": {

@@ -26,10 +26,19 @@ parallelizing the work within an issue.
 Reload plan.md and (once it exists) plan.json before EACH stage and
 before EACH spawn (B8 ATTENTION ANCHOR). Never drive from recall.
 
+## Model routing (B12)
+
+Every child below is spawned with an EXPLICIT model, resolved from
+[model-routing.md](model-routing.md) -- the authoritative table. Pass
+the resolved model to each `task` spawn; never let the spawner infer a
+model from a role-class name. The concrete SKUs are named inline at each
+spawn for convenience but model-routing.md is the source of truth.
+
 ## Stage 1 - Ideate
 
 Spawn ONE Ideate child ([ideate-prompt.md](ideate-prompt.md),
-devx-ux-expert). On `status: ok`, persist its `design_brief` and
+devx-ux-expert) at IMPLEMENTER class (`claude-sonnet-4.6`). On
+`status: ok`, persist its `design_brief` and
 `acceptance_shape` into plan.md under this issue. On `status:
 escalate`, STOP and return that escalate up to the orchestrator.
 
@@ -40,9 +49,12 @@ Per [plan-panel-prompt.md](plan-panel-prompt.md):
 1. Select lenses from the design_brief surface + TRIAGE_RED_FLAGS
    (always test-coverage-expert; add performance / supply-chain / auth
    on their triggers). Spawn the selected lens advisors in parallel
-   (read-only); fan in their `plan-lens-note` returns.
-2. Spawn the architect synthesis child (python-architect) with the
-   design_brief, acceptance_shape, brief, and the gathered LENS_NOTES.
+   (read-only) at TRIVIAL class (`claude-haiku-4.5` each); fan in their
+   `plan-lens-note` returns.
+2. Spawn the architect synthesis child (python-architect) at PLANNER
+   class (`claude-opus-4.8` -- a BIND-UP justified by stakes: a wrong
+   plan poisons every wave) with the design_brief, acceptance_shape,
+   brief, and the gathered LENS_NOTES.
    It returns an `issue-solution-plan` matching
    [plan-schema.json](plan-schema.json), or a `status: escalate`.
 3. Schema-validate the plan. Persist plan.json (the B4 PLAN MEMENTO).
@@ -64,7 +76,10 @@ reload plan.json first):
    Record every (worktree path, branch) pair on the wave row.
 2. Spawn ONE task child per task
    ([task-implement-prompt.md](task-implement-prompt.md)), staffed by
-   the task's `staff`, each in its own worktree. Cap 6 task children
+   the task's `staff`, each in its own worktree, each spawned with the
+   model resolved from the task's `role_class` (+ `model_override` if
+   present) via [model-routing.md](model-routing.md) -- default
+   IMPLEMENTER (`claude-sonnet-4.6`). Cap 6 task children
    per wave; if a wave exceeds 6, the plan should have split it -- treat
    as a gate failure and re-plan.
 3. Fan in and VALIDATE each return: a malformed/absent return or a `done`
@@ -89,9 +104,11 @@ reload plan.json first):
 
 ## Stage 4 - Acceptance close
 
-After the final wave passes, run [acceptance-observer.md](acceptance-observer.md):
-verify every `acceptance_shape` condition with a deterministic check,
-push ISSUE_BRANCH, open ONE PR (`Closes #N`), and return the PR number.
+After the final wave passes, run [acceptance-observer.md](acceptance-observer.md)
+INLINE (you are the sole writer of ISSUE_BRANCH, so you push and open the
+PR yourself -- no spawn, this runs at your own model): verify every
+`acceptance_shape` condition with a deterministic check, push
+ISSUE_BRANCH, open ONE PR (`Closes #N`), and return the PR number.
 
 ## Return to the orchestrator (Phase 4 contract)
 

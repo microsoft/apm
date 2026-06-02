@@ -206,7 +206,10 @@ For each proceed row WITHOUT an in-flight PR, spawn ONE solution-
 pipeline child in its OWN git worktree on the issue branch (provision
 with `git worktree add` at HEAD; record its slug in the row's
 `worktree` column so Phase 7 tears down only worktrees this run
-created). The child runs
+created). Spawn it at IMPLEMENTER class (`claude-sonnet-4.6`); it and
+every child it spawns route models per
+[assets/model-routing.md](assets/model-routing.md) (B12 MODEL ROUTER).
+The child runs
 [assets/solution-pipeline-prompt.md](assets/solution-pipeline-prompt.md),
 a four-stage per-issue pipeline (A2 PIPELINE), and returns the opened
 PR. It is the SOLE WRITER of the issue branch:
@@ -299,6 +302,10 @@ Never auto-close an escalated issue.
   the task DAG.
 - [assets/plan-schema.json](assets/plan-schema.json) -- JSON schema for
   the persisted `issue-solution-plan` (tasks, deps, waves, checkpoints).
+- [assets/model-routing.md](assets/model-routing.md) -- B12 MODEL ROUTER:
+  authoritative role-class -> concrete-model table + per-spawn bindings +
+  verifier escalation; the pipeline resolves every Phase 4 spawn's model
+  here.
 - [assets/task-implement-prompt.md](assets/task-implement-prompt.md) --
   ONE task per child in its own worktree; loads the typed coverage gate
   by task type; no PR, no further fan-out.

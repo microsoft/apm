@@ -35,9 +35,7 @@ Read TASK.type and load the matching lens; do not load the others:
   `{"kind":"task-result","task":"<id>","status":"escalate",
   "reason":"unsupported task type <TASK.type>"}`.
 
-The lens defines the coverage discipline (bug: failing regression trap +
-mutation-break; feature: failing acceptance test; docs: build/link
-check; refactor/perf: behavior-preserving test + benchmark).
+The lens defines the coverage discipline -- follow it exactly.
 
 ## Discipline
 
