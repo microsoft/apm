@@ -1,14 +1,14 @@
 """Plugin manifest builder -- generates ``plugin.json`` for each target ecosystem.
 
 Triggered when ``apm.yml`` declares a ``target:`` (or ``targets:``) field containing
-``claude``, ``copilot``, ``vscode``, or ``agents``.
+``claude`` or ``copilot``.
 
 Supported ecosystems and their output paths
 -------------------------------------------
-* ``claude``  → ``.claude-plugin/plugin.json``
-* ``copilot`` → ``.github/plugin/plugin.json``
-* ``vscode``  → ``.github/plugin/plugin.json``  (alias for copilot)
-* ``agents``  → ``.github/plugin/plugin.json``  (alias for copilot)
+* ``claude``  -> ``.claude-plugin/plugin.json``
+* ``copilot`` -> ``.github/plugin/plugin.json``
+* ``vscode``  -> ``.github/plugin/plugin.json``  (alias for copilot)
+* ``agents``  -> ``.github/plugin/plugin.json``  (alias for copilot)
 
 The builder delegates all heavy lifting to the existing
 :func:`apm_cli.deps.plugin_parser.synthesize_plugin_json_from_apm_yml` helper and
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..utils.console import _rich_info, _rich_warning
+from ..utils.path_security import ensure_path_within
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -207,6 +208,10 @@ def write_plugin_manifest(
         return None
 
     output_path = project_root / rel_path
+
+    # Containment guard: reject symlink-based escapes (e.g. a symlinked
+    # .github/ directory pointing outside the project root).
+    ensure_path_within(output_path, project_root)
 
     if dry_run:
         _msg = f"[dry-run] Would write plugin manifest to {output_path}"

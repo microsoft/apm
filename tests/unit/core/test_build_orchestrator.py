@@ -469,45 +469,18 @@ class TestPluginManifestProducer:
         _write(apm, "name: test-plugin\nversion: 1.0.0\ndescription: d\ntarget: copilot\n")
         opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
 
-        # Fake parse_targets_field to return both copilot and vscode
+        # Patch parse_targets_field at its source module so the lazy import
+        # inside PluginManifestProducer.produce picks it up.
         monkeypatch.setattr(
-            "apm_cli.core.build_orchestrator.PluginManifestProducer.produce",
-            lambda self, options, logger: _deduplicate_test_impl(options),
+            "apm_cli.core.apm_yml.parse_targets_field",
+            lambda data: ["copilot", "vscode"],
         )
-
-        def _deduplicate_test_impl(options: BuildOptions) -> ProducerResult:
-            from apm_cli.core.plugin_manifest import (
-                PLUGIN_ECOSYSTEM_PATHS,
-                PLUGIN_MANIFEST_ECOSYSTEMS,
-                build_plugin_manifest,
-                write_plugin_manifest,
-            )
-
-            # Simulate targets = ["copilot", "vscode"]
-            targets = ["copilot", "vscode"]
-            seen_paths: set[str] = set()
-            ecosystems: list[str] = []
-            for t in targets:
-                if t in PLUGIN_MANIFEST_ECOSYSTEMS:
-                    path = PLUGIN_ECOSYSTEM_PATHS.get(t, "")
-                    if path and path not in seen_paths:
-                        seen_paths.add(path)
-                        ecosystems.append(t)
-
-            outputs: list[Path] = []
-            for eco in ecosystems:
-                manifest = build_plugin_manifest(options.project_root, options.apm_yml_path, eco)
-                out = write_plugin_manifest(options.project_root, manifest, eco)
-                if out is not None:
-                    outputs.append(out)
-
-            return ProducerResult(kind=OutputKind.PLUGIN_MANIFEST, outputs=outputs)
 
         result = PluginManifestProducer().produce(opts, logger=None)
 
         copilot_out = tmp_path / ".github" / "plugin" / "plugin.json"
         # Only one output (path deduplication removes the vscode alias)
-        assert result.outputs.count(copilot_out) == 1
+        assert result.outputs == [copilot_out]
         assert len(result.outputs) == 1
 
     def test_dry_run_does_not_write_files(self, tmp_path: Path) -> None:

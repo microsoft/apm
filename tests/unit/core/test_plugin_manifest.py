@@ -250,7 +250,7 @@ class TestWritePluginManifest:
         raw = result.read_text(encoding="utf-8")
         parsed = json.loads(raw)
         assert parsed == manifest
-        # Verify indentation (indent=2 → second line should start with 2 spaces)
+        # Verify indentation (indent=2 -- second line should start with 2 spaces)
         lines = raw.splitlines()
         assert len(lines) > 1
         assert lines[1].startswith("  ")
@@ -267,6 +267,20 @@ class TestWritePluginManifest:
         result = write_plugin_manifest(tmp_path, {"name": "plugin"}, "unknown", logger=logger)
         assert result is None
         logger.warning.assert_called_once()
+
+    def test_rejects_symlink_escape(self, tmp_path: Path) -> None:
+        """Symlinked ecosystem dir pointing outside project root is rejected."""
+        from apm_cli.utils.path_security import PathTraversalError
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        project = tmp_path / "project"
+        project.mkdir()
+        # Symlink .claude-plugin -> ../outside
+        (project / ".claude-plugin").symlink_to(outside)
+
+        with pytest.raises(PathTraversalError):
+            write_plugin_manifest(project, {"name": "p"}, "claude")
 
 
 # ---------------------------------------------------------------------------
