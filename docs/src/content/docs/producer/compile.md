@@ -171,7 +171,7 @@ use **managed-section mode** to update only the APM-owned block while
 leaving everything else untouched.
 
 For the full `apm.yml` key reference for `compilation.agents_md`, see
-[Section 6.2 of the manifest schema](../../reference/manifest-schema/#62-compilationagents_md).
+[the `compilation.agents_md` section in the manifest schema](../reference/manifest-schema/#62-compilationagents_md).
 
 **1. Add markers to `AGENTS.md`:**
 

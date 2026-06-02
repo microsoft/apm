@@ -608,7 +608,7 @@ compilation:
 
 ### 6.2. `compilation.agents_md`
 
-Controls how `apm compile` writes the `AGENTS.md` output file. All fields are OPTIONAL; omitting the entire sub-object keeps the default full-overwrite behaviour.
+Controls how `apm compile` writes the `AGENTS.md` output file. All fields are OPTIONAL; omitting the entire sub-object keeps the default full-overwrite behaviour. Use `managed_section` mode when your `AGENTS.md` contains hand-written content you want to preserve across recompiles.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
@@ -618,7 +618,7 @@ Controls how `apm compile` writes the `AGENTS.md` output file. All fields are OP
 
 Both markers must appear **exactly once** in the file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content.
 
-See [Managed-section mode](../../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
+See [Managed-section mode](../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
 
 ```yaml
 compilation:
