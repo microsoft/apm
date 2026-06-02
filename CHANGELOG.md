@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm pack --check-clean` now emits a copy-pasteable recovery recipe when `marketplace.json` drifts from source: `git commit --amend --no-edit` + `git push --force-with-lease` to fold the diff into the current commit, or a follow-up commit variant. Producers get the right command at the point of failure without consulting external docs. (closes #1381)
 - `apm compile --target copilot` (and `agents`) no longer writes instructions into `AGENTS.md` when `apm install` has already deployed them to `.github/instructions/`, eliminating duplicate context that Copilot would read from both locations. Mirrors the equivalent dedup behaviour that was already in place for the Claude path (`.claude/rules/`). (closes #1550, refs #1445)
 
 ### Changed
