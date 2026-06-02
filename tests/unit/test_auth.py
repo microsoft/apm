@@ -4,6 +4,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -1241,8 +1242,17 @@ class TestBuildErrorContextWithPort:
             with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
                 resolver = AuthResolver()
                 msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
-        assert "custom-port-hosts-and-per-port-credentials" in msg, (
-            f"Expected docs URL anchor in hint, got:\n{msg}"
+        # Extract the docs URL from the hint and validate its components with urlparse
+        # (substring URL assertions are prohibited; see tests.instructions.md)
+        url_line = next(
+            (line for line in msg.splitlines() if "microsoft.github.io/apm" in line), None
+        )
+        assert url_line is not None, f"Expected docs URL line in hint, got:\n{msg}"
+        url = url_line.split()[-1]
+        parsed = urlparse(url)
+        assert parsed.hostname == "microsoft.github.io", f"Unexpected hostname: {parsed.hostname}"
+        assert parsed.fragment == "custom-port-hosts-and-per-port-credentials", (
+            f"Unexpected fragment: {parsed.fragment}"
         )
 
     def test_no_port_hint_when_port_missing(self):

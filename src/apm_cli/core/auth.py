@@ -48,6 +48,11 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
+_PORT_CREDENTIAL_DOCS_URL = (
+    "https://microsoft.github.io/apm/getting-started/authentication/"
+    "#custom-port-hosts-and-per-port-credentials"
+)
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -708,15 +713,11 @@ class AuthResolver:
         # (some `gh` integrations, older keychain backends) can silently
         # return the wrong credential. Point the user at the concrete fix.
         if host_info.port is not None:
-            _docs_url = (
-                "https://microsoft.github.io/apm/getting-started/authentication/"
-                "#custom-port-hosts-and-per-port-credentials"
-            )
             lines.append(
                 f"[i] Host '{display}' -- this helper may key by host only.\n"
                 f"    Verify with: printf 'protocol=https\\nhost={display}\\n\\n'"
                 f" | git credential fill\n"
-                f"    See: {_docs_url}"
+                f"    Docs: {_PORT_CREDENTIAL_DOCS_URL}"
             )
 
         lines.append("Run with --verbose for detailed auth diagnostics.")
