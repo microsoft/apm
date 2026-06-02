@@ -180,9 +180,10 @@ class DetectionEvidence:
 def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
     """Collect all package-type signals from a directory in one pass.
 
-    Pure: no side-effects, no file mutations.  Cheap (a handful of stat
-    calls).  See :class:`DetectionEvidence` for the shape of the return
-    value.
+    Pure: no side-effects, no file mutations. Stat-cheap except when
+    ``apm.yml`` is present without a ``.apm/`` directory, in which case it
+    is parsed once to detect declared dependencies.  See
+    :class:`DetectionEvidence` for the shape of the return value.
 
     Internally delegates to :class:`~.format_detection.PackageFormatRegistry`
     so each signal is gathered by its dedicated detector.
@@ -194,21 +195,10 @@ def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
     """
     from .format_detection import (
         _PLUGIN_DIRS,
-        ApmYmlDetector,
-        ClaudePluginDetector,
-        HookJsonDetector,
         PackageFormatRegistry,
-        SkillMdDetector,
     )
 
-    registry = PackageFormatRegistry(
-        detectors=(
-            ClaudePluginDetector(),
-            SkillMdDetector(),
-            ApmYmlDetector(),
-            HookJsonDetector(),
-        )
-    )
+    registry = PackageFormatRegistry()
     report = registry.detect(package_path)
 
     cp = report.claude_plugin
@@ -269,7 +259,7 @@ def detect_package_type(
 
     report = PackageFormatRegistry().detect(package_path)
     pkg_type, plugin_json_path = NormalizationPlanner().plan(report)
-    return pkg_type, plugin_json_path  # type: ignore[return-value]
+    return pkg_type, plugin_json_path
 
 
 def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:

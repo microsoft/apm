@@ -141,7 +141,7 @@ class TestHookJsonDetector:
         (hooks / "hook.json").write_text("{}")
         ev = HookJsonDetector().detect(tmp_path)
         assert isinstance(ev, HookJsonFormatEvidence)
-        assert any(str(hooks) in str(d) for d in ev.hooks_dirs_found)
+        assert hooks in ev.hooks_dirs_found
 
     def test_returns_evidence_for_apm_hooks(self, tmp_path: Path) -> None:
         apm_hooks = tmp_path / ".apm" / "hooks"

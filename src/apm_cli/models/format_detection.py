@@ -18,7 +18,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .validation import PackageType
 
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 
@@ -196,12 +199,20 @@ class ApmYmlDetector:
         if not apm_yml_path.exists():
             return None
         has_apm_dir = (package_path / APM_DIR).is_dir()
+        if has_apm_dir:
+            # .apm/ directory present -- APM_PACKAGE eligibility is already
+            # determined; skip YAML parsing on this hot path.
+            return ApmYmlFormatEvidence(
+                apm_yml_path=apm_yml_path,
+                has_apm_dir=True,
+                declares_dependencies=False,
+            )
         from .validation import _apm_yml_declares_dependencies
 
         declares_deps = _apm_yml_declares_dependencies(apm_yml_path)
         return ApmYmlFormatEvidence(
             apm_yml_path=apm_yml_path,
-            has_apm_dir=has_apm_dir,
+            has_apm_dir=False,
             declares_dependencies=declares_deps,
         )
 
@@ -353,7 +364,7 @@ class NormalizationPlanner:
     normalizer callables so mixed packages can run multiple passes.
     """
 
-    def plan(self, report: DetectionReport) -> tuple[object, Path | None]:
+    def plan(self, report: DetectionReport) -> tuple[PackageType, Path | None]:
         """Resolve ``PackageType`` and optional ``plugin_json_path`` from report.
 
         Returns a ``(PackageType, plugin_json_path)`` tuple identical in

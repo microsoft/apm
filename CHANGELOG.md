@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm_cli.models` internals: package-format detection extracted into a composition model (`PackageFormatRegistry` + per-format detectors + `NormalizationPlanner`); `detect_package_type()` is now a thin facade with no user-visible behaviour change. (#1618)
 - `apm compile` no longer emits cosmetic debug comments (APM version, source-file headers, footer) in generated `CLAUDE.md` and `copilot-instructions.md` files by default. The `compilation.source_attribution` flag now defaults to `false` (was `true`), reducing token overhead for every LLM context window that reads these files. Load-bearing markers (`_COPILOT_ROOT_GENERATED_MARKER` and Build ID) are always emitted regardless of the flag. To restore the previous behaviour, set `compilation: source_attribution: true` in `apm.yml`. (closes #1341)
 ### Removed
 
