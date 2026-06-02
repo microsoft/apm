@@ -1299,8 +1299,17 @@ class SkillIntegrator(BaseIntegrator):
         import stat
 
         from apm_cli.core.scope import InstallScope
+        from apm_cli.utils.path_security import ensure_path_within, validate_path_segments
 
         if scope is not InstallScope.USER:
+            if logger and scope is not None:
+                from apm_cli.core.scope import InstallScope as _S
+
+                if scope is _S.PROJECT:
+                    logger.progress(
+                        "bin/ deploy is user-scope only; skipping for project-scope install",
+                        symbol="info",
+                    )
             return []
 
         package_path = package_info.install_path
@@ -1310,12 +1319,12 @@ class SkillIntegrator(BaseIntegrator):
 
         # Policy opt-out
         if policy is not None:
-            bd_policy = getattr(policy, "bin_deploy", None)
+            bd_policy = policy.bin_deploy
             if bd_policy is not None:
                 if bd_policy.deny_all:
                     if logger:
                         logger.progress(
-                            "[i] bin_deploy.deny_all: skipping bin deploy for "
+                            "bin_deploy.deny_all: skipping bin deploy for "
                             f"{package_info.get_canonical_dependency_string()}",
                             symbol="info",
                         )
@@ -1324,7 +1333,7 @@ class SkillIntegrator(BaseIntegrator):
                 if canonical in bd_policy.deny:
                     if logger:
                         logger.progress(
-                            f"[i] bin_deploy.deny: skipping bin deploy for {canonical}",
+                            f"bin_deploy.deny: skipping bin deploy for {canonical}",
                             symbol="info",
                         )
                     return []
@@ -1341,6 +1350,7 @@ class SkillIntegrator(BaseIntegrator):
             return []
 
         skill_name = package_path.name
+        validate_path_segments(skill_name, context="plugin skill name")
         deployed: list[Path] = []
 
         for target in claude_targets:
@@ -1354,9 +1364,12 @@ class SkillIntegrator(BaseIntegrator):
             dest_bin = skill_base / "bin"
             dest_bin.mkdir(parents=True, exist_ok=True)
             for src_file in bin_dir.iterdir():
-                if not src_file.is_file():
+                # Reject symlinks -- a malicious package could point a symlink
+                # at an arbitrary file outside the sandbox.
+                if src_file.is_symlink() or not src_file.is_file():
                     continue
                 dest_file = dest_bin / src_file.name
+                ensure_path_within(dest_file, dest_bin)
                 if dest_file.exists() and not force:
                     import hashlib
 
@@ -1371,9 +1384,9 @@ class SkillIntegrator(BaseIntegrator):
                     dest_file.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
                 if logger:
                     logger.progress(
-                        f"[bin] deployed {src_file.name} -> "
+                        f"deployed {src_file.name} -> "
                         f"{target.root_dir}/skills/{skill_name}/bin/{src_file.name}",
-                        symbol="plus",
+                        symbol="check",
                     )
                 deployed.append(dest_file)
 
@@ -1386,9 +1399,9 @@ class SkillIntegrator(BaseIntegrator):
                 shutil.copy2(plugin_manifest, dest_manifest)
                 if logger:
                     logger.progress(
-                        f"[bin] deployed plugin.json -> "
+                        f"deployed plugin.json -> "
                         f"{target.root_dir}/skills/{skill_name}/.claude-plugin/plugin.json",
-                        symbol="plus",
+                        symbol="check",
                     )
                 deployed.append(dest_manifest)
 

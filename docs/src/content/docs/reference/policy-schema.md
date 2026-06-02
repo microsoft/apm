@@ -42,6 +42,7 @@ The `<ref>` accepts:
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
+| `bin_deploy`       | object              | see section      | no       | Control whether `marketplace_plugin` bin/ executables are deployed to `~/.claude/skills/<name>/bin/`. |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
 
@@ -288,6 +289,30 @@ registry_source:
   require:
     - jf-skills
   allow_non_registry: false
+```
+
+## bin_deploy
+
+Controls whether `apm install -g` deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/`.
+
+By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |
+| `deny` | `list<string>` | `[]` | Package canonical strings (e.g. `owner/name`) whose bin/ executables must not be deployed. |
+
+```yaml
+bin_deploy:
+  # Block all bin/ deploys organisation-wide:
+  deny_all: true
+```
+
+```yaml
+bin_deploy:
+  # Allow bin/ deploys except for one specific package:
+  deny:
+    - myorg/untrusted-plugin
 ```
 
 ## See also

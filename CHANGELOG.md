@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm install -g` now deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/` and makes them executable, giving Claude Code direct access to plugin-provided binaries. The `bin_deploy` policy field lets enterprise administrators opt out globally (`deny_all: true`) or per-package. (#1544)
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
 
 ## [0.16.1] - 2026-06-01

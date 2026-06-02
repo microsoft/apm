@@ -4310,3 +4310,50 @@ class TestPluginBinDeploy:
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert not deployed_bin.exists()
         assert result.skill_created is False
+
+    def test_force_overwrites_identical_bin(self, tmp_path: Path) -> None:
+        """force=True copies bin/ executables even when src and dest hashes match."""
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        # Pre-seed an identical copy so hash-check would normally skip it.
+        dest_bin = project_root / ".claude" / "skills" / "myplugin" / "bin"
+        dest_bin.mkdir(parents=True)
+        import shutil
+
+        shutil.copy2(bin_dir / "myplugin", dest_bin / "myplugin")
+
+        integrator = SkillIntegrator()
+        # Without force: the file is skipped (hash matches).
+        result_no_force = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            force=False,
+        )
+        assert result_no_force.skill_created is True
+
+        # With force=True: the file must be (re-)deployed unconditionally.
+        # Modify the dest to a different content so we can detect the overwrite.
+        (dest_bin / "myplugin").write_text("#!/bin/sh\necho stale\n")
+        result_force = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            force=True,
+        )
+        assert result_force.skill_created is True
+        assert (dest_bin / "myplugin").read_text() == "#!/bin/sh\necho hello\n", (
+            "force=True must overwrite stale dest with fresh src content"
+        )
