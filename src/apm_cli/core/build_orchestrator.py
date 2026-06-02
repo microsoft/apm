@@ -28,6 +28,7 @@ class OutputKind(enum.Enum):
 
     BUNDLE = "bundle"
     MARKETPLACE = "marketplace"
+    PLUGIN_MANIFEST = "plugin_manifest"
 
 
 @dataclass
@@ -238,6 +239,78 @@ class MarketplaceProducer:
 
 
 # ---------------------------------------------------------------------------
+# Plugin manifest producer -- generates plugin.json for each target ecosystem
+# ---------------------------------------------------------------------------
+
+
+class PluginManifestProducer:
+    """Produce standalone ``plugin.json`` files for each target ecosystem."""
+
+    kind = OutputKind.PLUGIN_MANIFEST
+
+    def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
+        from .apm_yml import parse_targets_field
+        from .plugin_manifest import (
+            PLUGIN_ECOSYSTEM_PATHS,
+            PLUGIN_MANIFEST_ECOSYSTEMS,
+            build_plugin_manifest,
+            write_plugin_manifest,
+        )
+
+        # Read raw apm.yml to obtain targets.
+        data: dict = {}
+        if options.apm_yml_path.is_file():
+            try:
+                with open(options.apm_yml_path, encoding="utf-8") as handle:
+                    loaded = yaml.safe_load(handle)
+                if isinstance(loaded, dict):
+                    data = loaded
+            except yaml.YAMLError:
+                pass
+
+        try:
+            targets = parse_targets_field(data)
+        except Exception:
+            targets = []
+
+        # Deduplicate: copilot/vscode/agents all map to the same output path.
+        seen_paths: set[str] = set()
+        ecosystems: list[str] = []
+        for target in targets:
+            if target in PLUGIN_MANIFEST_ECOSYSTEMS:
+                path = PLUGIN_ECOSYSTEM_PATHS.get(target, "")
+                if path and path not in seen_paths:
+                    seen_paths.add(path)
+                    ecosystems.append(target)
+
+        outputs: list[Path] = []
+        warnings: list[str] = []
+
+        for ecosystem in ecosystems:
+            manifest = build_plugin_manifest(
+                options.project_root,
+                options.apm_yml_path,
+                ecosystem,
+                logger=logger,
+            )
+            output_path = write_plugin_manifest(
+                options.project_root,
+                manifest,
+                ecosystem,
+                dry_run=options.dry_run,
+                logger=logger,
+            )
+            if output_path is not None:
+                outputs.append(output_path)
+
+        return ProducerResult(
+            kind=OutputKind.PLUGIN_MANIFEST,
+            outputs=outputs,
+            warnings=warnings,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Output detection
 # ---------------------------------------------------------------------------
 
@@ -268,6 +341,18 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
     if legacy.is_file():
         out.add(OutputKind.MARKETPLACE)
 
+    # Check target: field for plugin-manifest-eligible ecosystems.
+    if data:
+        from .apm_yml import parse_targets_field
+        from .plugin_manifest import PLUGIN_MANIFEST_ECOSYSTEMS
+
+        try:
+            targets = parse_targets_field(data)
+            if any(t in PLUGIN_MANIFEST_ECOSYSTEMS for t in targets):
+                out.add(OutputKind.PLUGIN_MANIFEST)
+        except Exception:
+            pass
+
     return out
 
 
@@ -284,7 +369,9 @@ class BuildOrchestrator:
         producers: Sequence[ArtifactProducer] | None = None,
     ) -> None:
         self._producers: list[ArtifactProducer] = (
-            list(producers) if producers is not None else [BundleProducer(), MarketplaceProducer()]
+            list(producers)
+            if producers is not None
+            else [BundleProducer(), MarketplaceProducer(), PluginManifestProducer()]
         )
 
     def run(self, options: BuildOptions, logger: Any = None) -> BuildResult:
@@ -292,9 +379,11 @@ class BuildOrchestrator:
         if not outputs_needed:
             raise BuildError(
                 "apm.yml has neither 'dependencies:' nor 'marketplace:' "
-                "block. Nothing to pack. Add dependencies via "
-                "'apm install <pkg>' or scaffold a marketplace block "
-                "with 'apm marketplace init'."
+                "block, and 'target:' does not include a plugin-manifest-eligible "
+                "ecosystem. Nothing to pack. Add dependencies via "
+                "'apm install <pkg>', scaffold a marketplace block "
+                "with 'apm marketplace init', or set 'target:' to "
+                "include 'claude' or 'copilot'."
             )
 
         result = BuildResult()

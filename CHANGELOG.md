@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm pack` generates ecosystem-specific `plugin.json` files when `target:` includes `claude` or `copilot` (#1597).
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
 
 ## [0.16.1] - 2026-06-01

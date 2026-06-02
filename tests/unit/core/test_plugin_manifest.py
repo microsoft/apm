@@ -1,0 +1,380 @@
+"""Unit tests for ``apm_cli.core.plugin_manifest``."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from apm_cli.core.plugin_manifest import (
+    PLUGIN_ECOSYSTEM_PATHS,
+    PLUGIN_MANIFEST_ECOSYSTEMS,
+    build_plugin_manifest,
+    collect_mcp_servers,
+    find_or_synthesize_plugin_json,
+    write_plugin_manifest,
+)
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _minimal_apm_yml(tmp_path: Path, **extra: object) -> Path:
+    """Write a minimal ``apm.yml`` to ``tmp_path`` and return its path."""
+    fields = {"name": "my-plugin", "version": "1.0.0", "description": "test plugin", **extra}
+    lines = "\n".join(f"{k}: {v}" for k, v in fields.items())
+    apm = tmp_path / "apm.yml"
+    _write(apm, lines + "\n")
+    return apm
+
+
+# ---------------------------------------------------------------------------
+# TestCollectMcpServers
+# ---------------------------------------------------------------------------
+
+
+class TestCollectMcpServers:
+    def test_returns_servers_from_valid_mcp_json(self, tmp_path: Path) -> None:
+        mcp = tmp_path / ".mcp.json"
+        mcp.write_text(
+            json.dumps({"mcpServers": {"my-server": {"command": "npx", "args": ["-y", "server"]}}}),
+            encoding="utf-8",
+        )
+        result = collect_mcp_servers(tmp_path)
+        assert result == {"my-server": {"command": "npx", "args": ["-y", "server"]}}
+
+    def test_returns_empty_when_no_mcp_file(self, tmp_path: Path) -> None:
+        assert collect_mcp_servers(tmp_path) == {}
+
+    def test_returns_empty_when_mcp_is_symlink(self, tmp_path: Path) -> None:
+        real = tmp_path / "real_mcp.json"
+        real.write_text(
+            json.dumps({"mcpServers": {"srv": {}}}),
+            encoding="utf-8",
+        )
+        link = tmp_path / ".mcp.json"
+        link.symlink_to(real)
+        assert collect_mcp_servers(tmp_path) == {}
+
+    def test_returns_empty_on_invalid_json(self, tmp_path: Path) -> None:
+        (tmp_path / ".mcp.json").write_text("{not valid json", encoding="utf-8")
+        assert collect_mcp_servers(tmp_path) == {}
+
+    def test_returns_empty_when_mcp_servers_not_dict(self, tmp_path: Path) -> None:
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": ["server-a", "server-b"]}),
+            encoding="utf-8",
+        )
+        assert collect_mcp_servers(tmp_path) == {}
+
+    def test_returns_empty_when_mcp_json_has_no_mcp_servers_key(self, tmp_path: Path) -> None:
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"otherKey": {}}),
+            encoding="utf-8",
+        )
+        assert collect_mcp_servers(tmp_path) == {}
+
+    def test_returns_empty_mcp_servers_dict(self, tmp_path: Path) -> None:
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {}}),
+            encoding="utf-8",
+        )
+        assert collect_mcp_servers(tmp_path) == {}
+
+
+# ---------------------------------------------------------------------------
+# TestBuildPluginManifest
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPluginManifest:
+    def test_claude_includes_mcp_servers(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"srv": {"command": "node"}}}),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        assert "mcpServers" in manifest
+        assert manifest["mcpServers"] == {"srv": {"command": "node"}}
+
+    def test_claude_omits_mcp_when_no_mcp_json(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        assert "mcpServers" not in manifest
+
+    def test_copilot_omits_mcp_servers(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"srv": {"command": "node"}}}),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "copilot")
+        assert "mcpServers" not in manifest
+
+    def test_strips_convention_directory_keys(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        with patch("apm_cli.deps.plugin_parser.synthesize_plugin_json_from_apm_yml") as mock_synth:
+            mock_synth.return_value = {
+                "name": "my-plugin",
+                "version": "1.0.0",
+                "agents": ["./agents"],
+                "skills": ["./skills"],
+                "commands": ["./commands"],
+                "instructions": "./INSTRUCTIONS.md",
+            }
+            manifest = build_plugin_manifest(tmp_path, apm, "copilot")
+        assert "agents" not in manifest
+        assert "skills" not in manifest
+        assert "commands" not in manifest
+        assert "instructions" not in manifest
+        assert manifest["name"] == "my-plugin"
+
+    def test_name_and_version_from_apm_yml(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path, author="Jane Doe")
+        manifest = build_plugin_manifest(tmp_path, apm, "copilot")
+        assert manifest["name"] == "my-plugin"
+        assert manifest["version"] == "1.0.0"
+        assert manifest["description"] == "test plugin"
+        assert manifest["author"] == {"name": "Jane Doe"}
+
+    def test_agents_ecosystem_omits_mcp_servers(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"srv": {}}}),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "agents")
+        assert "mcpServers" not in manifest
+
+    def test_vscode_ecosystem_omits_mcp_servers(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"srv": {}}}),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "vscode")
+        assert "mcpServers" not in manifest
+
+
+# ---------------------------------------------------------------------------
+# TestWritePluginManifest
+# ---------------------------------------------------------------------------
+
+
+class TestWritePluginManifest:
+    def test_writes_to_claude_path(self, tmp_path: Path) -> None:
+        manifest = {"name": "plugin", "version": "1.0.0"}
+        result = write_plugin_manifest(tmp_path, manifest, "claude")
+        expected = tmp_path / ".claude-plugin" / "plugin.json"
+        assert result == expected
+        assert expected.exists()
+
+    def test_writes_to_copilot_path(self, tmp_path: Path) -> None:
+        manifest = {"name": "plugin", "version": "1.0.0"}
+        result = write_plugin_manifest(tmp_path, manifest, "copilot")
+        expected = tmp_path / ".github" / "plugin" / "plugin.json"
+        assert result == expected
+        assert expected.exists()
+
+    def test_vscode_alias_writes_to_copilot_path(self, tmp_path: Path) -> None:
+        manifest = {"name": "plugin", "version": "1.0.0"}
+        result = write_plugin_manifest(tmp_path, manifest, "vscode")
+        expected = tmp_path / ".github" / "plugin" / "plugin.json"
+        assert result == expected
+        assert expected.exists()
+
+    def test_agents_alias_writes_to_copilot_path(self, tmp_path: Path) -> None:
+        manifest = {"name": "plugin", "version": "1.0.0"}
+        result = write_plugin_manifest(tmp_path, manifest, "agents")
+        expected = tmp_path / ".github" / "plugin" / "plugin.json"
+        assert result == expected
+        assert expected.exists()
+
+    def test_creates_parent_dirs(self, tmp_path: Path) -> None:
+        manifest = {"name": "plugin"}
+        result = write_plugin_manifest(tmp_path, manifest, "claude")
+        assert result is not None
+        assert result.parent.is_dir()
+
+    def test_overwrites_existing_with_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, json.dumps({"name": "old-content"}))
+
+        warnings_emitted: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_warning",
+            lambda msg: warnings_emitted.append(msg),
+        )
+
+        manifest = {"name": "new-content"}
+        result = write_plugin_manifest(tmp_path, manifest, "claude")
+
+        assert result == existing
+        written = json.loads(existing.read_text(encoding="utf-8"))
+        assert written["name"] == "new-content"
+        assert len(warnings_emitted) == 1
+        assert "Overwriting" in warnings_emitted[0] or "overwriting" in warnings_emitted[0].lower()
+
+    def test_dry_run_does_not_write(self, tmp_path: Path) -> None:
+        manifest = {"name": "plugin"}
+        result = write_plugin_manifest(tmp_path, manifest, "claude", dry_run=True)
+        expected = tmp_path / ".claude-plugin" / "plugin.json"
+        assert result is None
+        assert not expected.exists()
+
+    def test_unknown_ecosystem_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        warnings_emitted: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_warning",
+            lambda msg: warnings_emitted.append(msg),
+        )
+
+        manifest = {"name": "plugin"}
+        result = write_plugin_manifest(tmp_path, manifest, "nonexistent-ecosystem")
+        assert result is None
+        assert len(warnings_emitted) == 1
+
+    def test_output_is_valid_json(self, tmp_path: Path) -> None:
+        manifest = {"name": "plugin", "version": "1.0.0", "description": "test"}
+        result = write_plugin_manifest(tmp_path, manifest, "claude")
+        assert result is not None
+        raw = result.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+        assert parsed == manifest
+        # Verify indentation (indent=2 → second line should start with 2 spaces)
+        lines = raw.splitlines()
+        assert len(lines) > 1
+        assert lines[1].startswith("  ")
+
+    def test_dry_run_with_logger_calls_info(self, tmp_path: Path) -> None:
+        logger = MagicMock()
+        manifest = {"name": "plugin"}
+        result = write_plugin_manifest(tmp_path, manifest, "claude", dry_run=True, logger=logger)
+        assert result is None
+        logger.info.assert_called_once()
+
+    def test_unknown_ecosystem_with_logger_calls_warning(self, tmp_path: Path) -> None:
+        logger = MagicMock()
+        result = write_plugin_manifest(tmp_path, {"name": "plugin"}, "unknown", logger=logger)
+        assert result is None
+        logger.warning.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestFindOrSynthesizePluginJson
+# ---------------------------------------------------------------------------
+
+
+class TestFindOrSynthesizePluginJson:
+    def test_finds_existing_plugin_json(self, tmp_path: Path) -> None:
+        # Place plugin.json at the root (first candidate location)
+        existing = {"name": "existing-plugin", "version": "2.0.0"}
+        plugin_json = tmp_path / "plugin.json"
+        plugin_json.write_text(json.dumps(existing), encoding="utf-8")
+        apm = _minimal_apm_yml(tmp_path)
+
+        result = find_or_synthesize_plugin_json(tmp_path, apm, suppress_missing_warning=True)
+        assert result == existing
+
+    def test_synthesises_when_no_plugin_json(self, tmp_path: Path) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        result = find_or_synthesize_plugin_json(tmp_path, apm, suppress_missing_warning=True)
+        assert result["name"] == "my-plugin"
+        assert result["version"] == "1.0.0"
+
+    def test_falls_back_on_parse_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Create a malformed plugin.json at the root
+        bad_json = tmp_path / "plugin.json"
+        bad_json.write_text("{malformed json]", encoding="utf-8")
+        apm = _minimal_apm_yml(tmp_path)
+
+        warnings_emitted: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_warning",
+            lambda msg: warnings_emitted.append(msg),
+        )
+
+        result = find_or_synthesize_plugin_json(tmp_path, apm)
+        # Should fall back to synthesised result from apm.yml
+        assert result["name"] == "my-plugin"
+        assert len(warnings_emitted) == 1
+        assert "parse" in warnings_emitted[0].lower() or "Falling back" in warnings_emitted[0]
+
+    def test_suppress_missing_warning_prevents_info_message(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        info_calls: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_info",
+            lambda msg: info_calls.append(msg),
+        )
+
+        find_or_synthesize_plugin_json(tmp_path, apm, suppress_missing_warning=True)
+        assert info_calls == []
+
+    def test_emits_info_when_no_plugin_json_and_not_suppressed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        apm = _minimal_apm_yml(tmp_path)
+        info_calls: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_info",
+            lambda msg: info_calls.append(msg),
+        )
+
+        find_or_synthesize_plugin_json(tmp_path, apm, suppress_missing_warning=False)
+        assert len(info_calls) == 1
+
+    def test_finds_plugin_json_under_github_plugin(self, tmp_path: Path) -> None:
+        existing = {"name": "github-plugin"}
+        plugin_json = tmp_path / ".github" / "plugin" / "plugin.json"
+        _write(plugin_json, json.dumps(existing))
+        apm = _minimal_apm_yml(tmp_path)
+
+        result = find_or_synthesize_plugin_json(tmp_path, apm, suppress_missing_warning=True)
+        assert result == existing
+
+    def test_falls_back_with_logger_calls_warning(self, tmp_path: Path) -> None:
+        bad_json = tmp_path / "plugin.json"
+        bad_json.write_text("{bad json", encoding="utf-8")
+        apm = _minimal_apm_yml(tmp_path)
+
+        logger = MagicMock()
+        result = find_or_synthesize_plugin_json(tmp_path, apm, logger=logger)
+        assert result["name"] == "my-plugin"
+        logger.warning.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Module constants
+# ---------------------------------------------------------------------------
+
+
+class TestModuleConstants:
+    def test_plugin_manifest_ecosystems_frozenset(self) -> None:
+        assert isinstance(PLUGIN_MANIFEST_ECOSYSTEMS, frozenset)
+        assert {"claude", "copilot", "vscode", "agents"} == PLUGIN_MANIFEST_ECOSYSTEMS
+
+    def test_plugin_ecosystem_paths_keys_match_ecosystems(self) -> None:
+        assert set(PLUGIN_ECOSYSTEM_PATHS.keys()) == PLUGIN_MANIFEST_ECOSYSTEMS
+
+    def test_claude_path(self) -> None:
+        assert PLUGIN_ECOSYSTEM_PATHS["claude"] == ".claude-plugin/plugin.json"
+
+    def test_copilot_vscode_agents_share_path(self) -> None:
+        shared = ".github/plugin/plugin.json"
+        assert PLUGIN_ECOSYSTEM_PATHS["copilot"] == shared
+        assert PLUGIN_ECOSYSTEM_PATHS["vscode"] == shared
+        assert PLUGIN_ECOSYSTEM_PATHS["agents"] == shared

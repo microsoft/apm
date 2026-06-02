@@ -317,6 +317,8 @@ my-skill/
 
 Packaged distribution format created with `apm pack --format plugin`.
 
+When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json` automatically -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the [`apm pack` reference](../../../docs/src/content/docs/reference/cli/pack.md) for path details and per-ecosystem differences.
+
 ## Step-by-step: create and publish
 
 ```bash
