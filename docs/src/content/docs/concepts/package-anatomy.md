@@ -85,8 +85,11 @@ version: 1.0.0                     # SemVer string. Required.
 
 # Optional metadata
 description: Code review skills for Python services
-author: Jane Doe
+author: Jane Doe             # plain string, or {name, email?, url?} object
 license: MIT
+homepage: https://example.com/my-pkg
+repository: https://github.com/org/my-pkg
+keywords: [ai, review, python]
 
 # Optional content type: one of instructions, skill, hybrid, prompts.
 # Constrains what `.apm/` may contain. Useful for single-purpose packages.
@@ -129,8 +132,11 @@ scripts:
 | `name`           | yes      | Package name.                                               |
 | `version`        | yes      | SemVer string.                                              |
 | `description`    | no       |                                                             |
-| `author`         | no       |                                                             |
+| `author`         | no       | Plain string or `{name, email?, url?}` object.              |
 | `license`        | no       | SPDX identifier recommended.                                |
+| `homepage`       | no       | URL; passed through to `plugin.json` by `apm pack`.         |
+| `repository`     | no       | URL; passed through to `plugin.json` by `apm pack`.         |
+| `keywords`       | no       | List of strings; passed through to `plugin.json` by `apm pack`. |
 | `type`           | no       | `instructions`, `skill`, `hybrid`, or `prompts`.            |
 | `targets` / `target` | no   | Preferred YAML list, or legacy string/list of harness slugs. |
 | `includes`       | no       | `"auto"` or list of repo paths.                             |

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm pack` now synthesises `homepage`, `repository`, `keywords`, and a structured
+  `author` (`{name, email?, url?}`) from `apm.yml` into `plugin.json`. All changes are
+  additive: omitting any of these fields in `apm.yml` produces no change to the output.
+  The `author` field continues to accept a plain string (backward-compatible). (closes #1621)
 - `apm audit` can now ingest findings from external SARIF 2.1.0 scanners
   (e.g. NVIDIA SkillSpector or any SARIF-emitting tool) via `--external
   <name>` and `--external-sarif <file>`, merging them into APM's own report

@@ -289,6 +289,23 @@ class TestPluginJsonSynthesis:
         assert result["author"] == {"name": "Bob", "email": "bob@example.com"}
         assert "url" not in result["author"]
 
+    def test_author_structured_object_unrecognized_keys_drops_author(self, tmp_path):
+        """Structured author dict with only unrecognized keys silently drops author field.
+
+        This is the intended design: only name/email/url are recognized; a dict
+        with no recognized keys produces an empty author_obj and the author key
+        is omitted rather than raised. This protects the design decision from
+        silent regression.
+        """
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "author": {"github": "user123"}},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert "author" not in result
+
     def test_extra_apm_fields_ignored(self, tmp_path):
         """Fields not part of plugin spec (dependencies, scripts) are not in output."""
         yml = _write_apm_yml(
