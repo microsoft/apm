@@ -1227,6 +1227,24 @@ class TestBuildErrorContextWithPort:
                 msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
         assert "per-port" in msg, f"Expected per-port hint when port is set, got:\n{msg}"
 
+    def test_port_hint_includes_credential_fill_command(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
+        assert "git credential fill" in msg, (
+            f"Expected 'git credential fill' verification command in hint, got:\n{msg}"
+        )
+
+    def test_port_hint_includes_docs_url(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("bitbucket.corp.com", "clone", port=7999)
+        assert "custom-port-hosts-and-per-port-credentials" in msg, (
+            f"Expected docs URL anchor in hint, got:\n{msg}"
+        )
+
     def test_no_port_hint_when_port_missing(self):
         with patch.dict(os.environ, {}, clear=True):
             with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):

@@ -708,9 +708,15 @@ class AuthResolver:
         # (some `gh` integrations, older keychain backends) can silently
         # return the wrong credential. Point the user at the concrete fix.
         if host_info.port is not None:
+            _docs_url = (
+                "https://microsoft.github.io/apm/getting-started/authentication/"
+                "#custom-port-hosts-and-per-port-credentials"
+            )
             lines.append(
-                f"[i] Host '{display}' -- verify your credential helper stores per-port entries "
-                f"(some helpers key by host only)."
+                f"[i] Host '{display}' -- this helper may key by host only.\n"
+                f"    Verify with: printf 'protocol=https\\nhost={display}\\n\\n'"
+                f" | git credential fill\n"
+                f"    See: {_docs_url}"
             )
 
         lines.append("Run with --verbose for detailed auth diagnostics.")
