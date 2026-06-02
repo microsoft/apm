@@ -228,8 +228,14 @@ if [ -z "$TAG_NAME" ]; then
 # Get latest release info
 echo -e "${YELLOW}Fetching latest release information...${NC}"
 
-# Try to fetch release info without authentication first (for public repos)
-LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$APM_REPO/releases/latest")
+# Fetch release info; include Authorization header when a token is already resolved
+# (AUTH_HEADER_VALUE set earlier from GITHUB_APM_PAT > GITHUB_TOKEN precedence).
+# This avoids anonymous rate-limiting behind shared IPs / corporate NAT.
+if [ -n "$AUTH_HEADER_VALUE" ]; then
+    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "https://api.github.com/repos/$APM_REPO/releases/latest")
+else
+    LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$APM_REPO/releases/latest")
+fi
 CURL_EXIT_CODE=$?
 
 # Check if the response indicates authentication is required (private repo)
