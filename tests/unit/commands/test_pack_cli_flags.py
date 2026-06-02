@@ -1,10 +1,9 @@
 """Tests for new CLI flags in pack command (phase-3c, T-3c-01..12).
 
 Covers:
-- --marketplace filter validation (unknown format → error)
+- --marketplace filter validation (unknown format -> error)
 - --marketplace-path FORMAT=PATH parsing + validation
 - --json flag emits valid JSON on failure
-- --marketplace-output deprecation warning
 """
 
 from __future__ import annotations
@@ -85,16 +84,15 @@ class TestJsonFlag:
         assert "machine-readable" in result.output.lower() or "JSON" in result.output
 
 
-class TestDeprecationWarning:
-    """T-3c-11..12: --marketplace-output deprecation."""
+class TestMarketplaceOutputRemoved:
+    """T-3c-11: --marketplace-output was removed in v0.16 (breaking change, #1318)."""
 
-    def test_deprecated_flag_still_accepted(self) -> None:
-        """The flag doesn't crash immediately (it will fail later
-        because no apm.yml exists, but that's fine — we check the
-        deprecation message is printed before the crash)."""
+    def test_removed_flag_is_unknown_option(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--marketplace-output", "test.json"])
-        combined = result.output or ""
-        assert "deprecated" in combined.lower() or result.exit_code != 0
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower() or isinstance(
+            result.exception, SystemExit
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +240,33 @@ class TestCheckCleanFlag:
         assert "drift" in data
         assert data["drift"] is not None
         assert data["drift"]["ok"] is False
+
+    def test_drift_error_includes_amend_recipe(self, tmp_path: _Path, monkeypatch) -> None:
+        """Drift error output must include the commit --amend recovery recipe."""
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+        assert result.exit_code == 4
+        assert "commit --amend" in result.output
+
+    def test_drift_error_includes_force_with_lease(self, tmp_path: _Path, monkeypatch) -> None:
+        """Drift error output must include the force-with-lease recovery recipe."""
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+        assert result.exit_code == 4
+        assert "force-with-lease" in result.output
+
+    def test_drift_error_includes_output_path(self, tmp_path: _Path, monkeypatch) -> None:
+        """Drift error output must embed the affected path in the git add recipe line."""
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+        assert result.exit_code == 4
+        # Assert on a recipe-specific line that embeds the path; "marketplace.json"
+        # alone was already present in the pre-recipe drift output (path display line).
+        assert "git add" in result.output
+        assert "marketplace.json" in result.output
 
 
 class TestBothFlagsCombined:

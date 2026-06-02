@@ -108,7 +108,9 @@ class DependencyReference:
     # source: which resolver should fetch this dep. None and "git" are equivalent
     # (legacy default). Set to "registry" by the parser when an entry routes to
     # a configured registry (via top-level registries: block or
-    # object-form `- registry:` / `- id:` discriminator).
+    # object-form `- registry:` / `- id:` discriminator), and to "local" when
+    # the entry is a local filesystem path (is_local=True) so every reader and
+    # the lockfile (which records source="local") agree on a local dep's source.
     # registry_name: name of the registry from apm.yml's registries: block when
     # source == "registry". Carried in-memory only; never serialized into the
     # lockfile (the lockfile uses URL-based identity per design §6.1).
@@ -762,7 +764,7 @@ class DependencyReference:
     ) -> tuple[str, list[str], str | None] | None:
         """If *package* is bare host/path shorthand, return (host, path_segments, ref_str).
 
-        Returns ``None`` for ``https://``, ``git@``, or non–GitLab-class hosts.
+        Returns ``None`` for ``https://``, ``git@``, or non-GitLab-class hosts.
         """
         s = package.strip()
         ref_out: str | None = None
@@ -1694,6 +1696,7 @@ class DependencyReference:
                 repo_url=f"_local/{pkg_name}",
                 is_local=True,
                 local_path=local,
+                source="local",
             )
 
         if dependency_str.startswith("//"):

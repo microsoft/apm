@@ -115,7 +115,7 @@ Per target, with the rules shape on disk after compile:
 
 | Target | Root context file | Per-rule output | Compile required? |
 |---|---|---|---|
-| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively |
+| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively; deduplicates with `.github/instructions/` (see [below](#copilot-deduplication)) |
 | `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
@@ -138,6 +138,18 @@ correct AGENTS.md / CLAUDE.md / GEMINI.md output. Reach for
 `apm compile` directly when you are iterating on instructions and
 do not want install's side effects.
 
+:::note[Copilot deduplication]
+<a id="copilot-deduplication"></a>
+When `.github/instructions/` is already populated with `.instructions.md` files
+(deployed by `apm install --target copilot`), `apm compile --target copilot`
+automatically omits the instructions section from `AGENTS.md` to avoid
+duplicate context in Copilot's context window. `AGENTS.md` is still generated
+when it carries a constitution or dependency `@import` paths. If
+`.github/instructions/` is later cleared, re-running `apm compile` restores
+the instructions section to `AGENTS.md`. This behaviour has no opt-out flag;
+it is always active when `.github/instructions/` contains `.instructions.md` files.
+:::
+
 :::note[Claude Code deduplication]
 <a id="claude-code-deduplication"></a>
 When `.claude/rules/` is already populated with instructions,
@@ -150,7 +162,58 @@ run -- both write per-file instruction rules into `.claude/rules/`.
 dependency `@import` paths. If `.claude/rules/` is later removed,
 re-running `apm compile` restores the instructions section to
 `CLAUDE.md`.
+
+To opt out of the deduplication and always include the instructions
+section in `CLAUDE.md` (for debugging or when you intentionally want
+both copies), pass `--no-dedup` (alias: `--force-instructions`):
+
+```bash
+apm compile --target claude --no-dedup
+```
+
+This flag affects the Claude path only. Copilot deduplication (see
+[Copilot deduplication](#copilot-deduplication)) is always on and has no opt-out.
 :::
+
+## Managed-section mode
+
+By default `apm compile` overwrites `AGENTS.md` entirely. If your team
+keeps hand-written content in `AGENTS.md` alongside APM-managed rules,
+use **managed-section mode** to update only the APM-owned block while
+leaving everything else untouched.
+
+For the full `apm.yml` key reference for `compilation.agents_md`, see
+[the `compilation.agents_md` section in the manifest schema](../reference/manifest-schema/#62-compilationagents_md).
+
+**1. Add markers to `AGENTS.md`:**
+
+```md
+<!-- apm:start -->
+<!-- apm will insert content here -->
+<!-- apm:end -->
+```
+
+**2. Enable the mode in `apm.yml`:**
+
+```yaml
+compilation:
+  agents_md:
+    mode: managed_section
+    start_marker: "<!-- apm:start -->"
+    end_marker: "<!-- apm:end -->"
+```
+
+The default markers are `<!-- apm:start -->` and `<!-- apm:end -->`, so
+you can omit `start_marker` and `end_marker` if you use those verbatim.
+
+**Constraints:**
+- Managed-section mode requires a pre-existing `AGENTS.md` containing both markers; if the file is absent the marker check fails with a markers-not-found error telling you to add them.
+- Both markers must be present in the file exactly once (missing or
+  duplicate markers raise a loud error so no content is silently lost).
+- The start marker must appear before the end marker; reversed order raises a loud error.
+- `start_marker` and `end_marker` must be distinct non-empty strings.
+- Content outside the markers is preserved verbatim across every compile
+  run; only the block between the markers is replaced.
 
 ## Pitfalls
 

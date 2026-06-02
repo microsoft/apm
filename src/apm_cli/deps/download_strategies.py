@@ -355,12 +355,15 @@ class DownloadDelegate:
                             if not dest.resolve().is_relative_to(target_path.resolve()):
                                 _debug(f"Skipping zip entry escaping target: {member.filename}")
                                 continue
+                            unix_mode = (member.external_attr >> 16) & 0xFFFF
                             if member.is_dir():
                                 dest.mkdir(parents=True, exist_ok=True)
                             else:
                                 dest.parent.mkdir(parents=True, exist_ok=True)
                                 with zf.open(member) as src, open(dest, "wb") as dst:
                                     dst.write(src.read())
+                                if unix_mode:
+                                    os.chmod(dest, unix_mode & 0o755)
                     _debug(f"Extracted Artifactory archive to {target_path}")
                     return
                 else:

@@ -140,6 +140,69 @@
       "expected": "no_fire",
       "split": "val",
       "notes": "Design work, not batch triage."
+    },
+    {
+      "id": "no-fire-11",
+      "query": "fold the panel recommendations into PR #1234",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR fold-in -> apm-review-panel completion flow, NOT batch outer-loop. Guards against dispatch mis-fire after the fold-in invariant was added."
+    },
+    {
+      "id": "no-fire-12",
+      "query": "fold the followups into this one PR",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR phrasing using the new fold-in vocabulary; must not fire batch-bug-shepherd."
+    },
+    {
+      "id": "no-fire-13",
+      "query": "apply the panel recommendations to PR #998 and close it out",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Single-PR completion phrasing; remains apm-review-panel territory."
+    },
+    {
+      "id": "fire-11",
+      "query": "double-check none of the PRs we just marked ready went stale on main",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Mid-saga continuation of a bbs run; the new Phase 5 mergeability gate is the right home. The phrasing is plural ('the PRs') and references prior batch state ('we just marked ready'); routes to bbs."
+    },
+    {
+      "id": "no-fire-14",
+      "query": "rebase my branch onto main and resolve conflicts",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-branch git operation; routes to manual git, not bbs. Guards against the new 'rebase' vocabulary leaking out of the batch context."
+    },
+    {
+      "id": "no-fire-15",
+      "query": "this single PR has merge conflicts now, can you rebase it?",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR conflict resolution; routes to a one-off conflict-resolution session, not bbs outer loop."
+    },
+    {
+      "id": "fire-12",
+      "query": "sweep the bug queue but make sure we don't ship anything off-strategy",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Batch sweep with explicit strategic-alignment hint; routes to bbs Phase 1.5 gate."
+    },
+    {
+      "id": "fire-13",
+      "query": "triage open bugs and have the CEO persona check each against principles before we fix anything",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Names the Phase 1.5 mechanism (CEO persona vs PRINCIPLES.md) inside a batch context."
+    },
+    {
+      "id": "no-fire-16",
+      "query": "review my draft of PRINCIPLES.md and tell me if the rejection clauses are sharp enough",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Document-authoring on PRINCIPLES.md routes to doc-writer / apm-ceo direct, NOT bbs. Guards against the new 'PRINCIPLES.md' vocabulary leaking out of batch context."
     }
   ]
 }

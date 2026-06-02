@@ -75,7 +75,7 @@ class TestValidCallNoErrors:
 
 
 # ---------------------------------------------------------------------------
-# E10 – flags require --mcp
+# E10 - flags require --mcp
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +116,7 @@ class TestE10FlagsRequireMcp:
 
 
 # ---------------------------------------------------------------------------
-# E7 – empty mcp_name
+# E7 - empty mcp_name
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +127,7 @@ class TestE7EmptyMcpName:
 
 
 # ---------------------------------------------------------------------------
-# E8 – mcp_name starts with '-'
+# E8 - mcp_name starts with '-'
 # ---------------------------------------------------------------------------
 
 
@@ -145,7 +145,7 @@ class TestE8McpNameStartsWithDash:
 
 
 # ---------------------------------------------------------------------------
-# E1 – positional packages mixed with --mcp
+# E1 - positional packages mixed with --mcp
 # ---------------------------------------------------------------------------
 
 
@@ -163,7 +163,7 @@ class TestE1PositionalPackagesMixedWithMcp:
 
 
 # ---------------------------------------------------------------------------
-# E2 – --global not supported for MCP entries
+# E2 - --global not supported for MCP entries
 # ---------------------------------------------------------------------------
 
 
@@ -177,7 +177,7 @@ class TestE2GlobalNotSupportedForMcp:
 
 
 # ---------------------------------------------------------------------------
-# E3 – --only apm conflicts with --mcp
+# E3 - --only apm conflicts with --mcp
 # ---------------------------------------------------------------------------
 
 
@@ -194,7 +194,7 @@ class TestE3OnlyApmConflictsWithMcp:
 
 
 # ---------------------------------------------------------------------------
-# E4 – transport selection flags don't apply to MCP
+# E4 - transport selection flags don't apply to MCP
 # ---------------------------------------------------------------------------
 
 
@@ -216,7 +216,7 @@ class TestE4TransportSelectionFlags:
 
 
 # ---------------------------------------------------------------------------
-# E5 – --update is for refreshing
+# E5 - --update is for refreshing
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +230,7 @@ class TestE5UpdateFlag:
 
 
 # ---------------------------------------------------------------------------
-# E9 – --header requires --url
+# E9 - --header requires --url
 # ---------------------------------------------------------------------------
 
 
@@ -247,7 +247,7 @@ class TestE9HeaderRequiresUrl:
 
 
 # ---------------------------------------------------------------------------
-# E11 – --url with stdio command
+# E11 - --url with stdio command
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +266,7 @@ class TestE11UrlWithStdioCommand:
 
 
 # ---------------------------------------------------------------------------
-# E12 – --transport stdio with --url
+# E12 - --transport stdio with --url
 # ---------------------------------------------------------------------------
 
 
@@ -283,7 +283,7 @@ class TestE12StdioTransportWithUrl:
 
 
 # ---------------------------------------------------------------------------
-# E13 – remote transports with stdio command
+# E13 - remote transports with stdio command
 # ---------------------------------------------------------------------------
 
 
@@ -301,7 +301,7 @@ class TestE13RemoteTransportWithStdioCommand:
 
 
 # ---------------------------------------------------------------------------
-# E14 – --env with --url and no command
+# E14 - --env with --url and no command
 # ---------------------------------------------------------------------------
 
 
@@ -323,7 +323,7 @@ class TestE14EnvWithUrlNoCommand:
 
 
 # ---------------------------------------------------------------------------
-# E15 – --registry only applies to registry-resolved entries
+# E15 - --registry only applies to registry-resolved entries
 # ---------------------------------------------------------------------------
 
 

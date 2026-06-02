@@ -172,6 +172,21 @@ class SecurityPolicy:
 
 
 @dataclass(frozen=True)
+class BinDeployPolicy:
+    """Policy controls for marketplace_plugin bin/ deployment.
+
+    ``deny_all``: when ``True``, bin/ deployment is suppressed for all
+    marketplace_plugin packages regardless of the ``deny`` list.
+
+    ``deny``: package canonical dependency strings (e.g. ``owner/repo``)
+    whose bin/ executables must NOT be deployed. Matched as exact strings.
+    """
+
+    deny_all: bool = False
+    deny: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -188,3 +203,4 @@ class ApmPolicy:
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
     security: SecurityPolicy = field(default_factory=SecurityPolicy)
+    bin_deploy: BinDeployPolicy = field(default_factory=BinDeployPolicy)

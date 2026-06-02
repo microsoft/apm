@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import stat
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,6 +94,23 @@ def make_zip(entries: dict[str, bytes], *, root_prefix: str = "repo-main/") -> b
                 zf.mkdir(full_name)
             else:
                 zf.writestr(full_name, payload)
+    return buffer.getvalue()
+
+
+def make_zip_with_file_modes(
+    entries: dict[str, tuple[bytes, int]],
+    *,
+    root_prefix: str = "repo-main/",
+) -> bytes:
+    buffer = io.BytesIO()
+    root_info = zipfile.ZipInfo(root_prefix)
+    root_info.external_attr = (stat.S_IFDIR | 0o755) << 16
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr(root_info, b"")
+        for name, (payload, mode) in entries.items():
+            file_info = zipfile.ZipInfo(root_prefix + name)
+            file_info.external_attr = (stat.S_IFREG | mode) << 16
+            zf.writestr(file_info, payload)
     return buffer.getvalue()
 
 
@@ -214,6 +233,36 @@ class TestDownloadArtifactoryArchive:
         assert (tmp_path / "nested").is_dir()
         assert (tmp_path / "nested" / "file.txt").read_text() == "safe"
         assert not (tmp_path.parent / "escape.txt").exists()
+
+    def test_executable_bits_survive_archive_extraction(self, tmp_path: Path) -> None:
+        host = make_host()
+        delegate = DownloadDelegate(host)
+        archive_bytes = make_zip_with_file_modes(
+            {
+                "bin/run-driver": (b"#!/bin/sh\n", 0o755),
+                "README.md": (b"hello", 0o644),
+            }
+        )
+        host._resilient_get.return_value = fake_response(200, content=archive_bytes)
+
+        with patch(
+            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
+            return_value=["https://art.example.com/archive.zip"],
+        ):
+            delegate.download_artifactory_archive(
+                "art.example.com",
+                "proxy",
+                "owner",
+                "repo",
+                "main",
+                tmp_path,
+            )
+
+        script = tmp_path / "bin" / "run-driver"
+        readme = tmp_path / "README.md"
+        assert script.read_bytes() == b"#!/bin/sh\n"
+        assert os.stat(script).st_mode & 0o111 == 0o111
+        assert os.stat(readme).st_mode & 0o111 == 0
 
     def test_request_exception_becomes_last_error(self, tmp_path: Path) -> None:
         host = make_host()

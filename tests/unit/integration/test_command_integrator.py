@@ -465,6 +465,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             r.target_paths = []
             r.skill_created = False
             r.sub_skills_promoted = 0
+            r.bin_deployed = 0
             r.files_integrated = 0
             return r
 

@@ -413,7 +413,7 @@ class CachedDependencySource(DependencySource):
                 display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
             )
 
-        deltas: dict[str, int] = {"installed": 1}
+        deltas: dict[str, int] = {"installed": int(self.fetched_this_run)}
         if not dep_ref.reference:
             deltas["unpinned"] = 1
 

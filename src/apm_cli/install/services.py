@@ -96,7 +96,7 @@ def _deployed_path_entry(
         )
 
 
-def integrate_package_primitives(
+def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
     *,
@@ -116,6 +116,7 @@ def integrate_package_primitives(
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
+    policy: Any = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -383,6 +384,8 @@ def integrate_package_primitives(
         force=force,
         targets=targets,
         skill_subset=skill_subset,
+        scope=scope,
+        policy=policy,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -415,6 +418,20 @@ def integrate_package_primitives(
             _log_integration(
                 f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
             )
+    if skill_result.bin_deployed > 0:
+        _log_integration(
+            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
+            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)"
+        )
+        _log_integration("  |-- run /reload-plugins or restart Claude Code to activate")
+    elif skill_result.bin_skipped_reason == "project_scope":
+        _log_integration(
+            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
+        )
+    elif skill_result.bin_skipped_reason == "no_claude_target":
+        _log_integration(
+            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
 
@@ -424,6 +441,7 @@ def integrate_package_primitives(
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
     _total_integrated += int(skill_result.skill_created)
     _total_integrated += int(skill_result.sub_skills_promoted)
+    _total_integrated += int(skill_result.bin_deployed)
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 

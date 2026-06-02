@@ -2,7 +2,7 @@
 
 Tests the core mathematical foundation:
 - Hierarchical coverage verification: ∀file_matching_pattern → can_inherit_instruction
-- Coverage-constrained optimization: minimize Σ(context_pollution × directory_weight) subject to coverage
+- Coverage-constrained optimization: minimize Σ(context_pollution x directory_weight) subject to coverage
 - Data loss prevention: no files are left without applicable instructions
 - Coverage-first principle: coverage takes priority over efficiency
 """
@@ -349,7 +349,7 @@ class TestCoverageGuarantees:
     ):
         """Test that the mathematical constraints are satisfied as a system.
 
-        Verifies: minimize Σ(context_pollution × directory_weight) subject to ∀file → coverage
+        Verifies: minimize Σ(context_pollution x directory_weight) subject to ∀file → coverage
         """
         optimizer = ContextOptimizer(str(complex_project))
 

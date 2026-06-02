@@ -1,0 +1,24 @@
+# Trigger-eval prompts. For each query below, decide which of these skills should fire:
+# docs-sync | docs-corpus-audit | docs-grounding-verifier | NONE
+# Return JSON: [{"query_id":N, "selected":"SKILL_NAME"}, ...]
+---
+Q1 [expected: docs-grounding-verifier]: verify the registries.md page against the source code
+Q2 [expected: docs-grounding-verifier]: fact-check the install command reference
+Q3 [expected: docs-grounding-verifier]: any claims in the policy docs that drifted from src/apm_cli/policy/
+Q4 [expected: docs-grounding-verifier]: is the copilot-app integration page accurate?
+Q5 [expected: docs-grounding-verifier]: ground-truth check on the package-types reference
+Q6 [expected: docs-grounding-verifier]: I want claim-by-claim verification of the lockfile guide against the implementation
+Q7 [expected: docs-grounding-verifier]: drift hunt on the auth pages -- which sentences are wrong?
+Q8 [expected: docs-grounding-verifier]: run a grounding audit on the three pages I just edited
+Q9 [expected: docs-grounding-verifier]: for each factual statement on this page, find the supporting code or flag it
+Q10 [expected: docs-grounding-verifier]: validate that the docs match what the code does -- claim level
+Q1 [expected: NOT docs-grounding-verifier]: sweep the entire docs corpus for drift
+Q2 [expected: NOT docs-grounding-verifier]: audit all of docs/ against the codebase
+Q3 [expected: NOT docs-grounding-verifier]: this PR changed install.py -- assess docs impact
+Q4 [expected: NOT docs-grounding-verifier]: the PR touched the policy parser -- what docs need updating?
+Q5 [expected: NOT docs-grounding-verifier]: rewrite registries.md to be more user-friendly
+Q6 [expected: NOT docs-grounding-verifier]: polish the tone of the install reference
+Q7 [expected: NOT docs-grounding-verifier]: add a new page about the rate-limit error
+Q8 [expected: NOT docs-grounding-verifier]: the README has marketing voice -- can you make it lean?
+Q9 [expected: NOT docs-grounding-verifier]: list all guides that mention apm-policy.yml
+Q10 [expected: NOT docs-grounding-verifier]: what is the file:line where unpack.md says it'll be removed?

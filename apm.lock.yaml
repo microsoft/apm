@@ -1,14 +1,40 @@
 lockfile_version: '1'
-generated_at: '2026-06-01T00:11:30.740222+00:00'
-apm_version: 0.16.0
+generated_at: '2026-06-02T18:54:45.470196+00:00'
+apm_version: 0.16.1
 dependencies:
-- repo_url: _local/apm-review-panel
-  package_type: hybrid
+- repo_url: _local/apm-issue-autopilot
+  package_type: apm_package
+  deployed_files:
+  - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   source: local
-  local_path: ./packages/apm-review-panel
+  local_path: ./packages/apm-issue-autopilot
 - repo_url: _local/batch-bug-shepherd
   package_type: apm_package
   deployed_files:
   - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
   source: local
   local_path: ./packages/batch-bug-shepherd
+- repo_url: _local/apm-triage-panel
+  depth: 2
+  resolved_by: _local/apm-issue-autopilot
+  package_type: hybrid
+  source: local
+  local_path: ../apm-triage-panel
+- repo_url: _local/pr-description-skill
+  depth: 2
+  resolved_by: _local/apm-issue-autopilot
+  package_type: hybrid
+  source: local
+  local_path: ../pr-description-skill
+- repo_url: _local/shepherd-driver
+  depth: 2
+  resolved_by: _local/apm-issue-autopilot
+  package_type: hybrid
+  source: local
+  local_path: ../shepherd-driver
+- repo_url: _local/apm-review-panel
+  depth: 3
+  resolved_by: _local/shepherd-driver
+  package_type: hybrid
+  source: local
+  local_path: ../apm-review-panel
