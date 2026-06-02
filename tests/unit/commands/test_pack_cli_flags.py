@@ -1,10 +1,9 @@
 """Tests for new CLI flags in pack command (phase-3c, T-3c-01..12).
 
 Covers:
-- --marketplace filter validation (unknown format → error)
+- --marketplace filter validation (unknown format -> error)
 - --marketplace-path FORMAT=PATH parsing + validation
 - --json flag emits valid JSON on failure
-- --marketplace-output deprecation warning
 """
 
 from __future__ import annotations
@@ -85,16 +84,15 @@ class TestJsonFlag:
         assert "machine-readable" in result.output.lower() or "JSON" in result.output
 
 
-class TestDeprecationWarning:
-    """T-3c-11..12: --marketplace-output deprecation."""
+class TestMarketplaceOutputRemoved:
+    """T-3c-11: --marketplace-output was removed in v0.16 (breaking change, #1318)."""
 
-    def test_deprecated_flag_still_accepted(self) -> None:
-        """The flag doesn't crash immediately (it will fail later
-        because no apm.yml exists, but that's fine — we check the
-        deprecation message is printed before the crash)."""
+    def test_removed_flag_is_unknown_option(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--marketplace-output", "test.json"])
-        combined = result.output or ""
-        assert "deprecated" in combined.lower() or result.exit_code != 0
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower() or isinstance(
+            result.exception, SystemExit
+        )
 
 
 # ---------------------------------------------------------------------------

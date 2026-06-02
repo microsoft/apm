@@ -45,7 +45,6 @@ class BuildOptions:
     # Marketplace-only options
     marketplace_offline: bool = False
     marketplace_include_prerelease: bool = False
-    marketplace_output: Path | None = None
     marketplace_formats: tuple[str, ...] | None = None
     marketplace_path_overrides: dict[str, str] | None = None
     # Common options
@@ -172,7 +171,6 @@ class MarketplaceProducer:
             dry_run=options.dry_run,
             offline=options.marketplace_offline,
             include_prerelease=options.marketplace_include_prerelease,
-            marketplace_output=None,
         )
         builder = MarketplaceBuilder.from_config(
             config, project_root=project_root, options=mkt_opts
@@ -213,10 +211,6 @@ class MarketplaceProducer:
                     and output_name in options.marketplace_path_overrides
                 ):
                     output_path = project_root / options.marketplace_path_overrides[output_name]
-                elif (
-                    profile.supports_cli_output_override and options.marketplace_output is not None
-                ):
-                    output_path = options.marketplace_output
 
                 output_report = builder.write_output(
                     profile,
