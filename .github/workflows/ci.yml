@@ -280,13 +280,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Installs the APM CLI (latest stable) and adds `apm` to PATH.
+      # Installs the APM CLI and adds `apm` to PATH.
       # setup-only: true skips `apm install` so managed files on disk are
       # not overwritten before the audit runs. This preserves the committed
       # state so content-integrity can detect any tampered file hashes.
+      # apm-version is pinned to 0.16.1: the action default (0.14.0) predates
+      # the transitive local-path orphan fix and false-flags this repo's
+      # nested local-sibling deps (shepherd-driver -> apm-review-panel, etc.)
+      # as orphaned packages. 0.16+ resolves transitive local deps correctly.
       - uses: microsoft/apm-action@v1
         with:
           setup-only: true
+          apm-version: '0.16.1'
 
       # Gate A: lockfile / install fidelity (consumer-side).
       # Verifies every file in lockfile.deployed_files exists, ref consistency
