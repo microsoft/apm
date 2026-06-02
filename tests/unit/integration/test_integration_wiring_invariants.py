@@ -7,9 +7,8 @@ enumeration (``pytest test_X.py`` x20) to directory-wide discovery
 Three invariants are checked:
 
 1. Shell-script discovery - ``scripts/test-integration.sh`` must invoke
-   ``pytest tests/integration/`` (or a variable that resolves to the
-   directory) at least once.  It must NOT contain any per-file invocation
-   of the form ``pytest tests/integration/test_*.py``.
+   ``pytest tests/integration/`` at least once.  It must NOT contain any
+   per-file invocation of the form ``pytest tests/integration/test_*.py``.
 
 2. Marker-registry completeness - every ``requires_*`` marker key present
    in ``_MARKER_CHECKS`` (``tests/integration/conftest.py``) must be
@@ -46,8 +45,10 @@ _PER_FILE_PATTERN = re.compile(
 
 # Pattern that matches the preferred directory-wide invocation present in the script.
 # Matches "pytest tests/integration/" NOT immediately followed by a test filename.
+# The [^#] anchor mirrors _PER_FILE_PATTERN to exclude commented-out lines.
 _DIRECTORY_INVOCATION = re.compile(
-    r"pytest\s+tests/integration/(?!test_\w+\.py)",
+    r"^\s*[^#].*pytest\s+tests/integration/(?!test_\w+\.py)",
+    re.MULTILINE,
 )
 
 # Marker prefix that indicates a gating marker (vs. informational ones).
@@ -74,7 +75,7 @@ def _load_pyproject_markers() -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_script_no_per_file_pytest_invocations():
+def test_script_no_per_file_pytest_invocations() -> None:
     """``scripts/test-integration.sh`` must not enumerate individual test files.
 
     Per-file invocations (``pytest tests/integration/test_X.py``) defeat
@@ -82,7 +83,7 @@ def test_script_no_per_file_pytest_invocations():
     script must delegate file selection entirely to pytest.
     """
     if not _INTEGRATION_SCRIPT.is_file():
-        pytest.skip(f"Integration script not found: {_INTEGRATION_SCRIPT}")
+        pytest.fail(f"Integration script not found: {_INTEGRATION_SCRIPT}")
 
     text = _INTEGRATION_SCRIPT.read_text(encoding="utf-8")
     matches = _PER_FILE_PATTERN.findall(text)
@@ -93,14 +94,14 @@ def test_script_no_per_file_pytest_invocations():
     )
 
 
-def test_script_uses_directory_invocation():
+def test_script_uses_directory_invocation() -> None:
     """``scripts/test-integration.sh`` must invoke ``pytest tests/integration/``.
 
     This confirms the single-directory invocation that replaced the 20+
     per-file blocks introduced in PR #1247 (issue #1166) is still present.
     """
     if not _INTEGRATION_SCRIPT.is_file():
-        pytest.skip(f"Integration script not found: {_INTEGRATION_SCRIPT}")
+        pytest.fail(f"Integration script not found: {_INTEGRATION_SCRIPT}")
 
     text = _INTEGRATION_SCRIPT.read_text(encoding="utf-8")
     assert _DIRECTORY_INVOCATION.search(text), (
@@ -114,7 +115,7 @@ def test_script_uses_directory_invocation():
 # ---------------------------------------------------------------------------
 
 
-def test_conftest_markers_declared_in_pyproject():
+def test_conftest_markers_declared_in_pyproject() -> None:
     """Every ``requires_*`` key in ``_MARKER_CHECKS`` must be in pyproject.toml.
 
     Undeclared markers produce a ``PytestUnknownMarkWarning`` (or error with
@@ -136,7 +137,7 @@ def test_conftest_markers_declared_in_pyproject():
 # ---------------------------------------------------------------------------
 
 
-def test_pyproject_requires_markers_have_conftest_checks():
+def test_pyproject_requires_markers_have_conftest_checks() -> None:
     """Every ``requires_*`` marker declared in pyproject.toml must be enforced.
 
     A marker listed in pyproject.toml but absent from ``_MARKER_CHECKS`` is
