@@ -61,7 +61,7 @@ fields:
 | `name`         | `name` (required) |
 | `version`      | `version` |
 | `description`  | `description` |
-| `author`       | `author: {name, email?, url?}` |
+| `author`       | author |
 | `license`      | `license` |
 | `homepage`     | `homepage` |
 | `repository`   | `repository` |

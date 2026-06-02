@@ -306,6 +306,43 @@ class TestPluginJsonSynthesis:
 
         assert "author" not in result
 
+    def test_author_structured_object_no_name_drops_author(self, tmp_path):
+        """Structured author dict with recognized keys but no 'name' silently drops author.
+
+        name is required for the structured path. An email-only dict produces no
+        author output -- the consumer would receive a nameless author object otherwise.
+        """
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "author": {"email": "jane@example.com"}},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert "author" not in result
+
+    def test_keywords_bare_string_coerced_to_list(self, tmp_path):
+        """YAML bare-string keywords value is coerced to a single-element list."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "keywords": "ai"},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["keywords"] == ["ai"]
+
+    def test_homepage_non_string_coerced_to_string(self, tmp_path):
+        """Non-string homepage value (e.g. YAML integer) is str()-coerced in plugin.json."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "homepage": 404},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["homepage"] == "404"
+
     def test_extra_apm_fields_ignored(self, tmp_path):
         """Fields not part of plugin spec (dependencies, scripts) are not in output."""
         yml = _write_apm_yml(

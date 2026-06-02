@@ -705,22 +705,25 @@ def synthesize_plugin_json_from_apm_yml(apm_yml_path: Path) -> dict:
     if data.get("author"):
         author = data["author"]
         if isinstance(author, dict):
-            author_obj: dict[str, str] = {}
-            for key in ("name", "email", "url"):
-                if author.get(key):
-                    author_obj[key] = str(author[key])
-            if author_obj:
+            # name is required for the structured path; drop the author field if absent
+            if author.get("name"):
+                author_obj: dict[str, str] = {"name": str(author["name"])}
+                if author.get("email"):
+                    author_obj["email"] = str(author["email"])
+                if author.get("url"):
+                    author_obj["url"] = str(author["url"])
                 result["author"] = author_obj
         else:
             result["author"] = {"name": str(author)}
     if data.get("license"):
         result["license"] = data["license"]
     if data.get("homepage"):
-        result["homepage"] = data["homepage"]
+        result["homepage"] = str(data["homepage"])
     if data.get("repository"):
-        result["repository"] = data["repository"]
+        result["repository"] = str(data["repository"])
     if data.get("keywords"):
-        result["keywords"] = data["keywords"]
+        raw_kw = data["keywords"]
+        result["keywords"] = [str(raw_kw)] if isinstance(raw_kw, str) else [str(k) for k in raw_kw]
 
     return result
 
