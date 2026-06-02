@@ -46,4 +46,4 @@ ASCII only.
 
 | issue | verdict | pr | pr_in_flight | author | worktree | status | strategic_verdict | strategic_rationale | notes |
 |-------|---------|----|--------------|--------|----------|--------|-------------------|---------------------|-------|
-| #___ | pending-triage | | | | | pending-triage | n/a | | seeded from <list-or-sweep>; awaiting wave 1 |
+| #___ |  | | | | | pending-triage | n/a | | seeded from <list-or-sweep>; awaiting wave 1 |

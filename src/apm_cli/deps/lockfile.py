@@ -39,7 +39,10 @@ class LockedDependency:
     deployed_files: list[str] = field(default_factory=list)
     deployed_file_hashes: dict[str, str] = field(default_factory=dict)
     source: str | None = None  # "local" for local deps, None/absent for remote
-    local_path: str | None = None  # Original local path (relative to project root)
+    local_path: str | None = None  # Original local path. Direct deps: relative to
+    # the project root (``./packages/foo``). Transitive deps: relative to the
+    # package that declared them (``../sibling``), anchored via ``resolved_by``
+    # (issue #857; see apm_cli.deps.path_anchoring).
     content_hash: str | None = None  # SHA-256 of package file tree
     is_dev: bool = False  # True for devDependencies
     discovered_via: str | None = None  # Marketplace name (provenance)

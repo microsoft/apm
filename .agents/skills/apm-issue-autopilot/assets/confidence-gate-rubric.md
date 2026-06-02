@@ -41,7 +41,8 @@ or overrides each row in the single Phase 2 checkpoint.
      (the IMPLEMENTATION-READY gate -- separate from triage accept;
      a clean accept with an incomplete brief still escalates).
 4. decision is `accept`, confidence `high`, no red flags, type in
-   {bug, feature, docs, refactor, performance}, and a complete
+   {type/bug, type/feature, type/docs, type/refactor,
+   type/performance}, and a complete
    implementation brief -> `auto-proceed`.
 5. ANY row not matched by rules 1-4 -> `escalate`. This is the
    escalate-by-default backstop: a malformed-but-schema-valid row, an
@@ -63,9 +64,11 @@ After the digest, the maintainer marks each row:
 - `overridden` -- proceed despite an `escalate` gate; MUST carry an
   `override_reason`. Recorded as `overridden-to-proceed`. An override
   is VALID for implementation ONLY when the row carries a supported
-  implementation type {bug, feature, docs, refactor, performance} AND
+  implementation type {type/bug, type/feature, type/docs,
+  type/refactor, type/performance} AND
   a complete implementation brief. If the maintainer overrides a row
-  whose type is unsupported (architecture, automation, release) or
+  whose type is unsupported (type/architecture, type/automation,
+  type/release) or
   whose brief is incomplete, they MUST also reclassify the type and/or
   supply the missing brief fields in the same checkpoint reply;
   otherwise the override is rejected and the row stays escalated. The
