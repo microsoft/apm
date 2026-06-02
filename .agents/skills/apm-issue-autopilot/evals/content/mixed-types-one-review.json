@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "mixed-types-one-review",
+  "summary": "Maintainer seeds three issues of different types (a bug accept, a feature needing design, a docs accept). With the skill loaded the orchestrator fans out one read-only triage child per issue, applies the confidence gate, and renders ONE consolidated digest covering all three (not three drop-by-drop reviews); only after the single maintainer reply does it implement the approved rows via the B2 type router. Without the skill, the baseline reviews issues one at a time and uses a single generic implementation path regardless of type.",
+  "scenario": {
+    "user_query": "autopilot these to merge with one triage review for the batch: #520 (bug: wrong exit code on lint failure), #521 (feature: pluggable cache backend), #522 (docs: document the new --quiet flag)",
+    "ground_truth": {
+      "520_type": "type/bug",
+      "520_decision": "accept",
+      "521_type": "type/feature",
+      "521_decision": "needs-design",
+      "522_type": "type/docs",
+      "522_decision": "accept"
+    },
+    "expected_behavior_with_skill": [
+      "one triage child per issue, read-only, returning autopilot-triage-decision JSON",
+      "521 (needs-design) routes to gate=escalate; 520 and 522 route to auto-proceed",
+      "exactly ONE consolidated digest covers all three rows with a single maintainer checkpoint",
+      "implement router loads implement-bug.md for 520 and implement-docs.md for 522, not a generic path",
+      "521 is left for the maintainer, never auto-implemented"
+    ]
+  },
+  "fixtures": {
+    "with_skill": "fixtures/mixed-types-one-review.with_skill.md",
+    "without_skill": "fixtures/mixed-types-one-review.without_skill.md"
+  },
+  "rubric": [
+    {"id": "one-triage-child-each", "pattern": "(?is)(one\\s+triage\\s+child|per[- ]issue\\s+triage|fan[- ]?out)[^.\\n]{0,40}(read[- ]?only|each)", "weight": 2, "description": "Per-issue read-only triage fan-out."},
+    {"id": "single-consolidated-review", "pattern": "(?is)(one|single)\\s+(consolidated\\s+)?(triage\\s+)?(digest|review)[^.\\n]{0,40}(batch|all|three)", "weight": 2, "description": "Exactly one consolidated review, not per-issue."},
+    {"id": "needs-design-escalated", "pattern": "(?is)needs[- ]?design[^.\\n]{0,40}(escalat|maintainer|your\\s+call)", "weight": 2, "description": "needs-design row is escalated, not implemented."},
+    {"id": "type-router", "pattern": "(?is)(implement-bug|implement-docs|type\\s+router|per[- ]type\\s+lens)", "weight": 2, "description": "B2 router loads per-type lenses rather than a generic path."},
+    {"id": "ground-truth-table", "pattern": "(?im)^\\s*\\|\\s*issue\\s*\\|\\s*type\\s*\\|", "weight": 1, "description": "Ground-truth table with the autopilot column header present."}
+  ]
+}

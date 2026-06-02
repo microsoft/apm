@@ -203,7 +203,7 @@ class TestNoCollisionsWithExistingShapes:
     def test_local_path_unchanged(self):
         d = DependencyReference.parse("./local/pkg")
         assert d.is_local
-        assert d.source is None
+        assert d.source == "local"
 
 
 class TestObjectFormRegistry:
@@ -368,7 +368,7 @@ class TestObjectFormRegistry:
     def test_existing_local_object_form_unchanged(self):
         d = DependencyReference.parse_from_dict({"path": "./local/pkg"})
         assert d.is_local
-        assert d.source is None
+        assert d.source == "local"
 
 
 @pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)

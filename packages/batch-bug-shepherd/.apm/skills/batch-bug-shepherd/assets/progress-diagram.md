@@ -39,35 +39,31 @@ SVG / ASCII in any terminal markdown viewer).
 
 ## Diagram template
 
-Substitute the cardinalities (`<N>`, `<L>`, `<k>`, `<m>`, `<F>`)
-with the live numbers known at each phase boundary. Substitute the
-`:::<state>` class on each node based on the contract above.
+Substitute the cardinalities (`<N>`, `<L>`, `<L_prime>`, `<m>`,
+`<D>`, `<R>`, `<C>`) with the live numbers known at each phase
+boundary. Substitute the `:::<state>` class on each node based on the
+contract above. Node labels are single-line (use " - " as the inline
+separator, NOT `<br/>`, which fails to render in some markdown viewers).
 
 ```mermaid
 flowchart TB
-    P0["Phase 0<br/>scope resolution<br/>N = <N> candidates"]:::pending
-    P1["Phase 1<br/>triage fan-out<br/><N> parallel subagents"]:::pending
-    P15["Phase 1.5<br/>strategic-alignment gate<br/>L = <L> LEGIT rows -> apm-ceo"]:::pending
-    P2["Phase 2<br/>PR-in-flight cross-ref<br/>L' = <L_prime> aligned LEGIT rows"]:::pending
-
-    subgraph WAVE2[" "]
-        direction LR
-        P3a["Phase 3a<br/>shepherd<br/>k = <k> PRs in flight"]:::pending
-        P3b["Phase 3b<br/>fix dispatch<br/>m = <m> rows without PR"]:::pending
-    end
-
-    P4["Phase 4<br/>completion<br/>F = <F> PRs needing follow-up"]:::pending
+    P0["Phase 0 - scope resolution - N = <N> candidates"]:::pending
+    P1["Phase 1 - triage fan-out - <N> parallel subagents"]:::pending
+    P15["Phase 1.5 - strategic-alignment gate - L = <L> LEGIT rows -> apm-ceo"]:::pending
+    P2["Phase 2 - PR-in-flight cross-ref - L' = <L_prime> aligned LEGIT rows"]:::pending
+    P3["Phase 3 - greenfield fix dispatch - m = <m> rows without PR"]:::pending
+    P4["Phase 4 - drive-to-merge - D = <D> PRs (community + own fix)"]:::pending
 
     subgraph WAVE4[" "]
         direction LR
-        P5a["Phase 5a<br/>mergeability probe<br/>R = <R> ready PRs"]:::pending
-        P5b["Phase 5b<br/>conflict resolution<br/>C = <C> conflicting PRs"]:::pending
-        P5c["Phase 5c<br/>re-probe synthesis"]:::pending
+        P5a["Phase 5a - mergeability probe - R = <R> ready PRs"]:::pending
+        P5b["Phase 5b - conflict resolution - C = <C> conflicting PRs"]:::pending
+        P5c["Phase 5c - re-probe synthesis"]:::pending
     end
 
-    P6["Phase 6<br/>final report"]:::pending
+    P6["Phase 6 - final report"]:::pending
 
-    P0 --> P1 --> P15 --> P2 --> WAVE2 --> P4 --> WAVE4 --> P6
+    P0 --> P1 --> P15 --> P2 --> P3 --> P4 --> WAVE4 --> P6
 
     classDef pending fill:#f5f5f5,stroke:#9ca3af,stroke-width:1px,color:#111827
     classDef active  fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#0c4a6e
@@ -116,7 +112,7 @@ the operator's situational awareness.
 
 ## Dispatch-time table requirement
 
-When spawning a fan-out wave (Phase 1, 1.5, 3a, 3b, 4, 5b), the
+When spawning a fan-out wave (Phase 1, 1.5, 3, 4, 5b), the
 orchestrator MUST also print the dispatch table BEFORE issuing the
 parallel spawns, so the operator sees which subagent is doing what:
 
@@ -144,35 +140,35 @@ k, m, F).
 
 ### After Phase 2
 
-`P0`, `P1`, `P2` are `done`. `WAVE2` subgraph nodes are `active` (both
-sub-waves spawn in parallel; treat the subgraph as one active band).
-`P4` and `P5` `pending`. `L`, `k`, `m` populated; `F` still unknown
-(comes from shepherd returns).
+`P0`, `P1`, `P2` are `done`. `P3` is `active` (greenfield fix
+dispatch). `P4` and `WAVE4` `pending`. `L`, `L_prime`, `m` populated;
+`D` still unknown (it is the count of own fix PRs from Phase 3 plus
+community PRs from Phase 2, finalized when Phase 3 returns).
 
 ### Skipped strategic-alignment gate
 
 When `L = 0` (zero LEGIT rows from Phase 1), render `P15` with class
-`skipped` and label `Phase 1.5<br/>strategic-alignment gate<br/>L = 0 (skipped)`.
+`skipped` and label `Phase 1.5 - strategic-alignment gate - L = 0 (skipped)`.
 The gate had no rows to inspect; pass through to Phase 2 with
 `L_prime = 0` also.
 
 ### Skipped fix wave
 
 When `m = 0` (all LEGIT issues have community PRs in flight), render
-`P3b` with class `skipped` and label `Phase 3b<br/>fix dispatch<br/>m = 0 (skipped)`.
+`P3` with class `skipped` and label `Phase 3 - greenfield fix dispatch - m = 0 (skipped)`.
+The drive wave (`P4`) still runs over the community PRs.
 
 ### Skipped conflict resolution
 
 When `C = 0` (every ready PR is MERGEABLE on first probe), render
-`P5b` with class `skipped` and label `Phase 5b<br/>conflict resolution<br/>C = 0 (skipped)`.
+`P5b` with class `skipped` and label `Phase 5b - conflict resolution - C = 0 (skipped)`.
 `P5a` and `P5c` still render `done`; the gate ran, just had nothing to do.
 
 ### After Phase 4 with conflicts present
 
-`P0`, `P1`, `P2`, `WAVE2`, `P4` all `done`. `WAVE4` subgraph: `P5a`
+`P0`, `P1`, `P2`, `P3`, `P4` all `done`. `WAVE4` subgraph: `P5a`
 `done`, `P5b` `active`, `P5c` `pending`. `R` populated from
-completion-wave returns; `C` populated from 5a probe (e.g.
-`C = 2 of 6`).
+drive-wave returns; `C` populated from 5a probe (e.g. `C = 2 of 6`).
 
 ### End of run with blockers
 

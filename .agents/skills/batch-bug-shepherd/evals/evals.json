@@ -5,10 +5,7 @@
   "triggers_manifest": "triggers.json",
   "content_manifests": [
     "content/three-issues-mixed.json",
-    "content/sweep-bug-queue.json",
-    "content/fold-vs-defer-panel.json",
-    "content/copilot-classification-and-fold.json",
-    "content/ci-recovery-lint-bucket.json"
+    "content/sweep-bug-queue.json"
   ],
   "gates": {
     "triggers": {

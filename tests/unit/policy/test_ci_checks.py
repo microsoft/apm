@@ -1265,6 +1265,52 @@ class TestCheckDriftCacheMiss:
         assert aggregate.passed, "cache-miss skip must not fail the aggregate CIAuditResult"
 
 
+class TestCheckDriftLocalResolutionError:
+    """_check_drift must HARD-FAIL on LocalResolutionError.
+
+    A corrupt local dependency graph (missing / ambiguous / cyclic
+    ``resolved_by`` parent) is internal lockfile inconsistency, NOT a cold
+    cache. Folding it into the cache-miss soft-skip is exactly how a
+    resolution bug silently disables drift detection repo-wide, so it must
+    surface as passed=False.
+    """
+
+    def test_local_resolution_error_returns_passed_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.deps.path_anchoring import LocalResolutionError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_local_resolution(*_args: object, **_kwargs: object) -> None:
+            raise LocalResolutionError(
+                "resolved_by parent '_local/ghost' of '_local/orphan' is not a "
+                "local dependency in the lockfile"
+            )
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_local_resolution)
+
+        check_result, findings = _check_drift(tmp_path, lockfile)
+
+        assert not check_result.passed, "corrupt local graph must fail the drift check"
+        assert check_result.name == "drift"
+        assert "skipped" not in check_result.message.lower(), (
+            "a corrupt local graph must not masquerade as a soft skip"
+        )
+        assert findings == []
+
+
 class TestManifestMissingWarning:
     """Tests for the manifest-missing warning when apm.yml is absent."""
 
