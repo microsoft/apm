@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "skill": "apm-issue-autopilot",
+  "skill_path": "../SKILL.md",
+  "triggers_manifest": "triggers.json",
+  "content_manifests": [
+    "content/gate-escalate-doubtful.json",
+    "content/gate-proceed-clean-accept.json",
+    "content/mixed-types-one-review.json"
+  ],
+  "gates": {
+    "triggers": {
+      "split": "val",
+      "should_fire_rate_min": 0.5,
+      "should_not_fire_rate_max": 0.5
+    },
+    "content": {
+      "delta_min_anchors": 1,
+      "scope": "every_scenario"
+    }
+  },
+  "stop_list": [
+    "sweep the bug queue",
+    "drive every bug to a mergeable state",
+    "community bug",
+    "review my pr",
+    "panel-review this pr",
+    "triage this one new issue",
+    "draft a pr body",
+    "pr description",
+    "open an issue",
+    "release note",
+    "release notes",
+    "changelog",
+    "explain this code",
+    "explain the resolver flow",
+    "update the docs site",
+    "implement issue #233 for me right now"
+  ],
+  "trigger_keywords_primary": [
+    "issue queue",
+    "issues to merge",
+    "issues to mergeable",
+    "issue backlog",
+    "backlog to prs",
+    "issues end to end",
+    "and bug to merge",
+    "from intake to a ready pr",
+    "one triage review",
+    "autopilot the issue",
+    "autopilot these to merge",
+    "intake to a mergeable pr"
+  ],
+  "trigger_keywords_secondary": [
+    "issue", "issues", "backlog", "queue", "prs", "triage",
+    "merge", "mergeable", "intake", "autopilot", "escalate", "accept"
+  ]
+}

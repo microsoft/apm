@@ -10,12 +10,12 @@ auto-activates inside Copilot or Claude, add a custom agent that pairs with
 it, install both into a project, and ship the result as a plugin. No prompts,
 no `cat <<EOF`, no compile step you do not need.
 
-If you want the conceptual map first, read [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/).
+If you want the conceptual map first, read [Anatomy of an APM Package](/apm/concepts/package-anatomy/).
 Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](/apm/quickstart/).
+- APM installed -- see [Installation](./installation/).
 - A GitHub account and an empty repo for publishing (step 5).
 - A runtime where you can try the result: GitHub Copilot, Claude Code, or
   Cursor.
@@ -165,11 +165,11 @@ See the [Agent Workflows guide](/apm/producer/author-primitives/instructions-and
 
 ## 4. Deploy and use
 
-Run install with no arguments. APM treats your repo as the package and
-deploys its `.apm/` content into the runtime directories your tools read:
+Run install with an explicit target. APM treats your repo as the package and
+deploys its `.apm/` content into the Copilot runtime directories:
 
 ```bash
-apm install
+apm install --target copilot
 ```
 
 Output:
@@ -311,7 +311,7 @@ APM recognizes three layouts. Pick the one that matches what you are shipping:
   it directly without restructuring.
 
 For the full comparison and metadata precedence rules, see
-[Package Types](../../reference/package-types/).
+[Package Types](../reference/package-types/).
 
 ## Next steps
 

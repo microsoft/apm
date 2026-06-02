@@ -19,6 +19,10 @@ dependencies:
     - git@github.com:microsoft/apm-sample-package.git
     - git@gitlab.com:group/subgroup/repo.git
 
+    # SSH with non-default user (EMU accounts, servers where login != "git")
+    - myuser@host.example.com:owner/repo.git
+    - ssh://myuser@host.example.com/owner/repo.git
+
     # Custom ports (e.g. Bitbucket Datacenter, self-hosted GitLab)
     - ssh://git@bitbucket.example.com:7999/project/repo.git
     - https://git.internal:8443/team/repo.git
@@ -57,6 +61,12 @@ fallback enabled with `--allow-protocol-fallback`).
 - Use the `ssh://` form to specify an SSH port
   (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand
   `git@host:path` **cannot** carry a port -- the `:` is the path separator.
+- A non-`git` SSH user is honored when present in the dep URL
+  (e.g. `myuser@host:owner/repo.git` or `ssh://myuser@host/owner/repo.git`),
+  useful for EMU accounts or servers where the SSH login is not `git`.
+  Validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` with a 64-char cap;
+  percent-encoded userinfo is rejected. The user is presentation-only and
+  not part of dependency identity (does not perturb lockfile dedup).
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
   is set. Port is a transport detail, not part of the package identity --
   the same repo reachable on different ports dedupes to one entry.
@@ -122,6 +132,78 @@ both protocols.
 - path: ./packages/my-skills                    # local only
 ```
 
+## Registry-sourced APM dependencies (experimental)
+
+Behind `apm experimental enable registries`. Registry deps resolve over the
+REST [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
+alongside the Git resolver -- declare registries in `apm.yml` (or in
+`~/.apm/config.json`) and reference them from `dependencies.apm`. See
+`authentication.md` (Registry tokens) for `APM_REGISTRY_TOKEN_{NAME}`.
+
+```yaml
+registries:
+  jf-skills:
+    url: https://registry.example.com/apm/jf-skills
+  default: jf-skills                       # optional; routes shorthand deps
+
+dependencies:
+  apm:
+    # String shorthand -- requires a default registry; always needs a semver ref
+    - acme/foo#^1.2.3                      # semver range -> default registry
+    - acme/bar#1.4.0                       # exact semver -> default registry
+
+    # Object form -- whole package via the default registry
+    - id: acme/toolkit
+      version: ^2.0.0
+
+    # Object form -- explicit registry by name
+    - registry: jf-skills
+      id: acme/toolkit
+      version: ^2.0.0
+
+    # Object form -- virtual package (sub-path inside a published package)
+    - registry: jf-skills
+      id: acme/prompt-pack
+      path: prompts/review.prompt.md
+      version: 1.4.0
+      alias: review-prompt                 # optional local alias
+```
+
+Object-form fields:
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `id` | yes | `owner/repo` identity at the registry |
+| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
+| `registry` | no | Name from the merged registry map; defaults to the effective default |
+| `path` | no | Sub-path to a file or directory within the published package |
+| `alias` | no | Local alias controlling the install directory name |
+
+Routing rules when a default registry is active:
+
+| Entry form | Routed to |
+|------------|-----------|
+| `owner/repo#<any-ref>` | Default registry |
+| `- id:` object (no `registry:`) | Default registry |
+| `- registry:` object | Named registry |
+| `- git:` object | Git (explicit override) |
+| `- path:` object | Local filesystem |
+
+A shorthand entry with no ref (`acme/foo`) is **rejected** when routed to a
+registry -- a semver version selector is always required. Non-semver refs
+(labels, `v`-prefixed tags, branch names) are also rejected for registry
+sources; use `- git:` to keep a dep on Git when a default registry is
+active. Registry-routed deps add `source: registry`, `version`,
+`resolved_url`, and `resolved_hash` (sha256 of the archive bytes) to
+their lockfile entry, and the lockfile is promoted to
+`lockfile_version: "2"` when any dep is registry-sourced OR carries
+git-source semver resolution fields (`constraint` / `resolved_tag` /
+`resolved_at`).
+
+The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
+to v2) -- the `@` collides with npm/cargo/pip version syntax, with
+`git@host`, and with marketplace plugin shorthand. Use the object form.
+
 ## Virtual package types
 
 Virtual packages reference a subset of a repository.
@@ -133,7 +215,7 @@ Virtual packages reference a subset of a repository.
 
 Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.
 
-**Gitea and Gogs (self-hosted or vendor-hosted):** virtual packages resolve via the host's `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab nested-group repos (`group/subgroup/repo`) require the object form (`git: <full-url>`, `path: <virtual>`) -- shorthand is ambiguous on >2-segment paths.
+**Gitea and Gogs (self-hosted or vendor-hosted):** virtual packages resolve via the host's `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). Direct GitLab nested-group repos (`group/subgroup/repo`) require the object form (`git: <full-url>`, `path: <virtual>`) -- shorthand is ambiguous on >2-segment paths. **Exception:** when the dep routes through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`), the install-time boundary probe HEAD-walks the candidate splits against the proxy and locks in the first one whose archive responds, so nested-group shorthand works without the object form (#1472).
 
 > **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any `.collection.yml` to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
@@ -204,10 +286,21 @@ dependencies:
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|
 | Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
+| Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
 | Commit SHA | `owner/repo#abc123d` | Maximum reproducibility |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
+
+Semver ranges accept `^1.2.0`, `~1.4`, `>=2.0 <3`, or `1.5.x`. At
+install time APM runs `git ls-remote` against the dep and picks the
+highest tag matching the range; the resolved tag, commit SHA, version,
+and original constraint are pinned in the lockfile. Subsequent
+`apm install` runs replay the lockfile without network. Use
+`apm install --update` (or change the manifest constraint) to
+re-resolve against current remote tags. Two tag patterns are tried in
+order: `v{version}` and `{name}--v{version}`, then a bare `{version}`
+fallback.
 
 ## Marketplace ref override
 

@@ -60,7 +60,7 @@ Because `apm.lock.yaml` is a committed file, standard git tooling answers govern
 - **What was active at a specific release?** `git show v4.2.1:apm.lock.yaml`
 - **Is this environment current?** `apm audit`
 
-For the full forensic and compliance recipes, see the [Lock File Specification](../../reference/lockfile-spec/#9-auditing-patterns).
+For the full forensic and compliance recipes, see the [Lock File Specification](../reference/lockfile-spec/#9-auditing-patterns).
 
 ---
 
@@ -68,7 +68,7 @@ For the full forensic and compliance recipes, see the [Lock File Specification](
 
 - **APM is an open-source dependency manager for AI agent configuration** -- like `package.json` but for AI tools. It declares what your agents need in one manifest and installs it with one command.
 - **One manifest, one command, locked versions.** Every developer gets identical agent setup, every CI run is reproducible. No more configuration drift across teams.
-- **Secure by default and governable.** Hidden-Unicode and content scanners run before any package reaches an agent; `apm-policy.yml` lets a platform team allow-list dependencies, restrict deploy targets, and enforce trust rules across every repo. See [Security Model](../security/) and [Governance](../governance-guide/).
+- **Secure by default and governable.** Hidden-Unicode and content scanners run before any package reaches an agent; `apm-policy.yml` lets a platform team allow-list dependencies, restrict deploy targets, and enforce trust rules across every repo. See [Security Model](./security/) and [Governance](./governance-guide/).
 - **Zero lock-in.** APM generates native config files (`.github/`, `.claude/`, `AGENTS.md`). Remove APM and everything still works.
 
 ---
@@ -86,13 +86,13 @@ For the full forensic and compliance recipes, see the [Lock File Specification](
 - **Lock file integrity.** `apm.lock.yaml` pins exact versions and commit SHAs for every dependency. No silent updates, no supply chain surprises.
 - **Dependency provenance.** Every package resolves to a specific git repository and commit. The full dependency tree is inspectable before installation.
 - **No code execution, no runtime.** APM is a dev-time tool only. It copies configuration files -- it does not execute code, run background processes, or modify your application at runtime.
-- **Org-wide policy enforcement.** `apm-policy.yml` allow-lists dependency repos, restricts MCP transports and deploy targets, and is auto-discovered from the org's `.github` repo. See [Governance](../governance-guide/) for the bypass contract and install-gate guarantees.
+- **Org-wide policy enforcement.** `apm-policy.yml` allow-lists dependency repos, restricts MCP transports and deploy targets, and is auto-discovered from the org's `.github` repo. See [Governance](./governance-guide/) for the bypass contract and install-gate guarantees.
 - **Full audit trail.** All configuration changes are committed to git. Compliance teams can review agent setup changes through standard code review processes.
 
 ### For Platform Teams
 
 - **Standardize AI configuration across N repos.** Publish a shared APM package with your organization's coding standards, approved MCP servers, and prompt templates. Every repo that depends on it stays in sync.
-- **Enforce standards via CI gates.** `apm install` blocks packages with critical hidden-character findings -- no configuration needed. `apm audit --ci` verifies lockfile consistency. Add `--policy org` for [organizational policy enforcement](../governance-guide/).
+- **Enforce standards via CI gates.** `apm install` blocks packages with critical hidden-character findings -- no configuration needed. `apm audit --ci` verifies lockfile consistency. Add `--policy org` for [organizational policy enforcement](./governance-guide/).
 - **Version-controlled standards updates.** When standards change, update the shared package and bump the version. Teams adopt updates through normal dependency management, not ad-hoc communication.
 
 ### For Individual Developers
@@ -237,22 +237,22 @@ With APM, setup reduces to `apm install` (under 30 seconds). Standards updates r
 
 | Topic | Link |
 |-------|------|
-| Quick Start | [Installation](../../getting-started/installation/) |
-| Adoption Playbook | [Phased rollout guide](../adoption-playbook/) |
-| Governance | [Bypass contract and install gate](../governance-guide/) |
-| Security Model | [Supply-chain posture](../security/) |
-| CI/CD Integration | [Pipeline setup and enforcement](../../integrations/ci-cd/) |
-| Why APM | [Problem statement and design principles](../../introduction/why-apm/) |
-| How It Works | [Architecture and compilation pipeline](../../introduction/how-it-works/) |
-| Manifest Schema | [apm.yml reference](../../reference/manifest-schema/) |
-| Org-Wide Packages | [Publishing shared configuration](../../guides/org-packages/) |
+| Quick Start | [Installation](../getting-started/installation/) |
+| Adoption Playbook | [Phased rollout guide](./adoption-playbook/) |
+| Governance | [Bypass contract and install gate](./governance-guide/) |
+| Security Model | [Supply-chain posture](./security/) |
+| CI/CD Integration | [Pipeline setup and enforcement](../integrations/ci-cd/) |
+| Why APM | [What is APM](../concepts/what-is-apm/) |
+| How It Works | [Lifecycle and compilation pipeline](../concepts/lifecycle/) |
+| Manifest Schema | [apm.yml reference](../reference/manifest-schema/) |
+| Org-Wide Packages | [Publishing shared configuration](../producer/publish-to-a-marketplace/) |
 
 ---
 
 ## Next Steps
 
-1. Review the [Adoption Playbook](../adoption-playbook/) for a phased rollout plan.
-2. Read [Governance](../governance-guide/) end-to-end before making `apm audit --ci` a required check.
+1. Review the [Adoption Playbook](./adoption-playbook/) for a phased rollout plan.
+2. Read [Governance](./governance-guide/) end-to-end before making `apm audit --ci` a required check.
 3. Start with a single team or repository as a pilot.
-4. Publish a shared package with your organization's standards using the [Org-Wide Packages guide](../../guides/org-packages/).
+4. Publish a shared package with your organization's standards using [Publish to a marketplace](../producer/publish-to-a-marketplace/).
 5. Add APM to CI and measure adoption over 30 days.

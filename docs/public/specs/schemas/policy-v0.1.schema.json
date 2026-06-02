@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/policy-v0.1.schema.json",
+  "title": "OpenAPM Policy (apm-policy.yml) v0.1",
+  "description": "Normative JSON Schema (Draft 2020-12) for OpenAPM v0.1 policy documents. Where this schema and the prose of OpenAPM v0.1 disagree, the prose is authoritative.",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "extends": { "type": "string" },
+    "enforcement": { "enum": ["off", "warn", "block"] },
+    "fetch_failure": { "enum": ["off", "warn", "block"], "default": "warn" },
+    "discovery": {
+      "type": "object",
+      "description": "Discovery provider plug-in registry; see spec section 6.1.",
+      "properties": {
+        "providers": { "type": "array", "items": { "type": "string" } }
+      },
+      "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },
+      "additionalProperties": true
+    },
+    "cache": {
+      "type": "object",
+      "properties": { "ttl": { "type": "integer", "minimum": 0 } }
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "allow": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
+        "deny": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
+        "require": { "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
+        "require_resolution": { "enum": ["project-wins", "policy-wins", "block"], "default": "project-wins" },
+        "max_depth": { "type": "integer", "minimum": 1 },
+        "require_pinned_constraint": { "type": "boolean" }
+      },
+      "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} }
+    },
+    "mcp": { "type": "object" },
+    "compilation": { "type": "object" },
+    "manifest": { "type": "object" },
+    "unmanaged_files": { "type": "object" }
+  },
+  "patternProperties": {
+    "^x-[a-z][a-z0-9-]*$": {}
+  },
+  "additionalProperties": true
+}

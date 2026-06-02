@@ -1,4 +1,4 @@
-"""Integration tests for Wave 7 – marketplace and install coverage.
+"""Integration tests for Wave 7 - marketplace and install coverage.
 
 Targets:
   1. src/apm_cli/commands/marketplace/__init__.py  (~39% covered, 406 lines missing)
@@ -100,7 +100,7 @@ def runner() -> CliRunner:
 
 
 # ===========================================================================
-# Marketplace – list command
+# Marketplace - list command
 # ===========================================================================
 
 
@@ -166,7 +166,7 @@ class TestMarketplaceList:
 
 
 # ===========================================================================
-# Marketplace – browse command
+# Marketplace - browse command
 # ===========================================================================
 
 
@@ -243,7 +243,7 @@ class TestMarketplaceBrowse:
 
 
 # ===========================================================================
-# Marketplace – search command
+# Marketplace - search command
 # ===========================================================================
 
 
@@ -357,7 +357,7 @@ class TestMarketplaceSearch:
 
 
 # ===========================================================================
-# Marketplace – update command
+# Marketplace - update command
 # ===========================================================================
 
 
@@ -449,7 +449,7 @@ class TestMarketplaceUpdate:
 
 
 # ===========================================================================
-# Marketplace – remove command
+# Marketplace - remove command
 # ===========================================================================
 
 
@@ -502,7 +502,7 @@ class TestMarketplaceRemove:
 
 
 # ===========================================================================
-# Marketplace – add command
+# Marketplace - add command
 # ===========================================================================
 
 
@@ -659,7 +659,7 @@ class TestMarketplaceAdd:
 
 
 # ===========================================================================
-# Marketplace – removed 'build' subcommand
+# Marketplace - removed 'build' subcommand
 # ===========================================================================
 
 
@@ -676,7 +676,7 @@ class TestMarketplaceBuildRemoved:
 
 
 # ===========================================================================
-# Marketplace – validate command
+# Marketplace - validate command
 # ===========================================================================
 
 
@@ -708,7 +708,7 @@ build:
 
 
 # ===========================================================================
-# Install – basic invocation
+# Install - basic invocation
 # ===========================================================================
 
 
@@ -753,7 +753,7 @@ class TestInstallBasic:
 
 
 # ===========================================================================
-# Install – with packages argument
+# Install - with packages argument
 # ===========================================================================
 
 
@@ -834,7 +834,7 @@ class TestInstallWithPackages:
 
 
 # ===========================================================================
-# Install – flags and options
+# Install - flags and options
 # ===========================================================================
 
 
@@ -927,7 +927,7 @@ class TestInstallFlags:
 
 
 # ===========================================================================
-# Install – lockfile scenarios
+# Install - lockfile scenarios
 # ===========================================================================
 
 
@@ -970,7 +970,7 @@ class TestInstallWithLockfile:
 
 
 # ===========================================================================
-# Install – apm.yml auto-bootstrap
+# Install - apm.yml auto-bootstrap
 # ===========================================================================
 
 
@@ -994,7 +994,7 @@ class TestInstallAutoBootstrap:
 
 
 # ===========================================================================
-# Install – error paths
+# Install - error paths
 # ===========================================================================
 
 
@@ -1036,7 +1036,7 @@ class TestInstallErrorPaths:
 
 
 # ===========================================================================
-# Install – global scope
+# Install - global scope
 # ===========================================================================
 
 
@@ -1061,7 +1061,7 @@ class TestInstallGlobalScope:
 
 
 # ===========================================================================
-# Marketplace – internal helpers (unit-style but via real code paths)
+# Marketplace - internal helpers (unit-style but via real code paths)
 # ===========================================================================
 
 
@@ -1084,20 +1084,18 @@ class TestMarketplaceInternalHelpers:
         """_parse_marketplace_repo parses OWNER/REPO correctly."""
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo_name, embedded_host = _parse_marketplace_repo("acme/plugins", None)
-        assert owner == "acme"
-        assert repo_name == "plugins"
-        assert embedded_host is None
+        url, kind, embedded_host = _parse_marketplace_repo("acme/plugins", None)
+        assert url == "https://github.com/acme/plugins"
+        assert kind == "github"
+        assert embedded_host == "github.com"
 
     def test_parse_marketplace_repo_https_url(self) -> None:
         """_parse_marketplace_repo handles HTTPS URLs."""
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo_name, embedded_host = _parse_marketplace_repo(
-            "https://github.com/acme/plugins", None
-        )
-        assert owner == "acme"
-        assert repo_name == "plugins"
+        url, kind, embedded_host = _parse_marketplace_repo("https://github.com/acme/plugins", None)
+        assert url == "https://github.com/acme/plugins"
+        assert kind == "github"
         assert embedded_host == "github.com"
 
     def test_parse_marketplace_repo_http_rejected(self) -> None:
@@ -1180,7 +1178,7 @@ class TestMarketplaceInternalHelpers:
 
 
 # ===========================================================================
-# Install – internal helper tests
+# Install - internal helper tests
 # ===========================================================================
 
 

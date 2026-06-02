@@ -356,6 +356,15 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     except ImportError:
         raise RuntimeError("APM dependency system not available")  # noqa: B904
 
+    # Reset process-scoped perf counters and discovery memo so that
+    # numbers / cache hits from earlier pipeline runs (tests, REPL,
+    # long-lived processes) do not bleed into this install. See #1533.
+    from ..primitives.discovery import clear_discovery_cache
+    from ..utils import perf_stats as _perf_stats
+
+    _perf_stats.reset()
+    clear_discovery_cache()
+
     from ..core.scope import InstallScope, get_apm_dir, get_deploy_root
 
     if scope is None:
@@ -665,10 +674,14 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
                 "One or more direct dependencies failed validation. Run with --verbose for details."
             )
 
-        # Update .gitignore
-        from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
+        # Update .gitignore only for project-scoped installs (#1577).
+        # Global installs (InstallScope.USER) must not touch the CWD.
+        if scope == InstallScope.PROJECT:
+            from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
 
-        _update_gitignore_for_apm_modules(logger=logger)
+            _update_gitignore_for_apm_modules(logger=logger)
+        elif verbose and logger is not None:
+            logger.verbose_detail("Skipping .gitignore update (global scope install).")
 
         # ------------------------------------------------------------------
         # Phase: Orphan cleanup + intra-package stale-file cleanup
@@ -762,6 +775,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
 
+        _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return _run_phase("finalize", _finalize_phase, ctx)
 
     except AuthenticationError:

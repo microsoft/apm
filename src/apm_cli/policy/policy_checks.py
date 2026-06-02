@@ -207,7 +207,11 @@ def _check_required_packages_deployed(
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
-        message=f"{len(not_deployed)} required package(s) not deployed",
+        message=(
+            f"{len(not_deployed)} required package(s) not deployed. "
+            "Hint: run `apm install --no-policy` to repair the lockfile, "
+            "then reinstall normally."
+        ),
         details=not_deployed,
     )
 
@@ -769,6 +773,129 @@ def _check_unmanaged_files(
     )
 
 
+def _check_registry_source(
+    deps: list[DependencyReference],
+    policy: RegistrySourcePolicy,
+    registries_map: dict[str, str] | None,
+) -> CheckResult:
+    """Check registry source policy (require / allow_non_registry).
+
+    Fail-closed when a required registry name has no URL configured in
+    *registries_map* — that means the registry source is unreachable by
+    definition and the install must not proceed.
+    """
+    check_name = "registry-source"
+    no_op = not policy.require and policy.allow_non_registry
+    if no_op:
+        return CheckResult(name=check_name, passed=True, message="No registry source policy")
+
+    violations: list[str] = []
+
+    # Fail-closed: required registry names must be configured.
+    for req_name in policy.require:
+        if not registries_map or req_name not in registries_map:
+            violations.append(
+                f"required registry '{req_name}' is not configured — "
+                "add it to the 'registries:' block or via 'apm config set registry."
+                f"{req_name}.url <url>'"
+            )
+
+    for dep in deps:
+        key = dep.get_canonical_dependency_string()
+        is_registry = getattr(dep, "source", None) == "registry"
+        registry_name = getattr(dep, "registry_name", None)
+
+        if not policy.allow_non_registry and not is_registry:
+            violations.append(
+                f"{key}: non-registry source not permitted (policy requires registry sources only)"
+            )
+            continue
+
+        if policy.require and is_registry and registry_name not in policy.require:
+            violations.append(
+                f"{key}: sourced from registry '{registry_name}' "
+                f"but policy requires one of {sorted(policy.require)}"
+            )
+
+    if violations:
+        return CheckResult(
+            name=check_name,
+            passed=False,
+            message=f"{len(violations)} registry source violation(s)",
+            details=violations,
+        )
+    return CheckResult(
+        name=check_name,
+        passed=True,
+        message="All dependencies satisfy registry source policy",
+    )
+
+
+def _check_pinned_constraints(
+    deps: list[DependencyReference],
+    policy: DependencyPolicy,
+    direct_dep_keys: set[str] | None = None,
+) -> CheckResult:
+    """Check: every direct dep declares a bounded constraint.
+
+    Skipped (passes vacuously) when
+    ``policy.require_pinned_constraint`` is ``False`` -- the default.
+
+    Operates on the **declared** constraint (``dep.reference``), not
+    the resolved one, so authors learn before the install completes
+    that a moving ref slipped past review.
+
+    When ``direct_dep_keys`` is provided, the check is restricted to
+    direct dependencies only -- transitives are excluded, since the
+    consumer cannot rewrite a constraint declared in a transitive
+    package's own manifest. Callers that have direct-vs-transitive
+    context (the install pipeline gate, the target-aware re-check,
+    and the install preflight) should always pass it. When ``None``
+    (legacy dep-only seam, or the audit wrapper that already iterates
+    direct-only manifest deps) the check falls back to evaluating
+    every dep in ``deps``.
+
+    See ``_constraint_pinning.py`` for classification rules.
+    """
+    from ._constraint_pinning import classify_unbounded_reason, humanize_reason
+
+    check_name = "dependency-pinned-constraint"
+    if not policy.require_pinned_constraint:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="Pinned-constraint requirement disabled",
+        )
+
+    violations: list[str] = []
+    for dep in deps:
+        if direct_dep_keys is not None and dep.get_unique_key() not in direct_dep_keys:
+            continue
+        reason = classify_unbounded_reason(dep)
+        if reason is None:
+            continue
+        key = dep.get_canonical_dependency_string()
+        hint = humanize_reason(reason, dep)
+        violations.append(f"{key}: {hint}")
+
+    if not violations:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="All dependencies use pinned constraints",
+        )
+
+    return CheckResult(
+        name=check_name,
+        passed=False,
+        message=(
+            f"{len(violations)} dependency(ies) use unbounded constraints "
+            "(hint: pin to a semver range, literal tag, or SHA)"
+        ),
+        details=violations,
+    )
+
+
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -782,6 +909,8 @@ def run_dependency_policy_checks(
     fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
+    registries: dict[str, str] | None = None,
+    direct_dep_keys: set[str] | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -819,6 +948,15 @@ def run_dependency_policy_checks(
         the ``explicit-includes`` check is skipped -- callers that
         do not have manifest information available (e.g. dep-only
         seams) can leave it unset.
+    direct_dep_keys:
+        Optional set of ``DependencyReference.get_unique_key()`` for
+        the direct (manifest-declared) deps. When supplied, the
+        ``require_pinned_constraint`` check only evaluates direct
+        deps -- transitive entries are excluded because the consumer
+        cannot rewrite a constraint declared inside a transitive
+        package's own manifest. When ``None`` (legacy dep-only seam
+        and the audit wrapper that already iterates direct-only
+        manifest deps) every dep in ``deps_to_install`` is evaluated.
 
     Returns
     -------
@@ -861,30 +999,35 @@ def run_dependency_policy_checks(
     if _run(_check_transitive_depth(lockfile, policy.dependencies)):
         return result
 
-    # -- MCP checks (7-10) ----------------------------------------
-    # When mcp_deps is None (not provided), skip MCP checks entirely.
+    # -- Registry source + pinned-constraint + MCP + tail checks -----
+    # Collect all remaining checks into a single loop so the function
+    # stays within the max-returns threshold.
+    remaining_checks: list[CheckResult] = [
+        _check_registry_source(deps_list, policy.registry_source, registries),
+        # Pinned-constraint: property check on declared refs. Cheap
+        # (O(N) string classification, no I/O) so it always runs.
+        # When direct_dep_keys is supplied, restrict to direct deps -- a
+        # transitive package with an unbounded ref in its own manifest is
+        # not actionable by the consumer (see Copilot review on #1494).
+        _check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys),
+    ]
+    # MCP checks -- when mcp_deps is None (not provided), skip entirely.
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
     if mcp_deps is not None:
-        if _run(_check_mcp_allowlist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_denylist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_transport(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
-            return result
-
-    # -- Target / compilation + manifest tail checks ----------------
-    # Collect applicable tail checks, then run in a single loop so
-    # the function stays within the max-returns threshold.
-    tail_checks: list[CheckResult] = []
+        remaining_checks += [
+            _check_mcp_allowlist(mcp_list, policy.mcp),
+            _check_mcp_denylist(mcp_list, policy.mcp),
+            _check_mcp_transport(mcp_list, policy.mcp),
+            _check_mcp_self_defined(mcp_list, policy.mcp),
+        ]
+    # Target / compilation + manifest tail checks.
     if effective_target is not None:
         synthetic_yml = {"target": effective_target}
-        tail_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
+        remaining_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
-        tail_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
-    for check in tail_checks:
+        remaining_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
+    for check in remaining_checks:
         if _run(check):
             return result
 
@@ -957,6 +1100,7 @@ def run_policy_checks(
         # effective_target=None: target checks handled below from raw_yml
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
+        registries=getattr(manifest, "registries", None),
     )
     result.checks.extend(dep_result.checks)
 

@@ -5,9 +5,11 @@ sidebar:
   order: 5
 ---
 
+> **Normative reference:** this page documents the v0.2 working-draft policy schema as enforced by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 6 (Policy)](/apm/specs/openapm-v01/) and published as JSON Schema at [`policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json).
+
 The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, `apm audit --ci`, `apm policy status`, and the install preflight before any package is written to disk.
 
-For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../../enterprise/apm-policy-getting-started/). For CLI usage of `apm policy status`, see [apm policy](../cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance overview](../../enterprise/governance-overview/).
+For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance overview](../enterprise/governance-overview/).
 
 ## File location
 
@@ -34,11 +36,13 @@ The `<ref>` accepts:
 | `enforcement`      | enum                | `warn`           | no       | `off` / `warn` / `block`. See [Enforcement modes](#enforcement-modes).            |
 | `fetch_failure`    | enum                | `warn`           | no       | `warn` / `block`. Behavior when a remote policy cannot be fetched or parsed.      |
 | `cache`            | object              | `{ttl: 3600}`    | no       | Cache settings for remote policy fetches.                                         |
-| `dependencies`    | object              | see section      | no       | Rules over APM dependencies.                                                       |
+| `dependencies`     | object              | see section      | no       | Rules over APM dependencies.                                                       |
 | `mcp`              | object              | see section      | no       | Rules over MCP servers (direct and transitive).                                   |
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
+| `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
+| `bin_deploy`       | object              | see section      | no       | Control whether `marketplace_plugin` bin/ executables are deployed to `~/.claude/skills/<name>/bin/`. |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
 
@@ -71,6 +75,41 @@ Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` 
 | `require`            | list of refs or null  | `null`           | `null` = no opinion (transparent during merge). `[]` = explicitly empty. Packages every consumer manifest must include. |
 | `require_resolution` | enum                  | `project-wins`   | `project-wins` / `policy-wins` / `block` -- how to resolve version conflicts on required packages. |
 | `max_depth`          | integer               | `50`             | Maximum transitive dependency depth. Must be `> 0`.                                         |
+| `require_pinned_constraint` | boolean        | `false`          | When `true`, every APM dep declared in `apm.yml` must use a bounded constraint (exact, `^`/`~`/bounded range, literal tag, or SHA). Transitive deps are also classified and pass when their parent manifests pinned them. Unbounded refs (missing ref, `*`, bare branch, bare `>=X.Y`) are routed through `policy.enforcement` (`warn` / `block`). **Enabling on existing projects will likely surface violations; roll out with `enforcement: warn` first.** |
+
+### `require_pinned_constraint` reference
+
+Examples (with `require_pinned_constraint: true` and `enforcement: block`):
+
+```yaml
+# apm.yml
+dependencies:
+  apm:
+    - acme/skills              # FAIL: no ref (NO_REF)
+    - other/lib#>=1.0.0        # FAIL: unbounded upper (OPEN_UPPER)
+    - third/lib#*              # FAIL: wildcard (WILDCARD)
+    - acme/lib#main            # FAIL: bare branch (BARE_BRANCH)
+    - fourth/lib#^1.2.0        # OK: caret range
+    - fifth/lib#~1.2.3         # OK: tilde range
+    - sixth/lib#1.5.3          # OK: exact version (bare)
+    - sixth_eq/lib#=1.5.3      # OK: exact version (npm/cargo explicit equality)
+    - sixth_pip/lib#==1.5.3    # FAIL: pip-style operator not supported (BARE_BRANCH)
+    - seventh/lib#v1.5.3       # OK: literal tag
+    - eighth/lib#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # OK: SHA
+    - ./packages/local         # OK: local-path dep (no version surface)
+```
+
+Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
+
+```text
+[x] Policy violation: dependency-pinned-constraint
+    4 dependency(ies) use unbounded constraints
+    (hint: pin to a semver range, literal tag, or SHA)
+    - acme/skills: no ref; resolves to default branch
+    - other/lib: unbounded upper; pair with '<X.Y' or use a caret range
+    - third/lib: wildcard '*' matches any version
+    - acme/lib: bare branch 'main' tracks a moving tip
+```
 
 Patterns are matched against `<owner>/<repo>` (or `<host>/<owner>/<repo>`). Wildcards via shell-style globs, e.g. `contoso/*`.
 
@@ -140,6 +179,7 @@ inherited list (see the tri-state table below).
 | `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
+| `dependencies.require_pinned_constraint` | Logical OR -- once a parent enables it, child cannot relax.            |
 | `mcp.self_defined`          | Stricter wins (`deny` > `warn` > `allow`).                                       |
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
@@ -231,9 +271,59 @@ unmanaged_files:
     - .github/prompts
 ```
 
+## registry_source
+
+::::caution[Experimental]
+Requires `apm experimental enable registries`. Ignored on clients without the flag enabled.
+::::
+
+Mandate that APM dependencies come from configured registries. Checks apply transitively (including transitive deps pulled in by registry packages).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `require` | `list<string>` | `[]` | Registry names that MUST be reachable. APM **fails-closed** if a listed name has no URL in the merged registry map (from project `apm.yml`, workspace `~/.apm/apm.yml`, or `~/.apm/config.json`) — this is intentional: a missing registry config is treated as a policy violation, not a no-op. |
+| `allow_non_registry` | `bool` | `true` | When `false`, APM blocks installation of any dependency not routed through a configured registry. |
+
+```yaml
+registry_source:
+  require:
+    - jf-skills
+  allow_non_registry: false
+```
+
+## bin_deploy
+
+Controls whether `apm install -g` deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/`, alongside the package's `.claude-plugin/plugin.json`. Here `<name>` is the package's install directory name (typically the repository name).
+
+This realizes Claude Code's "skills-directory plugin" contract: a folder under a skills directory that contains `.claude-plugin/plugin.json` loads as `<name>@skills-dir`, and its root `bin/` is added to the Bash tool's `PATH`. The package's `.claude-plugin/plugin.json` is required for Claude to load the folder as a plugin; APM copies it alongside `bin/` when the package ships one. The contract is Claude-specific, so deployment only targets Claude. Restart Claude Code (or run `/reload-plugins`) after install for new executables to be picked up.
+
+**Security note:** deployed executables are made executable (the execute bit is set for user, group, and other) and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments.
+
+**Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
+
+**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |
+| `deny` | `list<string>` | `[]` | Package canonical strings (e.g. `owner/name`) whose bin/ executables must not be deployed. |
+
+```yaml
+bin_deploy:
+  # Block all bin/ deploys organisation-wide:
+  deny_all: true
+```
+
+```yaml
+bin_deploy:
+  # Allow bin/ deploys except for one specific package:
+  deny:
+    - myorg/untrusted-plugin
+```
+
 ## See also
 
-- [apm policy](../cli/policy/) -- the `apm policy status` command.
-- [Govern with apm-policy.yml](../../enterprise/apm-policy-getting-started/) -- end-to-end rollout guide.
-- [Enforce in CI](../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
-- [Governance overview](../../enterprise/governance-overview/) -- the full enterprise control surface.
+- [apm policy](./cli/policy/) -- the `apm policy status` command.
+- [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/) -- end-to-end rollout guide.
+- [Enforce in CI](../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
+- [Governance overview](../enterprise/governance-overview/) -- the full enterprise control surface.

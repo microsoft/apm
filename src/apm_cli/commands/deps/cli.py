@@ -17,6 +17,7 @@ from ._utils import (
     _get_package_display_info,
     _is_nested_under_package,
 )
+from .why import why as _why_cmd
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -256,6 +257,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
 def deps():
     """APM dependency management commands."""
     pass
+
+
+deps.add_command(_why_cmd)
 
 
 def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):

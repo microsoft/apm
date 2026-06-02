@@ -3,12 +3,12 @@
 Covers the helper functions and compile-command branches that are not yet
 reached by test_compile_target_flag.py:
 
-* _display_single_file_summary  – console present, console absent, fallback
-* _display_next_steps           – console present, ImportError fallback
-* _display_validation_errors    – console present, ImportError/NameError fallback
-* _get_validation_suggestion    – every suggestion branch
-* _resolve_effective_target     – explicit flag, apm.yml, auto-detect paths
-* compile command               – no-apm-yml, --all + --target conflict,
+* _display_single_file_summary  - console present, console absent, fallback
+* _display_next_steps           - console present, ImportError fallback
+* _display_validation_errors    - console present, ImportError/NameError fallback
+* _get_validation_suggestion    - every suggestion branch
+* _resolve_effective_target     - explicit flag, apm.yml, auto-detect paths
+* compile command               - no-apm-yml, --all + --target conflict,
                                   --all target expansion, validate mode,
                                   watch mode routing, distributed success,
                                   zero-output warning, result errors,
@@ -604,7 +604,7 @@ class TestCompileCommandWatchMode:
 
 
 class TestCompileCommandDistributedSuccess:
-    """compile command – distributed strategy success path."""
+    """compile command - distributed strategy success path."""
 
     def _setup_project_dir(self) -> None:
         Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
@@ -774,7 +774,7 @@ class TestCompileCommandDistributedSuccess:
 
 
 class TestCompileCommandWarnings:
-    """compile command – warnings propagation."""
+    """compile command - warnings propagation."""
 
     def test_result_warnings_appear_in_output(self) -> None:
         """result.warnings should be printed."""
@@ -820,7 +820,7 @@ class TestCompileCommandWarnings:
 
 
 class TestCompileCommandNoContent:
-    """compile command – no content to compile branches."""
+    """compile command - no content to compile branches."""
 
     def test_no_apm_modules_no_local_apm_content(self) -> None:
         """When no apm_modules, no .apm content, no constitution → exit 1."""
@@ -859,7 +859,7 @@ class TestCompileCommandNoContent:
 
 
 class TestCompileCommandImportError:
-    """compile command – ImportError path."""
+    """compile command - ImportError path."""
 
     def test_import_error_in_compilation_exits_1(self) -> None:
         """ImportError inside the try block should exit with code 1."""

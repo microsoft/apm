@@ -2,11 +2,10 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "batch-bug-shepherd-verdict-schema.json",
   "title": "batch-bug-shepherd subagent return shapes",
-  "description": "Three return shapes, one per wave. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR and continue.",
+  "description": "Two BBS-owned return shapes (triage / strategic-alignment). Driver and conflict-resolution returns validate against shepherd-driver assets/completion-schema.json (loaded by the orchestrator as ../shepherd-driver/assets/completion-schema.json), not this schema. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR (triage) or route as aligned with gate-failed-open annotation (strategic-alignment) and continue.",
   "oneOf": [
     { "$ref": "#/definitions/triage_return" },
-    { "$ref": "#/definitions/shepherd_return" },
-    { "$ref": "#/definitions/completion_return" }
+    { "$ref": "#/definitions/strategic_alignment_return" }
   ],
   "definitions": {
     "triage_return": {
@@ -38,94 +37,37 @@
         }
       ]
     },
-    "shepherd_return": {
+    "strategic_alignment_return": {
       "type": "object",
-      "required": ["kind", "pr", "issue", "verdict", "comment_url", "blocking_followups"],
+      "required": ["kind", "issue", "verdict", "cited_principle", "rationale"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": "shepherd" },
-        "pr": { "type": "integer", "minimum": 1 },
+        "kind": { "const": "strategic-alignment" },
         "issue": { "type": "integer", "minimum": 1 },
         "verdict": {
           "type": "string",
-          "enum": ["ready-to-merge", "needs-author-changes", "reject"]
+          "enum": ["aligned", "aligned-with-reservations", "out-of-scope", "wrong-direction"]
         },
-        "comment_url": { "type": "string", "format": "uri" },
-        "blocking_followups": {
+        "cited_principle": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Verbatim section heading OR short sentence from PRINCIPLES.md that fires (for demote verdicts) or grounds the aligned verdict. On gate-fail-open infrastructure failures, the literal string 'gate-failed-open: <reason>'. NEVER empty; the gate fails OPEN to 'aligned' if no principle is citable, rather than demoting under infrastructure failure (truth #3 OUTPUT IS PROBABILISTIC + truth #4 HALLUCINATION IS INHERENT)."
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "1-3 sentences explaining the verdict in CEO voice. References the cited principle by name."
+        },
+        "reservations": {
           "type": "array",
-          "description": "Each item is the work definition the completion subagent will resolve.",
-          "items": {
-            "type": "object",
-            "required": ["id", "summary"],
-            "additionalProperties": false,
-            "properties": {
-              "id": { "type": "string" },
-              "summary": { "type": "string", "maxLength": 400 },
-              "source_persona": { "type": "string" },
-              "file_hints": {
-                "type": "array",
-                "items": { "type": "string" }
-              }
-            }
-          }
-        },
-        "maintainerCanModify": { "type": "boolean" },
-        "author": { "type": "string" },
-        "head_repo": { "type": "string" },
-        "head_branch": { "type": "string" }
-      }
-    },
-    "completion_return": {
-      "type": "object",
-      "required": ["kind", "pr", "status"],
-      "additionalProperties": false,
-      "properties": {
-        "kind": { "const": "completion" },
-        "pr": { "type": "integer", "minimum": 1 },
-        "status": {
-          "type": "string",
-          "enum": ["ready-to-merge", "blocked", "superseded"]
-        },
-        "superseded_by": { "type": "integer", "minimum": 1 },
-        "supersedes": { "type": "integer", "minimum": 1 },
-        "ci_evidence": {
-          "type": "string",
-          "description": "CI run URL or `gh pr checks` summary; required when status=ready-to-merge."
-        },
-        "lint_evidence": {
-          "type": "string",
-          "description": "Exit code and silent-output confirmation for the canonical ruff pair; required when status=ready-to-merge."
-        },
-        "mutation_break_evidence": {
-          "type": "array",
-          "description": "One entry per regression-trap test added: the test name, the guard deleted, and confirmation that the test failed without the guard.",
-          "items": {
-            "type": "object",
-            "required": ["test", "guard_removed", "failed_without_guard"],
-            "properties": {
-              "test": { "type": "string" },
-              "guard_removed": { "type": "string" },
-              "failed_without_guard": { "type": "boolean" }
-            }
-          }
-        },
-        "blocker": {
-          "type": "string",
-          "description": "Required when status=blocked. One-paragraph human-readable explanation."
+          "items": { "type": "string", "maxLength": 200 },
+          "description": "Required when verdict=aligned-with-reservations. Each entry is one specific concern downstream phases (panel / completion) must surface in their review prose. Omitted for other verdicts."
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "status": { "const": "ready-to-merge" } } },
-          "then": { "required": ["ci_evidence", "lint_evidence"] }
-        },
-        {
-          "if": { "properties": { "status": { "const": "blocked" } } },
-          "then": { "required": ["blocker"] }
-        },
-        {
-          "if": { "properties": { "status": { "const": "superseded" } } },
-          "then": { "required": ["superseded_by"] }
+          "if": { "properties": { "verdict": { "const": "aligned-with-reservations" } } },
+          "then": { "required": ["reservations"] }
         }
       ]
     }

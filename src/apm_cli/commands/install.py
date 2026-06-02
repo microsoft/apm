@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import click
 
+from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
 from apm_cli.install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -47,11 +48,12 @@ from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     dependency_reference_to_yaml_entry,
-    merge_structured_entry_into_current_deps,
     persist_dependency_list_if_changed,
     resolve_parsed_dependency_reference,
+    update_existing_dependency_entry_if_needed,
     user_scope_rejection_reason,
 )
+from apm_cli.install.package_selection import only_packages_from_validation
 
 # Re-export local-content leaf helpers so that callers inside this module
 # (e.g. _install_apm_dependencies) and any future test patches against
@@ -352,13 +354,6 @@ def _resolve_package_references(
     invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
-    # #1305: canonical -> (marketplace_name, plugin_name, CrossRepoMisconfigRisk)
-    # for cross-repo dict ``type: github`` sources on enterprise marketplaces
-    # whose bare ``repo`` would mis-route auth at ``github.com``. Recorded
-    # before validation runs so the validation-fail branch can emit an
-    # actionable hint -- ``_marketplace_provenance`` is only written on
-    # validation success and cannot be relied on at the failure boundary.
-    _misconfig_risks = {}
     validated_packages = []
     dependencies_changed = False
 
@@ -407,19 +402,51 @@ def _resolve_package_references(
                     canonical_str, _resolved_plugin = resolution
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
+                    # #1326: dependency-confusion fail-closed gate.
+                    # When the resolver attaches ``CrossRepoMisconfigRisk``,
+                    # the marketplace declared a bare ``owner/repo`` on a
+                    # ``*.ghe.com`` host and the canonical falls back to
+                    # ``github.com`` -- the same syntactic form that an
+                    # attacker pre-staging the namespace on public github.com
+                    # would exploit. Refuse before any outbound validation so
+                    # no probe reaches the potentially-attacker-controlled
+                    # URL (information leak + RCE both shut at one boundary).
+                    # Escape hatch: marketplace.json author host-qualifies
+                    # ``repo:`` (either to the enterprise host for same-host
+                    # intent or to github.com for declared cross-host intent).
+                    # That prevents the sentinel from attaching at resolver
+                    # layer -- no new flag, env var, or schema field needed.
+                    _risk = resolution.cross_repo_misconfig_risk
+                    if _risk is not None:
+                        # Two explicit-host options are alternatives, not a
+                        # sequence, so they read clearer as separate bullets.
+                        # ``validation_fail`` prepends the package name; the
+                        # body below is the remediation.  Each list element is
+                        # one logical clause so individual edits stay local.
+                        _lead = (
+                            f"refused (dependency-confusion risk #1326): bare"
+                            f" `repo: {_risk.bare_repo_field}` on enterprise"
+                            f" marketplace '{_risk.marketplace_host}' is ambiguous."
+                            f" Host-qualify the plugin `repo` field in"
+                            f" marketplace.json to one of:"
+                        )
+                        reason = "\n".join(
+                            [
+                                _lead,
+                                f"  - '{_risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
+                                f"  - 'github.com/{_risk.bare_repo_field}' (declared cross-host dep on public github.com)",
+                            ]
+                        )
+                        invalid_outcomes.append((package, reason))
+                        if logger:
+                            logger.validation_fail(package, reason)
+                        continue
                     marketplace_provenance = {
                         "discovered_via": marketplace_name,
                         "marketplace_plugin_name": plugin_name,
                     }
                     package = canonical_str
                     marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
-                    _risk = getattr(resolution, "cross_repo_misconfig_risk", None)
-                    if _risk is not None:
-                        _misconfig_risks[canonical_str] = (
-                            marketplace_name,
-                            plugin_name,
-                            _risk,
-                        )
                 except Exception as mkt_err:
                     reason = str(mkt_err)
                     invalid_outcomes.append((package, reason))
@@ -436,13 +463,15 @@ def _resolve_package_references(
 
         # Canonicalize input
         try:
-            dep_ref, direct_gitlab_virtual_resolved = resolve_parsed_dependency_reference(
+            dep_ref, direct_virtual_resolved = resolve_parsed_dependency_reference(
                 package,
                 marketplace_dep_ref,
                 dependency_reference_cls=DependencyReference,
                 try_resolve_gitlab_direct_shorthand=_try_resolve_gitlab_direct_shorthand,
+                resolve_artifactory_boundary=_resolve_artifactory_boundary,
                 auth_resolver=auth_resolver,
                 verbose=bool(logger and logger.verbose),
+                logger=logger,
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
@@ -458,7 +487,7 @@ def _resolve_package_references(
                         _seen.add(_s)
                         _normalized.append(_s)
                 dep_ref.skill_subset = _normalized
-            if marketplace_dep_ref is not None or direct_gitlab_virtual_resolved:
+            if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
             reason = str(e)
@@ -508,24 +537,24 @@ def _resolve_package_references(
             logger=logger,
             dep_ref=dep_ref,
         ):
+            updates_existing_entry = update_existing_dependency_entry_if_needed(
+                current_deps,
+                already_in_deps=already_in_deps,
+                apm_yml_entries=_apm_yml_entries,
+                canonical=canonical,
+                dep_ref=dep_ref,
+                identity=identity,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
+            )
             valid_outcomes.append((canonical, already_in_deps))
             if logger:
-                logger.validation_pass(canonical, already_present=already_in_deps)
+                logger.validation_pass(canonical, already_in_deps, updates_existing_entry)
 
             if not already_in_deps:
                 validated_packages.append(canonical)
                 existing_identities.add(identity)  # prevent duplicates within batch
-            elif canonical in _apm_yml_entries:
-                structured_entry = _apm_yml_entries[canonical]
-                merge_structured_entry_into_current_deps(
-                    current_deps,
-                    structured_entry,
-                    identity,
-                    canonical,
-                    dependency_reference_cls=DependencyReference,
-                    logger=logger,
-                )
-                dependencies_changed = True
+            dependencies_changed = dependencies_changed or updates_existing_entry
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
@@ -557,34 +586,6 @@ def _resolve_package_references(
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
-            # #1305: when a cross-repo dict ``type: github`` source on an
-            # enterprise marketplace fails validation, the failure is most
-            # likely the silent auth mis-route (bare canonical fell back to
-            # ``github.com``). Surface the host-qualify hint inline so the
-            # operator can correct ``marketplace.json`` without rerunning
-            # under ``--verbose`` to decode the auth trace. ``logger.warning``
-            # is used (not ``info``) per the PR #1292 panel review's explicit
-            # guidance for this exact follow-up: a misconfiguration that
-            # voids ``apm install`` should be at warning level, not buried
-            # in info-level ambient output. The second clause acknowledges
-            # the legitimate cross-host alternative so operators whose
-            # github.com dep failed for a transient reason (rate limit,
-            # network, expired PAT) are not misdirected into adding an
-            # enterprise host prefix that would break a working config.
-            _risk_entry = _misconfig_risks.get(package)
-            if _risk_entry is not None and logger:
-                _mp_name, _plugin_name, _risk = _risk_entry
-                logger.warning(
-                    f"'{_plugin_name}@{_mp_name}' is registered on "
-                    f"'{_risk.marketplace_host}' but the plugin's bare "
-                    f"`repo: {_risk.bare_repo_field}` resolved to "
-                    "'github.com'. If you meant the enterprise host, set "
-                    "the plugin's `repo` field to "
-                    f"'{_risk.suggested_qualified_repo}' in marketplace.json. "
-                    "If this is intentionally a github.com dependency, "
-                    "verify your github.com credentials and that the "
-                    "repository is accessible."
-                )
 
     return (
         valid_outcomes,
@@ -1358,8 +1359,6 @@ def install(  # noqa: PLR0913
         # Resolve transport selection inputs.
         from ..deps.transport_selection import (
             ProtocolPreference,
-            is_fallback_allowed,
-            protocol_pref_from_env,
         )
 
         if use_ssh and use_https:
@@ -1370,9 +1369,16 @@ def install(  # noqa: PLR0913
         elif use_https:
             protocol_pref = ProtocolPreference.HTTPS
         else:
-            protocol_pref = protocol_pref_from_env()
-        # CLI flag OR env var enables fallback.
-        allow_protocol_fallback = allow_protocol_fallback or is_fallback_allowed()
+            # Precedence: APM_GIT_PROTOCOL env var > apm config ssh > git insteadOf
+            from ..config import get_apm_protocol_pref as _get_apm_protocol_pref
+
+            _pref_str = _get_apm_protocol_pref()
+            protocol_pref = ProtocolPreference.from_str(_pref_str)
+        # CLI flag > env var (APM_ALLOW_PROTOCOL_FALLBACK) > apm config > default.
+        # get_apm_allow_protocol_fallback() already encodes env > config > False.
+        from ..config import get_apm_allow_protocol_fallback as _get_apm_apf
+
+        allow_protocol_fallback = allow_protocol_fallback or _get_apm_apf()
 
         # Resolve scope
         from ..core.scope import (
@@ -1433,7 +1439,6 @@ def install(  # noqa: PLR0913
             sys.exit(1)
 
         # If packages are specified, validate and add them to apm.yml first
-        validated_packages = []
         outcome = None
         if packages:
             # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
@@ -1445,7 +1450,7 @@ def install(  # noqa: PLR0913
                 _manifest_snapshot = manifest_path.read_bytes()
                 _snapshot_manifest_path = manifest_path
 
-            validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
+            _validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
                 packages,
                 dry_run,
                 dev=dev,
@@ -1459,8 +1464,8 @@ def install(  # noqa: PLR0913
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:
                 return
-            # Note: Empty validated_packages is OK if packages are already in apm.yml
-            # We'll proceed with installation from apm.yml to ensure everything is synced
+            # Note: Empty validated_packages is OK if packages are already in apm.yml;
+            # only_packages is derived from validation outcomes below.
 
         # Build install context
         install_ctx = InstallContext(
@@ -1489,7 +1494,7 @@ def install(  # noqa: PLR0913
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
             refresh=refresh,
-            only_packages=builtins.list(validated_packages) if packages else None,
+            only_packages=only_packages_from_validation(packages, outcome),
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
             legacy_skill_paths=legacy_skill_paths,
@@ -1533,6 +1538,7 @@ def install(  # noqa: PLR0913
         _rich_error(str(e))
         if e.diagnostic_context:
             _rich_echo(e.diagnostic_context)
+        _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except DirectDependencyError as e:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
@@ -1739,12 +1745,17 @@ def _install_apm_packages(ctx, outcome):
             _rich_error(str(e))
             if e.diagnostic_context:
                 _rich_echo(e.diagnostic_context)
+            _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
             sys.exit(1)
         except FrozenInstallError as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
             _rich_error(str(e))
             for reason in e.reasons:
                 _rich_echo(reason)
+            _rich_info(
+                "Tip: run 'apm outdated' to see what changed, then 'apm update'.",
+                symbol="info",
+            )
             sys.exit(1)
         except Exception as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)

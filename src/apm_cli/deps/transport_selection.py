@@ -30,7 +30,8 @@ ENV_ALLOW_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
 # Documented escape-hatch hint surfaced on strict-mode failures.
 FALLBACK_HINT = (
     "To allow cross-protocol fallback (not recommended), pass "
-    "--allow-protocol-fallback or set APM_ALLOW_PROTOCOL_FALLBACK=1."
+    "--allow-protocol-fallback, set APM_ALLOW_PROTOCOL_FALLBACK=1, "
+    "or run: apm config set allow-protocol-fallback true"
 )
 
 

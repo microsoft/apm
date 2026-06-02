@@ -1,0 +1,108 @@
+{
+  "$comment": "Exercises req-rs-007 (semver dialect pin: node-semver semantics) and req-rs-014 (build-metadata tie-break by bytewise ASCII order of full tag string). Each case lists the manifest-side range, the candidate tag set, and the expected highest-matching tag (or null if none match). Pre-release tags are excluded unless the range contains a pre-release identifier on the same [major,minor,patch] tuple OR the dependency declares prerelease: true. Ordering follows semver 2.0.0 section 11.",
+  "dialect": "node-semver",
+  "spec_anchor": "req-rs-007",
+  "cases": [
+    {
+      "id": "caret-1_x",
+      "range": "^1.2.3",
+      "prerelease_optin": false,
+      "tags": ["1.2.2", "1.2.3", "1.3.0", "1.9.9", "2.0.0"],
+      "expected": "1.9.9"
+    },
+    {
+      "id": "caret-0_2",
+      "range": "^0.2.3",
+      "prerelease_optin": false,
+      "tags": ["0.2.3", "0.2.4", "0.3.0", "1.0.0"],
+      "expected": "0.2.4"
+    },
+    {
+      "id": "caret-0_0",
+      "range": "^0.0.3",
+      "prerelease_optin": false,
+      "tags": ["0.0.3", "0.0.4", "0.1.0"],
+      "expected": "0.0.3"
+    },
+    {
+      "id": "tilde-1_2",
+      "range": "~1.2.3",
+      "prerelease_optin": false,
+      "tags": ["1.2.3", "1.2.9", "1.3.0", "2.0.0"],
+      "expected": "1.2.9"
+    },
+    {
+      "id": "tilde-0_x",
+      "range": "~0.2",
+      "prerelease_optin": false,
+      "tags": ["0.2.0", "0.2.7", "0.3.0"],
+      "expected": "0.2.7"
+    },
+    {
+      "id": "gte-range",
+      "range": ">=1.0.0 <2.0.0",
+      "prerelease_optin": false,
+      "tags": ["0.9.9", "1.0.0", "1.5.0", "1.9.9", "2.0.0"],
+      "expected": "1.9.9"
+    },
+    {
+      "id": "comma-and",
+      "range": ">=1.0.0, <1.5.0",
+      "prerelease_optin": false,
+      "tags": ["0.9.0", "1.0.0", "1.4.9", "1.5.0", "1.6.0"],
+      "expected": "1.4.9"
+    },
+    {
+      "id": "or-union",
+      "range": "1.x || >=2.5.0 <3.0.0",
+      "prerelease_optin": false,
+      "tags": ["1.0.0", "1.9.9", "2.0.0", "2.4.0", "2.5.0", "2.9.9", "3.0.0"],
+      "expected": "2.9.9"
+    },
+    {
+      "id": "prerelease-excluded-default",
+      "range": "^1.0.0",
+      "prerelease_optin": false,
+      "tags": ["1.0.0", "1.1.0-rc.1", "1.1.0"],
+      "expected": "1.1.0"
+    },
+    {
+      "id": "prerelease-in-range-allows-same-tuple",
+      "range": ">=1.1.0-alpha <1.2.0",
+      "prerelease_optin": false,
+      "tags": ["1.0.9", "1.1.0-alpha", "1.1.0-beta", "1.1.0", "1.1.5"],
+      "expected": "1.1.5"
+    },
+    {
+      "id": "prerelease-optin-field",
+      "range": "^1.0.0",
+      "prerelease_optin": true,
+      "tags": ["1.0.0", "1.1.0-rc.1", "1.1.0-rc.2"],
+      "expected": "1.1.0-rc.2"
+    },
+    {
+      "id": "build-metadata-ignored",
+      "range": "1.2.3",
+      "prerelease_optin": false,
+      "tags": ["1.2.3+build.1", "1.2.3+build.42"],
+      "expected": "1.2.3+build.42",
+      "note": "Build metadata is ignored for precedence; ordering is by string per semver 2.0.0 section 10 (informative; ranges treat all 1.2.3+* as 1.2.3)."
+    },
+    {
+      "id": "build-metadata-tiebreak-ascii-highest",
+      "spec_anchor": "req-rs-014",
+      "range": "^1.2.3",
+      "prerelease_optin": false,
+      "tags": ["1.2.3+alpha", "1.2.3+zeta", "1.2.3+build.42"],
+      "expected": "1.2.3+zeta",
+      "note": "Two tags have equal semver precedence (differ only in build metadata); req-rs-014 mandates the bytewise-ASCII-highest full tag string ('1.2.3+zeta' > '1.2.3+build.42' > '1.2.3+alpha')."
+    },
+    {
+      "id": "empty-set",
+      "range": "^99.0.0",
+      "prerelease_optin": false,
+      "tags": ["1.0.0", "2.0.0", "3.0.0"],
+      "expected": null
+    }
+  ]
+}

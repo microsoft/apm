@@ -261,6 +261,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         # Mock dispatch table to skip integration loops
@@ -339,6 +340,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -387,6 +389,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -434,6 +437,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         # ctx=None should not raise
@@ -482,6 +486,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -535,6 +540,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -594,6 +600,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(

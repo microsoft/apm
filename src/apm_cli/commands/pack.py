@@ -217,14 +217,6 @@ def _parse_marketplace_filter(
     ),
 )
 @click.option(
-    "--marketplace-output",
-    "marketplace_output",
-    type=click.Path(),
-    default=None,
-    hidden=True,
-    help=("[Deprecated] Override Claude output path. Use --marketplace-path claude=PATH instead."),
-)
-@click.option(
     "-m",
     "--marketplace",
     "marketplace_filter",
@@ -276,7 +268,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     verbose,
     offline,
     include_prerelease,
-    marketplace_output,
     marketplace_filter,
     marketplace_path_overrides,
     json_output,
@@ -290,20 +281,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         set_console_stderr(True)
 
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
-
-    # -- Deprecation: --marketplace-output -> --marketplace-path claude=PATH --
-    if marketplace_output is not None:
-        translated = f"--marketplace-path claude={marketplace_output}"
-        click.echo(
-            f"Warning: --marketplace-output is deprecated and will be removed in v0.15. "
-            f"Use {translated} instead.",
-            err=True,
-        )
-        marketplace_path_overrides = (
-            *marketplace_path_overrides,
-            f"claude={marketplace_output}",
-        )
-        marketplace_output = None
 
     # -- Parse --marketplace-path overrides --
     path_overrides_result = _parse_path_overrides(marketplace_path_overrides, ctx, json_output)
@@ -346,7 +323,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         bundle_force=force,
         marketplace_offline=offline,
         marketplace_include_prerelease=include_prerelease,
-        marketplace_output=None,
         marketplace_formats=marketplace_formats,
         marketplace_path_overrides=path_overrides if path_overrides else None,
         dry_run=dry_run,
@@ -438,7 +414,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                     dry_run=True,
                     offline=options.marketplace_offline,
                     include_prerelease=options.marketplace_include_prerelease,
-                    marketplace_output=None,
                 )
                 drift_builder = MarketplaceBuilder.from_config(
                     gate_config, project_root=project_root, options=mkt_opts
@@ -463,11 +438,13 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                                 logger.info(f"    {out.path}  [unchanged]")
                             elif out.status == "missing":
                                 logger.info(f"    {out.path}  [missing on disk; would be created]")
+                                _emit_drift_recipe(logger, out.path)
                             else:
                                 count = len(out.differences)
                                 logger.info(f"    {out.path}  [drift: {count} differences]")
                                 for line in render_diff_lines(out):
                                     logger.info(line)
+                                _emit_drift_recipe(logger, out.path)
                     for msg in d_report.error_messages():
                         gate_errors.append({"code": "marketplace_drift", "message": msg})
 
@@ -510,6 +487,30 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         ctx.exit(3)
     if drift_gate_failed:
         ctx.exit(4)
+
+
+def _emit_drift_recipe(logger, out_path: str) -> None:
+    """Emit the canonical recovery recipe when marketplace.json drift is detected.
+
+    Teaches producers the amend+force-with-lease pattern so they can fix the
+    drift without a noisy follow-up commit.
+    """
+    logger.info("")
+    logger.info("    To recover cleanly (fold into the current commit):")
+    logger.info("")
+    logger.info("      apm pack                       # regenerate locally")
+    logger.info(f"      git add -- {out_path}")
+    logger.info("      git commit --amend --no-edit   # fold into the current commit")
+    logger.info("      git push --force-with-lease    # safe re-push")
+    logger.info("")
+    logger.info("    Or as a follow-up commit:")
+    logger.info("")
+    logger.info(f"      apm pack && git add -- {out_path}")
+    logger.info("      git commit -m 'chore(marketplace): regen'")
+    logger.info("")
+    logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")
+    logger.info("    so consumers can resolve packages without running 'apm pack'. CI")
+    logger.info("    enforces that the checked-in copy matches the apm.yml source of truth.")
 
 
 def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
@@ -638,7 +639,7 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
     name="unpack",
     help=(
         "[Deprecated] Extract an APM bundle into the current project. "
-        "Use 'apm install <bundle-path>' instead -- this command will be removed in v0.14."
+        "Use 'apm install <bundle-path>' instead -- this command will be removed in a future release."
     ),
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
@@ -665,7 +666,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
     logger.warning(
-        "'apm unpack' is deprecated and will be removed in v0.14. "
+        "'apm unpack' is deprecated and will be removed in a future release. "
         "Use 'apm install <bundle-path>' instead.",
     )
     try:

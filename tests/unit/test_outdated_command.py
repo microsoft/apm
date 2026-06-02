@@ -423,6 +423,93 @@ class TestOutdatedCommand:
             assert "art/pkg" not in result.output
             assert mock_downloader.list_remote_refs.call_count == 1
 
+    # --- Registry dep ---
+
+    @patch("apm_cli.deps.registry.outdated.make_auth_context")
+    @patch("apm_cli.deps.registry.outdated.RegistryClient")
+    @patch(_PATCH_AUTH)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_MIGRATE)
+    @patch(_PATCH_GET_LOCKFILE_PATH)
+    @patch(_PATCH_GET_APM_DIR)
+    @patch(_PATCH_LOCKFILE)
+    def test_registry_dep_shows_outdated(
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
+        mock_client_cls,
+        mock_make_auth,
+        monkeypatch,
+    ):
+        """Registry lockfile deps compare locked version against manifest range best."""
+        import apm_cli.config as _conf
+        from apm_cli.deps.registry.client import VersionEntry
+        from apm_cli.models.apm_package import clear_apm_yml_cache
+
+        monkeypatch.setattr(
+            _conf,
+            "_config_cache",
+            {"experimental": {"registries": True}},
+        )
+
+        with self._chdir_tmp() as tmp:
+            mock_get_apm_dir.return_value = tmp
+            mock_get_path.return_value = tmp / "apm.lock.yaml"
+
+            clear_apm_yml_cache()
+            (tmp / "apm.yml").write_text(
+                "name: demo\n"
+                "version: 1.0.0\n"
+                "registries:\n"
+                "  corp:\n"
+                "    url: https://reg.example.com/apm\n"
+                "  default: corp\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - nadavy/e2e-demo#^1.0.0\n"
+            )
+
+            deps = {
+                "nadavy/e2e-demo": LockedDependency(
+                    repo_url="nadavy/e2e-demo",
+                    source="registry",
+                    version="1.0.1",
+                ),
+            }
+            mock_lf_cls.read.return_value = _make_lockfile(deps)
+
+            mock_downloader = MagicMock()
+            mock_dl_cls.return_value = mock_downloader
+
+            mock_client = MagicMock()
+            mock_client.list_versions.return_value = [
+                VersionEntry(
+                    version="1.0.1",
+                    digest="sha256:a",
+                    published_at="2026-01-01T00:00:00Z",
+                ),
+                VersionEntry(
+                    version="1.1.1",
+                    digest="sha256:b",
+                    published_at="2026-02-01T00:00:00Z",
+                ),
+            ]
+            mock_client_cls.return_value = mock_client
+
+            result = self.runner.invoke(cli, ["outdated"])
+
+            assert result.exit_code == 0
+            assert "nadavy/e2e-demo" in result.output
+            assert "1.0.1" in result.output
+            assert "1.1.1" in result.output
+            assert "outdated" in result.output.lower()
+            mock_downloader.list_remote_refs.assert_not_called()
+            mock_client.list_versions.assert_called_once_with("nadavy", "e2e-demo")
+
     # --- Error fetching refs for one dep (graceful degradation) ---
 
     @patch(_PATCH_AUTH)

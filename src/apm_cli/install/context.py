@@ -96,7 +96,14 @@ class InstallContext:
     # Pre-integrate inputs (populated by caller before integrate phase)
     # ------------------------------------------------------------------
     diagnostics: Any = None  # DiagnosticCollector
-    registry_config: Any = None  # RegistryConfig
+    registry_config: Any = None  # RegistryConfig (proxy registry; pre-existing)
+    registry_resolver: Any = None  # RegistryPackageResolver -- dedicated registry resolver
+    # Per-dep git-source semver resolutions (issue #1488). Keyed by
+    # dep_key (DependencyReference.get_unique_key()), populated by the
+    # BFS download_callback when a git-source dep has ref_kind == "semver",
+    # consumed by install/sources.py to plumb the resolution into the
+    # lockfile via InstalledPackage.git_semver_resolution.
+    git_semver_resolutions: dict[str, Any] = field(default_factory=dict)
     managed_files: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------
@@ -106,6 +113,7 @@ class InstallContext:
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
+    content_hash_verified_deps: set[str] = field(default_factory=set)
     # Deps whose content hash is expected to change legitimately:
     # populated by _resolve_download_strategy in phases/integrate.py
     # (branch-ref `remote_drifted` guard and v<=0.12.2 self-heal block),

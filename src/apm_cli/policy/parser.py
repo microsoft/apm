@@ -10,6 +10,7 @@ import yaml
 
 from .schema import (
     ApmPolicy,
+    BinDeployPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -18,6 +19,7 @@ from .schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    RegistrySourcePolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -44,6 +46,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "compilation",
     "manifest",
     "unmanaged_files",
+    "bin_deploy",
 }
 
 
@@ -118,6 +121,9 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                 errors.append(f"dependencies.max_depth must be a positive integer, got '{md}'")
             elif md <= 0:
                 errors.append(f"dependencies.max_depth must be a positive integer, got {md}")
+        rpc = deps.get("require_pinned_constraint")
+        if rpc is not None and not isinstance(rpc, bool):
+            errors.append(f"dependencies.require_pinned_constraint must be a boolean, got '{rpc}'")
 
     # mcp.self_defined
     mcp = data.get("mcp")
@@ -185,6 +191,9 @@ def _build_policy(data: dict) -> ApmPolicy:
         else _parse_tuple(deps_data["require"]),
         require_resolution=deps_data.get("require_resolution", DependencyPolicy.require_resolution),
         max_depth=deps_data.get("max_depth", DependencyPolicy.max_depth),
+        require_pinned_constraint=bool(
+            deps_data.get("require_pinned_constraint", DependencyPolicy.require_pinned_constraint)
+        ),
     )
 
     mcp_data = data.get("mcp") or {}
@@ -232,6 +241,18 @@ def _build_policy(data: dict) -> ApmPolicy:
         directories = _parse_tuple(uf_data.get("directories")) if "directories" in uf_data else None
         unmanaged_files = UnmanagedFilesPolicy(action=action, directories=directories)
 
+    reg_data = data.get("registry_source") or {}
+    registry_source = RegistrySourcePolicy(
+        require=_parse_tuple(reg_data.get("require")),
+        allow_non_registry=bool(reg_data.get("allow_non_registry", True)),
+    )
+
+    bd_data = data.get("bin_deploy") or {}
+    bin_deploy = BinDeployPolicy(
+        deny_all=bool(bd_data.get("deny_all", False)),
+        deny=_parse_tuple(bd_data.get("deny")) if bd_data.get("deny") is not None else (),
+    )
+
     return ApmPolicy(
         name=data.get("name", "") or "",
         version=data.get("version", "") or "",
@@ -244,6 +265,8 @@ def _build_policy(data: dict) -> ApmPolicy:
         compilation=compilation,
         manifest=manifest,
         unmanaged_files=unmanaged_files,
+        registry_source=registry_source,
+        bin_deploy=bin_deploy,
     )
 
 

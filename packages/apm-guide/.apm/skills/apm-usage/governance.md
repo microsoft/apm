@@ -28,6 +28,7 @@ dependencies:
   require: []                           # required packages
   require_resolution: project-wins      # project-wins | policy-wins | block
   max_depth: 50                         # transitive depth limit
+  require_pinned_constraint: false      # when true, ban unbounded dep ranges (NO_REF, '*', bare branch, '>=X' without upper bound)
 
 mcp:
   allow: []                             # allowed server patterns
@@ -55,7 +56,66 @@ manifest:
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
+
+registry_source:                        # experimental: requires `apm experimental enable registries`
+  require: []                           # registry names that MUST be reachable in the merged registry map
+  allow_non_registry: true              # when false, blocks any dep not routed through a configured registry
+
+bin_deploy:                             # marketplace_plugin bin/ executable deployment (Claude, global installs)
+  deny_all: false                       # when true, suppress bin/ deploy for every plugin
+  deny: []                              # canonical strings (owner/name) whose bin/ must not deploy
 ```
+
+## Registry source governance (experimental)
+
+Gate dependency sources to REST-based APM registries declared via the
+`registries:` block in `apm.yml` (or in `~/.apm/config.json`). Applies
+to direct AND transitive dependencies.
+
+```yaml
+# .github/apm-policy.yml
+registry_source:
+  require:
+    - corp-main                         # this registry MUST be reachable
+  allow_non_registry: false             # block any dep not routed through a registry
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `require` | `[]` | Registry names that MUST appear in the merged registry map (project `apm.yml` + workspace `~/.apm/apm.yml` + `~/.apm/config.json`). Fail-closed if a listed name has no URL. |
+| `allow_non_registry` | `true` | When `false`, every dep MUST be routed through a configured registry; git-shorthand and `- git:` deps are blocked at install time. |
+
+The check fires from all four call sites (`policy_gate`,
+`policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
+`apm install`, `apm install <pkg>`, `apm deps update`, and
+`apm audit --ci` all enforce the same gate.
+
+## Plugin bin/ deployment governance
+
+When a `marketplace_plugin` package ships a `bin/` directory, a global
+install (`apm install -g`) deploys those executables into
+`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
+commands (the skills-directory plugin contract). Deployment is
+Claude-only and user-scope only; project-scope installs never deploy
+executables.
+
+```yaml
+# .github/apm-policy.yml
+bin_deploy:
+  deny_all: true                        # block every plugin's bin/ deploy org-wide
+  # or target specific packages:
+  deny:
+    - myorg/untrusted-plugin            # canonical owner/name string
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `deny_all` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin`, regardless of `deny`. |
+| `deny` | `[]` | Canonical package strings (`owner/name`) whose bin/ executables must not deploy. |
+
+Deployed executables are placed on Claude Code's `PATH` and invoked
+without further confirmation, so use this field to opt out in
+environments where plugin executables are not trusted by default.
 
 ## Local content governance
 
@@ -90,6 +150,7 @@ list (removing entries the parent set). All other fields obey the rules below:
 | Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `max_depth` | `min(parent, child)` |
+| `require_pinned_constraint` | Logical OR (once enabled, child cannot relax) |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `source_attribution` | `parent OR child` (either enables) |
 
@@ -382,6 +443,7 @@ Violation classes:
 | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
 | `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
+| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal `vX.Y.Z` tag, or a full SHA. Roll out enforcement with `warn` before `block`. |
 | `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |

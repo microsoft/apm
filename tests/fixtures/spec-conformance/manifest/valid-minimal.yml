@@ -1,0 +1,4 @@
+# Exercises: req-mf-001, req-mf-002, req-mf-003, req-mf-004
+# Valid minimal manifest: top-level mapping with name + version.
+name: my-project
+version: "1.0.0"

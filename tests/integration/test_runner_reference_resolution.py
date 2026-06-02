@@ -35,7 +35,7 @@ def _dep_ref():
 
 
 # ============================================================================
-# SECTION 1 – DependencyReference: basic shorthand parsing
+# SECTION 1 - DependencyReference: basic shorthand parsing
 # ============================================================================
 
 
@@ -105,7 +105,7 @@ class TestParseShorthand:
 
 
 # ============================================================================
-# SECTION 2 – DependencyReference: HTTPS URL parsing
+# SECTION 2 - DependencyReference: HTTPS URL parsing
 # ============================================================================
 
 
@@ -148,7 +148,8 @@ class TestParseHttpsUrls:
         ref = DR.parse("https://gitlab.com/owner/repo.git")
         canonical = ref.to_canonical()
         # Non-default host must appear in canonical form
-        assert "gitlab.com" in canonical
+        host = canonical.split("/", 1)[0]
+        assert host == "gitlab.com"
 
     def test_http_insecure_url_sets_flag(self) -> None:
         DR = _dep_ref()
@@ -163,7 +164,7 @@ class TestParseHttpsUrls:
 
 
 # ============================================================================
-# SECTION 3 – DependencyReference: SSH URL parsing
+# SECTION 3 - DependencyReference: SSH URL parsing
 # ============================================================================
 
 
@@ -230,7 +231,7 @@ class TestParseSshUrls:
 
 
 # ============================================================================
-# SECTION 4 – DependencyReference: virtual packages
+# SECTION 4 - DependencyReference: virtual packages
 # ============================================================================
 
 
@@ -314,7 +315,7 @@ class TestVirtualPackages:
 
 
 # ============================================================================
-# SECTION 5 – DependencyReference: local paths
+# SECTION 5 - DependencyReference: local paths
 # ============================================================================
 
 
@@ -381,7 +382,7 @@ class TestLocalPaths:
 
 
 # ============================================================================
-# SECTION 6 – DependencyReference: to_canonical / get_identity
+# SECTION 6 - DependencyReference: to_canonical / get_identity
 # ============================================================================
 
 
@@ -399,7 +400,7 @@ class TestCanonicalAndIdentity:
         DR = _dep_ref()
         ref = DR.parse("https://gitlab.com/owner/repo.git")
         canonical = ref.to_canonical()
-        assert "gitlab.com" in canonical
+        assert canonical.split("/", 1)[0] == "gitlab.com"
 
     def test_canonical_appends_ref(self) -> None:
         DR = _dep_ref()
@@ -445,7 +446,7 @@ class TestCanonicalAndIdentity:
 
 
 # ============================================================================
-# SECTION 7 – DependencyReference: to_github_url / to_apm_yml_entry
+# SECTION 7 - DependencyReference: to_github_url / to_apm_yml_entry
 # ============================================================================
 
 
@@ -519,7 +520,7 @@ class TestToGithubUrlAndApmYmlEntry:
 
 
 # ============================================================================
-# SECTION 8 – DependencyReference: get_install_path
+# SECTION 8 - DependencyReference: get_install_path
 # ============================================================================
 
 
@@ -581,7 +582,7 @@ class TestGetInstallPath:
 
 
 # ============================================================================
-# SECTION 9 – DependencyReference: Azure DevOps parsing
+# SECTION 9 - DependencyReference: Azure DevOps parsing
 # ============================================================================
 
 
@@ -620,7 +621,7 @@ class TestAzureDevOpsParsing:
 
 
 # ============================================================================
-# SECTION 10 – DependencyReference: parse_from_dict
+# SECTION 10 - DependencyReference: parse_from_dict
 # ============================================================================
 
 
@@ -671,7 +672,7 @@ class TestParseFromDict:
 
     def test_missing_git_and_path_raises(self) -> None:
         DR = _dep_ref()
-        with pytest.raises(ValueError, match="'git' or 'path' field"):
+        with pytest.raises(ValueError, match=r"'git', 'path', or 'registry' field"):
             DR.parse_from_dict({"version": "1.0"})
 
     def test_allow_insecure_non_bool_raises(self) -> None:
@@ -713,7 +714,7 @@ class TestParseFromDict:
 
 
 # ============================================================================
-# SECTION 11 – DependencyReference: GitLab shorthand helpers
+# SECTION 11 - DependencyReference: GitLab shorthand helpers
 # ============================================================================
 
 
@@ -800,7 +801,7 @@ class TestGitlabShorthandHelpers:
 
 
 # ============================================================================
-# SECTION 12 – DependencyReference: display name and __str__
+# SECTION 12 - DependencyReference: display name and __str__
 # ============================================================================
 
 
@@ -833,11 +834,11 @@ class TestDisplayNameAndStr:
         DR = _dep_ref()
         ref = DR.parse("https://gitlab.com/owner/repo.git")
         s = str(ref)
-        assert "gitlab.com" in s
+        assert s.split("/", 1)[0] == "gitlab.com"
 
 
 # ============================================================================
-# SECTION 13 – PromptCompiler: compile and parameter substitution
+# SECTION 13 - PromptCompiler: compile and parameter substitution
 # ============================================================================
 
 
@@ -949,7 +950,7 @@ class TestPromptCompiler:
 
 
 # ============================================================================
-# SECTION 14 – ScriptRunner: list_scripts and _load_config
+# SECTION 14 - ScriptRunner: list_scripts and _load_config
 # ============================================================================
 
 
@@ -1002,7 +1003,7 @@ class TestScriptRunnerConfig:
 
 
 # ============================================================================
-# SECTION 15 – ScriptRunner: runtime detection helpers
+# SECTION 15 - ScriptRunner: runtime detection helpers
 # ============================================================================
 
 
@@ -1111,7 +1112,7 @@ class TestScriptRunnerRuntimeDetection:
 
 
 # ============================================================================
-# SECTION 16 – ScriptRunner: _detect_installed_runtime
+# SECTION 16 - ScriptRunner: _detect_installed_runtime
 # ============================================================================
 
 
@@ -1152,7 +1153,7 @@ class TestDetectInstalledRuntime:
 
 
 # ============================================================================
-# SECTION 17 – ScriptRunner: _generate_runtime_command
+# SECTION 17 - ScriptRunner: _generate_runtime_command
 # ============================================================================
 
 
@@ -1194,7 +1195,7 @@ class TestGenerateRuntimeCommand:
 
 
 # ============================================================================
-# SECTION 18 – ScriptRunner: _transform_runtime_command
+# SECTION 18 - ScriptRunner: _transform_runtime_command
 # ============================================================================
 
 
@@ -1262,7 +1263,7 @@ class TestTransformRuntimeCommand:
 
 
 # ============================================================================
-# SECTION 19 – ScriptRunner: _discover_prompt_file
+# SECTION 19 - ScriptRunner: _discover_prompt_file
 # ============================================================================
 
 
@@ -1347,7 +1348,7 @@ class TestDiscoverPromptFile:
 
 
 # ============================================================================
-# SECTION 20 – ScriptRunner: _is_virtual_package_reference
+# SECTION 20 - ScriptRunner: _is_virtual_package_reference
 # ============================================================================
 
 
@@ -1387,7 +1388,7 @@ class TestIsVirtualPackageReference:
 
 
 # ============================================================================
-# SECTION 21 – ScriptRunner: run_script with explicit scripts
+# SECTION 21 - ScriptRunner: run_script with explicit scripts
 # ============================================================================
 
 
@@ -1456,7 +1457,7 @@ class TestRunScriptExplicit:
 
 
 # ============================================================================
-# SECTION 22 – ScriptRunner: auto-compile path in _auto_compile_prompts
+# SECTION 22 - ScriptRunner: auto-compile path in _auto_compile_prompts
 # ============================================================================
 
 
@@ -1501,7 +1502,7 @@ class TestAutoCompilePrompts:
 
 
 # ============================================================================
-# SECTION 23 – ScriptRunner: _collect_dependency_dirs
+# SECTION 23 - ScriptRunner: _collect_dependency_dirs
 # ============================================================================
 
 
@@ -1544,7 +1545,7 @@ class TestCollectDependencyDirs:
 
 
 # ============================================================================
-# SECTION 24 – ScriptRunner: _add_dependency_to_config
+# SECTION 24 - ScriptRunner: _add_dependency_to_config
 # ============================================================================
 
 
@@ -1587,7 +1588,7 @@ class TestAddDependencyToConfig:
 
 
 # ============================================================================
-# SECTION 25 – ScriptRunner: _create_minimal_config
+# SECTION 25 - ScriptRunner: _create_minimal_config
 # ============================================================================
 
 

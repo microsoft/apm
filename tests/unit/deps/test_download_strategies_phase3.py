@@ -27,6 +27,7 @@ import json
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 import requests
@@ -406,7 +407,7 @@ class TestBuildRepoUrl:
             backend.build_clone_https_url.return_value = "https://ghes.company.com/owner/repo.git"
             mock_backend_for.return_value = backend
             url = d.build_repo_url("owner/repo", dep_ref=dep)
-        assert "ghes.company.com" in url
+        assert urlparse(url).hostname == "ghes.company.com"
 
     def test_ado_backend_without_org_falls_to_generic(self) -> None:
         """ADO dep_ref missing ado_organization must fall through to generic GitHub-style URL."""
@@ -1370,7 +1371,7 @@ class TestBuildContentsApiUrls:
         from urllib.parse import urlparse
 
         parsed = urlparse(urls[0])
-        assert "myorg.ghe.com" in parsed.netloc
+        assert parsed.hostname == "myorg.ghe.com"
 
     def test_ghes_custom_uses_host_api_v3(self) -> None:
         with patch.dict("os.environ", {"GITHUB_HOST": "ghes.company.com"}):
@@ -1383,21 +1384,21 @@ class TestBuildContentsApiUrls:
                 is_github_host=True,
             )
         assert len(urls) >= 1
-        assert "ghes.company.com" in urls[0]
+        assert urlparse(urls[0]).hostname == "ghes.company.com"
 
     def test_generic_host_returns_multiple_candidates(self) -> None:
         urls = DownloadDelegate._build_contents_api_urls(
             "gitea.myorg.com", "owner", "repo", "apm.yml", "main"
         )
         assert len(urls) >= 1
-        assert "gitea.myorg.com" in urls[0]
+        assert urlparse(urls[0]).hostname == "gitea.myorg.com"
 
     def test_is_github_host_none_auto_detected(self) -> None:
         """When is_github_host=None, github.com is auto-detected as GitHub."""
         urls = DownloadDelegate._build_contents_api_urls(
             "github.com", "owner", "repo", "apm.yml", "main", is_github_host=None
         )
-        assert "api.github.com" in urls[0]
+        assert urlparse(urls[0]).hostname == "api.github.com"
 
 
 # ---------------------------------------------------------------------------

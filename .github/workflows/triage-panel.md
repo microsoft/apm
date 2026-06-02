@@ -105,6 +105,34 @@ imports:
 tools:
   github:
     toolsets: [default]
+    # Integrity exemption for external contributor issues.
+    #
+    # Write-class safe-outputs (add-comment, add-labels, remove-labels,
+    # assign-milestone, dispatch-workflow) cause gh-aw's integrity
+    # filter to elevate the minimum integrity for MCP reads to
+    # `approved` by default on public repos. Issues filed by external
+    # contributors (FIRST_TIME_CONTRIBUTOR / NONE author association)
+    # are assigned `unapproved` or `none` integrity, so search_issues
+    # silently drops them while get_issue fails with
+    # McpError: MCP error 0: [Filtered] -- making the triage panel
+    # blind to the exact issues it exists to triage.
+    #
+    # Setting min-integrity to `none` restores visibility of all public
+    # issues regardless of author affiliation. This is safe because:
+    #   (a) the panel only READS issue content for classification -- it
+    #       never executes, evals, or re-emits raw body text;
+    #   (b) prompt-injection rails (BATCH_ALLOW_LIST, body-size cap,
+    #       spam filter) are enforced in the prompt, not in the
+    #       integrity filter; and
+    #   (c) write actions are still gated by safe-outputs allow-lists.
+    #
+    # `allowed-repos` is pinned to the current repo so the integrity
+    # exemption does not also widen the read-scope to every repo the
+    # workflow token can reach. Without it, omitting `allowed-repos`
+    # defaults to `"all"` (per gh-aw integrity reference) -- a
+    # gratuitous blast-radius expansion if the agent is prompt-injected.
+    min-integrity: none
+    allowed-repos: ["microsoft/apm"]
   bash: true
 
 network:
@@ -202,25 +230,7 @@ safe-outputs:
       - project-sync
     max: 10
 
-# DIFC read-integrity exemption
-#
-# Write-class safe-outputs (add-comment, add-labels, remove-labels,
-# assign-milestone, dispatch-workflow) cause gh-aw's DIFC policy to
-# elevate the minimum integrity for MCP reads to HIGH. Issues filed by
-# external contributors (non-org-members) are assigned LOW integrity,
-# so search_issues silently drops them while get_issue fails with
-# McpError: MCP error 0: [Filtered] -- making the triage panel blind
-# to the exact issues it exists to triage.
-#
-# Setting read-integrity to `low` restores visibility of all public
-# issues regardless of author affiliation. This is safe because:
-#   (a) the panel only READS issue content for classification -- it
-#       never executes, evals, or re-emits raw body text;
-#   (b) prompt-injection rails (BATCH_ALLOW_LIST, body-size cap, spam
-#       filter) are enforced in the prompt, not in DIFC; and
-#   (c) write actions are still gated by safe-outputs allow-lists.
-difc:
-  read-integrity: low
+# (Integrity exemption is configured under tools.github.min-integrity above.)
 
 timeout-minutes: 30
 ---
@@ -292,7 +302,7 @@ fetch the full body again -- the cap is the cap.
 
 Find up to 10 untriaged open issues, **oldest first**, excluding
 bots. Use the MCP `search_issues` tool (authenticated via the gh-aw
-runtime; the `difc: read-integrity: low` exemption ensures external
+runtime; the `tools.github.min-integrity: none` exemption ensures external
 contributor issues are not filtered) with a server-side filter that
 excludes already-triaged issues:
 
@@ -309,15 +319,15 @@ the candidates we care about. With `list_issues` we'd have to
 paginate the entire open-issue queue and filter the triaged label
 client-side, which is wasteful and error-prone.
 
-**DIFC note:** Write-class safe-outputs (add-comment, add-labels,
-etc.) normally elevate the MCP read-integrity floor to HIGH, which
-would silently drop issues authored by external contributors (LOW
-integrity). The `difc: read-integrity: low` declaration in the
-workflow frontmatter exempts this workflow's MCP reads from that
-elevation. Without the exemption, `search_issues` and `get_issue`
-would return only org-member issues -- defeating the triage panel's
-purpose. See the `difc:` block in the frontmatter for the safety
-rationale.
+**Integrity note:** Write-class safe-outputs (add-comment, add-labels,
+etc.) normally elevate the MCP min-integrity floor to `approved`, which
+would silently drop issues authored by external contributors
+(`unapproved` or `none` integrity). The `tools.github.min-integrity: none`
+declaration in the workflow frontmatter exempts this workflow's MCP
+reads from that elevation. Without the exemption, `search_issues` and
+`get_issue` would return only org-member issues -- defeating the triage
+panel's purpose. See the `tools.github` block in the frontmatter for the
+safety rationale.
 
 The `sort:created-asc` qualifier returns oldest first, so the first
 30 results are the oldest untriaged issues -- exactly the queue we
@@ -371,8 +381,8 @@ rolled issue; just process the 10 you picked.
 
 The triggering issue is `#${{ github.event.issue.number }}`. Read it
 using the MCP `get_issue` tool (the `gh` CLI is not authenticated in
-the agent sandbox; MCP tools are authenticated and the `difc:
-read-integrity: low` exemption ensures external contributor issues
+the agent sandbox; MCP tools are authenticated and the
+`tools.github.min-integrity: none` exemption ensures external contributor issues
 are visible):
 
 ```

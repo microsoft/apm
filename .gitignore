@@ -12,6 +12,7 @@ __pycache__/
 .Python
 build/build/
 build/apm/
+build/conformance-coverage.json
 *.bak
 develop-eggs/
 dist/
@@ -80,3 +81,4 @@ scout-pipeline-result.png
 server.pid
 .docs-rewrite-plan/
 build/apm-*/
+copilot-scratch/

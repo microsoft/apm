@@ -78,7 +78,7 @@ SEED_APM_YML = (
 
 
 def _successful_install_result() -> InstallResult:
-    diag = MagicMock(has_diagnostics=False, has_critical_security=False)
+    diag = MagicMock(has_diagnostics=False, has_critical_security=False, error_count=0)
     return InstallResult(diagnostics=diag)
 
 

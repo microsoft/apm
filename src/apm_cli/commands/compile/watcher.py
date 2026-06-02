@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING, Any
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...primitives.discovery import PRIMITIVE_SUFFIXES, clear_discovery_cache
+from ...utils import perf_stats
+
+# Skill modules use a fixed filename (``SKILL.md``) rather than a suffix
+# pattern, so the watcher checks basename equality in addition to the
+# suffix membership test below.
+_SKILL_FILENAME = "SKILL.md"
 
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
@@ -67,6 +75,7 @@ class APMFileHandler:
         dry_run: bool,
         logger: CommandLogger,
         effective_target: CompileTargetType | None = None,
+        cli_target: str | list[str] | None = None,
     ) -> None:
         self.output = output
         self.chatmode = chatmode
@@ -74,6 +83,11 @@ class APMFileHandler:
         self.dry_run = dry_run
         self.logger = logger
         self.effective_target = effective_target
+        # Raw --target CLI argument retained so ``_recompile`` can
+        # re-run :func:`_resolve_effective_target` against the
+        # current apm.yml on every recompile, letting mid-session
+        # ``targets:`` edits take effect on the next file event.
+        self.cli_target = cli_target
         self.last_compile = 0.0
         self.debounce_delay = 1.0  # 1 second debounce
 
@@ -81,7 +95,21 @@ class APMFileHandler:
         if getattr(event, "is_directory", False):
             return
         src_path = getattr(event, "src_path", "")
-        if not src_path.endswith(".md") and not src_path.endswith(APM_YML_FILENAME):
+        # Smart filter: recompile only when the changed file is an APM
+        # primitive (matches one of LOCAL_PRIMITIVE_PATTERNS' suffixes, a
+        # SKILL.md basename, or the project manifest). Generic .md edits
+        # (README, CHANGELOG, AGENTS output) never affect compile output
+        # and would otherwise trigger a full discovery walk on every
+        # save. See #1533 follow-up.
+        basename = os.path.basename(src_path)
+        is_manifest = basename == APM_YML_FILENAME
+        is_skill = basename == _SKILL_FILENAME
+        is_primitive = any(src_path.endswith(suffix) for suffix in PRIMITIVE_SUFFIXES)
+        if not is_manifest and not is_primitive and not is_skill:
+            # Leave a verbose breadcrumb so --verbose watch sessions can
+            # see why an edit produced no recompile. Silent at default.
+            if src_path:
+                self.logger.verbose_detail(f"Skipping non-primitive change: {basename}")
             return
         current_time = time.time()
         if current_time - self.last_compile < self.debounce_delay:
@@ -95,12 +123,36 @@ class APMFileHandler:
             self.logger.progress(f"File changed: {changed_file}", symbol="eyes")
             self.logger.progress("Recompiling...", symbol="gear")
 
+            # The process-scoped discovery cache (populated by the previous
+            # compile pass) MUST be cleared before re-walking, otherwise
+            # subsequent recompiles serve the stale primitive set from
+            # before the edit. See #1533 follow-up. perf_stats counters
+            # are NOT reset here -- they accumulate across the watch
+            # session and are rendered once at teardown.
+            clear_discovery_cache()
+
+            # When apm.yml itself was the trigger, re-resolve so a
+            # mid-session edit to ``target:`` / ``targets:`` takes
+            # effect on this recompile, then persist the fresh value
+            # so subsequent instruction-file edits do not silently
+            # revert to the startup snapshot.  Match on basename
+            # rather than ``endswith`` so a stray ``backup_apm.yml``
+            # cannot masquerade as the project root manifest.
+            effective_target = self.effective_target
+            if os.path.basename(changed_file) == APM_YML_FILENAME:
+                from .cli import _resolve_effective_target
+
+                effective_target, _reason, _config_target = _resolve_effective_target(
+                    self.cli_target
+                )
+                self.effective_target = effective_target
+
             config = CompilationConfig.from_apm_yml(
                 output_path=self.output if self.output != AGENTS_MD_FILENAME else None,
                 chatmode=self.chatmode,
                 resolve_links=not self.no_links if self.no_links else None,
                 dry_run=self.dry_run,
-                target=self.effective_target,
+                target=effective_target,
             )
 
             compiler = AgentsCompiler(".")
@@ -129,15 +181,20 @@ def _watch_mode(
     effective_target: CompileTargetType | None = None,
     target_label_user: str | list[str] | None = None,
     target_label_config: str | list[str] | None = None,
+    cli_target: str | list[str] | None = None,
 ) -> None:
     """Watch for changes in .apm/ directories and auto-recompile.
 
     ``effective_target`` is the compiler-understood target resolved by
     :func:`apm_cli.commands.compile.cli._resolve_effective_target` (the
     same resolver the one-shot path uses) and is forwarded as ``target=``
-    into every :meth:`CompilationConfig.from_apm_yml` call so watch mode
-    honors ``targets: [claude, cursor]`` instead of silently fanning out
-    to all families on every recompile (#1345).
+    into the initial compile so the startup label matches the one-shot
+    path (#1345).
+
+    ``cli_target`` is the raw ``--target`` argument; recompiles re-run
+    the resolver against the current apm.yml so mid-session edits to
+    ``targets:`` take effect on the next file event without restarting
+    the watcher.
     """
     logger = CommandLogger("compile-watch", verbose=verbose, dry_run=dry_run)
 
@@ -159,6 +216,7 @@ def _watch_mode(
             dry_run,
             logger,
             effective_target=effective_target,
+            cli_target=cli_target,
         )
         observer = Observer()
 
@@ -202,6 +260,12 @@ def _watch_mode(
 
         logger.progress("Performing initial compilation...", symbol="gear")
 
+        # Watch mode is a long-lived process. Reset both the discovery
+        # cache and perf counters on entry so neither carries state from
+        # a sibling REPL/test run sharing this Python process.
+        clear_discovery_cache()
+        perf_stats.reset()
+
         config = CompilationConfig.from_apm_yml(
             output_path=output if output != AGENTS_MD_FILENAME else None,
             chatmode=chatmode,
@@ -212,6 +276,10 @@ def _watch_mode(
 
         compiler = AgentsCompiler(".")
         result = compiler.compile(config)
+
+        # NOTE: render_summary moved to the Ctrl+C teardown below so the
+        # watch session emits ONE aggregate perf block at exit instead of
+        # spamming a 5-6 line block after every recompile.
 
         if result.success:
             if dry_run:
@@ -232,6 +300,10 @@ def _watch_mode(
         except KeyboardInterrupt:
             observer.stop()
             logger.progress("Stopped watching for changes", symbol="info")
+            # Render aggregate perf counters accumulated across the
+            # session. Reset once at watch start (above), so this summary
+            # covers initial compile + every subsequent recompile.
+            perf_stats.render_summary(logger, project_root=".")
 
         observer.join()
 

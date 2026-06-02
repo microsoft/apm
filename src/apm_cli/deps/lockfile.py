@@ -3,11 +3,13 @@
 Provides deterministic, reproducible installs by capturing exact resolved versions.
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
@@ -16,6 +18,11 @@ from ..models.apm_package import DependencyReference
 logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    """Return values without duplicates, preserving first-seen order."""
+    return list(dict.fromkeys(values))
 
 
 @dataclass
@@ -37,7 +44,10 @@ class LockedDependency:
     deployed_files: list[str] = field(default_factory=list)
     deployed_file_hashes: dict[str, str] = field(default_factory=dict)
     source: str | None = None  # "local" for local deps, None/absent for remote
-    local_path: str | None = None  # Original local path (relative to project root)
+    local_path: str | None = None  # Original local path. Direct deps: relative to
+    # the project root (``./packages/foo``). Transitive deps: relative to the
+    # package that declared them (``../sibling``), anchored via ``resolved_by``
+    # (issue #857; see apm_cli.deps.path_anchoring).
     content_hash: str | None = None  # SHA-256 of package file tree
     is_dev: bool = False  # True for devDependencies
     discovered_via: str | None = None  # Marketplace name (provenance)
@@ -45,6 +55,28 @@ class LockedDependency:
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
+
+    # Registry resolver fields (design §6.1).
+    # Populated when source == "registry"; absent otherwise. resolved_hash is
+    # the sole non-negotiable trust anchor on every install — bytes are fetched
+    # from resolved_url and re-verified against this digest.
+    resolved_url: str | None = None
+    resolved_hash: str | None = None
+
+    # Git-source semver resolution fields (issue #1488).
+    # Populated when a git-source dependency carried a semver range
+    # (e.g. ``^1.2.0``) that the install pipeline resolved against the
+    # remote's tags. Lockfile version stays at "2" -- these fields are
+    # purely additive and forward-compatible with old readers (which
+    # ignore unknown keys via the explicit ``from_dict`` allowlist).
+    constraint: str | None = None
+    resolved_tag: str | None = None
+    resolved_at: str | None = None
+    # Forward-compat carrier: keys we don't recognise are preserved
+    # through a from_dict / to_dict round-trip so an older APM build
+    # reading a lockfile written by a newer build doesn't silently drop
+    # fields when it re-emits.
+    _unknown_fields: dict[str, Any] = field(default_factory=dict)
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -80,7 +112,7 @@ class LockedDependency:
         if self.package_type:
             result["package_type"] = self.package_type
         if self.deployed_files:
-            result["deployed_files"] = sorted(self.deployed_files)
+            result["deployed_files"] = sorted(_dedupe_preserving_order(self.deployed_files))
         if self.deployed_file_hashes:
             result["deployed_file_hashes"] = dict(sorted(self.deployed_file_hashes.items()))
         if self.source:
@@ -101,17 +133,31 @@ class LockedDependency:
             result["allow_insecure"] = True
         if self.skill_subset:
             result["skill_subset"] = sorted(self.skill_subset)
+        if self.resolved_url:
+            result["resolved_url"] = self.resolved_url
+        if self.resolved_hash:
+            result["resolved_hash"] = self.resolved_hash
+        if self.constraint:
+            result["constraint"] = self.constraint
+        if self.resolved_tag:
+            result["resolved_tag"] = self.resolved_tag
+        if self.resolved_at:
+            result["resolved_at"] = self.resolved_at
+        # Replay forward-compat unknown fields LAST so they never shadow a
+        # known field that this build understands.
+        for k, v in self._unknown_fields.items():
+            result.setdefault(k, v)
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LockedDependency":
+    def from_dict(cls, data: dict[str, Any]) -> LockedDependency:
         """Deserialize from dict.
 
         Handles backwards compatibility:
         - Old ``deployed_skills`` lists are migrated to ``deployed_files``
           paths under ``.github/skills/`` and ``.claude/skills/``.
         """
-        deployed_files = list(data.get("deployed_files", []))
+        deployed_files = _dedupe_preserving_order(list(data.get("deployed_files", [])))
 
         # Migrate legacy deployed_skills -> deployed_files
         old_skills = data.get("deployed_skills", [])
@@ -130,6 +176,44 @@ class LockedDependency:
                 _p_int = None
             if _p_int is not None and 1 <= _p_int <= 65535:
                 port = _p_int
+
+        # Recognised keys this build knows about. Anything else is captured
+        # as ``_unknown_fields`` so a re-emit preserves forward-introduced
+        # fields rather than silently dropping them. ``deployed_skills`` is
+        # the explicit legacy key handled above; do NOT consider it unknown.
+        _known_keys = {
+            "repo_url",
+            "host",
+            "port",
+            "registry_prefix",
+            "resolved_commit",
+            "resolved_ref",
+            "version",
+            "virtual_path",
+            "is_virtual",
+            "depth",
+            "resolved_by",
+            "package_type",
+            "deployed_files",
+            "deployed_file_hashes",
+            "source",
+            "local_path",
+            "content_hash",
+            "is_dev",
+            "discovered_via",
+            "marketplace_plugin_name",
+            "is_insecure",
+            "allow_insecure",
+            "skill_subset",
+            "resolved_url",
+            "resolved_hash",
+            "constraint",
+            "resolved_tag",
+            "resolved_at",
+            # legacy migration key handled above
+            "deployed_skills",
+        }
+        unknown_fields = {k: v for k, v in data.items() if k not in _known_keys}
 
         return cls(
             repo_url=data["repo_url"],
@@ -155,6 +239,12 @@ class LockedDependency:
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
+            resolved_url=data.get("resolved_url"),
+            resolved_hash=data.get("resolved_hash"),
+            constraint=data.get("constraint"),
+            resolved_tag=data.get("resolved_tag"),
+            resolved_at=data.get("resolved_at"),
+            _unknown_fields=unknown_fields,
         )
 
     @classmethod
@@ -166,7 +256,9 @@ class LockedDependency:
         resolved_by: str | None,
         is_dev: bool = False,
         registry_config=None,
-    ) -> "LockedDependency":
+        registry_resolution=None,
+        git_semver_resolution=None,
+    ) -> LockedDependency:
         """Create from a DependencyReference with resolution info.
 
         Args:
@@ -176,29 +268,85 @@ class LockedDependency:
             resolved_by: Parent repo URL, or ``None`` for direct dependencies.
             is_dev: Whether this is a dev-only dependency.
             registry_config: Optional :class:`~apm_cli.deps.registry_proxy.RegistryConfig`
-                used for this download.  When provided, ``host`` is set to the
-                pure FQDN (e.g. ``"art.example.com"``) and ``registry_prefix``
-                is set to the URL path prefix (e.g. ``"artifactory/github"``),
-                ensuring correct auth routing on subsequent installs.
+                used for this download (Artifactory VCS proxy — pre-existing
+                concept, distinct from the new dedicated-registry resolver).
+                When provided, ``host`` is set to the pure FQDN and
+                ``registry_prefix`` to the URL path prefix.
+            registry_resolution: Optional :class:`~apm_cli.deps.registry.resolver.RegistryResolution`
+                produced by the dedicated-registry resolver. When provided,
+                ``source`` is set to ``"registry"`` and ``resolved_url`` /
+                ``resolved_hash`` / ``version`` are populated from it (the
+                trust anchor for re-installs per design §6.1).
+            git_semver_resolution: Optional
+                :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolution`
+                produced when a git-source dep had a semver range as ``ref:``.
+                When provided, ``constraint`` / ``resolved_tag`` /
+                ``resolved_at`` are populated and ``resolved_ref`` is set
+                to the concrete tag (issue #1488). Mutually exclusive with
+                ``registry_resolution``.
+
+        Raises:
+            ValueError: When both ``registry_resolution`` and
+                ``git_semver_resolution`` are provided. The two resolution
+                paths are mutually exclusive: a dependency is either
+                registry-sourced (carries ``resolved_url`` / ``resolved_hash``)
+                or git-source with a semver range (carries ``constraint`` /
+                ``resolved_tag`` / ``resolved_at``). Combining both would
+                produce an inconsistent lockfile entry (e.g. ``source=registry``
+                while ``resolved_ref`` is overridden to a git tag).
         """
+        if registry_resolution is not None and git_semver_resolution is not None:
+            raise ValueError(
+                "registry_resolution and git_semver_resolution are mutually "
+                "exclusive: a dependency is either registry-sourced or a "
+                "git-source semver resolution, not both."
+            )
         if registry_config is not None:
             host = registry_config.host
             registry_prefix = registry_config.prefix
         else:
             host = dep_ref.host
             registry_prefix = None
+
+        # Determine source: explicit registry resolution wins; else local;
+        # else inherit from dep_ref.source (which may be "git" or None).
+        if registry_resolution is not None:
+            source = "registry"
+        elif dep_ref.is_local:
+            source = "local"
+        else:
+            source = None
+
+        # When a git-semver resolution is present, prefer the concrete
+        # resolved tag for ``resolved_ref`` (so subsequent installs see a
+        # literal tag, not the original range). The original constraint
+        # is preserved in the dedicated ``constraint`` field.
+        if git_semver_resolution is not None:
+            resolved_ref_val: str | None = git_semver_resolution.resolved_tag
+        else:
+            resolved_ref_val = dep_ref.reference
+
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
             port=dep_ref.port,
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
-            resolved_ref=dep_ref.reference,
+            resolved_ref=resolved_ref_val,
+            version=(
+                registry_resolution.version
+                if registry_resolution is not None
+                else (
+                    git_semver_resolution.resolved_version
+                    if git_semver_resolution is not None
+                    else None
+                )
+            ),
             virtual_path=dep_ref.virtual_path,
             is_virtual=dep_ref.is_virtual,
             depth=depth,
             resolved_by=resolved_by,
-            source="local" if dep_ref.is_local else None,
+            source=source,
             local_path=dep_ref.local_path if dep_ref.is_local else None,
             is_dev=is_dev,
             is_insecure=dep_ref.is_insecure,
@@ -206,15 +354,42 @@ class LockedDependency:
             skill_subset=sorted(dep_ref.skill_subset)
             if isinstance(getattr(dep_ref, "skill_subset", None), list)
             else [],
+            resolved_url=(
+                registry_resolution.resolved_url if registry_resolution is not None else None
+            ),
+            resolved_hash=(
+                registry_resolution.resolved_hash if registry_resolution is not None else None
+            ),
+            constraint=(
+                git_semver_resolution.constraint if git_semver_resolution is not None else None
+            ),
+            resolved_tag=(
+                git_semver_resolution.resolved_tag if git_semver_resolution is not None else None
+            ),
+            resolved_at=(
+                git_semver_resolution.resolved_at if git_semver_resolution is not None else None
+            ),
         )
 
     def to_dependency_ref(self) -> DependencyReference:
-        """Reconstruct a DependencyReference from this locked dependency."""
+        """Reconstruct a DependencyReference from this locked dependency.
+
+        Registry-sourced deps come back with ``source="registry"`` so the
+        install pipeline routes them to the registry resolver. The exact
+        locked version is in ``reference`` (the registry resolver still calls
+        /versions and the hash-check on download enforces the lockfile's
+        intent).
+        """
+        # Registry deps: prefer the locked exact version over resolved_ref so
+        # the resolver picks up the exact-version constraint, not the original
+        # range (e.g. ``^1.2.0`` -> ``1.5.3``).
+        is_registry = self.source == "registry"
+        ref = self.version if (is_registry and self.version) else self.resolved_ref
         return DependencyReference(
             repo_url=self.repo_url,
             host=self.host,
             port=self.port,
-            reference=self.resolved_ref,
+            reference=ref,
             virtual_path=self.virtual_path,
             is_virtual=self.is_virtual,
             artifactory_prefix=self.registry_prefix,
@@ -222,6 +397,7 @@ class LockedDependency:
             local_path=self.local_path,
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
+            source=self.source,
         )
 
 
@@ -239,8 +415,19 @@ class LockFile:
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
 
     def add_dependency(self, dep: LockedDependency) -> None:
-        """Add a dependency to the lock file."""
+        """Add a dependency to the lock file.
+
+        Adding a registry-sourced dep or a git-source dep with semver
+        resolution fields promotes ``lockfile_version`` to ``"2"`` eagerly,
+        keeping the in-memory state consistent with what ``to_yaml()``
+        would emit (design section 6.1; issue #1488).
+        """
+        dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
         self.dependencies[dep.get_unique_key()] = dep
+        if self.lockfile_version == "1" and (
+            dep.source == "registry" or dep.constraint or dep.resolved_tag or dep.resolved_at
+        ):
+            self.lockfile_version = "2"
 
     def get_dependency(self, key: str) -> LockedDependency | None:
         """Get a dependency by its unique key."""
@@ -258,8 +445,33 @@ class LockFile:
         """Get all dependencies excluding the virtual self-entry."""
         return [d for d in self.get_all_dependencies() if d.local_path != "."]
 
+    def _needs_v2(self) -> bool:
+        """Whether the resolved graph requires lockfile schema v2.
+
+        Per design section 6.1 (and invariant 2.1.4): bump opportunistically --
+        only when at least one dep is sourced from a dedicated registry, OR
+        when at least one dep carries git-source semver resolution fields
+        (``constraint`` / ``resolved_tag`` / ``resolved_at`` -- issue #1488).
+        A project that uses neither feature keeps v1 forever, even on a
+        newer client.
+        """
+        for d in self.dependencies.values():
+            if d.source == "registry":
+                return True
+            if d.constraint or d.resolved_tag or d.resolved_at:
+                return True
+        return False
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
+        # Opportunistic v1<->v2 derivation (design §6.1, invariant §2.1.4):
+        # the lockfile_version field always reflects current content at
+        # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
+        # that mutate ``self.dependencies`` directly or remove the last
+        # registry / git-semver dep need the field re-derived here so the
+        # on-disk version is correct in both directions.
+        self.lockfile_version = "2" if self._needs_v2() else "1"
+        emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
         # of the flat local_deployed_files / local_deployed_file_hashes
         # fields. It must not be written back into the dependencies list,
@@ -267,7 +479,7 @@ class LockFile:
         _self_dep = self.dependencies.pop(_SELF_KEY, None)
         try:
             data: dict[str, Any] = {
-                "lockfile_version": self.lockfile_version,
+                "lockfile_version": emit_version,
                 "generated_at": self.generated_at,
             }
             if self.apm_version:
@@ -291,7 +503,7 @@ class LockFile:
                 self.dependencies[_SELF_KEY] = _self_dep
 
     @classmethod
-    def from_yaml(cls, yaml_str: str) -> "LockFile":
+    def from_yaml(cls, yaml_str: str) -> LockFile:
         """Deserialize from YAML string."""
         data = yaml.safe_load(yaml_str)
         if not data:
@@ -329,7 +541,7 @@ class LockFile:
         path.write_text(self.to_yaml(), encoding="utf-8")
 
     @classmethod
-    def read(cls, path: Path) -> Optional["LockFile"]:
+    def read(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None if not exists or corrupt."""
         if not path.exists():
             return None
@@ -339,7 +551,7 @@ class LockFile:
             return None
 
     @classmethod
-    def load_or_create(cls, path: Path) -> "LockFile":
+    def load_or_create(cls, path: Path) -> LockFile:
         """Load existing lock file or create a new one."""
         return cls.read(path) or cls()
 
@@ -348,7 +560,7 @@ class LockFile:
         cls,
         installed_packages,
         dependency_graph,
-    ) -> "LockFile":
+    ) -> LockFile:
         """Create a lock file from installed packages.
 
         Args:
@@ -372,6 +584,8 @@ class LockFile:
         lock = cls(apm_version=apm_version)
 
         for entry in installed_packages:
+            registry_resolution = None
+            git_semver_resolution = None
             if isinstance(entry, InstalledPackage):
                 dep_ref = entry.dep_ref
                 resolved_commit = entry.resolved_commit
@@ -379,6 +593,8 @@ class LockFile:
                 resolved_by = entry.resolved_by
                 is_dev = entry.is_dev
                 registry_config = getattr(entry, "registry_config", None)
+                registry_resolution = getattr(entry, "registry_resolution", None)
+                git_semver_resolution = getattr(entry, "git_semver_resolution", None)
             elif len(entry) >= 5:
                 dep_ref, resolved_commit, depth, resolved_by, is_dev = entry[:5]
                 registry_config = None
@@ -394,6 +610,8 @@ class LockFile:
                 resolved_by=resolved_by,
                 is_dev=is_dev,
                 registry_config=registry_config,
+                registry_resolution=registry_resolution,
+                git_semver_resolution=git_semver_resolution,
             )
             lock.add_dependency(locked_dep)
 
@@ -434,7 +652,7 @@ class LockFile:
         """Save lock file to disk (alias for write)."""
         self.write(path)
 
-    def is_semantically_equivalent(self, other: "LockFile") -> bool:
+    def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP servers, and configs.
 
         Ignores ``generated_at`` and ``apm_version`` so that a no-change

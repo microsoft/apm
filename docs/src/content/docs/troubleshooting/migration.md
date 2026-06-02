@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../getting-started/) and come back here for upgrade-time issues.
+This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../getting-started/migration/) and come back here for upgrade-time issues.
 
 [i] Throughout: replace `<your-version>` with the version you currently have installed (`apm --version`) and `<target>` with the version you are moving to.
 
@@ -41,7 +41,7 @@ Migration steps:
    which awd && rm "$(which awd)"
    ```
 
-2. Install APM via the documented [installation flow](../getting-started/).
+2. Install APM via the documented [installation flow](../getting-started/installation/).
 
 3. In your scripts, CI workflows, and docs, replace `awd ` with `apm `. The subcommand surface (`init`, `install`, `compile`, `run`, `audit`) is the same.
 
@@ -116,7 +116,37 @@ Existing target output is untouched. The new target's directory is created fresh
 
 Discovery: `apm targets` lists every supported target on the current binary.
 
-## 6. Marketplace switchover (hand-rolled MCP -> APM-managed)
+## 6. Default registry adoption (Git → registry routing)
+
+Adopting a default registry changes how **existing** shorthand dependencies resolve. Entries like `microsoft/apm-sample-package#^1.0.0` that previously cloned from GitHub route to the configured registry instead. APM does not print a migration banner — failures show up as registry errors (`no versions`, `401`) on the next `apm install`.
+
+Recommended rollout:
+
+1. **Inventory** — list shorthand deps in the root `apm.yml` and in installed packages under `apm_modules/` that are not yet published to your registry.
+
+2. **Pin Git-only deps** before enabling the default:
+
+   ```yaml
+   dependencies:
+     apm:
+       - git: https://github.com/microsoft/apm-sample-package.git
+         ref: v1.0.0
+   ```
+
+3. **Enable gradually** — start with `registries:` in `apm.yml` without `default:`, publish packages, then set `registry.<name>.default true` or `registries.default` once shorthand deps exist on the registry.
+
+4. **Verify lockfile** — after the first install with the default, confirm each entry has the intended `source:` (`registry` vs git commit SHA):
+
+   ```bash
+   apm install
+   grep -E 'source:|repo_url:' apm.lock.yaml
+   ```
+
+5. **Publish or remove** — deps that must stay on Git use `- git:`; deps moving to the registry need a published version before the team enables the default org-wide.
+
+See [Registries guide — pitfalls](../guides/registries/#pitfalls) for env-var typos and name-sanitization collisions.
+
+## 7. Marketplace switchover (hand-rolled MCP -> APM-managed)
 
 If your project has a hand-edited `.mcp.json` (or VS Code `mcp.json`) declaring servers directly:
 
@@ -125,9 +155,9 @@ If your project has a hand-edited `.mcp.json` (or VS Code `mcp.json`) declaring 
 3. Diff the generated MCP config against your previous hand-rolled version and reconcile any custom env vars or args using the marketplace package's documented inputs.
 4. Delete the legacy hand-rolled config once the APM-managed version is verified.
 
-For publishing your own marketplace entries, see [Marketplace authoring](../guides/pack-distribute/marketplace-authoring/).
+For publishing your own marketplace entries, see [Publish to a marketplace](../producer/publish-to-a-marketplace/).
 
-## 7. Breaking-change checklist when upgrading APM
+## 8. Breaking-change checklist when upgrading APM
 
 Before bumping `apm` across major or minor versions in a project that other people depend on:
 

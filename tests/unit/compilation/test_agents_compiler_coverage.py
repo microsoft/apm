@@ -53,7 +53,7 @@ def _make_primitives(*instructions):
 
 
 # ---------------------------------------------------------------------------
-# CompilationConfig.from_apm_yml() – additional fields
+# CompilationConfig.from_apm_yml() - additional fields
 # ---------------------------------------------------------------------------
 
 
@@ -157,7 +157,7 @@ class TestCompilationConfigPostInit(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AgentsCompiler.compile() – exception path
+# AgentsCompiler.compile() - exception path
 # ---------------------------------------------------------------------------
 
 
@@ -199,7 +199,7 @@ class TestAgentsCompilerCompileException(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AgentsCompiler.validate_primitives() – error branches
+# AgentsCompiler.validate_primitives() - error branches
 # ---------------------------------------------------------------------------
 
 
@@ -286,7 +286,7 @@ class TestValidatePrimitivesErrors(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AgentsCompiler._write_output_file() – error path
+# AgentsCompiler._write_output_file() - error path
 # ---------------------------------------------------------------------------
 
 
@@ -547,7 +547,7 @@ class TestMergeResults(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# compile_agents_md() convenience function – error path
+# compile_agents_md() convenience function - error path
 # ---------------------------------------------------------------------------
 
 
@@ -608,7 +608,7 @@ class TestCompileAgentsMdFunction(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _compile_claude_md – constitution injection failure path (G2)
+# _compile_claude_md - constitution injection failure path (G2)
 # ---------------------------------------------------------------------------
 
 
@@ -669,6 +669,180 @@ class TestCompileClaudeMdConstitutionInjectionFailure(unittest.TestCase):
             matched,
             f"Expected 'Constitution injection failed' in debug logs, got: {debug_calls}",
         )
+
+
+# ---------------------------------------------------------------------------
+# AgentsCompiler._compile_claude_md() -- skip_instructions when .claude/rules/ populated
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeCompileSkipInstructions(unittest.TestCase):
+    """Test that _compile_claude_md skips instructions when .claude/rules/ has files."""
+
+    def setUp(self):
+        self.original_dir = os.getcwd()
+        self.tmp = tempfile.mkdtemp()
+        self.tmp_resolved = str(Path(self.tmp).resolve())
+        os.chdir(self.tmp_resolved)
+        # Minimal apm.yml so discovery works
+        with open("apm.yml", "w") as f:
+            yaml.dump({"name": "test-project", "version": "1.0.0"}, f)
+        # Create .apm/instructions with a sample instruction
+        instr_dir = Path(self.tmp_resolved) / ".apm" / "instructions"
+        instr_dir.mkdir(parents=True)
+        (instr_dir / "style.instructions.md").write_text(
+            "---\ndescription: Style guide\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+        )
+
+    def tearDown(self):
+        os.chdir(self.original_dir)
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_instructions_included_without_rules_dir(self):
+        """Without .claude/rules/, instructions appear in CLAUDE.md."""
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+        result = compiler.compile(config)
+        self.assertTrue(result.success)
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        self.assertTrue(claude_md.exists())
+        self.assertIn("# Project Standards", claude_md.read_text())
+
+    def test_instructions_skipped_with_populated_rules_dir(self):
+        """With .claude/rules/ containing .md files, instructions are skipped."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nUse type hints.\n")
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+        result = compiler.compile(config)
+        self.assertTrue(result.success)
+
+        # No constitution or dependencies, so CLAUDE.md should not be generated
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        self.assertFalse(claude_md.exists())
+
+    def test_instructions_not_skipped_with_empty_rules_dir(self):
+        """An empty .claude/rules/ does not trigger instruction skipping."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+        result = compiler.compile(config)
+        self.assertTrue(result.success)
+
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        self.assertTrue(claude_md.exists())
+        content = claude_md.read_text()
+        self.assertIn("# Project Standards", content)
+
+    def test_instructions_not_skipped_with_non_md_files_in_rules_dir(self):
+        """Non-.md files in .claude/rules/ do not trigger instruction skipping."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / ".gitkeep").write_text("")
+        (rules_dir / "notes.txt").write_text("some notes")
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+        result = compiler.compile(config)
+        self.assertTrue(result.success)
+
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        self.assertTrue(claude_md.exists())
+        content = claude_md.read_text()
+        self.assertIn("# Project Standards", content)
+
+    def test_skip_instructions_dry_run(self):
+        """Dry-run respects skip_instructions when .claude/rules/ is populated."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nUse type hints.\n")
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=True)
+        result = compiler.compile(config)
+        self.assertTrue(result.success)
+        self.assertEqual(result.stats.get("claude_files_generated", 0), 0)
+        self.assertIn("Would generate 0 files", result.content)
+        # Dry-run UX (panel follow-up #4): "0 files" must be accompanied
+        # by a why so scripted consumers do not read it as a no-op.
+        self.assertIn("instructions section skipped", result.content)
+        self.assertIn(".claude/rules/", result.content)
+
+    def test_dry_run_reports_file_without_skip(self):
+        """Dry-run without .claude/rules/ reports CLAUDE.md would be generated."""
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=True)
+        result = compiler.compile(config)
+        self.assertTrue(result.success)
+        self.assertIn("Would generate 1 file", result.content)
+        self.assertIn("CLAUDE.md", result.content)
+
+    def test_skip_instructions_stats_reflect_emitted_files(self):
+        """Stats report zero files generated when all placements are skipped."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nUse type hints.\n")
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=True)
+        result = compiler.compile(config)
+        self.assertTrue(result.success)
+        self.assertEqual(result.stats.get("claude_files_generated", 0), 0)
+
+    def test_skip_instructions_emits_log_messages(self):
+        """When instructions are skipped, informational log messages are emitted."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nUse type hints.\n")
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+
+        mock_logger = MagicMock()
+        result = compiler.compile(config, logger=mock_logger)
+        self.assertTrue(result.success)
+
+        # Collect all progress messages
+        progress_calls = [str(call) for call in mock_logger.progress.call_args_list]
+        joined = " ".join(progress_calls)
+        self.assertIn("Instructions already in .claude/rules/", joined)
+        self.assertIn("CLAUDE.md not generated", joined)
+
+    def test_skip_instructions_ignores_symlink_outside_project(self):
+        """A .claude/rules/ symlinked outside the project does not trigger skip."""
+        import shutil
+
+        # Create a rules directory in a separate unique temp directory
+        external_dir = Path(tempfile.mkdtemp())
+        try:
+            (external_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nHacked.\n")
+
+            # Symlink .claude/rules/ to the external directory
+            claude_dir = Path(self.tmp_resolved) / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            rules_link = claude_dir / "rules"
+            try:
+                rules_link.symlink_to(external_dir)
+            except OSError:
+                self.skipTest("symlinks not supported on this platform")
+
+            compiler = AgentsCompiler(self.tmp_resolved)
+            config = CompilationConfig(target="claude", dry_run=False)
+            result = compiler.compile(config)
+            self.assertTrue(result.success)
+
+            # Instructions should NOT be skipped (symlink escapes project root)
+            claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+            self.assertTrue(claude_md.exists())
+            self.assertIn("# Project Standards", claude_md.read_text())
+        finally:
+            shutil.rmtree(external_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from apm_cli.commands.cache import cache
 from apm_cli.commands.compile import compile as compile_cmd
 from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
+from apm_cli.commands.doctor import doctor
 from apm_cli.commands.experimental import experimental
 from apm_cli.commands.init import init
 from apm_cli.commands.install import install
@@ -34,6 +35,7 @@ from apm_cli.commands.pack import pack_cmd, unpack_cmd
 from apm_cli.commands.plugin import plugin as plugin_cmd
 from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
+from apm_cli.commands.publish import publish_cmd
 from apm_cli.commands.run import preview, run
 from apm_cli.commands.runtime import runtime
 from apm_cli.commands.self_update import self_update
@@ -42,8 +44,24 @@ from apm_cli.commands.uninstall import uninstall
 from apm_cli.commands.update import update
 from apm_cli.commands.view import view as view_cmd
 
+_CLI_EPILOG = (
+    "\b\n"
+    "Common workflows:\n"
+    "  apm init                       Scaffold a new project\n"
+    "  apm install                    Install dependencies from apm.yml\n"
+    "  apm install --frozen           Reproduce lockfile exactly (CI-safe)\n"
+    "  apm outdated                   See what's drifted from upstream\n"
+    "  apm update                     Refresh refs and rewrite the lockfile\n"
+    "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
+    "  apm doctor                     Diagnose environment problems\n"
+    "  apm run <script>               Execute a script from apm.yml"
+)
 
-@click.group(help="Agent Package Manager (APM): The package manager for AI-Native Development")
+
+@click.group(
+    help="Agent Package Manager (APM): The package manager for AI-Native Development",
+    epilog=_CLI_EPILOG,
+)
 @click.option(
     "--version",
     is_flag=True,
@@ -87,6 +105,7 @@ cli.add_command(
 )
 cli.add_command(pack_cmd, name="pack")
 cli.add_command(unpack_cmd, name="unpack")
+cli.add_command(publish_cmd, name="publish")
 cli.add_command(init)
 cli.add_command(install)
 cli.add_command(uninstall)
@@ -105,6 +124,7 @@ cli.add_command(targets)
 cli.add_command(mcp)
 cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
+cli.add_command(doctor)
 cli.add_command(marketplace)
 cli.add_command(marketplace_search, name="search")
 

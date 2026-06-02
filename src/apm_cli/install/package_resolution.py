@@ -40,14 +40,30 @@ def resolve_parsed_dependency_reference(
     try_resolve_gitlab_direct_shorthand: Callable[..., Any],
     auth_resolver: Any,
     verbose: bool,
+    resolve_artifactory_boundary: Callable[..., Any] | None = None,
+    logger: Any = None,
 ) -> tuple[Any, bool]:
     """Parse or probe *package* into a ``DependencyReference``.
 
-    Returns ``(dep_ref, direct_gitlab_virtual_resolved)`` where the second flag
-    is True when GitLab direct shorthand probing produced a virtual path entry.
+    Returns ``(dep_ref, direct_virtual_resolved)`` where the second flag is
+    True when the dep should be persisted as a structured ``git:`` + ``path:``
+    entry in ``apm.yml`` (the canonical shorthand cannot round-trip the probed
+    boundary).  The two probe paths gate this flag differently:
+
+    * **GitLab shorthand** -- True only when the resolved ref is a virtual
+      package (``is_virtual and virtual_path``); a probe that lands on a bare
+      repo with no virtual path stays in canonical shorthand form.
+    * **Artifactory boundary** -- True whenever the probe rebuilt the ref
+      (parse-time guess differed from the proxy-verified split); a probe that
+      merely confirms the parse-time boundary keeps the original ref so
+      apm.yml stays in its existing shape.
+
+    For Artifactory deps the optional ``resolve_artifactory_boundary`` is
+    authoritative: it returns the proxy-verified boundary or raises -- there
+    is no silent fallback to the parse-time guess.
 
     Raises:
-        ValueError: When GitLab shorthand probing is required but fails to resolve.
+        ValueError: When GitLab or Artifactory probing fails to resolve.
     """
     dep_ref = (
         marketplace_dep_ref
@@ -66,8 +82,22 @@ def resolve_parsed_dependency_reference(
         if resolved is None:
             raise ValueError(_GITLAB_DIRECT_SHORTHAND_UNRESOLVED)
         dep_ref = resolved
-        direct_gitlab_virtual_resolved = bool(dep_ref.is_virtual and dep_ref.virtual_path)
-        return dep_ref, direct_gitlab_virtual_resolved
+        direct_virtual_resolved = bool(dep_ref.is_virtual and dep_ref.virtual_path)
+        return dep_ref, direct_virtual_resolved
+    if marketplace_dep_ref is None and resolve_artifactory_boundary is not None:
+        # The resolver decides its own applicability -- it short-circuits for
+        # deps that don't route through the Artifactory proxy.  When it rebuilds
+        # the dep_ref, the canonical shorthand can't round-trip the verified
+        # boundary, so persist as a structured ``git:`` + ``path:`` entry.
+        resolved = resolve_artifactory_boundary(
+            package,
+            auth_resolver,
+            verbose=verbose,
+            dep_ref=dep_ref,
+            logger=logger,
+        )
+        if resolved is not dep_ref:
+            return resolved, True
     return dep_ref, False
 
 
@@ -97,6 +127,65 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     if dep_ref.is_parent_repo_inheritance and scope is InstallScope.USER:
         return GIT_PARENT_USER_SCOPE_ERROR
     return None
+
+
+def manifest_has_different_entry_for_identity(
+    current_deps: builtins.list,
+    identity: str,
+    canonical: str,
+    *,
+    dependency_reference_cls: Any,
+) -> bool:
+    """Return True when apm.yml already has *identity* but not *canonical*."""
+    for dep_entry in current_deps:
+        try:
+            if isinstance(dep_entry, builtins.str):
+                existing_ref = dependency_reference_cls.parse(dep_entry)
+            elif isinstance(dep_entry, builtins.dict):
+                existing_ref = dependency_reference_cls.parse_from_dict(dep_entry)
+            else:
+                continue
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if existing_ref.get_identity() == identity:
+            return existing_ref.to_canonical() != canonical
+    return False
+
+
+def update_existing_dependency_entry_if_needed(
+    current_deps: builtins.list,
+    *,
+    already_in_deps: bool,
+    apm_yml_entries: dict,
+    canonical: str,
+    dep_ref: Any,
+    identity: str,
+    dependency_reference_cls: Any,
+    logger: Any = None,
+) -> bool:
+    """Rewrite an existing manifest dep when the requested ref changed."""
+    should_update = already_in_deps and (
+        canonical in apm_yml_entries
+        or (
+            dep_ref.reference
+            and manifest_has_different_entry_for_identity(
+                current_deps,
+                identity,
+                canonical,
+                dependency_reference_cls=dependency_reference_cls,
+            )
+        )
+    )
+    if should_update:
+        merge_structured_entry_into_current_deps(
+            current_deps,
+            apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry()),
+            identity,
+            canonical,
+            dependency_reference_cls=dependency_reference_cls,
+            logger=logger,
+        )
+    return should_update
 
 
 def merge_structured_entry_into_current_deps(
@@ -153,7 +242,7 @@ def persist_dependency_list_if_changed(
 
         dump_yaml(data, apm_yml_path)
         if logger:
-            logger.success(f"Updated {apm_yml_filename} to preserve marketplace subdirectory entry")
+            logger.success(f"Updated {apm_yml_filename} dependency entries")
     except Exception as e:
         if logger:
             logger.error(f"Failed to write {apm_yml_filename}: {e}")

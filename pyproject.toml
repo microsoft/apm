@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.14.2"
+version = "0.16.1"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -88,8 +88,6 @@ ignore = [
     "S602",     # subprocess-popen-with-shell -- intentional in CLI wrapping git/pip
     # --- Deferred rules: enable in dedicated future PRs ---
     "SIM102",   # collapsible-if -- 28 violations, auto-fixable style improvement
-    "RUF003",   # ambiguous-unicode-character-comment -- 14 violations, review against ASCII convention
-    "RUF002",   # ambiguous-unicode-character-docstring -- 8 violations, same as above
 ]
 
 [tool.ruff.lint.pylint]
@@ -167,5 +165,6 @@ markers = [
     "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",
     "requires_runtime_llm: requires llm runtime installed",
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
+    "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
 ]
 

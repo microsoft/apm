@@ -16,9 +16,11 @@ Strategy:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -1988,7 +1990,9 @@ class TestUnifiedLinkResolverForInstallation:
         source_file = tmp_path / "source.md"
         target_file = tmp_path / "target.md"
         result = r.resolve_links_for_installation(content, source_file, target_file)
-        assert "https://example.com" in result
+        urls = re.findall(r"https?://[^\s)\]\}]+", result)
+        assert len(urls) == 1
+        assert urlparse(urls[0]).hostname == "example.com"
 
 
 class TestUnifiedLinkResolverGetReferencedContexts:

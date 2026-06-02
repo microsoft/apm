@@ -57,6 +57,7 @@ def _make_skill_result():
     sr = MagicMock()
     sr.skill_created = False
     sr.sub_skills_promoted = 0
+    sr.bin_deployed = 0
     sr.target_paths = []
     return sr
 
@@ -308,7 +309,8 @@ class TestExhaustivenessChecks:
             "agents_cursor",
             "agents_opencode",
             "agents_codex",
-            "agents_windsurf",
+            # NOTE: windsurf no longer exposes an 'agents' primitive
+            # (its content deploys as skills under .windsurf/skills/).
             "commands",  # was commands_claude, aliased
             "commands_cursor",
             "commands_gemini",
@@ -742,15 +744,17 @@ class TestForScope:
         assert resolved.root_dir == ".claude"
 
     def test_filters_unsupported_primitives(self):
-        """for_scope removes unsupported primitives from the dict."""
+        """for_scope keeps instructions with a different mapping for copilot user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         copilot = KNOWN_TARGETS["copilot"]
         assert "prompts" in copilot.primitives
         assert "instructions" in copilot.primitives
         resolved = copilot.for_scope(user_scope=True)
-        assert "prompts" not in resolved.primitives
-        assert "instructions" not in resolved.primitives
+        assert "prompts" in resolved.primitives
+        # instructions now supported at user scope via concat (#650)
+        assert "instructions" in resolved.primitives
+        assert resolved.primitives["instructions"].format_id == "copilot_user_instructions"
         # Supported primitives remain
         assert "agents" in resolved.primitives
         assert "skills" in resolved.primitives

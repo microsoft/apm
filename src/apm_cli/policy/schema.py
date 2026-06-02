@@ -35,6 +35,13 @@ class DependencyPolicy:
     require: tuple[str, ...] | None = None  # None = no opinion; () = explicit empty
     require_resolution: str = "project-wins"  # project-wins | policy-wins | block
     max_depth: int = 50
+    # When True, every direct APM dep must declare a bounded constraint
+    # (exact version, caret/tilde range, bounded range, literal tag,
+    # SHA, or local path). Unbounded refs ('*', bare '>=X', missing ref,
+    # bare branch name) are reported as policy violations and routed
+    # through ``policy.enforcement`` (off | warn | block). See
+    # ``policy/_constraint_pinning.py`` for classification rules.
+    require_pinned_constraint: bool = False
 
     @property
     def effective_deny(self) -> tuple[str, ...]:
@@ -123,6 +130,35 @@ class UnmanagedFilesPolicy:
 
 
 @dataclass(frozen=True)
+class RegistrySourcePolicy:
+    """Rules governing which registries APM dependencies may use.
+
+    ``require``: registry names that MUST be the source for all deps.
+    ``allow_non_registry``: when ``False``, any dep that is not
+    registry-sourced (git, local, etc.) is blocked. Applied transitively
+    across the full resolved dep graph.
+    """
+
+    require: tuple[str, ...] = ()
+    allow_non_registry: bool = True
+
+
+@dataclass(frozen=True)
+class BinDeployPolicy:
+    """Policy controls for marketplace_plugin bin/ deployment.
+
+    ``deny_all``: when ``True``, bin/ deployment is suppressed for all
+    marketplace_plugin packages regardless of the ``deny`` list.
+
+    ``deny``: package canonical dependency strings (e.g. ``owner/repo``)
+    whose bin/ executables must NOT be deployed. Matched as exact strings.
+    """
+
+    deny_all: bool = False
+    deny: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -137,3 +173,5 @@ class ApmPolicy:
     compilation: CompilationPolicy = field(default_factory=CompilationPolicy)
     manifest: ManifestPolicy = field(default_factory=ManifestPolicy)
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
+    registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
+    bin_deploy: BinDeployPolicy = field(default_factory=BinDeployPolicy)

@@ -115,6 +115,25 @@ class TestLockedDependency:
         dep = LockedDependency(repo_url="owner/repo")
         assert "deployed_file_hashes" not in dep.to_dict()
 
+    def test_deployed_files_deduplicated_when_serialized_after_repeated_update(self, tmp_path):
+        """Repeated installs may append the same path; lock output stays canonical."""
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                deployed_files=["b.md", "a.md", "b.md", "a.md"],
+            )
+        )
+
+        assert lock.get_dependency("owner/repo").deployed_files == ["b.md", "a.md"]
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock.write(lock_path)
+
+        data = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        [dep_data] = data["dependencies"]
+        assert dep_data["deployed_files"] == ["a.md", "b.md"]
+
     def test_from_dict_missing_hashes_defaults_empty(self):
         loaded = LockedDependency.from_dict({"repo_url": "owner/repo"})
         assert loaded.deployed_file_hashes == {}

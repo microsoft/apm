@@ -1,10 +1,10 @@
 """Skill integration functionality for APM packages (Claude Code & Cursor support)."""
 
 import filecmp
-import hashlib  # noqa: F401
+import hashlib
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime  # noqa: F401
 from pathlib import Path
 from typing import Dict, List, Optional  # noqa: F401, UP035
@@ -30,6 +30,10 @@ class SkillIntegrationResult:
     references_copied: int  # Now tracks total files copied to subdirectories
     links_resolved: int = 0  # Kept for backwards compatibility
     sub_skills_promoted: int = 0  # Number of sub-skills promoted to top-level
+    bin_deployed: int = 0  # Number of marketplace_plugin bin/ executables deployed
+    # Why a plugin's bin/ was NOT deployed despite shipping one, so the install
+    # layer can surface an actionable hint: "project_scope" | "no_claude_target".
+    bin_skipped_reason: str | None = None
     target_paths: list[Path] = None  # All deployed directories (for deployed_files manifest)
 
     def __post_init__(self):
@@ -507,7 +511,7 @@ class SkillIntegrator(BaseIntegrator):
         return context_files
 
     @staticmethod
-    def _dirs_equal(dir_a: Path, dir_b: Path) -> bool:
+    def is_skill_dir_identical_to_source(dir_a: Path, dir_b: Path) -> bool:
         """Check if two directory trees have identical file contents."""
         dcmp = filecmp.dircmp(str(dir_a), str(dir_b))
         return SkillIntegrator._dircmp_equal(dcmp)
@@ -588,7 +592,7 @@ class SkillIntegrator(BaseIntegrator):
             rel_path = f"{rel_prefix}/{sub_name}"
             if target.exists():
                 # Content-identical → skip entirely (no copy, no warning)
-                if SkillIntegrator._dirs_equal(sub_skill_path, target):
+                if SkillIntegrator.is_skill_dir_identical_to_source(sub_skill_path, target):
                     promoted += 1
                     deployed.append(target)
                     continue
@@ -1132,6 +1136,8 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        scope=None,
+        policy=None,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
 
@@ -1196,6 +1202,25 @@ class SkillIntegrator(BaseIntegrator):
 
         package_path = package_info.install_path
 
+        # MARKETPLACE_PLUGIN: deploy bin/ executables + plugin manifest BEFORE
+        # skill routing.  bin/ deployment is orthogonal to whether the plugin
+        # also ships a root SKILL.md or a skills/ bundle, so it must run for
+        # every plugin -- not only the no-skill fallback.  See issue #1544.
+        bin_paths: list[Path] = []
+        bin_skip_reason: str | None = None
+        from apm_cli.models.apm_package import PackageType as _PackageType
+
+        if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
+            bin_paths, bin_skip_reason = self._deploy_plugin_bin(
+                package_info,
+                project_root,
+                targets,
+                scope=scope,
+                policy=policy,
+                force=force,
+                logger=logger,
+            )
+
         # Check if this is a native Skill (already has SKILL.md at root)
         source_skill_md = package_path / "SKILL.md"
         if source_skill_md.exists():
@@ -1206,15 +1231,19 @@ class SkillIntegrator(BaseIntegrator):
                     f"--skill filter ignored for '{package_info.install_path.name}': "
                     "package is a single CLAUDE_SKILL, not a SKILL_BUNDLE."
                 )
-            return self._integrate_native_skill(
-                package_info,
-                project_root,
-                source_skill_md,
-                diagnostics=diagnostics,
-                managed_files=managed_files,
-                force=force,
-                logger=logger,
-                targets=targets,
+            return self._merge_bin_paths(
+                self._integrate_native_skill(
+                    package_info,
+                    project_root,
+                    source_skill_md,
+                    diagnostics=diagnostics,
+                    managed_files=managed_files,
+                    force=force,
+                    logger=logger,
+                    targets=targets,
+                ),
+                bin_paths,
+                bin_skip_reason,
             )
 
         # SKILL_BUNDLE: promote skills from root-level skills/ directory.
@@ -1222,16 +1251,20 @@ class SkillIntegrator(BaseIntegrator):
         if root_skills_dir.is_dir() and any(
             (d / "SKILL.md").exists() for d in root_skills_dir.iterdir() if d.is_dir()
         ):
-            return self._integrate_skill_bundle(
-                package_info,
-                project_root,
-                root_skills_dir,
-                diagnostics=diagnostics,
-                managed_files=managed_files,
-                force=force,
-                logger=logger,
-                targets=targets,
-                skill_subset=skill_subset,
+            return self._merge_bin_paths(
+                self._integrate_skill_bundle(
+                    package_info,
+                    project_root,
+                    root_skills_dir,
+                    diagnostics=diagnostics,
+                    managed_files=managed_files,
+                    force=force,
+                    logger=logger,
+                    targets=targets,
+                    skill_subset=skill_subset,
+                ),
+                bin_paths,
+                bin_skip_reason,
             )
 
         # No SKILL.md at root  -- not a skill package.
@@ -1245,16 +1278,248 @@ class SkillIntegrator(BaseIntegrator):
             logger=logger,
             targets=targets,
         )
-        return SkillIntegrationResult(
-            skill_created=False,
-            skill_updated=False,
-            skill_skipped=True,
-            skill_path=None,
-            references_copied=0,
-            links_resolved=0,
-            sub_skills_promoted=sub_skills_count,
-            target_paths=sub_deployed,
+        return self._merge_bin_paths(
+            SkillIntegrationResult(
+                skill_created=False,
+                skill_updated=False,
+                skill_skipped=True,
+                skill_path=None,
+                references_copied=0,
+                links_resolved=0,
+                sub_skills_promoted=sub_skills_count,
+                target_paths=sub_deployed,
+            ),
+            bin_paths,
+            bin_skip_reason,
         )
+
+    @staticmethod
+    def _merge_bin_paths(
+        result: SkillIntegrationResult,
+        bin_paths: list[Path],
+        skip_reason: str | None = None,
+    ) -> SkillIntegrationResult:
+        """Fold deployed plugin bin/manifest paths into a skill result.
+
+        Pure: returns a NEW result via ``dataclasses.replace`` rather than
+        mutating the argument, so callers never observe surprise in-place
+        edits.  ``skill_created`` is intentionally left untouched -- deploying
+        executables is not the same as creating a skill, so reporting and
+        sync semantics stay honest.  When bins were deployed the result is no
+        longer "skipped" (work happened) and the paths are tracked for the
+        lockfile / uninstall manifest.  ``skip_reason`` records why a plugin
+        that ships bin/ was NOT deployed, for the install layer to surface.
+        """
+        if not bin_paths and skip_reason is None:
+            return result
+        updates: dict = {}
+        if bin_paths:
+            updates["bin_deployed"] = len(bin_paths)
+            updates["skill_skipped"] = False
+            updates["target_paths"] = (result.target_paths or []) + bin_paths
+        if skip_reason is not None:
+            updates["bin_skipped_reason"] = skip_reason
+        return replace(result, **updates)
+
+    def _deploy_plugin_bin(
+        self,
+        package_info,
+        project_root: Path,
+        targets,
+        scope=None,
+        policy=None,
+        force: bool = False,
+        logger=None,
+    ) -> tuple[list[Path], str | None]:
+        """Deploy bin/ executables and plugin manifest for a MARKETPLACE_PLUGIN.
+
+        Only activates when ALL of:
+        - The package has a bin/ directory
+        - At least one Claude target that supports skills is active
+        - scope is InstallScope.USER (bin/ deploy is user-scope only, v1)
+        - policy does not deny the package
+
+        This realizes Claude Code's "skills-directory plugin" contract: a folder
+        under a skills directory containing ``.claude-plugin/plugin.json`` is
+        loaded as ``<name>@skills-dir`` and its root ``bin/`` is added to the
+        Bash tool PATH.  The contract is Claude-specific by design; other
+        harnesses have no equivalent, so only Claude targets are considered.
+
+        Each binary is made executable (chmod 0o755) on POSIX systems.
+
+        Returns ``(deployed_paths, skip_reason)``.  ``skip_reason`` is non-None
+        ONLY when the package ships a bin/ but it could not be deployed for an
+        actionable reason ("project_scope", "no_claude_target"), so the install
+        layer can surface a hint.  Policy-deny and "no bin/ at all" return
+        ``None`` -- they are intentional, not traps.
+        """
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.utils.path_security import validate_path_segments
+
+        bin_dir = package_info.install_path / "bin"
+        if not bin_dir.is_dir():
+            return [], None
+
+        # The package ships executables -- from here a non-deploy is a
+        # reportable skip, not a silent no-op.
+        if scope is not InstallScope.USER:
+            if logger and scope is InstallScope.PROJECT:
+                logger.progress(
+                    "bin/ deploy is user-scope only; skipping for project-scope install",
+                    symbol="info",
+                )
+            return [], "project_scope"
+
+        if self._bin_deploy_denied(package_info, policy, logger):
+            return [], None
+
+        if targets is None:
+            from apm_cli.integration.targets import active_targets
+
+            targets = active_targets(project_root)
+
+        # Claude-specific contract: only Claude targets that support skills.
+        claude_targets = [t for t in targets if t.name == "claude" and t.supports("skills")]
+        if not claude_targets:
+            if logger:
+                logger.progress(
+                    "bin/ present but no active Claude skills target; skipping bin deploy for "
+                    f"{package_info.get_canonical_dependency_string()}",
+                    symbol="warning",
+                )
+            return [], "no_claude_target"
+
+        skill_name = package_info.install_path.name
+        validate_path_segments(skill_name, context="plugin skill name")
+        deployed: list[Path] = []
+
+        for target in claude_targets:
+            effective_root = target.primitives["skills"].deploy_root or target.root_dir
+            target_root_dir = project_root / target.root_dir
+            if not target.auto_create and not target_root_dir.is_dir():
+                continue
+
+            skill_base = project_root / effective_root / "skills" / skill_name
+            rel_prefix = f"{effective_root}/skills/{skill_name}"
+            deployed.extend(self._deploy_bin_files(bin_dir, skill_base, rel_prefix, force, logger))
+            manifest = self._deploy_plugin_manifest(
+                package_info.install_path, skill_base, rel_prefix, force, logger
+            )
+            if manifest is not None:
+                deployed.append(manifest)
+
+        return deployed, None
+
+    @staticmethod
+    def _bin_deploy_denied(package_info, policy, logger) -> bool:
+        """Return True when policy opts the package out of bin/ deployment."""
+        if policy is None:
+            return False
+        bd_policy = policy.bin_deploy
+        if bd_policy is None:
+            return False
+        canonical = package_info.get_canonical_dependency_string()
+        if bd_policy.deny_all:
+            if logger:
+                logger.progress(
+                    f"bin_deploy.deny_all: skipping bin deploy for {canonical}",
+                    symbol="info",
+                )
+            return True
+        if canonical in bd_policy.deny:
+            if logger:
+                logger.progress(
+                    f"bin_deploy.deny: skipping bin deploy for {canonical}",
+                    symbol="info",
+                )
+            return True
+        return False
+
+    def _deploy_bin_files(
+        self,
+        bin_dir: Path,
+        skill_base: Path,
+        rel_prefix: str,
+        force: bool,
+        logger,
+    ) -> list[Path]:
+        """Copy bin/ executables into ``skill_base/bin`` (chmod +x on POSIX)."""
+        from apm_cli.utils.path_security import ensure_path_within
+
+        dest_bin = skill_base / "bin"
+        dest_bin.mkdir(parents=True, exist_ok=True)
+        deployed: list[Path] = []
+        for src_file in bin_dir.iterdir():
+            # Reject symlinks -- a malicious package could point a symlink
+            # at an arbitrary file outside the sandbox.
+            if src_file.is_symlink() or not src_file.is_file():
+                continue
+            dest_file = dest_bin / src_file.name
+            ensure_path_within(dest_file, dest_bin)
+            self._copy_plugin_file(
+                src_file,
+                dest_file,
+                force=force,
+                make_executable=True,
+                logger=logger,
+                rel_label=f"{rel_prefix}/bin/{src_file.name}",
+            )
+            deployed.append(dest_file)
+        return deployed
+
+    def _deploy_plugin_manifest(
+        self,
+        package_path: Path,
+        skill_base: Path,
+        rel_prefix: str,
+        force: bool,
+        logger,
+    ) -> Path | None:
+        """Copy ``.claude-plugin/plugin.json`` next to the deployed bin/."""
+        plugin_manifest = package_path / ".claude-plugin" / "plugin.json"
+        if plugin_manifest.is_symlink() or not plugin_manifest.is_file():
+            return None
+        dest_manifest = skill_base / ".claude-plugin" / "plugin.json"
+        dest_manifest.parent.mkdir(parents=True, exist_ok=True)
+        self._copy_plugin_file(
+            plugin_manifest,
+            dest_manifest,
+            force=force,
+            make_executable=False,
+            logger=logger,
+            rel_label=f"{rel_prefix}/.claude-plugin/plugin.json",
+        )
+        return dest_manifest
+
+    @staticmethod
+    def _copy_plugin_file(
+        src_file: Path,
+        dest_file: Path,
+        *,
+        force: bool,
+        make_executable: bool,
+        logger,
+        rel_label: str,
+    ) -> None:
+        """Hash-gated copy of one plugin file, optionally marking it executable.
+
+        Skips the copy when an identical file already exists (unless *force*),
+        keeping repeated installs quiet and idempotent.
+        """
+        import os
+        import stat
+
+        if dest_file.exists() and not force:
+            src_hash = hashlib.sha256(src_file.read_bytes()).hexdigest()
+            dst_hash = hashlib.sha256(dest_file.read_bytes()).hexdigest()
+            if src_hash == dst_hash:
+                return
+        shutil.copy2(src_file, dest_file)
+        if make_executable and os.name == "posix":
+            current = dest_file.stat().st_mode
+            dest_file.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        if logger:
+            logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")
 
     def sync_integration(
         self,

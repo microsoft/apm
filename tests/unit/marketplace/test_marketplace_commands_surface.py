@@ -289,22 +289,18 @@ class TestParseMarketplaceRepo:
     def test_owner_repo_simple(self) -> None:
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo, host = _parse_marketplace_repo("acme/plugins", None)
-        assert owner == "acme"
-        assert repo == "plugins"
-        assert host is None
+        url, kind, host = _parse_marketplace_repo("acme/plugins", None)
+        assert url == "https://github.com/acme/plugins"
+        assert kind == "github"
+        assert host == "github.com"
 
     def test_https_url_parsed(self) -> None:
-        from urllib.parse import urlparse
-
         from apm_cli.commands.marketplace import _parse_marketplace_repo
 
-        owner, repo, host = _parse_marketplace_repo("https://github.com/acme/plugins", None)
-        assert owner == "acme"
-        assert repo == "plugins"
-        # host should be github.com - verified through urlparse
-        parsed = urlparse(f"https://{host}")
-        assert parsed.hostname == "github.com"
+        url, kind, host = _parse_marketplace_repo("https://github.com/acme/plugins", None)
+        assert url == "https://github.com/acme/plugins"
+        assert kind == "github"
+        assert host == "github.com"
 
     def test_conflicting_host_flag_raises(self) -> None:
         from apm_cli.commands.marketplace import _parse_marketplace_repo
@@ -330,10 +326,14 @@ class TestParseMarketplaceRepo:
             _parse_marketplace_repo("github.com/only-repo", None)
 
     def test_dot_git_suffix_stripped(self) -> None:
+        # The model strips ``.git`` when deriving owner/repo from the URL;
+        # the parser preserves it in the URL itself.
         from apm_cli.commands.marketplace import _parse_marketplace_repo
+        from apm_cli.marketplace.models import MarketplaceSource
 
-        _, repo, _ = _parse_marketplace_repo("https://github.com/acme/plugins.git", None)
-        assert repo == "plugins"
+        url, _, _ = _parse_marketplace_repo("https://github.com/acme/plugins.git", None)
+        src = MarketplaceSource(name="x", url=url)
+        assert src.repo == "plugins"
 
 
 # ---------------------------------------------------------------------------

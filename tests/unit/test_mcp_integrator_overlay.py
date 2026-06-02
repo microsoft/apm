@@ -475,17 +475,17 @@ class TestUpdateLockfile:
         MCPIntegrator.update_lockfile({"server-a"}, lock_path=lock_path)
 
     def test_updates_mcp_servers_in_lockfile(self, tmp_path):
+        from apm_cli.deps.lockfile import LockFile
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\ndependencies: {}\n", encoding="utf-8")
+        LockFile().save(lock_path)
 
-        mock_lockfile = MagicMock()
-        with patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile):
-            MCPIntegrator.update_lockfile({"server-a", "server-b"}, lock_path=lock_path)
+        MCPIntegrator.update_lockfile({"server-a", "server-b"}, lock_path=lock_path)
 
-        assert mock_lockfile.mcp_servers == sorted({"server-a", "server-b"})
-        mock_lockfile.save.assert_called_once_with(lock_path)
+        lockfile = LockFile.read(lock_path)
+        assert lockfile is not None
+        assert lockfile.mcp_servers == sorted({"server-a", "server-b"})
 
     def test_noop_when_lockfile_read_returns_none(self, tmp_path):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -498,16 +498,18 @@ class TestUpdateLockfile:
             MCPIntegrator.update_lockfile({"srv"}, lock_path=lock_path)
 
     def test_mcp_configs_written_when_provided(self, tmp_path):
+        from apm_cli.deps.lockfile import LockFile
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text("lock_version: '1'\n", encoding="utf-8")
+        LockFile().save(lock_path)
 
-        mock_lockfile = MagicMock()
         configs = {"srv": {"key": "val"}}
-        with patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile):
-            MCPIntegrator.update_lockfile({"srv"}, lock_path=lock_path, mcp_configs=configs)
-        assert mock_lockfile.mcp_configs == configs
+        MCPIntegrator.update_lockfile({"srv"}, lock_path=lock_path, mcp_configs=configs)
+
+        lockfile = LockFile.read(lock_path)
+        assert lockfile is not None
+        assert lockfile.mcp_configs == configs
 
 
 # ---------------------------------------------------------------------------

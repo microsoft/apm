@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,7 +16,8 @@ from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
-from ...primitives.discovery import discover_primitives
+from ...primitives.discovery import clear_discovery_cache, discover_primitives
+from ...utils import perf_stats
 from ...utils.console import (
     _rich_error,
     _rich_info,
@@ -375,6 +377,8 @@ def _run_validation_mode(logger: CommandLogger, verbose: bool) -> None:
     summary.  Calls ``sys.exit(1)`` when validation errors are found.
     """
     logger.start("Validating APM context...", symbol="gear")
+    clear_discovery_cache()
+    perf_stats.reset()
     compiler = AgentsCompiler(".")
     try:
         primitives = discover_primitives(".")
@@ -406,6 +410,8 @@ def _run_validation_mode(logger: CommandLogger, verbose: bool) -> None:
     except Exception:
         pass
 
+    perf_stats.render_summary(logger, project_root=".")
+
 
 def _run_watch_mode(
     logger: CommandLogger,
@@ -415,6 +421,7 @@ def _run_watch_mode(
     no_links: bool,
     dry_run: bool,
     verbose: bool,
+    clean: bool,
 ) -> None:
     """Set up and run watch mode (``--watch`` flag).
 
@@ -423,6 +430,11 @@ def _run_watch_mode(
     not silently regress on every recompile (#1345), then delegates to
     :func:`_watch_mode`.
     """
+    if clean:
+        logger.warning(
+            "--clean is ignored in watch mode; run 'apm compile --clean' "
+            "separately to remove orphaned outputs."
+        )
     effective_target, _detection_reason, config_target = _resolve_effective_target(target)
     _watch_mode(
         output,
@@ -433,6 +445,7 @@ def _run_watch_mode(
         effective_target=effective_target,
         target_label_user=target,
         target_label_config=config_target,
+        cli_target=target,
     )
 
 
@@ -448,6 +461,7 @@ def _run_compilation(
     verbose: bool,
     local_only: bool,
     clean: bool,
+    no_dedup: bool,
 ) -> None:
     """Main compilation flow: target resolution, config, compile, and output.
 
@@ -525,6 +539,7 @@ def _run_compilation(
         debug=verbose,
         clean_orphaned=clean,
         target=effective_target,
+        no_dedup=no_dedup,
     )
     config.with_constitution = with_constitution
 
@@ -575,6 +590,8 @@ def _run_compilation(
         logger.progress("Using single-file compilation (legacy mode)", symbol="page")
 
     # Perform compilation
+    clear_discovery_cache()
+    perf_stats.reset()
     compiler = AgentsCompiler(".")
     result = compiler.compile(config, logger=logger)
     compile_has_critical = result.has_critical_security
@@ -625,15 +642,10 @@ def _run_compilation(
         else:
             # Traditional single-file compilation - keep existing logic
             # Perform initial compilation in dry-run to get generated body (without constitution)
-            # TODO: Refactor to use dataclasses.replace() once CompilationConfig fields stabilise
-            intermediate_config = CompilationConfig(
-                output_path=config.output_path,
-                chatmode=config.chatmode,
-                resolve_links=config.resolve_links,
-                dry_run=True,  # force
-                with_constitution=config.with_constitution,
+            intermediate_config = dataclasses.replace(
+                config,
+                dry_run=True,
                 strategy="single-file",
-                target=config.target,
             )
             intermediate_result = compiler.compile(intermediate_config)
 
@@ -738,7 +750,10 @@ def _run_compilation(
             "Compiled output contains critical hidden characters"
             " -- run 'apm audit' to inspect, 'apm audit --strip' to clean"
         )
+        perf_stats.render_summary(logger, project_root=".")
         sys.exit(1)
+
+    perf_stats.render_summary(logger, project_root=".")
 
 
 @click.command(help="Compile APM context into distributed AGENTS.md files")
@@ -810,8 +825,28 @@ def _run_compilation(
     default=False,
     help="Compile for all canonical targets. Equivalent to --target all.",
 )
+@click.option(
+    "--no-dedup/--no-force-instructions",
+    "no_dedup",
+    is_flag=True,
+    default=False,
+    help=(
+        "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
+        "already populated. Overrides the default deduplication that normally omits "
+        "the section to avoid duplicate context in Claude Code. Affects the Claude "
+        "target only. Alias: --force-instructions."
+    ),
+)
+@click.option(
+    "--force-instructions",
+    "no_dedup",
+    is_flag=True,
+    default=False,
+    help="Alias for --no-dedup.",
+    hidden=True,
+)
 @click.pass_context
-def compile(
+def compile(  # noqa: PLR0913 -- Click handler
     ctx,
     output,
     target,
@@ -827,6 +862,7 @@ def compile(
     clean,
     legacy_skill_paths,
     compile_all,
+    no_dedup,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -872,7 +908,7 @@ def compile(
             return
 
         if watch:
-            _run_watch_mode(logger, target, output, chatmode, no_links, dry_run, verbose)
+            _run_watch_mode(logger, target, output, chatmode, no_links, dry_run, verbose, clean)
             return
 
         _run_compilation(
@@ -887,6 +923,7 @@ def compile(
             verbose,
             local_only,
             clean,
+            no_dedup,
         )
 
     except ImportError as e:

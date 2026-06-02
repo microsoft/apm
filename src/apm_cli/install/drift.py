@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.deps.path_anchoring import resolve_local_dep_dir
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
@@ -201,16 +202,30 @@ def _materialize_install_path(
     project_root: Path,
     apm_modules_dir: Path,
     cache_only: bool,
+    *,
+    lockfile: LockFile | None = None,
 ) -> Path:
     """Resolve the on-disk path for a locked dep's package contents.
 
-    For local deps -- contents live at ``project_root / lock_dep.local_path``.
+    For local deps -- contents live at the source directory the install
+    resolver anchored on: ``project_root`` for direct (root-declared) deps,
+    or the declaring package's directory for transitive ``../sibling`` deps
+    (resolved via ``resolved_by``; see
+    :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`). The
+    ``lockfile`` is required to walk that chain; it is unused for remote
+    deps and for direct local deps (``resolved_by is None``).
     For remote deps -- contents live at the canonical apm_modules subpath.
 
     Raises
     ------
     CacheMissError
-        If ``cache_only`` is True and the path does not exist.
+        If ``cache_only`` is True and the resolved source path does not
+        exist (cold-cache-like: the source is simply not present yet).
+    LocalResolutionError
+        If a local dep's ``resolved_by`` chain is internally inconsistent
+        (missing / ambiguous / non-local / cyclic parent). This is a
+        corrupt-lockfile condition and MUST fail loud -- it is not caught
+        by the drift gate's cache-miss soft-skip.
     NotImplementedError
         If ``cache_only`` is False (network-enabled replay is a follow-up).
     """
@@ -220,7 +235,7 @@ def _materialize_install_path(
     if lock_dep.source == "local":
         if not lock_dep.local_path:
             raise CacheMissError(f"local dep {lock_dep.repo_url!r} has no local_path in lockfile")
-        candidate = (project_root / lock_dep.local_path).resolve()
+        candidate = resolve_local_dep_dir(lock_dep, lockfile, project_root)
         if not candidate.exists():
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
@@ -464,6 +479,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         project_root,
                         apm_modules_dir,
                         cache_only=config.cache_only,
+                        lockfile=lock,
                     )
 
                 package_info = _build_package_info(lock_dep, install_path)

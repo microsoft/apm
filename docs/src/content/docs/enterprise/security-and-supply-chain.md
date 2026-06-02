@@ -22,7 +22,7 @@ host), and pre-deploy content safety (no hidden Unicode reaches the
 agent). APM does **not** sandbox MCP servers at runtime, does not do
 malware analysis on dependency code, does not sign packages, and does
 not inspect what an agent does once it has read your context. See
-[The three promises](../../concepts/the-three-promises/) for the
+[The three promises](../concepts/the-three-promises/) for the
 canonical framing.
 
 ## Integrity
@@ -39,7 +39,7 @@ lockfile entry already has a `content_hash`, it recomputes the hash
 post-download and aborts the install on mismatch -- the partial
 download is removed and the user is told to use `apm install --update`
 if the change is intentional. Source: `src/apm_cli/install/sources.py`
-lines 621-649.
+(`content_hash` mismatch handling around lines 770-784).
 
 **Cache-hit verification.** On every cache HIT, APM reads the cached
 checkout's `.git/HEAD` and compares it to the lockfile's
@@ -52,7 +52,7 @@ Bundles (the local-file install path used by `apm pack` outputs) get a
 fourth check: every file listed in `pack.bundle_files` is SHA-256
 verified, symlinks anywhere under the bundle root are rejected, and
 files not listed in the manifest are flagged as a tampering signal.
-Source: `src/apm_cli/bundle/local_bundle.py:276-351`
+Source: `src/apm_cli/bundle/local_bundle.py:287-368`
 (`verify_bundle_integrity`).
 
 ## Provenance
@@ -71,7 +71,7 @@ detection remains intact -- treat HTTP deps as "I trust the network
 path" assertions, not as "APM made this safe".
 
 For the registry-proxy / air-gap story see
-[Registry proxy](../registry-proxy/).
+[Registry proxy](./registry-proxy/).
 
 ## Secret handling
 
@@ -80,17 +80,18 @@ APM has no secret store. The contract is:
 - **Tokens come from the environment.** `GITHUB_APM_PAT` for GitHub
   hosts, `ADO_APM_PAT` for Azure DevOps. Tokens are scoped per host
   family and never forwarded cross-host. See
-  [Authentication](../../consumer/authentication/).
+  [Authentication](../consumer/authentication/).
 - **MCP `env:` blocks in `apm.yml` are name/value pairs**, intended to
   hold *references* (e.g. `GITHUB_TOKEN: ${GITHUB_TOKEN}`) that the
   harness resolves at agent runtime, not literal secrets. Source:
   `src/apm_cli/install/mcp/entry.py`,
   `src/apm_cli/integration/mcp_integrator_install.py` (orchestration) and
   `src/apm_cli/integration/mcp_integrator.py` (runtime wiring).
-- **`apm install` writes `apm_modules/` to `.gitignore` automatically**
+- **`apm install` (project scope) writes `apm_modules/` to `.gitignore` automatically**
   on first install. Source:
-  `src/apm_cli/commands/_helpers.py:437` (`_update_gitignore_for_apm_modules`).
-  This keeps cached source trees out of commits.
+  `src/apm_cli/commands/_helpers.py:414` (`_update_gitignore_for_apm_modules`).
+  This keeps cached source trees out of commits. Global installs (`apm install -g`)
+  do **not** modify `.gitignore` in the current working directory.
 - **`apm.yml` is committed; `.env` is yours.** APM never reads `.env`
   files itself; that is delegated to the agent harness.
 
@@ -143,8 +144,8 @@ target restrictions, MCP transport restrictions). Tighten-only
 inheritance (enterprise -> org -> repo) is enforced in
 `src/apm_cli/policy/inheritance.py`.
 
-For schema and getting started, see [Get started with apm-policy.yml](../apm-policy-getting-started/) and
-[Policy Reference](../policy-reference/).
+For schema and getting started, see [Get started with apm-policy.yml](./apm-policy-getting-started/) and
+[Policy Reference](./policy-reference/).
 
 ## What APM does NOT do
 
@@ -178,10 +179,10 @@ For an org standardising on APM:
 - Wire `apm audit --ci -f sarif -o audit.sarif` into branch protection
   and upload SARIF to GitHub code scanning.
 - Publish an `apm-policy.yml` from your `<org>/.github` repo with an
-  allow list and a transport restriction on MCP. See [Governance overview](../governance-overview/).
+  allow list and a transport restriction on MCP. See [Governance overview](./governance-overview/).
 - Require signed commits on the source repos APM pulls from -- this is
   where APM's trust chain bottoms out.
 - Route all dep traffic through an enterprise proxy with audit
-  logging. See [Registry proxy](../registry-proxy/).
+  logging. See [Registry proxy](./registry-proxy/).
 - Forbid `allow_insecure: true` in `apm.yml` via the policy allow
   list, except where an air-gapped mirror demands it.

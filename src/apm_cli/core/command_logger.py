@@ -218,9 +218,11 @@ class InstallLogger(CommandLogger):
         noun = "package" if count == 1 else "packages"
         _rich_info(f"Validating {count} {noun}...", symbol="gear")
 
-    def validation_pass(self, canonical: str, already_present: bool):
+    def validation_pass(self, canonical: str, already_present: bool, updated: bool = False):
         """Log a package that passed validation."""
-        if already_present:
+        if updated:
+            _rich_echo(f"{canonical} (updated ref in apm.yml)", color="dim", symbol="check")
+        elif already_present:
             _rich_echo(f"{canonical} (already in apm.yml)", color="dim", symbol="check")
         else:
             _rich_success(canonical, symbol="check")
@@ -809,6 +811,11 @@ class InstallLogger(CommandLogger):
             _rich_error(
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
+            )
+        else:
+            _rich_info(
+                f"No changes -- install state already up to date{timing_suffix}.",
+                symbol="info",
             )
 
     def install_interrupted(self, elapsed_seconds: float):

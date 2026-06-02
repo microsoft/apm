@@ -71,3 +71,12 @@ def render_post_install_summary(
     # (consistent with ``apm unpack``). ``--force`` overrides.
     if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
         sys.exit(1)
+
+    # Hard-fail when ANY per-dep install error was reported. Matches
+    # the npm / pip / cargo convention: any install failure -> non-zero
+    # exit so CI scripts can detect failure without parsing stderr.
+    # ``--force`` covers critical-security overrides only; it does NOT
+    # suppress this hard-fail (Bug 2 fix on #1496, where the CLI used
+    # to exit 0 even after printing "Installation failed with N error(s)").
+    if error_count > 0:
+        sys.exit(1)

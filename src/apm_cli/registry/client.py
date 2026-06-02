@@ -291,10 +291,7 @@ class SimpleRegistryClient:
         servers = self._unwrap_server_list(data)
 
         metadata = data.get("metadata", {})
-        # Spec is camelCase ``nextCursor``; ``next_cursor`` accepted as a
-        # transitional kindness for in-tree mock fixtures only.
-        # TODO(v0.1): drop legacy snake_case once fixtures migrate.
-        next_cursor = metadata.get("nextCursor") or metadata.get("next_cursor")
+        next_cursor = metadata.get("nextCursor")
 
         return servers, next_cursor
 

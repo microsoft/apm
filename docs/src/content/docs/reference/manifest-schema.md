@@ -5,6 +5,8 @@ sidebar:
   order: 1
 ---
 
+> **Normative reference:** this page documents the v0.2 working-draft manifest schema as implemented by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 4 (Manifest)](/apm/specs/openapm-v01/) and published as JSON Schema at [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json).
+
 <dl>
 <dt>Version</dt><dd>0.2 (Working Draft)</dd>
 <dt>Date</dt><dd>2026-05-10</dd>
@@ -50,6 +52,7 @@ target:        <enum | list<enum>>
 type:          <enum>
 scripts:       <map<string, string>>
 includes:      <enum | list<string>>
+registries:    <map<string, RegistryEntry> & {default?: <string>}>
 dependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
@@ -65,7 +68,7 @@ Two fields are REQUIRED at parse time: `name` and `version`. All other fields ar
 
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 
-Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](../cli/init/) for the templates.
+Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](./cli/init/) for the templates.
 
 ---
 
@@ -139,6 +142,8 @@ target:
 ```
 
 When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets. `all` cannot be combined with other values.
+
+A plural alias `targets:` (YAML list only) is also accepted and takes precedence over the legacy CSV form when both are declared. Prefer `targets:` in new manifests; `target:` remains supported for backward compatibility.
 
 | Value | Effect |
 |---|---|
@@ -220,9 +225,9 @@ includes: auto
 #   - .apm/skills/my-skill/
 ```
 
-`includes:` is allow-list only. There is no `exclude:` form. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+`includes:` is allow-list only. There is no `exclude:` form. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
-When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
+When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
 ### 3.10. `policy`
 
@@ -245,7 +250,38 @@ policy:
 | `hash` | `string` | unset | `<algo>:<hex-digest>` | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present. MD5 and SHA-1 are rejected at parse time. |
 
-Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../../enterprise/policy-reference/).
+Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../enterprise/policy-reference/).
+
+### 3.11. `registries`
+
+::::caution[Experimental]
+The `registries:` field and registry-routed APM dependency forms require `apm experimental enable registries`.
+::::
+
+| | |
+|---|---|
+| **Type** | `map<string, RegistryEntry>` with optional `default: <string>` key |
+| **Required** | OPTIONAL |
+| **Description** | Declares REST-based APM registries for the project. Strictly additive — absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../guides/registries/#user-level-config). |
+
+```yaml
+registries:
+  jf-skills:
+    url: https://artifactory.example.com/artifactory/api/skills/jf-skills-local
+  default: jf-skills           # OPTIONAL — name of one of the configured entries
+```
+
+| Sub-key | Type | Required | Constraint | Semantic |
+|---|---|---|---|---|
+| `<name>` | `RegistryEntry` | at least one when block is non-empty | Name uses lowercase letters, digits, `-`, `.` | Registered registry. |
+| `<name>.url` | `string` | REQUIRED per entry | MUST start with `https://` or `http://`; no trailing slash required | Base URL the client appends `/v1/...` paths to. |
+| `default` | `string` | OPTIONAL | MUST name one of the configured entries | When set, plain string-shorthand APM deps and object-form deps without an explicit `registry:` key route through this registry. Project value wins over `registry.<name>.default` in `~/.apm/config.json`. |
+
+Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
+
+**Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
+
+For full client semantics — auth, lockfile fields, and routing rules — see the [Registries guide](../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](./registry-http-api/).
 
 ---
 
@@ -276,7 +312,9 @@ shorthand_form  = [host "/"] owner "/" repo ["/" virtual_path] ["#" ref]
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
-`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port because `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
+When a default registry is configured — via `registries.default` in `apm.yml` or `registry.<name>.default true` in `~/.apm/config.json` — plain `shorthand_form` entries with a `#<selector>` route through that registry instead of Git.
+
+`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port — `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
 
 | Segment | Required | Pattern | Description |
 |---|---|---|---|
@@ -324,7 +362,7 @@ dependencies:
 
 #### 4.1.2. Object Form
 
-REQUIRED when the shorthand is ambiguous (e.g. nested-group repos with virtual paths).
+REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with virtual paths). NOT required for nested-group deps that route through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`): the install-time boundary probe HEAD-walks candidate splits against the proxy and locks in the first one whose archive responds. See [Registry proxy guide](../enterprise/registry-proxy/#nested-group-repos-gitlab-subgroups-behind-the-proxy).
 
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
@@ -342,6 +380,10 @@ Remote dependency (git URL plus sub-path):
   alias: acme-sec
 ```
 
+`ref:` accepts either a literal git ref (`main`, `v2.0`, a 40-char commit SHA) or a **semver range** (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`). When `ref:` is a semver range, APM resolves it against the remote's tags at install time, matching against `v{version}` and `{name}--v{version}` patterns (with `{version}` as a bare-tag fallback) and selecting the highest tag that satisfies the range.
+
+The lockfile records the original `constraint`, the `resolved_tag`, the resolved `version`, the `resolved_commit`, and a `resolved_at` timestamp so subsequent installs replay the same tag deterministically -- only `apm install --update` or a manifest change re-resolves. When no remote tag satisfies the range, APM surfaces `NoMatchingTagError` with the inspected patterns.
+
 Local path dependency (development only):
 
 ```yaml
@@ -357,6 +399,28 @@ Monorepo sibling reference (`git: parent`):
 ```
 
 The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. `ref` and `alias` overrides are accepted; when `ref` is omitted the parent's resolved ref is inherited.
+
+Registry dependency (whole package or virtual sub-path):
+
+```yaml
+# Whole package via the default registry
+- id: acme/toolkit
+  version: ^2.0.0
+
+# Whole package routed to a named registry
+- registry: jf-skills              # OPTIONAL — defaults to the effective default registry
+  id: acme/toolkit                 # REQUIRED — owner/repo identity at the registry
+  version: ^2.0.0                  # REQUIRED — opaque version selector (semver when supported)
+
+# Virtual package (sub-path inside a published package)
+- registry: jf-skills
+  id: acme/prompt-pack
+  path: prompts/review.prompt.md   # OPTIONAL — omit to install the whole package
+  version: 1.4.0
+  alias: review                    # OPTIONAL
+```
+
+`id:` (or `registry:`) and `git:` are mutually exclusive on the same entry. `version:` MUST be a non-empty string — opaque selectors such as `stable`, `main`, or commit pins are valid; semver ranges (`^1.2.3`) are interpreted as ranges when the registry publishes semver-tagged versions. When `registry:` is omitted, a default registry MUST be configured — in project `apm.yml` or via `registry.<name>.default true` in `~/.apm/config.json`; APM hard-fails otherwise.
 
 #### 4.1.3. Virtual Packages
 
@@ -480,7 +544,7 @@ dependencies:
 | **Required** | OPTIONAL |
 | **Known keys** | `apm`, `mcp` |
 
-Development-only dependencies installed locally but excluded from plugin bundles produced by [`apm pack`](../cli/pack/) (plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
+Development-only dependencies installed locally but excluded from plugin bundles produced by [`apm pack`](./cli/pack/) (plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
 
 ```yaml
 devDependencies:
@@ -489,13 +553,13 @@ devDependencies:
     - owner/lint-rules#v2.0.0
 ```
 
-Created automatically by [`apm plugin init`](../cli/plugin/). Use [`apm install --dev`](../cli/install/) to add packages:
+Created automatically by [`apm plugin init`](./cli/plugin/). Use [`apm install --dev`](./cli/install/) to add packages:
 
 ```bash
 apm install --dev owner/test-helpers
 ```
 
-Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
 Local-path devDependency example:
 
@@ -509,19 +573,20 @@ devDependencies:
 
 ## 6. Compilation
 
-The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) behaviour. All fields have sensible defaults; omitting the entire section is valid.
+The `compilation` key is OPTIONAL. It controls [`apm compile`](./cli/compile/) behaviour. All fields have sensible defaults; omitting the entire section is valid.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
 | `target` | `enum<string>` | `all` | Same values as Section 3.6 | Output target. Defaults to `all` when set explicitly in compilation config. |
-| `strategy` | `enum<string>` | `distributed` | `distributed`, `single-file` | `distributed` generates per-directory `AGENTS.md` files. `single-file` generates one monolithic file. |
+| `strategy` | `enum<string>` | `distributed` | `distributed`, `single-file` | `distributed` generates per-directory target files (e.g. `AGENTS.md`, `CLAUDE.md`). `single-file` generates one monolithic file at `output`. |
 | `single_file` | `bool` | `false` | | Legacy alias. When `true`, overrides `strategy` to `single-file`. |
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
 | `chatmode` | `string` | unset | | Chatmode filter for compilation. |
 | `resolve_links` | `bool` | `true` | | Resolve relative Markdown links in primitives. |
-| `source_attribution` | `bool` | `true` | | Include source-file origin comments in compiled output. |
+| `source_attribution` | `bool` | `false` | | Include source-file origin comments in compiled output (opt-in). |
 | `exclude` | `list<string>` or `string` | `[]` | Glob patterns | Directories to skip during compilation (e.g. `apm_modules/**`). |
 | `placement` | `object` | unset | | Placement tuning. See Section 6.1. |
+| `agents_md` | `object` | unset | | AGENTS.md output tuning. See Section 6.2. |
 
 ### 6.1. `compilation.placement`
 
@@ -541,13 +606,35 @@ compilation:
     min_instructions_per_file: 1
 ```
 
+### 6.2. `compilation.agents_md`
+
+Controls how `apm compile` writes the `AGENTS.md` output file. All fields are OPTIONAL; omitting the entire sub-object keeps the default full-overwrite behaviour. Use `managed_section` mode when your `AGENTS.md` contains hand-written content you want to preserve across recompiles.
+
+| Field | Type | Default | Constraint | Description |
+|---|---|---|---|---|
+| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` overwrites the entire file on every compile. `managed_section` replaces only the block between `start_marker` and `end_marker`, leaving surrounding content untouched. |
+| `start_marker` | `string` | `<!-- apm:start -->` | Non-empty, distinct from `end_marker` | Opening HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
+| `end_marker` | `string` | `<!-- apm:end -->` | Non-empty, distinct from `start_marker` | Closing HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
+
+Both markers must appear **exactly once** in the file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content.
+
+See [Managed-section mode](../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
+
+```yaml
+compilation:
+  agents_md:
+    mode: managed_section
+    start_marker: "<!-- apm:start -->"
+    end_marker: "<!-- apm:end -->"
+```
+
 ---
 
 ## 7. Marketplace Authoring Block
 
 The OPTIONAL `marketplace:` block declares the metadata `apm pack` needs to emit a Claude-Code-compatible plugin marketplace (`marketplace.json`). It is read by `apm marketplace` subcommands and ignored by everything else. Repositories that do not publish a marketplace omit it entirely.
 
-The block was previously a standalone `marketplace.yml` file (still loadable for back-compat); the in-`apm.yml` form is canonical and is what [`apm marketplace init`](../cli/marketplace/) scaffolds.
+The block was previously a standalone `marketplace.yml` file (still loadable for back-compat); the in-`apm.yml` form is canonical and is what [`apm marketplace init`](./cli/marketplace/) scaffolds.
 
 ### 7.1. Inheritance
 
@@ -605,7 +692,7 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | REQUIRED | Package identifier as it appears in the marketplace. |
-| `source` | `string` | REQUIRED | `<owner>/<repo>` (remote) or `./<path>` (local). Must match the source pattern; path traversal (`..`) is refused. |
+| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), or `./<path>` (local). Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
 | `subdir` | `string` | OPTIONAL | Subdirectory inside the source repo. Path-traversal-validated. Ignored for local sources. |
 | `version` | `string` | Conditional | Semver range (e.g. `^1.0.0`, `~2.1.0`, `>=3.0`). Stored as a string; resolution happens at pack time. REQUIRED for remote packages unless `ref` is given. |
 | `ref` | `string` | Conditional | Explicit git ref (SHA, tag, or branch). Overrides `version` range when both are present. REQUIRED for remote packages unless `version` is given. |
@@ -620,6 +707,10 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | `repository` | `string` | OPTIONAL | Pass-through. |
 
 Remote packages MUST declare at least one of `version` or `ref`. Local packages (sources beginning with `./`) skip git resolution and have no version requirement.
+
+The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
+
+Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
 
 ### 7.6. Complete Marketplace Block
 
@@ -653,6 +744,14 @@ marketplace:
     - name: local-tool                       # local-path package
       source: ./packages/local-tool
       description: Vendored tool
+
+    - name: enterprise-agents                # GHE shorthand
+      source: ghe.corp.example.com/platform/agents
+      version: "^0.3.0"
+
+    - name: gitlab-helper                    # full URL form
+      source: https://gitlab.corp.example.com/team/helper.git
+      ref: v1.2.0
 ```
 
 The legacy standalone `marketplace.yml` (top-level keys, no `marketplace:` wrapper) is still loadable but deprecated; new repositories SHOULD use the in-`apm.yml` form scaffolded by `apm marketplace init`.
@@ -663,7 +762,7 @@ The legacy standalone `marketplace.yml` (top-level keys, no `marketplace:` wrapp
 
 After successful dependency resolution, a conforming resolver MUST write a lockfile capturing the exact resolved state. The lockfile MUST be a YAML file named `apm.lock.yaml` at the project root and SHOULD be committed to version control.
 
-The full lockfile schema is specified in the [Lockfile specification](../lockfile-spec/). At a minimum, every resolver MUST record `lockfile_version`, `dependencies[].repo_url`, `dependencies[].resolved_commit`, and `dependencies[].deployed_files` so subsequent installs are reproducible and `apm uninstall` can remove every placed file.
+The full lockfile schema is specified in the [Lockfile specification](./lockfile-spec/). At a minimum, every resolver MUST record `lockfile_version`, `dependencies[].repo_url`, `dependencies[].resolved_commit`, and `dependencies[].deployed_files` so subsequent installs are reproducible and `apm uninstall` can remove every placed file.
 
 Resolver behaviour:
 
@@ -681,7 +780,7 @@ Any runtime adopting this format (e.g. GitHub Agentic Workflows, CI systems, IDE
 2. **Resolve `dependencies.apm`** -- For each entry, clone or fetch the git repo (respecting `ref`), locate the `.apm/` directory (or virtual path), and extract primitives.
 3. **Resolve `dependencies.mcp`** -- For each entry, resolve from the MCP registry or validate self-defined transport config per Section 4.2.3.
 4. **Transitive resolution** -- Resolved packages MAY contain their own `apm.yml` with further dependencies, forming a dependency tree. Resolvers MUST resolve transitively. Conflicts are merged at instruction level (by `applyTo` pattern), not file level.
-5. **Write lockfile** -- Record exact commit SHAs and deployed file paths in `apm.lock.yaml` per Section 8 and the [Lockfile specification](../lockfile-spec/).
+5. **Write lockfile** -- Record exact commit SHAs and deployed file paths in `apm.lock.yaml` per Section 8 and the [Lockfile specification](./lockfile-spec/).
 
 ---
 
@@ -751,4 +850,4 @@ marketplace:
 | Version | Date | Changes |
 |---|---|---|
 | 0.1 | 2026-03-06 | Initial Working Draft. |
-| 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to `../cli/<verb>/` paths. ASCII-only enforcement. |
+| 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to reference CLI paths. ASCII-only enforcement. |

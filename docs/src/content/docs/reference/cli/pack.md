@@ -38,8 +38,9 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
 | `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
 | `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
-| `--marketplace-output PATH` | _(hidden)_ | **Deprecated.** Translates to `--marketplace-path claude=PATH` with a stderr warning. Will be removed in v0.15 (see #1318). |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
+| `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
+| `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp path and diff against the on-disk file. Exits `4` if the working tree is dirty (out-of-date `marketplace.json`). The gate itself never writes to disk. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
 ## Examples
@@ -126,7 +127,7 @@ dependencies:
 
 `.claude-plugin/marketplace.json` by default, plus any additional artifact selected by `marketplace.outputs` such as `.agents/plugins/marketplace.json` for Codex. Each remote plugin's version range is resolved against `git ls-remote`; local-path entries pass through verbatim. Files are written atomically, and parent directories are created if absent.
 
-Configure marketplace artifact paths in `apm.yml`: `marketplace.claude.output` controls the Claude/Anthropic artifact, and `marketplace.codex.output` controls the Codex artifact. `--marketplace-output PATH` remains as a legacy Claude-only compatibility override; prefer manifest config for new projects and CI.
+Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs` map, keyed by format. Use `--marketplace-path FORMAT=PATH` to override per-format output paths at pack time.
 
 ## Behavior
 
@@ -145,6 +146,8 @@ Configure marketplace artifact paths in `apm.yml`: `marketplace.claude.output` c
 | `0` | Success. Requested artifacts written (or, with `--dry-run`, planned). |
 | `1` | Build or runtime error: network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
 | `2` | `apm.yml` schema validation error. |
+| `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
+| `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file). |
 
 ## Related
 

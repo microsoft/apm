@@ -116,9 +116,9 @@ That is the entire surface. It does not read `apm.yml`. It does not
 touch `apm_modules/`. It does not modify the lockfile.
 
 <Aside type="note" title="Back-compat shim">
-If you run the legacy `apm update --check` or `apm update --self`, the
-CLI prints a deprecation notice and forwards to `apm self-update`.
-Update your scripts to call `apm self-update` directly.
+If you run the legacy `apm update --check`, the CLI prints a
+deprecation notice and forwards to `apm self-update --check`. Update
+your scripts to call `apm self-update --check` directly.
 </Aside>
 
 ## When to use which

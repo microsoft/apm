@@ -36,6 +36,191 @@ _logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 
 
+def _lockfile_has_registry_deps(existing_lockfile) -> bool:
+    """True when the on-disk lockfile records at least one registry-sourced dep.
+
+    Used to construct the registry resolver even when apm.yml's
+    ``registries:`` block has been removed but locked deps still need to
+    re-install. A user clones a repo, the apm.yml has no registries: block
+    but the lockfile says some deps are ``source: registry`` — we still
+    want them to install (they'll fail at auth lookup if the URL doesn't
+    match anything configured, with a clear remediation per §6.2).
+    """
+    if not existing_lockfile:
+        return False
+    return any(
+        getattr(dep, "source", None) == "registry"
+        for dep in existing_lockfile.dependencies.values()
+    )
+
+
+def _require_package_registry_feature_if_needed(registries_map, existing_lockfile) -> bool:
+    """Validate the gate and return whether registry support is needed."""
+    needs_registry = bool(registries_map) or _lockfile_has_registry_deps(existing_lockfile)
+    if needs_registry:
+        from apm_cli.deps.registry.feature_gate import require_package_registry_enabled
+
+        require_package_registry_enabled("Registry-sourced installs")
+    return needs_registry
+
+
+def _maybe_resolve_git_semver(
+    *,
+    dep_ref,
+    existing_lockfile,
+    update_refs: bool,
+    auth_resolver=None,
+):
+    """Resolve a git-source semver-range ``ref:`` to a concrete tag.
+
+    Returns the :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolution`
+    when resolution ran (and the caller should rewrite ``dep_ref.reference``);
+    returns ``None`` for any dep that should NOT route through the
+    git-semver resolver (local, registry-sourced, proxy-sourced, literal
+    ref, or a lockfile-pinned reinstall without ``--update``).
+
+    Lockfile replay
+    ---------------
+    When a lockfile entry already records ``constraint == dep_ref.reference``
+    and the locked tag still satisfies it, this function rebuilds the
+    :class:`GitSemverResolution` from the lockfile WITHOUT touching the
+    network. This is the npm-style "honour the lock" path -- the locked
+    tag is canonical until the manifest range changes or the user passes
+    ``--update`` / ``--refresh``.
+
+    Auth
+    ----
+    When ``auth_resolver`` is supplied, the per-dep ``AuthContext`` is
+    resolved before constructing :class:`RefResolver` and its token is
+    embedded in the ``https://`` URL used by ``git ls-remote``. This
+    mirrors the auth path used by the clone step downstream, so a
+    private-repo semver dep that clones successfully also enumerates
+    its tags successfully in CI environments where ``GITHUB_APM_PAT`` /
+    ``ADO_APM_PAT`` are the only credential source (no system
+    credential helper available). Passing ``auth_resolver=None`` (the
+    legacy path) preserves the previous unauthenticated behaviour for
+    public repos and for callers that intentionally skip auth.
+    """
+    # Only git-source deps with a semver-range reference are eligible.
+    if dep_ref.is_local:
+        return None
+    if getattr(dep_ref, "source", None) == "registry":
+        return None
+    if getattr(dep_ref, "artifactory_prefix", None):
+        return None
+    if dep_ref.ref_kind != "semver":
+        return None
+
+    constraint = dep_ref.reference
+    owner_repo = dep_ref.repo_url
+    package_name = owner_repo.rsplit("/", 1)[-1]
+
+    # Lockfile replay (npm semantics): if the lockfile already records a
+    # resolution for this constraint, return it directly. Saves a
+    # ls-remote call and keeps installs deterministic across machines.
+    if not update_refs and existing_lockfile is not None:
+        locked = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+        if (
+            locked is not None
+            and locked.constraint == constraint
+            and locked.resolved_tag
+            and locked.resolved_commit
+            and locked.version
+        ):
+            from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+            return GitSemverResolution(
+                constraint=locked.constraint,
+                resolved_version=locked.version,
+                resolved_tag=locked.resolved_tag,
+                resolved_sha=locked.resolved_commit,
+                # The pattern that produced the locked tag is not
+                # persisted (it would just be informational); the empty
+                # string here means "unknown / from lockfile".
+                matched_pattern="",
+                resolved_at=locked.resolved_at or "",
+            )
+
+    # Fresh resolution: call git ls-remote and pick the highest matching tag.
+    from apm_cli.deps.git_semver_resolver import GitSemverResolver
+    from apm_cli.marketplace.ref_resolver import RefResolver
+
+    # Resolve the per-dep token via AuthResolver so ls-remote uses the
+    # same credential source the downstream clone will use. Without this
+    # threading, ls-remote on a private repo would rely on the host's
+    # git credential helper (present on dev laptops, absent in CI).
+    token: str | None = None
+    if auth_resolver is not None:
+        try:
+            auth_ctx = auth_resolver.resolve_for_dep(dep_ref)
+            token = auth_ctx.token if auth_ctx is not None else None
+        except Exception:
+            # Auth lookup is best-effort here: if it fails the unauth path
+            # remains, the downstream clone will surface the real auth
+            # error with its own actionable diagnostic.
+            token = None
+
+    ref_resolver = RefResolver(host=dep_ref.host, token=token)
+    resolver = GitSemverResolver(ref_resolver)
+    return resolver.resolve(
+        owner_repo=owner_repo,
+        package_name=package_name,
+        constraint=constraint,
+    )
+
+
+def _purge_cached_semver_paths_for_update(
+    *,
+    all_apm_deps,
+    apm_modules_dir,
+    logger,
+) -> None:
+    """Pre-purge on-disk install paths for direct git-source semver deps
+    when ``--update`` / ``--refresh`` is set.
+
+    Bug 1 fix (#1496): the BFS resolver short-circuits at
+    ``install_path.exists()`` and never invokes ``download_callback``,
+    which is where ``_maybe_resolve_git_semver`` lives. For git-source
+    semver direct deps we therefore pre-purge the install path so the
+    resolver is forced through the callback, re-runs ``git ls-remote``,
+    and rewrites the lockfile with the latest matching tag. Matches
+    npm / cargo / bundler: ``--update`` is the explicit re-resolve
+    trigger and must not be swallowed by the on-disk cache. Scoped to
+    direct deps to avoid disturbing transitive cached content; the
+    resolver re-walks transitives naturally once a direct dep's
+    callback rewrites its ref. Local, registry, and proxy deps are
+    excluded -- their semver semantics (if any) belong to a different
+    resolver path.
+    """
+    from contextlib import suppress
+
+    from apm_cli.utils.file_ops import robust_rmtree as _rrm
+
+    for _dep in all_apm_deps:
+        if getattr(_dep, "ref_kind", None) != "semver":
+            continue
+        if _dep.is_local:
+            continue
+        if getattr(_dep, "source", None) == "registry":
+            continue
+        if getattr(_dep, "artifactory_prefix", None):
+            continue
+        try:
+            _ip = _dep.get_install_path(apm_modules_dir)
+        except Exception:  # noqa: S112
+            # Path computation failure (e.g. malformed dep) is non-fatal
+            # here -- the resolver will surface a real error downstream.
+            continue
+        if _ip.exists():
+            with suppress(Exception):
+                _rrm(_ip, ignore_errors=True)
+            if logger:
+                logger.verbose_detail(
+                    f"[*] --update: cleared cached install path for "
+                    f"{_dep.get_unique_key()} to force semver re-resolution"
+                )
+
+
 def _load_lockfile(ctx: InstallContext) -> None:
     """Load ``apm.lock.yaml`` and populate ``ctx.existing_lockfile`` / ``ctx.lockfile_path``."""
     # ------------------------------------------------------------------
@@ -184,6 +369,32 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
     from apm_cli.install.phases.local_content import _copy_local_package
 
     # ------------------------------------------------------------------
+    # 3b. Dedicated registry resolver (design §3.1, §8)
+    # ------------------------------------------------------------------
+    # Built when:
+    #   - the manifest's apm.yml has a top-level ``registries:`` block, OR
+    #   - the on-disk lockfile has at least one ``source: registry`` entry
+    #     (re-install of a project whose authors removed the block but the
+    #     locked deps still need somewhere to land).
+    # In the second case the URL is the trust anchor — auth resolves by
+    # URL prefix against the apm.yml registries map (which may be empty,
+    # forcing anonymous fetch).
+    registry_resolver = None
+    _apply_lockfile_registry_name = None
+    existing_lockfile = ctx.existing_lockfile
+    registries_map = getattr(ctx.apm_package, "registries", None) or {}
+    needs_registry = _require_package_registry_feature_if_needed(registries_map, existing_lockfile)
+    if needs_registry:
+        from apm_cli.deps.registry.auth import (
+            dependency_ref_with_registry_name_from_lockfile,
+        )
+        from apm_cli.deps.registry.resolver import RegistryPackageResolver
+
+        registry_resolver = RegistryPackageResolver(registries_map)
+        _apply_lockfile_registry_name = dependency_ref_with_registry_name_from_lockfile
+    ctx.registry_resolver = registry_resolver
+
+    # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)
     # ------------------------------------------------------------------
     # direct_dep_keys is phase-local (only read inside download_callback)
@@ -238,8 +449,27 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
                 package's directory rather than the root consumer (#857).
         """
         install_path = dep_ref.get_install_path(modules_dir)
+        # Cache short-circuit: skip the rest of the callback when the
+        # install path already exists. Exception: for git-source semver
+        # deps under ``--update`` / ``--refresh`` (``update_refs=True``),
+        # fall through so ``_maybe_resolve_git_semver`` re-runs
+        # ``git ls-remote`` and the lockfile gets rewritten with the
+        # latest matching tag. Matches npm/cargo/bundler: ``--update``
+        # is the explicit re-resolve trigger and must not be swallowed
+        # by the on-disk cache (Bug 1 fix on #1496). The downstream
+        # ``downloader.download_package`` rmtrees and re-clones the
+        # install path when the resolved tag changes, so refetching is
+        # safe.
         if install_path.exists():
-            return install_path
+            _force_semver_resolve = (
+                update_refs
+                and not dep_ref.is_local
+                and getattr(dep_ref, "source", None) != "registry"
+                and not getattr(dep_ref, "artifactory_prefix", None)
+                and getattr(dep_ref, "ref_kind", None) == "semver"
+            )
+            if not _force_semver_resolve:
+                return install_path
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
         # users see the install advancing past silent transitive lookups.
         # Under F7's parallel BFS this callback may run on a worker
@@ -258,6 +488,64 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
                 if _tui is None or not _tui.is_animating():
                     logger.resolving_heartbeat(_display)
         try:
+            # ─── Registry-sourced dep (design §8) ──────────────────────
+            # Routed before local/git so the registry resolver owns the
+            # download for source=="registry" entries. Lockfile re-installs
+            # may arrive with registry_name=None — look it up by URL prefix
+            # against the configured registries map.
+            if dep_ref.source == "registry":
+                from apm_cli.deps.registry.feature_gate import (
+                    require_package_registry_enabled,
+                )
+
+                require_package_registry_enabled("Registry-sourced downloads")
+
+                if registry_resolver is None:
+                    raise RuntimeError(
+                        f"dep {dep_ref.repo_url!r} is registry-sourced but no "
+                        f"registries: block is configured in apm.yml and the "
+                        f"lockfile carries no resolved_url for it."
+                    )
+                dep_ref = _apply_lockfile_registry_name(
+                    dep_ref,
+                    registries_map,
+                    existing_lockfile=existing_lockfile,
+                )
+                # Registry T5: honor lockfile on apm install (mirrors git T5
+                # at lines below). When the lockfile has full replay data and
+                # the manifest range still covers the locked version, fetch
+                # from the locked URL and verify against the locked hash
+                # (npm install model — no /versions API call).
+                _locked_reg = (
+                    existing_lockfile.get_dependency(dep_ref.get_unique_key())
+                    if existing_lockfile
+                    else None
+                )
+                if (
+                    not update_refs
+                    and _locked_reg
+                    and _locked_reg.resolved_url
+                    and _locked_reg.resolved_hash
+                    and _locked_reg.version
+                ):
+                    from apm_cli.drift import detect_ref_change as _detect_ref_change
+
+                    if not _detect_ref_change(dep_ref, _locked_reg, update_refs=False):
+                        registry_resolver.download_from_lockfile(
+                            dep_ref,
+                            install_path,
+                            resolved_url=_locked_reg.resolved_url,
+                            resolved_hash=_locked_reg.resolved_hash,
+                            version=_locked_reg.version,
+                        )
+                        callback_downloaded[dep_ref.get_unique_key()] = None
+                        return install_path
+                registry_resolver.download_package(dep_ref, install_path)
+                # Mark as already-downloaded so the parallel pre-download
+                # phase skips this dep. No SHA for registry deps.
+                callback_downloaded[dep_ref.get_unique_key()] = None
+                return install_path
+
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
                 if (
@@ -301,6 +589,29 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
                 if _tui is not None:
                     _tui.task_failed(dep_ref.get_unique_key())
                 return None
+
+            # --- Git-source semver range resolution (issue #1488) ---
+            # When the manifest carries a semver range as ``ref:`` and
+            # the dep is non-local, non-registry, and non-proxy, resolve
+            # it to a concrete tag BEFORE any git operation. The result
+            # is stashed on ctx so install/sources.py can plumb it into
+            # the lockfile, and the dep_ref's ``reference`` is replaced
+            # with the concrete tag so build_download_ref / clone use a
+            # literal git ref.
+            _semver_resolution = _maybe_resolve_git_semver(
+                dep_ref=dep_ref,
+                existing_lockfile=existing_lockfile,
+                update_refs=update_refs,
+                auth_resolver=ctx.auth_resolver,
+            )
+            if _semver_resolution is not None:
+                with callback_lock:
+                    ctx.git_semver_resolutions[dep_ref.get_unique_key()] = _semver_resolution
+                # Rewrite the dep_ref's ref to the concrete tag so the
+                # rest of the pipeline (drift detection, download, etc.)
+                # operates on a literal git ref. The original constraint
+                # is preserved in the resolution dataclass.
+                dep_ref.reference = _semver_resolution.resolved_tag
 
             # T5: Use locked commit for reproducibility, unless the manifest
             # ref has drifted from what the lockfile recorded (spec drift).
@@ -354,9 +665,25 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
             dep_key = dep_ref.get_unique_key()
             is_direct = dep_key in direct_dep_keys
 
+            # Distinguish resolution failures (git-semver no-match) from
+            # download failures: the dep_ref was rewritten to a concrete
+            # tag BEFORE clone, so a NoMatchingTagError means we never
+            # got to the download step. Using "download" as the verb
+            # would mislead users who are debugging an unsatisfied
+            # constraint -- nothing was downloaded yet.
+            from apm_cli.deps.git_semver_resolver import NoMatchingTagError
+
+            if isinstance(e, NoMatchingTagError):
+                if is_direct:
+                    fail_msg = f"No matching tag for {dep_ref.repo_url}: {e}"
+                else:
+                    chain_hint = f" (via {parent_chain})" if parent_chain else ""
+                    fail_msg = (
+                        f"No matching tag for transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
+                    )
             # Distinguish direct vs transitive failure messages so users
             # don't see a misleading "transitive dep" label for top-level deps.
-            if is_direct:
+            elif is_direct:
                 fail_msg = f"Failed to download dependency {dep_ref.repo_url}: {e}"
             else:
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
@@ -381,6 +708,13 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
+    if update_refs:
+        _purge_cached_semver_paths_for_update(
+            all_apm_deps=ctx.all_apm_deps,
+            apm_modules_dir=ctx.apm_modules_dir,
+            logger=ctx.logger,
+        )
+
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,

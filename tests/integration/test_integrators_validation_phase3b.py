@@ -16,6 +16,7 @@ Strategy:
 
 from __future__ import annotations
 
+import re
 import subprocess  # noqa: F401 -- keep for potential future use
 from datetime import datetime
 from pathlib import Path
@@ -609,57 +610,10 @@ class TestAgentIntegratorWriteCodexAgent:
             AgentIntegrator._write_codex_agent(link, dst)
 
 
-class TestAgentIntegratorWriteWindsurfAgentSkill:
-    """_write_windsurf_agent_skill transforms .agent.md to SKILL.md."""
-
-    def test_write_windsurf_basic(self, tmp_path: Path) -> None:
-        src = tmp_path / "tester.agent.md"
-        dst = tmp_path / "SKILL.md"
-        src.write_text("# Tester Agent\n\nTest things.", encoding="utf-8")
-        integrator = AgentIntegrator()
-        integrator._write_windsurf_agent_skill(src, dst)
-        content = dst.read_text(encoding="utf-8")
-        assert "---" in content
-        assert "tester" in content.lower()
-
-    def test_write_windsurf_with_frontmatter(self, tmp_path: Path) -> None:
-        src = tmp_path / "rev.agent.md"
-        dst = tmp_path / "SKILL.md"
-        src.write_text(
-            "---\nname: Reviewer\ndescription: Reviews code\n---\n\nReview all PRs.",
-            encoding="utf-8",
-        )
-        integrator = AgentIntegrator()
-        integrator._write_windsurf_agent_skill(src, dst)
-        content = dst.read_text(encoding="utf-8")
-        assert "Reviewer" in content
-        assert "Reviews code" in content
-
-    def test_write_windsurf_drops_agent_only_fields(self, tmp_path: Path) -> None:
-        """tools and model fields are dropped with a diagnostic."""
-        src = tmp_path / "agent.agent.md"
-        dst = tmp_path / "SKILL.md"
-        src.write_text(
-            "---\nname: SomeAgent\ntools:\n  - read_file\nmodel: gpt-4\n---\n\nBody.",
-            encoding="utf-8",
-        )
-        diagnostics = MagicMock()
-        integrator = AgentIntegrator()
-        integrator._write_windsurf_agent_skill(src, dst, diagnostics=diagnostics)
-        content = dst.read_text(encoding="utf-8")
-        # tools and model should not appear in the output YAML frontmatter
-        assert "tools:" not in content or "SomeAgent" in content
-        diagnostics.warn.assert_called_once()
-
-    def test_write_windsurf_rejects_symlink(self, tmp_path: Path) -> None:
-        real = tmp_path / "real.agent.md"
-        real.write_text("content", encoding="utf-8")
-        link = tmp_path / "link.agent.md"
-        link.symlink_to(real)
-        dst = tmp_path / "SKILL.md"
-        integrator = AgentIntegrator()
-        with pytest.raises(ValueError, match="symlink"):
-            integrator._write_windsurf_agent_skill(link, dst)
+# NOTE: TestAgentIntegratorWriteWindsurfAgentSkill was removed when windsurf
+# dropped its 'agents' primitive. The agents -> SKILL.md transformer is no
+# longer reachable from production code; windsurf deploys SKILL.md directly
+# via the 'skills' primitive.
 
 
 class TestAgentIntegratorIntegrateForTarget:
@@ -1322,7 +1276,9 @@ class TestLogTlsFailure:
         exc = RuntimeError("TLS verification failed: bad cert")
         verbose_calls: list[str] = []
         _log_tls_failure("host.example.com", exc, lambda m: verbose_calls.append(m), logger)
-        assert any("host.example.com" in m or "bad cert" in m for m in verbose_calls)
+        assert any(
+            re.search(r"\bhost\.example\.com\b", m) or "bad cert" in m for m in verbose_calls
+        )
 
     def test_without_logger_calls_warning_with_mock(self) -> None:
         """_log_tls_failure always requires a logger; test it calls warning with the right message."""
