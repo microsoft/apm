@@ -39,10 +39,15 @@ per-PR convergence loop -- it COMPOSES existing skills.
 - [shepherd-driver](../shepherd-driver/SKILL.md) -- the per-PR drive-
   to-merge convergence loop and cross-PR mergeability gate (which in
   turn composes apm-review-panel).
+- [pr-description-skill](../pr-description-skill/SKILL.md) -- authors
+  the anchored, mermaid-validated body of the ONE issue PR opened at
+  Phase 4 acceptance-close (see `assets/acceptance-observer.md`). The
+  PR body is never hand-rolled.
 
-Both are same-repo LOCAL SIBLINGS. This skill DECLARES the dependency
-here and PROBES for each at its use-site (Phase 1 and Phase 5) with a
-tool call -- never an assertion from recall (A9 SUPERVISED EXECUTION).
+All three are same-repo LOCAL SIBLINGS. This skill DECLARES each
+dependency here AND in `apm.yml`, and PROBES for each at its use-site
+(Phase 1 triage, Phase 4 PR-open, Phase 5 shepherd) with a tool call --
+never an assertion from recall (A9 SUPERVISED EXECUTION).
 
 ## Hard boundaries
 
@@ -123,6 +128,16 @@ test -f ../shepherd-driver/assets/shepherd-driver-prompt.md \
   && test -f ../shepherd-driver/assets/completion-schema.json \
   && echo "shepherd-driver present" \
   || echo "MISSING shepherd-driver - stop and ask the operator"
+```
+
+Phase 4 (before a pipeline child opens the issue PR -- the child
+re-probes this in its own worktree before `gh pr create`):
+
+```
+test -f ../pr-description-skill/SKILL.md \
+  && test -f ../pr-description-skill/assets/pr-body-template.md \
+  && echo "pr-description-skill present" \
+  || echo "MISSING pr-description-skill - stop and ask the operator"
 ```
 
 On a probe MISS, STOP and ask the operator to restore the sibling; do
@@ -346,6 +361,10 @@ Never auto-close an escalated issue.
 - [shepherd-driver](../shepherd-driver/SKILL.md) -- per-PR drive-to-
   merge loop + mergeability gate (Phases 5-6; probed before use).
   Transitively composes apm-review-panel.
+- [pr-description-skill](../pr-description-skill/SKILL.md) -- authors
+  the Phase 4 issue-PR body (probed before the PR-open; never
+  hand-rolled). Transitively also used by shepherd-driver for any
+  superseding PR.
 
 ## Operating contract for the orchestrator thread
 

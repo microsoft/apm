@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm compile --target copilot` (and `agents`) no longer writes instructions into `AGENTS.md` when `apm install` has already deployed them to `.github/instructions/`, eliminating duplicate context that Copilot would read from both locations. Mirrors the equivalent dedup behaviour that was already in place for the Claude path (`.claude/rules/`). (closes #1550, refs #1445)
+
 ### Changed
 
 - `apm compile` no longer emits cosmetic debug comments (APM version, source-file headers, footer) in generated `CLAUDE.md` and `copilot-instructions.md` files by default. The `compilation.source_attribution` flag now defaults to `false` (was `true`), reducing token overhead for every LLM context window that reads these files. Load-bearing markers (`_COPILOT_ROOT_GENERATED_MARKER` and Build ID) are always emitted regardless of the flag. To restore the previous behaviour, set `compilation: source_attribution: true` in `apm.yml`. (closes #1341)
@@ -17,7 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `apm pack` generates ecosystem-specific `plugin.json` files when `target:` includes `claude` or `copilot` (#1623).
+- Teams with existing `AGENTS.md` content can now adopt `apm compile` without
+  losing hand-written rules: set `compilation.agents_md.mode: managed_section`
+  in `apm.yml` to update only the APM-owned block between configurable markers.
+  Missing or duplicate markers raise a loud error so no content is silently
+  lost. (closes #1540)
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
+- `install.sh` and `apm self-update` now send a conditional `Authorization` header on GitHub release-lookup API calls when `GITHUB_APM_PAT`, `GITHUB_TOKEN`, or `GH_TOKEN` is set, improving reliability for users on shared IPs and corporate NAT that hit anonymous rate limits. Anonymous fallback is preserved when no token is configured. (closes #1582)
 
 ## [0.16.1] - 2026-06-01
 
@@ -27,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install -g` (USER scope) no longer writes `apm_modules/` to the working-directory `.gitignore`; only project-scope installs update it. (closes #1577)
 - `apm install -g --target copilot` now deploys prompt primitives to `~/.copilot/prompts/` while continuing to filter unsupported user-scope instructions. (closes #1482, #1570)
 - Linux standalone `apm` binaries no longer fail git shared-cache clones with shared-library symbol lookup errors caused by PyInstaller dynamic-library paths leaking into child processes. (closes #1534)
 - Avoid 13-minute `apm install` hangs in large local projects by limiting synthetic `_local` discovery to `.apm/` and `.github/`, while preserving package metadata discovery. (closes #1507) -- by @ioannispoulios

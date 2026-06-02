@@ -1,14 +1,35 @@
 """Version checking and update notification utilities."""
 
+import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional, Tuple  # noqa: F401, UP035
+
+
+def _get_github_token() -> str | None:
+    """Return a GitHub token following canonical precedence, or None.
+
+    Precedence mirrors TOKEN_PRECEDENCE["modules"] in core/token_manager.py:
+      GITHUB_APM_PAT -> GITHUB_TOKEN -> GH_TOKEN
+
+    The token value is never logged or included in any output.
+    """
+    return (
+        os.environ.get("GITHUB_APM_PAT")
+        or os.environ.get("GITHUB_TOKEN")
+        or os.environ.get("GH_TOKEN")
+        or None
+    )
 
 
 def get_latest_version_from_github(repo: str = "microsoft/apm", timeout: int = 2) -> str | None:
     """
     Fetch the latest release version from GitHub API.
+
+    Sends an Authorization header when a GitHub token is present in the
+    environment (GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN), falling back to
+    anonymous when none is set. This avoids rate-limit failures on shared IPs
+    and corporate NAT. The token value is never logged or echoed.
 
     Args:
         repo: Repository in format "owner/repo"
@@ -24,7 +45,9 @@ def get_latest_version_from_github(repo: str = "microsoft/apm", timeout: int = 2
 
     try:
         url = f"https://api.github.com/repos/{repo}/releases/latest"
-        response = requests.get(url, timeout=timeout)
+        token = _get_github_token()
+        headers = {"Authorization": f"token {token}"} if token else {}
+        response = requests.get(url, headers=headers, timeout=timeout)
 
         if response.status_code != 200:
             return None

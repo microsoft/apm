@@ -40,6 +40,13 @@ Columns:
 
 Lines stay under 200 chars to remain readable in narrow terminals.
 ASCII only.
+
+CELL-WRITE RULE: write each cell as a ONE-LINE, sanitized ASCII
+summary. NEVER backslash-escape Markdown metacharacters (`|` `_` `*`
+backtick) -- it corrupts the rendered table. If a value contains a
+literal pipe `|` or a newline, REPLACE it with ` / ` (or a space)
+before writing the cell. Keep rich/multi-line detail (blocker text,
+session refs) in the subagent return or a PR comment, never in a cell.
 -->
 
 # Ground-truth table

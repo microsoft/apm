@@ -5,21 +5,25 @@ author: Microsoft
 license: MIT
 type: skill
 
-# Composes the apm-review-panel skill as its per-PR review primitive.
+# Composes the apm-review-panel skill as its per-PR review primitive,
+# and pr-description-skill to author the body of any superseding PR it
+# opens (Path B).
 #
 # Belt + suspenders (genesis step 3.5 declaration mechanism = BOTH):
-#  - Belt: the manifest dep below declares the edge so the resolver
-#    deploys apm-review-panel alongside this driver. The local-path
-#    key resolves relative to THIS package's directory (apm-usage
-#    dependencies.md anchor rule), hence `../apm-review-panel`.
+#  - Belt: the manifest deps below declare the edges so the resolver
+#    deploys both alongside this driver. The local-path keys resolve
+#    relative to THIS package's directory (apm-usage dependencies.md
+#    anchor rule), hence `../apm-review-panel` and
+#    `../pr-description-skill`.
 #  - Suspenders: the runtime activate-by-name probe in
-#    `assets/shepherd-driver-prompt.md` loads apm-review-panel at
-#    spawn time even if a consumer wired the deploy differently.
+#    `assets/shepherd-driver-prompt.md` loads each at use time even if
+#    a consumer wired the deploy differently.
 #
 # The <= 0.14.1 orphaned-lockfile bug that forced batch-bug-shepherd
 # to COMMENT OUT its analogous edge is fixed from 0.16 onward, so the
-# real edge is declared here.
+# real edges are declared here.
 dependencies:
   apm:
     - ../apm-review-panel
+    - ../pr-description-skill
   mcp: []
