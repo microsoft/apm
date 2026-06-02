@@ -96,7 +96,7 @@ def _deployed_path_entry(
         )
 
 
-def integrate_package_primitives(
+def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
     *,
@@ -116,6 +116,7 @@ def integrate_package_primitives(
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
+    policy: Any = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -383,6 +384,8 @@ def integrate_package_primitives(
         force=force,
         targets=targets,
         skill_subset=skill_subset,
+        scope=scope,
+        policy=policy,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:

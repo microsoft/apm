@@ -1132,6 +1132,8 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        scope=None,
+        policy=None,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
 
@@ -1235,6 +1237,22 @@ class SkillIntegrator(BaseIntegrator):
             )
 
         # No SKILL.md at root  -- not a skill package.
+        # MARKETPLACE_PLUGIN: deploy bin/ executables + plugin manifest when
+        # a bin/ directory is present and the scope and target qualify.
+        bin_paths: list[Path] = []
+        from apm_cli.models.apm_package import PackageType as _PackageType
+
+        if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
+            bin_paths = self._deploy_plugin_bin(
+                package_info,
+                project_root,
+                targets,
+                scope=scope,
+                policy=policy,
+                force=force,
+                logger=logger,
+            )
+
         # Still promote any sub-skills shipped under .apm/skills/.
         sub_skills_count, sub_deployed = self._promote_sub_skills_standalone(
             package_info,
@@ -1246,15 +1264,135 @@ class SkillIntegrator(BaseIntegrator):
             targets=targets,
         )
         return SkillIntegrationResult(
-            skill_created=False,
+            skill_created=bool(bin_paths),
             skill_updated=False,
-            skill_skipped=True,
+            skill_skipped=not bool(bin_paths),
             skill_path=None,
             references_copied=0,
             links_resolved=0,
             sub_skills_promoted=sub_skills_count,
-            target_paths=sub_deployed,
+            target_paths=sub_deployed + bin_paths,
         )
+
+    def _deploy_plugin_bin(
+        self,
+        package_info,
+        project_root: Path,
+        targets,
+        scope=None,
+        policy=None,
+        force: bool = False,
+        logger=None,
+    ) -> list[Path]:
+        """Deploy bin/ executables and plugin manifest for a MARKETPLACE_PLUGIN.
+
+        Only activates when ALL of:
+        - The package has a bin/ directory
+        - At least one claude target is active
+        - scope is InstallScope.USER (bin/ deploy is user-scope only, v1)
+        - policy does not deny the package
+
+        Each binary is made executable (chmod 0o755) on POSIX systems.
+        Returns a list of all deployed file Paths (files, not directories).
+        """
+        import os
+        import stat
+
+        from apm_cli.core.scope import InstallScope
+
+        if scope is not InstallScope.USER:
+            return []
+
+        package_path = package_info.install_path
+        bin_dir = package_path / "bin"
+        if not bin_dir.is_dir():
+            return []
+
+        # Policy opt-out
+        if policy is not None:
+            bd_policy = getattr(policy, "bin_deploy", None)
+            if bd_policy is not None:
+                if bd_policy.deny_all:
+                    if logger:
+                        logger.progress(
+                            "[i] bin_deploy.deny_all: skipping bin deploy for "
+                            f"{package_info.get_canonical_dependency_string()}",
+                            symbol="info",
+                        )
+                    return []
+                canonical = package_info.get_canonical_dependency_string()
+                if canonical in bd_policy.deny:
+                    if logger:
+                        logger.progress(
+                            f"[i] bin_deploy.deny: skipping bin deploy for {canonical}",
+                            symbol="info",
+                        )
+                    return []
+
+        # Resolve active targets list (user-scope: project_root == Path.home())
+        if targets is None:
+            from apm_cli.integration.targets import active_targets
+
+            targets = active_targets(project_root)
+
+        # Find claude targets
+        claude_targets = [t for t in targets if t.name == "claude"]
+        if not claude_targets:
+            return []
+
+        skill_name = package_path.name
+        deployed: list[Path] = []
+
+        for target in claude_targets:
+            target_root_dir = project_root / target.root_dir
+            if not target.auto_create and not target_root_dir.is_dir():
+                continue
+
+            skill_base = target_root_dir / "skills" / skill_name
+
+            # Deploy bin/ executables
+            dest_bin = skill_base / "bin"
+            dest_bin.mkdir(parents=True, exist_ok=True)
+            for src_file in bin_dir.iterdir():
+                if not src_file.is_file():
+                    continue
+                dest_file = dest_bin / src_file.name
+                if dest_file.exists() and not force:
+                    import hashlib
+
+                    src_hash = hashlib.sha256(src_file.read_bytes()).hexdigest()
+                    dst_hash = hashlib.sha256(dest_file.read_bytes()).hexdigest()
+                    if src_hash == dst_hash:
+                        deployed.append(dest_file)
+                        continue
+                shutil.copy2(src_file, dest_file)
+                if os.name == "posix":
+                    current = dest_file.stat().st_mode
+                    dest_file.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                if logger:
+                    logger.progress(
+                        f"[bin] deployed {src_file.name} -> "
+                        f"{target.root_dir}/skills/{skill_name}/bin/{src_file.name}",
+                        symbol="plus",
+                    )
+                deployed.append(dest_file)
+
+            # Deploy .claude-plugin/plugin.json manifest
+            plugin_manifest = package_path / ".claude-plugin" / "plugin.json"
+            if plugin_manifest.is_file():
+                dest_manifest_dir = skill_base / ".claude-plugin"
+                dest_manifest_dir.mkdir(parents=True, exist_ok=True)
+                dest_manifest = dest_manifest_dir / "plugin.json"
+                shutil.copy2(plugin_manifest, dest_manifest)
+                if logger:
+                    logger.progress(
+                        f"[bin] deployed plugin.json -> "
+                        f"{target.root_dir}/skills/{skill_name}/.claude-plugin/plugin.json",
+                        symbol="plus",
+                    )
+                deployed.append(dest_manifest)
+
+        return deployed
 
     def sync_integration(
         self,

@@ -10,6 +10,7 @@ import yaml
 
 from .schema import (
     ApmPolicy,
+    BinDeployPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -45,6 +46,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "compilation",
     "manifest",
     "unmanaged_files",
+    "bin_deploy",
 }
 
 
@@ -245,6 +247,12 @@ def _build_policy(data: dict) -> ApmPolicy:
         allow_non_registry=bool(reg_data.get("allow_non_registry", True)),
     )
 
+    bd_data = data.get("bin_deploy") or {}
+    bin_deploy = BinDeployPolicy(
+        deny_all=bool(bd_data.get("deny_all", False)),
+        deny=_parse_tuple(bd_data.get("deny")) if bd_data.get("deny") is not None else (),
+    )
+
     return ApmPolicy(
         name=data.get("name", "") or "",
         version=data.get("version", "") or "",
@@ -258,6 +266,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         manifest=manifest,
         unmanaged_files=unmanaged_files,
         registry_source=registry_source,
+        bin_deploy=bin_deploy,
     )
 
 
