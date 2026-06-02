@@ -209,8 +209,8 @@ def _check_required_packages_deployed(
         passed=False,
         message=(
             f"{len(not_deployed)} required package(s) not deployed. "
-            "Hint: re-run with --no-policy to bypass this check and repair the "
-            "lockfile, then reinstall normally."
+            "Hint: run `apm install --no-policy` to repair the lockfile, "
+            "then reinstall normally."
         ),
         details=not_deployed,
     )
