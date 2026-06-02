@@ -121,8 +121,8 @@ primitive type:
 | instruction | `.apm/instructions/*.instructions.md` | No |
 | command (prompt) | `.apm/prompts/*.prompt.md` | No |
 | hook | `.apm/hooks/*.json` | Yes: `hooks/*.json` |
-| agent | `.apm/agents/**/*.agent.md`, `.apm/chatmodes/` | Yes: `*.agent.md` at package root |
-| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (MARKETPLACE_PLUGIN type only) |
+| agent | `.apm/agents/**/*.agent.md`, `.apm/chatmodes/*.chatmode.md` | Yes: `*.agent.md` and `*.chatmode.md` at package root |
+| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
 `src/apm_cli/integration/command_integrator.py`,
@@ -132,12 +132,19 @@ Source: `src/apm_cli/integration/instruction_integrator.py`,
 
 ### Canonical layout for marketplace publishers
 
+:::caution[Silent install drops can remove intended guardrails]
+`apm pack` accepts primitives from both `.apm/<type>/` and root convention
+directories (for example, an `instructions/` folder at the plugin root).
+`apm install` does NOT discover instructions, commands, or prompts placed
+in root convention directories. Packages that rely on these primitives for
+security guardrails or policy enforcement will install silently incomplete,
+potentially removing those guardrails from consumer environments.
+:::
+
 If you publish a plugin that consumers install via `apm install`, use
 `.apm/<type>/` for **every** primitive type. This layout is the only
 one that works symmetrically through both `apm pack` (export) and
-`apm install` (discovery). Using root convention directories for
-instructions or commands produces a bundle that packs correctly but
-installs silently incomplete.
+`apm install` (discovery).
 
 ```
 plugins/my-plugin/

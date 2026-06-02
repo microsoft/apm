@@ -74,8 +74,8 @@ Per-primitive scan paths for `apm install`:
 | instruction | `.apm/instructions/` | No |
 | command (prompt) | `.apm/prompts/` | No |
 | hook | `.apm/hooks/` | Yes: `hooks/` |
-| agent | `.apm/agents/`, `.apm/chatmodes/` | Yes: `*.agent.md` at root |
-| skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (MARKETPLACE_PLUGIN) |
+| agent | `.apm/agents/`, `.apm/chatmodes/` | Yes: `*.agent.md` and `*.chatmode.md` at root |
+| skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
