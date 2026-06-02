@@ -22,6 +22,6 @@ description: "Python development guidelines"
 - Use meaningful test names that describe behavior
 - Implement integration tests for external dependencies
 - Maintain test coverage above 85%
-- Use linting tools (ruff, mypy)
+- Use ruff for linting and formatting, mypy for type checking
 
 See [project architecture](../context/architecture.context.md) for detailed patterns.
