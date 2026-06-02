@@ -800,3 +800,9 @@ class TestResolveRequestedPackages:
             resolve_requested_packages(("nope",), [self._dep("org/a")])
         assert exc.value.token == "nope"
         assert "org/a" in exc.value.available
+
+    def test_alias_maps_to_canonical(self):
+        from apm_cli.commands._helpers import resolve_requested_packages
+
+        deps = [self._dep("org/compliance-rules", alias="my-rules")]
+        assert resolve_requested_packages(("my-rules",), deps) == ["org/compliance-rules"]

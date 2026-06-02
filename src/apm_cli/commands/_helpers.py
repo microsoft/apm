@@ -349,7 +349,10 @@ class UnknownPackageError(Exception):
         super().__init__(f"Package '{token}' not found")
 
 
-def resolve_requested_packages(packages, all_deps):
+def resolve_requested_packages(
+    packages: tuple[str, ...] | list[str],
+    all_deps: list,
+) -> list[str] | None:
     """Map requested package tokens to canonical dependency keys.
 
     The install engine matches ``only_packages`` by ``DependencyReference``
