@@ -63,15 +63,23 @@ tool call -- never an assertion from recall (A9 SUPERVISED EXECUTION).
 
 ## Architecture invariants
 
-- **Fan-out, not serial.** Triage, implement, and shepherd-driver all
-  run as parallel child threads via the runtime `task` affordance. A
+- **Fan-out, not serial.** Triage, solution-pipeline (and its Plan
+  lenses + per-wave task children), and shepherd-driver all run as
+  parallel child threads via the runtime `task` affordance. A
   single-loop variant is an anti-pattern. Subagent capacity is
   UNLIMITED and is NEVER a deferral reason.
-- **Worktree isolation.** Every implement and shepherd-driver child
-  runs in its OWN git worktree (one per issue/PR). Do NOT fan out
-  against one shared REPO_ROOT working tree -- parallel children would
-  race on the index, branch, and working tree. Triage children are
-  read-only and may share a read-only REPO_ROOT.
+- **Worktree isolation, with one-writer integration.** Every solution-
+  pipeline and shepherd-driver child runs in its OWN git worktree (one
+  per issue/PR). Within Phase 4, a pipeline child further spawns ONE
+  task child per task PER WAVE, each in its OWN worktree branched off
+  the issue branch at the wave base; the pipeline child is the SOLE
+  WRITER of the issue branch and integrates task branches via `git
+  merge --no-ff` at the wave gate. Tasks in a wave are mutually
+  independent and touch disjoint files by construction (planner-
+  enforced), so integration is conflict-free -- a real conflict is a
+  planning error and triggers a re-plan, never a hand-resolve. Do NOT
+  fan out against one shared working tree. Triage and verifier/lens
+  children are read-only and may share a read-only REPO_ROOT.
 - **One persisted state table.** A single `plan.md` ground-truth table
   plus a machine-readable `proceed_manifest` is the canonical session
   state (B4 PLAN MEMENTO). Reload it at every phase boundary; never
@@ -192,28 +200,48 @@ label THIS run adds in the row's `labels_added` column so Phase 7 (and
 Phase 5 teardown) strip ONLY those and never touch pre-existing
 labels.
 
-### Phase 4 - implement fan-out (by type)
+### Phase 4 - solution pipeline (Ideate -> Plan -> Implement waves)
 
-For each proceed row WITHOUT an in-flight PR, spawn ONE implement
-child in its OWN git worktree (provision with `git worktree add` at
-HEAD; record its slug in the row's `worktree` column so Phase 7 tears
-down only worktrees this run created). The child uses
-[assets/implement-prompt.md](assets/implement-prompt.md), a
-CONDITIONAL DISPATCH ROUTER that lazy-loads the per-type asset:
+For each proceed row WITHOUT an in-flight PR, spawn ONE solution-
+pipeline child in its OWN git worktree on the issue branch (provision
+with `git worktree add` at HEAD; record its slug in the row's
+`worktree` column so Phase 7 tears down only worktrees this run
+created). The child runs
+[assets/solution-pipeline-prompt.md](assets/solution-pipeline-prompt.md),
+a four-stage per-issue pipeline (A2 PIPELINE), and returns the opened
+PR. It is the SOLE WRITER of the issue branch:
 
-- `type/bug` -> [assets/implement-bug.md](assets/implement-bug.md)
-- `type/feature` -> [assets/implement-feature.md](assets/implement-feature.md)
-- `type/docs` -> [assets/implement-docs.md](assets/implement-docs.md)
-- `type/refactor` / `type/performance` ->
-  [assets/implement-refactor.md](assets/implement-refactor.md)
+1. **Ideate** ([assets/ideate-prompt.md](assets/ideate-prompt.md),
+   devx-ux-expert) -- frame the brief and derive a testable
+   `acceptance_shape` (the B5 contract).
+2. **Plan** ([assets/plan-panel-prompt.md](assets/plan-panel-prompt.md),
+   python-architect lead + conditional performance / test-coverage /
+   supply-chain / auth lenses) -- emit a persisted task DAG matching
+   [assets/plan-schema.json](assets/plan-schema.json): per-task
+   staffing, interdependencies, ordering, and WAVES with checkpoints
+   (B4 PLAN MEMENTO). Trivial issue -> ONE task in ONE wave; skip the
+   full gate ceremony (scale-down).
+3. **Implement** (A5 WAVE EXECUTION) -- per wave, spawn ONE task child
+   ([assets/task-implement-prompt.md](assets/task-implement-prompt.md))
+   per task, each in its OWN worktree off the issue branch at the wave
+   base; the pipeline integrates the task branches into the issue
+   branch, then runs the inter-wave checkpoint
+   ([assets/wave-gate-rubric.md](assets/wave-gate-rubric.md), plan-
+   guardian + ideator verifiers). PASS advances; FAIL re-plans from the
+   failed wave (cap 2 re-plans).
+4. **Acceptance close**
+   ([assets/acceptance-observer.md](assets/acceptance-observer.md), B5)
+   -- verify every `acceptance_shape` condition deterministically, then
+   open ONE PR (`Closes #N`) and return its number.
 
-Each child writes the TYPED coverage gate first (bug: failing
+Each task child writes the TYPED coverage gate first (bug: failing
 regression trap + mutation-break; feature: failing acceptance test;
-docs: docs build/link check; refactor/perf: behavior-preserving test
-+ benchmark), implements the minimum change, runs the lint contract,
-opens a PR, and returns the PR number. The orchestrator then applies
-the Phase 3 ownership signaling to the new PR. Rows WITH an in-flight
-PR skip Phase 4 and go straight to Phase 5.
+docs: docs build/link check; refactor/perf: behavior-preserving test +
+benchmark) for its task type, never opens a PR, and never spawns
+children. The orchestrator then applies the Phase 3 ownership signaling
+to the new PR. Rows WITH an in-flight PR skip Phase 4 and go straight
+to Phase 5. On a `status: escalate|blocked` return, write the reason to
+the row and surface it in Phase 7 (no PR opened).
 
 ### Phase 5 - shepherd-driver fan-out (drive to merge)
 
@@ -247,9 +275,9 @@ the maintainer: per-issue decision, gate, maintainer decision, PR
 link, terminal status, ready-to-merge PRs, advisory-with-deferred
 PRs, blockers (with the responsible child's session ref), and every
 ESCALATED / terminal row still awaiting human action. Tear down only
-the implement/shepherd worktrees recorded in the `worktree` column
-(`git worktree remove`); leave branches on origin for open PRs. Never
-auto-close an escalated issue.
+the solution-pipeline/shepherd worktrees recorded in the `worktree`
+column (`git worktree remove`); leave branches on origin for open PRs.
+Never auto-close an escalated issue.
 
 ## Bundled assets
 
@@ -261,13 +289,29 @@ auto-close an escalated issue.
   -- escalate-by-default gate policy (Phase 2).
 - [assets/triage-digest-template.md](assets/triage-digest-template.md)
   -- the ONE consolidated review presented to the maintainer.
-- [assets/implement-prompt.md](assets/implement-prompt.md) -- B2
-  conditional-dispatch router for the implement child.
+- [assets/solution-pipeline-prompt.md](assets/solution-pipeline-prompt.md)
+  -- A2 PIPELINE: per-issue Ideate -> Plan -> Implement(waves) ->
+  Acceptance close (Phase 4 child; sole writer of the issue branch).
+- [assets/ideate-prompt.md](assets/ideate-prompt.md) -- devx-ux-expert
+  Ideate child: design_brief + testable acceptance_shape (read-only).
+- [assets/plan-panel-prompt.md](assets/plan-panel-prompt.md) -- Plan
+  stage: lens-selection rubric + python-architect synthesis emitting
+  the task DAG.
+- [assets/plan-schema.json](assets/plan-schema.json) -- JSON schema for
+  the persisted `issue-solution-plan` (tasks, deps, waves, checkpoints).
+- [assets/task-implement-prompt.md](assets/task-implement-prompt.md) --
+  ONE task per child in its own worktree; loads the typed coverage gate
+  by task type; no PR, no further fan-out.
 - [assets/implement-bug.md](assets/implement-bug.md),
   [assets/implement-feature.md](assets/implement-feature.md),
   [assets/implement-docs.md](assets/implement-docs.md),
   [assets/implement-refactor.md](assets/implement-refactor.md) --
-  per-type implementation lenses + typed coverage gate.
+  per-type coverage-gate references loaded per task by
+  task-implement-prompt.md.
+- [assets/wave-gate-rubric.md](assets/wave-gate-rubric.md) -- inter-wave
+  checkpoint: integrate + plan-guardian/ideator verify + re-plan policy.
+- [assets/acceptance-observer.md](assets/acceptance-observer.md) -- B5
+  close: verify acceptance_shape, open the ONE issue PR.
 - [assets/ground-truth-table.md](assets/ground-truth-table.md) --
   canonical table template with A11 columns + proceed_manifest.
 - [assets/final-report-template.md](assets/final-report-template.md)

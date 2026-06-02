@@ -72,8 +72,8 @@ After the digest, the maintainer marks each row:
   whose brief is incomplete, they MUST also reclassify the type and/or
   supply the missing brief fields in the same checkpoint reply;
   otherwise the override is rejected and the row stays escalated. The
-  implementation router NEVER receives an unsupported type (see
-  implement-prompt.md router fallback).
+  implementation pipeline NEVER receives an unsupported type (see
+  task-implement-prompt.md type-routing fallback).
 - `rejected` -- do not implement (an auto-proceed row the maintainer
   declines, or an escalated row left for human action).
 
