@@ -2,9 +2,11 @@
 
 import json  # noqa: F401
 import os
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest  # noqa: F401
 import yaml
@@ -841,12 +843,19 @@ class TestInitAgentrcSuggestion:
 
     def test_agentrc_not_in_path_no_instructions_shows_tip(self):
         """When agentrc NOT in PATH and no instructions, show tip line."""
+        _url_re = re.compile(r"https?://[^\s\[\]<>'\"]+")
         with self.runner.isolated_filesystem():
             with patch("apm_cli.commands.init.shutil.which", return_value=None):
                 result = self.runner.invoke(cli, ["init", "--yes"])
             assert result.exit_code == 0
             assert "agentrc" in result.output
-            assert "https://github.com/microsoft/agentrc" in result.output
+            urls = [urlparse(m) for m in _url_re.findall(result.output)]
+            assert any(
+                u.scheme == "https"
+                and u.hostname == "github.com"
+                and u.path.startswith("/microsoft/agentrc")
+                for u in urls
+            ), "agentrc URL not found in output"
 
     def test_agentrc_suppressed_when_copilot_instructions_exist(self):
         """When .github/copilot-instructions.md exists, no agentrc mention."""
@@ -877,8 +886,8 @@ class TestInitAgentrcSuggestion:
             assert result.exit_code == 0
             assert "agentrc" not in result.output
 
-    def test_agentrc_in_path_step_is_first(self):
-        """agentrc init step appears before other next steps."""
+    def test_agentrc_in_path_step_is_after_install(self):
+        """agentrc init step appears after 'apm install' but before other steps."""
         with self.runner.isolated_filesystem():
             with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
                 result = self.runner.invoke(cli, ["init", "--yes"])
@@ -887,4 +896,12 @@ class TestInitAgentrcSuggestion:
             install_pos = result.output.find("apm install")
             assert agentrc_pos != -1
             assert install_pos != -1
-            assert agentrc_pos < install_pos
+            assert agentrc_pos > install_pos
+
+    def test_agentrc_suppressed_in_plugin_mode(self):
+        """When invoked via 'apm init --plugin', no agentrc mention."""
+        with self.runner.isolated_filesystem():
+            with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
+                result = self.runner.invoke(cli, ["init", "--plugin", "--yes", "my-plugin"])
+            assert result.exit_code == 0
+            assert "agentrc" not in result.output

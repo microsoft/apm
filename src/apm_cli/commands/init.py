@@ -40,11 +40,11 @@ def _detect_agentrc(project_root: Path) -> tuple[bool, bool]:
     """
     installed = shutil.which("agentrc") is not None
     has_instructions = any(
-        [
+        (
             (project_root / ".github" / "copilot-instructions.md").exists(),
             (project_root / "AGENTS.md").exists(),
             (project_root / ".github" / "instructions").is_dir(),
-        ]
+        )
     )
     return installed, has_instructions
 
@@ -161,6 +161,7 @@ def _perform_init(
         else:
             project_dir = Path.cwd()
             final_project_name = project_dir.name
+        project_root = Path.cwd()
 
         # Validate plugin name early
         if plugin and not _validate_plugin_name(final_project_name):
@@ -197,7 +198,7 @@ def _perform_init(
         # --- Target selection (must run before the confirmation panel so
         #     the chosen targets render in the "About to create" summary). ---
         resolved_targets = _resolve_init_targets(
-            project_root=Path.cwd(),
+            project_root=project_root,
             target_flag=target_flag,
             yes=yes,
             apm_yml_exists=apm_yml_exists,
@@ -296,16 +297,16 @@ def _perform_init(
         # Only applies to consumer init (not plugin mode).
         agentrc_tip: str | None = None
         if not plugin and source == "init":
-            agentrc_installed, has_instructions = _detect_agentrc(Path.cwd())
+            agentrc_installed, has_instructions = _detect_agentrc(project_root)
             if not has_instructions:
                 if agentrc_installed:
                     next_steps.insert(
-                        0,
-                        "Generate agent instructions: agentrc init",
+                        1,
+                        "Generate agent instructions:     agentrc init",
                     )
                 else:
                     agentrc_tip = (
-                        "Tip: use agentrc to generate tailored agent instructions "
+                        "Tip: Use agentrc to generate tailored agent instructions "
                         "from your codebase. https://github.com/microsoft/agentrc"
                     )
 
