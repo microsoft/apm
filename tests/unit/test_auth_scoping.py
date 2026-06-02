@@ -62,7 +62,7 @@ def _url_host(url: str) -> str:
 
 
 # ===========================================================================
-# _build_repo_url – token scoping
+# _build_repo_url - token scoping
 # ===========================================================================
 
 
@@ -177,7 +177,7 @@ class TestBuildRepoUrlTokenScoping:
 
 
 # ===========================================================================
-# _clone_with_fallback – env relaxation for generic hosts
+# _clone_with_fallback - env relaxation for generic hosts
 # ===========================================================================
 
 
@@ -769,7 +769,7 @@ class TestParseFromDict:
 
 
 # ===========================================================================
-# from_apm_yml – mixed string + dict dependencies
+# from_apm_yml - mixed string + dict dependencies
 # ===========================================================================
 
 

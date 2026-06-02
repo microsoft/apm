@@ -82,6 +82,22 @@ class TestApplyManagedSection:
         assert "After." in result
 
     # ------------------------------------------------------------------
+    # Input-validation guards: empty / identical markers
+    # ------------------------------------------------------------------
+
+    def test_empty_start_marker_raises_error(self):
+        with pytest.raises(ManagedSectionError, match=r"non-empty"):
+            apply_managed_section("content", "new", "", DEFAULT_END)
+
+    def test_empty_end_marker_raises_error(self):
+        with pytest.raises(ManagedSectionError, match=r"non-empty"):
+            apply_managed_section("content", "new", DEFAULT_START, "")
+
+    def test_identical_markers_raises_error(self):
+        with pytest.raises(ManagedSectionError, match=r"distinct"):
+            apply_managed_section("content", "new", "<!-- x -->", "<!-- x -->")
+
+    # ------------------------------------------------------------------
     # Acceptance criterion 2: duplicate markers -> loud error
     # ------------------------------------------------------------------
 
@@ -134,6 +150,37 @@ class TestApplyManagedSection:
         # Error message should mention the markers or how to add them
         msg = str(exc_info.value)
         assert DEFAULT_START in msg or DEFAULT_END in msg or "marker" in msg.lower()
+
+    # ------------------------------------------------------------------
+    # Issue #1595: message polish
+    # ------------------------------------------------------------------
+
+    def test_missing_one_marker_says_missing_not_both(self):
+        """When only start marker is absent, message must not say 'both markers'."""
+        existing = f"Some content.\n{DEFAULT_END}\n"
+        with pytest.raises(ManagedSectionError) as exc_info:
+            apply_managed_section(existing, "New.", DEFAULT_START, DEFAULT_END)
+        msg = str(exc_info.value)
+        assert "both markers" not in msg.lower()
+        assert "missing marker" in msg.lower() or "marker(s)" in msg.lower()
+
+    def test_duplicate_only_start_does_not_mention_end_count(self):
+        """When only the start marker is duplicated, message must not report end marker count."""
+        existing = f"{DEFAULT_START}\nSection 1.\n{DEFAULT_END}\n{DEFAULT_START}\nSection 2.\n"
+        with pytest.raises(ManagedSectionError) as exc_info:
+            apply_managed_section(existing, "New.", DEFAULT_START, DEFAULT_END)
+        msg = str(exc_info.value)
+        # end marker appears exactly once -- should not appear in duplicate report
+        assert "end marker" not in msg and DEFAULT_END not in msg
+
+    def test_duplicate_only_end_does_not_mention_start_count(self):
+        """When only the end marker is duplicated, message must not report start marker count."""
+        existing = f"{DEFAULT_START}\nSection 1.\n{DEFAULT_END}\nMiddle.\n{DEFAULT_END}\n"
+        with pytest.raises(ManagedSectionError) as exc_info:
+            apply_managed_section(existing, "New.", DEFAULT_START, DEFAULT_END)
+        msg = str(exc_info.value)
+        # start marker appears exactly once -- should not appear in duplicate report
+        assert "start marker" not in msg and DEFAULT_START not in msg
 
 
 class TestManagedSectionInCompilationConfig:
@@ -251,3 +298,29 @@ class TestManagedSectionWriteIntegration:
         compiler.config = config
         with pytest.raises(ManagedSectionError):
             compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
+
+    def test_write_reraise_uses_bracket_format(self, tmp_path):
+        """Re-raised ManagedSectionError must wrap filename in [brackets]."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+        from apm_cli.compilation.managed_section import ManagedSectionError
+
+        start = "<!-- apm:start -->"
+        end = "<!-- apm:end -->"
+        output_file = tmp_path / "AGENTS.md"
+        output_file.write_text("# Repo guidance\n\nHuman content only.\n")
+
+        config = CompilationConfig(
+            output_path=str(output_file),
+            agents_md_mode="managed_section",
+            agents_md_start_marker=start,
+            agents_md_end_marker=end,
+            dry_run=False,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        with pytest.raises(ManagedSectionError) as exc_info:
+            compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
+        msg = str(exc_info.value)
+        # filename must be wrapped in square brackets: [AGENTS.md] ...
+        assert msg.startswith("[")
+        assert "] " in msg

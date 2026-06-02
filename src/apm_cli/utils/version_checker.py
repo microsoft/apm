@@ -5,6 +5,38 @@ import re
 import sys
 from pathlib import Path
 
+_DEFAULT_REPO = "microsoft/apm"
+_PUBLIC_GITHUB_URL = "https://github.com"
+_PUBLIC_API_BASE = "https://api.github.com"
+
+
+def _get_air_gap_github_url() -> str:
+    """Return GITHUB_URL env var (stripped of trailing slash), or the public GitHub URL."""
+    return os.environ.get("GITHUB_URL", _PUBLIC_GITHUB_URL).rstrip("/")
+
+
+def _get_air_gap_repo() -> str:
+    """Return APM_REPO env var, or the default microsoft/apm repository."""
+    return os.environ.get("APM_REPO", _DEFAULT_REPO)
+
+
+def _get_air_gap_version() -> str | None:
+    """Return VERSION env var if set and non-empty, otherwise None."""
+    v = os.environ.get("VERSION", "")
+    return v if v else None
+
+
+def _build_releases_api_url(github_url: str, repo: str) -> str:
+    """Build the GitHub Releases API URL for the given host and repository.
+
+    For public GitHub, targets api.github.com directly.  For GitHub Enterprise
+    Server (any other GITHUB_URL value), uses the /api/v3 prefix on the
+    configured host, which is the standard GHE REST API path.
+    """
+    if github_url == _PUBLIC_GITHUB_URL:
+        return f"{_PUBLIC_API_BASE}/repos/{repo}/releases/latest"
+    return f"{github_url}/api/v3/repos/{repo}/releases/latest"
+
 
 def _get_github_token() -> str | None:
     """Return a GitHub token following canonical precedence, or None.
@@ -22,29 +54,49 @@ def _get_github_token() -> str | None:
     )
 
 
-def get_latest_version_from_github(repo: str = "microsoft/apm", timeout: int = 2) -> str | None:
-    """
-    Fetch the latest release version from GitHub API.
+def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) -> str | None:
+    """Fetch the latest release version from GitHub or a configured mirror.
 
-    Sends an Authorization header when a GitHub token is present in the
+    Respects the following environment variables (matching install.sh semantics):
+      - ``VERSION``: when set, the API call is skipped entirely and the pinned
+        version is returned directly.  Required for fully air-gapped setups.
+      - ``GITHUB_URL``: base URL of the GitHub host (default
+        ``https://github.com``).  A non-default value is treated as a GitHub
+        Enterprise Server instance and the API is addressed at
+        ``{GITHUB_URL}/api/v3``.
+      - ``APM_REPO``: repository in ``owner/repo`` form (default
+        ``microsoft/apm``).
+
+    Also sends an Authorization header when a GitHub token is present in the
     environment (GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN), falling back to
-    anonymous when none is set. This avoids rate-limit failures on shared IPs
-    and corporate NAT. The token value is never logged or echoed.
+    anonymous when none is set.  The token value is never logged or echoed.
 
     Args:
-        repo: Repository in format "owner/repo"
-        timeout: Request timeout in seconds (default: 2 for non-blocking)
+        repo: Repository override in ``owner/repo`` form.  When *None* (the
+            default), the value of ``APM_REPO`` env var is used, falling back
+            to ``microsoft/apm``.
+        timeout: Request timeout in seconds (default: 2 for non-blocking).
 
     Returns:
-        Version string (e.g., "0.6.3") or None if unable to fetch
+        Version string (e.g., ``"0.6.3"``) or ``None`` if unable to fetch.
     """
+    # When VERSION is pinned, skip the network call entirely.
+    pinned = _get_air_gap_version()
+    if pinned is not None:
+        tag = pinned.lstrip("v")
+        if re.match(r"^\d+\.\d+\.\d+(a\d+|b\d+|rc\d+)?$", tag):
+            return tag
+        return None
+
     try:
         import requests
     except ImportError:
         return None
 
     try:
-        url = f"https://api.github.com/repos/{repo}/releases/latest"
+        effective_repo = _get_air_gap_repo() if repo is None else repo
+        github_url = _get_air_gap_github_url()
+        url = _build_releases_api_url(github_url, effective_repo)
         token = _get_github_token()
         headers = {"Authorization": f"token {token}"} if token else {}
         response = requests.get(url, headers=headers, timeout=timeout)

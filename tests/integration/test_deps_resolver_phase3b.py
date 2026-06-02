@@ -96,7 +96,7 @@ def _write_apm_yml(path: Path, content: dict[str, Any]) -> None:
 
 
 # ============================================================================
-# SECTION 1 – GitHubPackageDownloader: helper / utility methods
+# SECTION 1 - GitHubPackageDownloader: helper / utility methods
 # ============================================================================
 
 
@@ -464,7 +464,7 @@ class TestGitHubDownloaderTrySparseCheckout:
 
 
 # ============================================================================
-# SECTION 2 – APMDependencyResolver
+# SECTION 2 - APMDependencyResolver
 # ============================================================================
 
 
@@ -917,7 +917,7 @@ class TestResolverTryLoadDependencyPackageWithCallback:
 
 
 # ============================================================================
-# SECTION 3 – ScriptRunner
+# SECTION 3 - ScriptRunner
 # ============================================================================
 
 
@@ -1348,7 +1348,7 @@ class TestPromptCompilerSubstituteAndCompile:
 
 
 # ============================================================================
-# SECTION 4 – plugin_parser
+# SECTION 4 - plugin_parser
 # ============================================================================
 
 

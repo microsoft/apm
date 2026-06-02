@@ -124,7 +124,7 @@ def _is_emoji_char(ch: str) -> bool:
 def _zwj_in_emoji_context(text: str, idx: int) -> bool:
     """Return True if a ZWJ at *idx* sits between two emoji-like characters.
 
-    Looks backward past FE0F (VS16) and skin-tone modifiers (U+1F3FB–1F3FF)
+    Looks backward past FE0F (VS16) and skin-tone modifiers (U+1F3FB-1F3FF)
     because emoji ZWJ sequences frequently interpose these between the base
     character and the joiner, e.g. 👩🏽‍🚀 = 👩 + 🏽 + ZWJ + 🚀.
     """

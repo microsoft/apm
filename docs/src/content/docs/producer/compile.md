@@ -170,6 +170,9 @@ keeps hand-written content in `AGENTS.md` alongside APM-managed rules,
 use **managed-section mode** to update only the APM-owned block while
 leaving everything else untouched.
 
+For the full `apm.yml` key reference for `compilation.agents_md`, see
+[the `compilation.agents_md` section in the manifest schema](../reference/manifest-schema/#62-compilationagents_md).
+
 **1. Add markers to `AGENTS.md`:**
 
 ```md
@@ -192,8 +195,10 @@ The default markers are `<!-- apm:start -->` and `<!-- apm:end -->`, so
 you can omit `start_marker` and `end_marker` if you use those verbatim.
 
 **Constraints:**
+- Managed-section mode requires a pre-existing `AGENTS.md` containing both markers; if the file is absent the marker check fails with a markers-not-found error telling you to add them.
 - Both markers must be present in the file exactly once (missing or
   duplicate markers raise a loud error so no content is silently lost).
+- The start marker must appear before the end marker; reversed order raises a loud error.
 - `start_marker` and `end_marker` must be distinct non-empty strings.
 - Content outside the markers is preserved verbatim across every compile
   run; only the block between the markers is replaced.

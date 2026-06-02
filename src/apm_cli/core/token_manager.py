@@ -177,7 +177,7 @@ class GitHubTokenManager:
     def _get_credential_timeout(cls) -> int:
         """Return timeout (seconds) for ``git credential fill``.
 
-        Configurable via ``APM_GIT_CREDENTIAL_TIMEOUT`` (1–180).
+        Configurable via ``APM_GIT_CREDENTIAL_TIMEOUT`` (1-180).
         """
         raw = os.environ.get("APM_GIT_CREDENTIAL_TIMEOUT", "").strip()
         if not raw:

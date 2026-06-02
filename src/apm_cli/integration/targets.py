@@ -95,6 +95,21 @@ class TargetProfile:
     """Primitives that are **not** available at user scope even when the
     target itself is partially supported."""
 
+    user_primitive_overrides: dict[str, PrimitiveMapping] | None = None
+    """Primitive mapping overrides applied at user scope only.
+
+    When set, these entries replace the corresponding entries in
+    ``primitives`` after ``unsupported_user_primitives`` filtering in
+    ``for_scope(user_scope=True)``.
+
+    Use this when a primitive must be deployed to a *different* location
+    or via a *different* transform at user scope.  The canonical example
+    is the Copilot target: at project scope each ``*.instructions.md``
+    file deploys individually to ``.github/instructions/``; at user scope
+    they are all concatenated into the single file that Copilot CLI reads
+    (``~/.copilot/copilot-instructions.md``).
+    """
+
     user_root_resolver: Callable[[], Path | None] | None = None  # noqa: F821
     """Optional callable that resolves the deploy root at runtime.
 
@@ -291,6 +306,10 @@ class TargetProfile:
                 }
             else:
                 filtered = self.primitives
+            if self.user_primitive_overrides:
+                merged = dict(filtered)
+                merged.update(self.user_primitive_overrides)
+                filtered = merged
             return replace(
                 self,
                 primitives=filtered,
@@ -340,6 +359,11 @@ class TargetProfile:
         else:
             filtered = self.primitives
 
+        if self.user_primitive_overrides:
+            merged = dict(filtered)
+            merged.update(self.user_primitive_overrides)
+            filtered = merged
+
         return replace(self, root_dir=new_root, primitives=filtered)
 
 
@@ -367,7 +391,9 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
-    # instead of ~/.github/.  Instructions are not supported at user scope.
+    # instead of ~/.github/.  Instructions are concatenated into
+    # ~/.copilot/copilot-instructions.md because Copilot CLI reads only
+    # that single file at user scope (not individual *.instructions.md).
     # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
     "copilot": TargetProfile(
         name="copilot",
@@ -390,7 +416,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".copilot",
-        unsupported_user_primitives=("instructions",),
+        unsupported_user_primitives=(),
+        user_primitive_overrides={
+            "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
+        },
         generated_files=("copilot-instructions.md",),
         compile_family="vscode",
     ),

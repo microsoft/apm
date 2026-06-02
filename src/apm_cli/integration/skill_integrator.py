@@ -507,7 +507,7 @@ class SkillIntegrator(BaseIntegrator):
         return context_files
 
     @staticmethod
-    def _dirs_equal(dir_a: Path, dir_b: Path) -> bool:
+    def is_skill_dir_identical_to_source(dir_a: Path, dir_b: Path) -> bool:
         """Check if two directory trees have identical file contents."""
         dcmp = filecmp.dircmp(str(dir_a), str(dir_b))
         return SkillIntegrator._dircmp_equal(dcmp)
@@ -588,7 +588,7 @@ class SkillIntegrator(BaseIntegrator):
             rel_path = f"{rel_prefix}/{sub_name}"
             if target.exists():
                 # Content-identical → skip entirely (no copy, no warning)
-                if SkillIntegrator._dirs_equal(sub_skill_path, target):
+                if SkillIntegrator.is_skill_dir_identical_to_source(sub_skill_path, target):
                     promoted += 1
                     deployed.append(target)
                     continue
