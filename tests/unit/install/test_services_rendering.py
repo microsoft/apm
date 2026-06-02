@@ -60,6 +60,7 @@ def _zero_skill_result() -> MagicMock:
     skill_result.target_paths = []
     skill_result.skill_created = False
     skill_result.sub_skills_promoted = 0
+    skill_result.bin_deployed = 0
     return skill_result
 
 
@@ -368,6 +369,7 @@ class TestWarmCacheAnnotation:
         skill_result.target_paths = []
         skill_result.skill_created = True
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         kwargs["skill_integrator"].integrate_package_skill.return_value = skill_result
         pkg = _make_pkg_info(tmp_path)
         logger = MagicMock()

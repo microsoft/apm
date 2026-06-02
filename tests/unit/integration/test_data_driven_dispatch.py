@@ -45,6 +45,7 @@ def _make_skill_result():
     sr = MagicMock()
     sr.skill_created = False
     sr.sub_skills_promoted = 0
+    sr.bin_deployed = 0
     sr.target_paths = []
     return sr
 

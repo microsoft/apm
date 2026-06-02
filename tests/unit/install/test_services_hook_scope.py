@@ -32,6 +32,7 @@ import pytest
 from apm_cli.core.scope import InstallScope
 from apm_cli.install.services import integrate_package_primitives
 from apm_cli.integration.base_integrator import IntegrationResult
+from apm_cli.integration.skill_integrator import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -84,12 +85,13 @@ def _make_skill_integrator() -> MagicMock:
     dataclass keeps those reads typed (vs MagicMock auto-attribute).
     """
     skill = MagicMock(name="skill_integrator")
-    skill.integrate_package_skill.return_value = IntegrationResult(
-        files_integrated=0,
-        files_updated=0,
-        files_skipped=0,
+    skill.integrate_package_skill.return_value = SkillIntegrationResult(
+        skill_created=False,
+        skill_updated=False,
+        skill_skipped=False,
+        skill_path=None,
+        references_copied=0,
         target_paths=[],
-        links_resolved=0,
     )
     return skill
 

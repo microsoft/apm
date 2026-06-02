@@ -418,6 +418,11 @@ def integrate_package_primitives(  # noqa: PLR0913
             _log_integration(
                 f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
             )
+    if skill_result.bin_deployed > 0:
+        _log_integration(
+            f"  |-- {skill_result.bin_deployed} executable(s) deployed -> {_skill_suffix} "
+            "(on Claude's PATH; restart Claude or /reload-plugins to use)"
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
 
@@ -427,6 +432,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
     _total_integrated += int(skill_result.skill_created)
     _total_integrated += int(skill_result.sub_skills_promoted)
+    _total_integrated += int(skill_result.bin_deployed)
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 

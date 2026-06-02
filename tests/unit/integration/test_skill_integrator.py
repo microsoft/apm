@@ -4182,8 +4182,11 @@ class TestPluginBinDeploy:
             scope=InstallScope.USER,
         )
 
-        assert result.skill_created is True
+        # skill_created stays False -- deploying executables is not creating a
+        # skill -- but bin_deployed reflects the work and it is not "skipped".
+        assert result.skill_created is False
         assert result.skill_skipped is False
+        assert result.bin_deployed == 2  # bin/myplugin + .claude-plugin/plugin.json
 
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert deployed_bin.is_file(), f"bin/myplugin not found at {deployed_bin}"
@@ -4342,7 +4345,7 @@ class TestPluginBinDeploy:
             scope=InstallScope.USER,
             force=False,
         )
-        assert result_no_force.skill_created is True
+        assert result_no_force.bin_deployed >= 1
 
         # With force=True: the file must be (re-)deployed unconditionally.
         # Modify the dest to a different content so we can detect the overwrite.
@@ -4353,7 +4356,46 @@ class TestPluginBinDeploy:
             scope=InstallScope.USER,
             force=True,
         )
-        assert result_force.skill_created is True
+        assert result_force.bin_deployed >= 1
         assert (dest_bin / "myplugin").read_text() == "#!/bin/sh\necho hello\n", (
             "force=True must overwrite stale dest with fresh src content"
         )
+
+    def test_deploys_bin_when_plugin_also_ships_skills(self, tmp_path: Path) -> None:
+        """Regression (#1591): a plugin that ships skills/ must STILL deploy bin/.
+
+        Previously bin/ deploy lived only in the no-skill fallback branch, so a
+        marketplace_plugin with a skills/ bundle returned early and never got
+        its bin/ executables -- the central use case (a skill plus its helper
+        binary) was the broken one.
+        """
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        # bin/ helper
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        # skills/ bundle -- forces the _integrate_skill_bundle routing branch
+        skill_dir = pkg_dir / "skills" / "mytool"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: mytool\n---\nbody\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert deployed_bin.is_file(), "bin/ must deploy even when the plugin ships skills/"
+        assert result.bin_deployed >= 1
+        assert deployed_bin in set(result.target_paths)
