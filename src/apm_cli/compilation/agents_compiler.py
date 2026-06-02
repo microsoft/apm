@@ -104,6 +104,12 @@ class CompilationConfig:
         # Initialize exclude list if None
         if self.exclude is None:
             self.exclude = []
+        _valid_modes = ("full", "managed_section")
+        if self.agents_md_mode not in _valid_modes:
+            raise ValueError(
+                f"Unknown agents_md.mode {self.agents_md_mode!r}. "
+                f"Supported values: {', '.join(repr(m) for m in _valid_modes)}."
+            )
 
     @classmethod
     def from_apm_yml(cls, **overrides) -> "CompilationConfig":

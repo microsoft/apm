@@ -102,6 +102,11 @@ class TestApplyManagedSection:
         with pytest.raises(ManagedSectionError, match=r"(?i)duplicate|multiple|more than one"):
             apply_managed_section(existing, "New.", DEFAULT_START, DEFAULT_END)
 
+    def test_reversed_markers_raises_error(self):
+        existing = f"{DEFAULT_END}\nContent.\n{DEFAULT_START}\n"
+        with pytest.raises(ManagedSectionError, match=r"(?i)before.*start|end.*before|order|first"):
+            apply_managed_section(existing, "New.", DEFAULT_START, DEFAULT_END)
+
     # ------------------------------------------------------------------
     # Acceptance criterion 3: markers absent -> conservative (error)
     # ------------------------------------------------------------------
@@ -180,6 +185,12 @@ class TestManagedSectionInCompilationConfig:
         assert config.agents_md_mode == "managed_section"
         assert config.agents_md_start_marker == "<!-- apm:start -->"
         assert config.agents_md_end_marker == "<!-- apm:end -->"
+
+    def test_invalid_mode_raises_value_error(self):
+        from apm_cli.compilation.agents_compiler import CompilationConfig
+
+        with pytest.raises(ValueError, match=r"Unknown agents_md\.mode"):
+            CompilationConfig(agents_md_mode="managed-section")
 
 
 class TestManagedSectionWriteIntegration:
