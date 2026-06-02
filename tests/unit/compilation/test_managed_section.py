@@ -155,7 +155,7 @@ class TestApplyManagedSection:
             apply_managed_section(existing, "New.", DEFAULT_START, DEFAULT_END)
         msg = str(exc_info.value)
         # end marker appears exactly once -- should not appear in duplicate report
-        assert "end marker" not in msg or DEFAULT_END not in msg
+        assert "end marker" not in msg and DEFAULT_END not in msg
 
     def test_duplicate_only_end_does_not_mention_start_count(self):
         """When only the end marker is duplicated, message must not report start marker count."""
@@ -164,7 +164,7 @@ class TestApplyManagedSection:
             apply_managed_section(existing, "New.", DEFAULT_START, DEFAULT_END)
         msg = str(exc_info.value)
         # start marker appears exactly once -- should not appear in duplicate report
-        assert "start marker" not in msg or DEFAULT_START not in msg
+        assert "start marker" not in msg and DEFAULT_START not in msg
 
 
 class TestManagedSectionInCompilationConfig:
@@ -307,3 +307,4 @@ class TestManagedSectionWriteIntegration:
         msg = str(exc_info.value)
         # filename must be wrapped in square brackets: [AGENTS.md] ...
         assert msg.startswith("[")
+        assert "] " in msg
