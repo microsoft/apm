@@ -82,6 +82,22 @@ class TestApplyManagedSection:
         assert "After." in result
 
     # ------------------------------------------------------------------
+    # Input-validation guards: empty / identical markers
+    # ------------------------------------------------------------------
+
+    def test_empty_start_marker_raises_error(self):
+        with pytest.raises(ManagedSectionError, match=r"non-empty"):
+            apply_managed_section("content", "new", "", DEFAULT_END)
+
+    def test_empty_end_marker_raises_error(self):
+        with pytest.raises(ManagedSectionError, match=r"non-empty"):
+            apply_managed_section("content", "new", DEFAULT_START, "")
+
+    def test_identical_markers_raises_error(self):
+        with pytest.raises(ManagedSectionError, match=r"distinct"):
+            apply_managed_section("content", "new", "<!-- x -->", "<!-- x -->")
+
+    # ------------------------------------------------------------------
     # Acceptance criterion 2: duplicate markers -> loud error
     # ------------------------------------------------------------------
 
