@@ -70,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
 - `install.sh` and `apm self-update` now send a conditional `Authorization` header on GitHub release-lookup API calls when `GITHUB_APM_PAT`, `GITHUB_TOKEN`, or `GH_TOKEN` is set, improving reliability for users on shared IPs and corporate NAT that hit anonymous rate limits. Anonymous fallback is preserved when no token is configured. (closes #1582)
 
+### Security
+
+- `apm install -g` now deploys `bin/` executables from `marketplace_plugin` packages with user-only execute (owner +x; group and other execute bits are cleared). Previously-deployed files are hardened in place on reinstall, so upgrading APM automatically tightens permissions left by older versions. (#1626)
+
 ## [0.16.1] - 2026-06-01
 
 ### Added
