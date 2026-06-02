@@ -207,7 +207,7 @@ The default markers are `<!-- apm:start -->` and `<!-- apm:end -->`, so
 you can omit `start_marker` and `end_marker` if you use those verbatim.
 
 **Constraints:**
-- Managed-section mode requires a pre-existing `AGENTS.md` containing both markers; if the file is absent the marker check fails with a markers-not-found error telling you to add them.
+- Managed-section mode requires a pre-existing `AGENTS.md`. If the file is absent, compile fails fast with a clear error telling you to create it with the managed-section markers first, or set `compilation.agents_md.mode` to `full` for initial generation.
 - Both markers must be present in the file exactly once (missing or
   duplicate markers raise a loud error so no content is silently lost).
 - The start marker must appear before the end marker; reversed order raises a loud error.

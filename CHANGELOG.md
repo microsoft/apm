@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extra to install.
 ### Fixed
 
+- `managed_section` mode now surfaces a clear "file does not exist" error before attempting marker search when the target `AGENTS.md` is absent, replacing the confusing markers-not-found message that would previously appear. Create the file with the managed-section markers first, or set `compilation.agents_md.mode` to `full` for initial generation. (closes #1593, thanks @SHIVANSH-ux-ys)
 - `apm pack --check-clean` now emits a copy-pasteable recovery recipe when `marketplace.json` drifts from source: `git commit --amend --no-edit` + `git push --force-with-lease` to fold the diff into the current commit, or a follow-up commit variant. Producers get the right command at the point of failure without consulting external docs. (closes #1381)
 - `apm mcp install --help` epilog now references `apm install --help` instead of the invalid `apm install --mcp --help` flag combination that always raised a UsageError. (closes #1586)
 - Custom-port credential errors now include a ready-to-run `git credential fill` verification command and a link to the auth troubleshooting docs, so users can diagnose miskeyed helpers without guessing. (closes #799)
