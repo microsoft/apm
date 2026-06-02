@@ -64,7 +64,7 @@ mcp: in apm.yml      ->   per target: .mcp.json / settings.json / equivalent
 
 Not every target supports every primitive type. When a primitive can't land on a target, APM emits a warning at install time. Skim [Targets matrix](../reference/targets-matrix/) to set expectations before adding a primitive.
 
-> **Deduplication**: When `.claude/rules/` already contains `.md` files (deployed by `apm install`), `apm compile --target claude` omits the instructions section from `CLAUDE.md` to avoid duplicate context. `CLAUDE.md` is still generated if it carries a constitution or dependency imports.
+> **Deduplication**: When `.github/instructions/` already contains `.instructions.md` files (deployed by `apm install --target copilot`), `apm compile --target copilot` omits the instructions section from `AGENTS.md` to avoid Copilot reading duplicate context. When `.claude/rules/` already contains `.md` files (deployed by `apm install --target claude`), `apm compile --target claude` omits the instructions section from `CLAUDE.md` for the same reason. In both cases the root context file is still generated when it carries a constitution or dependency imports.
 
 ## Common workflows
 

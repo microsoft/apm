@@ -125,6 +125,9 @@ class DistributedAgentsCompiler:
             debug = config.get("debug", False)
             clean_orphaned = config.get("clean_orphaned", False)
             dry_run = config.get("dry_run", False)
+            # True when apm install has already deployed instructions to
+            # .github/instructions/; omitting them here avoids Copilot reading
+            # duplicate content from both AGENTS.md and .github/instructions/.
             skip_instructions = config.get("skip_instructions", False)
 
             # Phase 0: Context Link Resolution

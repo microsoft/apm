@@ -115,7 +115,7 @@ Per target, with the rules shape on disk after compile:
 
 | Target | Root context file | Per-rule output | Compile required? |
 |---|---|---|---|
-| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively |
+| `copilot` | `AGENTS.md` | `.github/instructions/<name>.instructions.md` (preserves `applyTo`) | No -- Copilot reads the per-rule files natively; deduplicates with `.github/instructions/` (see [below](#copilot-deduplication)) |
 | `claude` | `CLAUDE.md` | `.claude/rules/<name>.md` | Yes -- deduplicates with `.claude/rules/` (see [below](#claude-code-deduplication)) |
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
@@ -137,6 +137,17 @@ so a normal `apm install` on a clean checkout already produces
 correct AGENTS.md / CLAUDE.md / GEMINI.md output. Reach for
 `apm compile` directly when you are iterating on instructions and
 do not want install's side effects.
+
+:::note[Copilot deduplication]
+<a id="copilot-deduplication"></a>
+When `.github/instructions/` is already populated with `.instructions.md` files
+(deployed by `apm install --target copilot`), `apm compile --target copilot`
+automatically omits the instructions section from `AGENTS.md` to avoid
+duplicate context in Copilot's context window. `AGENTS.md` is still generated
+when it carries a constitution or dependency `@import` paths. If
+`.github/instructions/` is later cleared, re-running `apm compile` restores
+the instructions section to `AGENTS.md`.
+:::
 
 :::note[Claude Code deduplication]
 <a id="claude-code-deduplication"></a>
