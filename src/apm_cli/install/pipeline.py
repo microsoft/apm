@@ -680,6 +680,8 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
             from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
 
             _update_gitignore_for_apm_modules(logger=logger)
+        elif verbose and logger is not None:
+            logger.verbose_detail("Skipping .gitignore update (global scope install).")
 
         # ------------------------------------------------------------------
         # Phase: Orphan cleanup + intra-package stale-file cleanup

@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 from apm_cli.core.scope import InstallScope
 
 
-def _make_pkg_with_dep():
+def _make_pkg_with_dep() -> MagicMock:
     pkg = MagicMock()
     dep = MagicMock()
     dep.repo_url = "owner/repo"
@@ -23,7 +23,7 @@ def _make_pkg_with_dep():
 
 
 def _common_patches():
-    """Return a list of (target, kwargs) patch pairs shared by all tests."""
+    """Return a list of patch context managers shared by all tests."""
     return [
         patch("apm_cli.deps.lockfile.LockFile"),
         patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=None),
