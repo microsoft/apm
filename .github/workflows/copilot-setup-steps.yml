@@ -43,3 +43,8 @@ jobs:
       
       - name: Verify installation
         run: uv run apm --version
+
+      - name: Display agent conventions
+        # Surface AGENTS.md so Copilot coding agents receive it as context
+        # before starting any coding task. See AGENTS.md at the repo root.
+        run: cat AGENTS.md
