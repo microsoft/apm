@@ -250,6 +250,11 @@ class PluginManifestProducer:
 
     def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
         from .apm_yml import parse_targets_field
+        from .errors import (
+            ConflictingTargetsError,
+            EmptyTargetsListError,
+            UnknownTargetError,
+        )
         from .plugin_manifest import (
             PLUGIN_ECOSYSTEM_PATHS,
             PLUGIN_MANIFEST_ECOSYSTEMS,
@@ -270,10 +275,17 @@ class PluginManifestProducer:
 
         try:
             targets = parse_targets_field(data)
-        except Exception:
-            targets = []
+        except (
+            ConflictingTargetsError,
+            EmptyTargetsListError,
+            UnknownTargetError,
+        ) as exc:
+            # Surface user-authored target errors instead of silently emitting
+            # nothing -- e.g. declaring both 'target:' and 'targets:'.
+            raise BuildError(str(exc)) from exc
 
-        # Deduplicate: copilot/vscode/agents all map to the same output path.
+        # Deduplicate by output path (defensive -- canonical targets currently
+        # map one-to-one to a path, but keep the guard if aliases are added).
         seen_paths: set[str] = set()
         ecosystems: list[str] = []
         for target in targets:
@@ -298,6 +310,7 @@ class PluginManifestProducer:
                 manifest,
                 ecosystem,
                 dry_run=options.dry_run,
+                force=options.bundle_force,
                 logger=logger,
             )
             if output_path is not None:
@@ -344,14 +357,23 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
     # Check target: field for plugin-manifest-eligible ecosystems.
     if data:
         from .apm_yml import parse_targets_field
+        from .errors import (
+            ConflictingTargetsError,
+            EmptyTargetsListError,
+            UnknownTargetError,
+        )
         from .plugin_manifest import PLUGIN_MANIFEST_ECOSYSTEMS
 
         try:
             targets = parse_targets_field(data)
-            if any(t in PLUGIN_MANIFEST_ECOSYSTEMS for t in targets):
-                out.add(OutputKind.PLUGIN_MANIFEST)
-        except Exception:
-            pass
+        except (
+            ConflictingTargetsError,
+            EmptyTargetsListError,
+            UnknownTargetError,
+        ) as exc:
+            raise BuildError(str(exc)) from exc
+        if any(t in PLUGIN_MANIFEST_ECOSYSTEMS for t in targets):
+            out.add(OutputKind.PLUGIN_MANIFEST)
 
     return out
 

@@ -97,9 +97,62 @@ class TestPackCmd:
         _write_lockfile(tmp_path)
         result = runner.invoke(pack_cmd, ["--target", "claude"])
         assert result.exit_code == 0
-        assert "deprecated" in result.output.lower() or result.exit_code == 0
+        assert "deprecated" in result.output.lower()
 
-    def test_pack_marketplace_output_deprecated_translates(self, runner, tmp_path, monkeypatch):
+    def test_pack_produces_claude_plugin_json_from_apm_yml_target(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """End-to-end: `apm pack` writes .claude-plugin/plugin.json for target: claude."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.2.3\ndescription: a plugin\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        assert out.exists()
+        manifest = json_mod.loads(out.read_text(encoding="utf-8"))
+        assert manifest["name"] == "my-plugin"
+        assert manifest["version"] == "1.2.3"
+
+    def test_pack_strips_mcp_credentials_in_claude_plugin_json(self, runner, tmp_path, monkeypatch):
+        """Credential-bearing keys in .mcp.json never reach the written plugin.json."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json_mod.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {"command": "node", "env": {"API_TOKEN": "secret"}},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        raw = out.read_text(encoding="utf-8")
+        assert "secret" not in raw
+        manifest = json_mod.loads(raw)
+        assert manifest["mcpServers"]["srv"] == {"command": "node"}
+
+    def test_pack_marketplace_output_flag_removed(self, runner, tmp_path, monkeypatch):
+        """The legacy --marketplace-output flag was removed in favour of --marketplace-path."""
         monkeypatch.chdir(tmp_path)
         plugin_dir = tmp_path / ".github" / "plugins" / "mypkg"
         plugin_dir.mkdir(parents=True)
@@ -121,8 +174,10 @@ marketplace:
 """,
         )
         result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/marketplace.json"])
-        # Deprecation warning should be printed
-        assert "deprecated" in result.output.lower()
+        # The flag no longer exists; Click rejects it with a usage error.
+        assert result.exit_code != 0
+        assert "no such option" in result.output.lower()
+        assert "--marketplace-path" in result.output
 
     def test_pack_marketplace_path_invalid_format(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

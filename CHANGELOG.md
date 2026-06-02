@@ -33,7 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm pack` generates ecosystem-specific `plugin.json` files when `target:` includes `claude` or `copilot` (#1623).
+- `apm pack` generates ecosystem-specific `plugin.json` files when `target:`
+  (or `targets:`) includes `claude` or `copilot`, so a package author no longer
+  hand-maintains the manifest -- it is synthesised from `apm.yml` identity
+  fields on every pack. Claude manifests embed `mcpServers` from `.mcp.json`
+  with credential-bearing keys (env blocks, tokens, secrets) stripped before
+  writing; Copilot manifests omit `mcpServers`. An existing `plugin.json` is
+  preserved unless `--force` is passed. (#1623)
 - `apm install -g` now deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/` and makes them executable, giving Claude Code direct access to plugin-provided binaries. The `bin_deploy` policy field lets enterprise administrators opt out globally (`deny_all: true`) or per-package. (#1544)
 - Teams with existing `AGENTS.md` content can now adopt `apm compile` without
   losing hand-written rules: set `compilation.agents_md.mode: managed_section`

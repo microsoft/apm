@@ -142,23 +142,45 @@ class TestBuildPluginManifest:
         assert manifest["description"] == "test plugin"
         assert manifest["author"] == {"name": "Jane Doe"}
 
-    def test_agents_ecosystem_omits_mcp_servers(self, tmp_path: Path) -> None:
+    def test_claude_strips_credential_env_block(self, tmp_path: Path) -> None:
         apm = _minimal_apm_yml(tmp_path)
         (tmp_path / ".mcp.json").write_text(
-            json.dumps({"mcpServers": {"srv": {}}}),
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node",
+                            "env": {"API_TOKEN": "secret-value"},
+                        }
+                    }
+                }
+            ),
             encoding="utf-8",
         )
-        manifest = build_plugin_manifest(tmp_path, apm, "agents")
-        assert "mcpServers" not in manifest
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        assert manifest["mcpServers"]["srv"] == {"command": "node"}
+        assert "env" not in manifest["mcpServers"]["srv"]
 
-    def test_vscode_ecosystem_omits_mcp_servers(self, tmp_path: Path) -> None:
+    def test_claude_strips_credential_named_key(self, tmp_path: Path) -> None:
         apm = _minimal_apm_yml(tmp_path)
         (tmp_path / ".mcp.json").write_text(
-            json.dumps({"mcpServers": {"srv": {}}}),
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node",
+                            "apiKey": "leak",
+                            "headers": {"x": "y"},
+                        }
+                    }
+                }
+            ),
             encoding="utf-8",
         )
-        manifest = build_plugin_manifest(tmp_path, apm, "vscode")
-        assert "mcpServers" not in manifest
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        srv = manifest["mcpServers"]["srv"]
+        assert "apiKey" not in srv
+        assert srv["command"] == "node"
 
 
 # ---------------------------------------------------------------------------
@@ -181,27 +203,13 @@ class TestWritePluginManifest:
         assert result == expected
         assert expected.exists()
 
-    def test_vscode_alias_writes_to_copilot_path(self, tmp_path: Path) -> None:
-        manifest = {"name": "plugin", "version": "1.0.0"}
-        result = write_plugin_manifest(tmp_path, manifest, "vscode")
-        expected = tmp_path / ".github" / "plugin" / "plugin.json"
-        assert result == expected
-        assert expected.exists()
-
-    def test_agents_alias_writes_to_copilot_path(self, tmp_path: Path) -> None:
-        manifest = {"name": "plugin", "version": "1.0.0"}
-        result = write_plugin_manifest(tmp_path, manifest, "agents")
-        expected = tmp_path / ".github" / "plugin" / "plugin.json"
-        assert result == expected
-        assert expected.exists()
-
     def test_creates_parent_dirs(self, tmp_path: Path) -> None:
         manifest = {"name": "plugin"}
         result = write_plugin_manifest(tmp_path, manifest, "claude")
         assert result is not None
         assert result.parent.is_dir()
 
-    def test_overwrites_existing_with_warning(
+    def test_existing_file_preserved_without_force(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         existing = tmp_path / ".claude-plugin" / "plugin.json"
@@ -210,17 +218,43 @@ class TestWritePluginManifest:
         warnings_emitted: list[str] = []
         monkeypatch.setattr(
             "apm_cli.core.plugin_manifest._rich_warning",
-            lambda msg: warnings_emitted.append(msg),
+            lambda msg, **kw: warnings_emitted.append(msg),
         )
 
         manifest = {"name": "new-content"}
         result = write_plugin_manifest(tmp_path, manifest, "claude")
 
+        # Without --force the existing file is preserved and the write skipped.
+        assert result is None
+        preserved = json.loads(existing.read_text(encoding="utf-8"))
+        assert preserved["name"] == "old-content"
+        assert len(warnings_emitted) == 1
+        assert "--force" in warnings_emitted[0]
+
+    def test_overwrites_existing_with_force(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, json.dumps({"name": "old-content"}))
+
+        warnings_emitted: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_warning",
+            lambda msg, **kw: warnings_emitted.append(msg),
+        )
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_success",
+            lambda msg, **kw: None,
+        )
+
+        manifest = {"name": "new-content"}
+        result = write_plugin_manifest(tmp_path, manifest, "claude", force=True)
+
         assert result == existing
         written = json.loads(existing.read_text(encoding="utf-8"))
         assert written["name"] == "new-content"
         assert len(warnings_emitted) == 1
-        assert "Overwriting" in warnings_emitted[0] or "overwriting" in warnings_emitted[0].lower()
+        assert "verwriting" in warnings_emitted[0]
 
     def test_dry_run_does_not_write(self, tmp_path: Path) -> None:
         manifest = {"name": "plugin"}
@@ -235,7 +269,7 @@ class TestWritePluginManifest:
         warnings_emitted: list[str] = []
         monkeypatch.setattr(
             "apm_cli.core.plugin_manifest._rich_warning",
-            lambda msg: warnings_emitted.append(msg),
+            lambda msg, **kw: warnings_emitted.append(msg),
         )
 
         manifest = {"name": "plugin"}
@@ -316,7 +350,7 @@ class TestFindOrSynthesizePluginJson:
         warnings_emitted: list[str] = []
         monkeypatch.setattr(
             "apm_cli.core.plugin_manifest._rich_warning",
-            lambda msg: warnings_emitted.append(msg),
+            lambda msg, **kw: warnings_emitted.append(msg),
         )
 
         result = find_or_synthesize_plugin_json(tmp_path, apm)
@@ -332,7 +366,7 @@ class TestFindOrSynthesizePluginJson:
         info_calls: list[str] = []
         monkeypatch.setattr(
             "apm_cli.core.plugin_manifest._rich_info",
-            lambda msg: info_calls.append(msg),
+            lambda msg, **kw: info_calls.append(msg),
         )
 
         find_or_synthesize_plugin_json(tmp_path, apm, suppress_missing_warning=True)
@@ -345,7 +379,7 @@ class TestFindOrSynthesizePluginJson:
         info_calls: list[str] = []
         monkeypatch.setattr(
             "apm_cli.core.plugin_manifest._rich_info",
-            lambda msg: info_calls.append(msg),
+            lambda msg, **kw: info_calls.append(msg),
         )
 
         find_or_synthesize_plugin_json(tmp_path, apm, suppress_missing_warning=False)
@@ -379,7 +413,7 @@ class TestFindOrSynthesizePluginJson:
 class TestModuleConstants:
     def test_plugin_manifest_ecosystems_frozenset(self) -> None:
         assert isinstance(PLUGIN_MANIFEST_ECOSYSTEMS, frozenset)
-        assert {"claude", "copilot", "vscode", "agents"} == PLUGIN_MANIFEST_ECOSYSTEMS
+        assert {"claude", "copilot"} == PLUGIN_MANIFEST_ECOSYSTEMS
 
     def test_plugin_ecosystem_paths_keys_match_ecosystems(self) -> None:
         assert set(PLUGIN_ECOSYSTEM_PATHS.keys()) == PLUGIN_MANIFEST_ECOSYSTEMS
@@ -387,8 +421,5 @@ class TestModuleConstants:
     def test_claude_path(self) -> None:
         assert PLUGIN_ECOSYSTEM_PATHS["claude"] == ".claude-plugin/plugin.json"
 
-    def test_copilot_vscode_agents_share_path(self) -> None:
-        shared = ".github/plugin/plugin.json"
-        assert PLUGIN_ECOSYSTEM_PATHS["copilot"] == shared
-        assert PLUGIN_ECOSYSTEM_PATHS["vscode"] == shared
-        assert PLUGIN_ECOSYSTEM_PATHS["agents"] == shared
+    def test_copilot_path(self) -> None:
+        assert PLUGIN_ECOSYSTEM_PATHS["copilot"] == ".github/plugin/plugin.json"

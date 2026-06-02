@@ -17,7 +17,7 @@ apm pack [OPTIONS]
 
 - `dependencies:` block present -> a bundle (directory or `.tar.gz`).
 - `marketplace:` block present -> selected marketplace artifacts.
-- `target:` field containing `claude` or `copilot` -> ecosystem-specific `plugin.json` files.
+- `target:` (or `targets:`) field containing `claude` or `copilot` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
 
 The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time.
@@ -141,10 +141,12 @@ When `apm.yml` declares a `target:` (or `targets:`) field containing `claude` or
 
 The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). Per-ecosystem differences:
 
-- **Claude:** includes `mcpServers` sourced from `.mcp.json` if that file is present in the project root.
+- **Claude:** includes `mcpServers` sourced from `.mcp.json` if that file is present in the project root. Credential-bearing keys (`env`/`environment` blocks and any key whose name contains `token`, `secret`, `password`, `credential`, or `apikey`) are stripped before writing, so a committed `plugin.json` never leaks secrets resolved at MCP-host startup. A warning lists every key dropped.
 - **Copilot:** omits `mcpServers`.
 
-If a `plugin.json` already exists at the target path it is overwritten; a warning is emitted so the replacement is visible in CI logs. The `--dry-run` flag prevents any writes -- the manifest content is computed but not persisted.
+If a `plugin.json` already exists at the target path it is **preserved**: `apm pack` warns and skips the write. Re-run with `--force` to overwrite it (the same flag that governs bundle collisions), or commit the generated file to silence the warning in CI. The `--dry-run` flag prevents any writes -- the manifest content is computed but not persisted.
+
+The generated manifest is intentionally minimal. Enrichment fields (`homepage`, `repository`, `keywords`, `author.url`) are planned for a follow-up release ([#1621](https://github.com/microsoft/apm/issues/1621)).
 
 Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the generated file is never accidentally included in the bundle export.
 

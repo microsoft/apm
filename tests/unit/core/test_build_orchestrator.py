@@ -461,19 +461,21 @@ class TestPluginManifestProducer:
         assert claude_out.exists()
         assert copilot_out.exists()
 
-    def test_deduplicates_copilot_vscode(
+    def test_deduplicates_by_output_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """copilot and vscode share the same output path; only one file written."""
+        """Targets mapping to the same output path yield only one written file."""
         apm = tmp_path / "apm.yml"
         _write(apm, "name: test-plugin\nversion: 1.0.0\ndescription: d\ntarget: copilot\n")
         opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
 
         # Patch parse_targets_field at its source module so the lazy import
-        # inside PluginManifestProducer.produce picks it up.
+        # inside PluginManifestProducer.produce picks it up. Only canonical
+        # plugin ecosystems (claude, copilot) survive the path filter; a
+        # repeated copilot entry must not write the file twice.
         monkeypatch.setattr(
             "apm_cli.core.apm_yml.parse_targets_field",
-            lambda data: ["copilot", "vscode"],
+            lambda data: ["copilot", "copilot"],
         )
 
         result = PluginManifestProducer().produce(opts, logger=None)
@@ -518,3 +520,42 @@ class TestPluginManifestProducer:
         result = PluginManifestProducer().produce(opts, logger=None)
 
         assert result.outputs == []
+
+    def test_existing_file_preserved_without_force(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "claude")
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, '{"name": "hand-authored"}')
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        # Without --force the existing file is preserved and not listed as output.
+        assert result.outputs == []
+        assert '"hand-authored"' in existing.read_text(encoding="utf-8")
+
+    def test_force_overwrites_existing_file(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "claude")
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, '{"name": "hand-authored"}')
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, bundle_force=True)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        assert existing in result.outputs
+        assert '"test-plugin"' in existing.read_text(encoding="utf-8")
+
+    def test_conflicting_targets_raises_build_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.core.errors import ConflictingTargetsError
+
+        apm = self._apm_yml(tmp_path, "claude")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        def _raise(data: dict) -> list[str]:
+            raise ConflictingTargetsError("both target and targets set")
+
+        monkeypatch.setattr("apm_cli.core.apm_yml.parse_targets_field", _raise)
+
+        with pytest.raises(BuildError, match=r"both target and targets set"):
+            PluginManifestProducer().produce(opts, logger=None)
