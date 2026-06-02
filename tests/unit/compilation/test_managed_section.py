@@ -324,3 +324,22 @@ class TestManagedSectionWriteIntegration:
         # filename must be wrapped in square brackets: [AGENTS.md] ...
         assert msg.startswith("[")
         assert "] " in msg
+
+    def test_write_output_file_managed_section_missing_file(self, tmp_path):
+        """When mode=managed_section and the file doesn't exist, a clear error is raised."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+        from apm_cli.compilation.managed_section import ManagedSectionError
+
+        output_file = tmp_path / "AGENTS.md"
+        # Ensure file does NOT exist
+
+        config = CompilationConfig(
+            output_path=str(output_file),
+            agents_md_mode="managed_section",
+            dry_run=False,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler.config = config
+        with pytest.raises(ManagedSectionError, match=r"AGENTS\.md does not exist yet\. Create it with markers first, or use mode: full for initial generation\."):
+            compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
