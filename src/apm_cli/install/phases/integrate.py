@@ -213,9 +213,26 @@ def _resolve_download_strategy(
         ref_changed=ref_changed,
     )
 
+    # Issue #551: skip re-download when the BFS callback already fetched this
+    # dep during resolution AND the remote SHA still matches what was captured.
+    # This eliminates redundant network I/O in --update mode when apm_modules/
+    # is empty but the lockfile SHA is stale: the callback downloads the latest
+    # content (recording its SHA), and the sequential loop would otherwise
+    # re-download identical bytes because lockfile_match=False (stale SHA).
+    _callback_sha = ctx.callback_downloaded.get(dep_key)
+    _already_resolved_sha_match = (
+        already_resolved
+        and update_refs
+        and bool(resolved_ref)
+        and bool(_callback_sha)
+        and getattr(resolved_ref, "resolved_commit", None) not in (None, "cached")
+        and _callback_sha == resolved_ref.resolved_commit
+    )
+
     skip_download = install_path.exists() and (
         (is_cacheable and not update_refs)
         or (already_resolved and not update_refs)
+        or _already_resolved_sha_match
         or lockfile_match
     )
 
