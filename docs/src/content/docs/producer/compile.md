@@ -152,6 +152,41 @@ re-running `apm compile` restores the instructions section to
 `CLAUDE.md`.
 :::
 
+## Managed-section mode
+
+By default `apm compile` overwrites `AGENTS.md` entirely. If your team
+keeps hand-written content in `AGENTS.md` alongside APM-managed rules,
+use **managed-section mode** to update only the APM-owned block while
+leaving everything else untouched.
+
+**1. Add markers to `AGENTS.md`:**
+
+```md
+<!-- apm:start -->
+<!-- apm will insert content here -->
+<!-- apm:end -->
+```
+
+**2. Enable the mode in `apm.yml`:**
+
+```yaml
+compilation:
+  agents_md:
+    mode: managed_section
+    start_marker: "<!-- apm:start -->"
+    end_marker: "<!-- apm:end -->"
+```
+
+The default markers are `<!-- apm:start -->` and `<!-- apm:end -->`, so
+you can omit `start_marker` and `end_marker` if you use those verbatim.
+
+**Constraints:**
+- Both markers must be present in the file exactly once (missing or
+  duplicate markers raise a loud error so no content is silently lost).
+- `start_marker` and `end_marker` must be distinct non-empty strings.
+- Content outside the markers is preserved verbatim across every compile
+  run; only the block between the markers is replaced.
+
 ## Pitfalls
 
 - **Confusing compile's scope.** Compile only handles **instructions**

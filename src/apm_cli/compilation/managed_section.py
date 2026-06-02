@@ -43,6 +43,13 @@ def apply_managed_section(
     Raises:
         ManagedSectionError: If either marker is absent or appears more than once.
     """
+    if not start_marker or not end_marker:
+        raise ManagedSectionError("start_marker and end_marker must be non-empty strings.")
+    if start_marker == end_marker:
+        raise ManagedSectionError(
+            f"start_marker and end_marker must be distinct; both are {start_marker!r}."
+        )
+
     start_count = existing_content.count(start_marker)
     end_count = existing_content.count(end_marker)
 
@@ -79,7 +86,7 @@ def apply_managed_section(
     before = existing_content[: start_idx + len(start_marker)]
     after = existing_content[end_idx:]
 
-    separator = "\n" if new_section_content else ""
-    middle = f"\n{new_section_content}{separator}" if new_section_content else "\n"
+    stripped = new_section_content.rstrip("\n")
+    middle = f"\n{stripped}\n" if stripped else "\n"
 
     return f"{before}{middle}{after}"

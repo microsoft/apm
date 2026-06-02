@@ -4,9 +4,6 @@ These tests verify:
 1. replace-between-markers preserves surrounding content
 2. duplicate-marker -> loud error
 3. marker-absent -> conservative behavior (error)
-
-These tests are written BEFORE the implementation and are expected to FAIL
-until the feature is implemented.
 """
 
 import pytest

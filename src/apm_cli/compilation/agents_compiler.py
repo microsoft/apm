@@ -92,7 +92,7 @@ class CompilationConfig:
 
     # Managed-section mode (issue #1540): update only the APM-owned block
     # inside an existing AGENTS.md instead of overwriting the whole file.
-    # Set agents_md_mode = "managed_section" in apm.yml to enable.
+    # Set compilation.agents_md.mode: managed_section in apm.yml to enable.
     agents_md_mode: str = "full"
     agents_md_start_marker: str = "<!-- apm:start -->"
     agents_md_end_marker: str = "<!-- apm:end -->"
@@ -1207,8 +1207,13 @@ class AgentsCompiler:
                     config.agents_md_start_marker,
                     config.agents_md_end_marker,
                 )
-            except ManagedSectionError:
-                raise
+            except ManagedSectionError as exc:
+                raise ManagedSectionError(f"{target}: {exc}") from exc
+        elif config.agents_md_mode != "full":
+            raise ValueError(
+                f"Unknown agents_md.mode {config.agents_md_mode!r}. "
+                "Supported values: 'full', 'managed_section'."
+            )
 
         try:
             CompiledOutputWriter().write(Path(output_path), content)
