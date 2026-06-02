@@ -229,6 +229,9 @@ def _resolve_download_strategy(
         and _callback_sha == resolved_ref.resolved_commit
     )
 
+    if _already_resolved_sha_match and logger:
+        logger.verbose_detail(f"  {dep_key}: callback SHA matches remote -- skipping re-download")
+
     skip_download = install_path.exists() and (
         (is_cacheable and not update_refs)
         or (already_resolved and not update_refs)
@@ -236,7 +239,16 @@ def _resolve_download_strategy(
         or lockfile_match
     )
 
-    # Verify content integrity when lockfile has a hash
+    # Verify content integrity when lockfile has a hash.
+    # NOTE: when _already_resolved_sha_match is True, the callback has already
+    # written the correct content for the current remote SHA -- but the lockfile
+    # content_hash still refers to the *previous* content. If the remote content
+    # changed (which is the typical stale-lockfile scenario), verify_package_hash
+    # will mismatch, safe_rmtree fires, and skip_download resets to False, causing
+    # a re-download. This is the correct safety behaviour but means the
+    # optimisation is a no-op for update scenarios where content_hash is present
+    # and stale. A follow-up can target this by propagating the callback-downloaded
+    # content_hash into the verified set before this guard runs.
     if (
         skip_download
         and _dep_locked_chk

@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING:** `apm pack --marketplace-output PATH` has been removed. This flag was deprecated in v0.14 with a stderr warning and auto-translated to `--marketplace-path claude=PATH`. Use `--marketplace-path claude=PATH` to override the Claude output path. (#1318)
 
+### Performance
+
+- `apm install --update` no longer re-downloads a dependency when the in-flight
+  resolution callback already fetched it at the correct SHA, eliminating a
+  redundant network round-trip per up-to-date dependency in update mode.
+  (closes #551)
+
 ### Added
 
 - Teams with existing `AGENTS.md` content can now adopt `apm compile` without
