@@ -55,9 +55,9 @@ Examples:
 @click.option(
     "--package",
     "package_id",
-    default=None,
+    required=True,
     metavar="OWNER/REPO",
-    help="Override owner/repo identity (default: parsed from 'source:' in apm.yml).",
+    help="Package identity to publish as (owner/repo, e.g. acme/my-skill).",
 )
 @click.option(
     "--tarball",
@@ -93,7 +93,7 @@ def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
         raise click.ClickException("apm.yml must declare a 'version:' field to publish.")
 
     # ----------------------------------------------------------- owner/repo
-    owner, repo = _resolve_package_id(pkg, package_id)
+    owner, repo = _resolve_package_id(package_id)
 
     # ----------------------------------------------------------- registry
     registries: dict[str, str] = pkg.registries or {}
@@ -143,17 +143,21 @@ def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_package_id(pkg, override: str | None) -> tuple[str, str]:
-    """Return (owner, repo) from --package override or apm.yml source field."""
-    raw = override or pkg.source or ""
-    # strip https://github.com/ and similar prefixes
-    raw = re.sub(r"^https?://[^/]+/", "", raw).strip("/")
+def _resolve_package_id(package_id: str) -> tuple[str, str]:
+    """Parse ``--package OWNER/REPO`` into ``(owner, repo)``.
+
+    Accepts bare ``owner/repo`` or a full URL
+    (``https://github.com/owner/repo``); strips the scheme+host prefix when
+    present.  Raises ``UsageError`` when the value cannot be parsed as a
+    two-segment identity.
+    """
+    raw = re.sub(r"^https?://[^/]+/", "", package_id).strip("/")
     parts = [p for p in raw.split("/") if p]
     if len(parts) >= 2:
         return parts[-2], parts[-1]
     raise click.UsageError(
-        "Cannot infer owner/repo for publish.\n"
-        "Either set 'source: owner/repo' in apm.yml, or pass --package owner/repo."
+        f"--package must be in owner/repo form (got {package_id!r}).\n"
+        "Example: --package acme/my-skill"
     )
 
 
@@ -181,6 +185,10 @@ def _resolve_registry_name(name: str | None, registries: dict[str, str]) -> str:
 
 def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: bool) -> Path:
     """Build a flat registry tarball (``apm.yml`` + ``.apm/`` at archive root).
+
+    Also includes ``README.md``, ``CHANGELOG.md``, and ``LICENSE`` (case-
+    insensitive, no extension required for LICENSE) when present — matching
+    npm's behaviour of bundling standard root-level documentation files.
 
     Registry servers and ``apm install`` expect the APM source layout at the
     tarball root — not the ``apm pack --archive`` plugin bundle wrapper
@@ -210,9 +218,27 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
             return None
         return ti
 
+    # Standard root-level doc files included when present (npm parity).
+    # Matched case-insensitively; LICENSE has no required extension.
+    _DOC_CANDIDATES = ("README.md", "CHANGELOG.md", "LICENSE", "LICENCE")
+
     with tarfile.open(dest, mode="w:gz") as tar:
         tar.add(apm_yml_path, arcname="apm.yml", filter=_tar_filter, recursive=False)
         tar.add(apm_dir, arcname=".apm", filter=_tar_filter)
+        for candidate in _DOC_CANDIDATES:
+            # Case-insensitive match against actual filenames in project root.
+            match = next(
+                (
+                    f
+                    for f in project_root.iterdir()
+                    if f.is_file() and not f.is_symlink() and f.name.lower() == candidate.lower()
+                ),
+                None,
+            )
+            if match:
+                tar.add(match, arcname=match.name, filter=_tar_filter, recursive=False)
+                if verbose:
+                    logger.info(f"  bundling {match.name}")
 
     return dest
 

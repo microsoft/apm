@@ -4,7 +4,7 @@ import errno
 import os
 import shutil
 import stat
-import sys  # noqa: F401
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -245,6 +245,10 @@ class TestRetryOnLock:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows does not honor POSIX execute bits; st_mode & 0o111 is not preserved",
+)
 def test_robust_copy2_preserves_executable_bits_on_reflink_fast_path(tmp_path):
     src = tmp_path / "source.sh"
     dst = tmp_path / "dest.sh"

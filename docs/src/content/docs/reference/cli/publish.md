@@ -15,7 +15,7 @@ apm publish [OPTIONS]
 
 `apm publish` uploads a package version to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`.
 
-By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.tar.gz`) containing `apm.yml` and `.apm/` at the tarball root. This is **not** the plugin bundle layout from [`apm pack`](../pack/) (`{name}-{version}/plugin.json`).
+By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.tar.gz`) containing `apm.yml`, `.apm/`, and standard root-level documentation files (`README.md`, `CHANGELOG.md`, `LICENSE` / `LICENCE`, matched case-insensitively) at the tarball root. Symlinks are excluded. This is **not** the plugin bundle layout from [`apm pack`](../pack/) (`{name}-{version}/plugin.json`).
 
 Requires the experimental `registries` feature:
 
@@ -30,7 +30,7 @@ The project's `apm.yml` must declare a `registries:` block with at least one reg
 | Flag | Default | Description |
 |---|---|---|
 | `--registry NAME` | _(required when multiple registries configured)_ | Registry name from the `registries:` block. |
-| `--package OWNER/REPO` | parsed from `source:` in `apm.yml` | Override the registry package identity. |
+| `--package OWNER/REPO` | _(required)_ | Package identity to publish as (e.g. `acme/my-skill`). |
 | `--tarball PATH` | auto-pack | Path to a pre-built `.tar.gz`. Skips auto-pack. |
 | `--dry-run` | off | Print what would be uploaded; do not call the registry. |
 | `--verbose`, `-v` | off | Show auto-pack details (tarball path). |
@@ -57,7 +57,7 @@ tar czf my-skill-0.0.1.tar.gz apm.yml SKILL.md
 apm publish --tarball my-skill-0.0.1.tar.gz
 ```
 
-Override owner/repo when `source:` is absent or wrong:
+Specify the registry package identity explicitly:
 
 ```bash
 apm publish --package acme/my-package --registry corp-main
