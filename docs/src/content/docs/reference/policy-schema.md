@@ -301,6 +301,8 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 
 **Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
 
+**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
+
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |

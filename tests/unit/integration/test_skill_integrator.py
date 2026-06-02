@@ -4313,6 +4313,10 @@ class TestPluginBinDeploy:
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert not deployed_bin.exists()
         assert result.skill_created is False
+        # The plugin ships a bin/, so the skip must be reported (not silent) so
+        # the install layer can hint the user to re-run with -g.
+        assert result.bin_deployed == 0
+        assert result.bin_skipped_reason == "project_scope"
 
     def test_force_overwrites_identical_bin(self, tmp_path: Path) -> None:
         """force=True copies bin/ executables even when src and dest hashes match."""

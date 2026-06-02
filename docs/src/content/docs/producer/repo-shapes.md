@@ -162,6 +162,37 @@ Local-path entries skip remote resolution. Each plugin's own
 marketplace index. Pick a versioning strategy that matches how you
 tag releases -- see [Versioning strategies](./versioning-strategies/).
 
+## Shipping `bin/` executables (Claude Code only)
+
+A plugin may ship a top-level `bin/` directory of executable scripts.
+When a consumer runs a **global** install (`apm install -g`), APM
+deploys the plugin as a Claude Code skills-directory plugin (a folder
+containing `.claude-plugin/plugin.json`) under the Claude skills
+directory, which puts `bin/` on Claude Code's Bash tool `PATH`. The
+agent can then invoke your scripts as bare commands.
+
+```
+my-plugin/
+  apm.yml
+  .apm/
+  bin/
+    my-tool                          # executable script (chmod handled by APM)
+```
+
+This is a **Claude-Code-specific** contract -- no other harness has an
+equivalent -- so `bin/` deploys only when the consumer has an active
+Claude Code skills target. Authoring rules:
+
+- Deploy is **user-scope only**. A project-scope install (without `-g`)
+  skips `bin/` and prints a hint to re-run with `-g`.
+- Deployed executables sit on Claude Code's `PATH` and are invoked
+  **without per-call confirmation**. Treat them as trusted code: keep
+  them minimal, audited, and free of network side effects you would not
+  want an agent to trigger unprompted.
+- Enterprises can deny deployment per-package or globally via the
+  `bin_deploy` policy rule -- see the
+  [policy schema](../../reference/policy-schema/#bin_deploy).
+
 ## What to read next
 
 - [Versioning strategies](./versioning-strategies/) -- lockstep vs

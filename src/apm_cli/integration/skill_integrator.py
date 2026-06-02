@@ -4,7 +4,7 @@ import filecmp
 import hashlib
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime  # noqa: F401
 from pathlib import Path
 from typing import Dict, List, Optional  # noqa: F401, UP035
@@ -31,6 +31,9 @@ class SkillIntegrationResult:
     links_resolved: int = 0  # Kept for backwards compatibility
     sub_skills_promoted: int = 0  # Number of sub-skills promoted to top-level
     bin_deployed: int = 0  # Number of marketplace_plugin bin/ executables deployed
+    # Why a plugin's bin/ was NOT deployed despite shipping one, so the install
+    # layer can surface an actionable hint: "project_scope" | "no_claude_target".
+    bin_skipped_reason: str | None = None
     target_paths: list[Path] = None  # All deployed directories (for deployed_files manifest)
 
     def __post_init__(self):
@@ -1204,10 +1207,11 @@ class SkillIntegrator(BaseIntegrator):
         # also ships a root SKILL.md or a skills/ bundle, so it must run for
         # every plugin -- not only the no-skill fallback.  See issue #1544.
         bin_paths: list[Path] = []
+        bin_skip_reason: str | None = None
         from apm_cli.models.apm_package import PackageType as _PackageType
 
         if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
-            bin_paths = self._deploy_plugin_bin(
+            bin_paths, bin_skip_reason = self._deploy_plugin_bin(
                 package_info,
                 project_root,
                 targets,
@@ -1239,6 +1243,7 @@ class SkillIntegrator(BaseIntegrator):
                     targets=targets,
                 ),
                 bin_paths,
+                bin_skip_reason,
             )
 
         # SKILL_BUNDLE: promote skills from root-level skills/ directory.
@@ -1259,6 +1264,7 @@ class SkillIntegrator(BaseIntegrator):
                     skill_subset=skill_subset,
                 ),
                 bin_paths,
+                bin_skip_reason,
             )
 
         # No SKILL.md at root  -- not a skill package.
@@ -1284,26 +1290,36 @@ class SkillIntegrator(BaseIntegrator):
                 target_paths=sub_deployed,
             ),
             bin_paths,
+            bin_skip_reason,
         )
 
     @staticmethod
     def _merge_bin_paths(
-        result: SkillIntegrationResult, bin_paths: list[Path]
+        result: SkillIntegrationResult,
+        bin_paths: list[Path],
+        skip_reason: str | None = None,
     ) -> SkillIntegrationResult:
         """Fold deployed plugin bin/manifest paths into a skill result.
 
-        ``skill_created`` is intentionally left untouched -- deploying
+        Pure: returns a NEW result via ``dataclasses.replace`` rather than
+        mutating the argument, so callers never observe surprise in-place
+        edits.  ``skill_created`` is intentionally left untouched -- deploying
         executables is not the same as creating a skill, so reporting and
         sync semantics stay honest.  When bins were deployed the result is no
         longer "skipped" (work happened) and the paths are tracked for the
-        lockfile / uninstall manifest.
+        lockfile / uninstall manifest.  ``skip_reason`` records why a plugin
+        that ships bin/ was NOT deployed, for the install layer to surface.
         """
-        if not bin_paths:
+        if not bin_paths and skip_reason is None:
             return result
-        result.bin_deployed = len(bin_paths)
-        result.skill_skipped = False
-        result.target_paths = (result.target_paths or []) + bin_paths
-        return result
+        updates: dict = {}
+        if bin_paths:
+            updates["bin_deployed"] = len(bin_paths)
+            updates["skill_skipped"] = False
+            updates["target_paths"] = (result.target_paths or []) + bin_paths
+        if skip_reason is not None:
+            updates["bin_skipped_reason"] = skip_reason
+        return replace(result, **updates)
 
     def _deploy_plugin_bin(
         self,
@@ -1314,7 +1330,7 @@ class SkillIntegrator(BaseIntegrator):
         policy=None,
         force: bool = False,
         logger=None,
-    ) -> list[Path]:
+    ) -> tuple[list[Path], str | None]:
         """Deploy bin/ executables and plugin manifest for a MARKETPLACE_PLUGIN.
 
         Only activates when ALL of:
@@ -1330,25 +1346,32 @@ class SkillIntegrator(BaseIntegrator):
         harnesses have no equivalent, so only Claude targets are considered.
 
         Each binary is made executable (chmod 0o755) on POSIX systems.
-        Returns a list of all deployed file Paths (files, not directories).
+
+        Returns ``(deployed_paths, skip_reason)``.  ``skip_reason`` is non-None
+        ONLY when the package ships a bin/ but it could not be deployed for an
+        actionable reason ("project_scope", "no_claude_target"), so the install
+        layer can surface a hint.  Policy-deny and "no bin/ at all" return
+        ``None`` -- they are intentional, not traps.
         """
         from apm_cli.core.scope import InstallScope
         from apm_cli.utils.path_security import validate_path_segments
 
+        bin_dir = package_info.install_path / "bin"
+        if not bin_dir.is_dir():
+            return [], None
+
+        # The package ships executables -- from here a non-deploy is a
+        # reportable skip, not a silent no-op.
         if scope is not InstallScope.USER:
             if logger and scope is InstallScope.PROJECT:
                 logger.progress(
                     "bin/ deploy is user-scope only; skipping for project-scope install",
                     symbol="info",
                 )
-            return []
-
-        bin_dir = package_info.install_path / "bin"
-        if not bin_dir.is_dir():
-            return []
+            return [], "project_scope"
 
         if self._bin_deploy_denied(package_info, policy, logger):
-            return []
+            return [], None
 
         if targets is None:
             from apm_cli.integration.targets import active_targets
@@ -1364,7 +1387,7 @@ class SkillIntegrator(BaseIntegrator):
                     f"{package_info.get_canonical_dependency_string()}",
                     symbol="warning",
                 )
-            return []
+            return [], "no_claude_target"
 
         skill_name = package_info.install_path.name
         validate_path_segments(skill_name, context="plugin skill name")
@@ -1385,7 +1408,7 @@ class SkillIntegrator(BaseIntegrator):
             if manifest is not None:
                 deployed.append(manifest)
 
-        return deployed
+        return deployed, None
 
     @staticmethod
     def _bin_deploy_denied(package_info, policy, logger) -> bool:

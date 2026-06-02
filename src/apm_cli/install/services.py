@@ -420,8 +420,17 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
     if skill_result.bin_deployed > 0:
         _log_integration(
-            f"  |-- {skill_result.bin_deployed} executable(s) deployed -> {_skill_suffix} "
-            "(on Claude's PATH; restart Claude or /reload-plugins to use)"
+            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
+            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)"
+        )
+        _log_integration("  |-- run /reload-plugins or restart Claude Code to activate")
+    elif skill_result.bin_skipped_reason == "project_scope":
+        _log_integration(
+            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
+        )
+    elif skill_result.bin_skipped_reason == "no_claude_target":
+        _log_integration(
+            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
         )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
