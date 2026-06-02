@@ -10,6 +10,7 @@ import yaml
 
 from .schema import (
     ApmPolicy,
+    AuditPolicy,
     BinDeployPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
@@ -20,6 +21,7 @@ from .schema import (
     McpTransportPolicy,
     PolicyCache,
     RegistrySourcePolicy,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -30,6 +32,7 @@ _VALID_REQUIRE_RESOLUTION = {"project-wins", "policy-wins", "block"}
 _VALID_SELF_DEFINED = {"deny", "warn", "allow"}
 _VALID_SCRIPTS = {"allow", "deny"}
 _VALID_UNMANAGED_ACTION = {"ignore", "warn", "deny"}
+_VALID_AUDIT_ON_INSTALL = {"off", "warn", "block"}
 
 # YAML 1.1 treats "off"/"on" as booleans — map them back to strings
 _YAML_BOOL_COERCE = {False: "off", True: "on"}
@@ -46,6 +49,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "compilation",
     "manifest",
     "unmanaged_files",
+    "security",
     "bin_deploy",
 }
 
@@ -165,6 +169,24 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                 f"{sorted(_VALID_UNMANAGED_ACTION)}, got '{action}'"
             )
 
+    # security.audit (install-time audit + external scanners)
+    security = data.get("security")
+    if security is not None and not isinstance(security, dict):
+        errors.append("security must be a YAML mapping")
+    elif isinstance(security, dict):
+        audit = security.get("audit")
+        if audit is not None and not isinstance(audit, dict):
+            errors.append("security.audit must be a YAML mapping")
+        elif isinstance(audit, dict):
+            on_install = audit.get("on_install")
+            if isinstance(on_install, bool):
+                on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
+            if on_install is not None and on_install not in _VALID_AUDIT_ON_INSTALL:
+                errors.append(
+                    f"security.audit.on_install must be one of "
+                    f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
+                )
+
     return errors, warnings
 
 
@@ -247,6 +269,21 @@ def _build_policy(data: dict) -> ApmPolicy:
         allow_non_registry=bool(reg_data.get("allow_non_registry", True)),
     )
 
+    sec_data = data.get("security") or {}
+    raw_audit = sec_data.get("audit")
+    audit_data = raw_audit if isinstance(raw_audit, dict) else {}
+    on_install = audit_data.get("on_install")
+    if isinstance(on_install, bool):
+        on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
+    security = SecurityPolicy(
+        audit=AuditPolicy(
+            on_install=on_install,
+            external=None
+            if "external" not in audit_data or audit_data["external"] is None
+            else _parse_tuple(audit_data["external"]),
+        ),
+    )
+
     bd_data = data.get("bin_deploy") or {}
     bin_deploy = BinDeployPolicy(
         deny_all=bool(bd_data.get("deny_all", False)),
@@ -266,6 +303,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         manifest=manifest,
         unmanaged_files=unmanaged_files,
         registry_source=registry_source,
+        security=security,
         bin_deploy=bin_deploy,
     )
 

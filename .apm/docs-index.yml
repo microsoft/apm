@@ -244,6 +244,14 @@ pages:
       cli: [apm audit]
       flags: [--strip, --file, --sarif, --json]
 
+  - path: docs/src/content/docs/integrations/external-scanners.md
+    title: "External scanners"
+    persona: cross
+    promise: cross
+    documents_symbols:
+      cli: [apm audit]
+      flags: [--external, --external-sarif]
+
 # Symbol-to-page reverse index. The localizer skill consults this
 # to translate a diff symbol (e.g. a new flag) into a page list.
 # Bootstrap: derived from the pages[] above. Regenerated on every
@@ -259,10 +267,12 @@ symbol_index:
     "apm marketplace check": [docs/src/content/docs/producer/publish-to-a-marketplace.md]
     "apm marketplace package add": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
     "apm marketplace publish": [docs/src/content/docs/producer/publish-to-a-marketplace.md]
-    "apm audit": [docs/src/content/docs/enterprise/apm-policy.md, docs/src/content/docs/enterprise/security.md]
+    "apm audit": [docs/src/content/docs/enterprise/apm-policy.md, docs/src/content/docs/enterprise/security.md, docs/src/content/docs/integrations/external-scanners.md]
   flags:
     "--check-versions": [docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
     "--check-clean": [docs/src/content/docs/producer/releasing-from-any-ci.md]
+    "--external": [docs/src/content/docs/integrations/external-scanners.md, docs/src/content/docs/reference/cli/audit.md]
+    "--external-sarif": [docs/src/content/docs/integrations/external-scanners.md, docs/src/content/docs/reference/cli/audit.md]
   schemas:
     "apm.yml": [docs/src/content/docs/consumer/install.md]
     "apm.lock.yaml": [docs/src/content/docs/consumer/install.md]

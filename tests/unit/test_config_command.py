@@ -1400,3 +1400,38 @@ class TestConfigShowTempDir:
             result = self.runner.invoke(config, [])
         assert result.exit_code == 0
         assert "auto-detection" in result.output or "Cowork" in result.output
+
+
+class TestAuditOnInstallCommand:
+    """`apm config set/get/unset audit-on-install` (flag-gated)."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_set_blocked_without_flag(self):
+        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
+            result = self.runner.invoke(config, ["set", "audit-on-install", "warn"])
+        assert result.exit_code == 1
+        assert "external-scanners experimental flag" in result.output
+
+    def test_set_allowed_with_flag(self):
+        with (
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch("apm_cli.config.set_audit_on_install") as mock_set,
+            patch("apm_cli.config.get_audit_on_install", return_value="warn"),
+        ):
+            result = self.runner.invoke(config, ["set", "audit-on-install", "warn"])
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("warn")
+
+    def test_get_audit_on_install(self):
+        with patch("apm_cli.config.get_audit_on_install", return_value="block"):
+            result = self.runner.invoke(config, ["get", "audit-on-install"])
+        assert result.exit_code == 0
+        assert "block" in result.output
+
+    def test_unset_audit_on_install(self):
+        with patch("apm_cli.config.unset_audit_on_install") as mock_unset:
+            result = self.runner.invoke(config, ["unset", "audit-on-install"])
+        assert result.exit_code == 0
+        mock_unset.assert_called_once()

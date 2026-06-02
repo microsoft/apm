@@ -230,6 +230,7 @@ class InstallContext:
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
+    audit_override: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1053,6 +1054,24 @@ def _handle_mcp_install(
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
 @click.option(
+    "--audit",
+    "audit_mode",
+    type=click.Choice(["off", "warn", "block"], case_sensitive=False),
+    default=None,
+    help=(
+        "Run 'apm audit' over deployed files during install: off, warn, or block. "
+        "Overrides config/policy. Requires 'apm experimental enable external-scanners'. "
+        "An org policy 'block' cannot be relaxed below by this flag."
+    ),
+)
+@click.option(
+    "--no-audit",
+    "no_audit",
+    is_flag=True,
+    default=False,
+    help="Disable the install-time audit for this invocation (equivalent to --audit off).",
+)
+@click.option(
     "--refresh",
     is_flag=True,
     default=False,
@@ -1078,6 +1097,20 @@ def _handle_mcp_install(
         "Override the log/display label when installing a local bundle "
         "(directory or .tar.gz produced by 'apm pack'). Only valid for "
         "local-bundle installs; passing --as without a local bundle path is rejected."
+    ),
+)
+@click.option(
+    "--root",
+    "root",
+    type=click.Path(file_okay=False, resolve_path=True),
+    default=None,
+    metavar="DIR",
+    help=(
+        "Install into DIR instead of $PWD: apm_modules/, apm.lock.yaml, "
+        ".claude/, .codex/, .agents/, .opencode/ are written under DIR "
+        "while sources (apm.yml, .apm/, local-path packages) continue "
+        "resolving from $PWD. Mirrors 'pip install --target' / "
+        "'npm install --prefix'. Project scope only; not valid with --global."
     ),
 )
 @click.pass_context
@@ -1111,9 +1144,12 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    audit_mode,
+    no_audit,
     refresh,
     legacy_skill_paths,
     alias,
+    root,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
@@ -1157,6 +1193,27 @@ def install(  # noqa: PLR0913
             "--frozen and --update are mutually exclusive. "
             "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
         )
+    # --root: see apm_cli.install.root_redirect.install_root_redirect.
+    # Conflicts with --global (user scope writes are anchored at $HOME
+    # and have no concept of an arbitrary deploy root). ``--dry-run`` is
+    # threaded through so the context manager skips the ``mkdir``
+    # side-effect on previews. Entered manually (rather than via
+    # ``with``) so the existing top-level try/except/finally below does
+    # not need a full-body re-indent; the matching ``__exit__`` in that
+    # ``finally`` restores cwd + clears the source-root override on every
+    # exit path (return, sys.exit -> SystemExit, exception).
+    if root and global_:
+        raise click.UsageError("--root is not valid with --global (user scope)")
+    from ..core.install_audit import resolve_audit_override_from_cli
+    from ..install.root_redirect import install_root_redirect
+
+    try:
+        audit_override = resolve_audit_override_from_cli(no_audit, audit_mode)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    _root_redirect = install_root_redirect(root, dry_run=dry_run)
+    _root_redirect.__enter__()
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1477,6 +1534,7 @@ def install(  # noqa: PLR0913
             allow_protocol_fallback=allow_protocol_fallback,
             trust_transitive_mcp=trust_transitive_mcp,
             no_policy=no_policy,
+            audit_override=audit_override,
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
             refresh=refresh,
@@ -1544,6 +1602,11 @@ def install(  # noqa: PLR0913
             _rich_error(f"Error installing dependencies: {e}")
         sys.exit(1)
     finally:
+        # --root: restore cwd + clear the source-root override regardless
+        # of how the handler exits (return, sys.exit -> SystemExit,
+        # exception). Done first so cwd is back to $PWD before any
+        # best-effort summary rendering below.
+        _root_redirect.__exit__(None, None, None)
         # F5 (#1116): render minimal elapsed-time line on exit paths that
         # did not already render the full install summary. Best-effort:
         # never let a render failure mask the original exception/exit.
@@ -1713,6 +1776,7 @@ def _install_apm_packages(ctx, outcome):
                 protocol_pref=ctx.protocol_pref,
                 allow_protocol_fallback=ctx.allow_protocol_fallback,
                 no_policy=ctx.no_policy,
+                audit_override=ctx.audit_override,
                 legacy_skill_paths=ctx.legacy_skill_paths,
                 frozen=ctx.frozen,
                 plan_callback=ctx.plan_callback,
@@ -1946,6 +2010,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     protocol_pref=None,
     allow_protocol_fallback: "bool | None" = None,
     no_policy: bool = False,
+    audit_override: "str | None" = None,
     skill_subset: "builtins.tuple | None" = None,
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
@@ -1984,6 +2049,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
         no_policy=no_policy,
+        audit_override=audit_override,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         legacy_skill_paths=legacy_skill_paths,

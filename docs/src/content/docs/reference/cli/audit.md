@@ -34,6 +34,15 @@ This is the explicit power tool. Built-in protection against critical Unicode fi
 | `--no-drift` | off | Skip the install-replay drift check (reduces coverage). Mutually exclusive with `--strip` and `--file`. |
 | `--verbose`, `-v` | off | Show info-level findings and per-file detail. No effect in `--ci` mode. |
 
+### External scanners (experimental)
+
+Gated by the `external-scanners` experimental flag (`apm experimental enable external-scanners`). Folds findings from any SARIF 2.1.0 scanner into the report. CLI-driven and install-method-neutral — no pip extra; works with the APM binary. See [External scanners](../../../integrations/external-scanners/).
+
+| Flag | Default | Description |
+|---|---|---|
+| `--external NAME` | unset | Ingest findings from an external SARIF-native scanner (repeatable). Names: `skillspector` (invokes the CLI on `PATH`), `sarif` (ingests a file via `--external-sarif`). Cannot be combined with `--strip`, `--dry-run`, or `--ci`. |
+| `--external-sarif PATH` | unset | SARIF file to ingest for `--external sarif`. |
+
 ### Output
 
 | Flag | Default | Description |
@@ -143,6 +152,7 @@ The default audit replays the install pipeline into a scratch tree and diffs the
 - `--no-drift` cannot be combined with `--strip` or `--file`.
 - `--ci` cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`.
 - `--ci` does not support `--format markdown`.
+- `--external` cannot be combined with `--strip`, `--dry-run`, or `--ci`; `--external-sarif` requires `--external sarif`.
 
 ## Exit codes
 

@@ -17,6 +17,25 @@ Design notes
 * Symbols on the ``commands/install`` module that phases access via
   ``_install_mod.X`` stay as re-exports there -- this module does NOT
   duplicate those re-exports.
+
+Source-vs-deploy root convention
+--------------------------------
+:class:`InstallContext` carries two roots; phases must pick the
+correct one or ``apm install --root`` silently produces wrong paths
+(the bug surfaces only when ``project_root != source_root``).
+
+* ``ctx.source_root`` -- read sources here (``apm.yml``, ``.apm/``
+  primitives, local-path packages).  Equal to ``$PWD`` regardless of
+  ``--root``.
+* ``ctx.project_root`` / ``ctx.apm_dir`` -- write deploy artifacts
+  here (``apm_modules/``, ``apm.lock.yaml``, ``.claude/``, ``.codex/``,
+  etc.).  Becomes the ``--root`` target when set.
+
+Convention: a phase that *reads* an existing project file uses
+``source_root``; a phase that *writes* anything uses ``project_root``
+(or the helper that already does -- e.g. :func:`get_apm_dir`).  When
+a new field is added to :class:`InstallContext`, the source-vs-write
+side must be an explicit, documented choice -- not implicit.
 """
 
 from __future__ import annotations
@@ -314,6 +333,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     protocol_pref=None,
     allow_protocol_fallback: bool | None = None,
     no_policy: bool = False,
+    audit_override: str | None = None,
     skill_subset: tuple | None = None,
     skill_subset_from_cli: bool = False,
     legacy_skill_paths: bool = False,
@@ -365,7 +385,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     _perf_stats.reset()
     clear_discovery_cache()
 
-    from ..core.scope import InstallScope, get_apm_dir, get_deploy_root
+    from ..core.scope import InstallScope, get_apm_dir, get_deploy_root, get_source_root
 
     if scope is None:
         scope = InstallScope.PROJECT
@@ -374,13 +394,16 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
     all_apm_deps = apm_deps + dev_apm_deps
 
-    project_root = get_deploy_root(scope)
+    project_root = get_deploy_root(scope)  # write target
+    source_root = get_source_root(scope)  # source reads (apm.yml, .apm/)
     apm_dir = get_apm_dir(scope)
 
-    # Check whether the project root itself has local .apm/ primitives (#714).
+    # Check whether the source root has local .apm/ primitives (#714).
+    # Sources resolve from $PWD even when --root redirects writes, so the
+    # check uses source_root rather than project_root.
     from apm_cli.install.phases.local_content import _project_has_root_primitives
 
-    _root_has_local_primitives = _project_has_root_primitives(project_root)
+    _root_has_local_primitives = _project_has_root_primitives(source_root)
 
     # Read old local deployed files from the existing lockfile so the
     # post-deps-local phase can run stale cleanup even when no current
@@ -416,6 +439,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     ctx = InstallContext(
         project_root=project_root,
         apm_dir=apm_dir,
+        source_root=source_root,
         apm_package=apm_package,
         update_refs=update_refs,
         verbose=verbose,
@@ -435,6 +459,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
         no_policy=no_policy,
+        audit_override=audit_override,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         early_lockfile=_early_lockfile,
@@ -771,6 +796,20 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         from .phases import post_deps_local as _post_deps_local_phase
 
         _run_phase("post_deps_local", _post_deps_local_phase, ctx)
+
+        # ------------------------------------------------------------------
+        # Phase: Optional install-time content audit (external_scanners flag).
+        # Runs after the lockfile + local content are persisted so deployed
+        # files are enumerable, and before finalize.  No-op unless config /
+        # policy opt in (default off).  A ``block`` decision raises
+        # PolicyViolationError, re-raised by the outer handler below.
+        # ------------------------------------------------------------------
+        from .phases import audit as _audit_phase
+
+        try:
+            _run_phase("audit", _audit_phase, ctx)
+        except PolicyViolationError:
+            raise
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase

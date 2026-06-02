@@ -1,3 +1,6 @@
+# Local tool state (gh CLI, etc.)
+.local/
+
 # Project-specific files
 APPROACH.md
 next-steps.md
@@ -82,3 +85,4 @@ server.pid
 .docs-rewrite-plan/
 build/apm-*/
 copilot-scratch/
+.local/

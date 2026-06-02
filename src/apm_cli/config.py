@@ -465,3 +465,54 @@ def get_apm_temp_dir() -> str | None:
     if config_val:
         return config_val
     return None
+
+
+# ---------------------------------------------------------------------------
+# Install-time audit default (external_scanners experimental feature)
+# ---------------------------------------------------------------------------
+
+#: Valid modes for the install-time audit. ``off`` skips it; ``warn`` runs the
+#: audit and surfaces findings without failing; ``block`` fails the install on
+#: critical findings.
+AUDIT_ON_INSTALL_MODES = ("off", "warn", "block")
+
+
+def get_audit_on_install() -> str:
+    """Get the user-level default mode for running ``apm audit`` at install time.
+
+    This is only consulted when the ``external_scanners`` experimental flag is
+    enabled and an ``apm-policy.yml`` ``security.audit.on_install`` rule does
+    not already mandate a stricter mode.
+
+    Returns:
+        One of :data:`AUDIT_ON_INSTALL_MODES`; defaults to ``"off"``.
+    """
+    value = get_config().get("audit_on_install", "off")
+    return value if value in AUDIT_ON_INSTALL_MODES else "off"
+
+
+def set_audit_on_install(mode: str) -> None:
+    """Set the install-time audit default mode.
+
+    Args:
+        mode: One of :data:`AUDIT_ON_INSTALL_MODES`.
+
+    Raises:
+        ValueError: If *mode* is not a recognised value.
+    """
+    normalized = (mode or "").strip().lower()
+    if normalized not in AUDIT_ON_INSTALL_MODES:
+        raise ValueError(
+            f"Invalid value '{mode}'. Use one of: {', '.join(AUDIT_ON_INSTALL_MODES)}."
+        )
+    update_config({"audit_on_install": normalized})
+
+
+def unset_audit_on_install() -> None:
+    """Remove the ``audit_on_install`` key from the config file.
+
+    No-op if the key is not present.  After this call
+    :func:`get_audit_on_install` falls through to the built-in default
+    (``"off"``).
+    """
+    _unset_config_key("audit_on_install")

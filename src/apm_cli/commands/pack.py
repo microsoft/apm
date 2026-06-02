@@ -28,6 +28,7 @@ Reads apm.yml to decide what to produce:
 
   dependencies: block  ->  bundle (directory or .tar.gz)
   marketplace: block   ->  selected marketplace artifacts
+  target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
   both blocks present  ->  bundle plus selected marketplace artifacts
 
 The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy
@@ -180,7 +181,11 @@ def _parse_marketplace_filter(
     "--dry-run", is_flag=True, default=False, help="Show what would be packed without writing"
 )
 @click.option(
-    "--force", is_flag=True, default=False, help="On collision (plugin format), last writer wins."
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Allow overwriting on collision: last-writer-wins in plugin bundles; "
+    "overwrites any existing plugin.json at the generated manifest path.",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information.")
 @click.option(
@@ -457,6 +462,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             "errors": [],
             "marketplace": {"outputs": []},
             "bundle": None,
+            "plugin_manifests": {"written": [], "skipped": [], "dry_run": []},
             "version_alignment": version_alignment_payload,
             "drift": drift_payload,
         }
@@ -465,7 +471,8 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                 payload = sub.payload.to_json_dict()
                 envelope["warnings"] = payload.get("warnings", [])
                 envelope["marketplace"] = payload.get("marketplace", {"outputs": []})
-                break
+            elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
+                envelope["plugin_manifests"] = sub.payload
         if gate_errors:
             envelope["errors"] = list(envelope["errors"]) + gate_errors
             envelope["ok"] = False
