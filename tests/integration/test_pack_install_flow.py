@@ -151,9 +151,7 @@ class TestPackCmd:
         manifest = json_mod.loads(raw)
         assert manifest["mcpServers"]["srv"] == {"command": "node"}
 
-    def test_pack_preserves_existing_plugin_json_without_force(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_pack_preserves_existing_plugin_json_without_force(self, runner, tmp_path, monkeypatch):
         """An existing plugin.json is preserved (warn + skip) when --force is absent."""
         import json as json_mod
 
@@ -165,7 +163,9 @@ class TestPackCmd:
         _write_lockfile(tmp_path)
         out = tmp_path / ".claude-plugin" / "plugin.json"
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8")
+        out.write_text(
+            json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8"
+        )
 
         result = runner.invoke(pack_cmd, [])
         assert result.exit_code == 0
@@ -185,7 +185,9 @@ class TestPackCmd:
         _write_lockfile(tmp_path)
         out = tmp_path / ".claude-plugin" / "plugin.json"
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8")
+        out.write_text(
+            json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8"
+        )
 
         result = runner.invoke(pack_cmd, ["--force"])
         assert result.exit_code == 0

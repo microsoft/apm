@@ -358,10 +358,10 @@ def write_plugin_manifest(
             _emit("warning", _skip_warn, logger, "warning")
             return None
 
-        _overwrite_msg = (
+        _overwrite_warn = (
             f"Overwriting {output_path} with generated manifest from apm.yml (--force)."
         )
-        _emit("info", _overwrite_msg, logger, "info")
+        _emit("warning", _overwrite_warn, logger, "warning")
 
     # Generated content under .github/ is granted elevated trust by GitHub
     # Actions -- surface the write so operators with branch-protection on
