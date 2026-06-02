@@ -275,7 +275,7 @@ class TestFindOrSynthesizePluginJson:
                 "apm_cli.deps.plugin_parser.synthesize_plugin_json_from_apm_yml",
                 return_value={"name": "test"},
             ),
-            patch("apm_cli.bundle.plugin_exporter._rich_info") as mock_info,
+            patch("apm_cli.core.plugin_manifest._rich_info") as mock_info,
         ):
             _find_or_synthesize_plugin_json(tmp_path, apm_yml, suppress_missing_warning=False)
         mock_info.assert_called_once()
