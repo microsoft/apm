@@ -1,4 +1,4 @@
-"""Integration tests – phase 4 coverage uplift.
+"""Integration tests - phase 4 coverage uplift.
 
 Covers the following high-miss files:
 1. ``src/apm_cli/install/mcp/writer.py``            (_diff_entry, add_mcp_to_apm_yml)

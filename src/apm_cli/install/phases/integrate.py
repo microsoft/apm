@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
 
 from apm_cli.install.phases._redownload import _should_skip_redownload
+from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
@@ -232,11 +233,12 @@ def _resolve_download_strategy(
     if _already_resolved_sha_match and logger:
         logger.verbose_detail(f"  {dep_key}: callback SHA matches remote -- skipping re-download")
 
-    skip_download = install_path.exists() and (
-        (is_cacheable and not update_refs)
-        or (already_resolved and not update_refs)
-        or _already_resolved_sha_match
-        or lockfile_match
+    skip_download = _already_resolved_sha_match or _compute_skip_download(
+        install_path_exists=install_path.exists(),
+        is_cacheable=is_cacheable,
+        update_refs=update_refs,
+        already_resolved=already_resolved,
+        lockfile_match=lockfile_match,
     )
 
     # Verify content integrity when lockfile has a hash.

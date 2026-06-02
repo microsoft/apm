@@ -58,6 +58,31 @@ my-package/
         resource2.md
 ```
 
+## Install-time discovery rules
+
+`apm pack` (export) is liberal: it collects primitives from both
+`.apm/<type>/` and root convention directories (`agents/`, `skills/`,
+`instructions/`, etc.). `apm install` (integration) is per-primitive
+and stricter. Authors who rely on root convention directories for
+instructions or prompts will produce bundles that pack but install
+silently incomplete.
+
+Per-primitive scan paths for `apm install`:
+
+| Primitive | Scanned path | Root alternative? |
+|-----------|-------------|------------------|
+| instruction | `.apm/instructions/` | No |
+| command (prompt) | `.apm/prompts/` | No |
+| hook | `.apm/hooks/` | Yes: `hooks/` |
+| agent | `.apm/agents/`, `.apm/chatmodes/` | Yes: `*.agent.md` and `*.chatmode.md` at root |
+| skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
+
+**Recommendation for marketplace publishers:** use `.apm/<type>/` for
+every primitive. This is the only layout that is symmetric between
+`apm pack` and `apm install`. Authoring `instructions/` at the plugin
+root will pack cleanly but instructions will be silently dropped when
+consumers run `apm install`.
+
 ## Hook files
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
