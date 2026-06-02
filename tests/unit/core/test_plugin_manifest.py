@@ -394,6 +394,37 @@ class TestBuildPluginManifest:
         # The lowercase variable name is preserved; only its value is scrubbed.
         assert "api_key=" in manifest["mcpServers"]["srv"]["command"]
 
+    def test_claude_redacts_extended_provider_token_prefixes(self, tmp_path: Path) -> None:
+        # HuggingFace, Stripe (underscore form), SendGrid, Supabase, and
+        # Databricks tokens passed as positional args must be redacted -- a
+        # GitHub/GitLab/npm-only allowlist would leak them. The fixtures are
+        # assembled from fragments at runtime so no contiguous provider-token
+        # literal lands in this file (avoids secret-scanning push protection on
+        # a synthetic test value).
+        hf = "hf_" + ("a" * 30)
+        stripe = "sk_" + "live_" + ("b" * 24)
+        sendgrid = "SG." + ("c" * 22) + "." + ("d" * 22)
+        supabase = "sbp_" + ("e" * 32)
+        databricks = "dapi" + ("0123456789abcdef" * 2)
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node srv",
+                            "args": [hf, stripe, sendgrid, supabase, databricks],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        raw = json.dumps(manifest)
+        for token in (hf, stripe, sendgrid, supabase, databricks):
+            assert token not in raw
+
 
 # ---------------------------------------------------------------------------
 # TestWritePluginManifest

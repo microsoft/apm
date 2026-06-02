@@ -121,18 +121,26 @@ _ENV_ASSIGN_SECRET_RE = re.compile(
 _AUTH_SCHEME_RE = re.compile(r"\b(Bearer|Basic)\s+([A-Za-z0-9._~+/=-]{8,})", re.IGNORECASE)
 # Bare provider tokens (no surrounding structure) recognised by their prefix --
 # GitHub PAT/OAuth, OpenAI, Slack, AWS access-key, Google API key, GitLab PAT,
-# npm automation token, PyPI upload token.
+# npm automation token, PyPI upload token, HuggingFace, Stripe, SendGrid,
+# Supabase, Databricks. This is a best-effort prefix allowlist layered on top of
+# the key-name and flag/value redaction; unrecognised provider prefixes still
+# fall to those defences when carried under a credential-named key or flag.
 _KNOWN_SECRET_TOKEN_RE = re.compile(
     r"\b(?:"
     r"gh[posur]_[A-Za-z0-9]{20,}"
     r"|github_pat_[A-Za-z0-9_]{20,}"
     r"|sk-(?:proj-)?[A-Za-z0-9_-]{20,}"
+    r"|sk_(?:live|test)_[A-Za-z0-9]{20,}"
     r"|xox[baprs]-[A-Za-z0-9-]{10,}"
     r"|A(?:KIA|SIA)[A-Z0-9]{12,}"
     r"|AIza[A-Za-z0-9_-]{30,}"
     r"|glpat-[A-Za-z0-9_-]{20,}"
     r"|npm_[A-Za-z0-9]{20,}"
     r"|pypi-[A-Za-z0-9_-]{20,}"
+    r"|hf_[A-Za-z0-9]{20,}"
+    r"|SG\.[A-Za-z0-9_.-]{20,}"
+    r"|sbp_[A-Za-z0-9]{20,}"
+    r"|dapi[a-f0-9]{32}"
     r")\b"
 )
 # Flag NAME that takes a secret as the NEXT array element (space-separated form),
@@ -224,8 +232,10 @@ def collect_mcp_servers(project_root: Path, *, logger: Any = None) -> dict:
     nesting depth, and secret-shaped values are redacted wherever they hide --
     ``user:pass@host`` URLs, inline ``--token=`` flags, space-separated
     ``--token VALUE`` pairs, shell ``ENV=secret`` prefixes, ``Bearer``/``Basic``
-    auth headers, and bare provider tokens (GitHub/OpenAI/Slack/AWS/Google)
-    passed as positional args. ``.mcp.json`` routinely embeds secrets so
+    auth headers, and bare provider tokens (GitHub, OpenAI, Slack, AWS, Google,
+    GitLab, npm, PyPI, HuggingFace, Stripe, SendGrid, Supabase, Databricks, and
+    other recognised provider token prefixes) passed as positional args.
+    ``.mcp.json`` routinely embeds secrets so
     an MCP host can inject them at startup; copying them verbatim into a
     committed ``plugin.json`` would exfiltrate them into the distributed
     artefact. A loud warning is emitted for every key dropped or value redacted.

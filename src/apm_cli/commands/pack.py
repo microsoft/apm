@@ -28,6 +28,7 @@ Reads apm.yml to decide what to produce:
 
   dependencies: block  ->  bundle (directory or .tar.gz)
   marketplace: block   ->  selected marketplace artifacts
+  target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
   both blocks present  ->  bundle plus selected marketplace artifacts
 
 The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy

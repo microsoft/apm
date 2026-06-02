@@ -158,7 +158,7 @@ Use `targets: [claude, copilot]` instead to emit both `.claude-plugin/plugin.jso
 
 The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). Per-ecosystem differences:
 
-- **Claude:** includes `mcpServers` sourced from `.mcp.json` if that file is present in the project root.
+- **Claude:** includes `mcpServers` sourced from `.mcp.json` when that file declares servers that survive credential stripping.
 - **Copilot:** omits `mcpServers`.
 
 #### Credential stripping (Claude `mcpServers`)
@@ -166,7 +166,7 @@ The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `
 `.mcp.json` routinely embeds secrets that an MCP host injects at startup, so they are removed before the manifest is written -- a committed `plugin.json` never leaks them. Stripping is recursive and applies at any nesting depth:
 
 - Credential-bearing keys are dropped: `env`/`environment`/`headers`/`authorization` blocks, plus any key whose name contains `token`, `secret`, `password`, `credential`, `apikey`, or `key`.
-- Secret-shaped values are redacted even when the key name is innocuous: `user:pass@host` URL userinfo, inline `--token=...` flags, space-separated `--token value` pairs, shell `ENV=secret` prefixes, `Bearer`/`Basic` auth headers, and bare provider tokens (GitHub, OpenAI, Slack, AWS, Google) passed as positional `args`.
+- Secret-shaped values are redacted even when the key name is innocuous: `user:pass@host` URL userinfo, inline `--token=...` flags, space-separated `--token value` pairs, shell `ENV=secret` prefixes, `Bearer`/`Basic` auth headers, and bare provider tokens (GitHub, OpenAI, Slack, AWS, Google, GitLab, npm, PyPI, HuggingFace, Stripe, SendGrid, Supabase, Databricks, and other recognised provider token prefixes) passed as positional `args`.
 
 A warning lists everything dropped or redacted, led by the consequence (secrets withheld from commit).
 
