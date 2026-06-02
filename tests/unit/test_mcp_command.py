@@ -541,6 +541,18 @@ class TestMcpInstallAlias:
         assert "--mcp-version" in result.output
         assert "--registry" in result.output
 
+    def test_epilog_does_not_reference_broken_mcp_help_flag(self):
+        """Epilog must reference `apm install --help`, not `apm install --mcp --help`.
+
+        `apm install --mcp --help` is rejected by conflicts.py because --help
+        is parsed as the value for --mcp, causing UsageError. Regression for #1586.
+        """
+        runner = make_runner()
+        result = runner.invoke(mcp, ["install", "--help"])
+        assert result.exit_code == 0
+        assert "install --mcp --help" not in result.output
+        assert "install --help" in result.output
+
     def test_forwards_args_to_root_install_with_mcp_flag(self):
         """Verify the alias invokes the root `cli` with `install --mcp <argv>`."""
         runner = make_runner()
