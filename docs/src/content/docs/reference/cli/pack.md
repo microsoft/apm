@@ -139,6 +139,19 @@ Ship one APM package; consumers get a native plugin for their tool of choice. Wh
 | `claude` | `.claude-plugin/plugin.json` |
 | `copilot` | `.github/plugin/plugin.json` |
 
+Add one line to `apm.yml` and pack:
+
+```yaml
+# apm.yml
+name: my-plugin
+version: 1.0.0
+target: claude
+```
+
+```bash
+apm pack   # writes .claude-plugin/plugin.json
+```
+
 `target:` and `targets:` are mutually exclusive: declaring both is a build error (exit `1`). An empty `targets:` list or an unrecognised ecosystem token is likewise rejected before any artifact is written.
 
 The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). Per-ecosystem differences:
@@ -151,7 +164,7 @@ The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `
 `.mcp.json` routinely embeds secrets that an MCP host injects at startup, so they are removed before the manifest is written -- a committed `plugin.json` never leaks them. Stripping is recursive and applies at any nesting depth:
 
 - Credential-bearing keys are dropped: `env`/`environment`/`headers`/`authorization` blocks, plus any key whose name contains `token`, `secret`, `password`, `credential`, `apikey`, or `key`.
-- Secret-shaped values are redacted even when the key name is innocuous: `user:pass@host` URL userinfo and inline `--token=...` style flags inside an `args` array.
+- Secret-shaped values are redacted even when the key name is innocuous: `user:pass@host` URL userinfo, inline `--token=...` flags, space-separated `--token value` pairs, shell `ENV=secret` prefixes, `Bearer`/`Basic` auth headers, and bare provider tokens (GitHub, OpenAI, Slack, AWS, Google) passed as positional `args`.
 
 A warning lists everything dropped or redacted, led by the consequence (secrets withheld from commit).
 

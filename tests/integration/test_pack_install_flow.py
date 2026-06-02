@@ -151,6 +151,47 @@ class TestPackCmd:
         manifest = json_mod.loads(raw)
         assert manifest["mcpServers"]["srv"] == {"command": "node"}
 
+    def test_pack_redacts_secret_values_in_claude_plugin_json(self, runner, tmp_path, monkeypatch):
+        """Secret-shaped VALUES (not just keys) in .mcp.json never reach the written plugin.json.
+
+        Guards the secret-never-committed promise end-to-end through the CLI for
+        the value-redaction paths: an inline --token= flag in args and a
+        basic-auth URL whose key carries no credential signal.
+        """
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json_mod.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node",
+                            "args": ["--token=sk-supersecret", "--verbose"],
+                            "url": "https://alice:hunter2@api.example.com/v1",
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        raw = out.read_text(encoding="utf-8")
+        assert "sk-supersecret" not in raw
+        assert "hunter2" not in raw
+        # The non-secret arg survives; the server itself is still emitted.
+        manifest = json_mod.loads(raw)
+        assert "--verbose" in manifest["mcpServers"]["srv"]["args"]
+
     def test_pack_preserves_existing_plugin_json_without_force(self, runner, tmp_path, monkeypatch):
         """An existing plugin.json is preserved (warn + skip) when --force is absent."""
         import json as json_mod

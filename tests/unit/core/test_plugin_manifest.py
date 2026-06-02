@@ -255,6 +255,88 @@ class TestBuildPluginManifest:
         manifest = build_plugin_manifest(tmp_path, apm, "claude")
         assert manifest["mcpServers"]["my-keychain"] == {"command": "node"}
 
+    def test_claude_redacts_positional_provider_tokens(self, tmp_path: Path) -> None:
+        # Bare provider tokens (no key/flag signal) passed as positional args --
+        # the canonical shape for several MCP servers -- must be redacted by
+        # their recognisable prefix, not slip through verbatim.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "npx",
+                            "args": [
+                                "-y",
+                                "@modelcontextprotocol/server-github",
+                                "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+                                "xoxb-1234567890-abcdefghijkl",
+                            ],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        raw = json.dumps(manifest)
+        assert "ghp_abcdefghijklmnopqrstuvwxyz0123456789" not in raw
+        assert "xoxb-1234567890-abcdefghijkl" not in raw
+        # The non-secret positional args survive.
+        srv = manifest["mcpServers"]["srv"]
+        assert "@modelcontextprotocol/server-github" in srv["args"]
+
+    def test_claude_redacts_space_separated_flag_value(self, tmp_path: Path) -> None:
+        # The space-separated "--token VALUE" form leaves the secret in the NEXT
+        # array element; the list-context lookahead must scrub it.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node",
+                            "args": ["--token", "sk-spaced-secret-value", "--port", "8080"],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        srv = manifest["mcpServers"]["srv"]
+        assert "sk-spaced-secret-value" not in json.dumps(manifest)
+        # The flag name itself is kept; a non-secret flag/value pair survives.
+        assert "--token" in srv["args"]
+        assert "--port" in srv["args"]
+        assert "8080" in srv["args"]
+
+    def test_claude_redacts_env_prefix_and_bearer(self, tmp_path: Path) -> None:
+        # A shell env-prefix assignment in a command string and a Bearer header
+        # carried as a standalone arg must both be redacted.
+        apm = _minimal_apm_yml(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "API_KEY=sk-envsecret npx server",
+                            "args": ["-H", "Authorization: Bearer sk-live-headersecret"],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = build_plugin_manifest(tmp_path, apm, "claude")
+        raw = json.dumps(manifest)
+        assert "sk-envsecret" not in raw
+        assert "sk-live-headersecret" not in raw
+        # The variable name and the -H flag survive; only the values are scrubbed.
+        srv = manifest["mcpServers"]["srv"]
+        assert "API_KEY=" in srv["command"]
+        assert "-H" in srv["args"]
+
 
 # ---------------------------------------------------------------------------
 # TestWritePluginManifest

@@ -107,7 +107,11 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
     "--dry-run", is_flag=True, default=False, help="Show what would be packed without writing"
 )
 @click.option(
-    "--force", is_flag=True, default=False, help="On collision (plugin format), last writer wins."
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Allow overwriting on collision: last-writer-wins in plugin bundles; "
+    "overwrites an existing generated plugin.json manifest.",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information.")
 @click.option(

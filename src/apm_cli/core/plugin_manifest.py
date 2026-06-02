@@ -35,12 +35,15 @@ def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
 
     Collapses the repeated ``if logger: logger.X(msg) else: _rich_X(msg)``
     branch that every status line in this module would otherwise duplicate.
-    *level* is one of ``"info"``, ``"warning"``, or ``"success"``; *symbol* is a
-    key into :data:`apm_cli.utils.console.STATUS_SYMBOLS`.
+    *level* is one of ``"info"``, ``"warning"``, or ``"success"`` -- each maps to
+    the identically-named :class:`~apm_cli.core.command_logger.CommandLogger`
+    method (all three accept a ``symbol`` keyword) and to the matching
+    ``_rich_*`` console helper. *symbol* is a key into
+    :data:`apm_cli.utils.console.STATUS_SYMBOLS` and is forwarded on both paths
+    so a success line renders as ``[+]`` (not ``[i]``) regardless of caller.
     """
     if logger is not None:
-        # Loggers have no "success" method -- map it onto info.
-        getattr(logger, "info" if level == "success" else level)(message)
+        getattr(logger, level)(message, symbol=symbol)
         return
     _console = {"info": _rich_info, "warning": _rich_warning, "success": _rich_success}[level]
     _console(message, symbol=symbol)
@@ -74,6 +77,11 @@ PLUGIN_ECOSYSTEM_PATHS: dict[str, str] = {
 _SENSITIVE_MCP_KEY_NAMES: frozenset[str] = frozenset(
     {"env", "environment", "headers", "authorization"}
 )
+# The bare ``key`` substring intentionally over-matches (it strips ``accessKey``,
+# ``privateKey``, ``signingKey``, and similar camelCase credential fields). A
+# tighter word-boundary rule would MISS those real secrets; the only cost of the
+# broad rule is dropping an innocuously-named field, which is safe -- a sanitiser
+# must err toward over-stripping, never toward leaking.
 _SENSITIVE_MCP_KEY_SUBSTRINGS: tuple[str, ...] = (
     "token",
     "secret",
@@ -83,13 +91,41 @@ _SENSITIVE_MCP_KEY_SUBSTRINGS: tuple[str, ...] = (
     "key",
 )
 
-# Secret-bearing VALUE patterns, redacted regardless of the key that holds them:
-# a URL with embedded ``user:pass@host`` userinfo, and a CLI flag that assigns a
-# credential inline (e.g. ``--token=sk-abc`` in an ``args`` array). The key name
-# carries no signal in these cases, so the value itself must be scrubbed.
+# Secret-bearing VALUE patterns, redacted regardless of the key that holds them.
+# ``.mcp.json`` secrets hide in shapes the key name cannot reveal: URL userinfo,
+# inline ``--token=`` flags, space-separated ``--token VALUE`` pairs, shell
+# ``ENV=secret`` prefixes, ``Authorization: Bearer ...`` headers, and bare
+# provider tokens passed as positional args. Each surviving string is scrubbed
+# against all of these so a positional or split secret cannot slip through.
 _URL_USERINFO_RE = re.compile(r"\b([a-zA-Z][\w+.-]*://)([^/?#\s@]+)@")
 _INLINE_SECRET_ARG_RE = re.compile(
     r"(--?[\w.-]*(?:token|secret|password|credential|apikey|key)[\w.-]*=)(\S+)",
+    re.IGNORECASE,
+)
+# Shell env-assignment of a credential-named variable (no leading dashes), e.g.
+# ``API_KEY=sk-abc npx server`` -- keep the variable name, scrub the value.
+_ENV_ASSIGN_SECRET_RE = re.compile(
+    r"\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|APIKEY|API_KEY|KEY)[A-Z0-9_]*=)(\S+)"
+)
+# ``Authorization: Bearer <token>`` / ``Basic <token>`` schemes in any string.
+_AUTH_SCHEME_RE = re.compile(r"\b(Bearer|Basic)\s+([A-Za-z0-9._~+/=-]{8,})", re.IGNORECASE)
+# Bare provider tokens (no surrounding structure) recognised by their prefix --
+# GitHub PAT/OAuth, OpenAI, Slack, AWS access-key, Google API key.
+_KNOWN_SECRET_TOKEN_RE = re.compile(
+    r"\b(?:"
+    r"gh[posur]_[A-Za-z0-9]{20,}"
+    r"|github_pat_[A-Za-z0-9_]{20,}"
+    r"|sk-(?:proj-)?[A-Za-z0-9_-]{20,}"
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"
+    r"|A(?:KIA|SIA)[A-Z0-9]{12,}"
+    r"|AIza[A-Za-z0-9_-]{30,}"
+    r")\b"
+)
+# Flag NAME that takes a secret as the NEXT array element (space-separated form),
+# e.g. ``["--token", "sk-abc"]``. Anchored so the ``--flag=value`` form (handled
+# by _INLINE_SECRET_ARG_RE) does not match here.
+_SECRET_FLAG_NAME_RE = re.compile(
+    r"^--?[\w.-]*(?:token|secret|password|credential|apikey|api-key|key)[\w.-]*$",
     re.IGNORECASE,
 )
 _REDACTED = "***REDACTED***"
@@ -107,6 +143,9 @@ def _redact_secret_values(text: str) -> tuple[str, bool]:
     """Return (*scrubbed text*, *changed?*) with embedded secrets redacted."""
     scrubbed = _URL_USERINFO_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}@", text)
     scrubbed = _INLINE_SECRET_ARG_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}", scrubbed)
+    scrubbed = _ENV_ASSIGN_SECRET_RE.sub(lambda m: f"{m.group(1)}{_REDACTED}", scrubbed)
+    scrubbed = _AUTH_SCHEME_RE.sub(lambda m: f"{m.group(1)} {_REDACTED}", scrubbed)
+    scrubbed = _KNOWN_SECRET_TOKEN_RE.sub(_REDACTED, scrubbed)
     return scrubbed, scrubbed != text
 
 
@@ -129,7 +168,21 @@ def _sanitize_value(value: Any, path: str, dropped: list[str]) -> Any:
             cleaned[key] = _sanitize_value(val, child, dropped)
         return cleaned
     if isinstance(value, list):
-        return [_sanitize_value(item, f"{path}[{i}]", dropped) for i, item in enumerate(value)]
+        cleaned_list: list = []
+        redact_next = False
+        for i, item in enumerate(value):
+            child = f"{path}[{i}]"
+            is_flag = isinstance(item, str) and bool(_SECRET_FLAG_NAME_RE.match(item))
+            if redact_next and isinstance(item, str) and not is_flag:
+                # Previous element was a bare secret flag (e.g. "--token"); this
+                # element is its space-separated value -- scrub it whole.
+                cleaned_list.append(_REDACTED)
+                dropped.append(child)
+                redact_next = False
+                continue
+            cleaned_list.append(_sanitize_value(item, child, dropped))
+            redact_next = is_flag
+        return cleaned_list
     if isinstance(value, str):
         scrubbed, changed = _redact_secret_values(value)
         if changed:
@@ -153,8 +206,11 @@ def collect_mcp_servers(project_root: Path, *, logger: Any = None) -> dict:
     carry a live credential (``env``/``environment``/``headers``/``authorization``
     blocks and any key whose name contains ``token``, ``secret``, ``password``,
     ``credential``, ``apikey``, or ``key`` -- case-insensitive) is dropped at any
-    nesting depth, and secret-shaped values (``user:pass@host`` URLs, inline
-    ``--token=`` flags) are redacted. ``.mcp.json`` routinely embeds secrets so
+    nesting depth, and secret-shaped values are redacted wherever they hide --
+    ``user:pass@host`` URLs, inline ``--token=`` flags, space-separated
+    ``--token VALUE`` pairs, shell ``ENV=secret`` prefixes, ``Bearer``/``Basic``
+    auth headers, and bare provider tokens (GitHub/OpenAI/Slack/AWS/Google)
+    passed as positional args. ``.mcp.json`` routinely embeds secrets so
     an MCP host can inject them at startup; copying them verbatim into a
     committed ``plugin.json`` would exfiltrate them into the distributed
     artefact. A loud warning is emitted for every key dropped or value redacted.
