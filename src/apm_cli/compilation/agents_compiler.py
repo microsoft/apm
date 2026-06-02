@@ -1251,7 +1251,7 @@ class AgentsCompiler:
             target = Path(output_path)
             if not target.exists():
                 raise ManagedSectionError(
-                    f"{target.name} does not exist yet. Create it with markers first, or use mode: full for initial generation."
+                    f"{target.name} does not exist yet. Create it with markers first, or set compilation.agents_md.mode to 'full' for initial generation."
                 )
             existing = target.read_text(encoding="utf-8")
             try:
