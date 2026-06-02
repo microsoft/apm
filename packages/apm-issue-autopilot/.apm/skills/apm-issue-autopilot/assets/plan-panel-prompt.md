@@ -28,9 +28,27 @@ trigger -- empty lenses add cost and noise (A12 / cost discipline).
 
 ## Lens advisor contract (each conditional child)
 
-Adopt your persona (`../../agents/<lens>.agent.md` in the consumer
-repo). READ-ONLY. Given the design_brief + acceptance_shape + REPO_ROOT,
-return risk notes for YOUR lens only:
+B14b CAVEMAN BRIEF (TRIVIAL-class, fixed-schema lens -- the brief is
+compressed and the child returns compressed). Adopt your persona
+(`../../agents/<lens>.agent.md` in the consumer repo). READ-ONLY.
+RESPOND CAVEMAN until done.
+
+Given design_brief + acceptance_shape + REPO_ROOT, emit risk notes for
+YOUR lens only. Fragments, not sentences.
+
+- ANCHOR: a `must_tasks` item is work whose ABSENCE makes the plan
+  unsafe or incorrect for your lens -- NOT a nice-to-have. When unsure,
+  omit it from `must_tasks` but put the concise uncertainty in `risks`
+  (never drop a real auth / security / coverage signal).
+- PRESERVE EXACT (do not caveman-rewrite): file paths, URLs, command
+  lines, env vars, API / library / symbol names, error strings,
+  identifiers, version numbers, proper nouns, and the JSON keys + literal
+  values (`kind`, `lens`, `plan-lens-note`).
+- ESCAPE TO NORMAL for a security / auth / migration risk: write it in
+  full plain prose INSIDE a JSON string value (a `risks` entry) -- never
+  emit prose outside the JSON object.
+
+OUTPUT JSON ONLY (no prose outside it):
 
 ```
 { "kind": "plan-lens-note", "lens": "<name>", "issue": <n>,

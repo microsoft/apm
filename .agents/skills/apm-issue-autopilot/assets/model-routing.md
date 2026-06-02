@@ -36,11 +36,35 @@ and re-verify the SKUs; trivial/reviewer spawns warn-and-continue.
 |----------------------------------|-------------|-------------------|------|-----|
 | solution-pipeline child (1/issue)| implementer | claude-sonnet-4.6 | down | drives git/integration, follows plan.json; no novel planning |
 | Ideate (1/issue)                 | implementer | claude-sonnet-4.6 | down | frames the acceptance_shape contract; moderate stakes |
-| Lens advisor (<=4/issue)         | trivial     | claude-haiku-4.5  | down | single-pass advisory checklist, read-only (PR#12 Cell E: lenses at reviewer class = +25% cost, 0 quality delta) |
+| Lens advisor (<=4/issue)         | trivial     | claude-haiku-4.5  | down | single-pass advisory checklist, read-only; fixed-schema, so carries a B14b caveman brief (PR#12 Cell E: lenses at reviewer class = +25% cost, 0 quality delta) |
 | Architect synthesis (1/issue +<=2 replans) | planner | claude-opus-4.8 | **UP (stakes)** | produces the task DAG; a wrong plan poisons every wave |
 | Task implementer (<=6/wave)      | per task `role_class` | resolved here | mixed | default implementer; docs->trivial; security/migration->planner via `model_override` |
-| Wave-gate verifier (2/wave)      | reviewer    | claude-haiku-4.5  | down | grades the candidate diff + the pipeline's deterministic lint/test evidence; ESCALATES (below) |
+| Wave-gate verifier (2/wave)      | reviewer    | claude-haiku-4.5  | down | grades the candidate diff + the pipeline's deterministic lint/test evidence; fixed-schema, so carries a B14b caveman brief; ESCALATES (below) |
 | Acceptance close (1/issue)       | --          | (pipeline model)  | n/a  | runs INLINE in the pipeline child (sole writer of the issue branch); not a separate spawn, so inherits the pipeline's implementer model |
+
+## B14b caveman briefs (layered on the haiku spawns)
+
+B12 picks the model; **B14b CAVEMAN BRIEF** compresses the briefs of the
+two cheap, high-fan-out, fixed-schema spawns so their input AND their
+returns are token-thin. Genesis gates caveman to `TRIVIAL` or
+fixed-schema `REVIEWER` only (open-ended judgement would collapse into
+the model's prior), so it applies to exactly two spawns here -- and to no
+others:
+
+| Spawn               | Return schema        | Brief lives in            |
+|---------------------|----------------------|---------------------------|
+| Lens advisor        | `{risks, must_tasks}`| plan-panel-prompt.md      |
+| Wave-gate verifiers | `{verdict, failures}`| wave-gate-rubric.md       |
+
+Each caveman brief carries the canonical contract: `RESPOND CAVEMAN until
+done` (role-mode persistence, so receipts come back compressed), a single
+`ANCHOR` line grounding the highest-risk verdict bucket, a `PRESERVE
+EXACT` list (paths / API names / error strings / numbers are never
+caveman-rewritten), an `ESCAPE TO NORMAL` clause for security/destructive
+findings, and an `OUTPUT JSON ONLY` contract (the JSON receipt schema is
+byte-identical to the verbose version). Triage, Ideate, the architect
+synthesis, the task implementers, and the pipeline child are NOT caveman
+(open-ended or prose-output contracts -- outside the gate).
 
 ## Wave-gate verifier escalation (reviewer haiku -> implementer sonnet)
 

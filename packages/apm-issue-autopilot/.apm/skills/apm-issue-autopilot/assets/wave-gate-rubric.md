@@ -68,9 +68,11 @@ as FAIL and re-plan.
 
 ### plan-guardian (python-architect)
 
-Adopt python-architect. Inputs: the CANDIDATE branch (checked out in a
-read-only worktree), this wave's tasks (with each task's `checkpoint`),
-and the lint/test evidence. Verify, read-only:
+B14b CAVEMAN BRIEF (fixed-schema REVIEWER -- compressed brief, compressed
+return). Adopt python-architect. READ-ONLY. RESPOND CAVEMAN until done.
+Inputs: the CANDIDATE branch (checked out in a read-only worktree), this
+wave's tasks (with each task's `checkpoint`), and the lint/test evidence.
+Verify, read-only:
 
 - Every task in the wave is present and its `checkpoint` holds.
 - The full lint contract is silent and the test suite is green on the
@@ -78,17 +80,43 @@ and the lint/test evidence. Verify, read-only:
 - No scope drift beyond the plan (no unplanned subsystem, no
   auth/security/migration surface that was not flagged).
 
-Return: `{ "kind":"gate-note","role":"plan-guardian","verdict":"pass|fail",
+- ANCHOR: verdict=fail on ANY scope drift, any unflagged auth / security
+  / migration surface, OR any checklist bullet you could not observe true
+  (unverified / uncertain = fail). PASS only when every bullet above is
+  observed true -- a false pass poisons every later wave.
+- FAILURE SHAPE: each `failures` entry names the exact task / `checkpoint`
+  / file, the observed miss, and the re-plan action needed. Compress the
+  wording, NOT the cause or evidence (the architect re-plans from these).
+- PRESERVE EXACT: file paths, URLs, command lines, env vars, `checkpoint`
+  text, API names, error strings, numbers, proper nouns, and the JSON
+  keys + literal values (`kind`, `role`, `gate-note`, `plan-guardian`,
+  `pass`, `fail`).
+- ESCAPE TO NORMAL for a security / destructive finding: state it in full
+  inside a `failures` JSON string value -- never as prose outside the JSON.
+
+Return JSON ONLY: `{ "kind":"gate-note","role":"plan-guardian","verdict":"pass|fail",
 "failures":["<concrete miss>"] }`.
 
 ### ideator (devx-ux-expert)
 
-Adopt devx-ux-expert. Inputs: the CANDIDATE branch + the original
-`acceptance_shape`. Verify, read-only, that the integrated state still
-moves toward (and does not contradict) the acceptance_shape from the
-user's point of view.
+B14b CAVEMAN BRIEF (fixed-schema REVIEWER). Adopt devx-ux-expert.
+READ-ONLY. RESPOND CAVEMAN until done. Inputs: the CANDIDATE branch + the
+original `acceptance_shape`. Verify, read-only, that the integrated state
+still moves toward (and does not contradict) the acceptance_shape from
+the user's point of view.
 
-Return: `{ "kind":"gate-note","role":"ideator","verdict":"pass|fail",
+- ANCHOR: verdict=fail if any acceptance_shape condition is now
+  contradicted, unreachable, unverified, or uncertain. PASS only when no
+  condition regressed.
+- FAILURE SHAPE: each `failures` entry names the acceptance_shape
+  condition at risk + why, in compressed wording (keep the cause).
+- PRESERVE EXACT: acceptance_shape wording, file paths, command lines,
+  URLs, env vars, proper nouns, and the JSON keys + literal values
+  (`kind`, `role`, `gate-note`, `ideator`, `pass`, `fail`).
+- ESCAPE TO NORMAL for a user-data / destructive concern: state it inside
+  a `failures` JSON string value -- never as prose outside the JSON.
+
+Return JSON ONLY: `{ "kind":"gate-note","role":"ideator","verdict":"pass|fail",
 "failures":["<acceptance_shape condition now at risk>"] }`.
 
 ## Synthesis (pipeline)

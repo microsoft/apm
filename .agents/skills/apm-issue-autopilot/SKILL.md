@@ -305,7 +305,8 @@ Never auto-close an escalated issue.
 - [assets/model-routing.md](assets/model-routing.md) -- B12 MODEL ROUTER:
   authoritative role-class -> concrete-model table + per-spawn bindings +
   verifier escalation; the pipeline resolves every Phase 4 spawn's model
-  here.
+  here. Also records the B14b CAVEMAN BRIEF layer (lens advisors +
+  wave-gate verifiers ship compressed, fixed-schema briefs).
 - [assets/task-implement-prompt.md](assets/task-implement-prompt.md) --
   ONE task per child in its own worktree; loads the typed coverage gate
   by task type; no PR, no further fan-out.
