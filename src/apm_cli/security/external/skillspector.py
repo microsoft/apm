@@ -11,17 +11,28 @@ from any tool and ingest it with ``--external sarif --external-sarif <file>``.
 
 APM only consumes SkillSpector's SARIF; it publishes nothing back
 (one-directional, no partnership framing).
+
+By default SkillSpector runs offline (``--no-llm``): deterministic, no network
+egress, no credentials.  Opting into LLM-powered analysis (``options.llm``)
+makes outbound API calls and consumes an API key from the environment; that key
+is only forwarded to the subprocess when LLM mode is active (env minimisation),
+and any captured stderr is secret-redacted before it reaches an error message.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..content_scanner import ScanFinding
 from .base import ExternalScanError
+
+if TYPE_CHECKING:
+    from .options import ScannerOptions
 
 #: Executable name expected on PATH when the SkillSpector CLI is installed.
 _BINARY = "skillspector"
@@ -29,14 +40,37 @@ _BINARY = "skillspector"
 #: Bounded wall-clock budget so a hung vendor process can't stall the audit.
 _TIMEOUT_SECONDS = 300
 
+#: Environment variables SkillSpector reads for LLM-powered analysis. Only
+#: forwarded to the subprocess when LLM mode is active; never logged.
+_LLM_KEY_ENV_VARS = ("OPENAI_API_KEY", "NVIDIA_INFERENCE_KEY")
+
 
 class SkillSpectorAdapter:
     """Run NVIDIA SkillSpector and ingest its SARIF output."""
 
     name = "skillspector"
 
-    def is_available(self) -> tuple[bool, str | None]:
-        """Available iff the SkillSpector binary is resolvable on PATH."""
+    #: Flag names a user may pass through via ``--external-args`` /
+    #: ``external.skillspector.args``. Deliberately narrow: only tuning knobs
+    #: that neither write files, load external rulesets/code, nor carry
+    #: credentials. Everything else is rejected fail-closed (see
+    #: :func:`options.validate_extra_args`).
+    ALLOWED_ARG_PREFIXES = frozenset(
+        {
+            "--model",
+            "--severity",
+            "--severity-threshold",
+            "--threshold",
+            "--profile",
+            "--lang",
+            "--language",
+            "--exclude",
+            "--include",
+        }
+    )
+
+    def is_available(self, *, options: ScannerOptions | None = None) -> tuple[bool, str | None]:
+        """Available iff the binary is on PATH (and, under LLM, a key is set)."""
         if shutil.which(_BINARY) is None:
             return (
                 False,
@@ -44,11 +78,25 @@ class SkillSpectorAdapter:
                 "tool, or use '--external sarif --external-sarif <file>' to ingest "
                 "a SARIF file from any scanner (works with the APM binary).",
             )
+        if options is not None and options.llm:
+            if not any(os.environ.get(var) for var in _LLM_KEY_ENV_VARS):
+                names = " or ".join(_LLM_KEY_ENV_VARS)
+                return (
+                    False,
+                    f"LLM analysis for 'skillspector' requires an API key. Set "
+                    f"{names}, or drop --external-llm to run offline (--no-llm).",
+                )
         return True, None
 
-    def scan(self, paths: list[Path]) -> dict[str, list[ScanFinding]]:
+    def scan(
+        self, paths: list[Path], *, options: ScannerOptions | None = None
+    ) -> dict[str, list[ScanFinding]]:
         """Invoke SkillSpector over *paths* and parse its SARIF output."""
+        from .options import ScannerOptions, validate_extra_args
         from .sarif_ingest import sarif_to_findings
+
+        if options is None:
+            options = ScannerOptions()
 
         binary = shutil.which(_BINARY)
         if binary is None:
@@ -57,8 +105,20 @@ class SkillSpectorAdapter:
                 "tool, or use '--external sarif --external-sarif <file>'."
             )
 
+        extra_args = validate_extra_args(
+            self.name,
+            options.extra_args,
+            self.ALLOWED_ARG_PREFIXES,
+            base_dir=Path.cwd(),
+        )
+
         targets = [str(p) for p in paths] or ["."]
-        cmd = [binary, "scan", "--format", "sarif", *targets]
+        cmd = [binary, "scan", "--format", "sarif"]
+        if not options.llm:
+            cmd.append("--no-llm")
+        cmd.extend(extra_args)
+        cmd.extend(targets)
+
         try:
             completed = subprocess.run(
                 cmd,
@@ -66,6 +126,7 @@ class SkillSpectorAdapter:
                 text=True,
                 timeout=_TIMEOUT_SECONDS,
                 check=False,
+                env=self._subprocess_env(options.llm),
             )
         except subprocess.TimeoutExpired as exc:
             raise ExternalScanError(f"SkillSpector timed out after {_TIMEOUT_SECONDS}s.") from exc
@@ -74,7 +135,7 @@ class SkillSpectorAdapter:
 
         if not completed.stdout.strip():
             # Non-zero exit with no SARIF is a tool error, not findings.
-            detail = (completed.stderr or "").strip() or f"exit code {completed.returncode}"
+            detail = self._redact(completed.stderr) or f"exit code {completed.returncode}"
             raise ExternalScanError(f"SkillSpector produced no SARIF output ({detail}).")
 
         try:
@@ -83,3 +144,24 @@ class SkillSpectorAdapter:
             raise ExternalScanError(f"SkillSpector output is not valid JSON SARIF: {exc}") from exc
 
         return sarif_to_findings(document, tool_name=self.name)
+
+    @staticmethod
+    def _subprocess_env(llm: bool | None) -> dict[str, str]:
+        """Build the subprocess environment with LLM keys minimised.
+
+        When LLM mode is off, the API-key variables are stripped so an offline
+        scan never exposes credentials to the vendor process.
+        """
+        env = dict(os.environ)
+        if not llm:
+            for var in _LLM_KEY_ENV_VARS:
+                env.pop(var, None)
+        return env
+
+    @staticmethod
+    def _redact(text: str | None) -> str:
+        """Secret-redact captured stderr before it reaches a user message."""
+        from ...core.plugin_manifest import _redact_secret_values
+
+        redacted, _ = _redact_secret_values((text or "").strip())
+        return redacted

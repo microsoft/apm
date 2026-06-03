@@ -1435,3 +1435,84 @@ class TestAuditOnInstallCommand:
             result = self.runner.invoke(config, ["unset", "audit-on-install"])
         assert result.exit_code == 0
         mock_unset.assert_called_once()
+
+
+class TestExternalScannerConfigCommand:
+    """`apm config set/get/unset external.<name>.{llm,args}` (flag-gated)."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_set_llm_blocked_without_flag(self):
+        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
+            result = self.runner.invoke(config, ["set", "external.skillspector.llm", "true"])
+        assert result.exit_code == 1
+        assert "external-scanners experimental" in result.output
+
+    def test_set_llm_with_flag(self):
+        with (
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch("apm_cli.config.set_scanner_llm") as mock_set,
+        ):
+            result = self.runner.invoke(config, ["set", "external.skillspector.llm", "true"])
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("skillspector", True)
+
+    def test_set_args_shlex_split(self):
+        with (
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch("apm_cli.config.set_scanner_args") as mock_set,
+        ):
+            result = self.runner.invoke(
+                config, ["set", "external.skillspector.args", "--", "--model gpt-4o"]
+            )
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("skillspector", ["--model", "gpt-4o"])
+
+    def test_set_args_empty_string_rejected(self):
+        with (
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch("apm_cli.config.set_scanner_args") as mock_set,
+        ):
+            result = self.runner.invoke(config, ["set", "external.skillspector.args", "--", "   "])
+        assert result.exit_code == 1
+        mock_set.assert_not_called()
+
+    def test_set_unknown_scanner_rejected(self):
+        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
+            result = self.runner.invoke(config, ["set", "external.bogus.llm", "true"])
+        assert result.exit_code == 1
+        assert "Unknown external scanner" in result.output
+
+    def test_get_llm(self):
+        with (
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch(
+                "apm_cli.config.get_scanner_options",
+                return_value=(True, None),
+            ),
+        ):
+            result = self.runner.invoke(config, ["get", "external.skillspector.llm"])
+        assert result.exit_code == 0
+        assert "true" in result.output
+
+    def test_get_args_not_set(self):
+        with (
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch(
+                "apm_cli.config.get_scanner_options",
+                return_value=(None, None),
+            ),
+        ):
+            result = self.runner.invoke(config, ["get", "external.skillspector.args"])
+        assert result.exit_code == 0
+        assert "Not set" in result.output
+
+    def test_unset_llm(self):
+        with (
+            patch("apm_cli.core.experimental.is_enabled", return_value=True),
+            patch("apm_cli.config.unset_scanner_llm") as mock_unset,
+        ):
+            result = self.runner.invoke(config, ["unset", "external.skillspector.llm"])
+        assert result.exit_code == 0
+        mock_unset.assert_called_once_with("skillspector")

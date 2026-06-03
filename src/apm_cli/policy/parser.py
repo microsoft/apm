@@ -21,6 +21,7 @@ from .schema import (
     McpTransportPolicy,
     PolicyCache,
     RegistrySourcePolicy,
+    ScannerGovernance,
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
@@ -186,6 +187,7 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                     f"security.audit.on_install must be one of "
                     f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
                 )
+            _validate_scanners(audit.get("scanners"), errors, warnings)
 
     return errors, warnings
 
@@ -281,6 +283,7 @@ def _build_policy(data: dict) -> ApmPolicy:
             external=None
             if "external" not in audit_data or audit_data["external"] is None
             else _parse_tuple(audit_data["external"]),
+            scanners=_parse_scanners(audit_data.get("scanners")),
         ),
     )
 
@@ -388,3 +391,51 @@ def _parse_tuple(val: Any) -> tuple[str, ...]:
     if isinstance(val, list):
         return tuple(val)
     return ()
+
+
+def _validate_scanners(scanners: Any, errors: list[str], warnings: list[str]) -> None:
+    """Validate the optional ``security.audit.scanners`` governance mapping.
+
+    Restrict-only: each scanner block may carry ``allow_args`` (bool). Unknown
+    scanner names are a warning (forward-compat), not a hard error.
+    """
+    if scanners is None:
+        return
+    if not isinstance(scanners, dict):
+        errors.append("security.audit.scanners must be a YAML mapping")
+        return
+    from ..security.external.registry import SUPPORTED_SCANNERS
+
+    for name, block in scanners.items():
+        if name not in SUPPORTED_SCANNERS:
+            warnings.append(
+                f"security.audit.scanners: unknown scanner '{name}' "
+                f"(supported: {', '.join(SUPPORTED_SCANNERS)})"
+            )
+        if block is None:
+            continue
+        if not isinstance(block, dict):
+            errors.append(f"security.audit.scanners.{name} must be a YAML mapping")
+            continue
+        allow_args = block.get("allow_args")
+        if allow_args is not None and not isinstance(allow_args, bool):
+            errors.append(
+                f"security.audit.scanners.{name}.allow_args must be a boolean, got '{allow_args}'"
+            )
+
+
+def _parse_scanners(scanners: Any) -> tuple[tuple[str, ScannerGovernance], ...] | None:
+    """Build the ``AuditPolicy.scanners`` tuple-of-pairs from validated data."""
+    if not isinstance(scanners, dict) or not scanners:
+        return None
+    pairs: list[tuple[str, ScannerGovernance]] = []
+    for name, block in scanners.items():
+        block_data = block if isinstance(block, dict) else {}
+        allow_args = block_data.get("allow_args")
+        pairs.append(
+            (
+                str(name),
+                ScannerGovernance(allow_args=bool(allow_args) if allow_args is not None else None),
+            )
+        )
+    return tuple(pairs)

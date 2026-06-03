@@ -42,6 +42,10 @@ Gated by the `external-scanners` experimental flag (`apm experimental enable ext
 |---|---|---|
 | `--external NAME` | unset | Ingest findings from an external SARIF-native scanner (repeatable). Names: `skillspector` (invokes the CLI on `PATH`), `sarif` (ingests a file via `--external-sarif`). Cannot be combined with `--strip`, `--dry-run`, or `--ci`. |
 | `--external-sarif PATH` | unset | SARIF file to ingest for `--external sarif`. |
+| `--external-llm` / `--no-external-llm` | adapter default | Force a scanner's LLM-powered analysis on or off for this run (overrides config). SkillSpector default is offline `--no-llm`. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`; missing the key fails closed. Requires `--external`. |
+| `--external-args TEXT` | unset | Extra scanner CLI flags as a single shlex-split string (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter; secret-looking or out-of-cwd tokens are rejected fail-closed. Overrides config args. Requires `--external`. |
+
+When LLM mode is active APM prints a `[!]` egress banner before the scan noting that outbound API calls will be made. `--external-llm` / `--external-args` used without `--external <name>` raise a usage error (exit 2).
 
 ### Output
 
@@ -106,6 +110,22 @@ apm audit -f markdown -o "$GITHUB_STEP_SUMMARY"
 apm audit -o report.sarif
 ```
 
+### External scanners
+
+```bash
+# Invoke SkillSpector on PATH (offline by default)
+apm audit --external skillspector
+
+# Opt into LLM-powered analysis (needs an API key; makes network calls)
+apm audit --external skillspector --external-llm
+
+# Pass allowlisted scanner flags
+apm audit --external skillspector --external-args "--model gpt-4o"
+
+# Ingest a SARIF file from any scanner
+apm audit --external sarif --external-sarif report.sarif
+```
+
 ### CI gate
 
 ```bash
@@ -152,7 +172,7 @@ The default audit replays the install pipeline into a scratch tree and diffs the
 - `--no-drift` cannot be combined with `--strip` or `--file`.
 - `--ci` cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`.
 - `--ci` does not support `--format markdown`.
-- `--external` cannot be combined with `--strip`, `--dry-run`, or `--ci`; `--external-sarif` requires `--external sarif`.
+- `--external` cannot be combined with `--strip`, `--dry-run`, or `--ci`; `--external-sarif` requires `--external sarif`; `--external-llm` / `--no-external-llm` and `--external-args` require `--external`.
 
 ## Exit codes
 

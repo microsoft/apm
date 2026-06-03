@@ -20,11 +20,12 @@ Modes form an escalation ladder ``off < warn < block``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.install.context import InstallContext
+    from apm_cli.security.external.options import ScannerOptions
 
 #: Severity ladder shared with the policy/config layers.
 _LEVELS = {"off": 0, "warn": 1, "block": 2}
@@ -39,11 +40,15 @@ class InstallAuditDecision:
         external: External SARIF scanner names to run (empty unless policy
             requires them AND ``mode`` is not ``off``).
         source: Human-readable origin of the effective mode, for messaging.
+        options_by_name: Per-scanner :class:`ScannerOptions` resolved from the
+            ``external.<name>.*`` config layer under the policy ``allow_args``
+            floor. Empty when ``mode`` is ``off`` or no scanners are required.
     """
 
     mode: str
     external: tuple[str, ...]
     source: str
+    options_by_name: dict[str, ScannerOptions] = field(default_factory=dict)
 
 
 def resolve_install_audit_mode(
@@ -113,6 +118,7 @@ def decide_for_install(ctx: InstallContext) -> InstallAuditDecision:
     # Policy floor + required scanners -- skipped entirely under --no-policy.
     policy_mode: str | None = None
     policy_external: tuple[str, ...] = ()
+    policy_scanners: tuple[tuple[str, object], ...] | None = None
     if not getattr(ctx, "no_policy", False):
         fetch = getattr(ctx, "policy_fetch", None)
         policy = getattr(fetch, "policy", None) if fetch is not None else None
@@ -120,6 +126,7 @@ def decide_for_install(ctx: InstallContext) -> InstallAuditDecision:
         if audit is not None:
             policy_mode = audit.on_install
             policy_external = audit.external or ()
+            policy_scanners = getattr(audit, "scanners", None)
 
     cli_override = getattr(ctx, "audit_override", None)
     config_mode = get_audit_on_install()
@@ -132,4 +139,38 @@ def decide_for_install(ctx: InstallContext) -> InstallAuditDecision:
     )
 
     external = policy_external if mode != "off" else ()
-    return InstallAuditDecision(mode=mode, external=external, source=source)
+    options_by_name = (
+        _resolve_install_scanner_options(external, policy_scanners) if external else {}
+    )
+    return InstallAuditDecision(
+        mode=mode, external=external, source=source, options_by_name=options_by_name
+    )
+
+
+def _resolve_install_scanner_options(
+    external: tuple[str, ...],
+    policy_scanners: tuple[tuple[str, object], ...] | None,
+) -> dict[str, ScannerOptions]:
+    """Resolve per-scanner options for the install path (config under policy floor).
+
+    The install path has no CLI flags; it folds the ``external.<name>.*`` config
+    layer under the policy ``allow_args`` governance floor. Policy never
+    contributes argv or forces LLM on (restrict-only stance).
+    """
+    from apm_cli.config import get_scanner_options
+    from apm_cli.security.external.options import resolve_scanner_options
+
+    gov_map = dict(policy_scanners or ())
+    options: dict[str, ScannerOptions] = {}
+    for name in external:
+        config_llm, config_args = get_scanner_options(name)
+        gov = gov_map.get(name)
+        policy_allow_args = getattr(gov, "allow_args", None) if gov is not None else None
+        options[name] = resolve_scanner_options(
+            cli_llm=None,
+            cli_args=None,
+            config_llm=config_llm,
+            config_args=config_args,
+            policy_allow_args=policy_allow_args,
+        )
+    return options

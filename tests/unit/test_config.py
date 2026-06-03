@@ -84,3 +84,58 @@ class TestAuditOnInstallConfig:
     def test_corrupt_value_falls_back_to_default(self, isolated_config):
         config_mod.update_config({"audit_on_install": "garbage"})
         assert config_mod.get_audit_on_install() == "off"
+
+
+class TestExternalScannerOptions:
+    """Round-trip the external_scanners config helpers."""
+
+    def test_defaults_are_none(self, isolated_config):
+        assert config_mod.get_scanner_config("skillspector") is None
+        assert config_mod.get_scanner_options("skillspector") == (None, None)
+
+    def test_set_and_get_llm(self, isolated_config):
+        config_mod.set_scanner_llm("skillspector", True)
+        llm, args = config_mod.get_scanner_options("skillspector")
+        assert llm is True
+        assert args is None
+
+    def test_set_and_get_args(self, isolated_config):
+        config_mod.set_scanner_args("skillspector", ["--model", "gpt-4o"])
+        llm, args = config_mod.get_scanner_options("skillspector")
+        assert llm is None
+        assert args == ("--model", "gpt-4o")
+
+    def test_set_both_fields_coexist(self, isolated_config):
+        config_mod.set_scanner_llm("skillspector", False)
+        config_mod.set_scanner_args("skillspector", ["--severity", "high"])
+        assert config_mod.get_scanner_options("skillspector") == (
+            False,
+            ("--severity", "high"),
+        )
+
+    def test_unset_llm_keeps_args(self, isolated_config):
+        config_mod.set_scanner_llm("skillspector", True)
+        config_mod.set_scanner_args("skillspector", ["--model", "x"])
+        config_mod.unset_scanner_llm("skillspector")
+        assert config_mod.get_scanner_options("skillspector") == (None, ("--model", "x"))
+
+    def test_unset_last_field_prunes_entry(self, isolated_config):
+        config_mod.set_scanner_llm("skillspector", True)
+        config_mod.unset_scanner_llm("skillspector")
+        assert config_mod.get_scanner_config("skillspector") is None
+
+    def test_unset_scanner_removes_entry(self, isolated_config):
+        config_mod.set_scanner_llm("skillspector", True)
+        config_mod.set_scanner_args("skillspector", ["--model", "x"])
+        config_mod.unset_scanner("skillspector")
+        assert config_mod.get_scanner_config("skillspector") is None
+
+    def test_corrupt_llm_falls_back_to_none(self, isolated_config):
+        config_mod.update_config({"external_scanners": {"skillspector": {"llm": "garbage"}}})
+        llm, _ = config_mod.get_scanner_options("skillspector")
+        assert llm is None
+
+    def test_corrupt_args_falls_back_to_none(self, isolated_config):
+        config_mod.update_config({"external_scanners": {"skillspector": {"args": "not-a-list"}}})
+        _, args = config_mod.get_scanner_options("skillspector")
+        assert args is None

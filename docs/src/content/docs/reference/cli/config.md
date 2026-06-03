@@ -45,7 +45,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, `external.<name>.{llm,args}`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
 
 ## Configuration keys
 
@@ -57,6 +57,8 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `prefer-ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
 | `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. Requires the `copilot-cowork` experimental flag for `set`. |
 | `audit-on-install` | enum | `off` | Default content-audit mode for `apm install`: `off` / `warn` / `block`. `warn` records findings in the install summary; `block` halts on critical findings. Overridable per-install with `--audit` / `--no-audit`; an org policy `security.audit.on_install` floor can raise it. Requires the `external-scanners` experimental flag for `set`. |
+| `external.<name>.llm` | boolean | unset | Opt a SARIF scanner into LLM-powered analysis (`<name>` validated against supported scanners). SkillSpector default is offline. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`. Overridable per-run with `--external-llm` / `--no-external-llm`. Requires the `external-scanners` experimental flag. |
+| `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
 | `registry.<name>.url` | URL | — | Base URL for registry `<name>`. Requires `registries` experimental flag. |
 | `registry.<name>.token` | string | — | Bearer token for registry `<name>`. Stored in `~/.apm/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
 | `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
@@ -160,6 +162,18 @@ apm config unset registry.corp-main.token
 ```
 
 With URL, token, and default set in `config.json`, a project can omit the top-level `registries:` block from `apm.yml` and still route shorthand deps through `corp-main`. See [Registries](../../../guides/registries/).
+
+Configure an external scanner (experimental):
+
+```bash
+apm experimental enable external-scanners
+apm config set external.skillspector.llm true
+apm config set external.skillspector.args "--model gpt-4o"
+apm config get external.skillspector.llm
+apm config unset external.skillspector.args
+```
+
+See [External scanners](../../../integrations/external-scanners/).
 
 ## Configuration file
 

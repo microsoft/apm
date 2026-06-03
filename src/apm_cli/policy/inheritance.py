@@ -24,6 +24,7 @@ from .schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    ScannerGovernance,
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
@@ -259,8 +260,53 @@ def _merge_security(parent: SecurityPolicy, child: SecurityPolicy) -> SecurityPo
         audit=AuditPolicy(
             on_install=on_install,
             external=_merge_list_field(p.external, c.external),
+            scanners=_merge_scanners(p.scanners, c.scanners),
         ),
     )
+
+
+def _merge_scanners(
+    parent: tuple[tuple[str, ScannerGovernance], ...] | None,
+    child: tuple[tuple[str, ScannerGovernance], ...] | None,
+) -> tuple[tuple[str, ScannerGovernance], ...] | None:
+    """Merge per-scanner governance: union of names; ``allow_args`` AND-merged.
+
+    Restrict-only -- any ancestor forbidding args (``allow_args=False``) wins,
+    so a child can tighten but never relax a parent's kill-switch. ``None``
+    means "no opinion" and flows through transparently.
+    """
+    if parent is None and child is None:
+        return None
+    p_map = dict(parent or ())
+    c_map = dict(child or ())
+    merged: list[tuple[str, ScannerGovernance]] = []
+    seen: set[str] = set()
+    for name in list(p_map) + [n for n in c_map if n not in p_map]:
+        if name in seen:
+            continue
+        seen.add(name)
+        merged.append((name, _merge_governance(p_map.get(name), c_map.get(name))))
+    return tuple(merged)
+
+
+def _merge_governance(
+    parent: ScannerGovernance | None,
+    child: ScannerGovernance | None,
+) -> ScannerGovernance:
+    """AND-merge two governance blocks (``allow_args=False`` always wins).
+
+    ``None`` is "no opinion" and flows through transparently; ``False``
+    (forbid args) beats ``True`` so an org floor can never be relaxed.
+    """
+    p_allow = parent.allow_args if parent is not None else None
+    c_allow = child.allow_args if child is not None else None
+    if p_allow is False or c_allow is False:
+        allow_args: bool | None = False
+    elif p_allow is None and c_allow is None:
+        allow_args = None
+    else:
+        allow_args = True
+    return ScannerGovernance(allow_args=allow_args)
 
 
 # ---------------------------------------------------------------------------

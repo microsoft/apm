@@ -10,9 +10,12 @@ uniformly.  Adapters normalise vendor SARIF into APM's internal
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..content_scanner import ScanFinding
+
+if TYPE_CHECKING:
+    from .options import ScannerOptions
 
 
 class ExternalScanError(RuntimeError):
@@ -35,8 +38,13 @@ class ExternalScanner(Protocol):
     #: Stable, lowercase identifier used on the ``--external`` CLI option.
     name: str
 
-    def is_available(self) -> tuple[bool, str | None]:
+    def is_available(self, *, options: ScannerOptions | None = None) -> tuple[bool, str | None]:
         """Report whether this scanner can run in the current environment.
+
+        Args:
+            options: Resolved scanner options for this run. Adapters use them
+                only when relevant (e.g. checking for an LLM API key when
+                ``options.llm`` is set); options-unaware adapters ignore it.
 
         Returns:
             ``(True, None)`` when the scanner is usable, or
@@ -47,11 +55,16 @@ class ExternalScanner(Protocol):
         """
         ...
 
-    def scan(self, paths: list[Path]) -> dict[str, list[ScanFinding]]:
+    def scan(
+        self, paths: list[Path], *, options: ScannerOptions | None = None
+    ) -> dict[str, list[ScanFinding]]:
         """Run the scanner over *paths* and return findings grouped by file.
 
         Args:
             paths: Files or directories to scan.
+            options: Resolved scanner options (LLM toggle, validated extra
+                argv). ``None`` means adapter defaults. Adapters use only the
+                options they understand.
 
         Returns:
             A ``{file: [ScanFinding, ...]}`` mapping ready to merge into the

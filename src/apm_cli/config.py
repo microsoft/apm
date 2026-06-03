@@ -516,3 +516,96 @@ def unset_audit_on_install() -> None:
     (``"off"``).
     """
     _unset_config_key("audit_on_install")
+
+
+# ---------------------------------------------------------------------------
+# External scanner options (external_scanners experimental feature)
+# ---------------------------------------------------------------------------
+#
+# Stored under the ``external_scanners`` JSON section, mirroring the
+# ``registries`` nested-dict shape:
+#
+#     {"external_scanners": {"skillspector": {"llm": true,
+#                                             "args": ["--model", "gpt-4o"]}}}
+#
+# Only consulted when the ``external_scanners`` experimental flag is enabled
+# and an external scan actually runs. ``llm`` opts into a scanner's LLM mode;
+# ``args`` are extra argv tokens (allowlist-validated by the adapter before
+# use). The user-facing config key is ``external.<name>.{llm,args}``; the JSON
+# section name stays ``external_scanners`` (internal, like ``registries``).
+
+
+def _get_external_scanners_section() -> dict:
+    """Return the ``external_scanners`` section from config.json as a dict."""
+    section = get_config().get("external_scanners", {})
+    return section if isinstance(section, dict) else {}
+
+
+def get_scanner_config(name: str) -> "dict | None":
+    """Return the config.json entry for external scanner *name*, or None."""
+    entry = _get_external_scanners_section().get(name)
+    return entry if isinstance(entry, dict) else None
+
+
+def set_scanner_llm(name: str, llm: bool) -> None:
+    """Write external_scanners.<name>.llm to config.json."""
+    scanners = dict(_get_external_scanners_section())
+    entry = dict(scanners.get(name) or {})
+    entry["llm"] = bool(llm)
+    scanners[name] = entry
+    update_config({"external_scanners": scanners})
+
+
+def set_scanner_args(name: str, args: "list[str]") -> None:
+    """Write external_scanners.<name>.args to config.json as a list."""
+    scanners = dict(_get_external_scanners_section())
+    entry = dict(scanners.get(name) or {})
+    entry["args"] = list(args)
+    scanners[name] = entry
+    update_config({"external_scanners": scanners})
+
+
+def unset_scanner_llm(name: str) -> None:
+    """Remove external_scanners.<name>.llm from config.json."""
+    _unset_scanner_field(name, "llm")
+
+
+def unset_scanner_args(name: str) -> None:
+    """Remove external_scanners.<name>.args from config.json."""
+    _unset_scanner_field(name, "args")
+
+
+def _unset_scanner_field(name: str, field: str) -> None:
+    """Remove one field from external_scanners.<name>, pruning empties."""
+    scanners = dict(_get_external_scanners_section())
+    entry = dict(scanners.get(name) or {})
+    entry.pop(field, None)
+    if entry:
+        scanners[name] = entry
+    else:
+        scanners.pop(name, None)
+    update_config({"external_scanners": scanners})
+
+
+def unset_scanner(name: str) -> None:
+    """Remove the entire external_scanners.<name> entry from config.json."""
+    scanners = dict(_get_external_scanners_section())
+    if name in scanners:
+        del scanners[name]
+        update_config({"external_scanners": scanners})
+
+
+def get_scanner_options(name: str) -> "tuple[bool | None, tuple[str, ...] | None]":
+    """Return ``(llm, args)`` configured for scanner *name*.
+
+    ``llm`` is ``None`` when unset (no opinion); ``args`` is ``None`` when
+    unset (distinct from an explicitly empty list).
+    """
+    entry = get_scanner_config(name)
+    if not entry:
+        return None, None
+    llm = entry.get("llm")
+    llm = bool(llm) if isinstance(llm, bool) else None
+    raw_args = entry.get("args")
+    args = tuple(str(a) for a in raw_args) if isinstance(raw_args, list) else None
+    return llm, args
