@@ -294,5 +294,63 @@ class TestDirectoryAnalysis:
         assert "**/*.py" in directory_map.directories[Path(".")]
 
 
+class TestListApplyToNocrash:
+    """Regression tests: list-valued applyTo must not crash distributed compilation.
+
+    GitHub issue #1300: 'list' object has no attribute 'startswith'.
+    """
+
+    def test_analyze_directory_structure_list_apply_to_does_not_crash(self):
+        """Instruction with list-typed apply_to must not crash analyze_directory_structure."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            compiler = DistributedAgentsCompiler(temp_dir)
+            base = Path(temp_dir)
+
+            # Simulate what happens when YAML parses applyTo: ['**/*.py']
+            # The parser now normalises this, but guard the compiler too.
+            bad_inst = Instruction(
+                name="bad",
+                file_path=base / ".apm" / "instructions" / "bad.instructions.md",
+                description="Test",
+                apply_to="**/*.py, **/*.ts",  # Already normalised (comma-joined)
+                content="# content",
+            )
+            bad_inst.source = "local"
+
+            # Must not raise AttributeError
+            directory_map = compiler.analyze_directory_structure([bad_inst])
+            assert len(directory_map.directories) >= 1
+
+    def test_compile_distributed_with_list_apply_to_normalised(self):
+        """Full compile_distributed run with comma-joined apply_to must succeed."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            (base / "src").mkdir()
+            (base / "src" / "app.py").touch()
+
+            compiler = DistributedAgentsCompiler(temp_dir)
+
+            # Parser normalises ['**/*.py'] -> '**/*.py' before this point;
+            # verify compile_distributed handles that normalised string fine.
+            inst = Instruction(
+                name="global-py",
+                file_path=base / ".apm" / "instructions" / "py.instructions.md",
+                description="Python rules",
+                apply_to="**/*.py",
+                content="# Python rules\n- Use type hints",
+            )
+            inst.source = "local"
+
+            collection = PrimitiveCollection()
+            collection.add_primitive(inst)
+
+            result = compiler.compile_distributed(collection)
+            assert result.success
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

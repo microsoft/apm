@@ -694,5 +694,124 @@ description: Test context
         self.assertTrue(found_files[0].name.endswith(".chatmode.md"))
 
 
+class TestListValuedFrontmatterNormalization(unittest.TestCase):
+    """Regression tests for list-valued applyTo / handoffs in frontmatter.
+
+    GitHub issue #1300: 'list' object has no attribute 'startswith' crash
+    during distributed compilation when applyTo is a YAML list.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir_path = self.temp_dir.name
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _write(self, filename, content):
+        path = os.path.join(self.temp_dir_path, filename)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    # -- applyTo normalization for .instructions.md ----------------------------
+
+    def test_apply_to_scalar_list_normalizes_to_string(self):
+        """applyTo: ['**/*.py'] (YAML inline list) must normalize to a string."""
+        path = self._write(
+            "test.instructions.md",
+            "---\ndescription: Test\napplyTo: ['**/*.py']\n---\n\n# content\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Instruction)
+        self.assertIsInstance(primitive.apply_to, str)
+        self.assertIn("**/*.py", primitive.apply_to)
+
+    def test_apply_to_multi_element_list_joins_with_comma(self):
+        """applyTo with multiple patterns joins all elements."""
+        path = self._write(
+            "multi.instructions.md",
+            "---\ndescription: Test\napplyTo:\n  - '**/*.py'\n  - '**/*.ts'\n---\n\n# c\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Instruction)
+        self.assertIn("**/*.py", primitive.apply_to)
+        self.assertIn("**/*.ts", primitive.apply_to)
+
+    def test_apply_to_string_unchanged(self):
+        """Scalar applyTo strings pass through unchanged."""
+        path = self._write(
+            "scalar.instructions.md",
+            "---\ndescription: Test\napplyTo: '**/*.py'\n---\n\n# content\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertEqual(primitive.apply_to, "**/*.py")
+
+    def test_apply_to_missing_defaults_to_empty_string(self):
+        """Missing applyTo falls back to empty string for instructions."""
+        path = self._write(
+            "global.instructions.md",
+            "---\ndescription: Test\n---\n\n# content\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Instruction)
+        self.assertEqual(primitive.apply_to, "")
+
+    # -- applyTo normalization for .agent.md / .chatmode.md -------------------
+
+    def test_chatmode_apply_to_list_normalizes(self):
+        """applyTo list in .agent.md normalizes to a string (not None)."""
+        path = self._write(
+            "bot.agent.md",
+            "---\ndescription: Bot\napplyTo: ['**/*.py']\n---\n\n# content\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Chatmode)
+        self.assertIsInstance(primitive.apply_to, str)
+        self.assertIn("**/*.py", primitive.apply_to)
+
+    def test_chatmode_apply_to_none_stays_none(self):
+        """Missing applyTo in .agent.md remains None (optional field)."""
+        path = self._write(
+            "noapply.agent.md",
+            "---\ndescription: Bot\n---\n\n# content\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Chatmode)
+        self.assertIsNone(primitive.apply_to)
+
+    # -- handoffs field in .agent.md ------------------------------------------
+
+    def test_handoffs_list_parsed_into_chatmode(self):
+        """handoffs: list in .agent.md is stored in Chatmode.handoffs."""
+        path = self._write(
+            "agent.agent.md",
+            "---\ndescription: Agent\nhandoffs:\n  - other-agent\n  - fallback\n---\n\n# c\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Chatmode)
+        self.assertEqual(primitive.handoffs, ["other-agent", "fallback"])
+
+    def test_handoffs_inline_list_parsed(self):
+        """handoffs: ['x'] inline YAML list is also parsed correctly."""
+        path = self._write(
+            "inline.agent.md",
+            "---\ndescription: Agent\nhandoffs: ['only-one']\n---\n\n# c\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Chatmode)
+        self.assertEqual(primitive.handoffs, ["only-one"])
+
+    def test_handoffs_absent_means_none(self):
+        """No handoffs key means Chatmode.handoffs is None."""
+        path = self._write(
+            "nohandoffs.agent.md",
+            "---\ndescription: Agent\n---\n\n# content\n",
+        )
+        primitive = parse_primitive_file(path)
+        self.assertIsInstance(primitive, Chatmode)
+        self.assertIsNone(primitive.handoffs)
+
+
 if __name__ == "__main__":
     unittest.main()
