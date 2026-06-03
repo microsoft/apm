@@ -2,7 +2,7 @@
 title: "Marketplace Schema"
 description: "The marketplace.json format -- how APM defines plugin marketplaces for Claude Code, Copilot CLI, and APM itself."
 sidebar:
-  order: 7
+  order: 9
 ---
 
 <dl>
@@ -25,6 +25,10 @@ This document may be updated, replaced, or made obsolete at any time. It is inap
 ## Abstract
 
 A marketplace is a curated index of plugin packages, distributed as a single `marketplace.json` file. APM resolves marketplace entries to dependency closures, applies version locking, and installs plugins exactly as it does for any other APM dependency. This specification defines the shape of `marketplace.json`, the supported source types, key aliases for backward compatibility with Copilot CLI, and the versioning and `pluginRoot` semantics.
+
+> **Scope:** This page documents `marketplace.json` -- the producer-side registry file APM emits via `apm pack` and resolves as a consumer. For the consumer-side dependency manifest (`apm.yml`), see [Manifest schema](../../manifest-schema/).
+
+> **Tip:** First time publishing? Start with the [Publish to a Marketplace](../../../producer/publish-to-a-marketplace/) guide, then return here for field-level reference.
 
 ---
 
@@ -116,6 +120,10 @@ Each member of `plugins` MUST be an object. Each plugin entry MUST contain `name
 | `settings` | `object` | OPTIONAL | Settings to merge into user settings while the plugin is enabled. | Only documented allowlisted keys are applied. | Additional object content is preserved by the schema. |
 | `userConfig` | `object` | OPTIONAL | User-configurable values prompted at enable time. | Config entries declare type, title, description, and related validation metadata. | Sensitive values are stored in secure storage; non-sensitive values are saved to settings. |
 | `strict` | `boolean` | OPTIONAL | Requires the plugin manifest to be present in the plugin folder. | Defaults to `true`. | If `false`, the marketplace entry provides the manifest. |
+
+> **APM-consumed fields:** APM's marketplace parser actively reads `name`, `source` (or `repository`), `description`, `version`, `tags`, and `registry` from each plugin entry. All other fields in this table are preserved in the resolved package graph for Claude Code compatibility but are not acted on by APM itself.
+
+> **Security (hooks and mcpServers):** APM does not execute plugin-supplied hooks or activate MCP servers automatically. Hook declarations require explicit user opt-in; `mcpServers` entries pass through MCPIntegrator validation and runtime gating before any server is activated. Declaring these fields in `marketplace.json` does not grant execution privileges.
 
 ### 4.1. Source Types
 
