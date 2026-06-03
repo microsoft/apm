@@ -188,6 +188,23 @@ class TestSarifToFindings:
         finding = out["s.py"][0]
         assert finding.description == "exec() call detected"
 
+    def test_ansi_only_message_falls_back_to_no_message(self) -> None:
+        from apm_cli.security.external.sarif_ingest import sarif_to_findings
+
+        doc = _sarif(
+            [
+                {
+                    "ruleId": "R",
+                    "level": "warning",
+                    "message": {"text": "\x1b[31m\x1b[0m"},
+                    "locations": [],
+                }
+            ]
+        )
+        out = sarif_to_findings(doc, tool_name="t")
+        finding = next(iter(out.values()))[0]
+        assert finding.description == "(no message)"
+
     def test_not_a_sarif_document_raises(self) -> None:
         from apm_cli.security.external.base import ExternalScanError
         from apm_cli.security.external.sarif_ingest import sarif_to_findings

@@ -85,7 +85,8 @@ def _result_message(result: dict) -> str:
     text = message.get("text") if isinstance(message, dict) else None
     if not isinstance(text, str) or not text:
         return "(no message)"
-    return _ANSI_ESCAPE_RE.sub("", text)
+    cleaned = _ANSI_ESCAPE_RE.sub("", text)
+    return cleaned if cleaned else "(no message)"
 
 
 def sarif_to_findings(
