@@ -45,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one-directional (APM only reads vendor SARIF), and are install-method
   neutral -- they work with the self-contained APM binary with no `pip`
   extra to install.
+- `apm update` now accepts `-g/--global`, positional `[PACKAGES]...`, `--force`, and `--parallel-downloads`, making it a strict superset of `apm deps update`. A single verb now covers project and user scope, per-package refresh, and collision overwrite -- all behind the same interactive plan with `--dry-run`/`--yes`. (closes #1525)
+
+### Deprecated
+
+- `apm deps update` is deprecated in favor of `apm update`, which now exposes every flag it had. It prints a one-line banner pointing to `apm update` and keeps working for one release; it will be removed in the next breaking release. (closes #1525)
+
 ### Fixed
 
 - `apm pack --check-clean` now emits a copy-pasteable recovery recipe when `marketplace.json` drifts from source: `git commit --amend --no-edit` + `git push --force-with-lease` to fold the diff into the current commit, or a follow-up commit variant. Producers get the right command at the point of failure without consulting external docs. (closes #1381)
@@ -52,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Custom-port credential errors now include a ready-to-run `git credential fill` verification command and a link to the auth troubleshooting docs, so users can diagnose miskeyed helpers without guessing. (closes #799)
 - `apm install` now shows a recovery hint (`apm install --no-policy`) when the `required-packages-deployed` policy check fails, so users know how to unblock without hunting for the flag. (closes #1314)
 - `apm install -g` now deploys `instructions` primitives for the Copilot target by concatenating all `*.instructions.md` files from each installed package into `~/.copilot/copilot-instructions.md`, the single file Copilot CLI reads at user scope. Previously this primitive type was silently skipped for global installs. Each package's contribution is wrapped in an HTML provenance comment so the file is auditable and multi-package installs accumulate correctly. (closes #650)
+- `apm compile` with `compilation.agents_md.mode: managed_section` now raises a clear error when the target file does not exist, instead of a confusing "markers not found". Create the file first with the managed-section markers, or set `agents_md.mode: full` in `apm.yml` for the initial generation, then switch to `managed_section`. (closes #1593)
 - `apm compile --target copilot` (and `agents`) no longer writes instructions into `AGENTS.md` when `apm install` has already deployed them to `.github/instructions/`, eliminating duplicate context that Copilot would read from both locations. Mirrors the equivalent dedup behaviour that was already in place for the Claude path (`.claude/rules/`). (closes #1550, refs #1445)
 
 ### Changed
