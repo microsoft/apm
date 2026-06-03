@@ -28,7 +28,9 @@ if TYPE_CHECKING:
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
 # (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
 # working without modification.
-from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan  # noqa: F401
+from apm_cli.install.helpers.security_scan import (
+    _pre_deploy_security_scan,  # noqa: F401 -- re-exported; test_install_scanning.py imports directly from apm_cli.commands.install
+)
 from apm_cli.install.insecure_policy import (
     InsecureDependencyPolicyError,
     _allow_insecure_host_callback,
@@ -43,8 +45,12 @@ from apm_cli.install.insecure_policy import (
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
 # names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
-from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
-from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
+from apm_cli.install.mcp.entry import (
+    _build_mcp_entry,  # noqa: F401 -- re-exported; legacy call sites import from apm_cli.commands.install
+)
+from apm_cli.install.mcp.writer import (
+    _add_mcp_to_apm_yml,  # noqa: F401 -- re-exported; legacy call sites import from apm_cli.commands.install
+)
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     dependency_reference_to_yaml_entry,
@@ -67,7 +73,9 @@ from apm_cli.install.phases.local_content import (
 # Re-export lockfile hash helper so existing call sites and the regression
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
-from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
+from apm_cli.install.phases.lockfile import (
+    compute_deployed_hashes as _hash_deployed,  # noqa: F401 -- re-exported; test_hash_deployed_is_module_level_and_works pins this import path
+)
 
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
@@ -87,7 +95,9 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
 )
-from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
+from apm_cli.utils.diagnostics import (
+    DiagnosticCollector,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability from apm_cli.commands.install
+)
 
 from ..constants import (
     APM_YML_FILENAME,
