@@ -164,6 +164,30 @@ class TestSarifToFindings:
         f = out["<unknown>"][0]
         assert (f.line, f.column) == (1, 1)
 
+    def test_ansi_escape_codes_stripped_from_message(self) -> None:
+        from apm_cli.security.external.sarif_ingest import sarif_to_findings
+
+        doc = _sarif(
+            [
+                {
+                    "ruleId": "R",
+                    "level": "warning",
+                    "message": {"text": "\x1b[31mexec() call detected\x1b[0m"},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": "s.py"},
+                                "region": {"startLine": 5, "startColumn": 1},
+                            }
+                        }
+                    ],
+                }
+            ]
+        )
+        out = sarif_to_findings(doc, tool_name="t")
+        finding = out["s.py"][0]
+        assert finding.description == "exec() call detected"
+
     def test_not_a_sarif_document_raises(self) -> None:
         from apm_cli.security.external.base import ExternalScanError
         from apm_cli.security.external.sarif_ingest import sarif_to_findings
