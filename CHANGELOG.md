@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- JetBrains users (IntelliJ IDEA, PyCharm, GoLand, WebStorm, and other IDEs)
+  can now install MCP servers with `apm install --mcp --runtime intellij
+  <package>` -- no manual `mcp.json` editing required. GitHub Copilot for
+  JetBrains stores servers under a `"servers"` top-level key (not
+  `"mcpServers"`) at an OS-specific user-scope path:
+  `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows),
+  `~/Library/Application Support/github-copilot/intellij/mcp.json` (macOS),
+  and `~/.local/share/github-copilot/intellij/mcp.json` (Linux, honouring
+  `XDG_DATA_HOME`). Auto-detected when that config directory exists.
+  Runtime `${VAR}` env substitution is not supported for this target, so
+  `--env` values are written verbatim -- avoid passing plaintext secrets.
+  (#1636)
 - `apm find <file>` command: trace a materialized file back to its contributing package(s) via a reverse index over `apm.lock.yaml`. Supports `--source` (oci/git/local origin) and `--path` (full dependency chain). Multi-contributor files list all packages. Unknown paths exit 2 with an ASCII `[x]` message. Zero network or write operations. (#1631)
 - `apm pack` now synthesises `homepage`, `repository`, `keywords`, and a structured
   `author` (`{name, email?, url?}`) from `apm.yml` into `plugin.json`. All changes are

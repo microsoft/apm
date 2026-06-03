@@ -654,6 +654,47 @@ class MCPIntegrator:
                         exc_info=True,
                     )
 
+        # Clean JetBrains Copilot user-scope mcp.json
+        if "intellij" in target_runtimes:
+            from apm_cli.adapters.client.intellij import _intellij_config_dir
+            from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+            try:
+                intellij_mcp = _intellij_config_dir() / "mcp.json"
+            except PathTraversalError:
+                _log.debug(
+                    "Skipping JetBrains Copilot stale cleanup: config dir unavailable",
+                    exc_info=True,
+                )
+                intellij_mcp = None
+            if intellij_mcp is not None and intellij_mcp.exists():
+                try:
+                    import json as _json
+
+                    # Route the env-var-derived write path through the same
+                    # containment guard every other APM write site uses.
+                    ensure_path_within(intellij_mcp, Path.home())
+                    config = _json.loads(intellij_mcp.read_text(encoding="utf-8"))
+                    servers = config.get("servers")
+                    if not isinstance(servers, dict):
+                        servers = {}
+                        config["servers"] = servers
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        intellij_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+                        for name in removed:
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from {intellij_mcp}",
+                                symbol="check",
+                            )
+                except (OSError, ValueError):
+                    _log.debug(
+                        "Failed to clean stale MCP servers from JetBrains Copilot config",
+                        exc_info=True,
+                    )
+
         # Clean .gemini/settings.json (only if .gemini/ directory exists)
         if "gemini" in target_runtimes:
             gemini_cfg = project_root_path / ".gemini" / "settings.json"
@@ -928,7 +969,7 @@ class MCPIntegrator:
         except ValueError as e:
             logger.warning(f"Runtime {runtime} not supported: {e}")
             logger.progress(
-                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, llm"
+                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, intellij, llm"
             )
             return False
         except Exception as e:
