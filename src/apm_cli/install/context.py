@@ -58,6 +58,7 @@ class InstallContext:
     allow_insecure_hosts: tuple[str, ...] = ()
 
     dry_run: bool = False
+    lockfile_only: bool = False
     force: bool = False
     verbose: bool = False
     refresh: bool = False
