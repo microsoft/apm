@@ -289,3 +289,4 @@ apm marketplace publish --draft
 - [`apm search`](../search/) -- top-level shortcut for `QUERY@MARKETPLACE` package search across registered marketplaces.
 - [Publish to a marketplace](../../../producer/publish-to-a-marketplace/) -- end-to-end authoring guide.
 - [Manifest schema](../../manifest-schema/) -- shape of the `marketplace:` block in `apm.yml`.
+- [Marketplace schema](../../marketplace-schema/) -- field-level `marketplace.json` requirements and source-type reference.
