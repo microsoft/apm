@@ -6,7 +6,6 @@ from apm_cli.utils.console — no new output primitives.
 """
 
 from dataclasses import dataclass
-from typing import Optional  # noqa: F401
 
 from apm_cli.utils.console import (
     _rich_echo,
@@ -685,7 +684,6 @@ class InstallLogger(CommandLogger):
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
         """
-        from apm_cli.utils.diagnostics import CATEGORY_POLICY  # noqa: F401
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
         # (the detail strings produced by policy_checks.py do this).

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 import yaml
 

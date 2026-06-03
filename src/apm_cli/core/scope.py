@@ -31,7 +31,6 @@ from __future__ import annotations
 import contextvars
 from enum import Enum
 from pathlib import Path
-from typing import List  # noqa: F401, UP035
 
 # ---------------------------------------------------------------------------
 # Constants

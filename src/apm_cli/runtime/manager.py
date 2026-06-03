@@ -9,7 +9,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 import click
 from colorama import Fore, Style

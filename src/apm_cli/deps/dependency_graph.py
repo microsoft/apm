@@ -2,8 +2,7 @@
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path  # noqa: F401
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
+from typing import Any, Optional
 
 from ..models.apm_package import APMPackage, DependencyReference
 

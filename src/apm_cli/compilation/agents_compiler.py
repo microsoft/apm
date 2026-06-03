@@ -9,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any, Callable  # noqa: UP035
 
 from ..core.target_detection import (
     CompileTargetType,
