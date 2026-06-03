@@ -18,6 +18,26 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
 
 
+def _warn_intellij_plaintext_env(target_runtimes: list, env_keys, logger: Any) -> None:
+    """Warn that the JetBrains (intellij) runtime bakes env values as plaintext.
+
+    JetBrains Copilot's ``mcp.json`` does not (yet) support runtime
+    environment-variable substitution, so APM resolves ``--env`` / declared
+    env vars at install time and writes the literal values into the config
+    file.  Surface that to the user so secrets are not leaked unknowingly.
+    """
+    if "intellij" not in target_runtimes:
+        return
+    keys = sorted(k for k in env_keys if k)
+    if not keys:
+        return
+    logger.warning(
+        "JetBrains Copilot (intellij) does not support runtime environment-variable "
+        "substitution; the following value(s) are written into mcp.json as plaintext "
+        f"at install time: {', '.join(keys)}. Rotate any secrets if this config is shared."
+    )
+
+
 def _install_registry_group(
     operations: Any,
     group_dep_names: list,
@@ -127,6 +147,7 @@ def _install_registry_group(
                 dep = group_dep_map.get(server_name)
                 if dep and dep.env:
                     shared_env_vars.update(dep.env)
+            _warn_intellij_plaintext_env(target_runtimes, shared_env_vars.keys(), logger)
             shared_runtime_vars = operations.collect_runtime_variables(
                 servers_to_install, server_info_cache
             )
@@ -241,6 +262,7 @@ def _resolve_target_runtimes(
                 "gemini",
                 "windsurf",
                 "claude",
+                "intellij",
             ]:
                 try:
                     if runtime_name == "vscode":
@@ -279,6 +301,17 @@ def _resolve_target_runtimes(
                         ):
                             ClientFactory.create_client(runtime_name)
                             installed_runtimes.append(runtime_name)
+                    elif runtime_name == "intellij":
+                        # JetBrains Copilot is opt-in: target when the
+                        # user-scope config directory already exists.  This
+                        # directory is created by the JetBrains Copilot
+                        # plugin on first run, so its presence reliably
+                        # signals that the plugin is installed.
+                        from apm_cli.adapters.client.intellij import _intellij_config_dir
+
+                        if _intellij_config_dir().is_dir():
+                            ClientFactory.create_client(runtime_name)
+                            installed_runtimes.append(runtime_name)
                     else:  # noqa: PLR5501
                         if manager.is_runtime_available(runtime_name):
                             ClientFactory.create_client(runtime_name)
@@ -309,6 +342,16 @@ def _resolve_target_runtimes(
                 find_runtime_binary("claude") is not None
             ):
                 installed_runtimes.append("claude")
+            # JetBrains Copilot: user-scope config directory presence
+            try:
+                from apm_cli.adapters.client.intellij import _intellij_config_dir
+
+                if _intellij_config_dir().is_dir():
+                    installed_runtimes.append("intellij")
+            except (ImportError, ValueError):
+                # ValueError (PathTraversalError) when LOCALAPPDATA/XDG_DATA_HOME
+                # is misconfigured -- treat as "not installed" rather than crash.
+                pass
 
         # Step 2: Get runtimes referenced in apm.yml scripts
         script_runtimes = MCPIntegrator._detect_runtimes(
@@ -351,10 +394,16 @@ def _resolve_target_runtimes(
                 logger.warning("No MCP-compatible runtimes installed")
                 logger.progress("Install a runtime with: apm runtime setup copilot")
 
+        # Surface auto-detected runtimes in non-verbose plain-logger mode so
+        # users get a signal about what `apm install --mcp` is targeting --
+        # notably the machine-scoped JetBrains (intellij) runtime, which is
+        # detected globally once the plugin is installed anywhere on the host.
+        if target_runtimes and not verbose and console is None:
+            logger.progress(f"Detected runtimes: {', '.join(target_runtimes)}")
+
         # Apply exclusions
         if exclude:
             target_runtimes = [r for r in target_runtimes if r != exclude]
-
         # All runtimes excluded  -- nothing to configure
         if not target_runtimes and installed_runtimes:
             logger.warning(

@@ -1054,8 +1054,8 @@ class TestPackCommandHelp:
 
         assert "deprecated" in result.output.lower() or result.exit_code in (0, 1)
 
-    def test_pack_deprecated_marketplace_output(self, tmp_path: Path) -> None:
-        """--marketplace-output emits deprecation warning."""
+    def test_pack_marketplace_output_removed(self, tmp_path: Path) -> None:
+        """--marketplace-output was removed; Click rejects it."""
         from apm_cli.commands.pack import pack_cmd
 
         runner = CliRunner()
@@ -1063,13 +1063,11 @@ class TestPackCommandHelp:
             (Path(".") / "apm.yml").write_text(_APM_YML_MINIMAL, encoding="utf-8")
             (Path(".") / "apm.lock.yaml").write_text(_LOCKFILE_TEMPLATE, encoding="utf-8")
 
-            with patch("apm_cli.core.build_orchestrator.BuildOrchestrator.run") as mock_run:
-                mock_result = MagicMock()
-                mock_result.producer_results = []
-                mock_run.return_value = mock_result
-                result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/mkt.json"])
+            result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/mkt.json"])
 
-        assert "deprecated" in result.output.lower() or result.exit_code in (0, 1)
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
     def test_pack_build_error_exits_nonzero(self, tmp_path: Path) -> None:
         """BuildError from orchestrator surfaces as non-zero exit."""

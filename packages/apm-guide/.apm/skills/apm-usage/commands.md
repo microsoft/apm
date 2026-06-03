@@ -17,6 +17,7 @@
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
 | `apm deps tree` | Show dependency tree | -- |
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
+| `apm find <PATH>` | Trace a deployed file back to the package(s) that contributed it (inverse of install; reads `apm.lock.yaml` only) | `--source` show OCI/git/local origin, `--path` show full why-chain (same as `apm deps why`) |
 | `apm view PKG [FIELD]` | View package details or remote refs | `-g` global, `FIELD=versions` |
 | `apm outdated` | Check locked deps via SHA/semver comparison | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
@@ -33,7 +34,7 @@
 
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
 2. `apm.yml` `targets:` list (or singular `target:` sugar).
-3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf).
+3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf, the user-scope JetBrains Copilot MCP config directory `github-copilot/intellij/` -- `%LOCALAPPDATA%\github-copilot\intellij\` on Windows, `~/Library/Application Support/github-copilot/intellij/` on macOS, `~/.local/share/github-copilot/intellij/` on Linux -> intellij). All signals except JetBrains are project-scoped repo markers; the JetBrains signal is a machine-global user-scope directory, so once the Copilot plugin is installed it is detected for every project on that machine.
 
 `apm install` prints a one-line provenance summary before any mutation:
 
