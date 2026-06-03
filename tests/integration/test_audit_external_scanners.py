@@ -170,6 +170,7 @@ def test_missing_sarif_file_gives_actionable_error(runner, monkeypatch, tmp_path
     )
     assert result.exit_code == 2
     assert "not found" in result.output.lower()
+    assert "Traceback" not in result.output
 
 
 def test_malformed_sarif_gives_actionable_error(runner, monkeypatch, tmp_path):
@@ -180,7 +181,9 @@ def test_malformed_sarif_gives_actionable_error(runner, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(audit, ["--external", "sarif", "--external-sarif", str(bad)])
     assert result.exit_code == 2
-    assert "not a SARIF document" in result.output or "failed" in result.output.lower()
+    assert "not a SARIF" in result.output
+    assert "missing 'runs'" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_skillspector_not_on_path_gives_actionable_error(runner, monkeypatch, tmp_path):
