@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Union  # noqa: F401, UP035
+from typing import Union
 
 
 @dataclass

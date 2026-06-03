@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 from .models import CheckResult, CIAuditResult
 

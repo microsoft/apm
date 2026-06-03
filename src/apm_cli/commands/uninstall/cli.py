@@ -3,11 +3,10 @@
 import builtins
 import sys
 import traceback
-from pathlib import Path  # noqa: F401
 
 import click
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
+from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...models.apm_package import APMPackage
 from .engine import (

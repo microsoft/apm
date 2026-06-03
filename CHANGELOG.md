@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neutral -- they work with the self-contained APM binary with no `pip`
   extra to install.
 - `apm update` now accepts `-g/--global`, positional `[PACKAGES]...`, `--force`, and `--parallel-downloads`, making it a strict superset of `apm deps update`. A single verb now covers project and user scope, per-package refresh, and collision overwrite -- all behind the same interactive plan with `--dry-run`/`--yes`. (closes #1525)
+- `apm config set mcp-registry-url <url>` / `get` / `unset` lets users persistently configure a private MCP registry endpoint without re-exporting `MCP_REGISTRY_URL` every session. The value is stored in `~/.apm/config.json` and sits between the environment variable and the built-in default in the resolution chain (CLI flag > env > config > default). Accepts `http://` or `https://` URLs; all other schemes are rejected. When the config layer is active, `apm mcp search` prints a `Registry (config): <url>` diagnostic. (closes #818) (#1637)
 
 ### Deprecated
 

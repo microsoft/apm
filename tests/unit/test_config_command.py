@@ -1435,3 +1435,78 @@ class TestAuditOnInstallCommand:
             result = self.runner.invoke(config, ["unset", "audit-on-install"])
         assert result.exit_code == 0
         mock_unset.assert_called_once()
+
+
+class TestMcpRegistryUrlCommand:
+    """`apm config set/get/unset mcp-registry-url` -- issue #818."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_set_valid_https_url(self):
+        with (
+            patch("apm_cli.config.set_mcp_registry_url") as mock_set,
+            patch(
+                "apm_cli.config.get_mcp_registry_url",
+                return_value="https://corp.mcp.example.com",
+            ),
+        ):
+            result = self.runner.invoke(
+                config, ["set", "mcp-registry-url", "https://corp.mcp.example.com"]
+            )
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("https://corp.mcp.example.com")
+        from urllib.parse import urlparse
+
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert len(urls) >= 1
+        assert urlparse(urls[0]).hostname == "corp.mcp.example.com"
+
+    def test_set_valid_http_url(self):
+        with (
+            patch("apm_cli.config.set_mcp_registry_url") as mock_set,
+            patch(
+                "apm_cli.config.get_mcp_registry_url",
+                return_value="http://internal.corp/mcp",
+            ),
+        ):
+            result = self.runner.invoke(
+                config, ["set", "mcp-registry-url", "http://internal.corp/mcp"]
+            )
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("http://internal.corp/mcp")
+
+    def test_set_invalid_scheme_rejected(self):
+        with patch(
+            "apm_cli.config.set_mcp_registry_url",
+            side_effect=ValueError("scheme 'file' is not supported"),
+        ):
+            result = self.runner.invoke(config, ["set", "mcp-registry-url", "file:///etc/hosts"])
+        assert result.exit_code == 1
+        assert "file" in result.output or "not supported" in result.output
+
+    def test_get_when_set(self):
+        with patch(
+            "apm_cli.config.get_mcp_registry_url",
+            return_value="https://corp.mcp.example.com",
+        ):
+            result = self.runner.invoke(config, ["get", "mcp-registry-url"])
+        assert result.exit_code == 0
+        from urllib.parse import urlparse
+
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert len(urls) >= 1
+        assert urlparse(urls[0]).hostname == "corp.mcp.example.com"
+
+    def test_get_when_not_set(self):
+        with patch("apm_cli.config.get_mcp_registry_url", return_value=None):
+            result = self.runner.invoke(config, ["get", "mcp-registry-url"])
+        assert result.exit_code == 0
+        assert "Not set" in result.output
+
+    def test_unset_removes_key(self):
+        with patch("apm_cli.config.unset_mcp_registry_url") as mock_unset:
+            result = self.runner.invoke(config, ["unset", "mcp-registry-url"])
+        assert result.exit_code == 0
+        mock_unset.assert_called_once()
+        assert "removed" in result.output

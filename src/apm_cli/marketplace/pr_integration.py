@@ -27,7 +27,6 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional  # noqa: F401
 
 from ._git_utils import redact_token as _redact_token
 from .git_stderr import translate_git_stderr

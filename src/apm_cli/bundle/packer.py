@@ -1,11 +1,9 @@
 """Bundle packer  -- creates self-contained APM bundles from the resolved dependency tree."""
 
-import os  # noqa: F401
 import shutil
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Union  # noqa: F401, UP035
 
 from ..core.target_detection import detect_target
 from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed

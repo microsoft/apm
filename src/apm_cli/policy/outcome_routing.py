@@ -24,7 +24,7 @@ and the exact gating semantics match the pre-extraction behaviour.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional  # noqa: F401
+from typing import TYPE_CHECKING
 
 from apm_cli.install.errors import PolicyViolationError
 

@@ -31,7 +31,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.registry_wiring import (
     get_registry_resolver,
@@ -568,7 +568,6 @@ class FreshDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.drift import build_download_ref
-        from apm_cli.models.apm_package import PackageType  # noqa: F401
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
         from apm_cli.utils.path_security import safe_rmtree
 

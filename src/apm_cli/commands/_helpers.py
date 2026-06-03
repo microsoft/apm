@@ -14,14 +14,15 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from ..constants import (
-    APM_LOCK_FILENAME,  # noqa: F401
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
 from ..update_policy import get_update_hint_message, is_self_update_enabled
-from ..utils.atomic_io import atomic_write_text as _atomic_write  # noqa: F401
+from ..utils.atomic_io import (
+    atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
+)
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates

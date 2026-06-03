@@ -9,7 +9,6 @@ import logging
 import os
 import re
 import sys
-from typing import List  # noqa: F401, UP035
 
 import click
 
