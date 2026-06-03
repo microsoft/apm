@@ -123,7 +123,7 @@ APM supports the following marketplace source forms:
 
 | Type | JSON form | Required fields | Description | Example |
 |---|---|---|---|---|
-| String `source` | `"./tools/local-plugin"` | None beyond the string itself. | Path to the plugin root, relative to the marketplace root. The canonical path form begins with `./`; APM also resolves bare names through `metadata.pluginRoot` as described in [section 5](#5-plugin-root-directory). | `"./tools/local-plugin"` |
+| String `source` | `"./tools/local-plugin"` | None beyond the string itself. | Path to the plugin root, relative to the marketplace root. The canonical JSON Schema requires string sources to match `^./` (start with `./`). APM also resolves bare names (e.g. `"my-tool"`) at runtime through `metadata.pluginRoot` (see [section 5](#5-plugin-root-directory)); bare names are an APM extension and do not conform to the canonical JSON Schema pattern. | `"./tools/local-plugin"` |
 | `github` | `{ "source": "github", "repo": "owner/repo" }` | `source`, `repo` | GitHub repository in `owner/repo` format. | `{ "source": "github", "repo": "acme/code-review-plugin" }` |
 | `url` | `{ "source": "url", "url": "https://..." }` | `source`, `url` | Full Git repository URL, such as HTTPS or `git@` SSH syntax. | `{ "source": "url", "url": "https://github.com/acme/style-guide.git" }` |
 | `git-subdir` | `{ "source": "git-subdir", "url": "owner/repo", "path": "plugins/tool" }` | `source`, `url`, `path` | Plugin located in a subdirectory of a larger repository. The repository is cloned sparsely so only the selected subdirectory is materialized. | `{ "source": "git-subdir", "url": "acme/monorepo", "path": "plugins/eslint-rules" }` |
@@ -188,12 +188,14 @@ In this example, `version` is display metadata and `source.ref` is the checkout 
   "owner": { "name": "Acme Corp" },
   "metadata": { "pluginRoot": "./plugins" },
   "plugins": [
-    { "name": "my-tool", "source": "my-tool" }
+    { "name": "my-tool", "source": "./my-tool" }
   ]
 }
 ```
 
-With `pluginRoot` set to `./plugins`, the source `"my-tool"` resolves to the `plugins/my-tool` directory in the marketplace repository. Sources that already contain a path separator, such as `./custom/path`, are not affected by `pluginRoot`.
+With `pluginRoot` set to `./plugins`, the source `"./my-tool"` resolves to the `plugins/my-tool` directory in the marketplace repository. Sources that already contain a path separator (e.g. `./custom/path`) are resolved relative to the repository root first, then prefixed by `pluginRoot` only if they do not start with `./plugins` already.
+
+> **Note (APM extension):** APM also accepts bare-name sources (e.g. `"my-tool"` without a leading `./`) at runtime and resolves them through `pluginRoot`. Bare names are an APM-specific extension; they do not satisfy the canonical JSON Schema pattern `^./` and will fail the `jsonschema` validation command in [section 7](#7-validation).
 
 The `metadata` object MAY also contain `version` and `description` strings for marketplace metadata. Consumers MUST NOT treat `metadata.version` as a plugin version or resolver input.
 
