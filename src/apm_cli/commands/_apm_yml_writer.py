@@ -6,7 +6,6 @@ field.  Keeps write-back logic isolated and unit-testable.
 """
 
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 from ..models.dependency.reference import DependencyReference
 from ..utils.yaml_io import dump_yaml, load_yaml

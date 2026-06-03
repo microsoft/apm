@@ -1,8 +1,6 @@
 """Parser for primitive definition files."""
 
-import os  # noqa: F401
 from pathlib import Path
-from typing import List, Union  # noqa: F401, UP035
 
 import frontmatter
 

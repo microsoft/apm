@@ -1,9 +1,6 @@
 """Dependency verification for APM-CLI."""
 
-import os  # noqa: F401
 from pathlib import Path
-
-import yaml  # noqa: F401
 
 from ..factory import ClientFactory, PackageManagerFactory
 

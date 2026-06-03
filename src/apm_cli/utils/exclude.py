@@ -9,7 +9,6 @@ import fnmatch
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 logger = logging.getLogger(__name__)
 

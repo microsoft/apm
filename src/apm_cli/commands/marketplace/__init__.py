@@ -46,7 +46,6 @@ from ...marketplace.publisher import (
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
-from ...utils.console import _rich_info, _rich_warning  # noqa: F401
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from .._helpers import _get_console, _is_interactive
 

@@ -9,12 +9,10 @@ under ``pack.bundle_files`` (issue #1098).
 
 import hashlib
 import json
-import os  # noqa: F401
 import re
 import shutil
 import tarfile
 from pathlib import Path, PurePosixPath
-from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 import yaml
 

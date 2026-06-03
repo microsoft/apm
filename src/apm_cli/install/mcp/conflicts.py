@@ -9,7 +9,6 @@ turns invalid ``apm install --mcp`` flag combinations into
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 import click
 

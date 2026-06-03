@@ -196,9 +196,9 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm config` | Show current configuration | -- |
-| `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`) | -- |
-| `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
-| `apm config unset KEY` | Remove a stored config value (`temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`) | -- |
+| `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`, `mcp-registry-url`) | -- |
+| `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `mcp-registry-url`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
+| `apm config unset KEY` | Remove a stored config value (`temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`, `mcp-registry-url`) | -- |
 | `apm update [PKGS...]` | Refresh APM dependencies: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged), and prompts before mutating anything (default `[y/N]`). Pass `[PKGS...]` to refresh only those deps, or `-g` for user scope (`~/.apm/`). Strict superset of the deprecated `apm deps update`. Skips the prompt with `--yes`; previews with `--dry-run`. | `--yes`, `--dry-run`, `--verbose`, `-g/--global`, `--force`, `--parallel-downloads N`, `--target` (comma-separated) |
 | `apm self-update` | Update the APM CLI itself (or show distributor guidance when self-update is disabled at build time). | `--check` only check |
 
@@ -209,3 +209,5 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 `apm self-update` (and the startup version-checker) honours the same env vars as `install.sh` for air-gapped and GitHub Enterprise Server (GHE) environments: `GITHUB_URL` overrides the GitHub base URL and API host (`{GITHUB_URL}/api/v3` for GHE), `APM_REPO` overrides the repository (default `microsoft/apm`), and `VERSION` pins a release and skips the GitHub API call entirely. Example: `GITHUB_URL=https://gh.corp.com APM_REPO=corp/apm VERSION=v1.2.3 apm self-update`.
 
 `apm config set copilot-cowork-skills-dir <absolute-path>` persists the Cowork skills directory across shells. `apm config get copilot-cowork-skills-dir` and `apm config unset copilot-cowork-skills-dir` remain available even when the `copilot-cowork` flag is disabled so leftover state can still be inspected or cleared. In `apm config` and bare `apm config get`, the `copilot-cowork-skills-dir` entry is shown only when the `copilot-cowork` flag is enabled.
+
+`apm config set mcp-registry-url https://mcp.internal.example.com` persists a private MCP registry URL so users do not need to export `MCP_REGISTRY_URL` every session. Accepts `http://` or `https://` URLs; all other schemes are rejected. Resolution order: `--registry <url>` flag on `apm mcp install` / `apm install --mcp` > `MCP_REGISTRY_URL` env var > `mcp-registry-url` in `~/.apm/config.json` > built-in public default. When the config layer is active, `apm mcp search` prints a `Registry (config): <url>` diagnostic. `apm config unset mcp-registry-url` removes the persisted URL.

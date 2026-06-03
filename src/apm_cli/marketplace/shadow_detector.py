@@ -11,7 +11,6 @@ never propagate to the caller.
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional  # noqa: F401, UP035
 
 from .client import fetch_or_cache
 from .registry import get_registered_marketplaces

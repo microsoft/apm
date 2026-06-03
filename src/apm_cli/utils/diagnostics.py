@@ -8,11 +8,10 @@ output when many packages are involved.
 """
 
 import threading
-from dataclasses import dataclass, field  # noqa: F401
-from typing import Dict, List, Optional  # noqa: F401, UP035
+from dataclasses import dataclass
 
 from apm_cli.utils.console import (
-    _get_console,  # noqa: F401  -- re-exported for back-compat (tests patch this name)
+    _get_console,  # noqa: F401 -- re-exported; tests patch apm_cli.utils.diagnostics._get_console
     _rich_echo,
     _rich_info,
     _rich_warning,

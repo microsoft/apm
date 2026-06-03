@@ -24,7 +24,6 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Dict, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 from apm_cli.utils.github_host import (
