@@ -657,6 +657,33 @@ class MCPIntegrator:
                         exc_info=True,
                     )
 
+        # Clean JetBrains Copilot user-scope mcp.json
+        if "intellij" in target_runtimes:
+            from apm_cli.adapters.client.intellij import _intellij_config_dir
+
+            intellij_mcp = _intellij_config_dir() / "mcp.json"
+            if intellij_mcp.exists():
+                try:
+                    import json as _json
+
+                    config = _json.loads(intellij_mcp.read_text(encoding="utf-8"))
+                    servers = config.get("servers", {})
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        intellij_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+                        for name in removed:
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from JetBrains Copilot config",
+                                symbol="check",
+                            )
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from JetBrains Copilot config",
+                        exc_info=True,
+                    )
+
         # Clean .gemini/settings.json (only if .gemini/ directory exists)
         if "gemini" in target_runtimes:
             gemini_cfg = project_root_path / ".gemini" / "settings.json"
@@ -931,7 +958,7 @@ class MCPIntegrator:
         except ValueError as e:
             logger.warning(f"Runtime {runtime} not supported: {e}")
             logger.progress(
-                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, llm"
+                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, intellij, llm"
             )
             return False
         except Exception as e:

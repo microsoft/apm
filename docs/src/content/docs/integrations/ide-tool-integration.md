@@ -1,6 +1,6 @@
 ---
 title: "IDE & tool integration"
-description: "How APM deploys primitives into VS Code, Claude Code, Cursor, Codex, Gemini, OpenCode, Windsurf and other AI coding clients."
+description: "How APM deploys primitives into VS Code, Claude Code, Cursor, Codex, Gemini, OpenCode, Windsurf, JetBrains and other AI coding clients."
 sidebar:
   order: 3
 ---
@@ -22,6 +22,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
+| JetBrains Copilot    | user-scope config dir                | MCP only (user-scope global path)      |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
@@ -106,6 +107,7 @@ MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies
 - `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
 - `.gemini/settings.json` (Gemini)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
+- OS-specific `github-copilot/intellij/mcp.json` (JetBrains Copilot -- uses `"servers"` key)
 
 For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../consumer/install-mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
 

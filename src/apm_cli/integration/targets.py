@@ -382,6 +382,7 @@ class TargetProfile:
 RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
     "vscode": "copilot",
     "agents": "copilot",
+    "intellij": "copilot",
 }
 
 

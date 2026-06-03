@@ -319,6 +319,7 @@ def run_mcp_install(
                 "gemini",
                 "windsurf",
                 "claude",
+                "intellij",
             ]:
                 try:
                     if runtime_name == "vscode":
@@ -357,6 +358,17 @@ def run_mcp_install(
                         ):
                             ClientFactory.create_client(runtime_name)
                             installed_runtimes.append(runtime_name)
+                    elif runtime_name == "intellij":
+                        # JetBrains Copilot is opt-in: target when the
+                        # user-scope config directory already exists.  This
+                        # directory is created by the JetBrains Copilot
+                        # plugin on first run, so its presence reliably
+                        # signals that the plugin is installed.
+                        from apm_cli.adapters.client.intellij import _intellij_config_dir
+
+                        if _intellij_config_dir().is_dir():
+                            ClientFactory.create_client(runtime_name)
+                            installed_runtimes.append(runtime_name)
                     else:  # noqa: PLR5501
                         if manager.is_runtime_available(runtime_name):
                             ClientFactory.create_client(runtime_name)
@@ -387,6 +399,14 @@ def run_mcp_install(
                 find_runtime_binary("claude") is not None
             ):
                 installed_runtimes.append("claude")
+            # JetBrains Copilot: user-scope config directory presence
+            try:
+                from apm_cli.adapters.client.intellij import _intellij_config_dir
+
+                if _intellij_config_dir().is_dir():
+                    installed_runtimes.append("intellij")
+            except ImportError:
+                pass
 
         # Step 2: Get runtimes referenced in apm.yml scripts
         script_runtimes = MCPIntegrator._detect_runtimes(
