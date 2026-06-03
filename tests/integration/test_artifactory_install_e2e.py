@@ -10,15 +10,16 @@ Design
 ------
 * In-process ``http.server.HTTPServer`` bound to ``127.0.0.1:0`` (OS-chosen
   port, no firewall, no secrets, fully offline).
-* Minimal ``_HasArchiveDownloader`` stub that does real HTTP fetch (via
-  ``urllib.request``) and real ZIP extraction (stripping the root prefix),
-  mirroring what ``DownloadDelegate.download_artifactory_archive`` does in
-  production without requiring a live ``HostInfo``.
+* ``_LocalArchiveDownloader`` stub that does real HTTP fetch (via
+  ``urllib.request``) and real ZIP extraction (stripping the root prefix).
+  The stub mirrors the interface of ``DownloadDelegate.download_artifactory_archive``
+  without requiring a live ``HostInfo``; ZIP extraction runs inside the stub
+  (not in ``ArtifactoryOrchestrator`` itself).
 * The ZIP contains ``<root>/<content>`` where ``<root>`` is ``testrepo-main/``
   so that root-prefix stripping lands ``apm.yml`` and ``.apm/`` directly in
   ``target_path``.
-* No mocking of extract/validate; every step after the HTTP fetch is real
-  production code.
+* ``ArtifactoryOrchestrator.download_package`` runs on real production code
+  with the stub satisfying the archive-downloader protocol.
 * URL assertions use ``urllib.parse`` component comparison, never substring.
 """
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 import io
 import threading
 import zipfile
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -99,7 +101,7 @@ _ZIP_BYTES: bytes = _build_apm_zip()
 
 
 class _ZipHandler(BaseHTTPRequestHandler):
-    """Serve the pre-built ZIP for any GET; 404 for everything else."""
+    """Serve the pre-built ZIP for any GET request path."""
 
     def do_GET(self) -> None:
         self.send_response(200)
@@ -139,7 +141,7 @@ class _LocalZipServer:
 
 
 @pytest.fixture(scope="module")
-def zip_server() -> _LocalZipServer:  # type: ignore[return]
+def zip_server() -> Iterator[_LocalZipServer]:
     """Start the in-process ZIP server once for this module."""
     srv = _LocalZipServer()
     srv.start()
@@ -178,6 +180,7 @@ class _LocalArchiveDownloader:
         *,
         scheme: str = "https",
     ) -> None:
+        import urllib.error
         import urllib.request
 
         # Build first-candidate URL (GitHub-style) -- same formula as
@@ -185,8 +188,11 @@ class _LocalArchiveDownloader:
         url = f"{scheme}://{host}/{prefix}/{owner}/{repo}/archive/refs/heads/{ref}.zip"
         self.captured_url = url
 
-        with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
-            data = resp.read()
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
+                data = resp.read()
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Download failed for {url}: {exc}") from exc
 
         # Extract, stripping root prefix -- mirrors DownloadDelegate logic
         target_path.mkdir(parents=True, exist_ok=True)
