@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 from urllib.parse import urlparse
 
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments

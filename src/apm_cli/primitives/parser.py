@@ -1,8 +1,6 @@
 """Parser for primitive definition files."""
 
-import os  # noqa: F401
 from pathlib import Path
-from typing import List, Union  # noqa: F401, UP035
 
 import frontmatter
 
@@ -94,6 +92,33 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
         raise ValueError(f"Failed to parse primitive file {file_path}: {e}")  # noqa: B904
 
 
+def _normalize_apply_to(value: object, default: str = "") -> str:
+    """Normalize an applyTo frontmatter value to a string.
+
+    YAML allows list-valued applyTo (e.g. ``applyTo: ['**/*.py']``).
+    The rest of the compilation pipeline expects a plain string and treats
+    apply_to as a single glob pattern -- it has no mechanism to split a
+    comma-joined multi-pattern string back into individual globs.
+
+    When a list is encountered, only the first non-null element is used.
+    Multi-pattern support (``list[str]`` migration across all consumers)
+    is tracked separately.
+
+    Args:
+        value: The raw value returned by the YAML parser (str, list, or None).
+        default: Fallback when value is None or an empty list.
+
+    Returns:
+        str: Normalized glob pattern string.
+    """
+    if isinstance(value, list):
+        non_null = [str(v) for v in value if v is not None]
+        return non_null[0] if non_null else default
+    if value is None:
+        return default
+    return str(value)
+
+
 def _parse_chatmode(
     name: str,
     file_path: Path,
@@ -113,15 +138,25 @@ def _parse_chatmode(
     Returns:
         Chatmode: Parsed chatmode primitive.
     """
+    raw_apply_to = metadata.get("applyTo")
+    normalized_apply_to = _normalize_apply_to(raw_apply_to, default="") or None
+    raw_handoffs = metadata.get("handoffs")
+    handoffs: list[str | dict] | None = None
+    if isinstance(raw_handoffs, list):
+        # Preserve structured entries (dicts) -- str() coercion destroys VS Code handoff objects.
+        handoffs = [h for h in raw_handoffs if h is not None]
+    elif raw_handoffs is not None:
+        handoffs = [str(raw_handoffs)]
     return Chatmode(
         name=name,
         file_path=file_path,
         description=metadata.get("description", ""),
-        apply_to=metadata.get("applyTo"),  # Optional for chatmodes
+        apply_to=normalized_apply_to,
         content=content,
         author=metadata.get("author"),
         version=metadata.get("version"),
         source=source,
+        handoffs=handoffs,
     )
 
 
@@ -148,7 +183,7 @@ def _parse_instruction(
         name=name,
         file_path=file_path,
         description=metadata.get("description", ""),
-        apply_to=metadata.get("applyTo", ""),  # Required for instructions
+        apply_to=_normalize_apply_to(metadata.get("applyTo"), default=""),
         content=content,
         author=metadata.get("author"),
         version=metadata.get("version"),

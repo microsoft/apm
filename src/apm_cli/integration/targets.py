@@ -19,8 +19,7 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field  # noqa: F401
-from typing import Dict, List, Optional, Tuple, Union  # noqa: F401, UP035
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -382,6 +381,7 @@ class TargetProfile:
 RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
     "vscode": "copilot",
     "agents": "copilot",
+    "intellij": "copilot",
 }
 
 

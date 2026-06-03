@@ -44,13 +44,13 @@ import builtins
 import contextlib
 import sys
 import time
-from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
-from .errors import AuthenticationError, DirectDependencyError, PolicyViolationError  # noqa: F401
+from .errors import AuthenticationError, DirectDependencyError
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver

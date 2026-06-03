@@ -1,10 +1,8 @@
 """Template building system for AGENTS.md compilation."""
 
-import re  # noqa: F401
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction
 from ..utils.paths import portable_relpath

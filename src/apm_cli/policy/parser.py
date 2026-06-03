@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import errno
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 

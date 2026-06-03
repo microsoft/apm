@@ -33,12 +33,12 @@ from apm_cli.install.insecure_policy import (
     InsecureDependencyPolicyError,
     _allow_insecure_host_callback,
     _check_insecure_dependencies,
-    _collect_insecure_dependency_infos,  # noqa: F401
+    _collect_insecure_dependency_infos,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _format_insecure_dependency_requirements,
-    _format_insecure_dependency_warning,  # noqa: F401
+    _format_insecure_dependency_warning,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _get_insecure_dependency_url,
-    _guard_transitive_insecure_dependencies,  # noqa: F401
-    _InsecureDependencyInfo,  # noqa: F401
+    _guard_transitive_insecure_dependencies,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
+    _InsecureDependencyInfo,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
 )
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
@@ -59,8 +59,8 @@ from apm_cli.install.package_selection import only_packages_from_validation
 # (e.g. _install_apm_dependencies) and any future test patches against
 # "apm_cli.commands.install._copy_local_package" keep working.
 from apm_cli.install.phases.local_content import (
-    _copy_local_package,  # noqa: F401
-    _has_local_apm_content,  # noqa: F401
+    _copy_local_package,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
+    _has_local_apm_content,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _project_has_root_primitives,
 )
 
@@ -72,8 +72,8 @@ from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_dep
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
 from apm_cli.install.services import (
-    _integrate_local_content,  # noqa: F401
-    _integrate_package_primitives,  # noqa: F401
+    _integrate_local_content,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
+    _integrate_package_primitives,  # noqa: F401 -- re-exported; tests import/patch from apm_cli.commands.install
 )
 
 # Re-export validation leaf helpers so that existing test patches like
@@ -84,7 +84,7 @@ from apm_cli.install.services import (
 # intercepts those calls without test changes.
 from apm_cli.install.validation import (
     _local_path_failure_reason,
-    _local_path_no_markers_hint,  # noqa: F401
+    _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
 )
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
@@ -112,11 +112,15 @@ from ..install.mcp.registry import (
 from ..install.mcp.registry import (
     validate_registry_url as _validate_registry_url,
 )
-from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success  # noqa: F401
+from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests patch commands.install._rich_success
+    _rich_echo,
+    _rich_error,
+    _rich_info,
+    _rich_success,
+)
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
-    _update_gitignore_for_apm_modules,  # noqa: F401
 )
 
 # ---------------------------------------------------------------------------
@@ -273,9 +277,7 @@ APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
 try:
     from ..deps.apm_resolver import APMDependencyResolver
-    from ..deps.github_downloader import GitHubPackageDownloader  # noqa: F401
     from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
-    from ..integration import AgentIntegrator, PromptIntegrator  # noqa: F401
     from ..integration.mcp_integrator import MCPIntegrator
     from ..models.apm_package import APMPackage, DependencyReference
 

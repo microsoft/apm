@@ -2,7 +2,6 @@
 
 import re
 from pathlib import Path
-from typing import Optional  # noqa: F401
 
 from ..primitives.models import Skill
 

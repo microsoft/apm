@@ -13,7 +13,6 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within

@@ -16,6 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reviewing or applying changes. Accepts `--update` (re-resolve to latest
   SHAs), `--verbose`, `--global`, `--no-policy`, `--target`, and
   `--parallel-downloads`. (#1639)
+- JetBrains users (IntelliJ IDEA, PyCharm, GoLand, WebStorm, and other IDEs)
+  can now install MCP servers with `apm install --mcp --runtime intellij
+  <package>` -- no manual `mcp.json` editing required. GitHub Copilot for
+  JetBrains stores servers under a `"servers"` top-level key (not
+  `"mcpServers"`) at an OS-specific user-scope path:
+  `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows),
+  `~/Library/Application Support/github-copilot/intellij/mcp.json` (macOS),
+  and `~/.local/share/github-copilot/intellij/mcp.json` (Linux, honouring
+  `XDG_DATA_HOME`). Auto-detected when that config directory exists.
+  Runtime `${VAR}` env substitution is not supported for this target, so
+  `--env` values are written verbatim -- avoid passing plaintext secrets.
+  (#1636)
+- `apm find <file>` command: trace a materialized file back to its contributing package(s) via a reverse index over `apm.lock.yaml`. Supports `--source` (oci/git/local origin) and `--path` (full dependency chain). Multi-contributor files list all packages. Unknown paths exit 2 with an ASCII `[x]` message. Zero network or write operations. (#1631)
 - `apm pack` now synthesises `homepage`, `repository`, `keywords`, and a structured
   `author` (`{name, email?, url?}`) from `apm.yml` into `plugin.json`. All changes are
   additive: omitting any of these fields in `apm.yml` produces no change to the output.
@@ -53,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neutral -- they work with the self-contained APM binary with no `pip`
   extra to install.
 - `apm update` now accepts `-g/--global`, positional `[PACKAGES]...`, `--force`, and `--parallel-downloads`, making it a strict superset of `apm deps update`. A single verb now covers project and user scope, per-package refresh, and collision overwrite -- all behind the same interactive plan with `--dry-run`/`--yes`. (closes #1525)
+- `apm config set mcp-registry-url <url>` / `get` / `unset` lets users persistently configure a private MCP registry endpoint without re-exporting `MCP_REGISTRY_URL` every session. The value is stored in `~/.apm/config.json` and sits between the environment variable and the built-in default in the resolution chain (CLI flag > env > config > default). Accepts `http://` or `https://` URLs; all other schemes are rejected. When the config layer is active, `apm mcp search` prints a `Registry (config): <url>` diagnostic. (closes #818) (#1637)
 
 ### Deprecated
 

@@ -63,7 +63,13 @@ def _valid_config_keys() -> str:
     """Return valid config keys for messages."""
     from ..core.experimental import is_enabled
 
-    keys = ["auto-integrate", "temp-dir", "allow-protocol-fallback", "prefer-ssh"]
+    keys = [
+        "auto-integrate",
+        "mcp-registry-url",
+        "temp-dir",
+        "allow-protocol-fallback",
+        "prefer-ssh",
+    ]
     if is_enabled("external_scanners"):
         keys.append("audit-on-install")
     if is_enabled("copilot_cowork"):
@@ -281,6 +287,17 @@ def set(key, value):  # noqa: F811
             sys.exit(1)
         return
 
+    if key == "mcp-registry-url":
+        from ..config import get_mcp_registry_url, set_mcp_registry_url
+
+        try:
+            set_mcp_registry_url(value)
+            logger.success(f"MCP registry URL set to: {get_mcp_registry_url()}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        return
+
     if key == "audit-on-install":
         from ..core.experimental import is_enabled
 
@@ -391,6 +408,16 @@ def get(key):
                 click.echo(f"temp-dir: {value}")
             return
 
+        if key == "mcp-registry-url":
+            from ..config import get_mcp_registry_url
+
+            value = get_mcp_registry_url()
+            if value is None:
+                click.echo("mcp-registry-url: Not set (using default https://api.mcp.github.com)")
+            else:
+                click.echo(f"mcp-registry-url: {value}")
+            return
+
         if key == "audit-on-install":
             from ..config import get_audit_on_install
 
@@ -442,6 +469,13 @@ def get(key):
                 f"{csd if csd is not None else 'Not set (using auto-detection)'}"
             )
 
+        from ..config import get_mcp_registry_url as _get_mcp_registry_url_all
+
+        mcp_url = _get_mcp_registry_url_all()
+        click.echo(
+            f"  mcp-registry-url: {mcp_url if mcp_url is not None else 'Not set (using default)'}"
+        )
+
 
 @config.command(help="Unset a configuration value")
 @click.argument("key")
@@ -485,6 +519,13 @@ def unset(key):
 
         unset_temp_dir()
         logger.success("Temporary directory configuration removed")
+        return
+
+    if key == "mcp-registry-url":
+        from ..config import unset_mcp_registry_url
+
+        unset_mcp_registry_url()
+        logger.success("MCP registry URL configuration removed (will use env var or default)")
         return
 
     if key == "audit-on-install":

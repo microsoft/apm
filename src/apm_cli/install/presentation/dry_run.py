@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Optional  # noqa: F401
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pathlib import Path

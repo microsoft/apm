@@ -117,12 +117,12 @@ class CopilotClientAdapter(MCPClientAdapter):
         """
         current_config = self.get_current_config()
 
-        # Ensure mcpServers section exists
-        if "mcpServers" not in current_config:
-            current_config["mcpServers"] = {}
+        # Ensure servers section exists and is a dict (guard against malformed config).
+        if not isinstance(current_config.get(self.mcp_servers_key), dict):
+            current_config[self.mcp_servers_key] = {}
 
         # Apply updates
-        current_config["mcpServers"].update(config_updates)
+        current_config[self.mcp_servers_key].update(config_updates)
 
         # Write back to file
         config_path = Path(self.get_config_path())
@@ -259,7 +259,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             current = self.get_current_config()
         except Exception:
             return set(), False
-        servers = current.get("mcpServers") or {}
+        servers = current.get(self.mcp_servers_key) or {}
         # Match the same key resolution rule used below.
         if server_name:
             key = server_name

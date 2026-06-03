@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Optional  # noqa: F401
 
 from .constants import (
     CONSTITUTION_MARKER_BEGIN,

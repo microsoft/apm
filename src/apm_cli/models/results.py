@@ -1,7 +1,6 @@
 """Typed result containers for APM operations."""
 
 from dataclasses import dataclass, field
-from typing import Dict  # noqa: F401, UP035
 
 
 @dataclass

@@ -7,7 +7,6 @@ LOC budget (sibling to ``warnings.py`` / ``registry.py``).
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Dict, Optional  # noqa: F401, UP035
 
 import click
 

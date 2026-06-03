@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
