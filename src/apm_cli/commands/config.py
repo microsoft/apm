@@ -469,6 +469,13 @@ def get(key):
                 f"{csd if csd is not None else 'Not set (using auto-detection)'}"
             )
 
+        from ..config import get_mcp_registry_url as _get_mcp_registry_url_all
+
+        mcp_url = _get_mcp_registry_url_all()
+        click.echo(
+            f"  mcp-registry-url: {mcp_url if mcp_url is not None else 'Not set (using default)'}"
+        )
+
 
 @config.command(help="Unset a configuration value")
 @click.argument("key")

@@ -557,7 +557,12 @@ def _validate_mcp_registry_url(url: str) -> str:
             f"use http:// or https://. "
             f"WebSocket URLs (ws/wss) and file:// paths are rejected for security."
         )
-    if not parsed.netloc:
+    if parsed.username is not None:
+        raise ValueError(
+            "mcp-registry-url: URL must not contain credentials; "
+            "use the MCP_REGISTRY_URL environment variable or a credential helper instead."
+        )
+    if not parsed.hostname:
         raise ValueError(
             f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
             f"(e.g. https://mcp.internal.example.com)"

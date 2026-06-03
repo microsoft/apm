@@ -121,6 +121,10 @@ class TestMcpRegistryUrlConfig:
         with pytest.raises(ValueError, match="Invalid URL"):
             config_mod.set_mcp_registry_url("https://")
 
+    def test_set_rejects_embedded_credentials(self, isolated_config):
+        with pytest.raises(ValueError, match="must not contain credentials"):
+            config_mod.set_mcp_registry_url("https://user:token@corp.mcp.example.com")
+
     def test_unset_removes_key(self, isolated_config):
         config_mod.set_mcp_registry_url("https://corp.mcp.example.com")
         config_mod.unset_mcp_registry_url()

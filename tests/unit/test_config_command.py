@@ -1456,7 +1456,11 @@ class TestMcpRegistryUrlCommand:
             )
         assert result.exit_code == 0
         mock_set.assert_called_once_with("https://corp.mcp.example.com")
-        assert "corp.mcp.example.com" in result.output
+        from urllib.parse import urlparse
+
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert len(urls) >= 1
+        assert urlparse(urls[0]).hostname == "corp.mcp.example.com"
 
     def test_set_valid_http_url(self):
         with (
@@ -1488,7 +1492,11 @@ class TestMcpRegistryUrlCommand:
         ):
             result = self.runner.invoke(config, ["get", "mcp-registry-url"])
         assert result.exit_code == 0
-        assert "corp.mcp.example.com" in result.output
+        from urllib.parse import urlparse
+
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert len(urls) >= 1
+        assert urlparse(urls[0]).hostname == "corp.mcp.example.com"
 
     def test_get_when_not_set(self):
         with patch("apm_cli.config.get_mcp_registry_url", return_value=None):

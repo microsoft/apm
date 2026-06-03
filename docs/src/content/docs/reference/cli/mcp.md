@@ -118,7 +118,7 @@ spot in CI logs.
 
 Registry URL resolution order (first set value wins):
 
-1. `--mcp-registry-url <url>` CLI flag
+1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (this invocation only)
 2. `MCP_REGISTRY_URL` environment variable -- prints `Registry: <url>` diagnostic
 3. `mcp-registry-url` in `~/.apm/config.json` (set via `apm config set mcp-registry-url`) -- prints `Registry (config): <url>` diagnostic
 4. Built-in public default (silent)

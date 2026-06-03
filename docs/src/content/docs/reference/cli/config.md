@@ -73,7 +73,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 
 `mcp-registry-url` follows a four-layer precedence chain (CLI flag wins):
 
-1. `--mcp-registry-url <url>` CLI flag on `apm install` / `apm mcp search`
+1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (this invocation only)
 2. `MCP_REGISTRY_URL` environment variable
 3. `mcp-registry-url` value in `~/.apm/config.json`
 4. Built-in public default registry

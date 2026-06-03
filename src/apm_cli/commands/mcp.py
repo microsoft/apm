@@ -39,11 +39,10 @@ def _build_registry_with_diag(console, logger):
 
         config_url = _get_mcp_registry_url()
         if config_url:
-            url = registry.client.registry_url
             if console:
-                console.print(f"[muted]Registry: {url} (from apm config)[/muted]")
+                console.print(f"[muted]Registry: {config_url} (from apm config)[/muted]")
             else:
-                logger.progress(f"Registry: {url} (from apm config)")
+                logger.progress(f"Registry: {config_url} (from apm config)")
     return registry
 
 
