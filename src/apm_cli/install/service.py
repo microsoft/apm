@@ -92,6 +92,7 @@ class InstallService:
             legacy_skill_paths=request.legacy_skill_paths,
             plan_callback=request.plan_callback,
             refresh=request.refresh,
+            lockfile_only=request.lockfile_only,
         )
 
     @staticmethod

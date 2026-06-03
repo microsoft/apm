@@ -67,12 +67,18 @@ class LockfileBuilder:
 
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
-        if not self.ctx.installed_packages:
+        if not self.ctx.installed_packages and not self.ctx.lockfile_only:
             # Even with nothing newly installed, a pre-existing
             # lockfile may need its cache pin markers refreshed --
             # e.g. user upgraded APM and their cache pre-dates the
             # marker contract. Sync best-effort against the on-disk
             # lockfile.
+            #
+            # In lockfile_only mode (``apm lock``) we deliberately fall
+            # through even with zero dependencies: the command's core
+            # promise is to always materialise an ``apm.lock.yaml`` (an
+            # empty one for a depless project), mirroring
+            # ``cargo generate-lockfile``.
             self._sync_cache_pin_markers_from_disk()
             return
         try:

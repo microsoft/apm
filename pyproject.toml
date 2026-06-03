@@ -94,13 +94,16 @@ ignore = [
 # High initial thresholds set just above current codebase maximums.
 # Prevents new code from exceeding the worst existing violations.
 # Tighten these over time via dedicated refactoring PRs.
-max-statements = 275   # current max: 269 (mcp_integrator.py::install)
-max-args = 18          # current max: 16  (commands/install.py)
-max-branches = 115     # current max: 108 (mcp_integrator.py::install)
-max-returns = 18       # current max: 16  (marketplace/publisher.py)
+# Stage 1 thresholds (PR #1464, issue #1077).
+# Roadmap: Stage 2 targets max-complexity<=20, max-branches<=25 (McCabe standard).
+max-statements = 200   # Stage 1 (was 275)
+max-args = 15          # Stage 1 (was 18)
+max-branches = 60      # Stage 1 (was 115)
+max-returns = 12       # Stage 1 (was 18)
 
 [tool.ruff.lint.mccabe]
-max-complexity = 100   # current max: 97  (mcp_integrator.py::install)
+# Stage 1 (was 100). Stage 2 target: <=20 (McCabe industry standard).
+max-complexity = 50
 
 [tool.ruff.lint.per-file-ignores]
 # Subprocess calls are intentional in a CLI tool
@@ -118,7 +121,6 @@ max-complexity = 100   # current max: 97  (mcp_integrator.py::install)
 "src/apm_cli/commands/init.py" = ["F821", "S603", "S607"]
 "src/apm_cli/install/pipeline.py" = ["F821", "S603", "S607"]
 "src/apm_cli/integration/skill_integrator.py" = ["F821", "S603", "S607"]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

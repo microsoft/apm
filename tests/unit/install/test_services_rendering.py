@@ -20,7 +20,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.targets import KNOWN_TARGETS
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    """Convert a dict of old-style integrator kwargs to an IntegratorBundle."""
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,7 +173,7 @@ class TestMultiTargetCollapseRule:
                 ctx=_ctx(verbose=verbose),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=_to_bundle(kwargs),
             )
 
         return _logger_lines(logger)
@@ -255,7 +269,7 @@ class TestAdoptedFileVisibility:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=_to_bundle(kwargs),
             )
         return _logger_lines(logger)
 
@@ -323,7 +337,7 @@ class TestWarmCacheAnnotation:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=_to_bundle(kwargs),
             )
 
         lines = _logger_lines(logger)
@@ -352,7 +366,7 @@ class TestWarmCacheAnnotation:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=_to_bundle(kwargs),
             )
 
         lines = _logger_lines(logger)
@@ -388,7 +402,7 @@ class TestWarmCacheAnnotation:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=_to_bundle(kwargs),
             )
 
         lines = _logger_lines(logger)
@@ -424,7 +438,7 @@ class TestAggregateCounterPreserved:
                 ctx=_ctx(),
                 force=False,
                 managed_files=None,
-                **kwargs,
+                integrators=_to_bundle(kwargs),
             )
 
         assert result["agents"] == 7

@@ -176,11 +176,12 @@ tags: [security, validation]
 ```
 
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
-(`"**/src/**,**/api/**"`). Commas inside brace alternation
-(`**/*.{css,scss}`) are part of the glob and are NOT separators -- only
-top-level commas split the list. On Copilot the value is preserved
-verbatim; on Claude/Cursor/Windsurf comma-lists are expanded to a YAML
-array under `paths:` / `globs:`.
+(`"**/src/**,**/api/**"`). A YAML sequence (`applyTo: ['**/*.py']`) is also
+accepted; when multiple sequence elements are given, the first is used.
+Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
+and are NOT separators -- only top-level commas split the list. On Copilot
+the value is preserved verbatim; on Claude/Cursor/Windsurf comma-lists are
+expanded to a YAML array under `paths:` / `globs:`.
 
 ### 2. Chatmode (`*.chatmode.md`)
 

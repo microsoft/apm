@@ -238,3 +238,87 @@ def test_default_skillspector_argv_has_no_llm(runner, monkeypatch, tmp_path):
     assert result.exit_code in (0, 1)
     assert "cmd" in captured
     assert "--no-llm" in captured["cmd"]
+
+
+def test_flag_on_warning_only_exits_2(runner, monkeypatch, tmp_path):
+    """Warning-only findings are non-critical but still flagged (exit 2)."""
+    _inject_flag(monkeypatch, enabled=True)
+    sarif = tmp_path / "w.sarif"
+    _write_sarif(sarif, level="warning")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        audit, ["--external", "sarif", "--external-sarif", str(sarif), "-f", "json"]
+    )
+    assert result.exit_code == 2
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert payload["summary"]["warning"] >= 1
+    assert payload["summary"]["critical"] == 0
+
+
+def test_missing_sarif_file_gives_actionable_error(runner, monkeypatch, tmp_path):
+    """A path that does not exist produces a clear, non-traceback message."""
+    _inject_flag(monkeypatch, enabled=True)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        audit, ["--external", "sarif", "--external-sarif", str(tmp_path / "no.sarif")]
+    )
+    assert result.exit_code == 2
+    assert "not found" in result.output.lower()
+    assert "Traceback" not in result.output
+
+
+def test_malformed_sarif_gives_actionable_error(runner, monkeypatch, tmp_path):
+    """A SARIF file missing the 'runs' key fails closed with a clear message."""
+    _inject_flag(monkeypatch, enabled=True)
+    bad = tmp_path / "bad.sarif"
+    bad.write_text('{"version":"2.1.0"}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(audit, ["--external", "sarif", "--external-sarif", str(bad)])
+    assert result.exit_code == 2
+    assert "not a SARIF" in result.output
+    assert "missing 'runs'" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_skillspector_not_on_path_gives_actionable_error(runner, monkeypatch, tmp_path):
+    """When skillspector CLI is absent, the message suggests the SARIF fallback."""
+    import shutil as _shutil
+
+    _inject_flag(monkeypatch, enabled=True)
+    monkeypatch.setattr(_shutil, "which", lambda _name: None)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(audit, ["--external", "skillspector"])
+    assert result.exit_code == 2
+    assert "not found on PATH" in result.output or "unavailable" in result.output.lower()
+    assert "--external sarif" in result.output
+
+
+def test_sarif_output_includes_external_findings(runner, monkeypatch, tmp_path):
+    """The -f sarif output contains external findings in SARIF 2.1.0 format."""
+    _inject_flag(monkeypatch, enabled=True)
+    sarif = tmp_path / "r.sarif"
+    _write_sarif(sarif, level="error")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        audit, ["--external", "sarif", "--external-sarif", str(sarif), "-f", "sarif"]
+    )
+    out = json.loads(result.output[result.output.index("{") :])
+    assert out["version"] == "2.1.0"
+    assert len(out["runs"]) >= 1
+    rules = out["runs"][0]["tool"]["driver"].get("rules", [])
+    rule_ids = [r["id"] for r in rules]
+    assert any("S1" in rid for rid in rule_ids)
+
+
+def test_markdown_output_includes_external_findings(runner, monkeypatch, tmp_path):
+    """The -f markdown output renders external findings in a table."""
+    _inject_flag(monkeypatch, enabled=True)
+    sarif = tmp_path / "r.sarif"
+    _write_sarif(sarif, level="error")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        audit, ["--external", "sarif", "--external-sarif", str(sarif), "-f", "markdown"]
+    )
+    assert result.exit_code == 1
+    assert "CRITICAL" in result.output
+    assert "app/x.py" in result.output

@@ -1029,7 +1029,7 @@ def _audit_content_scan(
     ),
 )
 @click.pass_context
-def audit(
+def audit(  # noqa: PLR0913 -- Click handler
     ctx,
     package,
     file_path,

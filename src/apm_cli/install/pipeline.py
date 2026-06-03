@@ -316,6 +316,44 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
+def _write_empty_lockfile_only(apm_dir: Path) -> None:
+    """Materialise an empty ``apm.lock.yaml`` for a depless ``apm lock`` run.
+
+    ``apm lock`` promises to always produce a lockfile, even when the
+    project declares zero dependencies (mirroring ``cargo
+    generate-lockfile``). The write is skipped when an equivalent
+    lockfile already exists so repeat runs don't churn ``generated_at``.
+    """
+    from ..deps.lockfile import LockFile, get_lockfile_path
+
+    lock_path = get_lockfile_path(apm_dir)
+    new_lock = LockFile.from_installed_packages([], None)
+    existing_lock = LockFile.read(lock_path) if lock_path.exists() else None
+    if not (existing_lock and new_lock.is_semantically_equivalent(existing_lock)):
+        new_lock.save(lock_path)
+
+
+def _is_no_work_install(
+    *,
+    all_apm_deps,
+    root_has_local_primitives: bool,
+    old_local_deployed,
+    has_orphan_deps: bool,
+    lockfile_only: bool,
+    apm_dir: Path | None,
+) -> bool:
+    """Return True when there is genuinely no install/cleanup work to do.
+
+    In ``lockfile_only`` mode (``apm lock``) an empty lockfile is written
+    before returning so the command always materialises its artefact.
+    """
+    if all_apm_deps or root_has_local_primitives or old_local_deployed or has_orphan_deps:
+        return False
+    if lockfile_only and apm_dir:
+        _write_empty_lockfile_only(apm_dir)
+    return True
+
+
 def run_install_pipeline(  # noqa: PLR0913, RUF100
     apm_package: APMPackage,
     update_refs: bool = False,
@@ -339,6 +377,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     legacy_skill_paths: bool = False,
     plan_callback=None,
     refresh: bool = False,
+    lockfile_only: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -423,11 +462,13 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         _early_lockfile and any(k != _SELF_KEY for k in _early_lockfile.dependencies)
     )
 
-    if (
-        not all_apm_deps
-        and not _root_has_local_primitives
-        and not _old_local_deployed
-        and not _has_orphan_deps
+    if _is_no_work_install(
+        all_apm_deps=all_apm_deps,
+        root_has_local_primitives=_root_has_local_primitives,
+        old_local_deployed=_old_local_deployed,
+        has_orphan_deps=_has_orphan_deps,
+        lockfile_only=lockfile_only,
+        apm_dir=apm_dir,
     ):
         return InstallResult()
 
@@ -465,6 +506,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         early_lockfile=_early_lockfile,
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
+        lockfile_only=lockfile_only,
     )
 
     # ------------------------------------------------------------------
@@ -540,19 +582,18 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
             raise  # re-raise through the outer except -> RuntimeError wrapper
 
         # --------------------------------------------------------------
-        # Phase 2: Target detection + integrator initialization
+        # Phase 2: Target detection + integrator initialization.
+        # Skipped in lockfile_only mode -- no primitives are deployed.
         # --------------------------------------------------------------
-        from .phases import targets as _targets_phase
+        if not lockfile_only:
+            from .phases import targets as _targets_phase
 
-        _run_phase("targets", _targets_phase, ctx)
+            _run_phase("targets", _targets_phase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
-        # Target/compilation policy rules need the effective target
-        # which is only known after targets.run().  Dependency checks
-        # already ran in policy_gate; this phase filters to
-        # compilation-target checks only.
-        # PolicyViolationError halts the pipeline cleanly.
+        # Runs even in lockfile_only mode so that --target policy
+        # constraints are enforced during resolution-only runs.
         # --------------------------------------------------------------
         from .phases import policy_target_check as _policy_target_check_phase
 
@@ -563,12 +604,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
         # --------------------------------------------------------------
         # Phase 1.75: Auth pre-flight for --update mode (#1015)
-        # When update_refs is set we are about to overwrite apm.yml,
-        # apm.lock.yaml, and apm_modules/. If any remote host rejects
-        # auth we must abort BEFORE any write phase to avoid partial
-        # file corruption. One git ls-remote per distinct (host, org).
+        # Skipped in lockfile_only mode -- no writes to apm.yml occur.
         # --------------------------------------------------------------
-        if update_refs and ctx.deps_to_install:
+        if update_refs and ctx.deps_to_install and not lockfile_only:
             # Use ctx.auth_resolver: resolve phase guarantees it is set
             # (resolve.py:91-92), whereas the local ``auth_resolver``
             # parameter can still be None for callers that omit it.
@@ -699,33 +737,33 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
                 "One or more direct dependencies failed validation. Run with --verbose for details."
             )
 
-        # Update .gitignore only for project-scoped installs (#1577).
-        # Global installs (InstallScope.USER) must not touch the CWD.
-        if scope == InstallScope.PROJECT:
+        # Update .gitignore only for project-scoped installs, not in lockfile_only mode.
+        if scope == InstallScope.PROJECT and not lockfile_only:
             from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
 
             _update_gitignore_for_apm_modules(logger=logger)
-        elif verbose and logger is not None:
+        elif verbose and logger is not None and not lockfile_only:
             logger.verbose_detail("Skipping .gitignore update (global scope install).")
 
         # ------------------------------------------------------------------
-        # Phase: Orphan cleanup + intra-package stale-file cleanup
-        # All deletions routed through integration/cleanup.py (#762).
+        # Phase: Orphan cleanup + intra-package stale-file cleanup.
+        # Skipped in lockfile_only mode -- no files were deployed.
         # ------------------------------------------------------------------
-        from .phases import cleanup as _cleanup_phase
+        if not lockfile_only:
+            from .phases import cleanup as _cleanup_phase
 
-        _run_phase("cleanup", _cleanup_phase, ctx)
+            _run_phase("cleanup", _cleanup_phase, ctx)
 
         # ------------------------------------------------------------------
-        # Phase: Skill path auto-migration (#737)
-        # After integrate wrote new .agents/skills/ files and cleanup
-        # removed orphans, migrate any legacy per-client skill paths
-        # still recorded in the lockfile (e.g. .github/skills/ ->
-        # .agents/skills/).  Mutates existing_lockfile.deployed_files
-        # in place so the downstream lockfile phase persists the new paths.
-        # Skipped when --legacy-skill-paths is active (opt-out).
+        # Phase: Skill path auto-migration (#737).
+        # Skipped in lockfile_only mode.
         # ------------------------------------------------------------------
-        if not ctx.legacy_skill_paths and ctx.existing_lockfile and not ctx.dry_run:
+        if (
+            not ctx.legacy_skill_paths
+            and ctx.existing_lockfile
+            and not ctx.dry_run
+            and not lockfile_only
+        ):
             from apm_cli.utils.console import _rich_info, _rich_warning
 
             from .skill_path_migration import (
@@ -787,29 +825,25 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         LockfileBuilder(ctx).build_and_save()
 
         # ------------------------------------------------------------------
-        # Phase: Post-deps local .apm/ content -- stale cleanup +
-        # lockfile persistence for the project's own .apm/ primitives.
-        # Runs after the dep lockfile so it can read-modify-write the
-        # lockfile with local_deployed_files / hashes.  All deletions
-        # routed through integration/cleanup.py (#762).
+        # Phase: Post-deps local .apm/ content.
+        # Skipped in lockfile_only mode -- no file deployment occurred.
         # ------------------------------------------------------------------
-        from .phases import post_deps_local as _post_deps_local_phase
+        if not lockfile_only:
+            from .phases import post_deps_local as _post_deps_local_phase
 
-        _run_phase("post_deps_local", _post_deps_local_phase, ctx)
+            _run_phase("post_deps_local", _post_deps_local_phase, ctx)
 
         # ------------------------------------------------------------------
         # Phase: Optional install-time content audit (external_scanners flag).
-        # Runs after the lockfile + local content are persisted so deployed
-        # files are enumerable, and before finalize.  No-op unless config /
-        # policy opt in (default off).  A ``block`` decision raises
-        # PolicyViolationError, re-raised by the outer handler below.
+        # Skipped in lockfile_only mode -- no files were deployed.
         # ------------------------------------------------------------------
-        from .phases import audit as _audit_phase
+        if not lockfile_only:
+            from .phases import audit as _audit_phase
 
-        try:
-            _run_phase("audit", _audit_phase, ctx)
-        except PolicyViolationError:
-            raise
+            try:
+                _run_phase("audit", _audit_phase, ctx)
+            except PolicyViolationError:
+                raise
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase

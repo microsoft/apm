@@ -17,6 +17,7 @@ class Chatmode:
     author: str | None = None
     version: str | None = None
     source: str | None = None  # Source of primitive: "local" or "dependency:{package_name}"
+    handoffs: list[str | dict] | None = None  # Agent handoff targets (optional, for .agent.md)
 
     def validate(self) -> list[str]:
         """Validate chatmode structure.

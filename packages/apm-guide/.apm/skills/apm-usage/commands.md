@@ -17,6 +17,7 @@
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
 | `apm deps tree` | Show dependency tree | -- |
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
+| `apm find <PATH>` | Trace a deployed file back to the package(s) that contributed it (inverse of install; reads `apm.lock.yaml` only) | `--source` show OCI/git/local origin, `--path` show full why-chain (same as `apm deps why`) |
 | `apm view PKG [FIELD]` | View package details or remote refs | `-g` global, `FIELD=versions` |
 | `apm outdated` | Check locked deps via SHA/semver comparison | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
@@ -33,7 +34,7 @@
 
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
 2. `apm.yml` `targets:` list (or singular `target:` sugar).
-3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf).
+3. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf, the user-scope JetBrains Copilot MCP config directory `github-copilot/intellij/` -- `%LOCALAPPDATA%\github-copilot\intellij\` on Windows, `~/Library/Application Support/github-copilot/intellij/` on macOS, `~/.local/share/github-copilot/intellij/` on Linux -> intellij). All signals except JetBrains are project-scoped repo markers; the JetBrains signal is a machine-global user-scope directory, so once the Copilot plugin is installed it is detected for every project on that machine.
 
 `apm install` prints a one-line provenance summary before any mutation:
 
@@ -201,6 +202,7 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 | `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`, `mcp-registry-url`) | -- |
 | `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `mcp-registry-url`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
 | `apm config unset KEY` | Remove a stored config value (`temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`, `mcp-registry-url`) | -- |
+| `apm lock` | Resolve all dependencies in `apm.yml` and write `apm.lock.yaml` **without** deploying any files to agent targets. Mirrors `cargo generate-lockfile` / `pnpm lock`. Use to bootstrap or refresh the lockfile before reviewing and applying changes. | `--update` re-resolve to latest SHAs, `--verbose`, `-g/--global`, `--no-policy`, `--target` (comma-separated), `--parallel-downloads N` |
 | `apm update [PKGS...]` | Refresh APM dependencies: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged), and prompts before mutating anything (default `[y/N]`). Pass `[PKGS...]` to refresh only those deps, or `-g` for user scope (`~/.apm/`). Strict superset of the deprecated `apm deps update`. Skips the prompt with `--yes`; previews with `--dry-run`. | `--yes`, `--dry-run`, `--verbose`, `-g/--global`, `--force`, `--parallel-downloads N`, `--target` (comma-separated) |
 | `apm self-update` | Update the APM CLI itself (or show distributor guidance when self-update is disabled at build time). | `--check` only check |
 

@@ -164,6 +164,47 @@ class TestSarifToFindings:
         f = out["<unknown>"][0]
         assert (f.line, f.column) == (1, 1)
 
+    def test_ansi_escape_codes_stripped_from_message(self) -> None:
+        from apm_cli.security.external.sarif_ingest import sarif_to_findings
+
+        doc = _sarif(
+            [
+                {
+                    "ruleId": "R",
+                    "level": "warning",
+                    "message": {"text": "\x1b[31mexec() call detected\x1b[0m"},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": "s.py"},
+                                "region": {"startLine": 5, "startColumn": 1},
+                            }
+                        }
+                    ],
+                }
+            ]
+        )
+        out = sarif_to_findings(doc, tool_name="t")
+        finding = out["s.py"][0]
+        assert finding.description == "exec() call detected"
+
+    def test_ansi_only_message_falls_back_to_no_message(self) -> None:
+        from apm_cli.security.external.sarif_ingest import sarif_to_findings
+
+        doc = _sarif(
+            [
+                {
+                    "ruleId": "R",
+                    "level": "warning",
+                    "message": {"text": "\x1b[31m\x1b[0m"},
+                    "locations": [],
+                }
+            ]
+        )
+        out = sarif_to_findings(doc, tool_name="t")
+        finding = next(iter(out.values()))[0]
+        assert finding.description == "(no message)"
+
     def test_not_a_sarif_document_raises(self) -> None:
         from apm_cli.security.external.base import ExternalScanError
         from apm_cli.security.external.sarif_ingest import sarif_to_findings
@@ -276,6 +317,61 @@ class TestSkillSpectorAdapter:
 
         monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
         assert mod.SkillSpectorAdapter().is_available() == (True, None)
+
+    def test_scan_passes_no_llm_flag(self, monkeypatch, tmp_path: Path) -> None:
+        """--no-llm must be part of the command so scans work without an API key."""
+        import apm_cli.security.external.skillspector as mod
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+
+        captured_cmd: list[str] = []
+        sarif = (
+            '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"s","rules":[]}},"results":[]}]}'
+        )
+
+        def fake_run(cmd, **_kwargs):
+            captured_cmd.extend(cmd)
+            return mod.subprocess.CompletedProcess(cmd, 0, stdout=sarif, stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+        mod.SkillSpectorAdapter().scan([tmp_path])
+        assert "--no-llm" in captured_cmd
+
+    def test_scan_non_json_stdout_surfaces_first_line(self, monkeypatch, tmp_path: Path) -> None:
+        """When SkillSpector writes an error to stdout, the message is surfaced."""
+        import apm_cli.security.external.skillspector as mod
+        from apm_cli.security.external.base import ExternalScanError
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+
+        error_text = "Error: NVIDIA_API_KEY not set. Please configure an API key."
+
+        def fake_run(cmd, **_kwargs):
+            return mod.subprocess.CompletedProcess(cmd, 1, stdout=error_text, stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+        with pytest.raises(ExternalScanError, match=r"NVIDIA_API_KEY not set"):
+            mod.SkillSpectorAdapter().scan([tmp_path])
+
+    def test_scan_non_json_stdout_sanitises_non_ascii(self, monkeypatch, tmp_path: Path) -> None:
+        """Non-printable / non-ASCII chars in vendor stdout are replaced with '?'."""
+        import apm_cli.security.external.skillspector as mod
+        from apm_cli.security.external.base import ExternalScanError
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+
+        # ANSI escape + non-ASCII char embedded in vendor error output.
+        error_text = "\x1b[31mError\x1b[0m: caf\u00e9 failure"
+
+        def fake_run(cmd, **_kwargs):
+            return mod.subprocess.CompletedProcess(cmd, 1, stdout=error_text, stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+        with pytest.raises(ExternalScanError, match=r"\?.*Error.*\?.*caf\?"):
+            mod.SkillSpectorAdapter().scan([tmp_path])
 
 
 # ---------------------------------------------------------------------------
