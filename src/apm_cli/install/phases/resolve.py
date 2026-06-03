@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
+# ------------------------------------------------------------------
+# Private helpers (each mutates ctx in-place, following existing pattern)
+# ------------------------------------------------------------------
+
+
 def _lockfile_has_registry_deps(existing_lockfile) -> bool:
     """True when the on-disk lockfile records at least one registry-sourced dep.
 
@@ -216,23 +221,13 @@ def _purge_cached_semver_paths_for_update(
                 )
 
 
-def run(ctx: InstallContext) -> None:
-    """Execute the resolve phase.
-
-    On return every field listed in the *Resolve phase outputs* section of
-    :class:`~apm_cli.install.context.InstallContext` is populated.
-    """
-    from apm_cli.core.auth import AuthResolver
-    from apm_cli.core.scope import InstallScope, get_modules_dir
-    from apm_cli.deps import github_downloader as _ghd_mod
-    from apm_cli.deps.apm_resolver import APMDependencyResolver
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-    from apm_cli.install.phases.local_content import _copy_local_package
-    from apm_cli.models.apm_package import DependencyReference
-
+def _load_lockfile(ctx: InstallContext) -> None:
+    """Load ``apm.lock.yaml`` and populate ``ctx.existing_lockfile`` / ``ctx.lockfile_path``."""
     # ------------------------------------------------------------------
     # 1. Lockfile loading
     # ------------------------------------------------------------------
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
     lockfile_path = get_lockfile_path(ctx.apm_dir)
     ctx.lockfile_path = lockfile_path
     existing_lockfile = None
@@ -263,16 +258,29 @@ def run(ctx: InstallContext) -> None:
                     ctx.logger.lockfile_entry(locked_dep.get_unique_key(), ref=_ref, sha=_sha)
     ctx.existing_lockfile = existing_lockfile
 
+
+def _ensure_modules_dir(ctx: InstallContext) -> None:
+    """Create the ``apm_modules/`` directory and populate ``ctx.apm_modules_dir``."""
     # ------------------------------------------------------------------
     # 2. apm_modules directory
     # ------------------------------------------------------------------
+    from apm_cli.core.scope import get_modules_dir
+
     apm_modules_dir = get_modules_dir(ctx.scope)
     apm_modules_dir.mkdir(parents=True, exist_ok=True)
     ctx.apm_modules_dir = apm_modules_dir
 
+
+def _setup_downloader(ctx: InstallContext) -> None:
+    """Create auth resolver and downloader; populate ``ctx.auth_resolver`` / ``ctx.downloader``."""
     # ------------------------------------------------------------------
     # 3. Auth resolver + downloader
     # ------------------------------------------------------------------
+    import os as _os
+
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.deps import github_downloader as _ghd_mod
+
     if ctx.auth_resolver is None:
         ctx.auth_resolver = AuthResolver()
 
@@ -285,8 +293,7 @@ def run(ctx: InstallContext) -> None:
 
     # WS2a (#1116): attach a per-run shared clone cache so subdirectory
     # deps from the same upstream repo+ref share a single git clone.
-    # The cache is cleaned up in the resolve phase's finally-equivalent
-    # (after resolution completes, whether success or failure).
+    # The cache is cleaned up after resolution completes (see _resolve_dependencies).
     from apm_cli.deps.shared_clone_cache import SharedCloneCache
 
     shared_cache = SharedCloneCache()
@@ -294,8 +301,6 @@ def run(ctx: InstallContext) -> None:
 
     # WS3 (#1116): attach persistent cross-run git cache unless disabled
     # via APM_NO_CACHE environment variable.
-    import os as _os
-
     if not _os.environ.get("APM_NO_CACHE"):
         from apm_cli.cache.paths import get_cache_root
 
@@ -343,6 +348,26 @@ def run(ctx: InstallContext) -> None:
             exc,
         )
 
+
+def _resolve_dependencies(ctx: InstallContext) -> None:
+    """Run ``APMDependencyResolver``, handle errors; populate ``ctx.deps_to_install`` and ``ctx.dependency_graph``.
+
+    Also wires the download callback (which handles transitive package fetching),
+    builds ``ctx.dep_base_dirs``, writes ancillary state to ``ctx``, and cleans up
+    the shared clone cache.
+    """
+    import threading as _threading
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
+    from apm_cli.install.insecure_policy import (
+        _check_insecure_dependencies,
+        _collect_insecure_dependency_infos,
+        _guard_transitive_insecure_dependencies,
+        _warn_insecure_dependencies,
+    )
+    from apm_cli.install.phases.local_content import _copy_local_package
+
     # ------------------------------------------------------------------
     # 3b. Dedicated registry resolver (design §3.1, §8)
     # ------------------------------------------------------------------
@@ -356,6 +381,7 @@ def run(ctx: InstallContext) -> None:
     # forcing anonymous fetch).
     registry_resolver = None
     _apply_lockfile_registry_name = None
+    existing_lockfile = ctx.existing_lockfile
     registries_map = getattr(ctx.apm_package, "registries", None) or {}
     needs_registry = _require_package_registry_feature_if_needed(registries_map, existing_lockfile)
     if needs_registry:
@@ -383,8 +409,6 @@ def run(ctx: InstallContext) -> None:
     # ``callback_downloaded`` (e.g. duplicate-key races) are not. A single
     # narrow lock around the result-recording sites is sufficient and
     # cheap; the heavy I/O work runs OUTSIDE the lock.
-    import threading as _threading
-
     callback_lock = _threading.Lock()
 
     # ------------------------------------------------------------------
@@ -406,6 +430,8 @@ def run(ctx: InstallContext) -> None:
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: re-resolving all refs")
     logger = ctx.logger
+    existing_lockfile = ctx.existing_lockfile
+    downloader = ctx.downloader
 
     # Hoist drift helpers so download_callback avoids per-call sys.modules
     # lookups and static analysis can see the dependency.
@@ -696,12 +722,12 @@ def run(ctx: InstallContext) -> None:
     if update_refs:
         _purge_cached_semver_paths_for_update(
             all_apm_deps=ctx.all_apm_deps,
-            apm_modules_dir=apm_modules_dir,
+            apm_modules_dir=ctx.apm_modules_dir,
             logger=ctx.logger,
         )
 
     resolver = APMDependencyResolver(
-        apm_modules_dir=apm_modules_dir,
+        apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,
     )
 
@@ -760,49 +786,6 @@ def run(ctx: InstallContext) -> None:
     # Get flattened dependencies for installation
     flat_deps = dependency_graph.flattened_dependencies
     deps_to_install = flat_deps.get_installation_list()
-
-    # ------------------------------------------------------------------
-    # 7. --only filtering
-    # ------------------------------------------------------------------
-    if ctx.only_packages:
-        # Build identity set from user-supplied package specs.
-        # Accepts any input form: git URLs, FQDN, shorthand.
-        only_identities = builtins.set()
-        for p in ctx.only_packages:
-            try:
-                ref = DependencyReference.parse(p)
-                only_identities.add(ref.get_identity())
-            except Exception:
-                only_identities.add(p)
-
-        # Expand the set to include transitive descendants of the
-        # requested packages so their MCP servers, primitives, etc.
-        # are correctly installed and written to the lockfile.
-        tree = dependency_graph.dependency_tree
-
-        def _collect_descendants(node, visited=None):
-            """Walk the tree and add every child identity (cycle-safe)."""
-            if visited is None:
-                visited = builtins.set()
-            for child in node.children:
-                identity = child.dependency_ref.get_identity()
-                if identity not in visited:
-                    visited.add(identity)
-                    only_identities.add(identity)
-                    _collect_descendants(child, visited)
-
-        for node in tree.nodes.values():
-            if node.dependency_ref.get_identity() in only_identities:
-                _collect_descendants(node)
-
-        deps_to_install = [dep for dep in deps_to_install if dep.get_identity() in only_identities]
-
-    from apm_cli.install.insecure_policy import (
-        _check_insecure_dependencies,
-        _collect_insecure_dependency_infos,
-        _guard_transitive_insecure_dependencies,
-        _warn_insecure_dependencies,
-    )
 
     _check_insecure_dependencies(
         ctx.all_apm_deps,
@@ -885,11 +868,6 @@ def run(ctx: InstallContext) -> None:
     ctx.dep_base_dirs = dep_base_dirs
 
     # ------------------------------------------------------------------
-    # 8. Orphan detection: intended_dep_keys
-    # ------------------------------------------------------------------
-    ctx.intended_dep_keys = builtins.set(d.get_unique_key() for d in deps_to_install)
-
-    # ------------------------------------------------------------------
     # Write ancillary state to ctx for later phases
     # ------------------------------------------------------------------
     ctx.callback_downloaded = callback_downloaded
@@ -899,7 +877,9 @@ def run(ctx: InstallContext) -> None:
     # WS2a (#1116): release shared clone temp dirs now that all subdir
     # deps have extracted their subpaths.  Safe to call even if no
     # subdir deps were processed (no-op in that case).
-    shared_cache.cleanup()
+    shared_cache = getattr(ctx.downloader, "shared_clone_cache", None)
+    if shared_cache is not None:
+        shared_cache.cleanup()
 
     # Perf #1433: emit ref-resolver tier hit counts at the end of the
     # resolve phase. Verbose only; one line; lets reviewers see which
@@ -910,3 +890,68 @@ def run(ctx: InstallContext) -> None:
             # tier_summary is install-only; other loggers degrade silently.
             if hasattr(ctx.logger, "tier_summary"):
                 ctx.logger.tier_summary(_tier_stats)
+
+
+def _apply_only_filter(ctx: InstallContext) -> None:
+    """Filter ``ctx.deps_to_install`` to the ``--only`` package(s) and their subtrees."""
+    # ------------------------------------------------------------------
+    # 7. --only filtering
+    # ------------------------------------------------------------------
+    from apm_cli.models.apm_package import DependencyReference
+
+    # Build identity set from user-supplied package specs.
+    # Accepts any input form: git URLs, FQDN, shorthand.
+    only_identities: builtins.set = builtins.set()
+    for p in ctx.only_packages:
+        try:
+            ref = DependencyReference.parse(p)
+            only_identities.add(ref.get_identity())
+        except Exception:
+            only_identities.add(p)
+
+    # Expand the set to include transitive descendants of the
+    # requested packages so their MCP servers, primitives, etc.
+    # are correctly installed and written to the lockfile.
+    tree = ctx.dependency_graph.dependency_tree
+
+    def _collect_descendants(node: object, visited: builtins.set | None = None) -> None:
+        """Walk the tree and add every child identity (cycle-safe)."""
+        if visited is None:
+            visited = builtins.set()
+        for child in node.children:  # type: ignore[attr-defined]
+            identity = child.dependency_ref.get_identity()
+            if identity not in visited:
+                visited.add(identity)
+                only_identities.add(identity)
+                _collect_descendants(child, visited)
+
+    for node in tree.nodes.values():
+        if node.dependency_ref.get_identity() in only_identities:
+            _collect_descendants(node)
+
+    ctx.deps_to_install = [
+        dep for dep in ctx.deps_to_install if dep.get_identity() in only_identities
+    ]
+
+
+def _compute_intended_dep_keys(ctx: InstallContext) -> None:
+    """Populate ``ctx.intended_dep_keys`` (manifest-intent set for orphan cleanup)."""
+    # ------------------------------------------------------------------
+    # 8. Orphan detection: intended_dep_keys
+    # ------------------------------------------------------------------
+    ctx.intended_dep_keys = builtins.set(d.get_unique_key() for d in ctx.deps_to_install)
+
+
+def run(ctx: InstallContext) -> None:
+    """Execute the resolve phase.
+
+    On return every field listed in the *Resolve phase outputs* section of
+    :class:`~apm_cli.install.context.InstallContext` is populated.
+    """
+    _load_lockfile(ctx)
+    _ensure_modules_dir(ctx)
+    _setup_downloader(ctx)
+    _resolve_dependencies(ctx)
+    if ctx.only_packages:
+        _apply_only_filter(ctx)
+    _compute_intended_dep_keys(ctx)

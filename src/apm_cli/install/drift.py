@@ -407,7 +407,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         Surfaced verbatim when a locked dep is not in the cache.
     """
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.services import integrate_package_primitives
+    from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
     from apm_cli.integration.targets import resolve_targets
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -487,12 +487,14 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     package_info,
                     scratch_root,
                     targets=targets,
-                    prompt_integrator=integrators["prompt"],
-                    agent_integrator=integrators["agent"],
-                    skill_integrator=integrators["skill"],
-                    instruction_integrator=integrators["instruction"],
-                    command_integrator=integrators["command"],
-                    hook_integrator=integrators["hook"],
+                    integrators=IntegratorBundle(
+                        prompt=integrators["prompt"],
+                        agent=integrators["agent"],
+                        skill=integrators["skill"],
+                        instruction=integrators["instruction"],
+                        command=integrators["command"],
+                        hook=integrators["hook"],
+                    ),
                     force=True,
                     managed_files=set(),
                     diagnostics=diagnostics,

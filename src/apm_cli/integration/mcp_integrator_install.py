@@ -205,115 +205,37 @@ def _install_registry_group(
     return configured_count
 
 
-def run_mcp_install(
-    mcp_deps: list,
-    runtime: str | None = None,
-    exclude: str | None = None,
-    verbose: bool = False,
-    apm_config: dict | None = None,
-    stored_mcp_configs: dict | None = None,
-    project_root=None,
-    user_scope: bool = False,
-    explicit_target: str | None = None,
-    logger=None,
-    diagnostics=None,
-    scope: InstallScope | None = None,
-) -> int:
-    """Install MCP dependencies.
+def _resolve_target_runtimes(
+    runtime: str | None,
+    exclude: str | None,
+    verbose: bool,
+    apm_config: dict | None,
+    project_root,
+    user_scope: bool,
+    explicit_target: str | None,
+    scope: InstallScope | None,
+    logger,
+    console,
+) -> list[str] | None:
+    """Detect, filter, and gate the target runtimes for MCP installation.
 
-    Args:
-        mcp_deps: List of MCP dependency entries (registry strings or
-            MCPDependency objects).
-        runtime: Target specific runtime only.
-        exclude: Exclude specific runtime from installation.
-        verbose: Show detailed installation information.
-        apm_config: The parsed apm.yml configuration dict (optional).
-            When not provided, this function loads ``apm.yml`` from the project
-            root if it exists.
-        stored_mcp_configs: Previously stored MCP configs from lockfile
-            for diff-aware installation.  When provided, servers whose
-            manifest config has changed are re-applied automatically.
-        project_root: Project root for repo-local runtime configs.
-        user_scope: Whether runtime configuration is being resolved at user scope.
-        explicit_target: Explicit target selected by CLI or manifest.
-        scope: InstallScope (PROJECT or USER). When USER, only
-            runtimes whose adapter declares ``supports_user_scope``
-            are targeted; workspace-only runtimes are skipped.
-
-    Returns:
-        Number of MCP servers newly configured or updated.
+    Returns a (possibly empty) list of runtime names to target, or ``None``
+    when the caller should immediately return 0 (e.g. all runtimes excluded,
+    no user-scope-capable runtimes available).
     """
-    # Local import: ``mcp_integrator`` must finish loading before this module
-    # is first imported (``MCPIntegrator.install`` delegates here lazily).
     from apm_cli.integration.mcp_integrator import (
         MCPIntegrator,
-        _get_console,
         _is_vscode_available,
     )
 
-    if logger is None:
-        logger = NullCommandLogger()
-    if not mcp_deps:
-        logger.warning("No MCP dependencies found in apm.yml")
-        return 0
-
-    from apm_cli.core.scope import InstallScope
-
-    # The explicit scope enum takes precedence over the raw user_scope bool
-    # so callers cannot accidentally mix user-scope runtime filtering with
-    # project-scope config writes (or the inverse).
-    if scope is InstallScope.USER:
-        user_scope = True
-    elif scope is InstallScope.PROJECT:
-        user_scope = False
-
-    # Split into registry-resolved and self-defined deps
-    # Backward compat: plain strings are treated as registry deps
-    registry_deps = [
-        dep
-        for dep in mcp_deps
-        if isinstance(dep, str)
-        or (hasattr(dep, "is_registry_resolved") and dep.is_registry_resolved)
-    ]
-    self_defined_deps = [
-        dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
-    ]
-    registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
-
-    console = _get_console()
-    # Track servers that were re-applied due to config drift
-    servers_to_update: builtins.set = builtins.set()
-    # Track successful updates separately so the summary counts are accurate
-    # even when some drift-detected servers fail to install.
-    successful_updates: builtins.set = builtins.set()
-    if stored_mcp_configs is None:
-        stored_mcp_configs = {}
-
-    # Start MCP section with clean header
-    if console:
-        try:
-            from rich.text import Text
-
-            header = Text()
-            header.append("+- MCP Servers (", style="cyan")
-            header.append(str(len(mcp_deps)), style="cyan bold")
-            header.append(")", style="cyan")
-            console.print(header)
-        except Exception:
-            logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
-    else:
-        logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
-
-    # Runtime detection and multi-runtime installation
     if runtime:
-        # Single runtime mode
-        target_runtimes = [runtime]
+        # Single runtime mode — skip auto-discovery entirely.
         logger.progress(f"Targeting specific runtime: {runtime}")
+        target_runtimes: list[str] = [runtime]
     else:
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
         if apm_config is None:
-            # Lazy load  -- only when the caller doesn't provide it
             try:
                 apm_yml = project_root_path / "apm.yml"
                 if apm_yml.exists():
@@ -329,7 +251,7 @@ def run_mcp_install(
             from apm_cli.runtime.manager import RuntimeManager
 
             manager = RuntimeManager()
-            installed_runtimes = []
+            installed_runtimes: list[str] = []
 
             for runtime_name in [
                 "copilot",
@@ -487,7 +409,7 @@ def run_mcp_install(
             logger.warning(
                 f"All installed runtimes excluded (--exclude {exclude}), skipping MCP configuration"
             )
-            return 0
+            return None
 
         # Fall back to VS Code only if no runtimes are installed at all
         if not target_runtimes and not installed_runtimes:
@@ -508,11 +430,13 @@ def run_mcp_install(
 
     # Explicit runtime/exclusion/gating can leave nothing to configure.
     if not target_runtimes:
-        return 0
+        return None
 
     # Scope filtering: at USER scope, keep only global-capable runtimes.
     # Applied after both explicit --runtime and auto-discovery paths.
-    if scope is InstallScope.USER:
+    from apm_cli.core.scope import InstallScope as _IS
+
+    if scope is _IS.USER:
         from apm_cli.factory import ClientFactory as _CF
 
         pre_filter = list(target_runtimes)
@@ -537,7 +461,271 @@ def run_mcp_install(
             logger.warning(
                 "No runtimes support user-scope MCP installation (supported: copilot, codex, gemini)"
             )
-            return 0
+            return None
+
+    return target_runtimes
+
+
+def _install_self_defined_deps(
+    self_defined_deps: list,
+    target_runtimes: list[str],
+    stored_mcp_configs: dict,
+    servers_to_update: builtins.set,
+    successful_updates: builtins.set,
+    project_root,
+    user_scope: bool,
+    verbose: bool,
+    console,
+    logger,
+) -> int:
+    """Install self-defined (``registry: false``) MCP deps for all target runtimes.
+
+    Mutates ``servers_to_update`` and ``successful_updates`` in-place.
+    Returns the number of servers newly configured or updated.
+    """
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    configured_count = 0
+    self_defined_names = [dep.name for dep in self_defined_deps]
+    self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
+        self_defined_names,
+        target_runtimes,
+        project_root=project_root,
+        user_scope=user_scope,
+    )
+    already_configured_candidates_sd = [
+        name for name in self_defined_names if name not in self_defined_to_install
+    ]
+
+    # Detect config drift for "already configured" self-defined servers
+    if stored_mcp_configs and already_configured_candidates_sd:
+        drifted_sd_deps = [
+            dep for dep in self_defined_deps if dep.name in already_configured_candidates_sd
+        ]
+        drifted_sd = MCPIntegrator._detect_mcp_config_drift(
+            drifted_sd_deps,
+            stored_mcp_configs,
+        )
+        if drifted_sd:
+            servers_to_update.update(drifted_sd)
+            MCPIntegrator._append_drifted_to_install_list(self_defined_to_install, drifted_sd)
+    already_configured_self_defined = [
+        name for name in already_configured_candidates_sd if name not in servers_to_update
+    ]
+
+    sd_env_keys: builtins.set = builtins.set()
+    for dep in self_defined_deps:
+        if dep.name in self_defined_to_install:
+            sd_env_keys |= builtins.set((dep.env or {}).keys())
+    _warn_intellij_plaintext_env(target_runtimes, sd_env_keys, logger)
+
+    if already_configured_self_defined:
+        if console:
+            for name in already_configured_self_defined:
+                console.print(
+                    f"|  [green]{STATUS_SYMBOLS['check']}[/green] {name} "
+                    f"[dim](already configured)[/dim]"
+                )
+        else:
+            count = len(already_configured_self_defined)
+            logger.success(f"{count} self-defined server(s) already configured")
+            for name in already_configured_self_defined:
+                logger.verbose_detail(f"{name} already configured, skipping")
+
+    for dep in self_defined_deps:
+        if dep.name not in self_defined_to_install:
+            continue
+
+        is_update = dep.name in servers_to_update
+        synthetic_info = MCPIntegrator._build_self_defined_info(dep)
+        self_defined_cache = {dep.name: synthetic_info}
+        self_defined_env = dep.env or {}
+
+        transport_label = dep.transport or "stdio"
+        action_text = "Updating" if is_update else "Configuring"
+        if console:
+            console.print(
+                f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep.name} "
+                f"[dim](self-defined, {transport_label})[/dim]"
+            )
+            console.print(
+                f"|     +- {action_text} for {', '.join([rt.title() for rt in target_runtimes])}..."
+            )
+        else:
+            logger.progress(
+                f"{dep.name}: {action_text.lower()} for {', '.join(target_runtimes)}..."
+            )
+
+        any_ok = False
+        for rt in target_runtimes:
+            if verbose:
+                logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
+            if MCPIntegrator._install_for_runtime(
+                rt,
+                [dep.name],
+                self_defined_env,
+                self_defined_cache,
+                project_root=project_root,
+                user_scope=user_scope,
+                logger=logger,
+            ):
+                any_ok = True
+
+        if any_ok:
+            if console:
+                label = "updated" if is_update else "configured"
+                console.print(
+                    f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
+                    f"{', '.join([rt.title() for rt in target_runtimes])}"
+                    f" [dim]({label})[/dim]"
+                )
+            configured_count += 1
+            if is_update:
+                successful_updates.add(dep.name)
+        elif console:
+            console.print(
+                f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep.name}  -- failed for all runtimes"
+            )
+        else:
+            logger.error(f"{dep.name} -- failed for all runtimes")
+
+    return configured_count
+
+
+def _print_mcp_summary(
+    console,
+    configured_count: int,
+    successful_updates: builtins.set,
+) -> None:
+    """Print the MCP install summary footer panel."""
+    if not console:
+        return
+    if configured_count > 0:
+        # Use successful_updates (not servers_to_update) for accurate counts.
+        # servers_to_update = all drift-detected servers (some may have failed).
+        # successful_updates = servers that were re-applied AND succeeded.
+        update_count = builtins.len(successful_updates)
+        new_count = configured_count - update_count
+        parts = []
+        if new_count > 0:
+            parts.append(f"configured {new_count} server{'s' if new_count != 1 else ''}")
+        if update_count > 0:
+            parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
+        console.print(f"[green]{STATUS_SYMBOLS['success']} {', '.join(parts).capitalize()}[/green]")
+    else:
+        console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
+
+
+def run_mcp_install(
+    mcp_deps: list,
+    runtime: str | None = None,
+    exclude: str | None = None,
+    verbose: bool = False,
+    apm_config: dict | None = None,
+    stored_mcp_configs: dict | None = None,
+    project_root=None,
+    user_scope: bool = False,
+    explicit_target: str | None = None,
+    logger=None,
+    diagnostics=None,
+    scope: InstallScope | None = None,
+) -> int:
+    """Install MCP dependencies.
+
+    Args:
+        mcp_deps: List of MCP dependency entries (registry strings or
+            MCPDependency objects).
+        runtime: Target specific runtime only.
+        exclude: Exclude specific runtime from installation.
+        verbose: Show detailed installation information.
+        apm_config: The parsed apm.yml configuration dict (optional).
+            When not provided, this function loads ``apm.yml`` from the project
+            root if it exists.
+        stored_mcp_configs: Previously stored MCP configs from lockfile
+            for diff-aware installation.  When provided, servers whose
+            manifest config has changed are re-applied automatically.
+        project_root: Project root for repo-local runtime configs.
+        user_scope: Whether runtime configuration is being resolved at user scope.
+        explicit_target: Explicit target selected by CLI or manifest.
+        scope: InstallScope (PROJECT or USER). When USER, only
+            runtimes whose adapter declares ``supports_user_scope``
+            are targeted; workspace-only runtimes are skipped.
+
+    Returns:
+        Number of MCP servers newly configured or updated.
+    """
+    # Local import: ``mcp_integrator`` must finish loading before this module
+    # is first imported (``MCPIntegrator.install`` delegates here lazily).
+    from apm_cli.integration.mcp_integrator import _get_console
+
+    if logger is None:
+        logger = NullCommandLogger()
+    if not mcp_deps:
+        logger.warning("No MCP dependencies found in apm.yml")
+        return 0
+
+    from apm_cli.core.scope import InstallScope
+
+    # The explicit scope enum takes precedence over the raw user_scope bool
+    # so callers cannot accidentally mix user-scope runtime filtering with
+    # project-scope config writes (or the inverse).
+    if scope is InstallScope.USER:
+        user_scope = True
+    elif scope is InstallScope.PROJECT:
+        user_scope = False
+
+    # Split into registry-resolved and self-defined deps
+    # Backward compat: plain strings are treated as registry deps
+    registry_deps = [
+        dep
+        for dep in mcp_deps
+        if isinstance(dep, str)
+        or (hasattr(dep, "is_registry_resolved") and dep.is_registry_resolved)
+    ]
+    self_defined_deps = [
+        dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
+    ]
+    registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
+
+    console = _get_console()
+    # Track servers that were re-applied due to config drift
+    servers_to_update: builtins.set = builtins.set()
+    # Track successful updates separately so the summary counts are accurate
+    # even when some drift-detected servers fail to install.
+    successful_updates: builtins.set = builtins.set()
+    if stored_mcp_configs is None:
+        stored_mcp_configs = {}
+
+    # Start MCP section with clean header
+    if console:
+        try:
+            from rich.text import Text
+
+            header = Text()
+            header.append("+- MCP Servers (", style="cyan")
+            header.append(str(len(mcp_deps)), style="cyan bold")
+            header.append(")", style="cyan")
+            console.print(header)
+        except Exception:
+            logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
+    else:
+        logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
+
+    # Runtime detection, gating, and scope filtering
+    target_runtimes = _resolve_target_runtimes(
+        runtime=runtime,
+        exclude=exclude,
+        verbose=verbose,
+        apm_config=apm_config,
+        project_root=project_root,
+        user_scope=user_scope,
+        explicit_target=explicit_target,
+        scope=scope,
+        logger=logger,
+        console=console,
+    )
+    if target_runtimes is None:
+        return 0
 
     # Use the new registry operations module for better server detection
     configured_count = 0
@@ -588,128 +776,20 @@ def run_mcp_install(
 
     # --- Self-defined deps (registry: false) ---
     if self_defined_deps:
-        self_defined_names = [dep.name for dep in self_defined_deps]
-        self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
-            self_defined_names,
-            target_runtimes,
+        configured_count += _install_self_defined_deps(
+            self_defined_deps=self_defined_deps,
+            target_runtimes=target_runtimes,
+            stored_mcp_configs=stored_mcp_configs,
+            servers_to_update=servers_to_update,
+            successful_updates=successful_updates,
             project_root=project_root,
             user_scope=user_scope,
+            verbose=verbose,
+            console=console,
+            logger=logger,
         )
-        already_configured_candidates_sd = [
-            name for name in self_defined_names if name not in self_defined_to_install
-        ]
-
-        # Detect config drift for "already configured" self-defined servers
-        if stored_mcp_configs and already_configured_candidates_sd:
-            drifted_sd_deps = [
-                dep for dep in self_defined_deps if dep.name in already_configured_candidates_sd
-            ]
-            drifted_sd = MCPIntegrator._detect_mcp_config_drift(
-                drifted_sd_deps,
-                stored_mcp_configs,
-            )
-            if drifted_sd:
-                servers_to_update.update(drifted_sd)
-                MCPIntegrator._append_drifted_to_install_list(self_defined_to_install, drifted_sd)
-        already_configured_self_defined = [
-            name for name in already_configured_candidates_sd if name not in servers_to_update
-        ]
-
-        sd_env_keys: builtins.set = builtins.set()
-        for dep in self_defined_deps:
-            if dep.name in self_defined_to_install:
-                sd_env_keys |= builtins.set((dep.env or {}).keys())
-        _warn_intellij_plaintext_env(target_runtimes, sd_env_keys, logger)
-
-        if already_configured_self_defined:
-            if console:
-                for name in already_configured_self_defined:
-                    console.print(
-                        f"|  [green]{STATUS_SYMBOLS['check']}[/green] {name} "
-                        f"[dim](already configured)[/dim]"
-                    )
-            else:
-                count = len(already_configured_self_defined)
-                logger.success(f"{count} self-defined server(s) already configured")
-                for name in already_configured_self_defined:
-                    logger.verbose_detail(f"{name} already configured, skipping")
-
-        for dep in self_defined_deps:
-            if dep.name not in self_defined_to_install:
-                continue
-
-            is_update = dep.name in servers_to_update
-            synthetic_info = MCPIntegrator._build_self_defined_info(dep)
-            self_defined_cache = {dep.name: synthetic_info}
-            self_defined_env = dep.env or {}
-
-            transport_label = dep.transport or "stdio"
-            action_text = "Updating" if is_update else "Configuring"
-            if console:
-                console.print(
-                    f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep.name} "
-                    f"[dim](self-defined, {transport_label})[/dim]"
-                )
-                console.print(
-                    f"|     +- {action_text} for "
-                    f"{', '.join([rt.title() for rt in target_runtimes])}..."
-                )
-            else:
-                logger.progress(
-                    f"{dep.name}: {action_text.lower()} for {', '.join(target_runtimes)}..."
-                )
-
-            any_ok = False
-            for rt in target_runtimes:
-                if verbose:
-                    logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
-                if MCPIntegrator._install_for_runtime(
-                    rt,
-                    [dep.name],
-                    self_defined_env,
-                    self_defined_cache,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                    logger=logger,
-                ):
-                    any_ok = True
-
-            if any_ok:
-                if console:
-                    label = "updated" if is_update else "configured"
-                    console.print(
-                        f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
-                        f"{', '.join([rt.title() for rt in target_runtimes])}"
-                        f" [dim]({label})[/dim]"
-                    )
-                configured_count += 1
-                if is_update:
-                    successful_updates.add(dep.name)
-            elif console:
-                console.print(
-                    f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep.name}  "
-                    "-- failed for all runtimes"
-                )
-            else:
-                logger.error(f"{dep.name} -- failed for all runtimes")
 
     # Close the panel
-    if console:
-        if configured_count > 0:
-            # Use successful_updates (not servers_to_update) for accurate counts.
-            # servers_to_update = all drift-detected servers (some may have failed).
-            # successful_updates = servers that were re-applied AND succeeded.
-            update_count = builtins.len(successful_updates)
-            new_count = configured_count - update_count
-            parts = []
-            if new_count > 0:
-                parts.append(f"configured {new_count} server{'s' if new_count != 1 else ''}")
-            if update_count > 0:
-                parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
-            console.print(
-                f"[green]{STATUS_SYMBOLS['success']} {', '.join(parts).capitalize()}[/green]"
-            )
-        else:
-            console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
+    _print_mcp_summary(console, configured_count, successful_updates)
 
     return configured_count

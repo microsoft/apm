@@ -76,6 +76,79 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
         raise click.ClickException(message)
 
 
+def _parse_path_overrides(
+    marketplace_path_overrides: "tuple[str, ...]",
+    ctx,
+    json_output: bool,
+) -> "dict[str, str] | None":
+    """Parse --marketplace-path KEY=VALUE pairs.
+
+    Returns a dict mapping format name -> path, or ``None`` on the first
+    validation error (after emitting the error via *ctx*).
+    """
+    from ..marketplace.output_profiles import known_output_names
+    from ..utils.path_security import validate_path_segments
+
+    path_overrides: dict[str, str] = {}
+    for override in marketplace_path_overrides:
+        if "=" not in override:
+            msg = f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
+            _emit_json_error_or_raise(ctx, json_output, "cli_error", msg)
+            return None
+        fmt_name, path_val = override.split("=", 1)
+        fmt_name = fmt_name.strip()
+        path_val = path_val.strip()
+        if fmt_name not in known_output_names():
+            msg = (
+                f"Unknown marketplace format '{fmt_name}' in --marketplace-path. "
+                f"Known formats: {', '.join(sorted(known_output_names()))}"
+            )
+            _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
+            return None
+        # Security: validate path to prevent traversal attacks
+        try:
+            validate_path_segments(path_val, context="--marketplace-path", allow_current_dir=True)
+        except Exception as exc:
+            _emit_json_error_or_raise(ctx, json_output, "path_error", str(exc))
+            return None
+        path_overrides[fmt_name] = path_val
+    return path_overrides
+
+
+def _parse_marketplace_filter(
+    marketplace_filter: "str | None",
+    ctx,
+    json_output: bool,
+) -> "tuple[str, ...] | None":
+    """Parse the --marketplace filter value.
+
+    Returns:
+      - ``None``           -- build all configured outputs
+      - empty ``tuple``    -- skip marketplace entirely (``--marketplace none``)
+      - non-empty tuple    -- build only the named formats
+      - ``None`` on validation error (after emitting the error via *ctx*)
+    """
+    from ..marketplace.output_profiles import known_output_names
+
+    if marketplace_filter is None:
+        return None
+    if marketplace_filter.strip().lower() == "none":
+        return ()
+    if marketplace_filter.strip().lower() == "all":
+        return None  # all configured
+    requested = [f.strip() for f in marketplace_filter.split(",") if f.strip()]
+    known = known_output_names()
+    for r in requested:
+        if r not in known:
+            msg = (
+                f"Unknown marketplace format '{r}' in --marketplace. "
+                f"Known formats: {', '.join(sorted(known))}"
+            )
+            _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
+            return None
+    return tuple(requested)
+
+
 @click.command(name="pack", help=_PACK_HELP)
 @click.option(
     "--format",
@@ -189,7 +262,7 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
     ),
 )
 @click.pass_context
-def pack_cmd(
+def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     ctx,
     fmt,
     target,
@@ -208,9 +281,6 @@ def pack_cmd(
     check_clean,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
-    from ..marketplace.output_profiles import known_output_names
-    from ..utils.path_security import validate_path_segments
-
     # -- Stream discipline: under --json, route ALL output to stderr --
     if json_output:
         set_console_stderr(True)
@@ -218,49 +288,14 @@ def pack_cmd(
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
 
     # -- Parse --marketplace-path overrides --
-    path_overrides: dict[str, str] = {}
-    for override in marketplace_path_overrides:
-        if "=" not in override:
-            msg = f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
-            _emit_json_error_or_raise(ctx, json_output, "cli_error", msg)
-            return
-        fmt_name, path_val = override.split("=", 1)
-        fmt_name = fmt_name.strip()
-        path_val = path_val.strip()
-        if fmt_name not in known_output_names():
-            msg = (
-                f"Unknown marketplace format '{fmt_name}' in --marketplace-path. "
-                f"Known formats: {', '.join(sorted(known_output_names()))}"
-            )
-            _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
-            return
-        # Security: validate path to prevent traversal attacks
-        try:
-            validate_path_segments(path_val, context="--marketplace-path", allow_current_dir=True)
-        except Exception as exc:
-            _emit_json_error_or_raise(ctx, json_output, "path_error", str(exc))
-            return
-        path_overrides[fmt_name] = path_val
+    path_overrides_result = _parse_path_overrides(marketplace_path_overrides, ctx, json_output)
+    if path_overrides_result is None:
+        return
+    path_overrides = path_overrides_result
 
     # -- Parse --marketplace filter --
-    marketplace_formats: tuple[str, ...] | None = None
-    if marketplace_filter is not None:
-        if marketplace_filter.strip().lower() == "none":
-            marketplace_formats = ()
-        elif marketplace_filter.strip().lower() == "all":
-            marketplace_formats = None  # all configured
-        else:
-            requested = [f.strip() for f in marketplace_filter.split(",") if f.strip()]
-            known = known_output_names()
-            for r in requested:
-                if r not in known:
-                    msg = (
-                        f"Unknown marketplace format '{r}' in --marketplace. "
-                        f"Known formats: {', '.join(sorted(known))}"
-                    )
-                    _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
-                    return
-            marketplace_formats = tuple(requested)
+    marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
+    # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was

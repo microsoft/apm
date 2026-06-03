@@ -11,6 +11,7 @@ The existing adapters (client/, package_manager/) and registry operations
 
 import builtins
 import copy
+import json
 import logging
 import re
 import shutil
@@ -46,6 +47,145 @@ def _is_vscode_available(project_root: Path | str | None = None) -> bool:
     """
     root = Path(project_root) if project_root is not None else Path.cwd()
     return shutil.which("code") is not None or (root / ".vscode").is_dir()
+
+
+def _clean_json_mcp_config(
+    config_path: Path,
+    stale_names: builtins.set,
+    logger,
+    label: str,
+    servers_key: str = "mcpServers",
+    trailing_newline: bool = False,
+    use_rich: bool = False,
+) -> int:
+    """Remove stale entries from a JSON-based MCP config file.
+
+    Args:
+        config_path: Path to the JSON config file.
+        stale_names: Set of server names to remove (expanded form).
+        logger: Command logger for progress messages.
+        label: Human-readable config label used in log messages.
+        servers_key: Key under which MCP servers are stored (default: ``"mcpServers"``).
+        trailing_newline: When True, append a trailing newline after JSON serialisation.
+        use_rich: When True, emit removal notices via ``_rich_success``; otherwise use
+            ``logger.progress``.
+
+    Returns:
+        Number of entries removed.
+    """
+    if not config_path.exists():
+        return 0
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        servers = config.get(servers_key, {})
+        removed = [n for n in stale_names if n in servers]
+        for name in removed:
+            del servers[name]
+        if removed:
+            text = json.dumps(config, indent=2)
+            if trailing_newline:
+                text += "\n"
+            config_path.write_text(text, encoding="utf-8")
+            for name in removed:
+                msg = f"Removed stale MCP server '{name}' from {label}"
+                if use_rich:
+                    _rich_success(msg, symbol="check")
+                else:
+                    logger.progress(msg)
+        return len(removed)
+    except Exception:
+        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        return 0
+
+
+def _clean_toml_mcp_config(
+    config_path: Path,
+    stale_names: builtins.set,
+    label: str,
+    logger=None,
+    use_rich: bool = True,
+) -> int:
+    """Remove stale entries from a TOML-based MCP config file.
+
+    Args:
+        config_path: Path to the TOML config file.
+        stale_names: Set of server names to remove (expanded form).
+        label: Human-readable config label used in log messages.
+        logger: Optional command logger for progress messages. When provided
+            and *use_rich* is False, removal notices use ``logger.progress``.
+        use_rich: When True (default), emit removal notices via ``_rich_success``;
+            otherwise use ``logger.progress``.
+
+    Returns:
+        Number of entries removed.
+    """
+    if not config_path.exists():
+        return 0
+    try:
+        import toml as _toml
+
+        config = _toml.loads(config_path.read_text(encoding="utf-8"))
+        servers = config.get("mcp_servers", {})
+        removed = [n for n in stale_names if n in servers]
+        for name in removed:
+            del servers[name]
+        if removed:
+            config_path.write_text(_toml.dumps(config), encoding="utf-8")
+            for name in removed:
+                msg = f"Removed stale MCP server '{name}' from {label}"
+                if use_rich:
+                    _rich_success(msg, symbol="check")
+                elif logger is not None:
+                    logger.progress(msg)
+        return len(removed)
+    except Exception:
+        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        return 0
+
+
+def _clean_claude_config(
+    config_path: Path,
+    stale_names: builtins.set,
+    logger,
+    is_user_scope: bool = False,
+) -> int:
+    """Remove stale entries from a Claude Code JSON config file.
+
+    Handles both the project-level ``.mcp.json`` and the user-level
+    ``~/.claude.json``, which share the same JSON structure but differ in
+    scope-validation requirements and log labels.
+
+    Args:
+        config_path: Path to the Claude JSON config file.
+        stale_names: Set of server names to remove (expanded form).
+        logger: Command logger for progress messages.
+        is_user_scope: When True, validates that the top-level config is a dict
+            (``~/.claude.json`` guard) and uses the user-scope log label.
+
+    Returns:
+        Number of entries removed.
+    """
+    label = "~/.claude.json" if is_user_scope else ".mcp.json"
+    if not config_path.exists():
+        return 0
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if is_user_scope and not isinstance(config, dict):
+            return 0
+        servers = config.get("mcpServers", {})
+        if not isinstance(servers, dict):
+            servers = {}
+        removed = [n for n in stale_names if n in servers]
+        for name in removed:
+            del servers[name]
+        if removed:
+            config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            for name in removed:
+                logger.progress(f"Removed stale MCP server '{name}' from {label}")
+        return len(removed)
+    except Exception:
+        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        return 0
 
 
 class MCPIntegrator:
@@ -500,54 +640,24 @@ class MCPIntegrator:
 
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
-        # Clean .vscode/mcp.json
+        # Per-runtime cleanup -- each helper reads, diffs, writes, and logs.
         if "vscode" in target_runtimes:
-            vscode_mcp = project_root_path / ".vscode" / "mcp.json"
-            if vscode_mcp.exists():
-                try:
-                    import json as _json
+            _clean_json_mcp_config(
+                project_root_path / ".vscode" / "mcp.json",
+                expanded_stale,
+                logger,
+                ".vscode/mcp.json",
+                servers_key="servers",
+            )
 
-                    config = _json.loads(vscode_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("servers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        vscode_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            logger.progress(
-                                f"Removed stale MCP server '{name}' from .vscode/mcp.json"
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .vscode/mcp.json",
-                        exc_info=True,
-                    )
-
-        # Clean ~/.copilot/mcp-config.json
         if "copilot" in target_runtimes:
-            copilot_mcp = Path.home() / ".copilot" / "mcp-config.json"
-            if copilot_mcp.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(copilot_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        copilot_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from Copilot CLI config",
-                                symbol="check",
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from Copilot CLI config",
-                        exc_info=True,
-                    )
+            _clean_json_mcp_config(
+                Path.home() / ".copilot" / "mcp-config.json",
+                expanded_stale,
+                logger,
+                "Copilot CLI config",
+                use_rich=True,
+            )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:
@@ -560,99 +670,36 @@ class MCPIntegrator:
                     user_scope=user_scope,
                 ).get_config_path()
             )
-            if codex_cfg.exists():
-                try:
-                    import toml as _toml
+            _clean_toml_mcp_config(codex_cfg, expanded_stale, "Codex CLI config")
 
-                    config = _toml.loads(codex_cfg.read_text(encoding="utf-8"))
-                    servers = config.get("mcp_servers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        codex_cfg.write_text(_toml.dumps(config), encoding="utf-8")
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from Codex CLI config",
-                                symbol="check",
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from Codex CLI config",
-                        exc_info=True,
-                    )
-
-        # Clean .cursor/mcp.json (only if .cursor/ directory exists)
         if "cursor" in target_runtimes:
-            cursor_mcp = project_root_path / ".cursor" / "mcp.json"
-            if cursor_mcp.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(cursor_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        cursor_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from .cursor/mcp.json",
-                                symbol="check",
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .cursor/mcp.json",
-                        exc_info=True,
-                    )
+            _clean_json_mcp_config(
+                project_root_path / ".cursor" / "mcp.json",
+                expanded_stale,
+                logger,
+                ".cursor/mcp.json",
+                use_rich=True,
+            )
 
         # Clean opencode.json (only if .opencode/ directory exists)
         if "opencode" in target_runtimes:
-            opencode_cfg = project_root_path / "opencode.json"
-            if opencode_cfg.exists() and (project_root_path / ".opencode").is_dir():
-                try:
-                    import json as _json
+            if (project_root_path / ".opencode").is_dir():
+                _clean_json_mcp_config(
+                    project_root_path / "opencode.json",
+                    expanded_stale,
+                    logger,
+                    "opencode.json",
+                    servers_key="mcp",
+                )
 
-                    config = _json.loads(opencode_cfg.read_text(encoding="utf-8"))
-                    servers = config.get("mcp", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        opencode_cfg.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            logger.progress(f"Removed stale MCP server '{name}' from opencode.json")
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from opencode.json",
-                        exc_info=True,
-                    )
-
-        # Clean ~/.codeium/windsurf/mcp_config.json
         if "windsurf" in target_runtimes:
-            windsurf_mcp = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
-            if windsurf_mcp.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(windsurf_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        windsurf_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from Windsurf config",
-                                symbol="check",
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from Windsurf config",
-                        exc_info=True,
-                    )
+            _clean_json_mcp_config(
+                Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
+                expanded_stale,
+                logger,
+                "Windsurf config",
+                use_rich=True,
+            )
 
         # Clean JetBrains Copilot user-scope mcp.json
         if "intellij" in target_runtimes:
@@ -671,8 +718,6 @@ class MCPIntegrator:
                 try:
                     import json as _json
 
-                    # Route the env-var-derived write path through the same
-                    # containment guard every other APM write site uses.
                     ensure_path_within(intellij_mcp, Path.home())
                     config = _json.loads(intellij_mcp.read_text(encoding="utf-8"))
                     servers = config.get("servers")
@@ -697,88 +742,30 @@ class MCPIntegrator:
 
         # Clean .gemini/settings.json (only if .gemini/ directory exists)
         if "gemini" in target_runtimes:
-            gemini_cfg = project_root_path / ".gemini" / "settings.json"
-            if gemini_cfg.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(gemini_cfg.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        gemini_cfg.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            if logger:
-                                logger.progress(
-                                    f"Removed stale MCP server '{name}' from .gemini/settings.json"
-                                )
-                            else:
-                                _rich_success(
-                                    f"Removed stale MCP server '{name}' from .gemini/settings.json",
-                                    symbol="check",
-                                )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .gemini/settings.json",
-                        exc_info=True,
-                    )
+            _clean_json_mcp_config(
+                project_root_path / ".gemini" / "settings.json",
+                expanded_stale,
+                logger,
+                ".gemini/settings.json",
+            )
 
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
         if clean_claude_project:
-            claude_mcp = project_root_path / ".mcp.json"
-            if claude_mcp.exists() and (project_root_path / ".claude").is_dir():
-                try:
-                    import json as _json
-
-                    config = _json.loads(claude_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    if not isinstance(servers, dict):
-                        servers = {}
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        claude_mcp.write_text(
-                            _json.dumps(config, indent=2) + "\n", encoding="utf-8"
-                        )
-                        for name in removed:
-                            logger.progress(f"Removed stale MCP server '{name}' from .mcp.json")
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .mcp.json",
-                        exc_info=True,
-                    )
+            if (project_root_path / ".claude").is_dir():
+                _clean_claude_config(
+                    project_root_path / ".mcp.json",
+                    expanded_stale,
+                    logger,
+                )
 
         # Clean Claude Code user ~/.claude.json (USER scope only)
         if clean_claude_user:
-            claude_user = Path.home() / ".claude.json"
-            if claude_user.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(claude_user.read_text(encoding="utf-8"))
-                    if isinstance(config, dict):
-                        servers = config.get("mcpServers", {})
-                        if not isinstance(servers, dict):
-                            servers = {}
-                        removed = [n for n in expanded_stale if n in servers]
-                        for name in removed:
-                            del servers[name]
-                        if removed:
-                            claude_user.write_text(
-                                _json.dumps(config, indent=2) + "\n", encoding="utf-8"
-                            )
-                            for name in removed:
-                                logger.progress(
-                                    f"Removed stale MCP server '{name}' from ~/.claude.json"
-                                )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from ~/.claude.json",
-                        exc_info=True,
-                    )
+            _clean_claude_config(
+                Path.home() / ".claude.json",
+                expanded_stale,
+                logger,
+                is_user_scope=True,
+            )
 
     # ------------------------------------------------------------------
     # Lockfile persistence

@@ -53,6 +53,11 @@ class InstallRequest:
     # the pipeline, so the failure surfaces without running resolve.
     frozen: bool = False
 
+    # --lockfile-only: resolve and download deps to get commit SHAs, then
+    # write apm.lock.yaml WITHOUT deploying any files to targets.  Set
+    # internally by the ``apm lock`` command (mirrors cargo generate-lockfile / pnpm lock).
+    lockfile_only: bool = False
+
     # --refresh: re-resolve all refs against upstream (bypass lockfile
     # pins).  Unlike --update (which restructures the whole graph),
     # --refresh only forces re-resolution without discarding orphans.

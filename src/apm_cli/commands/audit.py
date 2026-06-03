@@ -957,7 +957,7 @@ def _audit_content_scan(
     help="SARIF file to ingest for '--external sarif'. [experimental]",
 )
 @click.pass_context
-def audit(
+def audit(  # noqa: PLR0913 -- Click handler
     ctx,
     package,
     file_path,

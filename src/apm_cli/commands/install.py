@@ -406,26 +406,12 @@ def _resolve_package_references(
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
                     # #1326: dependency-confusion fail-closed gate.
-                    # When the resolver attaches ``CrossRepoMisconfigRisk``,
-                    # the marketplace declared a bare ``owner/repo`` on a
-                    # ``*.ghe.com`` host and the canonical falls back to
-                    # ``github.com`` -- the same syntactic form that an
-                    # attacker pre-staging the namespace on public github.com
-                    # would exploit. Refuse before any outbound validation so
-                    # no probe reaches the potentially-attacker-controlled
-                    # URL (information leak + RCE both shut at one boundary).
-                    # Escape hatch: marketplace.json author host-qualifies
-                    # ``repo:`` (either to the enterprise host for same-host
-                    # intent or to github.com for declared cross-host intent).
-                    # That prevents the sentinel from attaching at resolver
-                    # layer -- no new flag, env var, or schema field needed.
+                    # Bare ``owner/repo`` on *.ghe.com falls back to
+                    # github.com -- refuse before outbound validation so
+                    # no probe reaches a potentially attacker-controlled URL.
+                    # Escape hatch: host-qualify ``repo:`` in marketplace.json.
                     _risk = resolution.cross_repo_misconfig_risk
                     if _risk is not None:
-                        # Two explicit-host options are alternatives, not a
-                        # sequence, so they read clearer as separate bullets.
-                        # ``validation_fail`` prepends the package name; the
-                        # body below is the remediation.  Each list element is
-                        # one logical clause so individual edits stay local.
                         _lead = (
                             f"refused (dependency-confusion risk #1326): bare"
                             f" `repo: {_risk.bare_repo_field}` on enterprise"
@@ -800,7 +786,6 @@ def _handle_mcp_install(
     runtime,
     exclude,
     verbose,
-    dry_run,
     logger,
     no_policy,
     validated_registry_url,
@@ -856,14 +841,14 @@ def _handle_mcp_install(
             mcp_deps=[_preflight_dep],
             no_policy=no_policy,
             logger=logger,
-            dry_run=dry_run,
+            dry_run=logger.dry_run,
         )
     except PolicyBlockError:
         # Diagnostics already emitted by the helper + logger.
         logger.render_summary()
         sys.exit(1)
 
-    if dry_run:
+    if logger.dry_run:
         # C1: validate eagerly so dry-run rejects what real install would.
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -889,9 +874,7 @@ def _handle_mcp_install(
         force=force,
         runtime=runtime,
         exclude=exclude,
-        verbose=verbose,
         logger=logger,
-        manifest_path=mcp_manifest_path,
         apm_dir=mcp_apm_dir,
         scope=mcp_scope,
         registry_url=validated_registry_url,
@@ -1386,9 +1369,7 @@ def install(  # noqa: PLR0913
             global_=global_,
             only=only,
             update=update,
-            use_ssh=use_ssh,
-            use_https=use_https,
-            allow_protocol_fallback=allow_protocol_fallback,
+            any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
             registry_url=validated_registry_url,
         )
 
@@ -1414,7 +1395,6 @@ def install(  # noqa: PLR0913
                 runtime=runtime,
                 exclude=exclude,
                 verbose=verbose,
-                dry_run=dry_run,
                 logger=logger,
                 no_policy=no_policy,
                 validated_registry_url=validated_registry_url,
@@ -2039,6 +2019,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     frozen: bool = False,
     plan_callback=None,
     refresh: bool = False,
+    lockfile_only: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -2078,5 +2059,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
         frozen=frozen,
         plan_callback=plan_callback,
         refresh=refresh,
+        lockfile_only=lockfile_only,
     )
     return InstallService().run(request)

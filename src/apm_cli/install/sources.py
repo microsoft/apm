@@ -424,7 +424,9 @@ class CachedDependencySource(DependencySource):
         # write the empty deployed_files entry on its own (single source
         # of truth), so we just signal "skip integration" via
         # package_info=None.
-        if not ctx.targets:
+        # In lockfile_only mode, skip this early return so installed_packages
+        # is populated before we return without deploying any files.
+        if not ctx.targets and not ctx.lockfile_only:
             return Materialization(
                 package_info=None,
                 install_path=install_path,
@@ -528,6 +530,15 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
+
+        # Return without deploying integration files when the target set is empty.
+        if not ctx.targets:
+            return Materialization(
+                package_info=None,
+                install_path=install_path,
+                dep_key=dep_key,
+                deltas=deltas,
+            )
 
         return Materialization(
             package_info=cached_package_info,

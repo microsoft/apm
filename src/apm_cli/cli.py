@@ -28,6 +28,7 @@ from apm_cli.commands.find import find as find_cmd
 from apm_cli.commands.init import init
 from apm_cli.commands.install import install
 from apm_cli.commands.list_cmd import list as list_cmd
+from apm_cli.commands.lock import lock
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.marketplace import search as marketplace_search
 from apm_cli.commands.mcp import mcp
@@ -51,6 +52,7 @@ _CLI_EPILOG = (
     "  apm init                       Scaffold a new project\n"
     "  apm install                    Install dependencies from apm.yml\n"
     "  apm install --frozen           Reproduce lockfile exactly (CI-safe)\n"
+    "  apm lock                       Resolve deps and write lockfile only\n"
     "  apm outdated                   See what's drifted from upstream\n"
     "  apm update                     Refresh refs and rewrite the lockfile\n"
     "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
@@ -109,6 +111,7 @@ cli.add_command(unpack_cmd, name="unpack")
 cli.add_command(publish_cmd, name="publish")
 cli.add_command(init)
 cli.add_command(install)
+cli.add_command(lock)
 cli.add_command(uninstall)
 cli.add_command(prune)
 cli.add_command(update)

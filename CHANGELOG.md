@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm lock`: new command that resolves all dependencies and writes
+  `apm.lock.yaml` **without** deploying any files to agent targets.
+  Mirrors the lockfile-only ergonomics of `cargo generate-lockfile` and
+  `pnpm lock`. Use it to bootstrap or refresh the lockfile before
+  reviewing or applying changes. Accepts `--update` (re-resolve to latest
+  SHAs), `--verbose`, `--global`, `--no-policy`, `--target`, and
+  `--parallel-downloads`. (#1639)
 - JetBrains users (IntelliJ IDEA, PyCharm, GoLand, WebStorm, and other IDEs)
   can now install MCP servers with `apm install --mcp --runtime intellij
   <package>` -- no manual `mcp.json` editing required. GitHub Copilot for

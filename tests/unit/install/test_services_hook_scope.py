@@ -30,7 +30,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from apm_cli.core.scope import InstallScope
-from apm_cli.install.services import integrate_package_primitives
+from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.skill_integrator import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -105,12 +105,14 @@ def _call(scope: InstallScope, project_root: Path) -> MagicMock:
         package_info,
         project_root,
         targets=[_claude_hooks_only_target()],
-        prompt_integrator=MagicMock(),
-        agent_integrator=MagicMock(),
-        skill_integrator=_make_skill_integrator(),
-        instruction_integrator=MagicMock(),
-        command_integrator=MagicMock(),
-        hook_integrator=hook_integrator,
+        integrators=IntegratorBundle(
+            prompt=MagicMock(),
+            agent=MagicMock(),
+            skill=_make_skill_integrator(),
+            instruction=MagicMock(),
+            command=MagicMock(),
+            hook=hook_integrator,
+        ),
         force=False,
         managed_files=None,
         diagnostics=DiagnosticCollector(),
@@ -204,12 +206,14 @@ def test_non_hook_integrators_never_receive_user_scope(tmp_path: Path) -> None:
         package_info,
         tmp_path,
         targets=[target],
-        prompt_integrator=MagicMock(),
-        agent_integrator=MagicMock(),
-        skill_integrator=_make_skill_integrator(),
-        instruction_integrator=MagicMock(),
-        command_integrator=command_integrator,
-        hook_integrator=hook_integrator,
+        integrators=IntegratorBundle(
+            prompt=MagicMock(),
+            agent=MagicMock(),
+            skill=_make_skill_integrator(),
+            instruction=MagicMock(),
+            command=command_integrator,
+            hook=hook_integrator,
+        ),
         force=False,
         managed_files=None,
         diagnostics=DiagnosticCollector(),

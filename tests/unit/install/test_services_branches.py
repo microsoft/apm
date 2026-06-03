@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.install.services import (
+    IntegratorBundle,
     _deployed_path_entry,
     _integrate_local_content,
     _integrate_package_primitives,
@@ -31,6 +32,19 @@ from apm_cli.install.services import (
     integrate_package_primitives,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    """Convert a dict of old-style integrator kwargs to an IntegratorBundle."""
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -160,7 +174,7 @@ class TestIntegratePackagePrimitivesNoTargets:
                 tmp_path,
                 targets=[],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -197,7 +211,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 project_in_scratch,
                 targets=[copilot],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 scratch_root=scratch,
@@ -228,7 +242,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 project_root,
                 targets=[copilot],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 scratch_root=scratch,
@@ -274,7 +288,7 @@ class TestIntegratePackagePrimitivesFormatTargetCollapse:
                 tmp_path,
                 targets=[copilot],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 logger=logger,
@@ -345,7 +359,7 @@ class TestIntegratePackagePrimitivesSubSkills:
                 tmp_path,
                 targets=[copilot],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 logger=logger,
@@ -374,7 +388,7 @@ class TestIntegratePackagePrimitivesSubSkills:
                 tmp_path,
                 targets=[copilot],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 logger=logger,
@@ -422,7 +436,7 @@ class TestSkillPathOutsideProject:
                 project_root,
                 targets=[cowork_target],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -445,7 +459,12 @@ class TestIntegrateLocalContent:
                 tmp_path,
                 targets=[KNOWN_TARGETS["copilot"]],
                 diagnostics=MagicMock(),
-                **integrators,
+                prompt_integrator=integrators["prompt_integrator"],
+                agent_integrator=integrators["agent_integrator"],
+                skill_integrator=integrators["skill_integrator"],
+                instruction_integrator=integrators["instruction_integrator"],
+                command_integrator=integrators["command_integrator"],
+                hook_integrator=integrators["hook_integrator"],
                 force=False,
                 managed_files=None,
             )
@@ -473,7 +492,12 @@ class TestIntegrateLocalContent:
                 tmp_path,
                 targets=[KNOWN_TARGETS["copilot"]],
                 diagnostics=MagicMock(),
-                **integrators,
+                prompt_integrator=integrators["prompt_integrator"],
+                agent_integrator=integrators["agent_integrator"],
+                skill_integrator=integrators["skill_integrator"],
+                instruction_integrator=integrators["instruction_integrator"],
+                command_integrator=integrators["command_integrator"],
+                hook_integrator=integrators["hook_integrator"],
                 force=False,
                 managed_files=None,
             )
@@ -757,7 +781,7 @@ class TestCopilotAppWorkflowHint:
                 tmp_path,
                 targets=[mock_target],
                 diagnostics=MagicMock(),
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 logger=logger,
