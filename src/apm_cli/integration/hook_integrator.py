@@ -139,6 +139,11 @@ def _detect_event_casing(name: str) -> str | None:
     return None
 
 
+def _sanitize_event_name(name: str) -> str:
+    """Return event name with non-printable-ASCII characters stripped, for safe logging."""
+    return "".join(c for c in name if 0x20 <= ord(c) <= 0x7E)
+
+
 def _emit_hook_event_diagnostics(
     event_names: list[str],
     target_key: str,
@@ -150,10 +155,12 @@ def _emit_hook_event_diagnostics(
     """
     if not event_names:
         return
+    event_label = "hook event" if len(event_names) == 1 else "hook events"
     _log.info(
-        "target %s: deploying hook event(s): %s",
+        "target %s: detected %s: %s",
         target_key,
-        ", ".join(sorted(event_names)),
+        event_label,
+        ", ".join(sorted(_sanitize_event_name(n) for n in event_names)),
     )
     expected_casing = _HOOK_EVENT_EXPECTED_CASING.get(target_key)
     if not expected_casing:
@@ -167,15 +174,17 @@ def _emit_hook_event_diagnostics(
     ]
     if mismatched:
         example = "preToolUse" if expected_casing == "camelCase" else "PreToolUse"
+        safe_mismatched = sorted(_sanitize_event_name(n) for n in mismatched)
         _rich_warning(
             f"Hook events for target '{target_key}' may not be recognized: "
-            f"{', '.join(sorted(mismatched))}. "
-            f"Target expects {expected_casing} (e.g. {example})."
+            f"{', '.join(safe_mismatched)}. "
+            f"Target expects {expected_casing} (e.g. {example}). "
+            f"Rename events to match the {expected_casing} convention, then reinstall."
         )
         _log.warning(
             "target %s: hook event casing mismatch (no mapping): %s",
             target_key,
-            ", ".join(sorted(mismatched)),
+            ", ".join(safe_mismatched),
         )
 
 
@@ -1035,8 +1044,6 @@ class HookIntegrator(BaseIntegrator):
                 root_dir=root_dir,
             )
 
-            _emit_hook_event_diagnostics(list(rewritten.get("hooks", {}).keys()), "copilot", {})
-
             # Generate target filename (clean, no -apm suffix)
             stem = hook_file.stem
             target_filename = f"{package_name}-{stem}.json"
@@ -1047,6 +1054,8 @@ class HookIntegrator(BaseIntegrator):
                 target_path, rel_path, managed_files, force, diagnostics=diagnostics
             ):
                 continue
+
+            _emit_hook_event_diagnostics(list(rewritten.get("hooks", {}).keys()), "copilot", {})
 
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:

@@ -5,6 +5,7 @@ Covers:
 - Naming-convention mismatch triggers a user-visible warning
 - Multi-target fixture: per-target diagnostics distinguish events correctly
 - Full integration: integrate_hooks_for_target emits diagnostics during deploy
+- Regression: diagnostics suppressed when collision forces hook file skip
 """
 
 import json
@@ -273,3 +274,45 @@ class TestMultiTargetHookDiagnostics:
 
         captured = capsys.readouterr()
         assert "sessionStart" in captured.out
+
+    def test_collision_suppresses_diagnostics(self, temp_project, caplog, capsys):
+        """No diagnostics are emitted for a hook file skipped due to collision.
+
+        Regression trap: diagnostics must fire AFTER the collision gate, not before.
+        A pre-existing user-authored hook file causes integrate_package_hooks to
+        skip that file via check_collision. No casing warning or INFO log for
+        events in the skipped file should reach the user.
+        """
+        pkg_info = self._make_package_with_hooks(
+            temp_project,
+            {
+                "hooks": {
+                    # PascalCase event on copilot (camelCase) target -> would warn
+                    "PreToolUse": [{"type": "command", "bash": "echo pre"}],
+                }
+            },
+        )
+        integrator = HookIntegrator()
+        copilot = KNOWN_TARGETS["copilot"]
+
+        # Pre-create the target file to trigger a collision (user-authored, not managed)
+        hooks_dir = temp_project / ".github" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        collision_file = hooks_dir / "diag-pkg-hooks.json"
+        collision_file.write_text("{}", encoding="utf-8")
+
+        with caplog.at_level(logging.INFO, logger="apm_cli.integration.hook_integrator"):
+            integrator.integrate_hooks_for_target(
+                copilot, pkg_info, temp_project, managed_files=set()
+            )
+
+        # No INFO diagnostic about events from the skipped file
+        info_records = [r for r in caplog.records if r.levelno == logging.INFO]
+        event_logs = [r for r in info_records if "PreToolUse" in r.getMessage()]
+        assert not event_logs, "INFO diagnostic must not fire for collision-skipped hook files"
+
+        # No casing mismatch warning (PascalCase on camelCase target would warn if emitted)
+        captured = capsys.readouterr()
+        assert "may not be recognized" not in captured.out, (
+            "Casing warning must not fire for collision-skipped hook files"
+        )
