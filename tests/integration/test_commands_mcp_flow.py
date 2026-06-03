@@ -1066,9 +1066,8 @@ class TestPackCommandHelp:
             result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/mkt.json"])
 
         assert result.exit_code != 0
-        assert "no such option" in (result.output or "").lower() or isinstance(
-            result.exception, SystemExit
-        )
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
     def test_pack_build_error_exits_nonzero(self, tmp_path: Path) -> None:
         """BuildError from orchestrator surfaces as non-zero exit."""

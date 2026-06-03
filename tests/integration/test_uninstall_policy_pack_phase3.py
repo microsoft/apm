@@ -1787,9 +1787,8 @@ class TestPackCmdMarketplaceFilter:
 
         result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/marketplace.json"])
         assert result.exit_code != 0
-        assert "no such option" in (result.output or "").lower() or isinstance(
-            result.exception, SystemExit
-        )
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
 
 class TestPackCmdJsonOutput:

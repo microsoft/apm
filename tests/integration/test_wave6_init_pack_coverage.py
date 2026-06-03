@@ -607,9 +607,8 @@ class TestPackMarketplaceOutput:
             cli, ["pack", "--marketplace-output", str(tmp_path / "marketplace.json")]
         )
         assert result.exit_code != 0
-        assert "no such option" in (result.output or "").lower() or isinstance(
-            result.exception, SystemExit
-        )
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
 
 class TestPackMarketplacePath:

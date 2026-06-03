@@ -123,9 +123,8 @@ marketplace:
         result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/marketplace.json"])
         # Flag was removed; Click rejects it with a usage error.
         assert result.exit_code != 0
-        assert "no such option" in (result.output or "").lower() or isinstance(
-            result.exception, SystemExit
-        )
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
     def test_pack_marketplace_path_invalid_format(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

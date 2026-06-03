@@ -381,7 +381,7 @@ class TestSkillIntegratorFindFiles:
 
 
 # ===========================================================================
-# SkillIntegrator._dircmp_equal / _dircmp_equal
+# SkillIntegrator.is_skill_dir_identical_to_source / _dircmp_equal
 # ===========================================================================
 
 
