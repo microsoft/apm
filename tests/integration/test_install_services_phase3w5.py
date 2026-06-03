@@ -80,11 +80,15 @@ def make_skill_result(
     target_paths: list[Path] | None = None,
     skill_created: bool = False,
     sub_skills_promoted: int = 0,
+    bin_deployed: int = 0,
+    bin_skipped_reason: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         target_paths=target_paths or [],
         skill_created=skill_created,
         sub_skills_promoted=sub_skills_promoted,
+        bin_deployed=bin_deployed,
+        bin_skipped_reason=bin_skipped_reason,
     )
 
 

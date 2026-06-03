@@ -1780,6 +1780,7 @@ class TestMaterializeInstallPath:
         lock_dep.local_path = local_pkg_rel
         lock_dep.repo_url = "_local/my-tool"
         lock_dep.resolved_commit = None
+        lock_dep.resolved_by = None
 
         path = _materialize_install_path(
             lock_dep, project_root, tmp_path / "apm_modules", cache_only=True
@@ -1802,6 +1803,7 @@ class TestMaterializeInstallPath:
         lock_dep = MagicMock()
         lock_dep.source = "local"
         lock_dep.local_path = "nonexistent/path"
+        lock_dep.resolved_by = None
 
         with pytest.raises(CacheMissError, match="local source missing"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=True)

@@ -193,7 +193,7 @@ class TestPackUnified:
         )
         claude_override = tmp_path / "dist" / "legacy-override.json"
 
-        result = runner.invoke(pack_cmd, ["--marketplace-output", str(claude_override)])
+        result = runner.invoke(pack_cmd, ["--marketplace-path", f"claude={claude_override}"])
 
         assert result.exit_code == 0, result.output
         assert claude_override.exists()
@@ -274,7 +274,7 @@ marketplace:
         _write_marketplace_block_yml(tmp_path)
 
         out_path = tmp_path / "out" / "m.json"
-        result = runner.invoke(pack_cmd, ["--marketplace-output", str(out_path)])
+        result = runner.invoke(pack_cmd, ["--marketplace-path", f"claude={out_path}"])
 
         assert result.exit_code == 0, result.output
         assert out_path.exists()
