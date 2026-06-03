@@ -47,7 +47,10 @@ class TestFindIntegration:
         assert result.exit_code == 0
         lines = [line for line in result.output.strip().splitlines() if line.strip()]
         assert any("github.com/acme/git-utils" in line for line in lines)
-        assert not any("oci://" in line for line in lines)
+        from urllib.parse import urlparse
+
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert not any(urlparse(url).scheme == "oci" for url in urls)
 
     def test_acceptance_3_source_flag_oci(self):
         """--source renders oci:// origins correctly."""
@@ -57,7 +60,10 @@ class TestFindIntegration:
             runner, lf, ["find", ".github/instructions/oci-tools.instructions.md", "--source"]
         )
         assert result.exit_code == 0, result.output
-        assert "oci://" in result.output
+        from urllib.parse import urlparse
+
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert any(urlparse(url).scheme == "oci" for url in urls), result.output
 
     def test_acceptance_3_source_flag_git(self):
         """--source renders git ref origins correctly."""
@@ -158,4 +164,8 @@ class TestFindIntegration:
             runner, lf, ["find", ".github/instructions/workspace.instructions.md"]
         )
         assert result.exit_code == 0, result.output
-        assert "." in result.output
+        # The workspace sentinel "." must appear as a whole token on its own line.
+        output_lines = [line.strip() for line in result.output.splitlines()]
+        assert "." in output_lines, (
+            f"Workspace sentinel '.' not found as own line: {result.output!r}"
+        )

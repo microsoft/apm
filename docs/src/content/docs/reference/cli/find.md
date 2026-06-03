@@ -13,7 +13,7 @@ Reverse-lookup: given a file path on disk, `apm find` reports which package(s) i
 apm find <PATH> [OPTIONS]
 ```
 
-`PATH` is the path to the deployed file you want to trace (relative or absolute).
+`PATH` is the path to the deployed file you want to trace (relative path from the project root).
 
 ## Description
 
@@ -27,9 +27,8 @@ When multiple packages deployed the same file (common for shared harness files s
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source` | off | After each package name, print a second line showing the OCI image URI, git remote URL, or local path that is the origin of that package. |
+| `--source` | off | After each package name, print the OCI image URI, git remote URL, or local path that is the origin of that package on the same line. |
 | `--path` | off | After each package name, print the full dependency chain from that package up to the root (same output as `apm deps why`). |
-| `--lockfile PATH` | auto | Read from this lockfile instead of auto-discovering one from the current working directory. |
 
 ## Examples
 
@@ -54,8 +53,7 @@ apm find .github/copilot-instructions.md --source
 Output:
 
 ```
-owner/repo
-  source: https://github.com/owner/repo.git#abc1234
+owner/repo  https://github.com/owner/repo.git@abc1234
 ```
 
 ### Show full dependency chain
@@ -68,7 +66,7 @@ Output:
 
 ```
 owner/repo
-  why: your-project -> dep-a -> owner/repo
+  apm.yml -> owner/repo
 ```
 
 ### Multi-contributor file (AGENTS.md / CLAUDE.md)
@@ -95,16 +93,8 @@ apm find AGENTS.md --source
 Output:
 
 ```
-owner/repo-a
-  source: https://github.com/owner/repo-a.git#def5678
-owner/repo-b
-  source: oci://ghcr.io/owner/repo-b:v1.2.0
-```
-
-### Override lockfile location
-
-```bash
-apm find AGENTS.md --lockfile /path/to/apm.lock.yaml
+owner/repo-a  https://github.com/owner/repo-a.git@def5678
+owner/repo-b  oci://ghcr.io/owner/repo-b:v1.2.0
 ```
 
 ## Exit codes

@@ -111,7 +111,10 @@ class TestFindCommandBasic:
                 ["find", ".github/instructions/oci-tools.instructions.md", "--source"],
             )
         assert result.exit_code == 0, result.output
-        assert "oci://" in result.output
+        from urllib.parse import urlparse
+
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert any(urlparse(url).scheme == "oci" for url in urls), result.output
 
     def test_source_flag_git_origin(self):
         lf = _make_lockfile_with_git()
@@ -163,11 +166,11 @@ class TestFindCommandBasic:
         assert result.exit_code == 0, result.output
         assert "github.com/acme/git-utils" in result.output
 
-    def test_no_lockfile_exits_nonzero(self):
+    def test_no_lockfile_exits_with_code_2(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             result = runner.invoke(cli, ["find", "some-file.md"])
-        assert result.exit_code != 0
+        assert result.exit_code == 2
 
     def test_output_is_ascii_only(self):
         lf = _make_lockfile_with_git()

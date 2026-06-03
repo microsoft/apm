@@ -68,8 +68,10 @@ def _format_origin(dep: LockedDependency) -> str:
     Priority:
     1. OCI registry: resolved_url starting with ``oci://``
     2. Local source: use local_path
-    3. Git ref: resolved_ref or resolved_tag or resolved_commit (first truthy)
-    4. Fallback: repo_url
+    3. Git ref: resolved_ref (first truthy)
+    4. Git tag: resolved_tag
+    5. Git commit: resolved_commit (first 12 chars)
+    6. Fallback: repo_url
     """
     if dep.resolved_url and dep.resolved_url.startswith("oci://"):
         return dep.resolved_url
@@ -80,6 +82,11 @@ def _format_origin(dep: LockedDependency) -> str:
         if dep.repo_url:
             return f"{dep.repo_url}@{ref_part}"
         return ref_part
+    if dep.resolved_tag:
+        tag_part = dep.resolved_tag
+        if dep.repo_url:
+            return f"{dep.repo_url}@{tag_part}"
+        return tag_part
     if dep.resolved_commit:
         commit = dep.resolved_commit[:12]
         if dep.repo_url:
@@ -119,7 +126,9 @@ def _lookup_in_index(query: str, index: dict[str, list[str]]) -> list[str] | Non
     Checks:
     1. Exact match on the normalized query string.
     2. Prefix match: if a key in the index ends with "/" and the query starts
-       with that prefix, the entry owns the file.
+       with that prefix, the entry owns the file. When multiple directory
+       entries match (overlapping prefixes), the most specific (longest)
+       prefix wins.
     """
     # Normalize forward slashes only -- no os.sep conversion needed here
     # because deployed_files entries are always stored as POSIX paths.
@@ -128,14 +137,20 @@ def _lookup_in_index(query: str, index: dict[str, list[str]]) -> list[str] | Non
     if normalized in index:
         return index[normalized]
 
+    best_match: list[str] | None = None
+    best_prefix_len = -1
+
     for entry, owners in index.items():
         if entry.endswith("/") and normalized.startswith(entry):
-            return owners
-        if normalized.endswith("/") and entry.startswith(normalized):
-            # Query is a directory prefix of an entry
-            return owners
+            if len(entry) > best_prefix_len:
+                best_prefix_len = len(entry)
+                best_match = owners
+        elif normalized.endswith("/") and entry.startswith(normalized):
+            if len(normalized) > best_prefix_len:
+                best_prefix_len = len(normalized)
+                best_match = owners
 
-    return None
+    return best_match
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +188,7 @@ def find(ctx: click.Context, file_path: str, show_source: bool, show_path: bool)
             f"No lockfile found at {_APM_LOCK_YAML}. Run 'apm install' first.",
             symbol="error",
         )
-        sys.exit(1)
+        sys.exit(2)
 
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
@@ -181,12 +196,15 @@ def find(ctx: click.Context, file_path: str, show_source: bool, show_path: bool)
             f"Could not read {_APM_LOCK_YAML}. The file may be corrupt.",
             symbol="error",
         )
-        sys.exit(1)
+        sys.exit(2)
 
     index = build_reverse_index(lockfile)
 
     # Normalize the query to a POSIX-style relative path.
     normalized_query = file_path.replace("\\", "/").lstrip("/")
+    # Strip a leading "./" prefix common in shell tab-completion output.
+    if normalized_query.startswith("./"):
+        normalized_query = normalized_query[2:]
 
     owner_keys = _lookup_in_index(normalized_query, index)
 
