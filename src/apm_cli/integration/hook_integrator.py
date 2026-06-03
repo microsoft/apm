@@ -114,6 +114,70 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
     },
 }
 
+# Expected hook event naming convention per target.
+# Used to warn when a package author deploys events whose casing does not
+# match the target's convention AND no explicit rename mapping exists.
+_HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
+    "copilot": "camelCase",
+    "vscode": "PascalCase",
+    "claude": "PascalCase",
+    "cursor": "PascalCase",
+    "codex": "PascalCase",
+    "gemini": "PascalCase",
+    "windsurf": "PascalCase",
+}
+
+
+def _detect_event_casing(name: str) -> str | None:
+    """Return 'camelCase', 'PascalCase', or None for an event name string."""
+    if not name or not name[0].isalpha():
+        return None
+    if name[0].islower() and any(c.isupper() for c in name[1:]):
+        return "camelCase"
+    if name[0].isupper():
+        return "PascalCase"
+    return None
+
+
+def _emit_hook_event_diagnostics(
+    event_names: list[str],
+    target_key: str,
+    event_map: dict[str, str],
+) -> None:
+    """Log hook events per-target and warn on unmapped casing mismatches.
+
+    This is informational only -- it never blocks deployment.
+    """
+    if not event_names:
+        return
+    _log.info(
+        "target %s: deploying hook event(s): %s",
+        target_key,
+        ", ".join(sorted(event_names)),
+    )
+    expected_casing = _HOOK_EVENT_EXPECTED_CASING.get(target_key)
+    if not expected_casing:
+        return
+    # Warn for events whose detected casing does not match the target convention
+    # and that are not covered by an explicit rename in event_map.
+    mismatched = [
+        n
+        for n in event_names
+        if _detect_event_casing(n) not in (None, expected_casing) and n not in event_map
+    ]
+    if mismatched:
+        example = "preToolUse" if expected_casing == "camelCase" else "PreToolUse"
+        _rich_warning(
+            f"Hook events for target '{target_key}' may not be recognized: "
+            f"{', '.join(sorted(mismatched))}. "
+            f"Target expects {expected_casing} (e.g. {example})."
+        )
+        _log.warning(
+            "target %s: hook event casing mismatch (no mapping): %s",
+            target_key,
+            ", ".join(sorted(mismatched)),
+        )
+
 
 def _to_gemini_hook_entries(entries: list) -> list:
     """Transform hook entries into Gemini CLI format.
@@ -971,6 +1035,8 @@ class HookIntegrator(BaseIntegrator):
                 root_dir=root_dir,
             )
 
+            _emit_hook_event_diagnostics(list(rewritten.get("hooks", {}).keys()), "copilot", {})
+
             # Generate target filename (clean, no -apm suffix)
             stem = hook_file.stem
             target_filename = f"{package_name}-{stem}.json"
@@ -1140,6 +1206,8 @@ class HookIntegrator(BaseIntegrator):
             # Merge hooks into config (additive)
             hooks = rewritten.get("hooks", {})
             event_map = _HOOK_EVENT_MAP.get(config.target_key, {})
+
+            _emit_hook_event_diagnostics(list(hooks.keys()), config.target_key, event_map)
 
             # Build reverse map: normalised name -> set of source aliases
             reverse_map: dict[str, set[str]] = {}
