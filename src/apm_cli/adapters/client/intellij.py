@@ -18,6 +18,7 @@ import os
 import sys
 from pathlib import Path
 
+from ...utils.path_security import PathTraversalError, ensure_path_within
 from .copilot import CopilotClientAdapter
 
 
@@ -26,9 +27,24 @@ def _intellij_config_dir() -> Path:
 
     Does not guarantee the directory exists; callers that need to write
     to it should call ``mkdir(parents=True, exist_ok=True)`` first.
+
+    Raises
+    ------
+    PathTraversalError
+        If the environment variable the location is derived from
+        (``LOCALAPPDATA`` on Windows, ``XDG_DATA_HOME`` on Linux) is unset
+        or not absolute.  Without this guard an empty ``LOCALAPPDATA``
+        would yield ``Path("")`` -- a *relative* path -- causing APM to
+        silently read/write ``./github-copilot/intellij/mcp.json`` in the
+        current working directory and to falsely auto-detect the runtime.
     """
     if sys.platform == "win32":
         local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if not local_app_data or not os.path.isabs(local_app_data):
+            raise PathTraversalError(
+                "LOCALAPPDATA is unset or not an absolute path; cannot locate the "
+                "JetBrains Copilot configuration directory."
+            )
         return Path(local_app_data) / "github-copilot" / "intellij"
 
     if sys.platform == "darwin":
@@ -37,6 +53,11 @@ def _intellij_config_dir() -> Path:
     # Linux: honour $XDG_DATA_HOME, fall back to ~/.local/share
     xdg_data = os.environ.get("XDG_DATA_HOME", "")
     if xdg_data:
+        if not os.path.isabs(xdg_data):
+            raise PathTraversalError(
+                "XDG_DATA_HOME is set to a non-absolute path; cannot locate the "
+                "JetBrains Copilot configuration directory."
+            )
         return Path(xdg_data) / "github-copilot" / "intellij"
     return Path.home() / ".local" / "share" / "github-copilot" / "intellij"
 
@@ -65,5 +86,14 @@ class IntelliJClientAdapter(CopilotClientAdapter):
     # ------------------------------------------------------------------ #
 
     def get_config_path(self) -> str:
-        """Return the OS-specific path to ``mcp.json`` for JetBrains Copilot."""
-        return str(_intellij_config_dir() / "mcp.json")
+        """Return the OS-specific path to ``mcp.json`` for JetBrains Copilot.
+
+        The config directory is derived from an environment variable
+        (``LOCALAPPDATA`` / ``XDG_DATA_HOME``).  Validate it resolves
+        inside the user's home directory before any read/write so a
+        tampered or unexpected environment cannot redirect APM's writes
+        outside the user-scope tree (supply-chain hardening).
+        """
+        config_dir = _intellij_config_dir()
+        ensure_path_within(config_dir, Path.home())
+        return str(config_dir / "mcp.json")

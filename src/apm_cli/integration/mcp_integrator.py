@@ -660,12 +660,23 @@ class MCPIntegrator:
         # Clean JetBrains Copilot user-scope mcp.json
         if "intellij" in target_runtimes:
             from apm_cli.adapters.client.intellij import _intellij_config_dir
+            from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
-            intellij_mcp = _intellij_config_dir() / "mcp.json"
-            if intellij_mcp.exists():
+            try:
+                intellij_mcp = _intellij_config_dir() / "mcp.json"
+            except PathTraversalError:
+                _log.debug(
+                    "Skipping JetBrains Copilot stale cleanup: config dir unavailable",
+                    exc_info=True,
+                )
+                intellij_mcp = None
+            if intellij_mcp is not None and intellij_mcp.exists():
                 try:
                     import json as _json
 
+                    # Route the env-var-derived write path through the same
+                    # containment guard every other APM write site uses.
+                    ensure_path_within(intellij_mcp, Path.home())
                     config = _json.loads(intellij_mcp.read_text(encoding="utf-8"))
                     servers = config.get("servers")
                     if not isinstance(servers, dict):
@@ -678,10 +689,10 @@ class MCPIntegrator:
                         intellij_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
                         for name in removed:
                             _rich_success(
-                                f"Removed stale MCP server '{name}' from JetBrains Copilot config",
+                                f"Removed stale MCP server '{name}' from {intellij_mcp}",
                                 symbol="check",
                             )
-                except Exception:
+                except (OSError, ValueError):
                     _log.debug(
                         "Failed to clean stale MCP servers from JetBrains Copilot config",
                         exc_info=True,
