@@ -320,6 +320,59 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
+def _handle_global_flag(dry_run: bool) -> int:
+    """Handle --global compilation of user-scope root context files.
+
+    Returns 0 on success, 1 on error (for sys.exit).
+    """
+
+    from ...compilation import compile_user_root_contexts
+    from ...core.scope import InstallScope, get_source_root
+    from ...integration.targets import KNOWN_TARGETS
+    from ...utils.console import _rich_error, _rich_info, _rich_success
+
+    source_root = get_source_root(InstallScope.USER)
+    apm_modules = source_root / "apm_modules"
+    if not apm_modules.is_dir():
+        _rich_error(
+            f"User-scope apm_modules not found: {apm_modules}. "
+            "Run 'apm install -g <package>' to install packages globally."
+        )
+        return 1
+
+    results = compile_user_root_contexts(
+        list(KNOWN_TARGETS.values()),
+        source_root,
+        dry_run=dry_run,
+        logger=None,
+    )
+
+    if not results:
+        _rich_info("No user-scope targets produced output (no global instructions found).")
+        return 0
+
+    has_error = False
+    for entry in results:
+        status = entry["status"]
+        tname = entry["target"]
+        path = entry.get("path")
+        if status == "written":
+            _rich_success(f"[+] {tname}: wrote {path}")
+        elif status == "would-write":
+            _rich_info(f"[*] {tname}: would write {path} (dry-run)")
+        elif status == "unchanged":
+            _rich_info(f"[i] {tname}: unchanged {path}")
+        elif status == "skipped-hand-authored":
+            _rich_info(f"[i] {tname}: skipped (hand-authored) {path}")
+        elif status == "skipped-no-instructions":
+            _rich_info(f"[i] {tname}: skipped (no global instructions)")
+        elif status.startswith("error:"):
+            _rich_error(f"[x] {tname}: {status[6:]}")
+            has_error = True
+
+    return 1 if has_error else 0
+
+
 @click.command(help="Compile APM context into distributed AGENTS.md files")
 @click.option(
     "--output",
@@ -422,6 +475,17 @@ def _resolve_effective_target(
         "for scratch-dir verification. Cannot be combined with --watch."
     ),
 )
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    default=False,
+    help=(
+        "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
+        "from ~/.apm/apm_modules. Cannot be combined with --watch or --root."
+    ),
+)
 @click.pass_context
 def compile(
     ctx,
@@ -441,6 +505,7 @@ def compile(
     compile_all,
     no_dedup,
     root,
+    global_,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -477,6 +542,22 @@ def compile(
         # CLI output and would only ever fire for downstream library
         # consumers running with -W default, which we have none of.
         logger.warning("'--target all' is deprecated; use '--all' instead.")
+
+    # --global: compile user-scope root context files from ~/.apm/apm_modules.
+    # Must be checked before --watch / --root guards so we return early.
+    if global_:
+        from ...utils.console import _rich_error
+
+        if watch:
+            _rich_error("--global cannot be combined with --watch")
+            return
+        if root:
+            _rich_error("--global cannot be combined with --root")
+            return
+        rc = _handle_global_flag(dry_run=dry_run)
+        if rc != 0:
+            sys.exit(rc)
+        return
 
     # --root + --watch is rejected: ``_watch_mode`` uses bare-relative
     # paths (``Path(APM_DIR)``, ``AgentsCompiler(".")``) and the watch
