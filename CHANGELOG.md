@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--parallel-downloads`. (#1639)
 - `apm find <file>`: trace a materialized file back to its contributing
   package(s) via a reverse index over `apm.lock.yaml`. Supports `--source` and
-  `--path`; unknown paths exit 2 with an ASCII `[x]` message, and the command
-  performs zero network or write operations. (#1631)
+  `--path`; untracked paths exit 1 (a missing or corrupt lockfile exits 2),
+  each with an ASCII `[x]` message, and the command performs zero network or
+  write operations. (#1631)
 - `apm update` now accepts `-g/--global`, positional `[PACKAGES]...`,
   `--force`, and `--parallel-downloads`, making it a strict superset of
   `apm deps update` -- one verb covering project and user scope, per-package
