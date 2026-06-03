@@ -315,7 +315,7 @@ Controls whether `apm install -g` deploys `bin/` executables from `marketplace_p
 
 This realizes Claude Code's "skills-directory plugin" contract: a folder under a skills directory that contains `.claude-plugin/plugin.json` loads as `<name>@skills-dir`, and its root `bin/` is added to the Bash tool's `PATH`. The package's `.claude-plugin/plugin.json` is required for Claude to load the folder as a plugin; APM copies it alongside `bin/` when the package ships one. The contract is Claude-specific, so deployment only targets Claude. Restart Claude Code (or run `/reload-plugins`) after install for new executables to be picked up.
 
-**Security note:** deployed executables are made executable (the execute bit is set for user, group, and other) and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments.
+**Security note:** deployed executables are made executable (user-only execute bit; group and other execute bits are cleared) and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments.
 
 **Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
 
@@ -324,7 +324,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |
-| `deny` | `list<string>` | `[]` | Package canonical strings (e.g. `owner/name`) whose bin/ executables must not be deployed. |
+| `deny` | `list<string>` | `[]` | Package canonical strings whose bin/ executables must not be deployed. Entries are matched case-sensitively; copy each string verbatim from `apm deps list` (e.g. `myorg/myplugin`). |
 
 ```yaml
 bin_deploy:

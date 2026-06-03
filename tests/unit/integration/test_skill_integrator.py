@@ -4200,6 +4200,70 @@ class TestPluginBinDeploy:
         assert deployed_bin in tp_files, "deployed bin not in target_paths"
         assert deployed_manifest in tp_files, "plugin.json not in target_paths"
 
+        # Verify user-only execute: S_IXUSR set, S_IXGRP and S_IXOTH cleared.
+        import os
+        import stat as _stat
+
+        if os.name == "posix":
+            mode = deployed_bin.stat().st_mode
+            assert mode & _stat.S_IXUSR, "owner execute bit must be set"
+            assert not (mode & _stat.S_IXGRP), "group execute bit must NOT be set"
+            assert not (mode & _stat.S_IXOTH), "other execute bit must NOT be set"
+
+    def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(self, tmp_path: Path) -> None:
+        """Re-install of content-identical bin/ file still applies user-only execute.
+
+        Guard against a regression where the hash-match early-return path skips
+        the chmod mask, leaving previously-deployed files with loose permissions.
+        """
+        import os
+        import stat as _stat
+
+        if os.name != "posix":
+            return  # permission model only applies on POSIX
+
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir, pkg_name="myowner/myplugin")
+
+        integrator = SkillIntegrator()
+        # First install -- establishes the file.
+        integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert deployed_bin.is_file()
+
+        # Simulate a file previously deployed with loose permissions (0o755).
+        deployed_bin.chmod(0o755)
+        mode_before = deployed_bin.stat().st_mode
+        assert mode_before & _stat.S_IXGRP, "pre-condition: group-execute set"
+
+        # Second install with identical content -- must harden permissions.
+        integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        mode_after = deployed_bin.stat().st_mode
+        assert mode_after & _stat.S_IXUSR, "owner execute bit must be set"
+        assert not (mode_after & _stat.S_IXGRP), "group execute bit must be cleared on re-install"
+        assert not (mode_after & _stat.S_IXOTH), "other execute bit must be cleared on re-install"
+
     def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
         """bin_deploy.deny list suppresses deployment for the matching package."""
         from apm_cli.core.scope import InstallScope

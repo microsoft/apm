@@ -1116,6 +1116,20 @@ def _handle_mcp_install(
         "local-bundle installs; passing --as without a local bundle path is rejected."
     ),
 )
+@click.option(
+    "--root",
+    "root",
+    type=click.Path(file_okay=False, resolve_path=True),
+    default=None,
+    metavar="DIR",
+    help=(
+        "Install into DIR instead of $PWD: apm_modules/, apm.lock.yaml, "
+        ".claude/, .codex/, .agents/, .opencode/ are written under DIR "
+        "while sources (apm.yml, .apm/, local-path packages) continue "
+        "resolving from $PWD. Mirrors 'pip install --target' / "
+        "'npm install --prefix'. Project scope only; not valid with --global."
+    ),
+)
 @click.pass_context
 def install(  # noqa: PLR0913
     ctx,
@@ -1152,6 +1166,7 @@ def install(  # noqa: PLR0913
     refresh,
     legacy_skill_paths,
     alias,
+    root,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
@@ -1195,12 +1210,27 @@ def install(  # noqa: PLR0913
             "--frozen and --update are mutually exclusive. "
             "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
         )
+    # --root: see apm_cli.install.root_redirect.install_root_redirect.
+    # Conflicts with --global (user scope writes are anchored at $HOME
+    # and have no concept of an arbitrary deploy root). ``--dry-run`` is
+    # threaded through so the context manager skips the ``mkdir``
+    # side-effect on previews. Entered manually (rather than via
+    # ``with``) so the existing top-level try/except/finally below does
+    # not need a full-body re-indent; the matching ``__exit__`` in that
+    # ``finally`` restores cwd + clears the source-root override on every
+    # exit path (return, sys.exit -> SystemExit, exception).
+    if root and global_:
+        raise click.UsageError("--root is not valid with --global (user scope)")
     from ..core.install_audit import resolve_audit_override_from_cli
+    from ..install.root_redirect import install_root_redirect
 
     try:
         audit_override = resolve_audit_override_from_cli(no_audit, audit_mode)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
+
+    _root_redirect = install_root_redirect(root, dry_run=dry_run)
+    _root_redirect.__enter__()
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1592,6 +1622,11 @@ def install(  # noqa: PLR0913
             _rich_error(f"Error installing dependencies: {e}")
         sys.exit(1)
     finally:
+        # --root: restore cwd + clear the source-root override regardless
+        # of how the handler exits (return, sys.exit -> SystemExit,
+        # exception). Done first so cwd is back to $PWD before any
+        # best-effort summary rendering below.
+        _root_redirect.__exit__(None, None, None)
         # F5 (#1116): render minimal elapsed-time line on exit paths that
         # did not already render the full install summary. Best-effort:
         # never let a render failure mask the original exception/exit.

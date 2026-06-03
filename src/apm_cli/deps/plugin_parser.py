@@ -667,8 +667,11 @@ def synthesize_plugin_json_from_apm_yml(apm_yml_path: Path) -> dict:
     """Create a minimal ``plugin.json`` dict from ``apm.yml`` identity fields.
 
     Reads ``apm.yml`` and extracts ``name``, ``version``, ``description``,
-    ``author``, and ``license``.  The ``author`` string is mapped to the plugin
-    spec's ``{"name": author}`` object format.
+    ``author``, ``license``, ``homepage``, ``repository``, and ``keywords``.
+
+    The ``author`` field accepts either a plain string or a structured object
+    with ``name``, ``email``, and ``url`` keys.  A plain string is mapped to
+    ``{"name": author}``; a dict passes through its recognized keys.
 
     Args:
         apm_yml_path: Path to the ``apm.yml`` file.
@@ -700,9 +703,27 @@ def synthesize_plugin_json_from_apm_yml(apm_yml_path: Path) -> dict:
     if data.get("description"):
         result["description"] = data["description"]
     if data.get("author"):
-        result["author"] = {"name": str(data["author"])}
+        author = data["author"]
+        if isinstance(author, dict):
+            # name is required for the structured path; drop the author field if absent
+            if author.get("name"):
+                author_obj: dict[str, str] = {"name": str(author["name"])}
+                if author.get("email"):
+                    author_obj["email"] = str(author["email"])
+                if author.get("url"):
+                    author_obj["url"] = str(author["url"])
+                result["author"] = author_obj
+        else:
+            result["author"] = {"name": str(author)}
     if data.get("license"):
         result["license"] = data["license"]
+    if data.get("homepage"):
+        result["homepage"] = str(data["homepage"])
+    if data.get("repository"):
+        result["repository"] = str(data["repository"])
+    if data.get("keywords"):
+        raw_kw = data["keywords"]
+        result["keywords"] = [str(raw_kw)] if isinstance(raw_kw, str) else [str(k) for k in raw_kw]
 
     return result
 

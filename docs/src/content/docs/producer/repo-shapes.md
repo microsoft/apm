@@ -207,6 +207,8 @@ Claude Code skills target. Authoring rules:
 
 - Deploy is **user-scope only**. A project-scope install (without `-g`)
   skips `bin/` and prints a hint to re-run with `-g`.
+- APM sets **user-only execute** on deployed files (owner +x; group and
+  other execute bits are cleared). Do not rely on a specific umask.
 - Deployed executables sit on Claude Code's `PATH` and are invoked
   **without per-call confirmation**. Treat them as trusted code: keep
   them minimal, audited, and free of network side effects you would not

@@ -409,6 +409,19 @@ def _resolve_effective_target(
     help="Alias for --no-dedup.",
     hidden=True,
 )
+@click.option(
+    "--root",
+    "root",
+    type=click.Path(file_okay=False, resolve_path=True),
+    default=None,
+    metavar="DIR",
+    help=(
+        "Write AGENTS.md / CLAUDE.md outputs under DIR instead of $PWD; "
+        "sources (apm.yml, .apm/, project tree for placement scoring) "
+        "continue resolving from $PWD. Pairs with 'apm install --root' "
+        "for scratch-dir verification. Cannot be combined with --watch."
+    ),
+)
 @click.pass_context
 def compile(
     ctx,
@@ -427,6 +440,7 @@ def compile(
     legacy_skill_paths,
     compile_all,
     no_dedup,
+    root,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -464,11 +478,37 @@ def compile(
         # consumers running with -W default, which we have none of.
         logger.warning("'--target all' is deprecated; use '--all' instead.")
 
+    # --root + --watch is rejected: ``_watch_mode`` uses bare-relative
+    # paths (``Path(APM_DIR)``, ``AgentsCompiler(".")``) and the watch
+    # loop would scan the deploy root rather than the source tree. The
+    # flag combination has no real use case -- watch is interactive
+    # development; --root is for CI scratch-dir verification.
+    if root and watch:
+        raise click.UsageError("--root is not valid with --watch")
+
+    # --root: see apm_cli.install.root_redirect.compile_root_redirect.
+    # Bracket the handler so writes land under *root* while sources keep
+    # resolving from the captured original $PWD via the source-root
+    # override. ``--dry-run`` is threaded through so the context manager
+    # skips the ``mkdir`` side-effect on previews. The manager is entered
+    # manually (rather than via ``with``) so the existing top-level
+    # try/except below does not need a 300-line re-indent; the matching
+    # ``finally`` at the end of the handler restores cwd + clears the
+    # override on every exit path (return, sys.exit, exception).
+    from ...core.scope import InstallScope, get_source_root
+    from ...install.root_redirect import compile_root_redirect
+
+    _root_redirect = compile_root_redirect(root, dry_run=dry_run)
+    _root_redirect.__enter__()
     try:
+        # Source root: where apm.yml, .apm/, and the project tree are read
+        # from. Equals $PWD unless --root redirects writes elsewhere.
+        source_root = get_source_root(InstallScope.PROJECT)
+
         # Check if this is an APM project first
         from pathlib import Path
 
-        if not Path(APM_YML_FILENAME).exists():
+        if not (source_root / APM_YML_FILENAME).exists():
             logger.error("Not an APM project - no apm.yml found")
             logger.progress(" To initialize an APM project, run:")
             logger.progress("   apm init")
@@ -477,11 +517,11 @@ def compile(
         # Check if there are any instruction files to compile
         from ...compilation.constitution import find_constitution
 
-        apm_modules_exists = Path(APM_MODULES_DIR).exists()
-        constitution_exists = find_constitution(Path(".")).exists()
+        apm_modules_exists = (source_root / APM_MODULES_DIR).exists()
+        constitution_exists = find_constitution(source_root).exists()
 
         # Check if .apm directory has actual content
-        apm_dir = Path(APM_DIR)
+        apm_dir = source_root / APM_DIR
         local_apm_has_content = apm_dir.exists() and (
             any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
         )
@@ -515,9 +555,9 @@ def compile(
             logger.start("Validating APM context...", symbol="gear")
             clear_discovery_cache()
             perf_stats.reset()
-            compiler = AgentsCompiler(".")
+            compiler = AgentsCompiler(".", source_dir=str(source_root))
             try:
-                primitives = discover_primitives(".")
+                primitives = discover_primitives(str(source_root))
             except Exception as e:
                 logger.error(f"Failed to discover primitives: {e}")
                 logger.progress(f" Error details: {type(e).__name__}")
@@ -536,13 +576,13 @@ def compile(
             try:
                 from ...models.apm_package import APMPackage
 
-                apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+                apm_pkg = APMPackage.from_apm_yml(source_root / APM_YML_FILENAME)
                 mcp_count = len(apm_pkg.get_mcp_dependencies())
                 if mcp_count > 0:
                     logger.progress(f"  * {mcp_count} MCP dependencies")
             except Exception:
                 pass
-            perf_stats.render_summary(logger, project_root=".")
+            perf_stats.render_summary(logger, project_root=str(source_root))
             return
 
         # Watch mode
@@ -593,7 +633,7 @@ def compile(
         from ...models.apm_package import APMPackage
 
         config_target = None
-        apm_yml_path = Path(APM_YML_FILENAME)
+        apm_yml_path = source_root / APM_YML_FILENAME
         if apm_yml_path.exists():
             apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
             config_target = apm_pkg.target
@@ -637,7 +677,7 @@ def compile(
             # typed for Optional[str], and a frozenset config_target is already
             # handled by the branch above.
             detected_target, detection_reason = detect_target(
-                project_root=Path("."),
+                project_root=source_root,
                 explicit_target=compile_target,
                 config_target=compile_config_target
                 if isinstance(compile_config_target, str)
@@ -769,7 +809,7 @@ def compile(
         # same process (tests, REPL). Mirrors run_install_pipeline.
         clear_discovery_cache()
         perf_stats.reset()
-        compiler = AgentsCompiler(".")
+        compiler = AgentsCompiler(".", source_dir=str(source_root))
         result = compiler.compile(config, logger=logger)
         compile_has_critical = result.has_critical_security
 
@@ -927,10 +967,10 @@ def compile(
                 "Compiled output contains critical hidden characters"
                 " -- run 'apm audit' to inspect, 'apm audit --strip' to clean"
             )
-            perf_stats.render_summary(logger, project_root=".")
+            perf_stats.render_summary(logger, project_root=str(source_root))
             sys.exit(1)
 
-        perf_stats.render_summary(logger, project_root=".")
+        perf_stats.render_summary(logger, project_root=str(source_root))
 
     except ImportError as e:
         logger.error(f"Compilation module not available: {e}")
@@ -939,3 +979,7 @@ def compile(
     except Exception as e:
         logger.error(f"Error during compilation: {e}")
         sys.exit(1)
+    finally:
+        # Restore cwd + clear the source-root override regardless of how
+        # the handler exits (return, sys.exit -> SystemExit, exception).
+        _root_redirect.__exit__(None, None, None)

@@ -61,8 +61,25 @@ fields:
 | `name`         | `name` (required) |
 | `version`      | `version` |
 | `description`  | `description` |
-| `author`       | `author: {name: ...}` |
+| `author`       | author |
 | `license`      | `license` |
+| `homepage`     | `homepage` |
+| `repository`   | `repository` |
+| `keywords`     | `keywords` |
+
+The `author` field accepts a plain string (`"Jane Doe"` maps to `{name: "Jane Doe"}`) or a
+structured object (`{name, email?, url?}` -- all keys optional except `name`):
+
+```yaml
+# String form (backward-compatible):
+author: Jane Doe
+
+# Structured form:
+author:
+  name: Jane Doe
+  email: jane@example.com
+  url: https://example.com/jane
+```
 
 Author your own `plugin.json` at the project root (or under `.github/plugin/`,
 `.claude-plugin/`, or `.cursor-plugin/`) when you need fields APM does not

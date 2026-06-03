@@ -394,6 +394,11 @@ def run(ctx: InstallContext) -> None:
     # This matches the original code's closure over function-level locals.
     scope = ctx.scope
     project_root = ctx.project_root
+    # Local-path package references in apm.yml are relative to the
+    # manifest's location (source_root), not the deploy override.
+    # source_root is required on InstallContext; equals project_root
+    # when --root is not used.
+    source_root = ctx.source_root
     # --refresh implies re-resolution of all refs (but does NOT discard
     # lockfile entries for packages not in the manifest, unlike --update
     # which may restructure the whole graph).
@@ -540,10 +545,16 @@ def run(ctx: InstallContext) -> None:
                 # Anchor relative paths on the *declaring* package's source
                 # directory when available (#857). Falls back to project_root
                 # for direct deps and for parents that predate source_path.
+                # Direct deps from the root project anchor at ``source_root``
+                # (which equals ``project_root`` unless ``apm install --root``
+                # redirects writes -- then it stays at $PWD).  Transitive
+                # deps from a parent local package anchor at that package's
+                # source_path, which is already an absolute path and not
+                # affected by ``--root``.
                 base_dir = (
                     parent_pkg.source_path
                     if parent_pkg is not None and parent_pkg.source_path is not None
-                    else project_root
+                    else source_root
                 )
                 result_path = _copy_local_package(
                     dep_ref,
@@ -694,7 +705,20 @@ def run(ctx: InstallContext) -> None:
         download_callback=download_callback,
     )
 
-    dependency_graph = resolver.resolve_dependencies(ctx.apm_dir)
+    # Resolver reads ``<anchor>/apm.yml``. Preserve the original
+    # ``ctx.apm_dir`` anchor for every non-``--root`` install (zero
+    # behavior change: USER -> ``~/.apm``, PROJECT -> deploy root == cwd).
+    # When ``ctx.source_root`` differs from ``ctx.project_root`` (set by
+    # ``apm install --root`` via the pipeline), the manifest read diverges
+    # to ``ctx.source_root`` ($PWD) so sources keep resolving from the
+    # user's working directory while writes land under the deploy root.
+    # Using the ctx field (rather than the global ContextVar) makes this
+    # branch reachable for any caller that sets source_root directly.
+    # ``apm_modules_dir`` is already pinned on the resolver above, so
+    # this arg selects only where ``apm.yml`` is read -- never where
+    # ``apm_modules/`` is written.
+    manifest_anchor = ctx.source_root if ctx.source_root != ctx.project_root else ctx.apm_dir
+    dependency_graph = resolver.resolve_dependencies(manifest_anchor)
     ctx.dependency_graph = dependency_graph
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so

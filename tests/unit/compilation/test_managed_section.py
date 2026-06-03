@@ -325,19 +325,51 @@ class TestManagedSectionWriteIntegration:
         assert msg.startswith("[")
         assert "] " in msg
 
-    def test_write_output_file_managed_section_missing_file(self, tmp_path):
-        """When mode=managed_section and the output file is missing, error is raised with a clear message."""
+    def test_write_output_file_managed_section_file_missing(self, tmp_path):
+        """When mode=managed_section and target file does not exist, error says file missing.
+
+        This tests issue #1593: when the file doesn't exist yet, the error must
+        clearly say 'does not exist' rather than the confusing 'markers not found'.
+        """
         from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
         from apm_cli.compilation.managed_section import ManagedSectionError
 
+        start = "<!-- apm:start -->"
+        end = "<!-- apm:end -->"
         output_file = tmp_path / "AGENTS.md"
-        # Ensure it does not exist
-        if output_file.exists():
-            output_file.unlink()
+        # File is intentionally NOT created
 
         config = CompilationConfig(
             output_path=str(output_file),
             agents_md_mode="managed_section",
+            agents_md_start_marker=start,
+            agents_md_end_marker=end,
+            dry_run=False,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        with pytest.raises(ManagedSectionError, match=r"(?i)does not exist|not exist|create it"):
+            compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
+
+    def test_write_output_file_managed_section_directory_at_path(self, tmp_path):
+        """When mode=managed_section and a directory occupies the target path, raise ManagedSectionError.
+
+        Regression trap for the is_file() guard: a directory at the output path must
+        produce a clear ManagedSectionError, not an opaque IsADirectoryError/OSError.
+        """
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+        from apm_cli.compilation.managed_section import ManagedSectionError
+
+        start = "<!-- apm:start -->"
+        end = "<!-- apm:end -->"
+        output_file = tmp_path / "AGENTS.md"
+        output_file.mkdir()  # directory at the target path, not a regular file
+
+        config = CompilationConfig(
+            output_path=str(output_file),
+            agents_md_mode="managed_section",
+            agents_md_start_marker=start,
+            agents_md_end_marker=end,
             dry_run=False,
         )
 
@@ -348,3 +380,5 @@ class TestManagedSectionWriteIntegration:
         msg = str(exc_info.value)
         assert "AGENTS.md does not exist yet. Create it with markers first, or use mode: full for initial generation." in msg
         assert msg.startswith("[")
+        with pytest.raises(ManagedSectionError, match=r"(?i)does not exist|not exist|create it"):
+            compiler._write_output_file_with_config(str(output_file), "New content.\n", config)

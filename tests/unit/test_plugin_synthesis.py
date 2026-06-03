@@ -161,12 +161,187 @@ class TestPluginJsonSynthesis:
                 "description": "Full package",
                 "author": "Acme Corp",
                 "license": "ISC",
+                "homepage": "https://example.com",
+                "repository": "https://github.com/acme/full-pkg",
+                "keywords": ["ai", "tools"],
             },
         )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 
-        assert set(result.keys()) == {"name", "version", "description", "author", "license"}
+        assert set(result.keys()) == {
+            "name",
+            "version",
+            "description",
+            "author",
+            "license",
+            "homepage",
+            "repository",
+            "keywords",
+        }
+
+    def test_homepage_passthrough(self, tmp_path):
+        """homepage passes through unchanged to plugin.json."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "homepage": "https://example.com/pkg"},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["homepage"] == "https://example.com/pkg"
+
+    def test_homepage_omitted_if_missing(self, tmp_path):
+        """homepage is absent from result when not in apm.yml."""
+        yml = _write_apm_yml(tmp_path, {"name": "test", "version": "1.0.0"})
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert "homepage" not in result
+
+    def test_repository_passthrough(self, tmp_path):
+        """repository passes through unchanged to plugin.json."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "repository": "https://github.com/org/repo"},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["repository"] == "https://github.com/org/repo"
+
+    def test_repository_omitted_if_missing(self, tmp_path):
+        """repository is absent from result when not in apm.yml."""
+        yml = _write_apm_yml(tmp_path, {"name": "test", "version": "1.0.0"})
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert "repository" not in result
+
+    def test_keywords_passthrough(self, tmp_path):
+        """keywords list passes through unchanged to plugin.json."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "keywords": ["search", "ai", "tools"]},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["keywords"] == ["search", "ai", "tools"]
+
+    def test_keywords_omitted_if_missing(self, tmp_path):
+        """keywords is absent from result when not in apm.yml."""
+        yml = _write_apm_yml(tmp_path, {"name": "test", "version": "1.0.0"})
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert "keywords" not in result
+
+    def test_author_structured_object_full(self, tmp_path):
+        """Structured author dict with name/email/url passes through to plugin.json."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test",
+                "version": "1.0.0",
+                "author": {
+                    "name": "Jane Doe",
+                    "email": "jane@example.com",
+                    "url": "https://example.com/jane",
+                },
+            },
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["author"] == {
+            "name": "Jane Doe",
+            "email": "jane@example.com",
+            "url": "https://example.com/jane",
+        }
+
+    def test_author_structured_object_name_only(self, tmp_path):
+        """Structured author dict with only name produces a name-only object."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "author": {"name": "Jane Doe"}},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["author"] == {"name": "Jane Doe"}
+        assert "email" not in result["author"]
+        assert "url" not in result["author"]
+
+    def test_author_structured_object_partial_fields(self, tmp_path):
+        """Structured author dict with name and email but no url omits url."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test",
+                "version": "1.0.0",
+                "author": {"name": "Bob", "email": "bob@example.com"},
+            },
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["author"] == {"name": "Bob", "email": "bob@example.com"}
+        assert "url" not in result["author"]
+
+    def test_author_structured_object_unrecognized_keys_drops_author(self, tmp_path):
+        """Structured author dict with only unrecognized keys silently drops author field.
+
+        This is the intended design: only name/email/url are recognized; a dict
+        with no recognized keys produces an empty author_obj and the author key
+        is omitted rather than raised. This protects the design decision from
+        silent regression.
+        """
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "author": {"github": "user123"}},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert "author" not in result
+
+    def test_author_structured_object_no_name_drops_author(self, tmp_path):
+        """Structured author dict with recognized keys but no 'name' silently drops author.
+
+        name is required for the structured path. An email-only dict produces no
+        author output -- the consumer would receive a nameless author object otherwise.
+        """
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "author": {"email": "jane@example.com"}},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert "author" not in result
+
+    def test_keywords_bare_string_coerced_to_list(self, tmp_path):
+        """YAML bare-string keywords value is coerced to a single-element list."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "keywords": "ai"},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["keywords"] == ["ai"]
+
+    def test_homepage_non_string_coerced_to_string(self, tmp_path):
+        """Non-string homepage value (e.g. YAML integer) is str()-coerced in plugin.json."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {"name": "test", "version": "1.0.0", "homepage": 404},
+        )
+
+        result = synthesize_plugin_json_from_apm_yml(yml)
+
+        assert result["homepage"] == "404"
 
     def test_extra_apm_fields_ignored(self, tmp_path):
         """Fields not part of plugin spec (dependencies, scripts) are not in output."""

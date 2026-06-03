@@ -331,6 +331,74 @@ def _check_orphaned_packages():
         return []
 
 
+# ------------------------------------------------------------------
+# Dependency-update helpers (shared by `apm update` and `apm deps update`)
+# ------------------------------------------------------------------
+
+
+class UnknownPackageError(Exception):
+    """A requested package token matched no declared dependency.
+
+    Carries the offending *token* and the list of *available* display
+    names so the CLI caller can render a consistent error message.
+    """
+
+    def __init__(self, token: str, available: list[str]):
+        self.token = token
+        self.available = available
+        super().__init__(f"Package '{token}' not found")
+
+
+def resolve_requested_packages(
+    packages: tuple[str, ...] | list[str],
+    all_deps: list,
+) -> list[str] | None:
+    """Map requested package tokens to canonical dependency keys.
+
+    The install engine matches ``only_packages`` by ``DependencyReference``
+    identity (e.g. ``owner/repo``), so short names like ``compliance-rules``
+    must be normalised to their canonical key before the engine is called.
+
+    Args:
+        packages: Raw tokens from the CLI ``[PACKAGES]...`` argument.
+        all_deps: Declared dependencies (direct + dev) to match against.
+
+    Returns:
+        An order-preserving, de-duplicated list of canonical keys, or
+        ``None`` when *packages* is empty (meaning "refresh everything").
+
+    Raises:
+        UnknownPackageError: when a token matches no declared dependency.
+    """
+    if not packages:
+        return None
+
+    token_to_canonical: dict[str, str] = {}
+    for dep in all_deps:
+        canonical_key = dep.get_unique_key() or dep.repo_url or dep.get_display_name()
+        tokens = {canonical_key, dep.get_display_name(), dep.repo_url}
+        if getattr(dep, "alias", None):
+            tokens.add(dep.alias)
+        parts = dep.repo_url.split("/")
+        if len(parts) >= 2:
+            tokens.add(parts[-1])
+        for token in tokens:
+            if token and token not in token_to_canonical:
+                token_to_canonical[token] = canonical_key
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for pkg in packages:
+        canonical = token_to_canonical.get(pkg)
+        if not canonical:
+            available = [dep.get_display_name() for dep in all_deps]
+            raise UnknownPackageError(pkg, available)
+        if canonical not in seen:
+            seen.add(canonical)
+            resolved.append(canonical)
+    return resolved
+
+
 def print_version(ctx, param, value):
     """Print version and exit."""
     if not value or ctx.resilient_parsing:

@@ -36,6 +36,12 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
 | `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. |
 
+### Deploy location
+
+| Flag | Default | Description |
+|---|---|---|
+| `--root DIR` | `$PWD` | Redirect every write -- `apm_modules/`, `apm.lock.yaml`, `.gitignore`, and integrated harness files -- under `DIR`, while `apm.yml`, `.apm/`, and local-path dependencies still resolve from the current working directory. Mirrors `pip install --target` / `npm install --prefix`. `DIR` is created if missing (except under `--dry-run`, which refuses to create it). Not valid with `--global` (user scope), which exits `2`. |
+
 ### Target selection
 
 | Flag | Default | Description |
@@ -155,6 +161,17 @@ apm install --dry-run
 apm install microsoft/apm-sample-package --dry-run
 ```
 
+### Redirect writes to a scratch directory
+
+```bash
+# Resolve apm.yml + local deps from this directory, but write
+# apm_modules/, apm.lock.yaml, and harness files under /tmp/apm-out.
+apm install --root /tmp/apm-out --target copilot
+
+# The source tree stays clean; the deploy root holds every artifact.
+ls /tmp/apm-out          # apm_modules/  apm.lock.yaml  .github/  .gitignore
+```
+
 ### Install a local bundle produced by `apm pack`
 
 ```bash
@@ -176,7 +193,7 @@ apm install owner/skill-bundle --skill '*'   # reset to all skills
 |---|---|
 | `0` | Success. All requested dependencies and local content deployed. |
 | `1` | Install failure: security scan blocked a critical finding, auth error, manifest write error, dependency resolution error, `--frozen` with a missing lockfile or a direct dependency absent from `apm.lock.yaml`, any reported install error (the diagnostic summary closes with `Installation failed with N error(s)`), or unhandled exception. `--force` does **not** suppress general install errors. The diagnostic summary names the cause. |
-| `2` | Usage error: no deployment target detectable (no `--target`, no `targets:` in `apm.yml`, no harness signal in the project), `--ssh` and `--https` both passed, `--frozen` and `--update` both passed, or a Click flag conflict. |
+| `2` | Usage error: no deployment target detectable (no `--target`, no `targets:` in `apm.yml`, no harness signal in the project), `--ssh` and `--https` both passed, `--frozen` and `--update` both passed, `--root` combined with `--global`, or a Click flag conflict. |
 
 ## Notes
 
