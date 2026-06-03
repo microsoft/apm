@@ -298,52 +298,42 @@ class TestListApplyToNocrash:
     """Regression tests: list-valued applyTo must not crash distributed compilation.
 
     GitHub issue #1300: 'list' object has no attribute 'startswith'.
+    Tests exercise the full parse_primitive_file -> compiler pipeline.
     """
 
     def test_analyze_directory_structure_list_apply_to_does_not_crash(self):
-        """Instruction with list-typed apply_to must not crash analyze_directory_structure."""
-        import tempfile
+        """YAML list-valued applyTo through the full parse path must not crash."""
+        from apm_cli.primitives.parser import parse_primitive_file
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            compiler = DistributedAgentsCompiler(temp_dir)
             base = Path(temp_dir)
-
-            # Simulate what happens when YAML parses applyTo: ['**/*.py']
-            # The parser now normalises this, but guard the compiler too.
-            bad_inst = Instruction(
-                name="bad",
-                file_path=base / ".apm" / "instructions" / "bad.instructions.md",
-                description="Test",
-                apply_to="**/*.py, **/*.ts",  # Already normalised (comma-joined)
-                content="# content",
+            inst_file = base / "list-apply.instructions.md"
+            inst_file.write_text(
+                "---\ndescription: Test\napplyTo: ['**/*.py']\n---\n\n# content\n",
+                encoding="utf-8",
             )
-            bad_inst.source = "local"
-
+            compiler = DistributedAgentsCompiler(temp_dir)
+            parsed = parse_primitive_file(inst_file)
             # Must not raise AttributeError
-            directory_map = compiler.analyze_directory_structure([bad_inst])
+            directory_map = compiler.analyze_directory_structure([parsed])
             assert len(directory_map.directories) >= 1
 
     def test_compile_distributed_with_list_apply_to_normalised(self):
-        """Full compile_distributed run with comma-joined apply_to must succeed."""
-        import tempfile
+        """Full compile_distributed run with YAML list applyTo must succeed end-to-end."""
+        from apm_cli.primitives.parser import parse_primitive_file
 
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             (base / "src").mkdir()
             (base / "src" / "app.py").touch()
+            inst_file = base / "py.instructions.md"
+            inst_file.write_text(
+                "---\ndescription: Python rules\napplyTo: ['**/*.py']\n---\n\n# Python rules\n- Use type hints\n",
+                encoding="utf-8",
+            )
 
             compiler = DistributedAgentsCompiler(temp_dir)
-
-            # Parser normalises ['**/*.py'] -> '**/*.py' before this point;
-            # verify compile_distributed handles that normalised string fine.
-            inst = Instruction(
-                name="global-py",
-                file_path=base / ".apm" / "instructions" / "py.instructions.md",
-                description="Python rules",
-                apply_to="**/*.py",
-                content="# Python rules\n- Use type hints",
-            )
-            inst.source = "local"
+            inst = parse_primitive_file(inst_file)
 
             collection = PrimitiveCollection()
             collection.add_primitive(inst)
