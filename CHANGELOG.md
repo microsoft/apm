@@ -9,14 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm install --mcp` now supports JetBrains IDEs via the `intellij` runtime. GitHub
-  Copilot for JetBrains stores server definitions under a user-scope `mcp.json` with a
-  `"servers"` top-level key (not `"mcpServers"`). Config paths are OS-specific:
-  `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows),
-  `~/Library/Application Support/github-copilot/intellij/mcp.json` (macOS), or
-  `$XDG_DATA_HOME/github-copilot/intellij/mcp.json` (Linux). Auto-detection triggers
-  when the user-scope config directory exists (created by the plugin on first run).
-  (closes #1225)
+- `apm install --mcp` now supports JetBrains IDEs via the `intellij` runtime. GitHub Copilot for JetBrains uses a `"servers"` top-level key (not `"mcpServers"`) with an OS-specific user-scope config path. Auto-detects when the plugin config directory exists. (#1636)
 - `apm pack` now synthesises `homepage`, `repository`, `keywords`, and a structured
   `author` (`{name, email?, url?}`) from `apm.yml` into `plugin.json`. All changes are
   additive: omitting any of these fields in `apm.yml` produces no change to the output.

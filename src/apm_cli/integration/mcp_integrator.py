@@ -667,7 +667,10 @@ class MCPIntegrator:
                     import json as _json
 
                     config = _json.loads(intellij_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("servers", {})
+                    servers = config.get("servers")
+                    if not isinstance(servers, dict):
+                        servers = {}
+                        config["servers"] = servers
                     removed = [n for n in expanded_stale if n in servers]
                     for name in removed:
                         del servers[name]

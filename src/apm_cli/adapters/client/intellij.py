@@ -14,7 +14,6 @@ other Copilot-family adapters which use ``"mcpServers"``).
 Ref: https://github.com/orgs/community/discussions/139762
 """
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -47,9 +46,9 @@ class IntelliJClientAdapter(CopilotClientAdapter):
 
     JetBrains Copilot stores server definitions in a user-scope JSON file
     with a ``"servers"`` top-level key (not ``"mcpServers"``).  This adapter
-    inherits all registry-resolution and env-var handling from
-    :class:`CopilotClientAdapter` and overrides only the config-path and
-    the two methods that reference the hard-coded ``"mcpServers"`` key.
+    inherits all registry-resolution, env-var handling, and config read/write
+    from :class:`CopilotClientAdapter` and overrides only the config path and
+    ``mcp_servers_key`` so the parent methods operate on the correct key.
     """
 
     supports_user_scope: bool = True
@@ -68,72 +67,3 @@ class IntelliJClientAdapter(CopilotClientAdapter):
     def get_config_path(self) -> str:
         """Return the OS-specific path to ``mcp.json`` for JetBrains Copilot."""
         return str(_intellij_config_dir() / "mcp.json")
-
-    # ------------------------------------------------------------------ #
-    # Config read / write
-    # ------------------------------------------------------------------ #
-
-    def update_config(self, config_updates: dict) -> None:
-        """Merge *config_updates* into the ``"servers"`` section of ``mcp.json``.
-
-        The parent implementation hard-codes ``"mcpServers"``; this override
-        uses :attr:`mcp_servers_key` (``"servers"``) instead.
-        """
-        current_config = self.get_current_config()
-
-        if self.mcp_servers_key not in current_config:
-            current_config[self.mcp_servers_key] = {}
-
-        current_config[self.mcp_servers_key].update(config_updates)
-
-        config_path = Path(self.get_config_path())
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(current_config, f, indent=2)
-
-    # ------------------------------------------------------------------ #
-    # Security: baked-credential detection
-    # ------------------------------------------------------------------ #
-
-    def _collect_previously_baked_keys(self, server_url: str, server_name: str):
-        """Return ``(env_keys, headers_were_baked)`` from the existing entry.
-
-        The parent reads from ``"mcpServers"``; this override uses
-        :attr:`mcp_servers_key` (``"servers"``) instead.
-        """
-        try:
-            current = self.get_current_config()
-        except Exception:
-            return set(), False
-
-        servers = current.get(self.mcp_servers_key) or {}
-        if server_name:
-            key = server_name
-        elif "/" in server_url:
-            key = server_url.split("/")[-1]
-        else:
-            key = server_url
-
-        existing = servers.get(key)
-        if not isinstance(existing, dict):
-            return set(), False
-
-        from .copilot import _has_env_placeholder
-
-        baked_env_keys: set = set()
-        env_block = existing.get("env") or {}
-        if isinstance(env_block, dict):
-            for k, v in env_block.items():
-                if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
-                    baked_env_keys.add(k)
-
-        headers_were_baked = False
-        headers_block = existing.get("headers") or {}
-        if isinstance(headers_block, dict):
-            for v in headers_block.values():
-                if isinstance(v, str) and v.strip() and not _has_env_placeholder(v):
-                    headers_were_baked = True
-                    break
-
-        return baked_env_keys, headers_were_baked
