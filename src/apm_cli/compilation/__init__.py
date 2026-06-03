@@ -8,6 +8,7 @@ from .template_builder import (
     find_chatmode_by_name,
     render_instructions_block,
 )
+from .user_root_context import compile_user_root_contexts
 
 __all__ = [  # noqa: RUF022
     # Main compilation interface
@@ -15,6 +16,8 @@ __all__ = [  # noqa: RUF022
     "compile_agents_md",
     "CompilationConfig",
     "CompilationResult",
+    # User-scope root context compilation
+    "compile_user_root_contexts",
     # Template building
     "build_conditional_sections",
     "render_instructions_block",
