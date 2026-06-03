@@ -5,11 +5,7 @@ import hashlib
 import re
 import shutil
 from dataclasses import dataclass, replace
-from datetime import datetime  # noqa: F401
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
-
-import frontmatter  # noqa: F401
 
 from apm_cli.integration.base_integrator import BaseIntegrator
 

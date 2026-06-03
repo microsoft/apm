@@ -135,7 +135,7 @@ def test_llm_egress_banner_emitted(monkeypatch):
         logger=logger,
         options_by_name={"skillspector": ScannerOptions(llm=True)},
     )
-    banner_calls = [c.args[0] for c in logger.progress.call_args_list if c.args]
+    banner_calls = [c.args[0] for c in logger.warning.call_args_list if c.args]
     assert any("LLM analysis enabled" in msg for msg in banner_calls)
 
 
@@ -157,5 +157,5 @@ def test_no_banner_without_llm(monkeypatch):
         logger=logger,
         options_by_name={"skillspector": ScannerOptions(llm=False)},
     )
-    banner_calls = [c.args[0] for c in logger.progress.call_args_list if c.args]
+    banner_calls = [c.args[0] for c in logger.warning.call_args_list if c.args]
     assert not any("LLM analysis enabled" in msg for msg in banner_calls)

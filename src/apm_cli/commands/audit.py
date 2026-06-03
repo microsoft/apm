@@ -15,7 +15,6 @@ import dataclasses
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 import click
 
@@ -30,7 +29,6 @@ from ..utils.console import (
     _rich_echo,
     _rich_error,
     _rich_success,
-    _rich_warning,  # noqa: F401
 )
 
 # -- Shared config --------------------------------------------------
@@ -334,7 +332,6 @@ def _preview_strip(
 
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
-    from ..policy.models import CIAuditResult  # noqa: F401
 
     console = _get_console()
 
@@ -621,11 +618,15 @@ def _resolve_external_options(
     from ..config import get_scanner_options
     from ..security.external.options import resolve_scanner_options
 
-    cli_args = (
-        tuple(shlex.split(external_args, posix=(os.name != "nt")))
-        if external_args is not None
-        else None
-    )
+    if external_args is not None:
+        try:
+            cli_args: tuple[str, ...] | None = tuple(
+                shlex.split(external_args, posix=(os.name != "nt"))
+            )
+        except ValueError as exc:
+            raise click.UsageError(f"--external-args could not be parsed: {exc}") from exc
+    else:
+        cli_args = None
     options_by_name: dict[str, object] = {}
     for name in external:
         config_llm, config_args = get_scanner_options(name)
@@ -1131,8 +1132,7 @@ def audit(
         logger.error("--external cannot be combined with --strip or --dry-run")
         sys.exit(1)
     if external_sarif and not external:
-        logger.error("--external-sarif requires '--external sarif'")
-        sys.exit(1)
+        raise click.UsageError("--external-sarif requires '--external sarif'")
     # Orphan-flag guards: scanner-config flags are meaningless without a
     # scanner. UsageError yields exit 2 (usage error), matching --no-drift.
     if external_llm is not None and not external:

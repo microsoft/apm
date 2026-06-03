@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import errno
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
@@ -435,7 +435,7 @@ def _parse_scanners(scanners: Any) -> tuple[tuple[str, ScannerGovernance], ...] 
         pairs.append(
             (
                 str(name),
-                ScannerGovernance(allow_args=bool(allow_args) if allow_args is not None else None),
+                ScannerGovernance(allow_args=allow_args if isinstance(allow_args, bool) else None),
             )
         )
     return tuple(pairs)

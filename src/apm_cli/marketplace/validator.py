@@ -11,7 +11,6 @@ rules on the successfully parsed entries.
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import List  # noqa: F401, UP035
 
 from .models import MarketplaceManifest, MarketplacePlugin
 

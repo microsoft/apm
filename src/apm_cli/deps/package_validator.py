@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os  # noqa: F401
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from ..models.apm_package import (
     APMPackage,

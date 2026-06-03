@@ -46,6 +46,17 @@ def test_build_empty_block_yields_none_governance_value():
     assert audit.scanners == (("skillspector", ScannerGovernance(allow_args=None)),)
 
 
+def test_build_non_bool_allow_args_coerces_to_none():
+    """A non-bool allow_args (e.g. unvalidated 'yes') must never become True.
+
+    ``_build_policy`` may run on data that skipped ``validate_policy``; a truthy
+    string like ``"yes"`` must be treated as no-opinion (None), not silently
+    coerced to an args kill-switch.
+    """
+    audit = _build({"skillspector": {"allow_args": "yes"}})
+    assert audit.scanners == (("skillspector", ScannerGovernance(allow_args=None)),)
+
+
 # ---------------------------------------------------------------------------
 # parser: validation
 # ---------------------------------------------------------------------------

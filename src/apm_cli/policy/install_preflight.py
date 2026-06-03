@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
 # ``PolicyBlockError`` remains as an alias re-exported below so external
@@ -23,10 +22,8 @@ from typing import Optional, Tuple  # noqa: F401, UP035
 from apm_cli.install.errors import PolicyViolationError
 
 from .discovery import PolicyFetchResult, discover_policy_with_chain
-from .models import CIAuditResult  # noqa: F401
 from .outcome_routing import route_discovery_outcome
 from .policy_checks import run_dependency_policy_checks
-from .schema import ApmPolicy  # noqa: F401
 
 # Deprecated alias kept for backward compatibility (#832).  New code
 # should ``raise``/``except`` :class:`PolicyViolationError` directly.

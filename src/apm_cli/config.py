@@ -3,7 +3,6 @@
 import contextlib
 import json
 import os
-from typing import Optional  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public env-var names (re-declared here to avoid a circular import with the
@@ -609,3 +608,81 @@ def get_scanner_options(name: str) -> "tuple[bool | None, tuple[str, ...] | None
     raw_args = entry.get("args")
     args = tuple(str(a) for a in raw_args) if isinstance(raw_args, list) else None
     return llm, args
+
+
+# ---------------------------------------------------------------------------
+# MCP registry URL (issue #818)
+# ---------------------------------------------------------------------------
+
+_MCP_REGISTRY_URL_KEY = "mcp_registry_url"
+_MCP_REGISTRY_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_MCP_REGISTRY_URL_MAX_LENGTH = 2048
+
+
+def _validate_mcp_registry_url(url: str) -> str:
+    """Validate and normalise a registry URL.  Returns the trimmed URL.
+
+    Raises:
+        ValueError: If the URL is empty, too long, missing a scheme/host,
+            or uses a scheme outside ``http``/``https``.
+    """
+    from urllib.parse import urlparse
+
+    normalized = url.strip().rstrip("/")
+    if not normalized:
+        raise ValueError("mcp-registry-url: URL cannot be empty")
+    if len(normalized) > _MCP_REGISTRY_URL_MAX_LENGTH:
+        raise ValueError(
+            f"mcp-registry-url: URL is too long "
+            f"({len(normalized)} > {_MCP_REGISTRY_URL_MAX_LENGTH} characters)"
+        )
+    parsed = urlparse(normalized)
+    if not parsed.scheme:
+        raise ValueError(
+            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"(e.g. https://mcp.internal.example.com)"
+        )
+    scheme = parsed.scheme.lower()
+    if scheme not in _MCP_REGISTRY_ALLOWED_SCHEMES:
+        raise ValueError(
+            f"mcp-registry-url: scheme '{scheme}' is not supported; "
+            f"use http:// or https://. "
+            f"WebSocket URLs (ws/wss) and file:// paths are rejected for security."
+        )
+    if parsed.username is not None:
+        raise ValueError(
+            "mcp-registry-url: URL must not contain credentials; "
+            "use the MCP_REGISTRY_URL environment variable or a credential helper instead."
+        )
+    if not parsed.hostname:
+        raise ValueError(
+            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"(e.g. https://mcp.internal.example.com)"
+        )
+    return normalized
+
+
+def get_mcp_registry_url() -> str | None:
+    """Return the user-configured MCP registry URL, or None if not set."""
+    return get_config().get(_MCP_REGISTRY_URL_KEY)
+
+
+def set_mcp_registry_url(url: str) -> None:
+    """Persist *url* as the user-scope MCP registry URL.
+
+    Args:
+        url: Registry URL (``http://`` or ``https://`` only).
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """
+    normalized = _validate_mcp_registry_url(url)
+    update_config({_MCP_REGISTRY_URL_KEY: normalized})
+
+
+def unset_mcp_registry_url() -> None:
+    """Remove the ``mcp_registry_url`` key from the config file.
+
+    No-op if the key is not present.
+    """
+    _unset_config_key(_MCP_REGISTRY_URL_KEY)

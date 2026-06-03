@@ -86,8 +86,8 @@ def run_external_scanners(
 
         if logger is not None:
             if options.llm:
-                logger.progress(
-                    f"[!] LLM analysis enabled for '{name}' -- outbound API calls "
+                logger.warning(
+                    f"LLM analysis enabled for '{name}' -- outbound API calls "
                     f"will be made (network egress; API billing may apply)"
                 )
             logger.progress(f"Running external scanner: {name}")

@@ -41,11 +41,12 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 
 - `temp-dir` must be an existing, writable directory. The path is expanded (`~`) and stored absolute.
 - `copilot-cowork-skills-dir` must be absolute after expansion; the directory itself does not need to exist.
+- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. All other schemes are rejected.
 - Boolean keys reject anything outside the accepted truthy/falsy strings.
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, `external.<name>.{llm,args}`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, `external.<name>.{llm,args}`, `mcp-registry-url`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
 
 ## Configuration keys
 
@@ -59,6 +60,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `audit-on-install` | enum | `off` | Default content-audit mode for `apm install`: `off` / `warn` / `block`. `warn` records findings in the install summary; `block` halts on critical findings. Overridable per-install with `--audit` / `--no-audit`; an org policy `security.audit.on_install` floor can raise it. Requires the `external-scanners` experimental flag for `set`. |
 | `external.<name>.llm` | boolean | unset | Opt a SARIF scanner into LLM-powered analysis (`<name>` validated against supported scanners). SkillSpector default is offline. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`. Overridable per-run with `--external-llm` / `--no-external-llm`. Requires the `external-scanners` experimental flag. |
 | `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
+| `mcp-registry-url` | URL | public registry | Persist a private MCP registry endpoint. Accepts `http://` or `https://` URLs. Sits between `MCP_REGISTRY_URL` env and the built-in default in the resolution chain. Equivalent to exporting `MCP_REGISTRY_URL` permanently. |
 | `registry.<name>.url` | URL | — | Base URL for registry `<name>`. Requires `registries` experimental flag. |
 | `registry.<name>.token` | string | — | Bearer token for registry `<name>`. Stored in `~/.apm/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
 | `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
@@ -70,6 +72,13 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 1. Environment variable (`APM_TEMP_DIR`, `APM_COPILOT_COWORK_SKILLS_DIR`)
 2. Value in `~/.apm/config.json`
 3. Built-in default (system temp / platform auto-detection)
+
+`mcp-registry-url` follows a four-layer precedence chain (CLI flag wins):
+
+1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (this invocation only)
+2. `MCP_REGISTRY_URL` environment variable
+3. `mcp-registry-url` value in `~/.apm/config.json`
+4. Built-in public default registry
 
 `allow-protocol-fallback` and `prefer-ssh` follow the layered transport precedence:
 
@@ -147,6 +156,15 @@ Override the Cowork skills directory (experimental):
 apm experimental enable copilot-cowork
 apm config set copilot-cowork-skills-dir ~/Library/CloudStorage/OneDrive-Contoso/Cowork/skills
 apm config unset copilot-cowork-skills-dir
+```
+
+Persist a private MCP registry URL (no more exporting the env var every session):
+
+```bash
+apm config set mcp-registry-url https://mcp.internal.example.com
+apm config get mcp-registry-url
+# Remove the persisted URL (falls back to MCP_REGISTRY_URL env, then the public default):
+apm config unset mcp-registry-url
 ```
 
 Configure a private registry (experimental):

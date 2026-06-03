@@ -8,7 +8,6 @@ output format specifically optimized for Claude's project memory system.
 import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
 from ..utils.paths import resolve_base_and_source_dirs

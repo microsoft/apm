@@ -172,6 +172,14 @@ def test_external_args_without_external_is_usage_error(runner, monkeypatch, tmp_
     assert "--external-args" in result.output and "requires" in result.output
 
 
+def test_external_args_unmatched_quote_is_usage_error(runner, monkeypatch, tmp_path):
+    """A malformed --external-args string surfaces as a usage error, not a traceback."""
+    _inject_flag(monkeypatch, enabled=True)
+    result = runner.invoke(audit, ["--external", "skillspector", "--external-args", "'unbalanced"])
+    assert result.exit_code == 2
+    assert "--external-args" in result.output and "could not be parsed" in result.output
+
+
 def test_external_llm_threads_into_skillspector_argv(runner, monkeypatch, tmp_path):
     """--external-llm should drop --no-llm from the invoked skillspector argv."""
     _inject_flag(monkeypatch, enabled=True)

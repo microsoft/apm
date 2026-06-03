@@ -10,7 +10,7 @@ import click
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
-from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package  # noqa: F401
+from ...models.apm_package import APMPackage
 from .._helpers import (
     UnknownPackageError,
     _expand_with_ancestors,
