@@ -327,11 +327,11 @@ def _handle_global_flag(dry_run: bool) -> int:
     """
 
     from ...compilation import compile_user_root_contexts
-    from ...core.scope import InstallScope, get_source_root
+    from ...core.scope import InstallScope, get_apm_dir
     from ...integration.targets import KNOWN_TARGETS
     from ...utils.console import _rich_error, _rich_info, _rich_success
 
-    source_root = get_source_root(InstallScope.USER)
+    source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
     if not apm_modules.is_dir():
         _rich_error(
@@ -357,17 +357,17 @@ def _handle_global_flag(dry_run: bool) -> int:
         tname = entry["target"]
         path = entry.get("path")
         if status == "written":
-            _rich_success(f"[+] {tname}: wrote {path}")
+            _rich_success(f"{tname}: wrote {path}", symbol="check")
         elif status == "would-write":
-            _rich_info(f"[*] {tname}: would write {path} (dry-run)")
+            _rich_info(f"{tname}: would write {path} (dry-run)", symbol="preview")
         elif status == "unchanged":
-            _rich_info(f"[i] {tname}: unchanged {path}")
+            _rich_info(f"{tname}: unchanged {path}", symbol="info")
         elif status == "skipped-hand-authored":
-            _rich_info(f"[i] {tname}: skipped (hand-authored) {path}")
+            _rich_info(f"{tname}: skipped (hand-authored) {path}", symbol="info")
         elif status == "skipped-no-instructions":
-            _rich_info(f"[i] {tname}: skipped (no global instructions)")
+            _rich_info(f"{tname}: skipped (no global instructions)", symbol="info")
         elif status.startswith("error:"):
-            _rich_error(f"[x] {tname}: {status[6:]}")
+            _rich_error(f"{tname}: {status[6:]}", symbol="error")
             has_error = True
 
     return 1 if has_error else 0
@@ -550,10 +550,10 @@ def compile(
 
         if watch:
             _rich_error("--global cannot be combined with --watch")
-            return
+            sys.exit(2)
         if root:
             _rich_error("--global cannot be combined with --root")
-            return
+            sys.exit(2)
         rc = _handle_global_flag(dry_run=dry_run)
         if rc != 0:
             sys.exit(rc)

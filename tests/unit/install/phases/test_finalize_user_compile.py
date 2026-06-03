@@ -51,14 +51,14 @@ class TestCompileUserRootContextsAfterInstall:
             _compile_user_root_contexts_after_install,
         )
 
-        source_root = Path.home()
+        source_root = Path.home() / ".apm"
         ctx = _make_install_context(scope=InstallScope.USER)
 
         mock_compile = MagicMock(return_value=[])
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -83,7 +83,7 @@ class TestCompileUserRootContextsAfterInstall:
             _compile_user_root_contexts_after_install,
         )
 
-        source_root = Path.home()
+        source_root = Path.home() / ".apm"
         mock_logger = MagicMock()
         ctx = _make_install_context(scope=InstallScope.USER, logger=mock_logger)
 
@@ -95,7 +95,7 @@ class TestCompileUserRootContextsAfterInstall:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -117,7 +117,7 @@ class TestCompileUserRootContextsAfterInstall:
             _compile_user_root_contexts_after_install,
         )
 
-        source_root = Path.home()
+        source_root = Path.home() / ".apm"
         mock_logger = MagicMock()
         ctx = _make_install_context(scope=InstallScope.USER, logger=mock_logger)
 
@@ -128,7 +128,7 @@ class TestCompileUserRootContextsAfterInstall:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -148,7 +148,7 @@ class TestCompileUserRootContextsAfterInstall:
             _compile_user_root_contexts_after_install,
         )
 
-        source_root = Path.home()
+        source_root = Path.home() / ".apm"
         ctx = _make_install_context(scope=InstallScope.USER, logger=None)
 
         # Files written, but logger is None
@@ -158,7 +158,7 @@ class TestCompileUserRootContextsAfterInstall:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(

@@ -52,7 +52,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -82,7 +82,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -120,7 +120,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -154,7 +154,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -187,7 +187,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -222,7 +222,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -254,7 +254,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -295,7 +295,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -332,7 +332,7 @@ class TestHandleGlobalFlag:
 
         with (
             patch(
-                "apm_cli.core.scope.get_source_root",
+                "apm_cli.core.scope.get_apm_dir",
                 return_value=source_root,
             ),
             patch(
@@ -358,34 +358,36 @@ class TestCompileGlobalCommand:
     """Tests for compile command with --global flag."""
 
     def test_global_with_watch_rejected(self):
-        """--global and --watch together -> error message, no sys.exit."""
+        """--global and --watch together -> error message and sys.exit(2)."""
         from apm_cli.commands.compile.cli import compile as compile_cmd
 
         runner = CliRunner()
 
         with patch("apm_cli.utils.console._rich_error") as mock_error:
             # Invoke with both --global and --watch
-            runner.invoke(compile_cmd, ["--global", "--watch"], standalone_mode=False)
+            result = runner.invoke(compile_cmd, ["--global", "--watch"])
 
-            # Should reject the combination (returns None, not sys.exit)
+            # Should reject the combination with non-zero exit code
             mock_error.assert_called()
             call_str = str(mock_error.call_args)
             assert "global" in call_str.lower() and "watch" in call_str.lower()
+            assert result.exit_code == 2
 
     def test_global_with_root_rejected(self):
-        """--global and --root together -> error message, no sys.exit."""
+        """--global and --root together -> error message and sys.exit(2)."""
         from apm_cli.commands.compile.cli import compile as compile_cmd
 
         runner = CliRunner()
 
         with patch("apm_cli.utils.console._rich_error") as mock_error:
             # Invoke with both --global and --root
-            runner.invoke(compile_cmd, ["--global", "--root", "/tmp"], standalone_mode=False)
+            result = runner.invoke(compile_cmd, ["--global", "--root", "/nonexistent"])
 
-            # Should reject the combination (returns None, not sys.exit)
+            # Should reject the combination with non-zero exit code
             mock_error.assert_called()
             call_str = str(mock_error.call_args)
             assert "global" in call_str.lower() and "root" in call_str.lower()
+            assert result.exit_code == 2
 
     def test_global_success_no_exit(self, tmp_path):
         """--global with successful _handle_global_flag -> returns normally."""
@@ -397,7 +399,7 @@ class TestCompileGlobalCommand:
         source_root.mkdir()
 
         with (
-            patch("apm_cli.core.scope.get_source_root", return_value=source_root),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
             patch(
                 "apm_cli.commands.compile.cli._handle_global_flag",
                 return_value=0,
@@ -419,7 +421,7 @@ class TestCompileGlobalCommand:
         source_root.mkdir()
 
         with (
-            patch("apm_cli.core.scope.get_source_root", return_value=source_root),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
             patch(
                 "apm_cli.commands.compile.cli._handle_global_flag",
                 return_value=1,

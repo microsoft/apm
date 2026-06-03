@@ -22,10 +22,10 @@ if TYPE_CHECKING:
 def _compile_user_root_contexts_after_install(ctx: InstallContext) -> None:
     """Invoke compile_user_root_contexts after a user-scope install."""
     from apm_cli.compilation import compile_user_root_contexts
-    from apm_cli.core.scope import InstallScope, get_source_root
+    from apm_cli.core.scope import InstallScope, get_apm_dir
     from apm_cli.integration.targets import KNOWN_TARGETS
 
-    source_root = get_source_root(InstallScope.USER)
+    source_root = get_apm_dir(InstallScope.USER)
     targets = list(KNOWN_TARGETS.values())
     # Pass logger=None so compile_user_root_contexts uses the stdlib logger;
     # ctx.logger is an InstallLogger which does not expose the stdlib debug/info API.
