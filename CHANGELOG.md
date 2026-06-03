@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pnpm lock`. Use it to bootstrap or refresh the lockfile before
   reviewing or applying changes. Accepts `--update` (re-resolve to latest
   SHAs), `--verbose`, `--global`, `--no-policy`, `--target`, and
-  `--parallel-downloads`. (closes #975)
+  `--parallel-downloads`. (#1639)
 - `apm pack` now synthesises `homepage`, `repository`, `keywords`, and a structured
   `author` (`{name, email?, url?}`) from `apm.yml` into `plugin.json`. All changes are
   additive: omitting any of these fields in `apm.yml` produces no change to the output.

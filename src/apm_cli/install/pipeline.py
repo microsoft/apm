@@ -550,15 +550,17 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
             _run_phase("targets", _targets_phase, ctx)
 
-            # ----------------------------------------------------------
-            # Phase 2.5: Post-targets target-aware policy check (#827)
-            # ----------------------------------------------------------
-            from .phases import policy_target_check as _policy_target_check_phase
+        # --------------------------------------------------------------
+        # Phase 2.5: Post-targets target-aware policy check (#827)
+        # Runs even in lockfile_only mode so that --target policy
+        # constraints are enforced during resolution-only runs.
+        # --------------------------------------------------------------
+        from .phases import policy_target_check as _policy_target_check_phase
 
-            try:
-                _run_phase("policy_target_check", _policy_target_check_phase, ctx)
-            except PolicyViolationError:
-                raise  # re-raise through the outer except -> RuntimeError wrapper
+        try:
+            _run_phase("policy_target_check", _policy_target_check_phase, ctx)
+        except PolicyViolationError:
+            raise  # re-raise through the outer except -> RuntimeError wrapper
 
         # --------------------------------------------------------------
         # Phase 1.75: Auth pre-flight for --update mode (#1015)

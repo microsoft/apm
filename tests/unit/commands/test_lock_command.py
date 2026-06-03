@@ -5,7 +5,8 @@ Issue: https://github.com/microsoft/apm/issues/975
 Focus areas:
 * lockfile_only=True is forwarded to _install_apm_dependencies.
 * No apm.yml -> error + exit 1.
-* Empty deps -> writes lockfile (no-op resolution) and exits 0.
+* Empty deps -> pipeline called (no-op resolution), exits 0. Lockfile
+  write is not asserted at the unit tier (integration test covers it).
 * Auth errors and policy violations surface correctly.
 * --global scope wires up the user-scope manifest path.
 * --update forwarded as update_refs=True.

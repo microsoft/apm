@@ -54,8 +54,8 @@ class InstallRequest:
     frozen: bool = False
 
     # --lockfile-only: resolve and download deps to get commit SHAs, then
-    # write apm.lock.yaml WITHOUT deploying any files to targets.  Used by
-    # the ``apm lock`` command (mirrors cargo generate-lockfile / pnpm lock).
+    # write apm.lock.yaml WITHOUT deploying any files to targets.  Set
+    # internally by the ``apm lock`` command (mirrors cargo generate-lockfile / pnpm lock).
     lockfile_only: bool = False
 
     # --refresh: re-resolve all refs against upstream (bypass lockfile

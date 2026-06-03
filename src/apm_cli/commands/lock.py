@@ -18,8 +18,9 @@ What it does
 1. Parses ``apm.yml``.
 2. Runs the resolve + download phases (network required for fresh deps).
 3. Writes ``apm.lock.yaml`` with all pinned SHAs and content hashes.
-4. Skips the targets, integration, cleanup, post-deps-local, and audit
-   phases entirely -- no files are copied to agent targets.
+4. Skips the targets, cleanup, post-deps-local, and audit phases.
+   The integrate phase still runs but deploys nothing because the
+   target set is empty in lockfile-only mode.
 
 Flags
 -----
@@ -29,8 +30,8 @@ Flags
 * ``--update`` -- re-resolve refs to their latest SHAs (like
   ``apm install --update``) before writing the lockfile.
 * ``--no-policy`` -- skip policy enforcement during resolution.
-* ``--target``/``-t`` -- hint which agent targets are in use so the
-  resolver can apply target-aware rules; no files are deployed.
+* ``--target``/``-t`` -- scope policy enforcement to a specific agent
+  target during resolution; no files are deployed.
 * ``--parallel-downloads`` -- max concurrent package downloads.
 """
 
@@ -49,6 +50,7 @@ from ..install.errors import (
     PolicyViolationError,
 )
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
+from ._helpers import _find_apm_yml
 
 
 def _handle_lock_error(e: Exception, verbose: bool) -> None:
@@ -70,19 +72,6 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
         if not verbose:
             _rich_info("Run with --verbose for detailed diagnostics.", symbol="info")
     sys.exit(1)
-
-
-def _find_apm_yml(start: Path | None = None) -> Path | None:
-    """Walk parent directories to find ``apm.yml``.
-
-    Returns the absolute path when found; ``None`` otherwise.
-    """
-    cwd = (start or Path.cwd()).resolve()
-    for candidate in (cwd, *cwd.parents):
-        manifest = candidate / "apm.yml"
-        if manifest.is_file():
-            return manifest
-    return None
 
 
 @click.command(
@@ -123,9 +112,9 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     type=TargetParamType(),
     default=None,
     help=(
-        "Agent target(s) to hint during resolution "
+        "Agent target(s) to scope policy enforcement during resolution "
         "(e.g. claude, copilot, cursor). "
-        "No files are deployed -- this only influences target-aware resolver rules."
+        "No files are deployed regardless of this value."
     ),
 )
 @click.option(
@@ -189,9 +178,6 @@ def lock(
     except (FileNotFoundError, ValueError) as e:
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)
-
-    if not apm_package.has_apm_dependencies() and not apm_package.get_dev_apm_dependencies():
-        _rich_success("No APM dependencies declared in apm.yml -- writing empty lockfile.")
 
     logger = InstallLogger(verbose=verbose)
 

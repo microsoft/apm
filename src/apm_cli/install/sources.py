@@ -531,8 +531,7 @@ class CachedDependencySource(DependencySource):
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
 
-        # In lockfile_only mode, return after recording the installed package
-        # without deploying files to integration targets.
+        # Return without deploying integration files when the target set is empty.
         if not ctx.targets:
             return Materialization(
                 package_info=None,

@@ -15,7 +15,7 @@ apm lock [OPTIONS]
 
 ## Description
 
-`apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, integration, cleanup, and audit phases entirely -- no files are copied to `.github/`, `.agents/`, or any other harness directory.
+`apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, cleanup, post-deps-local, and audit phases. The integrate phase still runs but deploys nothing because the target set is empty in lockfile-only mode -- no files are copied to `.github/`, `.agents/`, or any other harness directory.
 
 Use `apm lock` to:
 
@@ -33,7 +33,7 @@ This mirrors the ergonomics of `cargo generate-lockfile` and `pnpm lock`.
 | `--global`, `-g` | off | Operate on `~/.apm/apm.yml` instead of the current project (mirrors `apm install -g`). |
 | `--update` | off | Re-resolve deps to their latest matching SHAs before writing the lockfile (like `apm install --update`). |
 | `--no-policy` | off | Skip policy enforcement during resolution. |
-| `--target TARGET`, `-t TARGET` | auto-detect | Agent target hint for resolver rules. No files are deployed regardless of this value. Accepts a single target (`claude`, `copilot`, etc.) or comma-separated list. |
+| `--target TARGET`, `-t TARGET` | none | Agent target for policy enforcement during resolution. No files are deployed regardless of this value. Accepts a single target (`claude`, `copilot`, etc.) or comma-separated list. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
 
 ## Examples
@@ -66,8 +66,28 @@ apm lock --verbose
 
 - **Resolve and download.** Every dependency in `apm.yml` is resolved and, if not already cached, downloaded. Fresh downloads pin the commit SHA and compute a content hash.
 - **Write `apm.lock.yaml`.** The lockfile records every pinned ref, resolved commit, and content hash. `deployed_files` entries are empty because no files are deployed.
-- **No files deployed.** The targets, integration, cleanup, post-deps-local, and audit phases are all skipped. Running `apm lock` is safe to run before you are ready to install.
+- **No files deployed.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
+
+## CI integration
+
+Add `apm lock` to your CI workflow to keep the lockfile in sync with `apm.yml`:
+
+```yaml
+- name: Refresh APM lockfile
+  run: apm lock
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+- name: Commit updated lockfile
+  run: |
+    git config user.name "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
+    git add apm.lock.yaml
+    git diff --cached --quiet || git commit -m "chore: update apm lockfile"
+```
+
+To verify the lockfile is up to date in a PR check (and fail if it drifts), use [`apm install --frozen`](../install/) instead.
 
 ## Related
 
