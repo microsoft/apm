@@ -58,7 +58,7 @@ class SkillSpectorAdapter:
             )
 
         targets = [str(p) for p in paths] or ["."]
-        cmd = [binary, "scan", "--format", "sarif", *targets]
+        cmd = [binary, "scan", "--format", "sarif", "--no-llm", *targets]
         try:
             completed = subprocess.run(
                 cmd,
@@ -80,6 +80,11 @@ class SkillSpectorAdapter:
         try:
             document = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
-            raise ExternalScanError(f"SkillSpector output is not valid JSON SARIF: {exc}") from exc
+            # SkillSpector writes errors (e.g. missing API key) to stdout,
+            # not stderr.  Surface the first line so users can diagnose.
+            first_line = completed.stdout.strip().splitlines()[0][:200]
+            raise ExternalScanError(
+                f"SkillSpector output is not valid JSON SARIF: {first_line}"
+            ) from exc
 
         return sarif_to_findings(document, tool_name=self.name)

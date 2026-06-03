@@ -277,6 +277,43 @@ class TestSkillSpectorAdapter:
         monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
         assert mod.SkillSpectorAdapter().is_available() == (True, None)
 
+    def test_scan_passes_no_llm_flag(self, monkeypatch, tmp_path: Path) -> None:
+        """--no-llm must be part of the command so scans work without an API key."""
+        import apm_cli.security.external.skillspector as mod
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+
+        captured_cmd: list[str] = []
+        sarif = (
+            '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"s","rules":[]}},"results":[]}]}'
+        )
+
+        def fake_run(cmd, **_kwargs):
+            captured_cmd.extend(cmd)
+            return mod.subprocess.CompletedProcess(cmd, 0, stdout=sarif, stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+        mod.SkillSpectorAdapter().scan([tmp_path])
+        assert "--no-llm" in captured_cmd
+
+    def test_scan_non_json_stdout_surfaces_first_line(self, monkeypatch, tmp_path: Path) -> None:
+        """When SkillSpector writes an error to stdout, the message is surfaced."""
+        import apm_cli.security.external.skillspector as mod
+        from apm_cli.security.external.base import ExternalScanError
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+
+        error_text = "Error: NVIDIA_API_KEY not set. Please configure an API key."
+
+        def fake_run(cmd, **_kwargs):
+            return mod.subprocess.CompletedProcess(cmd, 1, stdout=error_text, stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+        with pytest.raises(ExternalScanError, match=r"NVIDIA_API_KEY not set"):
+            mod.SkillSpectorAdapter().scan([tmp_path])
+
 
 # ---------------------------------------------------------------------------
 # registry
