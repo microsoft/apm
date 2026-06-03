@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.phases._redownload import _should_skip_redownload
 from apm_cli.install.phases._skip_logic import _compute_skip_download

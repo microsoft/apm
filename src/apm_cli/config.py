@@ -3,7 +3,6 @@
 import contextlib
 import json
 import os
-from typing import Optional  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public env-var names (re-declared here to avoid a circular import with the

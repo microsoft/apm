@@ -93,9 +93,7 @@ class CacheMissError(RuntimeError):
 # the drift module.
 # ---------------------------------------------------------------------------
 
-from apm_cli.utils.normalization import (  # noqa: E402, F401  -- re-exported for back-compat
-    _BOM,
-    _BUILD_ID_PATTERN,
+from apm_cli.utils.normalization import (  # noqa: E402, F401  -- re-exported; tests import helpers from apm_cli.install.drift
     _normalize,
     _normalize_line_endings,
     _strip_bom,

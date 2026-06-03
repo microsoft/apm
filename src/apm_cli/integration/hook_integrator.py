@@ -47,9 +47,8 @@ import json
 import logging
 import re
 import shutil
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 import yaml
 

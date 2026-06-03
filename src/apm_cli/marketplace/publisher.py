@@ -32,11 +32,11 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional  # noqa: F401
+from typing import Any
 
 import yaml
 
@@ -47,14 +47,13 @@ from ..utils.path_security import (
 )
 from ._git_utils import redact_token as _redact_token
 from ._io import atomic_write
-from .errors import MarketplaceError, MarketplaceYmlError  # noqa: F401
+from .errors import MarketplaceError
 from .git_stderr import translate_git_stderr
 from .migration import load_marketplace_config
 from .ref_resolver import RefResolver
 from .resolver import parse_marketplace_ref
 from .semver import parse_semver
 from .tag_pattern import render_tag
-from .yml_schema import load_marketplace_yml  # noqa: F401  (kept for back-compat)
 
 logger = logging.getLogger(__name__)
 

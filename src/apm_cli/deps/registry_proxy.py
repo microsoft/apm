@@ -38,7 +38,7 @@ import os
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional, Protocol, runtime_checkable  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:

@@ -8,12 +8,11 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from typing import List, Optional, Protocol, Set, Tuple  # noqa: F401, UP035
+from typing import Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
 from .dependency_graph import (
     CircularRef,
-    ConflictInfo,  # noqa: F401
     DependencyGraph,
     DependencyNode,
     DependencyTree,

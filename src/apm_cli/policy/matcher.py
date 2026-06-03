@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 from .schema import DependencyPolicy, McpPolicy
 

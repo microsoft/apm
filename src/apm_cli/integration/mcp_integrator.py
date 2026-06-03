@@ -17,15 +17,12 @@ import shutil
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
-
-import click  # noqa: F401
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import (
-    _get_console,  # noqa: F401  -- module attribute; patched by tests and used via re-export
+    _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
     _rich_error,
     _rich_info,
     _rich_success,
