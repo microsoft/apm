@@ -128,8 +128,11 @@ def _make_ctx(
 
 
 def _enable_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Enable the ``external_scanners`` experimental flag."""
-    monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda name: True)
+    """Enable the ``external_scanners`` experimental flag only."""
+    monkeypatch.setattr(
+        "apm_cli.core.experimental.is_enabled",
+        lambda name: name == "external_scanners",
+    )
 
 
 def _config_off(monkeypatch: pytest.MonkeyPatch) -> None:
