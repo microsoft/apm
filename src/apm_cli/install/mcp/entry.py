@@ -11,7 +11,7 @@ opaque; see #938 for the regression that motivates this rule.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Dict, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Any
 
 
 def build_mcp_entry(

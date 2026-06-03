@@ -1,10 +1,9 @@
 """GitHub Copilot CLI runtime adapter for APM."""
 
 import json
-import os  # noqa: F401
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
 
 from .base import RuntimeAdapter, _stream_subprocess_output
 from .utils import find_runtime_binary

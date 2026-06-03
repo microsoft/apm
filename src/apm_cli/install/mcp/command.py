@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional  # noqa: F401
 
 import click
 
@@ -49,15 +48,18 @@ def run_mcp_install(
     force: bool,
     runtime: str | None,
     exclude: str | None,
-    verbose: bool,
     logger,
-    manifest_path: Path,
     apm_dir: Path,
     scope: str | None,
     registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
-    --registry value; the caller resolved precedence vs MCP_REGISTRY_URL."""
+    --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
+    ``manifest_path`` is derived from ``apm_dir`` (``apm_dir / 'apm.yml'``)."""
+    from ...constants import APM_YML_FILENAME
+
+    manifest_path = apm_dir / APM_YML_FILENAME
+    verbose = logger.verbose
     from ...models.dependency.mcp import MCPDependency
 
     env = parse_env_pairs(env_pairs)

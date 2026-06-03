@@ -19,6 +19,7 @@ namespace intercepts both call paths consistently.
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
     from ..core.scope import InstallScope
     from ..install.context import InstallContext
+    from ..integration.base_integrator import BaseIntegrator
     from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -36,6 +38,23 @@ if TYPE_CHECKING:
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
+
+
+@dataclass(frozen=True)
+class IntegratorBundle:
+    """Groups the six primitive integrators passed to ``integrate_package_primitives``.
+
+    Using a bundle reduces the public argument count of
+    ``integrate_package_primitives`` below the PLR0913 threshold (≤15) while
+    keeping the integrator objects strongly typed and discoverable.
+    """
+
+    prompt: BaseIntegrator
+    agent: BaseIntegrator
+    skill: BaseIntegrator
+    instruction: BaseIntegrator
+    command: BaseIntegrator
+    hook: BaseIntegrator
 
 
 def _deployed_path_entry(
@@ -96,17 +115,12 @@ def _deployed_path_entry(
         )
 
 
-def integrate_package_primitives(  # noqa: PLR0913
+def integrate_package_primitives(
     package_info: Any,
     project_root: Path,
     *,
     targets: Any,
-    prompt_integrator: Any,
-    agent_integrator: Any,
-    skill_integrator: Any,
-    instruction_integrator: Any,
-    command_integrator: Any,
-    hook_integrator: Any,
+    integrators: IntegratorBundle,
     force: bool,
     managed_files: Any,
     diagnostics: DiagnosticCollector,
@@ -243,12 +257,12 @@ def integrate_package_primitives(  # noqa: PLR0913
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
     _INTEGRATOR_KWARGS = {
-        "prompts": prompt_integrator,
-        "agents": agent_integrator,
-        "commands": command_integrator,
-        "instructions": instruction_integrator,
-        "hooks": hook_integrator,
-        "skills": skill_integrator,
+        "prompts": integrators.prompt,
+        "agents": integrators.agent,
+        "commands": integrators.command,
+        "instructions": integrators.instruction,
+        "hooks": integrators.hook,
+        "skills": integrators.skill,
     }
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
@@ -376,7 +390,7 @@ def integrate_package_primitives(  # noqa: PLR0913
                 "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab"
             )
 
-    skill_result = skill_integrator.integrate_package_skill(
+    skill_result = integrators.skill.integrate_package_skill(
         package_info,
         project_root,
         diagnostics=diagnostics,
@@ -510,12 +524,14 @@ def integrate_local_content(
         local_info,
         project_root,
         targets=targets,
-        prompt_integrator=prompt_integrator,
-        agent_integrator=agent_integrator,
-        skill_integrator=skill_integrator,
-        instruction_integrator=instruction_integrator,
-        command_integrator=command_integrator,
-        hook_integrator=hook_integrator,
+        integrators=IntegratorBundle(
+            prompt=prompt_integrator,
+            agent=agent_integrator,
+            skill=skill_integrator,
+            instruction=instruction_integrator,
+            command=command_integrator,
+            hook=hook_integrator,
+        ),
         force=force,
         managed_files=managed_files,
         diagnostics=diagnostics,

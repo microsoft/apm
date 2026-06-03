@@ -7,7 +7,6 @@ Extracted from ``commands/audit.py`` so the policy module can call
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..integration.base_integrator import BaseIntegrator

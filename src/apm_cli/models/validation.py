@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 

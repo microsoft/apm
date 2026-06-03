@@ -14,14 +14,15 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from ..constants import (
-    APM_LOCK_FILENAME,  # noqa: F401
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
 from ..update_policy import get_update_hint_message, is_self_update_enabled
-from ..utils.atomic_io import atomic_write_text as _atomic_write  # noqa: F401
+from ..utils.atomic_io import (
+    atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
+)
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
@@ -724,3 +725,23 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
 
     out_file.write_text(content, encoding="utf-8")
+
+
+def _find_apm_yml(start: Path | None = None) -> Path | None:
+    """Walk parent directories from ``start`` (or cwd) to find ``apm.yml``.
+
+    Matches the npm / cargo / poetry ergonomic: a developer running
+    an ``apm`` command from a subdirectory of their project (``src/``,
+    ``docs/``, ``scripts/``) finds the manifest and operates on it.
+
+    The walk stops at the filesystem root or when an ``apm.yml`` is
+    found, whichever comes first. Returns the absolute path to the
+    ``apm.yml`` file when found; ``None`` when no project root is
+    discoverable from ``start`` upward.
+    """
+    cwd = (start or Path.cwd()).resolve()
+    for candidate in (cwd, *cwd.parents):
+        manifest = candidate / "apm.yml"
+        if manifest.is_file():
+            return manifest
+    return None

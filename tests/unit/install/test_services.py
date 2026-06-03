@@ -9,8 +9,24 @@ from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
-from apm_cli.install.services import _deployed_path_entry
+from apm_cli.install.services import IntegratorBundle, _deployed_path_entry
 from apm_cli.integration.targets import KNOWN_TARGETS
+
+# ---------------------------------------------------------------------------
+# Helper: convert legacy integrators dict to IntegratorBundle
+# ---------------------------------------------------------------------------
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
+
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -53,6 +69,30 @@ def _make_cowork_target(cowork_root: Path) -> Any:
 def _make_copilot_app_target(app_root: Path) -> Any:
     """Return a TargetProfile with resolved_deploy_root set for copilot-app."""
     return replace(KNOWN_TARGETS["copilot-app"], resolved_deploy_root=app_root)
+
+
+# ---------------------------------------------------------------------------
+# IntegratorBundle frozen contract
+# ---------------------------------------------------------------------------
+
+
+class TestIntegratorBundleFrozen:
+    """IntegratorBundle must be immutable (frozen=True contract)."""
+
+    def test_cannot_mutate_field(self) -> None:
+        from dataclasses import FrozenInstanceError
+        from unittest.mock import MagicMock
+
+        bundle = IntegratorBundle(
+            prompt=MagicMock(),
+            agent=MagicMock(),
+            skill=MagicMock(),
+            instruction=MagicMock(),
+            command=MagicMock(),
+            hook=MagicMock(),
+        )
+        with pytest.raises(FrozenInstanceError):
+            bundle.prompt = MagicMock()  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +278,7 @@ class TestAmendment6Warning:
                 package_name="test-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -262,7 +302,7 @@ class TestAmendment6Warning:
                 package_name="test-pkg2",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -314,7 +354,7 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -363,7 +403,7 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -412,7 +452,7 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=None,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -461,7 +501,7 @@ class TestAmendment6Warning:
                 package_name="my-awesome-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -515,7 +555,7 @@ class TestAmendment6Warning:
                 package_name="diag-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -575,7 +615,7 @@ class TestAmendment6Warning:
                 package_name="prompts-only-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )

@@ -3,9 +3,8 @@
 import errno
 import os
 import re
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives

@@ -16,7 +16,6 @@ Deny/require list semantics:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)

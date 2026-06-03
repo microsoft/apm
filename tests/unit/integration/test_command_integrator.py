@@ -16,10 +16,22 @@ from unittest.mock import MagicMock
 import frontmatter
 import pytest
 
+from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.command_integrator import (
     CommandIntegrator,
     _extract_input_names,
 )
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
 
 
 def _make_package(project_root, prompts):
@@ -518,7 +530,7 @@ class TestIntegratePackagePrimitivesTargetGating:
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
-                **integrators,
+                integrators=_to_bundle(integrators),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_not_called()
@@ -548,7 +560,7 @@ class TestIntegratePackagePrimitivesTargetGating:
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
-                **integrators,
+                integrators=_to_bundle(integrators),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -577,7 +589,7 @@ class TestIntegratePackagePrimitivesTargetGating:
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
-                **integrators,
+                integrators=_to_bundle(integrators),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -626,12 +638,14 @@ class TestCursorCommandEndToEnd:
             pkg_info,
             temp_project,
             targets=[KNOWN_TARGETS["cursor"]],
-            prompt_integrator=PromptIntegrator(),
-            agent_integrator=AgentIntegrator(),
-            skill_integrator=SkillIntegrator(),
-            instruction_integrator=InstructionIntegrator(),
-            command_integrator=CommandIntegrator(),
-            hook_integrator=HookIntegrator(),
+            integrators=IntegratorBundle(
+                prompt=PromptIntegrator(),
+                agent=AgentIntegrator(),
+                skill=SkillIntegrator(),
+                instruction=InstructionIntegrator(),
+                command=CommandIntegrator(),
+                hook=HookIntegrator(),
+            ),
             force=False,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
@@ -780,12 +794,14 @@ class TestInputToArgumentsEndToEnd:
             pkg_info,
             temp_project,
             targets=[KNOWN_TARGETS["claude"]],
-            prompt_integrator=PromptIntegrator(),
-            agent_integrator=AgentIntegrator(),
-            skill_integrator=SkillIntegrator(),
-            instruction_integrator=InstructionIntegrator(),
-            command_integrator=CommandIntegrator(),
-            hook_integrator=HookIntegrator(),
+            integrators=IntegratorBundle(
+                prompt=PromptIntegrator(),
+                agent=AgentIntegrator(),
+                skill=SkillIntegrator(),
+                instruction=InstructionIntegrator(),
+                command=CommandIntegrator(),
+                hook=HookIntegrator(),
+            ),
             force=False,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),

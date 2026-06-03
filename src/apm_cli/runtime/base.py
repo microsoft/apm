@@ -2,7 +2,7 @@
 
 import subprocess
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
 
 
 def _stream_subprocess_output(cmd: list, timeout: int | None = None) -> tuple[list, int]:

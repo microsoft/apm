@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Any, Union
 
 import click
 

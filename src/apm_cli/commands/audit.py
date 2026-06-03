@@ -14,7 +14,6 @@ Exit codes:
 import dataclasses
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 import click
 
@@ -29,7 +28,6 @@ from ..utils.console import (
     _rich_echo,
     _rich_error,
     _rich_success,
-    _rich_warning,  # noqa: F401
 )
 
 # -- Shared config --------------------------------------------------
@@ -333,7 +331,6 @@ def _preview_strip(
 
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
-    from ..policy.models import CIAuditResult  # noqa: F401
 
     console = _get_console()
 
@@ -960,7 +957,7 @@ def _audit_content_scan(
     help="SARIF file to ingest for '--external sarif'. [experimental]",
 )
 @click.pass_context
-def audit(
+def audit(  # noqa: PLR0913 -- Click handler
     ctx,
     package,
     file_path,

@@ -13,12 +13,24 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from apm_cli.commands.install import _integrate_package_primitives
+from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
 
 
 def _make_integration_result(n=0):
@@ -97,7 +109,7 @@ def _dispatch(targets, integrators=None, package_info=None, project_root=None):
         force=False,
         managed_files=set(),
         diagnostics=None,
-        **integrators,
+        integrators=_to_bundle(integrators),
     ), integrators
 
 

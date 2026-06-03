@@ -6,11 +6,9 @@ for nested agent context files.
 """
 
 import builtins
-import os  # noqa: F401
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 from ..output.formatters import CompilationFormatter
 from ..output.models import CompilationResults
@@ -20,11 +18,8 @@ from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .context_optimizer import ContextOptimizer
 from .link_resolver import UnifiedLinkResolver
-from .template_builder import (  # noqa: F401
-    TemplateData,
+from .template_builder import (
     build_attributed_instructions,
-    find_chatmode_by_name,
-    render_instructions_block,
 )
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
