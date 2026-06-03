@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm find <file>` command: trace a materialized file back to its contributing
+  package(s). Builds a reverse index over `apm.lock.yaml` deployed_files.
+  Supports `--source` (oci/git/local resolved origin) and `--path` (full chain
+  via `apm deps why`). Multi-contributor files (AGENTS.md, CLAUDE.md) list ALL
+  contributing packages. Unknown paths exit non-zero with an ASCII `[x]` message.
+  Zero network or write operations. (closes #1156)
 - `apm pack` now synthesises `homepage`, `repository`, `keywords`, and a structured
   `author` (`{name, email?, url?}`) from `apm.yml` into `plugin.json`. All changes are
   additive: omitting any of these fields in `apm.yml` produces no change to the output.
