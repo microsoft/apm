@@ -84,7 +84,7 @@ class SkillSpectorAdapter:
                 return (
                     False,
                     f"LLM analysis for 'skillspector' requires an API key. Set "
-                    f"{names}, or drop --external-llm to run offline (--no-llm).",
+                    f"{names}, or drop --external-llm to run offline (--no-external-llm).",
                 )
         return True, None
 

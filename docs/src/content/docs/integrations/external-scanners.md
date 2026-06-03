@@ -112,6 +112,14 @@ outside the working directory is **rejected fail-closed** -- the scan does not
 run. `--external-args` and `--external-llm` both require `--external <name>`;
 used alone they raise a usage error.
 
+:::caution[Policy floor is install-only]
+`allow_args` restrictions in `apm-policy.yml` apply during `apm install`. A bare
+`apm audit` run does **not** load org policy, so extra-args safety relies solely
+on the adapter allowlist described above -- not the policy floor. To enforce a
+scanner kill-switch over ad-hoc developer audits, gate it in CI (see
+[Run an audit during `apm install`](#run-an-audit-during-apm-install)).
+:::
+
 ### Persisted config
 
 Set personal defaults so you do not repeat the flags (both keys are gated on the
@@ -166,7 +174,8 @@ The optional `scanners` block lets an org **restrict** scanner behaviour. It is
 scanner at install time, locking it to a vetted invocation. Policy never *adds*
 argv tokens and never forces LLM mode on -- it can only tighten. `allow_args` is
 AND-merged across an inheritance chain (any ancestor setting `false` wins). See
-the [policy reference](../../enterprise/policy-reference/) for the full schema.
+the [policy schema reference](../../reference/policy-schema/#per-scanner-governance-auditscanners)
+for the full schema.
 
 Policy is a **floor**: it can raise the effective mode but a weaker
 `--audit`/config value can never relax an org `block`. `apm install
