@@ -27,7 +27,9 @@ def _compile_user_root_contexts_after_install(ctx: InstallContext) -> None:
 
     source_root = get_source_root(InstallScope.USER)
     targets = list(KNOWN_TARGETS.values())
-    results = compile_user_root_contexts(targets, source_root, dry_run=False, logger=ctx.logger)
+    # Pass logger=None so compile_user_root_contexts uses the stdlib logger;
+    # ctx.logger is an InstallLogger which does not expose the stdlib debug/info API.
+    results = compile_user_root_contexts(targets, source_root, dry_run=False, logger=None)
     written = [r for r in results if r.get("status") == "written"]
     if written and ctx.logger:
         ctx.logger.verbose_detail(f"Compiled {len(written)} user-scope root context file(s)")
