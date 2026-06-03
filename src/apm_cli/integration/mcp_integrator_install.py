@@ -513,6 +513,12 @@ def _install_self_defined_deps(
         name for name in already_configured_candidates_sd if name not in servers_to_update
     ]
 
+    sd_env_keys: builtins.set = builtins.set()
+    for dep in self_defined_deps:
+        if dep.name in self_defined_to_install:
+            sd_env_keys |= builtins.set((dep.env or {}).keys())
+    _warn_intellij_plaintext_env(target_runtimes, sd_env_keys, logger)
+
     if already_configured_self_defined:
         if console:
             for name in already_configured_self_defined:
