@@ -316,6 +316,44 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
+def _write_empty_lockfile_only(apm_dir: Path) -> None:
+    """Materialise an empty ``apm.lock.yaml`` for a depless ``apm lock`` run.
+
+    ``apm lock`` promises to always produce a lockfile, even when the
+    project declares zero dependencies (mirroring ``cargo
+    generate-lockfile``). The write is skipped when an equivalent
+    lockfile already exists so repeat runs don't churn ``generated_at``.
+    """
+    from ..deps.lockfile import LockFile, get_lockfile_path
+
+    lock_path = get_lockfile_path(apm_dir)
+    new_lock = LockFile.from_installed_packages([], None)
+    existing_lock = LockFile.read(lock_path) if lock_path.exists() else None
+    if not (existing_lock and new_lock.is_semantically_equivalent(existing_lock)):
+        new_lock.save(lock_path)
+
+
+def _is_no_work_install(
+    *,
+    all_apm_deps,
+    root_has_local_primitives: bool,
+    old_local_deployed,
+    has_orphan_deps: bool,
+    lockfile_only: bool,
+    apm_dir: Path | None,
+) -> bool:
+    """Return True when there is genuinely no install/cleanup work to do.
+
+    In ``lockfile_only`` mode (``apm lock``) an empty lockfile is written
+    before returning so the command always materialises its artefact.
+    """
+    if all_apm_deps or root_has_local_primitives or old_local_deployed or has_orphan_deps:
+        return False
+    if lockfile_only and apm_dir:
+        _write_empty_lockfile_only(apm_dir)
+    return True
+
+
 def run_install_pipeline(  # noqa: PLR0913, RUF100
     apm_package: APMPackage,
     update_refs: bool = False,
@@ -424,11 +462,13 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         _early_lockfile and any(k != _SELF_KEY for k in _early_lockfile.dependencies)
     )
 
-    if (
-        not all_apm_deps
-        and not _root_has_local_primitives
-        and not _old_local_deployed
-        and not _has_orphan_deps
+    if _is_no_work_install(
+        all_apm_deps=all_apm_deps,
+        root_has_local_primitives=_root_has_local_primitives,
+        old_local_deployed=_old_local_deployed,
+        has_orphan_deps=_has_orphan_deps,
+        lockfile_only=lockfile_only,
+        apm_dir=apm_dir,
     ):
         return InstallResult()
 

@@ -137,7 +137,7 @@ class TestLockLocalDep:
         pkg_dir = tmp_path / "my-skills"
         _make_local_package(pkg_dir, "my-skills")
 
-        _write_apm_yml(project, deps=[f"local:{pkg_dir}"])
+        _write_apm_yml(project, deps=[str(pkg_dir)])
 
         result = _run_apm(apm_command, ["lock"], project)
 
@@ -165,7 +165,7 @@ class TestLockLocalDep:
         pkg_dir = tmp_path / "my-skills"
         _make_local_package(pkg_dir, "my-skills")
 
-        _write_apm_yml(project, deps=[f"local:{pkg_dir}"])
+        _write_apm_yml(project, deps=[str(pkg_dir)])
         _run_apm(apm_command, ["lock"], project)
 
         lockfile = project / "apm.lock.yaml"
@@ -182,7 +182,7 @@ class TestLockLocalDep:
 
         pkg_dir = tmp_path / "my-skills"
         _make_local_package(pkg_dir, "my-skills")
-        _write_apm_yml(project, deps=[f"local:{pkg_dir}"])
+        _write_apm_yml(project, deps=[str(pkg_dir)])
 
         _run_apm(apm_command, ["lock"], project)
         first = (project / "apm.lock.yaml").read_text(encoding="utf-8")
