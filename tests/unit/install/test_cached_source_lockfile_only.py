@@ -68,9 +68,7 @@ class TestCachedSourceLockfileOnly:
 
         with (
             patch("apm_cli.models.validation.detect_package_type", return_value=(None, None)),
-            patch(
-                "apm_cli.utils.content_hash.compute_package_hash", return_value="fakehash"
-            ),
+            patch("apm_cli.utils.content_hash.compute_package_hash", return_value="fakehash"),
             patch(
                 "apm_cli.install.sources._rebuild_cached_semver_resolution",
                 return_value=None,
