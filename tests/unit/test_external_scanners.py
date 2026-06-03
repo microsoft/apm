@@ -314,6 +314,24 @@ class TestSkillSpectorAdapter:
         with pytest.raises(ExternalScanError, match=r"NVIDIA_API_KEY not set"):
             mod.SkillSpectorAdapter().scan([tmp_path])
 
+    def test_scan_non_json_stdout_sanitises_non_ascii(self, monkeypatch, tmp_path: Path) -> None:
+        """Non-printable / non-ASCII chars in vendor stdout are replaced with '?'."""
+        import apm_cli.security.external.skillspector as mod
+        from apm_cli.security.external.base import ExternalScanError
+
+        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
+
+        # ANSI escape + non-ASCII char embedded in vendor error output.
+        error_text = "\x1b[31mError\x1b[0m: caf\u00e9 failure"
+
+        def fake_run(cmd, **_kwargs):
+            return mod.subprocess.CompletedProcess(cmd, 1, stdout=error_text, stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+        with pytest.raises(ExternalScanError, match=r"\?.*Error.*\?.*caf\?"):
+            mod.SkillSpectorAdapter().scan([tmp_path])
+
 
 # ---------------------------------------------------------------------------
 # registry

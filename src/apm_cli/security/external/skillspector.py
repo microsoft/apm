@@ -82,9 +82,12 @@ class SkillSpectorAdapter:
         except json.JSONDecodeError as exc:
             # SkillSpector writes errors (e.g. missing API key) to stdout,
             # not stderr.  Surface the first line so users can diagnose.
-            first_line = completed.stdout.strip().splitlines()[0][:200]
+            # Strip non-printable / non-ASCII chars to honour the repo's
+            # printable-ASCII output contract.
+            raw_line = completed.stdout.strip().splitlines()[0][:200]
+            safe_line = "".join(ch if 0x20 <= ord(ch) <= 0x7E else "?" for ch in raw_line)
             raise ExternalScanError(
-                f"SkillSpector output is not valid JSON SARIF: {first_line}"
+                f"SkillSpector output is not valid JSON SARIF: {safe_line}"
             ) from exc
 
         return sarif_to_findings(document, tool_name=self.name)
