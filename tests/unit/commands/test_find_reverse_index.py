@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apm_cli.commands.find import build_reverse_index
+from apm_cli.commands.find import _lookup_in_index, build_reverse_index
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
@@ -86,3 +86,11 @@ class TestBuildReverseIndex:
         assert "owner/pkg-a" in owners
         assert "owner/pkg-b" in owners
         assert len(owners) == 2
+
+
+class TestLookupInIndex:
+    def test_backslash_normalized_to_forward_slash(self):
+        """Windows-style backslash paths are normalized to forward slash."""
+        idx = {".github/skills/foo/": ["owner/repo"]}
+        result = _lookup_in_index(".github\\skills\\foo\\bar.md", idx)
+        assert result == ["owner/repo"]

@@ -109,6 +109,6 @@ Error messages are written to stderr with a `[x]` prefix. Package names are writ
 
 ## Related
 
-- [`apm deps why`](../deps/) -- explain why a package is installed (the `--path` output uses the same walker).
+- [`apm deps why`](../deps/#apm-deps-why) -- explain why a package is installed (the `--path` output uses the same walker).
 - [`apm install`](../install/) -- installs packages and writes `apm.lock.yaml`.
 - [Lockfile spec](../../lockfile-spec/) -- the `deployed_files` field that `apm find` reads.
