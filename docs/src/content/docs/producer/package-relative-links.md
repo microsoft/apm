@@ -45,7 +45,7 @@ primitive points back into it.
 ## What APM rewrites
 
 A markdown link with text `[text]` and target `(path)` is rewritten only
-when **all** hold (`src/apm_cli/compilation/link_resolver.py:391-529`):
+when **all** hold (`src/apm_cli/compilation/link_resolver.py:400-545`):
 
 1. The link is relative -- no URL scheme (`http:`, `mailto:`, ...), not
    protocol-relative (`//host`), not root-absolute (`/foo`), not a bare

@@ -535,7 +535,7 @@ class SkillIntegrator(BaseIntegrator):
         source_root: Path,
         target_root: Path,
     ) -> int:
-        """Rewrite outbound links in markdown copied as a skill bundle."""
+        """Read copied skill markdown from source and write resolved target content."""
         links_resolved = 0
         for target_file in target_root.rglob("*.md"):
             if not target_file.is_file() or target_file.is_symlink():
@@ -555,8 +555,8 @@ class SkillIntegrator(BaseIntegrator):
                 links_resolved += count
         return links_resolved
 
+    @staticmethod
     def _promote_sub_skills(
-        self,
         sub_skills_dir: Path,
         target_skills_root: Path,
         parent_name: str,
@@ -569,6 +569,7 @@ class SkillIntegrator(BaseIntegrator):
         project_root: Path | None = None,
         logger=None,
         name_filter: "set | None" = None,
+        link_rewriter: "SkillIntegrator | None" = None,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from .apm/skills/ to top-level skill entries.
 
@@ -675,7 +676,8 @@ class SkillIntegrator(BaseIntegrator):
             from apm_cli.security.gate import ignore_non_content
 
             shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_non_content)
-            self._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
+            if link_rewriter is not None:
+                link_rewriter._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
             promoted += 1
             deployed.append(target)
         return promoted, deployed
@@ -808,6 +810,7 @@ class SkillIntegrator(BaseIntegrator):
                 managed_files=managed_files if is_primary else None,
                 force=force,
                 project_root=project_root,
+                link_rewriter=self,
             )
             if is_primary:
                 count = n
@@ -1029,6 +1032,7 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
+                link_rewriter=self,
             )
             all_target_paths.extend(sub_deployed)
 
@@ -1137,6 +1141,7 @@ class SkillIntegrator(BaseIntegrator):
                 project_root=project_root,
                 logger=logger if is_primary else None,
                 name_filter=_name_filter,
+                link_rewriter=self,
             )
             if is_primary:
                 total_promoted = n
