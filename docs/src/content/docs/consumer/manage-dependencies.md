@@ -213,12 +213,16 @@ dependencies:
     - acme/widget#1.5.x       # wildcard
 ```
 
-APM matches tags against `v{version}` and `{name}--v{version}` patterns
-(with `{version}` as a bare-tag fallback) and picks the highest tag that
-satisfies the range. The original constraint is preserved in the
+APM matches tags against `v{version}`, `{name}--v{version}`, and
+`{name}-v{version}` patterns (with `{version}` as a bare-tag fallback) and
+picks the highest tag that satisfies the range. For virtual subdirectory
+deps, `{name}` is the final path segment (for example `pkg-a` in
+`acme/mono/packages/pkg-a`). The original constraint is preserved in the
 lockfile alongside the resolved tag, so `apm install` on a fresh clone
-replays the same tag deterministically. Only `apm update` (or legacy
-`apm install --update`) or a manifest change re-resolves to a newer tag.
+replays the same tag deterministically. A malformed range-like ref is
+rejected; use a plain range such as `^1.2.0` or pin a literal tag such as
+`pkg-a-v1.2.0`. Only `apm update` (or legacy `apm install --update`) or a
+manifest change re-resolves to a newer tag.
 
 Marketplace object-form ranges use the marketplace package name in the tag
 pattern:

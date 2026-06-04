@@ -60,6 +60,18 @@ def _is_valid_registry_semver_range(spec: str) -> bool:
     return is_semver_range(spec)
 
 
+_RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+
+
+class InvalidSemverRangeError(ValueError):
+    """Raised when a ref starts like a semver range but is invalid."""
+
+
+def _looks_like_invalid_semver_range(spec: str) -> bool:
+    """Return whether *spec* starts like a semver range but is invalid."""
+    return bool(_RANGE_PREFIX_RE.match(spec.strip()))
+
+
 @dataclass
 class DependencyReference:
     """Represents a reference to an APM dependency."""
@@ -156,6 +168,13 @@ class DependencyReference:
         # routed through the git-semver resolver.
         if _is_valid_registry_semver_range(self.reference):
             return "semver"
+        if _looks_like_invalid_semver_range(self.reference):
+            raise InvalidSemverRangeError(
+                f"Invalid semver range in ref {self.reference!r}. "
+                "The ref field expects a plain semver range. "
+                "Use a range like '^1.2.0' or pin a literal tag like "
+                "'pkg-a-v1.2.0'."
+            )
         return "literal"
 
     # Supported file extensions for virtual packages

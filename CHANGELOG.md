@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `version` constraints, and fail closed when resolution errors occur - by
   @stbenjam (#1422)
 
+### Fixed
+
+- Git-source semver ranges for virtual subdirectory dependencies now match
+  per-package `{name}-v{version}` tags, derive `{name}` from the subpath, and
+  reject malformed range-like refs with an actionable manifest error. (#1658)
+
 ### Breaking
 
 - Reject string-form `@alias` dependency shorthand at parse time with a migration error; use object form with `alias:` instead -- by @prateek (#1301)

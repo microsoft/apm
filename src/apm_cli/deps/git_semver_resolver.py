@@ -50,11 +50,15 @@ __all__ = [
 #
 # * ``v{version}`` -- universal lockstep convention (most projects).
 # * ``{name}--v{version}`` -- Claude Code / PR #1422 per-package convention
-#   used by multi-marketplace repos.  Double dash is intentional and
-#   matches Claude's published convention; single-dash variants are NOT
-#   tried by default to avoid silent collisions with branch names like
-#   ``my-skills-v1`` (a hand-cut release branch).
-DEFAULT_TAG_PATTERNS: tuple[str, ...] = ("v{version}", "{name}--v{version}")
+#   used by multi-marketplace repos.
+# * ``{name}-v{version}`` -- common single-dash per-package convention
+#   accepted by marketplace tag-pattern helpers. The semver regex still
+#   requires a full version, so branch-like names such as ``pkg-v1`` do not match.
+DEFAULT_TAG_PATTERNS: tuple[str, ...] = (
+    "v{version}",
+    "{name}--v{version}",
+    "{name}-v{version}",
+)
 
 # Bare-version fallback (``1.2.3`` literal, no prefix).
 #

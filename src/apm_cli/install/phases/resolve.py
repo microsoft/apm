@@ -27,6 +27,7 @@ from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
 
@@ -62,6 +63,13 @@ def _require_package_registry_feature_if_needed(registries_map, existing_lockfil
 
         require_package_registry_enabled("Registry-sourced installs")
     return needs_registry
+
+
+def _git_semver_package_name(dep_ref: DependencyReference) -> str:
+    """Return the package name used for git tag ``{name}`` matching."""
+    if dep_ref.is_virtual_subdirectory() and dep_ref.virtual_path:
+        return dep_ref.virtual_path.rstrip("/").rsplit("/", 1)[-1]
+    return dep_ref.repo_url.rsplit("/", 1)[-1]
 
 
 def _maybe_resolve_git_semver(
@@ -113,7 +121,7 @@ def _maybe_resolve_git_semver(
 
     constraint = dep_ref.reference
     owner_repo = dep_ref.repo_url
-    package_name = owner_repo.rsplit("/", 1)[-1]
+    package_name = _git_semver_package_name(dep_ref)
 
     # Lockfile replay (npm semantics): if the lockfile already records a
     # resolution for this constraint, return it directly. Saves a
@@ -694,8 +702,18 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
             # would mislead users who are debugging an unsatisfied
             # constraint -- nothing was downloaded yet.
             from apm_cli.deps.git_semver_resolver import NoMatchingTagError
+            from apm_cli.models.dependency.reference import InvalidSemverRangeError
 
-            if isinstance(e, NoMatchingTagError):
+            if isinstance(e, InvalidSemverRangeError):
+                if is_direct:
+                    fail_msg = f"Invalid dependency spec for {dep_ref.repo_url}: {e}"
+                else:
+                    chain_hint = f" (via {parent_chain})" if parent_chain else ""
+                    fail_msg = (
+                        f"Invalid dependency spec for transitive dep "
+                        f"{dep_ref.repo_url}{chain_hint}: {e}"
+                    )
+            elif isinstance(e, NoMatchingTagError):
                 if is_direct:
                     fail_msg = f"No matching tag for {dep_ref.repo_url}: {e}"
                 else:
