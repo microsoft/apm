@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from apm_cli.marketplace.errors import PluginNotFoundError
+from apm_cli.marketplace.errors import BuildError, PluginNotFoundError
 from apm_cli.marketplace.resolver import MarketplacePluginResolution
 from src.apm_cli.deps.apm_resolver import APMDependencyResolver
 from src.apm_cli.deps.dependency_graph import (
@@ -749,6 +749,22 @@ class TestMarketplaceResolution(unittest.TestCase):
             assert any(
                 "bad-plugin" in e and "fake-marketplace" in e for e in result.resolution_errors
             )
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_build_error_surfaces_error(self, mock_resolve):
+        mock_resolve.side_effect = BuildError("git ls-remote failed", package="bad-plugin")
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: bad-plugin\n      marketplace: fake-marketplace\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.has_errors()
+            assert any("git ls-remote failed" in e for e in result.resolution_errors)
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
     def test_marketplace_dep_unknown_error_propagates_through_tree(self, mock_resolve):

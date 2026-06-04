@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Marketplace dependency object entries in `apm.yml` and `plugin.json` now
+  resolve to concrete git refs during install, support optional semver-style
+  `version` constraints, and fail closed when resolution errors occur - by
+  @stbenjam (#1422)
+
 ## [0.17.0] - 2026-06-03
 
 ### Added

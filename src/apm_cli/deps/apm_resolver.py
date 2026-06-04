@@ -336,6 +336,7 @@ class APMDependencyResolver:
             Resolved DependencyReference on success, ``None`` on known failure.
         """
         from apm_cli.marketplace.errors import (
+            BuildError,
             MarketplaceFetchError,
             MarketplaceNotFoundError,
             PluginNotFoundError,
@@ -347,6 +348,7 @@ class APMDependencyResolver:
             MarketplaceNotFoundError,
             PluginNotFoundError,
             MarketplaceFetchError,
+            BuildError,
             ValueError,
         ) as exc:
             _logger.debug(

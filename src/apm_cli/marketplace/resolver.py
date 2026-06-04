@@ -712,8 +712,8 @@ def _extract_token(auth_resolver: object | None, host: str, org: str | None = No
     try:
         ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
         return ctx.token if ctx and ctx.token else None
-    except Exception:
-        logger.debug("Could not extract token for host '%s'", host, exc_info=True)
+    except Exception as exc:
+        logger.debug("Could not extract token for host '%s': %s", host, type(exc).__name__)
         return None
 
 
