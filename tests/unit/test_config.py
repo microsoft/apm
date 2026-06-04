@@ -56,7 +56,14 @@ class TestConfigUtf8RoundTrip:
 class TestUnsetConfigHelpers:
     """Unset helpers route through the shared update_config write path."""
 
-    def test_unset_temp_dir_uses_update_config(self, monkeypatch):
+    @pytest.mark.parametrize(
+        ("unset_func", "key"),
+        (
+            (config_mod.unset_temp_dir, "temp_dir"),
+            (config_mod.unset_copilot_cowork_skills_dir, "copilot_cowork_skills_dir"),
+        ),
+    )
+    def test_unset_helpers_use_update_config(self, monkeypatch, unset_func, key):
         calls = []
 
         def fake_update_config(updates, *, remove_keys=()):
@@ -64,21 +71,9 @@ class TestUnsetConfigHelpers:
 
         monkeypatch.setattr(config_mod, "update_config", fake_update_config)
 
-        config_mod.unset_temp_dir()
+        unset_func()
 
-        assert calls == [({}, ("temp_dir",))]
-
-    def test_unset_copilot_cowork_skills_dir_uses_update_config(self, monkeypatch):
-        calls = []
-
-        def fake_update_config(updates, *, remove_keys=()):
-            calls.append((updates, tuple(remove_keys)))
-
-        monkeypatch.setattr(config_mod, "update_config", fake_update_config)
-
-        config_mod.unset_copilot_cowork_skills_dir()
-
-        assert calls == [({}, ("copilot_cowork_skills_dir",))]
+        assert calls == [({}, (key,))]
 
 
 class TestAuditOnInstallConfig:
