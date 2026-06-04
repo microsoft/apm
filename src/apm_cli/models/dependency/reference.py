@@ -60,9 +60,16 @@ def _is_valid_registry_semver_range(spec: str) -> bool:
     return is_semver_range(spec)
 
 
+_RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+
+
+class InvalidSemverRangeError(ValueError):
+    """Raised when a ref starts like a semver range but is invalid."""
+
+
 def _looks_like_invalid_semver_range(spec: str) -> bool:
     """Return whether *spec* starts like a semver range but is invalid."""
-    return bool(re.match(r"^(>=|<=|>|<|\^|~|=)", spec.strip()))
+    return bool(_RANGE_PREFIX_RE.match(spec.strip()))
 
 
 @dataclass
@@ -162,9 +169,9 @@ class DependencyReference:
         if _is_valid_registry_semver_range(self.reference):
             return "semver"
         if _looks_like_invalid_semver_range(self.reference):
-            raise ValueError(
+            raise InvalidSemverRangeError(
                 f"Invalid semver range in ref {self.reference!r}. "
-                "Package-name prefixes belong in tag patterns, not ranges. "
+                "The ref field expects a plain semver range. "
                 "Use a range like '^1.2.0' or pin a literal tag like "
                 "'pkg-a-v1.2.0'."
             )

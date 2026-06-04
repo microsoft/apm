@@ -52,7 +52,8 @@ __all__ = [
 # * ``{name}--v{version}`` -- Claude Code / PR #1422 per-package convention
 #   used by multi-marketplace repos.
 # * ``{name}-v{version}`` -- common single-dash per-package convention
-#   accepted by marketplace tag-pattern helpers.
+#   accepted by marketplace tag-pattern helpers. The semver regex still
+#   requires a full version, so branch-like names such as ``pkg-v1`` do not match.
 DEFAULT_TAG_PATTERNS: tuple[str, ...] = (
     "v{version}",
     "{name}--v{version}",

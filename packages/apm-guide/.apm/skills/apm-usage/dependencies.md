@@ -356,7 +356,9 @@ and original constraint are pinned in the lockfile. Subsequent
 re-resolve against current remote tags. Tag patterns are tried in order:
 `v{version}`, `{name}--v{version}`, and `{name}-v{version}`, then a bare
 `{version}` fallback. For virtual subdirectory deps, `{name}` is the
-final path segment (for example `pkg-a` in `acme/mono/packages/pkg-a`).
+final path segment (for example `pkg-a` in `acme/mono/packages/pkg-a`). A
+malformed range-like ref is rejected; use a plain range such as `^1.2.0`
+or pin a literal tag such as `pkg-a-v1.2.0`.
 
 ## Marketplace ref override
 
