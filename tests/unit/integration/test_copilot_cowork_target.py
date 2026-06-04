@@ -134,6 +134,11 @@ class TestDeployPath:
         result = copilot.deploy_path(tmp_path)
         assert result == tmp_path / ".github"
 
+    def test_deploy_path_with_primitive_deploy_root_override(self, tmp_path: Path) -> None:
+        copilot = KNOWN_TARGETS["copilot"]
+        result = copilot.deploy_path(tmp_path, "review", primitive="skills")
+        assert result == tmp_path / ".agents" / "skills" / "review"
+
 
 # ---------------------------------------------------------------------------
 # TestActiveTargetsGating
