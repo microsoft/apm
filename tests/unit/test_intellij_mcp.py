@@ -1,6 +1,7 @@
 """Tests for the JetBrains Copilot MCP client adapter."""
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -159,6 +160,25 @@ class TestIntelliJClientAdapter(unittest.TestCase):
         self.assertTrue(self.mcp_json.exists())
         data = json.loads(self.mcp_json.read_text())
         self.assertIn("srv", data["servers"])
+
+    def test_remote_header_preserves_env_prefix_placeholder(self):
+        server_info = {
+            "id": "remote-secret",
+            "name": "remote-secret",
+            "remotes": [
+                {
+                    "transport_type": "http",
+                    "url": "https://example.com/mcp",
+                    "headers": [{"name": "X-Token", "value": "${env:MY_TOKEN}"}],
+                }
+            ],
+        }
+
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-secret"}, clear=False):
+            config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["headers"]["X-Token"], "${env:MY_TOKEN}")
+        self.assertNotIn("literal-secret", json.dumps(config))
 
 
 class TestIntelliJCollectBakedKeys(unittest.TestCase):

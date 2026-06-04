@@ -529,14 +529,15 @@ dependencies:
 
 Values in `headers` and `env` may contain three placeholder syntaxes. APM resolves them per-target so secrets stay out of generated config files where possible.
 
-| Syntax | Source | VS Code | Copilot CLI / Codex / Gemini / Cursor |
-|---|---|---|---|
-| `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Resolved at install time from env (or interactive prompt) |
-| `${env:VAR}` | host environment | Native; passed through verbatim | Resolved at install time from env (or interactive prompt) |
-| `${input:<id>}` | user prompt | Native; VS Code prompts at runtime | Not supported; use `${VAR}` or `${env:VAR}` instead |
-| `<VAR>` (legacy) | host environment | Not recognized | Resolved at install time (kept for back-compat) |
+| Syntax | Source | VS Code | JetBrains Copilot | Copilot CLI / Codex / Gemini / Cursor |
+|---|---|---|---|---|
+| `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Translated to `${env:VAR}` | Resolved at install time from env (or interactive prompt) |
+| `${env:VAR}` | host environment | Native; passed through verbatim | Native; passed through verbatim | Resolved at install time from env (or interactive prompt) |
+| `${input:<id>}` | user prompt | Native; VS Code prompts at runtime | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead |
+| `<VAR>` (legacy) | host environment | Not recognized | Translated to `${env:VAR}` | Resolved at install time (kept for back-compat) |
 
 - **VS Code** has native `${env:VAR}` and `${input:VAR}` interpolation, so APM emits placeholders rather than baking secrets into `mcp.json`. Bare `${VAR}` is normalized to `${env:VAR}` for you.
+- **JetBrains Copilot** has native `${env:VAR}` interpolation in `mcp.json`; APM normalizes `${VAR}` and legacy `<VAR>` to `${env:VAR}`.
 - **Copilot CLI, Codex, Gemini, and Cursor** have no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
 - **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests — they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
 - **Registry-backed servers** — APM auto-generates input prompts from registry metadata for `${input:...}`.

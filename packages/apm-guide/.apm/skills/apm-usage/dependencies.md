@@ -312,7 +312,8 @@ dependencies:
         # Env-var placeholders in headers/env values:
         #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
         #                            from host env at server-start (no plaintext on disk).
-        #                            VS Code: rewritten to ${env:VAR} and resolved at runtime.
+        #                            VS Code and JetBrains: rewritten to ${env:VAR}
+        #                            and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
