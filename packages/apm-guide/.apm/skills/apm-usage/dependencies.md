@@ -118,7 +118,8 @@ both protocols.
 ## Object form (complex cases)
 
 Use object form when you need a custom install directory name. The legacy
-string suffix `@alias` is not supported; write `alias:` explicitly instead.
+string suffix `@alias` is not supported; write `alias:` explicitly instead so
+`@` remains reserved for git usernames and version syntax.
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git

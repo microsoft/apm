@@ -477,11 +477,11 @@ class DependencyReference:
 
         Bare ``@alias`` is not part of the supported reference grammar (#340
         retired the ``@`` separator to avoid the npm/go/cargo ``@version``
-        collision). The dedicated SSH parsers extract ``@alias`` from
-        ``ssh://`` URLs and SCP shorthand (``<user>@host:path``); this guard
-        fires for the remaining cases like ``owner/repo[/sub][#ref]@alias``,
-        which would otherwise silently leak the alias into ``virtual_path``
-        or ``reference``.
+        collision). The dedicated SSH parsers handle ``@`` in ``ssh://`` URLs
+        and SCP shorthand (``<user>@host:path``) as userinfo, not aliases; this
+        guard fires for the remaining cases like
+        ``owner/repo[/sub][#ref]@alias``, which would otherwise silently leak
+        the alias into ``virtual_path`` or ``reference``.
         """
         stripped = dependency_str.strip()
         if "@" not in stripped:
@@ -490,10 +490,13 @@ class DependencyReference:
             return
         if SCP_LIKE_RE.match(stripped):
             return
+        preview = "".join(ch if 32 <= ord(ch) <= 126 else "?" for ch in stripped)
+        if len(preview) > 160:
+            preview = f"{preview[:157]}..."
         raise ValueError(
-            f"Shorthand '@alias' is not supported in '{dependency_str}'. "
-            f"Use the object form with an 'alias:' field to install a "
-            f"dependency under a custom directory name. "
+            f"Shorthand '@alias' is not supported in '{preview}'. "
+            f"Use object form with 'git:', optional 'path:', and 'alias:' "
+            f"fields to install a dependency under a custom directory name. "
             f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
         )
 

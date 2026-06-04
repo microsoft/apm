@@ -93,9 +93,16 @@ For private repos and non-GitHub hosts, see
 
 :::caution[Alias migration]
 The shorthand `@alias` suffix is not supported on string references. Use
-object form instead: `- git: https://github.com/owner/repo.git` plus
-`alias: my-name`. This keeps `@` reserved for git usernames and future
-package-manager-compatible version syntax.
+object form instead:
+
+```yaml
+- git: https://github.com/owner/repo.git
+  path: skills/example
+  alias: my-name
+```
+
+Omit `path:` for whole-repo dependencies. Keeping aliases explicit reserves
+`@` for git usernames and future package-manager-compatible version syntax.
 :::
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
