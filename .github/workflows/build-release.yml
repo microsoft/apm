@@ -242,6 +242,8 @@ jobs:
             -o addopts='' \
             -v \
             --tb=short
+        # The test's install subprocess timeout is 240s; keep the step
+        # larger so pytest can report fixture, network, or lockfile failures.
         timeout-minutes: 10
 
       # ── PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only) ──

@@ -36,6 +36,7 @@ pytestmark = [
 _LIVE_PACKAGE_ENV = "APM_LIVE_GENERIC_PACKAGE"
 _LIVE_HOST_ENV = "APM_LIVE_GENERIC_HOST"
 _DEFAULT_HOST = "gitlab.com"
+INSTALL_TIMEOUT_SECONDS = 240
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -82,14 +83,23 @@ def _env_with_isolated_home(home: Path) -> dict[str, str]:
     return env
 
 
-def _read_lockfile(project: Path) -> dict:
+def _read_lockfile(project: Path) -> dict[str, object]:
     lock_path = project / "apm.lock.yaml"
     assert lock_path.exists(), "apm install did not create apm.lock.yaml"
-    return yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    data = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict), (
+        f"apm.lock.yaml must contain a YAML mapping, got {type(data).__name__}: {data!r}"
+    )
+    return data
 
 
-def _locked_dep(lockfile: dict, expected: DependencyReference) -> dict | None:
-    for dep in lockfile.get("dependencies") or []:
+def _locked_dep(lockfile: dict[str, object], expected: DependencyReference) -> dict | None:
+    deps = lockfile.get("dependencies")
+    assert isinstance(deps, list), (
+        f"apm.lock.yaml dependencies must be a list, got {type(deps).__name__}: {deps!r}"
+    )
+    for dep in deps:
+        assert isinstance(dep, dict), f"lockfile dependency entry must be a mapping: {dep!r}"
         if dep.get("host") == expected.host and dep.get("repo_url") == expected.repo_url:
             return dep
     return None
@@ -112,7 +122,7 @@ def test_live_gitlab_generic_install_clones_validates_and_stamps_lockfile(
         cwd=project,
         capture_output=True,
         text=True,
-        timeout=240,
+        timeout=INSTALL_TIMEOUT_SECONDS,
         env=_env_with_isolated_home(fake_home),
         check=False,
     )
@@ -133,7 +143,10 @@ def test_live_gitlab_generic_install_clones_validates_and_stamps_lockfile(
         f"dependencies={lockfile.get('dependencies')}"
     )
     assert locked.get("host") == dep.host
-    assert locked.get("resolved_commit"), f"missing resolved_commit in lockfile entry: {locked}"
-    assert _FULL_SHA_RE.match(locked["resolved_commit"]), (
-        f"resolved_commit is not a full commit SHA: {locked['resolved_commit']!r}"
+    resolved_commit = locked.get("resolved_commit")
+    assert isinstance(resolved_commit, str) and resolved_commit, (
+        f"resolved_commit must be a non-empty string in lockfile entry: {locked}"
+    )
+    assert _FULL_SHA_RE.match(resolved_commit), (
+        f"resolved_commit is not a full commit SHA: {resolved_commit!r}"
     )
