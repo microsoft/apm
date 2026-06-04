@@ -353,9 +353,10 @@ highest tag matching the range; the resolved tag, commit SHA, version,
 and original constraint are pinned in the lockfile. Subsequent
 `apm install` runs replay the lockfile without network. Use
 `apm install --update` (or change the manifest constraint) to
-re-resolve against current remote tags. Two tag patterns are tried in
-order: `v{version}` and `{name}--v{version}`, then a bare `{version}`
-fallback.
+re-resolve against current remote tags. Tag patterns are tried in order:
+`v{version}`, `{name}--v{version}`, and `{name}-v{version}`, then a bare
+`{version}` fallback. For virtual subdirectory deps, `{name}` is the
+final path segment (for example `pkg-a` in `acme/mono/packages/pkg-a`).
 
 ## Marketplace ref override
 

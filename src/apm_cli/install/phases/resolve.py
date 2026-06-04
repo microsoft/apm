@@ -64,6 +64,13 @@ def _require_package_registry_feature_if_needed(registries_map, existing_lockfil
     return needs_registry
 
 
+def _git_semver_package_name(dep_ref) -> str:
+    """Return the package name used for git tag ``{name}`` matching."""
+    if dep_ref.is_virtual_subdirectory() and getattr(dep_ref, "virtual_path", None):
+        return dep_ref.virtual_path.rstrip("/").rsplit("/", 1)[-1]
+    return dep_ref.repo_url.rsplit("/", 1)[-1]
+
+
 def _maybe_resolve_git_semver(
     *,
     dep_ref,
@@ -113,7 +120,7 @@ def _maybe_resolve_git_semver(
 
     constraint = dep_ref.reference
     owner_repo = dep_ref.repo_url
-    package_name = owner_repo.rsplit("/", 1)[-1]
+    package_name = _git_semver_package_name(dep_ref)
 
     # Lockfile replay (npm semantics): if the lockfile already records a
     # resolution for this constraint, return it directly. Saves a

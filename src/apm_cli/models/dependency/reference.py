@@ -60,6 +60,11 @@ def _is_valid_registry_semver_range(spec: str) -> bool:
     return is_semver_range(spec)
 
 
+def _looks_like_invalid_semver_range(spec: str) -> bool:
+    """Return whether *spec* starts like a semver range but is invalid."""
+    return bool(re.match(r"^(>=|<=|>|<|\^|~|=)", spec.strip()))
+
+
 @dataclass
 class DependencyReference:
     """Represents a reference to an APM dependency."""
@@ -156,6 +161,13 @@ class DependencyReference:
         # routed through the git-semver resolver.
         if _is_valid_registry_semver_range(self.reference):
             return "semver"
+        if _looks_like_invalid_semver_range(self.reference):
+            raise ValueError(
+                f"Invalid semver range in ref {self.reference!r}. "
+                "Package-name prefixes belong in tag patterns, not ranges. "
+                "Use a range like '^1.2.0' or pin a literal tag like "
+                "'pkg-a-v1.2.0'."
+            )
         return "literal"
 
     # Supported file extensions for virtual packages
