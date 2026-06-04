@@ -202,6 +202,7 @@ markers = [
     "e2e: a real installed CLI crossing at least one command boundary",
     "integration: marks tests as integration tests that may require network access",
     "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
+    "live_generic: marks tests that hit a live generic git host fixture",
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
     "windows_compat: load-bearing cross-platform regression contract family (CRLF-safe atomic writes, portable path formatting, git-executable resolution, socket/thread shutdown); runs on every OS and is additionally selected by the PR-time Windows Compatibility Gate -- NOT a requires_windows skip-gate, do not use requires_windows for this",
