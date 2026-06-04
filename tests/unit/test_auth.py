@@ -1,5 +1,6 @@
 """Unit tests for AuthResolver, HostInfo, and AuthContext."""
 
+import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -1473,3 +1474,40 @@ class TestCredentialFallbackOrderRegressionTrap:
         assert seen[0] is None, (
             "When no token is available, unauthenticated access (None) must be tried"
         )
+
+    def test_cascade_exception_emits_debug_log(self, caplog):
+        """Debug logging fires when the initial op raises (fallback triggered) -- #935."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "test-token"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+
+                def op_fail_on_token(token, env):
+                    if token is not None:
+                        raise Exception("simulated token rejection")
+                    return "ok"
+
+                with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                    resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
+
+        debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+        assert debug_msgs, (
+            "Expected at least one debug log during cascade fallback; none emitted (#935)"
+        )
+
+    def test_debug_logs_do_not_contain_token_values(self, caplog):
+        """Credential values must not appear in debug log output -- security guard (#935)."""
+        sentinel = "ghp_SENTINEL_TOKEN_DO_NOT_LOG_12345"
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": sentinel}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+
+                def op_fail_on_token(token, env):
+                    if token is not None:
+                        raise Exception("simulated token rejection")
+                    return "ok"
+
+                with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                    resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
+
+        full_log = " ".join(r.message for r in caplog.records)
+        assert sentinel not in full_log, "Credential values must not appear in debug log output"

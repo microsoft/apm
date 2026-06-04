@@ -818,7 +818,7 @@ class AuthResolver:
                     # Fall through to token=None; build_error_context will render Case 3.
                     logger.debug(
                         "ADO bearer token acquisition failed for %s: %s",
-                        host_info.host,
+                        host_info.display_name,
                         exc,
                     )
             return None, "none", "basic"
