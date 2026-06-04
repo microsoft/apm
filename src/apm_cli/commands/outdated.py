@@ -16,6 +16,7 @@ from ..deps.outdated_row import OutdatedRow
 
 logger = logging.getLogger(__name__)
 
+# Fallback heuristic for _resolve_tag_pattern when inference misses plain tags.
 TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+")
 
 
@@ -47,6 +48,12 @@ def _resolve_tag_pattern(current_ref: str, package_name: str) -> str | None:
 
     inferred = infer_tag_pattern(current_ref, package_name)
     if inferred:
+        logger.debug(
+            "Resolved tag pattern %r for %s from ref %s",
+            inferred,
+            package_name,
+            current_ref,
+        )
         return inferred
     if TAG_RE.match(current_ref or ""):
         return "v{version}" if (current_ref or "").startswith("v") else "{version}"
@@ -264,11 +271,11 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
             )
 
         _, latest_tag = candidates[0]
-        current_ver = (
-            parse_tag_version(current_ref, tag_pattern, name=package_basename) or _strip_v(current_ref)
-        )
-        latest_ver = (
-            parse_tag_version(latest_tag, tag_pattern, name=package_basename) or _strip_v(latest_tag)
+        current_ver = parse_tag_version(
+            current_ref, tag_pattern, name=package_basename
+        ) or _strip_v(current_ref)
+        latest_ver = parse_tag_version(latest_tag, tag_pattern, name=package_basename) or _strip_v(
+            latest_tag
         )
 
         if is_newer_version(current_ver, latest_ver):

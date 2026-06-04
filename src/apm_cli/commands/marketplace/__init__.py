@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import logging
 import re
 import sys
 import traceback
@@ -48,6 +49,8 @@ from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from .._helpers import _get_console, _is_interactive
+
+logger = logging.getLogger(__name__)
 
 # Restore builtins shadowed by subcommand names
 list = builtins.list
@@ -1048,6 +1051,12 @@ def _extract_tag_versions(refs, entry, yml, include_prerelease):
     if not results:
         inferred = infer_tag_pattern_from_refs(refs, entry.name)
         if inferred and inferred != pattern:
+            logger.debug(
+                "Configured tag pattern %r matched no tags for %s; inferred %r",
+                pattern,
+                entry.name,
+                inferred,
+            )
             results = _collect(inferred)
     return results
 

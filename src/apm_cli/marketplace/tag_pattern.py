@@ -32,6 +32,7 @@ DEFAULT_TAG_PATTERNS: tuple[str, ...] = (
     "v{version}",
     "{version}",
     "{name}_v{version}",
+    "{name}--v{version}",
     "{name}-v{version}",
 )
 
@@ -120,10 +121,7 @@ def build_tag_regex(pattern: str, *, name: str | None = None) -> re.Pattern[str]
     )
 
     escaped = escaped.replace(re.escape(_sentinel_version), _VERSION_RX)
-    if _PLACEHOLDER_NAME in pattern and name:
-        name_rx = re.escape(name)
-    else:
-        name_rx = r"[^/]+"
+    name_rx = re.escape(name) if _PLACEHOLDER_NAME in pattern and name else r"[^/]+"
     escaped = escaped.replace(re.escape(_sentinel_name), name_rx)
 
     return re.compile(r"^" + escaped + r"$")

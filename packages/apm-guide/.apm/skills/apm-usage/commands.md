@@ -19,7 +19,7 @@
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
 | `apm find <PATH>` | Trace a deployed file back to the package(s) that contributed it (inverse of install; reads `apm.lock.yaml` only) | `--source` show OCI/git/local origin, `--path` show full why-chain (same as `apm deps why`) |
 | `apm view PKG [FIELD]` | View package details or remote refs | `-g` global, `FIELD=versions` |
-| `apm outdated` | Check locked deps via SHA/semver comparison | `-g` global, `-v` verbose, `-j N` parallel checks |
+| `apm outdated` | Check locked deps via SHA/semver comparison; patterned per-package tags are auto-detected | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
@@ -136,7 +136,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 |---------|---------|-----------|
 | `apm marketplace init` | Append a `marketplace:` block to `apm.yml` and create `.claude-plugin/` | `--force`, `--no-gitignore-check`, `--name`, `--owner` |
 | `apm marketplace migrate` | Fold a legacy `marketplace.yml` into `apm.yml`'s `marketplace:` block; deletes `marketplace.yml` on success | `--force`/`--yes`/`-y`, `--dry-run`, `-v` |
-| `apm marketplace outdated` | Report upgradable plugins, range-aware | `--offline`, `--include-prerelease`, `-v` |
+| `apm marketplace outdated` | Report upgradable plugins, range-aware; respects `tag_pattern` and common monorepo tag layouts | `--offline`, `--include-prerelease`, `-v` |
 | `apm marketplace check` | Validate the `marketplace:` block and verify refs resolve | `--offline`, `-v` |
 | `apm marketplace doctor` | Diagnose git, network, auth, marketplace config readiness, and (when a `marketplace:` block is present) **format coverage** -- which output profiles are configured vs. supported, so producers can spot easy reach wins (e.g. add `codex: {}` to also publish for Codex consumers). All marketplace-specific rows are informational and never affect exit code. | `-v` |
 | `apm marketplace publish` | Open PRs on consumer repos from `consumer-targets.yml` | `--targets PATH`, `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, `-y` |

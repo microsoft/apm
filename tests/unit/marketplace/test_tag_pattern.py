@@ -222,6 +222,7 @@ class TestRoundTrip:
             ("{name}-v{version}", "my-tool", "2.0.0"),
             ("release-{version}", "x", "10.20.30"),
             ("{name}_v{version}", "tool", "1.0.0-beta.1"),
+            ("{name}--v{version}", "tool", "1.0.1"),
         ],
     )
     def test_roundtrip(self, pattern: str, name: str, version: str) -> None:
@@ -236,6 +237,9 @@ class TestRoundTrip:
 class TestInferTagPattern:
     def test_name_underscore_v_version(self) -> None:
         assert infer_tag_pattern("api-governance_v1.0.1") == "{name}_v{version}"
+
+    def test_name_double_dash_v_version(self) -> None:
+        assert infer_tag_pattern("api-governance--v1.0.1") == "{name}--v{version}"
 
     def test_name_underscore_v_scoped_to_package(self) -> None:
         assert infer_tag_pattern("apm1_v1.0.1", "apm1") == "{name}_v{version}"
@@ -257,6 +261,9 @@ class TestInferTagPattern:
 class TestIsVersionTagRef:
     def test_name_underscore_v_version_is_tag(self) -> None:
         assert is_version_tag_ref("api-governance_v1.0.1") is True
+
+    def test_name_double_dash_v_version_is_tag(self) -> None:
+        assert is_version_tag_ref("api-governance--v1.0.1") is True
 
     def test_name_at_version_not_tag(self) -> None:
         assert is_version_tag_ref("api-governance@1.0.1") is False
