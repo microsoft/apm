@@ -218,6 +218,69 @@ class TestInstallUserScope:
         assert "ruff" in data["lspServers"]
 
 
+class TestInstallCopilotTarget:
+    def test_writes_project_lsp_json_with_file_extensions(self, tmp_path):
+        deps = [_make_dep("pyright")]
+
+        count = LSPIntegrator.install(
+            deps,
+            project_root=tmp_path,
+            target_runtimes=["copilot"],
+        )
+
+        assert count == 1
+        config_path = tmp_path / ".github" / "lsp.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert data == {
+            "lspServers": {
+                "pyright": {
+                    "command": "pyright-langserver",
+                    "args": [],
+                    "fileExtensions": {".py": "python"},
+                }
+            }
+        }
+
+    def test_writes_user_lsp_config_with_file_extensions(self, tmp_path):
+        deps = [_make_dep("pyright")]
+
+        with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
+            count = LSPIntegrator.install(
+                deps,
+                user_scope=True,
+                target_runtimes=["copilot"],
+            )
+
+        assert count == 1
+        config_path = tmp_path / ".copilot" / "lsp-config.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert data == {
+            "lspServers": {
+                "pyright": {
+                    "command": "pyright-langserver",
+                    "args": [],
+                    "fileExtensions": {".py": "python"},
+                }
+            }
+        }
+
+
+class TestResolveLspTargets:
+    def test_targets_copilot_when_binary_present(self, tmp_path):
+        with patch(
+            "apm_cli.integration.lsp_integrator.find_runtime_binary",
+            side_effect=lambda name: f"/bin/{name}" if name == "copilot" else None,
+        ):
+            targets = LSPIntegrator.resolve_target_runtimes(
+                project_root=tmp_path,
+                user_scope=True,
+            )
+
+        assert targets == ["copilot"]
+
+
 # ===========================================================================
 # LSPIntegrator.remove_stale
 # ===========================================================================

@@ -16,17 +16,71 @@ from ..deps.outdated_row import OutdatedRow
 
 logger = logging.getLogger(__name__)
 
+# Fallback heuristic for _resolve_tag_pattern when inference misses plain tags.
 TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+")
 
 
-def _is_tag_ref(ref: str) -> bool:
-    """Return True when *ref* looks like a semver tag (v1.2.3 or 1.2.3)."""
-    return bool(TAG_RE.match(ref)) if ref else False
+def _is_tag_ref(ref: str, package_name: str | None = None) -> bool:
+    """Return True when *ref* names a version tag (plain or patterned)."""
+    from ..marketplace.tag_pattern import is_version_tag_ref
+
+    return is_version_tag_ref(ref, package_name)
 
 
 def _strip_v(ref: str) -> str:
     """Strip leading 'v' prefix from a version string."""
     return ref[1:] if ref and ref.startswith("v") else (ref or "")
+
+
+def _package_basename(dep) -> str:
+    """Return the display name used in ``{name}`` tag patterns."""
+    if dep.marketplace_plugin_name:
+        return dep.marketplace_plugin_name
+    repo = dep.repo_url or ""
+    if not repo:
+        return ""
+    return repo.rstrip("/").split("/")[-1]
+
+
+def _resolve_tag_pattern(current_ref: str, package_name: str) -> str | None:
+    """Return the tag pattern for *current_ref*, or ``None`` if not a version tag."""
+    from ..marketplace.tag_pattern import infer_tag_pattern
+
+    inferred = infer_tag_pattern(current_ref, package_name)
+    if inferred:
+        logger.debug(
+            "Resolved tag pattern %r for %s from ref %s",
+            inferred,
+            package_name,
+            current_ref,
+        )
+        return inferred
+    if TAG_RE.match(current_ref or ""):
+        return "v{version}" if (current_ref or "").startswith("v") else "{version}"
+    return None
+
+
+def _semver_tag_candidates(tag_refs, pattern: str, package_name: str = ""):
+    """Return ``(SemVer, tag_name)`` pairs matching *pattern*, highest first."""
+    from ..marketplace.semver import SemVer, parse_semver
+    from ..marketplace.tag_pattern import build_tag_regex
+
+    tag_rx = (
+        build_tag_regex(pattern, name=package_name)
+        if "{name}" in pattern and package_name
+        else build_tag_regex(pattern)
+    )
+    candidates: list[tuple[SemVer, str]] = []
+    for remote_ref in tag_refs:
+        match = tag_rx.match(remote_ref.name)
+        if not match:
+            continue
+        version = match.group("version")
+        parsed = parse_semver(version)
+        if parsed is not None:
+            candidates.append((parsed, remote_ref.name))
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return candidates
 
 
 def _find_remote_tip(ref_name, remote_refs):
@@ -189,7 +243,9 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    is_tag = _is_tag_ref(current_ref)
+    package_basename = _package_basename(dep)
+    tag_pattern = _resolve_tag_pattern(current_ref, package_basename)
+    is_tag = tag_pattern is not None
 
     if is_tag:
         tag_refs = [r for r in remote_refs if r.ref_type == GitReferenceType.TAG]
@@ -202,12 +258,28 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
                 source="git tags",
             )
 
-        latest_tag = tag_refs[0].name
-        current_ver = _strip_v(current_ref)
-        latest_ver = _strip_v(latest_tag)
+        from ..marketplace.tag_pattern import parse_tag_version
+
+        candidates = _semver_tag_candidates(tag_refs, tag_pattern, package_basename)
+        if not candidates:
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest="-",
+                status="unknown",
+                source="git tags",
+            )
+
+        _, latest_tag = candidates[0]
+        current_ver = parse_tag_version(
+            current_ref, tag_pattern, name=package_basename
+        ) or _strip_v(current_ref)
+        latest_ver = parse_tag_version(latest_tag, tag_pattern, name=package_basename) or _strip_v(
+            latest_tag
+        )
 
         if is_newer_version(current_ver, latest_ver):
-            extra = [r.name for r in tag_refs[:10]] if verbose else []
+            extra = [name for _, name in candidates[:10]] if verbose else []
             return OutdatedRow(
                 package=package_name,
                 current=current_ref,

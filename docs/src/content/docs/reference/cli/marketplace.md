@@ -25,6 +25,7 @@ apm marketplace validate NAME
 apm marketplace init [--force] [--name N] [--owner O]
 apm marketplace migrate [--force | --dry-run]
 apm marketplace check [--offline]
+apm marketplace audit NAME [--strict] [-v]
 apm marketplace doctor
 apm marketplace outdated [--offline] [--include-prerelease]
 apm marketplace publish [--targets FILE] [--dry-run] [--no-pr] [...]
@@ -186,6 +187,27 @@ package entry resolves to a reachable git ref.
 |---|---|
 | `--offline` | Schema and cached-ref checks only; no network. |
 
+### `apm marketplace audit NAME`
+
+Run after adding or updating a marketplace, or in CI, to verify no
+plugin escapes marketplace pinning. Audit a registered marketplace for
+plugin dependencies that bypass marketplace pinning. The command fetches each plugin's `apm.yml` at
+its pinned ref and warns when `dependencies.apm` uses direct git
+URLs, repo shorthands, or `{ git: ... }` entries instead of
+`name@marketplace` refs.
+
+| Flag | Description |
+|---|---|
+| `--strict` | Exit 1 when bypass warnings or unverifiable plugins are found. |
+| `--verbose`, `-v` | Show clean plugins and skipped reasons. |
+
+For the top-level content/integrity scan, see [`apm audit`](../audit/).
+
+```bash
+apm marketplace audit my-marketplace
+apm marketplace audit my-marketplace --strict
+```
+
 ### `apm marketplace doctor`
 
 Run environment diagnostics for marketplace publishing: git binary,
@@ -200,6 +222,23 @@ versions available.
 |---|---|
 | `--offline` | Use cached refs only. |
 | `--include-prerelease` | Consider prerelease tags. |
+
+When remote tags use a non-default layout (for example `my-pkg_v1.0.1`), set
+`tag_pattern: "{name}_v{version}"` on the package entry or under `build:` in
+`apm.yml`:
+
+```yaml
+packages:
+  - name: my-pkg
+    source: org/monorepo
+    version: "^1.0.0"
+    tag_pattern: "{name}_v{version}"
+```
+
+If no tags match the configured pattern, `apm marketplace outdated` tries common
+layouts (`v{version}`, `{name}_v{version}`, `{name}--v{version}`, etc.)
+automatically. Set `tag_pattern` explicitly when your producer uses a different
+layout.
 
 ### `apm marketplace publish`
 

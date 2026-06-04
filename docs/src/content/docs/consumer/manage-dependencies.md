@@ -54,8 +54,6 @@ parser. The supported forms:
 |---|---|---|
 | GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. |
 | Pinned ref | `owner/repo#v1.0.0` | Pin to a tag, branch, or full commit SHA. |
-| Aliased | `owner/repo@my-alias` | Install under a custom directory name. |
-| Pinned + aliased | `owner/repo#v1.0.0@my-alias` | Combine the two. |
 | FQDN shorthand | `gitlab.com/acme/repo#v2.0` | Any git host, not just github.com. |
 | Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. |
 | Virtual file | `owner/repo/prompts/review.prompt.md` | Install a single primitive file. |
@@ -64,7 +62,7 @@ parser. The supported forms:
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
-| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name> }` | Custom directory name (`alias`), nested groups, monorepo subpaths, or anything the string forms cannot express. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
 | Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
 
@@ -92,6 +90,20 @@ dependencies:
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
+
+:::caution[Alias migration]
+The shorthand `@alias` suffix is not supported on string references. Use
+object form instead:
+
+```yaml
+- git: https://github.com/owner/repo.git
+  path: skills/example
+  alias: my-name
+```
+
+Omit `path:` for whole-repo dependencies. Keeping aliases explicit reserves
+`@` for git usernames and future package-manager-compatible version syntax.
+:::
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
 [Registries](../../guides/registries/).

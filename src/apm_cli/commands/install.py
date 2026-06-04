@@ -1962,6 +1962,7 @@ def _install_apm_packages(ctx, outcome):
         should_install=should_install_lsp,
         logger=logger,
         diagnostics=apm_diagnostics,
+        target_context=(mcp_apm_config, ctx.target, ctx.scope),
     )
 
     # Local .apm/ content integration is now handled inside the

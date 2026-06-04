@@ -19,8 +19,8 @@ def _first_defined(data: dict, primary: str, fallback: str):
 class LSPDependency:
     """Represents an LSP server dependency.
 
-    Claude Code reads LSP config from `.lsp.json` at the plugin root. This model
-    represents the server entries in that file or inline `lspServers` in plugin.json.
+    Supported runtimes read LSP config from target-specific JSON files. This
+    model represents manifest entries and plugin-provided `lspServers` entries.
 
     Required fields:
     - name: server name (key in lspServers dict)

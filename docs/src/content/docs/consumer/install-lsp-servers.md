@@ -1,6 +1,6 @@
 ---
 title: "Install LSP servers"
-description: "Declare LSP servers in apm.yml and let apm install wire them into Claude Code."
+description: "Declare LSP servers in apm.yml and let apm install wire them into supported runtimes."
 sidebar:
   order: 5
 ---
@@ -11,11 +11,13 @@ sidebar:
 This page covers LSP servers: how you declare them, what gets written,
 and how the install pipeline manages their lifecycle.
 
-LSP integration currently targets **Claude Code only**. The dependency
-model is runtime-agnostic, so support for additional runtimes can be
-added as they adopt LSP plugin configuration. For Claude Code's LSP
-specification, see the
-[Plugins reference](https://code.claude.com/docs/en/plugins-reference).
+LSP integration targets supported agent runtimes. Today APM writes
+configuration for Claude Code and GitHub Copilot CLI, while keeping the
+manifest dependency model runtime-agnostic. See Claude Code's
+[Plugins reference](https://code.claude.com/docs/en/plugins-reference)
+and GitHub's
+[Copilot CLI LSP servers documentation](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/lsp-servers)
+for runtime-specific config details.
 
 ## One-line answer
 
@@ -35,9 +37,10 @@ dependencies:
 apm install
 ```
 
-APM writes a `.lsp.json` at the project root (or updates `lspServers`
-in `~/.claude.json` when installed with `-g`). Claude Code reads
-this file and starts the configured language servers automatically.
+APM writes runtime-specific config for each detected target. Claude Code
+uses `.lsp.json` or `~/.claude.json`; Copilot CLI uses `.github/lsp.json`
+or `~/.copilot/lsp-config.json`. The runtime starts the configured
+language servers automatically.
 
 ## The `lsp:` section in apm.yml
 
@@ -69,12 +72,12 @@ The full field reference is in the
 
 ## What `apm install` writes to disk
 
-| Scope | File | Format |
-|---|---|---|
-| Project (default) | `.lsp.json` at project root | JSON: server name as key, config as value |
-| User (`-g`) | `~/.claude.json` | JSON: `lspServers` section |
+| Runtime | Project file | User file (`-g`) | Language map key |
+|---|---|---|---|
+| Claude Code | `.lsp.json` | `~/.claude.json` `lspServers` | `extensionToLanguage` |
+| GitHub Copilot CLI | `.github/lsp.json` `lspServers` | `~/.copilot/lsp-config.json` `lspServers` | `fileExtensions` |
 
-**Project-scope `.lsp.json` example:**
+**Claude Code project-scope `.lsp.json` example:**
 
 ```json
 {
@@ -88,7 +91,7 @@ The full field reference is in the
 }
 ```
 
-**User-scope `~/.claude.json` excerpt:**
+**Copilot CLI project-scope `.github/lsp.json` example:**
 
 ```json
 {
@@ -96,13 +99,16 @@ The full field reference is in the
     "gopls": {
       "command": "gopls",
       "args": ["serve"],
-      "extensionToLanguage": {
+      "fileExtensions": {
         ".go": "go"
       }
     }
   }
 }
 ```
+
+User-scope files keep the same runtime-specific server shape under their
+`lspServers` section.
 
 ## Required and optional fields
 
@@ -142,9 +148,9 @@ LSP servers from installed packages are treated as trusted.
 ## Stale server cleanup
 
 When a previously installed LSP server is no longer declared by
-any dependency, APM removes it from `.lsp.json` (or `~/.claude.json`
-at user scope). The lockfile tracks which servers APM manages, so
-hand-added servers are never touched.
+any dependency, APM removes it from the target runtime configs it manages.
+The lockfile tracks which servers APM manages, so hand-added servers are
+never touched.
 
 ## Lockfile
 
@@ -157,23 +163,22 @@ See the [Lockfile specification](../../reference/lockfile-spec/).
 
 ## Plugin extraction
 
-When APM installs a Claude Code plugin that contains `lspServers` in
-`plugin.json` or a `.lsp.json` file, the LSP servers are automatically
-extracted and wired into the install pipeline. The `${CLAUDE_PLUGIN_ROOT}`
-placeholder in server configs is replaced with the absolute plugin path.
+When APM installs a plugin that contains `lspServers` in `plugin.json`
+or a `.lsp.json` file, the LSP servers are automatically extracted and
+wired into the install pipeline. The `${CLAUDE_PLUGIN_ROOT}` placeholder
+in server configs is replaced with the absolute plugin path for legacy
+Claude Code plugin compatibility.
 
 ## Runtime support
 
-LSP integration currently writes configuration for Claude Code only.
-The `LSPDependency` model and manifest format are runtime-agnostic --
-as other runtimes adopt LSP plugin configuration, APM can add write
-targets without changing the dependency schema.
+LSP integration writes configuration for supported runtimes and leaves
+the manifest schema runtime-neutral. Target selection follows the same
+runtime detection and `--target`/`targets:` mechanics as MCP installs.
 
 | Runtime | LSP support |
 |---|---|
 | Claude Code | `.lsp.json` / `~/.claude.json` |
-| Cursor | Uses LSP internally; no external config format yet |
-| OpenCode | Has LSP integration; no APM adapter yet |
+| GitHub Copilot CLI | `.github/lsp.json` / `~/.copilot/lsp-config.json` |
 | Others | Not yet supported |
 
 ## Next
@@ -182,5 +187,6 @@ targets without changing the dependency schema.
   [Manifest schema](../../reference/manifest-schema/#43-dependencieslsp----listlspdependency).
 - Lockfile fields --
   [Lockfile specification](../../reference/lockfile-spec/).
-- Claude Code LSP plugin authoring --
-  [Plugins reference](https://code.claude.com/docs/en/plugins-reference).
+- Runtime-specific LSP config docs --
+  [Claude Code Plugins reference](https://code.claude.com/docs/en/plugins-reference)
+  and [Copilot CLI LSP servers](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/lsp-servers).

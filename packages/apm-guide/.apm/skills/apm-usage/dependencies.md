@@ -117,6 +117,10 @@ both protocols.
 
 ## Object form (complex cases)
 
+Use object form when you need a custom install directory name. The legacy
+string suffix `@alias` is not supported; write `alias:` explicitly instead so
+`@` remains reserved for git usernames and version syntax.
+
 ```yaml
 - git: https://gitlab.com/acme/repo.git
   path: instructions/security                   # virtual sub-path
@@ -283,10 +287,9 @@ dependencies:
 
 ## LSP dependency formats
 
-LSP (Language Server Protocol) servers give Claude Code real-time code
-intelligence. LSP integration currently targets Claude Code only. See
-the [Claude Code Plugins reference](https://code.claude.com/docs/en/plugins-reference)
-for the LSP specification.
+LSP (Language Server Protocol) servers give supported runtimes real-time
+code intelligence. APM currently writes LSP config for Claude Code and
+GitHub Copilot CLI while keeping the dependency schema runtime-neutral.
 
 ```yaml
 dependencies:
@@ -320,8 +323,11 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 `settings`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`,
 `restartOnCrash`, `maxRestarts`.
 
-`apm install` writes LSP config to `.lsp.json` (project scope) or
-`~/.claude.json` `lspServers` section (user scope with `-g`).
+`apm install` writes LSP config to the detected runtime targets:
+Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
+uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
+uses `fileExtensions` on disk; manifests continue to use
+`extensionToLanguage`.
 
 ## Version pinning
 

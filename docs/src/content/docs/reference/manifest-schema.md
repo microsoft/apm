@@ -540,7 +540,7 @@ dependencies:
 
 ### 4.3. `dependencies.lsp` -- `list<LspDependency>`
 
-LSP (Language Server Protocol) server dependencies give Claude Code real-time code intelligence -- diagnostics, go-to-definition, and type information. LSP integration currently targets Claude Code only; see the [Plugins reference](https://code.claude.com/docs/en/plugins-reference) for Claude Code's LSP specification.
+LSP (Language Server Protocol) server dependencies give supported runtimes real-time code intelligence -- diagnostics, go-to-definition, and type information. APM currently writes LSP config for Claude Code and GitHub Copilot CLI while keeping this manifest schema runtime-neutral.
 
 Each element MUST be one of two forms: **string** or **object**.
 
@@ -605,7 +605,7 @@ dependencies:
 
 #### 4.3.4. What Gets Written
 
-`apm install` writes LSP server configs to `.lsp.json` at the project root (project scope) or to the `lspServers` section of `~/.claude.json` (user scope with `-g`). See [Install LSP servers](../../consumer/install-lsp-servers/) for the output format and lifecycle details.
+`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats and lifecycle details.
 
 ---
 
@@ -931,4 +931,4 @@ marketplace:
 |---|---|---|
 | 0.1 | 2026-03-06 | Initial Working Draft. |
 | 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to reference CLI paths. ASCII-only enforcement. |
-| 0.3 | 2026-05-20 | Added Section 4.3 (`dependencies.lsp`). LSP servers as a third dependency kind (Claude Code only). Updated document structure, devDependencies known keys, and Appendix A. |
+| 0.3 | 2026-05-20 | Added Section 4.3 (`dependencies.lsp`). LSP servers as a third dependency kind. Updated document structure, devDependencies known keys, and Appendix A. |
