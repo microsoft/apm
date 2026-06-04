@@ -326,9 +326,7 @@ def run_audit(
                 )
             )
         except Exception as exc:  # pragma: no cover -- defensive
-            logger.warning(
-                "Audit check failed for plugin '%s': %s", plugin.name, exc
-            )
+            logger.warning("Audit check failed for plugin '%s': %s", plugin.name, exc)
             reports.append(
                 PluginDepReport(
                     plugin_name=plugin.name,

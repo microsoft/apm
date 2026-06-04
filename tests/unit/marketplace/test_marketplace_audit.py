@@ -39,9 +39,7 @@ def _isolate_config(tmp_path, monkeypatch):
     """Mirror the isolation used by other marketplace tests."""
     config_dir = str(tmp_path / ".apm")
     monkeypatch.setattr("apm_cli.config.CONFIG_DIR", config_dir)
-    monkeypatch.setattr(
-        "apm_cli.config.CONFIG_FILE", str(tmp_path / ".apm" / "config.json")
-    )
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(tmp_path / ".apm" / "config.json"))
     monkeypatch.setattr("apm_cli.config._config_cache", None)
     monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
 
@@ -84,10 +82,7 @@ class TestClassifyDependency:
         # parse_marketplace_ref raises ValueError for semver ranges; audit
         # should classify as MARKETPLACE so that the install path (not
         # audit) surfaces the grammar error.
-        assert (
-            classify_dependency("pkg@mkt#^1.2.3")
-            == DepClassification.MARKETPLACE
-        )
+        assert classify_dependency("pkg@mkt#^1.2.3") == DepClassification.MARKETPLACE
 
     @pytest.mark.parametrize(
         "dep",
@@ -114,10 +109,7 @@ class TestClassifyDependency:
         ],
     )
     def test_bypass_paths(self, dep):
-        assert (
-            classify_dependency(dep)
-            == DepClassification.BYPASSES_MARKETPLACE
-        )
+        assert classify_dependency(dep) == DepClassification.BYPASSES_MARKETPLACE
 
     @pytest.mark.parametrize("dep", ["", "   ", None])
     def test_empty(self, dep):
@@ -137,9 +129,7 @@ class TestCollectApmDepStrings:
             "dependencies": {"apm": ["a@mkt", "owner/b"]},
             "devDependencies": {"apm": ["owner/c"]},
         }
-        assert _collect_apm_dep_strings(data) == [
-            "a@mkt", "owner/b", "owner/c"
-        ]
+        assert _collect_apm_dep_strings(data) == ["a@mkt", "owner/b", "owner/c"]
 
     def test_dict_form_git_entry_is_captured(self):
         """Dict-form deps bypass the marketplace too -- string-only
@@ -160,16 +150,10 @@ class TestCollectApmDepStrings:
         }
         flat = _collect_apm_dep_strings(data)
         assert "name@mkt" in flat
-        assert any(
-            "gitlab.com/acme/coding-standards.git" in s for s in flat
-        )
+        assert any("gitlab.com/acme/coding-standards.git" in s for s in flat)
 
     def test_dict_form_local_path_entry_is_captured(self):
-        data = {
-            "dependencies": {
-                "apm": [{"path": "./packages/shared"}]
-            }
-        }
+        data = {"dependencies": {"apm": [{"path": "./packages/shared"}]}}
         assert _collect_apm_dep_strings(data) == ["./packages/shared"]
 
     def test_skip_unrecognised_primitives(self):
@@ -179,20 +163,14 @@ class TestCollectApmDepStrings:
 
     def test_skip_malformed_dict_entries(self):
         # Missing both git and path -> cannot flatten -> dropped
-        data = {
-            "dependencies": {
-                "apm": [{"alias": "orphan"}, {"git": "", "path": "x"}]
-            }
-        }
+        data = {"dependencies": {"apm": [{"alias": "orphan"}, {"git": "", "path": "x"}]}}
         assert _collect_apm_dep_strings(data) == []
 
     def test_missing_sections(self):
         assert _collect_apm_dep_strings({}) == []
         assert _collect_apm_dep_strings({"dependencies": None}) == []
         assert _collect_apm_dep_strings({"dependencies": {}}) == []
-        assert _collect_apm_dep_strings(
-            {"dependencies": {"apm": "not-a-list"}}
-        ) == []
+        assert _collect_apm_dep_strings({"dependencies": {"apm": "not-a-list"}}) == []
 
 
 class TestNormalizeDepEntry:
@@ -206,9 +184,7 @@ class TestNormalizeDepEntry:
         assert out == "https://gitlab.com/acme/x.git"
 
     def test_dict_path_entry(self):
-        assert (
-            _normalize_dep_entry({"path": "./local/pkg"}) == "./local/pkg"
-        )
+        assert _normalize_dep_entry({"path": "./local/pkg"}) == "./local/pkg"
 
     def test_dict_path_whitespace_stripped(self):
         assert _normalize_dep_entry({"path": "  ./x  "}) == "./x"
@@ -227,15 +203,10 @@ class TestNormalizeDepEntry:
 class TestSuggestReplacement:
     def test_strips_git_suffix(self):
         """Review finding: suggestion should not end with .git."""
-        assert (
-            "coding-standards@<marketplace>"
-            in _suggest_replacement(
-                "https://gitlab.com/acme/coding-standards.git"
-            )
+        assert "coding-standards@<marketplace>" in _suggest_replacement(
+            "https://gitlab.com/acme/coding-standards.git"
         )
-        assert ".git@" not in _suggest_replacement(
-            "https://gitlab.com/acme/x.git"
-        )
+        assert ".git@" not in _suggest_replacement("https://gitlab.com/acme/x.git")
 
 
 # ===================================================================
@@ -250,9 +221,7 @@ class TestResolvePluginGithubCoords:
         assert coords == ("github.com", "acme", "forge", "abc123", "apm.yml")
 
     def test_with_subdir_path(self):
-        plugin = _gh_plugin(
-            repo="acme/forge", ref="abc", path="agents/code-quality"
-        )
+        plugin = _gh_plugin(repo="acme/forge", ref="abc", path="agents/code-quality")
         coords = _resolve_plugin_github_coords(plugin, "github.com")
         assert coords == (
             "github.com",
@@ -267,15 +236,11 @@ class TestResolvePluginGithubCoords:
         assert _resolve_plugin_github_coords(plugin, "github.com") is None
 
     def test_non_github_type(self):
-        plugin = MarketplacePlugin(
-            name="p", source={"type": "npm", "name": "x"}
-        )
+        plugin = MarketplacePlugin(name="p", source={"type": "npm", "name": "x"})
         assert _resolve_plugin_github_coords(plugin, "github.com") is None
 
     def test_repo_without_slash(self):
-        plugin = MarketplacePlugin(
-            name="p", source={"type": "github", "repo": "no-slash"}
-        )
+        plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "no-slash"})
         assert _resolve_plugin_github_coords(plugin, "github.com") is None
 
     def test_repo_with_extra_slashes_unsupported(self):
@@ -296,12 +261,8 @@ class TestResolvePluginGithubCoords:
         assert _resolve_plugin_github_coords(plugin, "github.com") is None
 
     def test_ref_defaults_to_head(self):
-        plugin = MarketplacePlugin(
-            name="p", source={"type": "github", "repo": "acme/forge"}
-        )
-        _host, _owner, _name, ref, _path = _resolve_plugin_github_coords(
-            plugin, "github.com"
-        )
+        plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "acme/forge"})
+        _host, _owner, _name, ref, _path = _resolve_plugin_github_coords(plugin, "github.com")
         assert ref == "HEAD"
 
     def test_source_host_overrides_fallback(self):
@@ -353,14 +314,8 @@ class TestCheckPlugin:
         report = check_plugin(plugin, _source(), _fetcher=fetcher)
         assert report.fetch_status == FetchStatus.OK
         assert len(report.issues) == 1
-        assert (
-            report.issues[0].dep
-            == "acme/agent-forge/general/conventions"
-        )
-        assert (
-            report.issues[0].classification
-            == DepClassification.BYPASSES_MARKETPLACE
-        )
+        assert report.issues[0].dep == "acme/agent-forge/general/conventions"
+        assert report.issues[0].classification == DepClassification.BYPASSES_MARKETPLACE
         assert "marketplace" in report.issues[0].suggestion
 
     def test_clean_plugin_has_no_issues(self):
@@ -369,11 +324,7 @@ class TestCheckPlugin:
             {
                 "clean": (
                     FetchStatus.OK,
-                    {
-                        "dependencies": {
-                            "apm": ["x@mkt", "./local-dev-pkg"]
-                        }
-                    },
+                    {"dependencies": {"apm": ["x@mkt", "./local-dev-pkg"]}},
                     "",
                 )
             }
@@ -384,27 +335,21 @@ class TestCheckPlugin:
 
     def test_missing_manifest_is_skipped(self):
         plugin = _gh_plugin("no-manifest")
-        fetcher = _fake_fetcher(
-            {"no-manifest": (FetchStatus.NO_MANIFEST, None, "not found")}
-        )
+        fetcher = _fake_fetcher({"no-manifest": (FetchStatus.NO_MANIFEST, None, "not found")})
         report = check_plugin(plugin, _source(), _fetcher=fetcher)
         assert report.fetch_status == FetchStatus.NO_MANIFEST
         assert report.issues == ()
 
     def test_parse_error_propagates_status(self):
         plugin = _gh_plugin("bad-yaml")
-        fetcher = _fake_fetcher(
-            {"bad-yaml": (FetchStatus.PARSE_ERROR, None, "bad yaml")}
-        )
+        fetcher = _fake_fetcher({"bad-yaml": (FetchStatus.PARSE_ERROR, None, "bad yaml")})
         report = check_plugin(plugin, _source(), _fetcher=fetcher)
         assert report.fetch_status == FetchStatus.PARSE_ERROR
         assert "bad yaml" in report.detail
 
     def test_network_error_propagates(self):
         plugin = _gh_plugin("offline")
-        fetcher = _fake_fetcher(
-            {"offline": (FetchStatus.NETWORK_ERROR, None, "DNS")}
-        )
+        fetcher = _fake_fetcher({"offline": (FetchStatus.NETWORK_ERROR, None, "DNS")})
         report = check_plugin(plugin, _source(), _fetcher=fetcher)
         assert report.fetch_status == FetchStatus.NETWORK_ERROR
 
@@ -458,11 +403,7 @@ class TestRunAudit:
                 ),
                 "bad": (
                     FetchStatus.OK,
-                    {
-                        "dependencies": {
-                            "apm": ["acme/forge/general/conventions"]
-                        }
-                    },
+                    {"dependencies": {"apm": ["acme/forge/general/conventions"]}},
                     "",
                 ),
                 "no-manifest": (FetchStatus.NO_MANIFEST, None, ""),
@@ -473,10 +414,7 @@ class TestRunAudit:
         status_by_name = {r.plugin_name: r for r in reports}
         assert status_by_name["clean"].issues == ()
         assert len(status_by_name["bad"].issues) == 1
-        assert (
-            status_by_name["no-manifest"].fetch_status
-            == FetchStatus.NO_MANIFEST
-        )
+        assert status_by_name["no-manifest"].fetch_status == FetchStatus.NO_MANIFEST
 
     def test_one_plugin_crash_isolated(self):
         good = _gh_plugin("good")
@@ -545,11 +483,7 @@ class TestAuditCLI:
                 "apm_cli.marketplace.audit.fetch_plugin_apm_yml",
                 return_value=(
                     FetchStatus.OK,
-                    {
-                        "dependencies": {
-                            "apm": ["acme/forge/general/conventions"]
-                        }
-                    },
+                    {"dependencies": {"apm": ["acme/forge/general/conventions"]}},
                     "",
                 ),
             ):

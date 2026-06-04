@@ -14,9 +14,7 @@ from ...marketplace.registry import get_marketplace_by_name
 from . import marketplace
 
 
-@marketplace.command(
-    help="Audit plugin transitive deps for marketplace-bypass risk"
-)
+@marketplace.command(help="Check that plugin dependencies resolve through the marketplace")
 @click.argument("name", required=True)
 @click.option(
     "--strict",
@@ -35,13 +33,11 @@ def audit(name, strict, verbose):
     logger = CommandLogger("marketplace-audit", verbose=verbose)
     try:
         source = get_marketplace_by_name(name)
-        logger.start(f"Auditing marketplace '{name}'...", symbol="gear")
+        logger.start(f"Auditing marketplace '{name}'...", symbol="running")
 
         manifest = fetch_marketplace(source, force_refresh=True)
         n = len(manifest.plugins)
-        logger.progress(
-            f"Checking {n} plugin{'' if n == 1 else 's'}...", symbol="info"
-        )
+        logger.progress(f"Checking {n} plugin{'' if n == 1 else 's'}...", symbol="info")
 
         reports = run_audit(manifest, source)
 
@@ -53,10 +49,7 @@ def audit(name, strict, verbose):
         # Suppress the per-plugin section header when there is nothing to
         # report and the user did not opt into verbose: in the all-clean
         # default run the header would otherwise hang above an empty body.
-        has_findings = any(
-            rep.fetch_status != FetchStatus.OK or rep.issues
-            for rep in reports
-        )
+        has_findings = any(rep.fetch_status != FetchStatus.OK or rep.issues for rep in reports)
 
         click.echo()
         if has_findings or verbose:
@@ -104,10 +97,11 @@ def audit(name, strict, verbose):
         click.echo()
         warn_noun = "warning" if bypass_total == 1 else "warnings"
         err_noun = "error" if fetch_error_count == 1 else "errors"
-        click.echo(
+        logger.success(
             f"Summary: {ok_count} clean, {bypass_total} bypass {warn_noun}, "
             f"{skipped_count} skipped, "
-            f"{fetch_error_count} unverifiable {err_noun}"
+            f"{fetch_error_count} unverifiable {err_noun}",
+            symbol="check",
         )
         if bypass_total:
             click.echo()
@@ -115,7 +109,7 @@ def audit(name, strict, verbose):
                 "Marketplace refs (name@marketplace) pin transitive deps "
                 "through the catalogue so consumers get the same versions "
                 "you tested.  See: "
-                "https://microsoft.github.io/apm/guides/marketplaces/"
+                "https://microsoft.github.io/apm/reference/cli/marketplace/#apm-marketplace-audit-name"
             )
 
         if strict and (bypass_total or fetch_error_count):
@@ -123,5 +117,6 @@ def audit(name, strict, verbose):
 
     except Exception as e:
         logger.error(f"Failed to audit marketplace: {e}")
+        logger.info("Run with --verbose for details.")
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)

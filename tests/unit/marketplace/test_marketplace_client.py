@@ -880,12 +880,15 @@ class TestFetchRaw:
         # plugin as NO_MANIFEST in proxy-only environments rather than
         # surfacing it as unverifiable.
         cfg = MagicMock(enforce_only=True)
-        with patch(
-            "apm_cli.marketplace.client._try_proxy_fetch_raw",
-            return_value=None,
-        ), patch(
-            "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
-            return_value=cfg,
+        with (
+            patch(
+                "apm_cli.marketplace.client._try_proxy_fetch_raw",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+                return_value=cfg,
+            ),
         ):
             with pytest.raises(MarketplaceError) as excinfo:
                 client_mod.fetch_raw(
@@ -912,15 +915,19 @@ class TestFetchRaw:
         # the fallback request -- doing so would leak credentials.
         # ``fetch_raw`` must fail closed with MarketplaceError and never
         # invoke requests.get.
-        with patch(
-            "apm_cli.marketplace.client._try_proxy_fetch_raw",
-            return_value=None,
-        ), patch(
-            "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
-            return_value=None,
-        ), patch(
-            "apm_cli.marketplace.client.requests.get",
-        ) as mock_get:
+        with (
+            patch(
+                "apm_cli.marketplace.client._try_proxy_fetch_raw",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.marketplace.client.requests.get",
+            ) as mock_get,
+        ):
             with pytest.raises(MarketplaceError) as excinfo:
                 client_mod.fetch_raw(
                     host="gitlab.com",

@@ -231,7 +231,8 @@ def _try_proxy_fetch(
 def _github_contents_url(source: MarketplaceSource, file_path: str, host_info) -> str:
     """Build the GitHub Contents API URL for a file (GitHub / GHES / generic)."""
     api_base = host_info.api_base.rstrip("/")
-    return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={source.ref}"
+    encoded_ref = quote(source.ref, safe="")
+    return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={encoded_ref}"
 
 
 def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -> str:
@@ -545,12 +546,11 @@ _FETCHERS: dict[str, Callable] = {
 }
 
 
-def _github_raw_contents_url(
-    host_info, owner: str, repo: str, file_path: str, ref: str
-) -> str:
+def _github_raw_contents_url(host_info, owner: str, repo: str, file_path: str, ref: str) -> str:
     """Build the GitHub Contents API URL for an arbitrary file."""
     api_base = host_info.api_base.rstrip("/")
-    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+    encoded_ref = quote(ref, safe="")
+    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={encoded_ref}"
 
 
 def fetch_raw(
@@ -614,9 +614,7 @@ def fetch_raw(
             unauth_first=False,
         )
     except Exception as exc:
-        raise MarketplaceError(
-            f"fetching {owner}/{repo}/{file_path}@{ref}: {exc}"
-        ) from exc
+        raise MarketplaceError(f"fetching {owner}/{repo}/{file_path}@{ref}: {exc}") from exc
 
 
 def _fetch_file(
