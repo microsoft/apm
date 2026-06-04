@@ -317,13 +317,18 @@ class TestSkillBundleInternalLinkUnchanged:
         ws.mkdir()
         producer = ws / "producer"
         _write_yaml(producer / "apm.yml", {"name": "producer", "version": "1.0.0"})
-        # Skill bundle with internal reference doc
-        skill = producer / ".apm" / "skills" / "demo"
+        # Root SKILL_BUNDLE with internal reference doc and outbound package docs.
+        skill = producer / "skills" / "demo"
         _write(skill / "REFERENCE.md", "# Reference\nHelpful info.\n")
+        _write(producer / "references" / "local.md", "# Local reference\n")
+        _write(producer / ".apm" / "context" / "in-apm.md", "# APM context\n")
         _write(
             skill / "SKILL.md",
             "---\nname: demo\ndescription: Demo skill.\n---\n"
-            "# Demo skill\n\nSee [REFERENCE](REFERENCE.md) for details.\n",
+            "# Demo skill\n\n"
+            "See [REFERENCE](REFERENCE.md) for details.\n"
+            "Use the [local reference](../../references/local.md).\n"
+            "Read the [APM context](../../.apm/context/in-apm.md).\n",
         )
         consumer = _make_consumer(ws)
         # Skills under copilot deploy_root=.agents/, so create it for
@@ -352,15 +357,46 @@ class TestSkillBundleInternalLinkUnchanged:
 
         body = deployed_skill.read_text(encoding="utf-8")
         link = _link_target(body, "REFERENCE")
+        assert link == "REFERENCE.md"
 
-        # The link MUST resolve on disk -- whether kept as the in-bundle
-        # relative path "REFERENCE.md" or rewritten through apm_modules/
-        # is an implementation choice, but the deployed link must work.
         resolved = (deployed_skill.parent / link).resolve()
         assert resolved.exists(), (
             f"In-bundle link does not resolve after install: {link} -> {resolved}"
         )
         assert resolved.read_text(encoding="utf-8").startswith("# Reference")
+
+    def test_outbound_skill_links_rewritten_to_apm_modules(self, workspace, apm_command):
+        consumer, producer = workspace
+        result = _run_install(apm_command, consumer, str(producer))
+        assert result.returncode == 0, f"Install failed:\n{result.stderr}\n{result.stdout}"
+
+        deployed_skills = [
+            p for p in consumer.rglob("SKILL.md") if p.is_file() and "apm_modules" not in p.parts
+        ]
+        assert deployed_skills, (
+            f"SKILL.md not deployed. consumer tree:\n"
+            f"{[str(p.relative_to(consumer)) for p in consumer.rglob('*') if p.is_file()]}"
+        )
+        deployed_skill = deployed_skills[0]
+        body = deployed_skill.read_text(encoding="utf-8")
+
+        local_ref = _link_target(body, "local reference")
+        assert local_ref == "../../../apm_modules/_local/producer/references/local.md"
+        assert (
+            (deployed_skill.parent / local_ref)
+            .resolve()
+            .read_text(encoding="utf-8")
+            .startswith("# Local reference")
+        )
+
+        apm_context = _link_target(body, "APM context")
+        assert apm_context == "../../../apm_modules/_local/producer/.apm/context/in-apm.md"
+        assert (
+            (deployed_skill.parent / apm_context)
+            .resolve()
+            .read_text(encoding="utf-8")
+            .startswith("# APM context")
+        )
 
 
 # ---------------------------------------------------------------------------
