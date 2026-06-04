@@ -1572,6 +1572,10 @@ class TestWindsurfRulesIntegration:
         )
         assert adopt.files_integrated == 0
         assert adopt.files_adopted == 1
+        # Adopted files MUST still be recorded in target_paths so they stay
+        # tracked in the lockfile manifest.  The #1662 regression was that
+        # paths were NOT recorded, causing rules to fall out of managed_files.
+        assert len(adopt.target_paths) == 1
 
         # Re-deploy WITH force rewrites instead of adopting.
         forced = self.integrator.integrate_instructions_for_target(

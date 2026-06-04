@@ -171,6 +171,7 @@ class InstructionIntegrator(BaseIntegrator):
             rel_path = portable_relpath(target_path, project_root)
 
             if apm_owned_rule_dir:
+                # Path containment already validated by ensure_path_within above.
                 # Structural invariant: target_name derives 1:1 from source, so
                 # ANY existing file here is APM's -- must hold for every format
                 # with output_compare=True. managed_files is not consulted.
