@@ -188,6 +188,23 @@ class TestLockFile:
         yaml_str = lock.to_yaml()
         assert "mcp_servers" not in yaml_str  # omitted when empty
 
+    def test_lsp_servers_round_trip(self, tmp_path):
+        """lsp_servers must survive a write -> read cycle."""
+        lock = LockFile(apm_version="1.0.0")
+        lock.lsp_servers = ["pyright", "ruff-lsp"]
+        lock.add_dependency(LockedDependency(repo_url="owner/repo"))
+        lock_path = tmp_path / "apm.lock"
+        lock.write(lock_path)
+        loaded = LockFile.read(lock_path)
+        assert loaded is not None
+        assert loaded.lsp_servers == ["pyright", "ruff-lsp"]
+
+    def test_lsp_servers_empty_by_default(self):
+        lock = LockFile()
+        assert lock.lsp_servers == []
+        yaml_str = lock.to_yaml()
+        assert "lsp_servers" not in yaml_str
+
     def test_local_deployed_file_hashes_round_trip(self, tmp_path):
         """local_deployed_file_hashes must survive a write -> read cycle."""
         lock = LockFile()
@@ -266,6 +283,29 @@ class TestLockFile:
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_configs == {}
+
+    def test_lsp_configs_round_trip(self, tmp_path):
+        """lsp_configs survive a write/read cycle."""
+        lock = LockFile()
+        lock.lsp_configs = {
+            "pyright": {
+                "name": "pyright",
+                "command": "pyright-langserver",
+                "extensionToLanguage": {".py": "python"},
+            }
+        }
+        lock_path = tmp_path / "apm.lock"
+        lock.write(lock_path)
+
+        loaded = LockFile.read(lock_path)
+        assert loaded is not None
+        assert loaded.lsp_configs == lock.lsp_configs
+
+    def test_lsp_configs_empty_by_default(self):
+        lock = LockFile()
+        assert lock.lsp_configs == {}
+        yaml_str = lock.to_yaml()
+        assert "lsp_configs" not in yaml_str
 
     def test_read_nonexistent(self, tmp_path):
         loaded = LockFile.read(tmp_path / "apm.lock.yaml")
@@ -387,6 +427,21 @@ class TestLockFileSemanticEquivalence:
     def test_changed_mcp_configs_not_equivalent(self):
         a = self._make_lock(mcp_configs={"s": {"cmd": "a"}})
         b = self._make_lock(mcp_configs={"s": {"cmd": "b"}})
+        assert not a.is_semantically_equivalent(b)
+
+    def test_changed_lsp_servers_not_equivalent(self):
+        a = self._make_lock(lsp_servers=["server-a"])
+        b = self._make_lock(lsp_servers=["server-b"])
+        assert not a.is_semantically_equivalent(b)
+
+    def test_lsp_server_order_irrelevant(self):
+        a = self._make_lock(lsp_servers=["b", "a"])
+        b = self._make_lock(lsp_servers=["a", "b"])
+        assert a.is_semantically_equivalent(b)
+
+    def test_changed_lsp_configs_not_equivalent(self):
+        a = self._make_lock(lsp_configs={"s": {"cmd": "a"}})
+        b = self._make_lock(lsp_configs={"s": {"cmd": "b"}})
         assert not a.is_semantically_equivalent(b)
 
     def test_changed_lockfile_version_not_equivalent(self):

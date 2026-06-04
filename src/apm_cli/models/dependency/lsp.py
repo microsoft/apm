@@ -9,6 +9,12 @@ from apm_cli.utils.path_security import PathTraversalError, validate_path_segmen
 _NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 
 
+def _first_defined(data: dict, primary: str, fallback: str):
+    """Return the first key whose value is not None."""
+    value = data.get(primary)
+    return value if value is not None else data.get(fallback)
+
+
 @dataclass
 class LSPDependency:
     """Represents an LSP server dependency.
@@ -61,19 +67,18 @@ class LSPDependency:
             name=d["name"],
             command=d.get("command"),
             args=d.get("args"),
-            extension_to_language=d.get("extensionToLanguage") or d.get("extension_to_language"),
+            extension_to_language=_first_defined(d, "extensionToLanguage", "extension_to_language"),
             transport=d.get("transport"),
             env=d.get("env"),
-            initialization_options=d.get("initializationOptions")
-            or d.get("initialization_options"),
+            initialization_options=_first_defined(
+                d, "initializationOptions", "initialization_options"
+            ),
             settings=d.get("settings"),
-            workspace_folder=d.get("workspaceFolder") or d.get("workspace_folder"),
-            startup_timeout=d.get("startupTimeout") or d.get("startup_timeout"),
-            shutdown_timeout=d.get("shutdownTimeout") or d.get("shutdown_timeout"),
-            restart_on_crash=d.get("restartOnCrash")
-            if d.get("restartOnCrash") is not None
-            else d.get("restart_on_crash"),
-            max_restarts=d.get("maxRestarts") or d.get("max_restarts"),
+            workspace_folder=_first_defined(d, "workspaceFolder", "workspace_folder"),
+            startup_timeout=_first_defined(d, "startupTimeout", "startup_timeout"),
+            shutdown_timeout=_first_defined(d, "shutdownTimeout", "shutdown_timeout"),
+            restart_on_crash=_first_defined(d, "restartOnCrash", "restart_on_crash"),
+            max_restarts=_first_defined(d, "maxRestarts", "max_restarts"),
         )
 
         instance.validate(strict=True)
@@ -178,6 +183,24 @@ class LSPDependency:
                     f"Invalid LSP command '{self.command}': must not contain '..' path segments."
                 ) from None
 
+        if self.workspace_folder is not None:
+            if not isinstance(self.workspace_folder, str):
+                raise ValueError(
+                    f"LSP dependency '{self.name}': 'workspaceFolder' must be a string, "
+                    f"got {type(self.workspace_folder).__name__}."
+                )
+            try:
+                validate_path_segments(
+                    self.workspace_folder,
+                    context="LSP workspaceFolder",
+                    allow_current_dir=True,
+                )
+            except PathTraversalError:
+                raise ValueError(
+                    f"Invalid LSP workspaceFolder '{self.workspace_folder}': "
+                    "must not contain '..' path segments."
+                ) from None
+
         if self.transport is not None and self.transport not in self._VALID_TRANSPORTS:
             raise ValueError(
                 f"LSP dependency '{self.name}' has unsupported transport "
@@ -195,4 +218,12 @@ class LSPDependency:
             raise ValueError(
                 f"LSP dependency '{self.name}': 'extensionToLanguage' must be a dict, "
                 f"got {type(self.extension_to_language).__name__}"
+            )
+        if not all(
+            isinstance(ext, str) and isinstance(language, str)
+            for ext, language in self.extension_to_language.items()
+        ):
+            raise ValueError(
+                f"LSP dependency '{self.name}': 'extensionToLanguage' must map "
+                "string extensions to string language IDs."
             )

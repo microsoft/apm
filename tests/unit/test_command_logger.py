@@ -310,6 +310,13 @@ class TestInstallLogger:
         assert "APM" in call_msg
         assert "MCP" in call_msg
 
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_install_summary_includes_lsp(self, mock_success):
+        logger = InstallLogger()
+        logger.install_summary(apm_count=0, mcp_count=0, lsp_count=2)
+        call_msg = mock_success.call_args[0][0]
+        assert "2 LSP servers" in call_msg
+
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_install_summary_with_errors(self, mock_warning):
         logger = InstallLogger()

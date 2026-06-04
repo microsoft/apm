@@ -77,6 +77,7 @@ def run_lsp_integration(
             lsp_deps,
             project_root=project_root,
             user_scope=user_scope,
+            logger=logger,
             diagnostics=diagnostics,
         )
         new_lsp_servers = LSPIntegrator.get_server_names(lsp_deps)
@@ -89,6 +90,7 @@ def run_lsp_integration(
                 stale_lsp,
                 project_root=project_root,
                 user_scope=user_scope,
+                logger=logger,
             )
 
         # Persist LSP servers in lockfile
@@ -101,6 +103,7 @@ def run_lsp_integration(
                 old_lsp_servers,
                 project_root=project_root,
                 user_scope=user_scope,
+                logger=logger,
             )
             LSPIntegrator.update_lockfile(builtins.set(), lock_path, lsp_configs={})
         logger.verbose_detail("No LSP dependencies found in apm.yml")

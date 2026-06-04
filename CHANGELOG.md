@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- First-class LSP server support in the install pipeline: `dependencies.lsp` in `apm.yml`, `.lsp.json` auto-discovery from plugins, transitive collection, deduplication, stale cleanup, and lockfile persistence -- by @stbenjam (#1424)
+- LSP server management: declare language servers in `apm.yml` and `apm install` wires them into Claude Code automatically -- by @stbenjam (#1424)
 
 ## [0.17.0] - 2026-06-03
 

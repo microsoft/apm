@@ -305,7 +305,10 @@ class LSPIntegrator:
             except Exception as exc:
                 _log.debug("Failed to write LSP config to ~/.claude.json", exc_info=True)
                 if diagnostics:
-                    diagnostics.warn(f"Failed to write LSP config: {exc}")
+                    diagnostics.warn(
+                        f"Failed to write LSP config to {claude_user}: {exc}. "
+                        "Check file permissions or run with --verbose for details."
+                    )
         else:
             # Write to project .lsp.json
             lsp_json = project_root_path / ".lsp.json"
@@ -330,6 +333,9 @@ class LSPIntegrator:
             except Exception as exc:
                 _log.debug("Failed to write LSP config to .lsp.json", exc_info=True)
                 if diagnostics:
-                    diagnostics.warn(f"Failed to write LSP config: {exc}")
+                    diagnostics.warn(
+                        f"Failed to write LSP config to {lsp_json}: {exc}. "
+                        "Check file permissions or run with --verbose for details."
+                    )
 
         return count

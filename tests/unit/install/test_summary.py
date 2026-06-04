@@ -53,6 +53,7 @@ class TestRenderPostInstallSummary:
         logger.install_summary.assert_called_once_with(
             apm_count=3,
             mcp_count=1,
+            lsp_count=0,
             errors=0,
             stale_cleaned=0,
             elapsed_seconds=None,

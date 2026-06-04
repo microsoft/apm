@@ -1,6 +1,8 @@
 ---
 title: "Install LSP servers"
 description: "Declare LSP servers in apm.yml and let apm install wire them into Claude Code."
+sidebar:
+  order: 5
 ---
 
 `apm install` handles three dependency kinds: APM packages

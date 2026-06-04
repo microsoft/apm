@@ -1550,7 +1550,7 @@ def install(  # noqa: PLR0913
             skill_subset_from_cli=bool(skill_names),
         )
 
-        apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
+        apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(
             install_ctx,
             outcome,
         )
@@ -1559,6 +1559,7 @@ def install(  # noqa: PLR0913
             logger=logger,
             apm_count=apm_count,
             mcp_count=mcp_count,
+            lsp_count=lsp_count,
             apm_diagnostics=apm_diagnostics,
             force=force,
             elapsed_seconds=time.perf_counter() - install_started_at,
@@ -1639,7 +1640,7 @@ def _install_apm_packages(ctx, outcome):
             ``None`` when no explicit packages were passed).
 
     Returns:
-        Tuple of ``(apm_count, mcp_count, apm_diagnostics)``.
+        Tuple of ``(apm_count, mcp_count, lsp_count, apm_diagnostics)``.
     """
     logger = ctx.logger
 
@@ -1677,6 +1678,7 @@ def _install_apm_packages(ctx, outcome):
     # Determine what to install based on install mode
     should_install_apm = ctx.install_mode != InstallMode.MCP
     should_install_mcp = ctx.install_mode != InstallMode.APM
+    should_install_lsp = should_install_mcp
 
     # Show what will be installed if dry run
     if ctx.dry_run:
@@ -1711,7 +1713,7 @@ def _install_apm_packages(ctx, outcome):
             only_packages=ctx.only_packages,
             apm_dir=ctx.apm_dir,
         )
-        return 0, 0, None  # render_and_exit exits; this line is defensive
+        return 0, 0, 0, None  # render_and_exit exits; this line is defensive
 
     # Install APM dependencies first (if requested)
     apm_count = 0
@@ -1950,14 +1952,14 @@ def _install_apm_packages(ctx, outcome):
     # -------------------------------------------------------------------------
     from apm_cli.install.lsp import run_lsp_integration
 
-    run_lsp_integration(
+    lsp_count = run_lsp_integration(
         apm_package=apm_package,
         apm_modules_path=apm_modules_path,
         lock_path=_lock_path,
         existing_lock=_existing_lock,
         project_root=ctx.project_root,
         user_scope=(ctx.scope is InstallScope.USER),
-        should_install=should_install_mcp,
+        should_install=should_install_lsp,
         logger=logger,
         diagnostics=apm_diagnostics,
     )
@@ -1968,11 +1970,11 @@ def _install_apm_packages(ctx, outcome):
     # initialization, and inline stale-cleanup block that lived here
     # have been removed.
 
-    return apm_count, mcp_count, apm_diagnostics
+    return apm_count, mcp_count, lsp_count, apm_diagnostics
 
 
 def _post_install_summary(
-    *, logger, apm_count, mcp_count, apm_diagnostics, force, elapsed_seconds=None
+    *, logger, apm_count, mcp_count, lsp_count=0, apm_diagnostics, force, elapsed_seconds=None
 ):
     """Thin shim forwarding to :func:`apm_cli.install.summary.render_post_install_summary`.
 
@@ -1986,6 +1988,7 @@ def _post_install_summary(
         logger=logger,
         apm_count=apm_count,
         mcp_count=mcp_count,
+        lsp_count=lsp_count,
         apm_diagnostics=apm_diagnostics,
         force=force,
         elapsed_seconds=elapsed_seconds,

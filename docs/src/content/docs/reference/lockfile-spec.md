@@ -88,6 +88,7 @@ lsp_servers:
   - pyright
 lsp_configs:
   pyright:
+    name: pyright
     command: pyright-langserver
     args: ["--stdio"]
     extensionToLanguage:

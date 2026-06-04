@@ -758,6 +758,7 @@ class InstallLogger(CommandLogger):
         self,
         apm_count: int,
         mcp_count: int,
+        lsp_count: int = 0,
         errors: int = 0,
         stale_cleaned: int = 0,
         elapsed_seconds: float | None = None,
@@ -767,6 +768,7 @@ class InstallLogger(CommandLogger):
         Args:
             apm_count: Number of APM dependencies installed.
             mcp_count: Number of MCP servers installed.
+            lsp_count: Number of LSP servers installed.
             errors: Number of errors collected during install.
             stale_cleaned: Total stale + orphan files removed during
                 this install. Reported as a parenthetical so existing
@@ -783,6 +785,9 @@ class InstallLogger(CommandLogger):
         if mcp_count > 0:
             noun = "server" if mcp_count == 1 else "servers"
             parts.append(f"{mcp_count} MCP {noun}")
+        if lsp_count > 0:
+            noun = "server" if lsp_count == 1 else "servers"
+            parts.append(f"{lsp_count} LSP {noun}")
 
         cleanup_suffix = ""
         if stale_cleaned > 0:

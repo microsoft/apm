@@ -100,6 +100,23 @@ class TestFromDict:
         assert dep.workspace_folder == "/home"
         assert dep.startup_timeout == 1000
 
+    def test_camel_case_zero_values_preserved(self):
+        dep = LSPDependency.from_dict(
+            {
+                "name": "zero-lsp",
+                "command": "zero-langserver",
+                "extensionToLanguage": {".z": "zero"},
+                "workspaceFolder": "",
+                "startupTimeout": 0,
+                "shutdownTimeout": 0,
+                "maxRestarts": 0,
+            }
+        )
+        assert dep.workspace_folder == ""
+        assert dep.startup_timeout == 0
+        assert dep.shutdown_timeout == 0
+        assert dep.max_restarts == 0
+
     def test_missing_name_raises(self):
         with pytest.raises(ValueError, match="must contain 'name'"):
             LSPDependency.from_dict({"command": "x", "extensionToLanguage": {".py": "python"}})
@@ -250,3 +267,23 @@ class TestValidateEdgeCases:
         )
         with pytest.raises(ValueError, match="must be a dict"):
             dep.validate(strict=True)
+
+    def test_extension_to_language_values_must_be_strings(self):
+        dep = LSPDependency(
+            name="bad-ext-value",
+            command="x",
+            extension_to_language={".py": 123},  # type: ignore[dict-item]
+        )
+        with pytest.raises(ValueError, match="string extensions to string language IDs"):
+            dep.validate(strict=True)
+
+    def test_workspace_folder_traversal_raises(self):
+        with pytest.raises(ValueError, match="Invalid LSP workspaceFolder"):
+            LSPDependency.from_dict(
+                {
+                    "name": "bad-workspace",
+                    "command": "x",
+                    "extensionToLanguage": {".py": "python"},
+                    "workspaceFolder": "../outside",
+                }
+            )
