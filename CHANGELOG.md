@@ -7,26 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-06-04
+
 ### Added
 
+- `apm marketplace audit`: new command that flags dependencies bypassing
+  marketplace pinning, so you can catch unpinned or non-marketplace deps before
+  they ship. (by @edenfunf, #881)
 - Marketplace dependency object entries in `apm.yml` and `plugin.json` now
   resolve to concrete git refs during install, support optional semver-style
-  `version` constraints, and fail closed when resolution errors occur - by
-  @stbenjam (#1422)
+  `version` constraints, and fail closed when resolution errors occur. (by
+  @stbenjam, #1422)
+- LSP server management: declare language servers in `apm.yml` and `apm install`
+  wires them into Claude Code and GitHub Copilot CLI automatically. (by
+  @stbenjam, #1424)
+- `apm outdated` now recognizes monorepo `{name}-v{version}` tag naming, so
+  per-package version checks work in repositories that publish multiple packages
+  under subpath tags. (by @kevinbeier-enbw, #1504)
+
+### Changed
+
+- **BREAKING:** `apm` now rejects string-form `@alias` dependency shorthand at
+  parse time with a migration error; use the object form with `alias:` instead.
+  (#1655)
 
 ### Fixed
 
+- `apm compile` now matches `applyTo` globs without following symlinks into
+  `node_modules`, avoiding spurious matches and slow traversals in projects with
+  symlinked dependencies. (by @srid, #1576)
+- `apm install` now rewrites outbound relative links inside skill bundles so the
+  links keep resolving after a skill is materialized into an agent target.
+  (closes #1625, #1657)
 - Git-source semver ranges for virtual subdirectory dependencies now match
   per-package `{name}-v{version}` tags, derive `{name}` from the subpath, and
-  reject malformed range-like refs with an actionable manifest error. (#1658)
-
-### Breaking
-
-- Reject string-form `@alias` dependency shorthand at parse time with a migration error; use object form with `alias:` instead -- by @prateek (#1301)
-
-### Added
-
-- LSP server management: declare language servers in `apm.yml` and `apm install` wires them into Claude Code and GitHub Copilot CLI automatically -- by @stbenjam (#1424)
+  reject malformed range-like refs with an actionable manifest error. (closes
+  #1633, #1658)
+- `apm install` now preserves env-var placeholders (e.g. `${VAR}`) when writing
+  IntelliJ `mcp.json`, so configured environment references survive install
+  instead of being expanded or dropped. (closes #1656, #1659)
 
 ## [0.17.0] - 2026-06-03
 
