@@ -13,7 +13,9 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
+from apm_cli.commands.install import install
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
@@ -300,6 +302,34 @@ class TestPluginIntegration:
         assert deps[0].is_marketplace is True
         assert deps[0].marketplace_name == "claude-plugins-official"
         assert deps[0].marketplace_plugin_name == "gopls-lsp"
+
+    def test_install_fails_on_unresolvable_marketplace_dependency(self, tmp_path, monkeypatch):
+        """apm install fails closed when marketplace dependency resolution fails."""
+        from apm_cli.marketplace.errors import PluginNotFoundError
+
+        (tmp_path / "apm.yml").write_text(
+            "name: consumer\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - name: missing-plugin\n"
+            "      marketplace: missing-marketplace\n"
+        )
+
+        def fail_resolution(*_args, **_kwargs):
+            raise PluginNotFoundError("missing-plugin", "missing-marketplace")
+
+        monkeypatch.setattr(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            fail_resolution,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(install, [])
+
+        assert result.exit_code != 0
+        assert "Dependency resolution failed" in result.output
+        assert "missing-plugin" in result.output
 
     def test_plugin_with_mixed_dependencies(self, tmp_path):
         """Test plugin with both string and marketplace dependencies."""
