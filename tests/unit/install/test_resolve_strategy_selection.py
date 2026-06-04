@@ -77,6 +77,7 @@ def _make_ctx(
 
 def _make_mock_graph(*, circular=None):
     mock_graph = MagicMock()
+    mock_graph.resolution_errors = []
     mock_graph.circular_dependencies = circular or []
     mock_graph.dependency_tree.nodes = {}
     mock_graph.dependency_tree.get_nodes_at_depth.return_value = []
