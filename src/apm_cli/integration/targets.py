@@ -251,9 +251,14 @@ class TargetProfile:
 
         Args:
             project_root: Workspace or home directory root.
-            *parts: Additional path segments (e.g. ``"skills"``, ``"my-skill"``).
+            *parts: Additional path segments below the resolved deployment
+                root. For primitive-aware calls, pass segments below the
+                primitive root, e.g. ``deploy_path(root, "my-skill",
+                primitive="skills")`` rather than including ``"skills"`` in
+                ``parts``.
             primitive: Optional primitive name whose mapping can override
-                ``root_dir`` via ``deploy_root``.
+                ``root_dir`` via ``deploy_root`` and append its mapped
+                ``subdir``.
         """
         mapping = self.primitives.get(primitive) if primitive is not None else None
         if self.resolved_deploy_root is not None:

@@ -29,6 +29,7 @@ from apm_cli.integration.skill_integrator import (
     should_compile_instructions,
     validate_skill_name,
 )
+from tests.unit._skill_integrator_target_helpers import attach_skill_deploy_path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,20 +67,10 @@ def _make_target(
     prim = MagicMock()
     mapping = MagicMock()
     mapping.deploy_root = deploy_root
+    mapping.subdir = "skills"
     prim.__getitem__ = MagicMock(return_value=mapping)
     target.primitives = {"skills": mapping}
-
-    def _deploy_path(project_root: Path, *parts: str, primitive: str | None = None) -> Path:
-        if target.resolved_deploy_root is not None:
-            base = target.resolved_deploy_root
-        elif primitive == "skills":
-            base = project_root / (deploy_root or root_dir) / "skills"
-        else:
-            base = project_root / root_dir
-        return base.joinpath(*parts) if parts else base
-
-    target.deploy_path = _deploy_path
-    return target
+    return attach_skill_deploy_path(target)
 
 
 # ---------------------------------------------------------------------------
