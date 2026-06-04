@@ -55,41 +55,32 @@ class TestIsVersionConstraint(unittest.TestCase):
 
 @patch("apm_cli.marketplace.version_resolver.RefResolver")
 class TestResolveVersionConstraint(unittest.TestCase):
-
     def test_tilde_range_picks_highest_patch(self, MockResolver):
         refs = _make_refs("2.1.0", "2.1.1", "2.1.5", "2.2.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, _sha = resolve_version_constraint(
-            "secrets-vault", "acme/plugins", "~2.1.0"
-        )
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "~2.1.0")
         assert tag == "secrets-vault--v2.1.5"
 
     def test_caret_range_picks_highest_minor(self, MockResolver):
         refs = _make_refs("2.0.0", "2.1.0", "2.5.3", "3.0.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, _sha = resolve_version_constraint(
-            "secrets-vault", "acme/plugins", "^2.0.0"
-        )
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "^2.0.0")
         assert tag == "secrets-vault--v2.5.3"
 
     def test_gte_range(self, MockResolver):
         refs = _make_refs("1.0.0", "2.0.0", "3.0.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, _sha = resolve_version_constraint(
-            "secrets-vault", "acme/plugins", ">=2.0.0"
-        )
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", ">=2.0.0")
         assert tag == "secrets-vault--v3.0.0"
 
     def test_exact_match(self, MockResolver):
         refs = _make_refs("2.0.0", "2.1.0", "2.1.1")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, _sha = resolve_version_constraint(
-            "secrets-vault", "acme/plugins", "2.1.0"
-        )
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "2.1.0")
         assert tag == "secrets-vault--v2.1.0"
 
     def test_no_matching_tag_raises(self, MockResolver):
@@ -97,17 +88,13 @@ class TestResolveVersionConstraint(unittest.TestCase):
         MockResolver.return_value.list_remote_refs.return_value = refs
 
         with self.assertRaises(NoMatchingVersionError):
-            resolve_version_constraint(
-                "secrets-vault", "acme/plugins", "~2.0.0"
-            )
+            resolve_version_constraint("secrets-vault", "acme/plugins", "~2.0.0")
 
     def test_prerelease_excluded(self, MockResolver):
         refs = _make_refs("2.1.0", "2.2.0-beta.1")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, _sha = resolve_version_constraint(
-            "secrets-vault", "acme/plugins", "^2.0.0"
-        )
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "^2.0.0")
         assert tag == "secrets-vault--v2.1.0"
 
     def test_ignores_other_plugin_tags(self, MockResolver):
@@ -117,26 +104,25 @@ class TestResolveVersionConstraint(unittest.TestCase):
         ]
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, _sha = resolve_version_constraint(
-            "secrets-vault", "acme/plugins", "^2.0.0"
-        )
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "^2.0.0")
         assert tag == "secrets-vault--v2.1.0"
 
     def test_empty_refs_raises(self, MockResolver):
         MockResolver.return_value.list_remote_refs.return_value = []
 
         with self.assertRaises(NoMatchingVersionError):
-            resolve_version_constraint(
-                "secrets-vault", "acme/plugins", "~1.0.0"
-            )
+            resolve_version_constraint("secrets-vault", "acme/plugins", "~1.0.0")
 
     def test_passes_host_and_token(self, MockResolver):
         refs = _make_refs("1.0.0", plugin_name="my-plugin")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
         resolve_version_constraint(
-            "my-plugin", "owner/repo", "^1.0.0",
-            host="ghes.example.com", token="ghp_secret",
+            "my-plugin",
+            "owner/repo",
+            "^1.0.0",
+            host="ghes.example.com",
+            token="ghp_secret",
         )
         MockResolver.assert_called_once_with(host="ghes.example.com", token="ghp_secret")
 
@@ -158,7 +144,5 @@ class TestResolveVersionConstraint(unittest.TestCase):
         refs = _make_refs("2.1.0", "2.1.1", "2.2.0")
         MockResolver.return_value.list_remote_refs.return_value = refs
 
-        tag, _sha = resolve_version_constraint(
-            "secrets-vault", "acme/plugins", "2.1.0"
-        )
+        tag, _sha = resolve_version_constraint("secrets-vault", "acme/plugins", "2.1.0")
         assert tag == "secrets-vault--v2.1.0"

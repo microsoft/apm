@@ -343,7 +343,12 @@ class APMDependencyResolver:
 
         try:
             return self._resolve_marketplace_dep(dep_ref)
-        except (MarketplaceNotFoundError, PluginNotFoundError, MarketplaceFetchError, ValueError) as exc:
+        except (
+            MarketplaceNotFoundError,
+            PluginNotFoundError,
+            MarketplaceFetchError,
+            ValueError,
+        ) as exc:
             _logger.debug(
                 "Marketplace resolution failed for %s@%s: %s",
                 dep_ref.marketplace_plugin_name,

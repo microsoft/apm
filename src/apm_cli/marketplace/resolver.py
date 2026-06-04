@@ -705,9 +705,7 @@ def resolve_plugin_source(
         raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
-def _extract_token(
-    auth_resolver: object | None, host: str, org: str | None = None
-) -> str | None:
+def _extract_token(auth_resolver: object | None, host: str, org: str | None = None) -> str | None:
     """Extract a token from the auth resolver for the given host."""
     if auth_resolver is None:
         return None
@@ -879,8 +877,7 @@ def resolve_marketplace_plugin(
                     raise
                 canonical = f"{base}#{version_spec}"
                 logger.debug(
-                    "No '%s--v*' tags matched '%s' on %s@%s, "
-                    "falling back to raw git ref",
+                    "No '%s--v*' tags matched '%s' on %s@%s, falling back to raw git ref",
                     plugin_name,
                     version_spec,
                     plugin_name,

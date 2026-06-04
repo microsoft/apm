@@ -614,8 +614,9 @@ class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
 class TestMarketplaceResolution(unittest.TestCase):
     """Tests for marketplace dependency resolution in the BFS resolver."""
 
-    def _make_marketplace_dep(self, name="gopls-lsp", marketplace="claude-plugins-official",
-                              version_spec=None):
+    def _make_marketplace_dep(
+        self, name="gopls-lsp", marketplace="claude-plugins-official", version_spec=None
+    ):
         return DependencyReference(
             repo_url=f"_marketplace/{marketplace}/{name}",
             is_marketplace=True,
@@ -644,8 +645,11 @@ class TestMarketplaceResolution(unittest.TestCase):
         assert result.reference == "main"
         assert not result.is_marketplace
         mock_resolve.assert_called_once_with(
-            "gopls-lsp", "claude-plugins-official",
-            version_spec=None, auth_resolver=None, warning_handler=unittest.mock.ANY,
+            "gopls-lsp",
+            "claude-plugins-official",
+            version_spec=None,
+            auth_resolver=None,
+            warning_handler=unittest.mock.ANY,
         )
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
@@ -672,8 +676,11 @@ class TestMarketplaceResolution(unittest.TestCase):
         dep = self._make_marketplace_dep()
         resolver._resolve_marketplace_dep(dep)
         mock_resolve.assert_called_once_with(
-            "gopls-lsp", "claude-plugins-official",
-            version_spec=None, auth_resolver=auth, warning_handler=unittest.mock.ANY,
+            "gopls-lsp",
+            "claude-plugins-official",
+            version_spec=None,
+            auth_resolver=auth,
+            warning_handler=unittest.mock.ANY,
         )
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
@@ -684,8 +691,11 @@ class TestMarketplaceResolution(unittest.TestCase):
         result = resolver._resolve_marketplace_dep(dep)
         assert result.reference == "v2.1.3"
         mock_resolve.assert_called_once_with(
-            "gopls-lsp", "claude-plugins-official",
-            version_spec="~2.1.0", auth_resolver=None, warning_handler=unittest.mock.ANY,
+            "gopls-lsp",
+            "claude-plugins-official",
+            version_spec="~2.1.0",
+            auth_resolver=None,
+            warning_handler=unittest.mock.ANY,
         )
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
@@ -697,7 +707,8 @@ class TestMarketplaceResolution(unittest.TestCase):
             is_virtual=True,
         )
         mock_resolve.return_value = self._make_resolution(
-            "gitlab.com/acme/plugins#v2.0", dep_ref=structured_ref,
+            "gitlab.com/acme/plugins#v2.0",
+            dep_ref=structured_ref,
         )
         resolver = APMDependencyResolver()
         dep = self._make_marketplace_dep()
@@ -735,7 +746,9 @@ class TestMarketplaceResolution(unittest.TestCase):
             result = resolver.resolve_dependencies(project_root)
             assert result.flattened_dependencies.total_dependencies() == 0
             assert result.has_errors()
-            assert any("bad-plugin" in e and "fake-marketplace" in e for e in result.resolution_errors)
+            assert any(
+                "bad-plugin" in e and "fake-marketplace" in e for e in result.resolution_errors
+            )
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
     def test_marketplace_dep_unknown_error_propagates_through_tree(self, mock_resolve):

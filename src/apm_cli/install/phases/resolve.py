@@ -349,6 +349,17 @@ def _setup_downloader(ctx: InstallContext) -> None:
         )
 
 
+def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
+    """Raise when the resolver recorded fatal dependency-resolution errors."""
+    if not dependency_graph.resolution_errors:
+        return
+    for error in dependency_graph.resolution_errors:
+        if ctx.logger:
+            ctx.logger.error(error)
+    joined_errors = "; ".join(dependency_graph.resolution_errors)
+    raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
+
+
 def _resolve_dependencies(ctx: InstallContext) -> None:
     """Run ``APMDependencyResolver``, handle errors; populate ``ctx.deps_to_install`` and ``ctx.dependency_graph``.
 
@@ -747,6 +758,7 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
     manifest_anchor = ctx.source_root if ctx.source_root != ctx.project_root else ctx.apm_dir
     dependency_graph = resolver.resolve_dependencies(manifest_anchor)
     ctx.dependency_graph = dependency_graph
+    _fail_on_resolution_errors(ctx, dependency_graph)
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so
     # the integrate phase skips them via the same gate used for download

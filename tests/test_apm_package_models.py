@@ -2007,9 +2007,7 @@ class TestMarketplaceDependencyParsing:
 
     def test_marketplace_dep_missing_name(self):
         with pytest.raises(ValueError, match="non-empty 'name' field"):
-            DependencyReference.parse_from_dict(
-                {"marketplace": "claude-plugins-official"}
-            )
+            DependencyReference.parse_from_dict({"marketplace": "claude-plugins-official"})
 
     def test_marketplace_dep_empty_name(self):
         with pytest.raises(ValueError, match="non-empty 'name' field"):
@@ -2019,9 +2017,7 @@ class TestMarketplaceDependencyParsing:
 
     def test_marketplace_dep_empty_marketplace(self):
         with pytest.raises(ValueError, match="non-empty string"):
-            DependencyReference.parse_from_dict(
-                {"name": "gopls-lsp", "marketplace": ""}
-            )
+            DependencyReference.parse_from_dict({"name": "gopls-lsp", "marketplace": ""})
 
     def test_marketplace_dep_whitespace_stripped(self):
         dep = DependencyReference.parse_from_dict(
@@ -2064,15 +2060,11 @@ class TestMarketplaceDependencyParsing:
 
     def test_marketplace_dep_integer_name_rejected(self):
         with pytest.raises(ValueError, match="non-empty 'name' field"):
-            DependencyReference.parse_from_dict(
-                {"name": 123, "marketplace": "my-marketplace"}
-            )
+            DependencyReference.parse_from_dict({"name": 123, "marketplace": "my-marketplace"})
 
     def test_marketplace_dep_whitespace_only_marketplace(self):
         with pytest.raises(ValueError, match="non-empty string"):
-            DependencyReference.parse_from_dict(
-                {"name": "test", "marketplace": "   "}
-            )
+            DependencyReference.parse_from_dict({"name": "test", "marketplace": "   "})
 
     def test_marketplace_dep_ambiguous_with_path(self):
         with pytest.raises(ValueError, match="Ambiguous dependency"):
@@ -2123,9 +2115,7 @@ class TestMarketplaceDependencyParsing:
             )
 
     def test_marketplace_dep_without_version_spec(self):
-        dep = DependencyReference.parse_from_dict(
-            {"name": "plugin", "marketplace": "mkt"}
-        )
+        dep = DependencyReference.parse_from_dict({"name": "plugin", "marketplace": "mkt"})
         assert dep.marketplace_version_spec is None
 
     def test_marketplace_dep_unknown_keys_rejected(self):
