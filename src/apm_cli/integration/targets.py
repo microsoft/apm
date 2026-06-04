@@ -21,6 +21,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+RULE_FORMATS: frozenset[str] = frozenset({"cursor_rules", "claude_rules", "windsurf_rules"})
+"""Canonical set of format-transforming rule ``format_id``s.
+
+Single home for "which instruction formats transform their source on
+deploy".  A mapping with one of these ``format_id``s MUST set
+``output_compare=True`` (enforced by :meth:`PrimitiveMapping.__post_init__`),
+and :meth:`InstructionIntegrator._render_instruction` dispatches on this same
+set.  Adding a new rule format means: add it here, set ``output_compare=True``
+on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
+"""
+
 
 @dataclass(frozen=True)
 class PrimitiveMapping:
@@ -46,6 +57,55 @@ class PrimitiveMapping:
     directory) rather than ``.codex/``.  Default ``None`` preserves
     existing behavior for all other targets.
     """
+
+    output_compare: bool = False
+    """Whether this primitive's deployed file is a format-transform of its
+    source, so the integrator must adopt/collision-check against the
+    rendered *output* rather than the source bytes.
+
+    This is the single source of truth for the rule-dir formats
+    (``cursor_rules``, ``claude_rules``, ``windsurf_rules``).  When ``True``:
+
+    * The deployed file is never byte-identical to its source, so a
+      source-based adopt always misses (apm#1662).  The integrator instead
+      compares against the rendered output and (re)writes when stale.
+    * The target is APM-owned per-file (``target_name`` derives 1:1 from a
+      source instruction), so ``managed_files`` is NOT consulted -- any
+      existing file at the target path is APM's, not user-authored.
+    * The deployed filename is renamed from ``<x>.instructions.md`` to
+      ``<x>{extension}``.
+
+    Adding a future format-transformed rule type requires two coordinated
+    edits: set ``output_compare=True`` here (add the ``format_id`` to
+    ``RULE_FORMATS``) *and* add the matching ``_convert_to_*`` branch to
+    :meth:`InstructionIntegrator._render_instruction`, which dispatches on the
+    ``format_id`` to perform the transform.
+    """
+
+    def __post_init__(self) -> None:
+        """Keep ``output_compare`` and :data:`RULE_FORMATS` in lockstep.
+
+        A rule ``format_id`` that transforms its source MUST compare against
+        the rendered output; otherwise the integrator would fall through to a
+        verbatim copy and silently deploy untransformed content (apm#1662).
+        The converse is also enforced so the canonical set stays the one home
+        for "which formats transform".
+        """
+        is_rule = self.format_id in RULE_FORMATS
+        if is_rule and not self.output_compare:
+            raise ValueError(
+                f"PrimitiveMapping(format_id={self.format_id!r}) is a rule "
+                f"format ({sorted(RULE_FORMATS)}) and must set "
+                "output_compare=True; otherwise its source is deployed "
+                "untransformed."
+            )
+        if self.output_compare and not is_rule:
+            raise ValueError(
+                f"PrimitiveMapping(format_id={self.format_id!r}) sets "
+                "output_compare=True but is not a known rule format "
+                f"({sorted(RULE_FORMATS)}); add it to RULE_FORMATS and a "
+                "_render_instruction branch, or unset output_compare."
+            )
 
 
 @dataclass(frozen=True)
@@ -434,7 +494,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         name="claude",
         root_dir=".claude",
         primitives={
-            "instructions": PrimitiveMapping("rules", ".md", "claude_rules"),
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".md",
+                "claude_rules",
+                output_compare=True,
+            ),
             "agents": PrimitiveMapping("agents", ".md", "claude_agent"),
             "commands": PrimitiveMapping("commands", ".md", "claude_command"),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
@@ -454,7 +519,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         name="cursor",
         root_dir=".cursor",
         primitives={
-            "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".mdc",
+                "cursor_rules",
+                output_compare=True,
+            ),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
             # TODO(cursor-command-format): track via dedicated issue once
             # filed.  Cursor command deployment reuses the shared command
@@ -576,7 +646,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         name="windsurf",
         root_dir=".windsurf",
         primitives={
-            "instructions": PrimitiveMapping("rules", ".md", "windsurf_rules"),
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".md",
+                "windsurf_rules",
+                output_compare=True,
+            ),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
             "commands": PrimitiveMapping("workflows", ".md", "windsurf_workflow"),
             "hooks": PrimitiveMapping("", "hooks.json", "windsurf_hooks"),

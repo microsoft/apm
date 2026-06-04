@@ -332,10 +332,10 @@ def integrate_package_primitives(
                 if _mapping.subdir
                 else f"{_effective_root}/"
             )
-            if _prim_name == "instructions" and _mapping.format_id in (
-                "cursor_rules",
-                "claude_rules",
-            ):
+            if _prim_name == "instructions" and _mapping.output_compare:
+                # Rule-dir formats (cursor/claude/windsurf) are the
+                # output_compare set; derive the label from the same flag so a
+                # new rule format needs no edit here.
                 _label = "rule(s)"
             elif _prim_name == "instructions":
                 _label = "instruction(s)"
