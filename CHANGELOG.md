@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `auth.py`: add `logger.debug` calls to all silent `except` clauses in the
+  credential cascade; bind `AzureCliBearerError` and `ImportError` catches with
+  explicit `as exc` clauses; keep broad `Exception` guards on caller-provided
+  callables with justification comments. (#935)
+
 ## [0.18.0] - 2026-06-04
 
 ### Added

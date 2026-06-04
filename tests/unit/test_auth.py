@@ -1373,3 +1373,103 @@ class TestGhCliShortCircuitsCredentialFill:
 
             assert result == "ok:gho_from_gh_cli"
             mock_cred_fill.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestCredentialFallbackOrderRegressionTrap
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialFallbackOrderRegressionTrap:
+    """Regression trap: the credential-resolution priority order for GitHub-class
+    hosts must not silently change.
+
+    Issue #935: while auditing silent except clauses we locked in the current
+    cascade order so any future refactor that shifts priorities is forced to
+    update this test explicitly.
+
+    Priority order (per-org PAT -> global PAT -> GITHUB_TOKEN -> GH_TOKEN ->
+    gh CLI -> git credential fill) is verified by observing which token reaches
+    the operation callable first across a series of isolated env configurations.
+    """
+
+    def _run_op(self, resolver, token_seen, org=None):
+        """Helper: run try_with_fallback and capture the token passed to op."""
+
+        def op(token, env):
+            token_seen.append(token)
+            return "ok"
+
+        return resolver.try_with_fallback("github.com", op, path="owner/repo", org=org)
+
+    def test_per_org_pat_beats_global_pat(self):
+        org = "owner"
+        per_org_key = f"GITHUB_APM_PAT_{org.upper()}"
+        with patch.dict(
+            os.environ,
+            {per_org_key: "per-org-token", "GITHUB_APM_PAT": "global-token"},
+            clear=True,
+        ):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen, org=org)
+        assert seen[0] == "per-org-token", (
+            "per-org PAT must be tried before global PAT; cascade order changed"
+        )
+
+    def test_global_pat_beats_github_token(self):
+        with patch.dict(
+            os.environ,
+            {"GITHUB_APM_PAT": "global-pat", "GITHUB_TOKEN": "gh-token"},
+            clear=True,
+        ):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen)
+        assert seen[0] == "global-pat", (
+            "GITHUB_APM_PAT must be tried before GITHUB_TOKEN; cascade order changed"
+        )
+
+    def test_github_token_beats_gh_token(self):
+        with patch.dict(
+            os.environ,
+            {"GITHUB_TOKEN": "gh-token-env", "GH_TOKEN": "gh-token-alt"},
+            clear=True,
+        ):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen)
+        assert seen[0] == "gh-token-env", (
+            "GITHUB_TOKEN must be tried before GH_TOKEN; cascade order changed"
+        )
+
+    def test_gh_cli_token_beats_git_credential_fill(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_cli",
+            ):
+                with patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git"
+                ) as mock_git_cred:
+                    seen = []
+                    resolver = AuthResolver()
+                    self._run_op(resolver, seen)
+        assert seen[0] == "gho_cli", (
+            "gh CLI token must be tried before git credential fill; cascade order changed"
+        )
+        mock_git_cred.assert_not_called()
+
+    def test_no_token_falls_back_to_unauthenticated(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen)
+        assert seen[0] is None, (
+            "When no token is available, unauthenticated access (None) must be tried"
+        )
