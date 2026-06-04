@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-06-03T07:29:46Z",
+  "last_updated": "2026-06-04T07:26:05Z",
   "last_run_tasks": ["noop"],
   "validated_commands": {
     "test": ".venv/bin/pytest tests/unit/ -q",
@@ -24,11 +24,16 @@
     {"id": "deps-cli-update", "file": "src/apm_cli/commands/deps/cli.py", "priority": "on-hold"},
     {"id": "policy-extends-regression", "priority": "on-hold"},
     {"id": "policy-status-ascii", "priority": "low"},
-    {"id": "integration-test-refactor", "issue": 1166, "priority": "on-hold"}
+    {"id": "integration-test-refactor", "issue": 1168, "priority": "on-hold"}
   ],
   "backlog_cursor": "cache-integrity",
   "open_prs": [],
   "completed_work": [
+    {
+      "run": "2026-06-04T07:26:05Z",
+      "tasks": ["noop"],
+      "description": "NOOP: Maintainer signal still in effect. No re-engagement detected. No activity."
+    },
     {
       "run": "2026-06-03T07:29:46Z",
       "tasks": ["noop"],
@@ -43,11 +48,6 @@
       "run": "2026-06-01T07:33:09Z",
       "tasks": ["noop"],
       "description": "NOOP: Maintainer signal still in effect (new month 2026-06). No re-engagement detected. No activity."
-    },
-    {
-      "run": "2026-05-31T07:09:46Z",
-      "tasks": ["noop"],
-      "description": "NOOP: Maintainer signal still in effect. No re-engagement. No activity."
     }
   ]
 }
