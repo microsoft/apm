@@ -18,26 +18,6 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
 
 
-def _warn_intellij_plaintext_env(target_runtimes: list, env_keys, logger: Any) -> None:
-    """Warn that the JetBrains (intellij) runtime bakes env values as plaintext.
-
-    JetBrains Copilot's ``mcp.json`` does not (yet) support runtime
-    environment-variable substitution, so APM resolves ``--env`` / declared
-    env vars at install time and writes the literal values into the config
-    file.  Surface that to the user so secrets are not leaked unknowingly.
-    """
-    if "intellij" not in target_runtimes:
-        return
-    keys = sorted(k for k in env_keys if k)
-    if not keys:
-        return
-    logger.warning(
-        "JetBrains Copilot (intellij) does not support runtime environment-variable "
-        "substitution; the following value(s) are written into mcp.json as plaintext "
-        f"at install time: {', '.join(keys)}. Rotate any secrets if this config is shared."
-    )
-
-
 def _install_registry_group(
     operations: Any,
     group_dep_names: list,
@@ -147,7 +127,6 @@ def _install_registry_group(
                 dep = group_dep_map.get(server_name)
                 if dep and dep.env:
                     shared_env_vars.update(dep.env)
-            _warn_intellij_plaintext_env(target_runtimes, shared_env_vars.keys(), logger)
             shared_runtime_vars = operations.collect_runtime_variables(
                 servers_to_install, server_info_cache
             )
@@ -229,7 +208,7 @@ def _resolve_target_runtimes(
     )
 
     if runtime:
-        # Single runtime mode — skip auto-discovery entirely.
+        # Single runtime mode - skip auto-discovery entirely.
         logger.progress(f"Targeting specific runtime: {runtime}")
         target_runtimes: list[str] = [runtime]
     else:
@@ -512,12 +491,6 @@ def _install_self_defined_deps(
     already_configured_self_defined = [
         name for name in already_configured_candidates_sd if name not in servers_to_update
     ]
-
-    sd_env_keys: builtins.set = builtins.set()
-    for dep in self_defined_deps:
-        if dep.name in self_defined_to_install:
-            sd_env_keys |= builtins.set((dep.env or {}).keys())
-    _warn_intellij_plaintext_env(target_runtimes, sd_env_keys, logger)
 
     if already_configured_self_defined:
         if console:
