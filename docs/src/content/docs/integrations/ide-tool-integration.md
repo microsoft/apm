@@ -22,7 +22,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
-| JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, no `${VAR}` env substitution) |
+| JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, `${env:VAR}` env substitution) |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
@@ -135,10 +135,9 @@ Notes and limits:
   file in your repo. It is therefore detected for every project on the machine
   once the plugin directory exists. Use `--runtime intellij` to target it
   explicitly regardless of auto-detect.
-- **No runtime env substitution.** This target does not expand `${VAR}`
-  placeholders at runtime, so any `--env KEY=VALUE` values are written verbatim
-  into `mcp.json`. Avoid passing plaintext secrets; APM emits a warning when you
-  combine `--env` with `--runtime intellij`.
+- **Runtime env substitution.** JetBrains Copilot resolves `${env:VAR}` in
+  `mcp.json` at server start. APM preserves env-var placeholders as
+  `${env:VAR}` instead of writing matching host secrets into the config.
 
 ## Per-tool reference pages
 

@@ -264,13 +264,13 @@ The `registries:` field and registry-routed APM dependency forms require `apm ex
 |---|---|
 | **Type** | `map<string, RegistryEntry>` with optional `default: <string>` key |
 | **Required** | OPTIONAL |
-| **Description** | Declares REST-based APM registries for the project. Strictly additive — absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../guides/registries/#user-level-config). |
+| **Description** | Declares REST-based APM registries for the project. Strictly additive - absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../guides/registries/#user-level-config). |
 
 ```yaml
 registries:
   jf-skills:
     url: https://artifactory.example.com/artifactory/api/skills/jf-skills-local
-  default: jf-skills           # OPTIONAL — name of one of the configured entries
+  default: jf-skills           # OPTIONAL - name of one of the configured entries
 ```
 
 | Sub-key | Type | Required | Constraint | Semantic |
@@ -283,7 +283,7 @@ Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
 
 **Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
 
-For full client semantics — auth, lockfile fields, and routing rules — see the [Registries guide](../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](./registry-http-api/).
+For full client semantics - auth, lockfile fields, and routing rules - see the [Registries guide](../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](./registry-http-api/).
 
 ---
 
@@ -314,9 +314,9 @@ shorthand_form  = [host "/"] owner "/" repo ["/" virtual_path] ["#" ref]
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
-When a default registry is configured — via `registries.default` in `apm.yml` or `registry.<name>.default true` in `~/.apm/config.json` — plain `shorthand_form` entries with a `#<selector>` route through that registry instead of Git.
+When a default registry is configured - via `registries.default` in `apm.yml` or `registry.<name>.default true` in `~/.apm/config.json` - plain `shorthand_form` entries with a `#<selector>` route through that registry instead of Git.
 
-`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port — `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
+`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port - `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
 
 | Segment | Required | Pattern | Description |
 |---|---|---|---|
@@ -531,18 +531,20 @@ dependencies:
 
 Values in `headers` and `env` may contain three placeholder syntaxes. APM resolves them per-target so secrets stay out of generated config files where possible.
 
-| Syntax | Source | VS Code | Copilot CLI / Codex / Gemini / Cursor |
-|---|---|---|---|
-| `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Resolved at install time from env (or interactive prompt) |
-| `${env:VAR}` | host environment | Native; passed through verbatim | Resolved at install time from env (or interactive prompt) |
-| `${input:<id>}` | user prompt | Native; VS Code prompts at runtime | Not supported; use `${VAR}` or `${env:VAR}` instead |
-| `<VAR>` (legacy) | host environment | Not recognized | Resolved at install time (kept for back-compat) |
+| Syntax | Source | VS Code | JetBrains Copilot | Copilot CLI | Codex / Gemini / Cursor |
+|---|---|---|---|---|---|
+| `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Translated to `${env:VAR}` | Native; passed through verbatim | Resolved at install time from env (or interactive prompt) |
+| `${env:VAR}` | host environment | Native; passed through verbatim | Native; passed through verbatim | Translated to `${VAR}` | Resolved at install time from env (or interactive prompt) |
+| `${input:<id>}` | user prompt | Native; VS Code prompts at runtime | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead | Not supported; use `${VAR}` or `${env:VAR}` instead |
+| `<VAR>` (legacy) | host environment | Not recognized | Translated to `${env:VAR}` | Translated to `${VAR}` | Resolved at install time (kept for back-compat) |
 
 - **VS Code** has native `${env:VAR}` and `${input:VAR}` interpolation, so APM emits placeholders rather than baking secrets into `mcp.json`. Bare `${VAR}` is normalized to `${env:VAR}` for you.
-- **Copilot CLI, Codex, Gemini, and Cursor** have no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
-- **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests — they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
-- **Registry-backed servers** — APM auto-generates input prompts from registry metadata for `${input:...}`.
-- **Self-defined servers** — APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
+- **JetBrains Copilot** has native `${env:VAR}` interpolation in `mcp.json`; APM normalizes `${VAR}` and legacy `<VAR>` to `${env:VAR}`.
+- **Copilot CLI** has native `${VAR}` interpolation in `~/.copilot/mcp-config.json`; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
+- **Codex, Gemini, and Cursor** have no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
+- **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
+- **Registry-backed servers** - APM auto-generates input prompts from registry metadata for `${input:...}`.
+- **Self-defined servers** - APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
 
 GitHub Actions templates (`${{ ... }}`) are intentionally left untouched.
 

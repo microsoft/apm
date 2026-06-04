@@ -67,9 +67,10 @@ class IntelliJClientAdapter(CopilotClientAdapter):
 
     JetBrains Copilot stores server definitions in a user-scope JSON file
     with a ``"servers"`` top-level key (not ``"mcpServers"``).  This adapter
-    inherits all registry-resolution, env-var handling, and config read/write
-    from :class:`CopilotClientAdapter` and overrides only the config path and
-    ``mcp_servers_key`` so the parent methods operate on the correct key.
+    inherits registry-resolution and config read/write from
+    :class:`CopilotClientAdapter` and overrides the config path,
+    ``mcp_servers_key``, and runtime env-var placeholder syntax so the parent
+    methods operate on the correct schema.
     """
 
     supports_user_scope: bool = True
@@ -77,9 +78,13 @@ class IntelliJClientAdapter(CopilotClientAdapter):
     target_name: str = "intellij"
     mcp_servers_key: str = "servers"
 
-    # JetBrains runtime-substitution support has not yet been audited.
-    # Pin to install-time resolution for safety; revisit in a follow-up.
-    _supports_runtime_env_substitution: bool = False
+    # JetBrains Copilot resolves ${env:VAR} placeholders in mcp.json at
+    # server-start, so APM must not bake matching host secrets to disk.
+    _supports_runtime_env_substitution: bool = True
+
+    def _format_runtime_env_placeholder(self, name: str) -> str:
+        """Return JetBrains Copilot's native env-var placeholder syntax."""
+        return "${env:" + name + "}"
 
     # ------------------------------------------------------------------ #
     # Config path

@@ -1,6 +1,7 @@
 """Tests for the JetBrains Copilot MCP client adapter."""
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -159,6 +160,51 @@ class TestIntelliJClientAdapter(unittest.TestCase):
         self.assertTrue(self.mcp_json.exists())
         data = json.loads(self.mcp_json.read_text())
         self.assertIn("srv", data["servers"])
+
+    def test_remote_header_preserves_env_prefix_placeholder(self):
+        server_info = {
+            "id": "remote-secret",
+            "name": "remote-secret",
+            "remotes": [
+                {
+                    "transport_type": "http",
+                    "url": "https://example.com/mcp",
+                    "headers": [{"name": "X-Token", "value": "${env:MY_TOKEN}"}],
+                }
+            ],
+        }
+
+        with patch.dict(os.environ, {"MY_TOKEN": "literal-secret"}, clear=False):
+            config = self.adapter._format_server_config(server_info)
+
+        self.assertEqual(config["headers"]["X-Token"], "${env:MY_TOKEN}")
+        self.assertNotIn("literal-secret", json.dumps(config))
+        self.assertIn("MY_TOKEN", self.adapter._last_env_placeholder_keys)
+
+    def test_dict_env_literal_uses_env_prefix_placeholder(self):
+        with patch.dict(os.environ, {"MY_TOKEN": "ignored-os-env"}, clear=False):
+            result = self.adapter._resolve_environment_variables(
+                {"MY_TOKEN": "literal-value-from-apm-yml"}, env_overrides=None
+            )
+
+        self.assertEqual(result["MY_TOKEN"], "${env:MY_TOKEN}")
+        self.assertNotIn("literal-value-from-apm-yml", json.dumps(result))
+        self.assertNotIn("ignored-os-env", json.dumps(result))
+        self.assertIn("MY_TOKEN", self.adapter._last_env_placeholder_keys)
+
+    def test_dict_env_translates_all_placeholder_syntaxes_to_env_prefix(self):
+        result = self.adapter._resolve_environment_variables(
+            {
+                "PRIMARY_TOKEN": "${MY_STDIO_TOKEN}",
+                "PREFIXED_TOKEN": "${env:MY_STDIO_TOKEN}",
+                "LEGACY_TOKEN": "<MY_LEGACY_VAR>",
+            },
+            env_overrides=None,
+        )
+
+        self.assertEqual(result["PRIMARY_TOKEN"], "${env:MY_STDIO_TOKEN}")
+        self.assertEqual(result["PREFIXED_TOKEN"], "${env:MY_STDIO_TOKEN}")
+        self.assertEqual(result["LEGACY_TOKEN"], "${env:MY_LEGACY_VAR}")
 
 
 class TestIntelliJCollectBakedKeys(unittest.TestCase):
