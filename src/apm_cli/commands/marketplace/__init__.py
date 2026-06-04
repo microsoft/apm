@@ -114,6 +114,8 @@ class MarketplaceGroup(click.Group):
                 cmd = self.get_command(ctx, name)
                 if cmd is None:
                     continue
+                if getattr(cmd, "hidden", False):
+                    continue
                 help_text = cmd.get_short_help_str(limit=150)
                 commands.append((name, help_text))
             if commands:
