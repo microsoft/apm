@@ -17,11 +17,14 @@ apm outdated [OPTIONS]
 
 `apm outdated` reads `apm.lock.yaml` and queries each remote to detect staleness:
 
-- **Tag-pinned deps** (e.g. `v1.2.3`): semver compare against the latest available remote tag.
+- **Plain tag-pinned deps** (e.g. `v1.2.3` or `1.2.3`): semver compare against the latest matching remote tag.
+- **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref.
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
 - **Marketplace deps**: compare the installed ref against the marketplace entry's current `source.ref`.
 - **Registry deps** (experimental `registries` feature): compare the lockfile's exact `version` against the highest semver on the registry that satisfies the manifest range (same resolution semantics as `apm install`). Manifest ranges come from the root `apm.yml` and from installed packages' `apm.yml` files (transitive deps). When a registry lockfile entry has no manifest range, `apm outdated` compares against the highest published version and labels the source `(lockfile)`.
+
+Common monorepo layouts are detected automatically for `outdated` reporting. Set an explicit marketplace `tag_pattern` when your producer uses a different layout than the built-in patterns.
 
 Local dependencies and Artifactory-hosted deps are skipped. Legacy `apm.lock` files are migrated to `apm.lock.yaml` automatically on read.
 

@@ -123,6 +123,9 @@ aliases, or marketplace dependencies.
 
 Three mutually exclusive keys select the form: `git`, `path`, or `marketplace`.
 
+The legacy string suffix `@alias` is not supported; write `alias:` explicitly
+instead so `@` remains reserved for git usernames and version syntax.
+
 ### Remote (`git`)
 
 | Field | Required | Description |
