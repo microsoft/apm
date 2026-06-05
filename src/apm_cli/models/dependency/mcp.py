@@ -5,7 +5,26 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
+# Keys recognised by from_dict (including legacy alias 'type' -> 'transport').
+_KNOWN_DICT_KEYS = frozenset(
+    {
+        "name",
+        "transport",
+        "type",  # legacy alias for 'transport'
+        "env",
+        "args",
+        "version",
+        "registry",
+        "package",
+        "headers",
+        "tools",
+        "url",
+        "command",
+    }
+)
 
 _NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
@@ -47,10 +66,17 @@ class MCPDependency:
         """Parse an MCPDependency from a dict.
 
         Handles backward compatibility: 'type' key is mapped to 'transport'.
-        Unknown keys are silently ignored for forward compatibility.
+        Unknown keys are dropped with a warning naming each discarded key.
         """
         if "name" not in d:
             raise ValueError("MCP dependency dict must contain 'name'")
+
+        unknown = sorted(k for k in d if k not in _KNOWN_DICT_KEYS)
+        if unknown:
+            _rich_warning(
+                f"MCP dependency '{d['name']}': unknown key(s) dropped: {', '.join(unknown)}",
+                symbol="warning",
+            )
 
         transport = d.get("transport") or d.get("type")  # legacy 'type' -> 'transport'
 
