@@ -224,16 +224,36 @@ A path must pass all three checks. Failure on any check prevents the file from b
 
 ### Symlink handling
 
-Symlinks are never followed during file discovery or artifact operations:
+Symlinks are handled with a strict containment policy:
 
 - **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
-- **Tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
+- **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
 - **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
+
+#### Local-install symlink dereference and containment guarantee
+
+When installing a local-path dependency (`apm install /path/to/pkg`), APM
+dereferences in-package symlinks so that the staged copy in `apm_modules/`
+contains only regular files -- matching the behavior of remote installs, which
+materialize all content as real files during git checkout.
+
+**Threat model.** A symlink inside a local package could point to a file
+outside the package root, giving a malicious package a path-traversal vector.
+APM prevents this with a per-symlink containment check:
+
+1. Each symlink is resolved atomically (resolve -> validate -> copy).
+2. The resolved target is verified to remain inside the package root using
+   `ensure_path_within()` (#596 containment helper).
+3. If the resolved target escapes the package root, APM **hard-fails the
+   install** with a `PathTraversalError` and a human-readable message naming
+   the offending link.  No warn-and-skip; no silent follow.
+4. Only symlinks that resolve within the package root are dereferenced and
+   copied as regular files.  External symlinks are never followed.
 
 This prevents symlink-based attacks that could escape allowed directories or cause APM to read or write outside the project root.
 
