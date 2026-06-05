@@ -3,9 +3,8 @@
 import errno
 import os
 import re
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
@@ -610,7 +609,13 @@ class BaseIntegrator:
         except Exception:
             self.link_resolver = None
 
-    def resolve_links(self, content: str, source: Path, target: Path) -> tuple:
+    def resolve_links(
+        self,
+        content: str,
+        source: Path,
+        target: Path,
+        preserved_source_root: Path | None = None,
+    ) -> tuple:
         """Resolve context links in *content*.
 
         Returns:
@@ -623,6 +628,7 @@ class BaseIntegrator:
             content=content,
             source_file=source,
             target_file=target,
+            preserved_source_root=preserved_source_root,
         )
         if resolved == content:
             return content, 0

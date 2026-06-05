@@ -9,7 +9,6 @@ import fnmatch
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +87,16 @@ def should_exclude(
             return True
 
     return False
+
+
+def matches_glob(rel_path: str, pattern: str) -> bool:
+    """Return True if forward-slash ``rel_path`` matches glob ``pattern``.
+
+    Supports ``**`` recursive segments. Shared by ``compilation.exclude``
+    filtering and instruction ``applyTo`` placement so both stay on a single
+    glob-matching implementation.
+    """
+    return _matches_pattern(rel_path, pattern)
 
 
 def _matches_pattern(rel_path_str: str, pattern: str) -> bool:

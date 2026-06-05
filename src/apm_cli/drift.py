@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
-from pathlib import Path  # noqa: F401
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.phases._skip_logic import _should_use_locked_ref

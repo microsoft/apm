@@ -32,11 +32,14 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional  # noqa: F401
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .semver import SemVer
 
 import yaml
 
@@ -47,14 +50,13 @@ from ..utils.path_security import (
 )
 from ._git_utils import redact_token as _redact_token
 from ._io import atomic_write
-from .errors import MarketplaceError, MarketplaceYmlError  # noqa: F401
+from .errors import MarketplaceError
 from .git_stderr import translate_git_stderr
 from .migration import load_marketplace_config
 from .ref_resolver import RefResolver
 from .resolver import parse_marketplace_ref
 from .semver import parse_semver
 from .tag_pattern import render_tag
-from .yml_schema import load_marketplace_yml  # noqa: F401  (kept for back-compat)
 
 logger = logging.getLogger(__name__)
 
@@ -503,138 +505,109 @@ class MarketplacePublisher:
         # Return in plan.targets order
         return [results[i] for i in range(len(plan.targets))]
 
-    # -- per-target processing ----------------------------------------------
+    # -- per-target helpers -------------------------------------------------
 
-    def _clone_and_checkout_branch(
+    def _load_consumer_manifest(
         self,
+        clone_dir: Path,
         target: ConsumerTarget,
         plan: PublishPlan,
-        tmpdir: str,
-        clone_dir: Path,
-    ) -> TargetResult | None:
-        """Steps 1–2: shallow-clone and create the publish branch.
+    ) -> tuple[dict | None, Path, TargetResult | None]:
+        """Load and validate consumer apm.yml.
 
-        Returns a :class:`TargetResult` on failure, ``None`` on success.
-        """
-        url = f"https://github.com/{target.repo}.git"
-        try:
-            self._run_git(
-                ["git", "clone", "--depth=1", "--branch", target.branch, url, str(clone_dir)],
-                cwd=tmpdir,
-            )
-        except subprocess.CalledProcessError as exc:
-            stderr = _redact_token(exc.stderr or "")
-            translated = translate_git_stderr(
-                stderr, exit_code=exc.returncode, operation="clone", remote=target.repo
-            )
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message=f"Clone failed: {translated.summary}",
-            )
-
-        try:
-            self._run_git(["git", "checkout", "-B", plan.branch_name], cwd=str(clone_dir))
-        except subprocess.CalledProcessError as exc:
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message=("Branch creation failed: " + _redact_token(str(exc))),
-            )
-        return None
-
-    def _load_consumer_apm_yml(
-        self,
-        target: ConsumerTarget,
-        plan: PublishPlan,
-        clone_dir: Path,
-    ) -> TargetResult | tuple[dict, list, list[tuple[int, str, "str | None", str]], list[str]]:
-        """Steps 3–5: load apm.yml and find marketplace entries.
-
-        Returns a :class:`TargetResult` on any failure, or a 4-tuple
-        ``(data, apm_deps, matches, warnings)`` on success.
+        Returns ``(data, apm_yml_path, None)`` on success or
+        ``(None, apm_yml_path, TargetResult)`` on first error.
         """
         apm_yml_path = clone_dir / target.path_in_repo
         try:
             ensure_path_within(apm_yml_path, clone_dir)
         except PathTraversalError:
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message=("Path traversal rejected: " + target.path_in_repo),
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message="Path traversal rejected: " + target.path_in_repo,
+                ),
             )
 
         if not apm_yml_path.exists():
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message=f"File not found: {target.path_in_repo}",
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"File not found: {target.path_in_repo}",
+                ),
             )
 
         try:
             raw_text = apm_yml_path.read_text(encoding="utf-8")
             data = yaml.safe_load(raw_text)
         except (yaml.YAMLError, OSError) as exc:
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message=(f"Failed to parse {target.path_in_repo}: {exc}"),
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"Failed to parse {target.path_in_repo}: {exc}",
+                ),
             )
 
         if not isinstance(data, dict):
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message="Invalid apm.yml: expected a mapping",
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message="Invalid apm.yml: expected a mapping",
+                ),
             )
 
         deps = data.get("dependencies")
-        apm_deps = deps.get("apm") if isinstance(deps, dict) else None
-        if not isinstance(deps, dict) or not isinstance(apm_deps, list):
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message=(f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml"),
+        if not isinstance(deps, dict):
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml",
+                ),
             )
 
-        # Parse each entry with parse_marketplace_ref
-        mkt_lower = plan.marketplace_name.lower()
-        matches: list[tuple[int, str, str | None, str]] = []
-        warnings: list[str] = []
+        apm_deps = deps.get("apm")
+        if not isinstance(apm_deps, list):
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml",
+                ),
+            )
 
-        for idx, entry_str in enumerate(apm_deps):
-            if not isinstance(entry_str, str):
-                continue
-            try:
-                parsed = parse_marketplace_ref(entry_str)
-            except ValueError as exc:
-                warnings.append(str(exc))
-                continue
-            if parsed is None:
-                continue
-            _plugin_name, entry_mkt, old_ref = parsed
-            if entry_mkt.lower() == mkt_lower:
-                matches.append((idx, _plugin_name, old_ref, entry_str))
-
-        return data, apm_deps, matches, warnings
+        return data, apm_yml_path, None
 
     def _check_ref_guards(
         self,
+        matches: list[tuple[int, str, str | None, str]],
         target: ConsumerTarget,
         plan: PublishPlan,
-        matches: list[tuple[int, str, "str | None", str]],
-        new_ref: str,
-        new_sv: "object | None",
+        new_sv: SemVer | None,
     ) -> TargetResult | None:
-        """Step 6: apply ref-change and downgrade guards.
-
-        Returns a :class:`TargetResult` if any guard blocks the update,
-        ``None`` if all guards pass.
-        """
+        """Check ref-change and downgrade guards. Returns error result or None."""
+        new_ref = plan.new_ref
         for _idx, _pname, old_ref, entry_str in matches:
             if old_ref == new_ref:
                 continue
 
+            # Ref-change guard
             if old_ref is None:
                 if not plan.allow_ref_change:
                     return TargetResult(
@@ -649,70 +622,37 @@ class MarketplacePublisher:
                     )
             else:
                 old_sv = parse_semver(old_ref.lstrip("vV"))
-                if old_sv is None and new_sv is not None and not plan.allow_ref_change:
-                    return TargetResult(
-                        target=target,
-                        outcome=PublishOutcome.SKIPPED_REF_CHANGE,
-                        message=(
-                            f"Entry '{entry_str}' uses "
-                            f"non-semver ref '{old_ref}'; "
-                            "pass allow_ref_change to switch"
-                        ),
-                        old_version=old_ref,
-                        new_version=new_ref,
-                    )
-                if old_sv and new_sv and new_sv < old_sv and not plan.allow_downgrade:  # type: ignore[operator]
-                    return TargetResult(
-                        target=target,
-                        outcome=PublishOutcome.SKIPPED_DOWNGRADE,
-                        message=(
-                            f"Downgrade from {old_ref} to "
-                            f"{new_ref}; pass allow_downgrade "
-                            "to override"
-                        ),
-                        old_version=old_ref,
-                        new_version=new_ref,
-                    )
+                if old_sv is None and new_sv is not None:
+                    if not plan.allow_ref_change:
+                        return TargetResult(
+                            target=target,
+                            outcome=PublishOutcome.SKIPPED_REF_CHANGE,
+                            message=(
+                                f"Entry '{entry_str}' uses "
+                                f"non-semver ref '{old_ref}'; "
+                                "pass allow_ref_change to switch"
+                            ),
+                            old_version=old_ref,
+                            new_version=new_ref,
+                        )
+
+                # Downgrade guard
+                if old_sv and new_sv and new_sv < old_sv:
+                    if not plan.allow_downgrade:
+                        return TargetResult(
+                            target=target,
+                            outcome=PublishOutcome.SKIPPED_DOWNGRADE,
+                            message=(
+                                f"Downgrade from {old_ref} to "
+                                f"{new_ref}; pass allow_downgrade "
+                                "to override"
+                            ),
+                            old_version=old_ref,
+                            new_version=new_ref,
+                        )
         return None
 
-    def _commit_and_push_update(
-        self,
-        target: ConsumerTarget,
-        plan: PublishPlan,
-        clone_dir: Path,
-        tmpdir: str,
-        dry_run: bool,
-    ) -> TargetResult | None:
-        """Steps 10–11: git add + commit + optional push.
-
-        Returns a :class:`TargetResult` on failure, ``None`` on success.
-        """
-        try:
-            self._run_git(["git", "add", target.path_in_repo], cwd=str(clone_dir))
-            msg_file = Path(tmpdir) / "commit-msg.txt"
-            msg_file.write_text(plan.commit_message, encoding="utf-8")
-            self._run_git(["git", "commit", "-F", str(msg_file)], cwd=str(clone_dir))
-        except subprocess.CalledProcessError as exc:
-            return TargetResult(
-                target=target,
-                outcome=PublishOutcome.FAILED,
-                message=("Commit failed: " + _redact_token(str(exc))),
-            )
-
-        if not dry_run:
-            try:
-                self._run_git(
-                    ["git", "push", "-u", "origin", plan.branch_name],
-                    cwd=str(clone_dir),
-                )
-            except subprocess.CalledProcessError as exc:
-                stderr = _redact_token(exc.stderr or "")
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=f"Push failed: {stderr}",
-                )
-        return None
+    # -- per-target processing ----------------------------------------------
 
     def _process_single_target(
         self,
@@ -725,22 +665,81 @@ class MarketplacePublisher:
         with tempfile.TemporaryDirectory(prefix="apm-publish-") as tmpdir:
             clone_dir = Path(tmpdir) / "repo"
 
-            # Steps 1–2: clone + branch
-            clone_err = self._clone_and_checkout_branch(target, plan, tmpdir, clone_dir)
-            if clone_err is not None:
-                return clone_err
+            # 1. Shallow clone
+            url = f"https://github.com/{target.repo}.git"
+            try:
+                self._run_git(
+                    [
+                        "git",
+                        "clone",
+                        "--depth=1",
+                        "--branch",
+                        target.branch,
+                        url,
+                        str(clone_dir),
+                    ],
+                    cwd=tmpdir,
+                )
+            except subprocess.CalledProcessError as exc:
+                stderr = _redact_token(exc.stderr or "")
+                translated = translate_git_stderr(
+                    stderr,
+                    exit_code=exc.returncode,
+                    operation="clone",
+                    remote=target.repo,
+                )
+                return TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"Clone failed: {translated.summary}",
+                )
 
-            # Steps 3–5: load apm.yml + find marketplace entries
-            load_result = self._load_consumer_apm_yml(target, plan, clone_dir)
-            if isinstance(load_result, TargetResult):
-                return load_result
-            data, apm_deps, matches, warnings = load_result
+            # 2. Create publish branch
+            try:
+                self._run_git(
+                    ["git", "checkout", "-B", plan.branch_name],
+                    cwd=str(clone_dir),
+                )
+            except subprocess.CalledProcessError as exc:
+                return TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=("Branch creation failed: " + _redact_token(str(exc))),
+                )
+
+            # 3. Load consumer apm.yml
+            data, apm_yml_path, manifest_err = self._load_consumer_manifest(clone_dir, target, plan)
+            if manifest_err is not None:
+                return manifest_err
+
+            # 4. Find matching marketplace entries in dependencies.apm
+            apm_deps = data["dependencies"]["apm"]
+
+            # Parse each entry with parse_marketplace_ref
+            new_ref = plan.new_ref
+            mkt_lower = plan.marketplace_name.lower()
+            matches: list[tuple[int, str, str | None, str]] = []
+            warnings: list[str] = []
+
+            for idx, entry_str in enumerate(apm_deps):
+                if not isinstance(entry_str, str):
+                    continue
+                try:
+                    parsed = parse_marketplace_ref(entry_str)
+                except ValueError as exc:
+                    warnings.append(str(exc))
+                    continue
+                if parsed is None:
+                    continue  # Direct repo ref -- not a marketplace entry
+                _plugin_name, entry_mkt, old_ref = parsed
+                if entry_mkt.lower() == mkt_lower:
+                    matches.append((idx, _plugin_name, old_ref, entry_str))
 
             # 5. Zero matches -> FAILED
             if not matches:
-                warn_suffix = (
-                    " (warnings: " + "; ".join(warnings) + ")" if warnings else ""
-                )
+                warn_suffix = ""
+                if warnings:
+                    warn_suffix = " (warnings: " + "; ".join(warnings) + ")"
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
@@ -750,15 +749,15 @@ class MarketplacePublisher:
                     ),
                 )
 
-            # Step 6: ref-change and downgrade guards
-            new_ref = plan.new_ref
+            # 6. Guards -- check every entry that would change
             new_sv = parse_semver(new_ref.lstrip("vV"))
-            guard_err = self._check_ref_guards(target, plan, matches, new_ref, new_sv)
+            guard_err = self._check_ref_guards(matches, target, plan, new_sv)
             if guard_err is not None:
                 return guard_err
 
-            # Step 7: no-change check
-            if not any(old_ref != new_ref for _, _, old_ref, _ in matches):
+            # 7. No-change check
+            needs_update = any(old_ref != new_ref for _, _, old_ref, _ in matches)
+            if not needs_update:
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.NO_CHANGE,
@@ -767,8 +766,7 @@ class MarketplacePublisher:
                     new_version=new_ref,
                 )
 
-            # Step 8: apply updates to matching entries
-            apm_yml_path = clone_dir / target.path_in_repo
+            # 8. Apply updates to matching entries
             first_old_ref: str | None = None
             updated_count = 0
             for idx, _pname, old_ref, entry_str in matches:
@@ -783,7 +781,7 @@ class MarketplacePublisher:
                     apm_deps[idx] = f"{entry_str}#{new_ref}"
                 updated_count += 1
 
-            # Step 9: write apm.yml atomically
+            # 9. Write apm.yml atomically
             new_text = yaml.safe_dump(
                 data, default_flow_style=False, sort_keys=False
             )  # yaml-io-exempt
@@ -801,10 +799,45 @@ class MarketplacePublisher:
                     pass
                 raise
 
-            # Steps 10–11: commit + push
-            commit_err = self._commit_and_push_update(target, plan, clone_dir, tmpdir, dry_run)
-            if commit_err is not None:
-                return commit_err
+            # 10. Git add + commit
+            try:
+                self._run_git(
+                    ["git", "add", target.path_in_repo],
+                    cwd=str(clone_dir),
+                )
+                msg_file = Path(tmpdir) / "commit-msg.txt"
+                msg_file.write_text(plan.commit_message, encoding="utf-8")
+                self._run_git(
+                    ["git", "commit", "-F", str(msg_file)],
+                    cwd=str(clone_dir),
+                )
+            except subprocess.CalledProcessError as exc:
+                return TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=("Commit failed: " + _redact_token(str(exc))),
+                )
+
+            # 11. Git push (unless dry_run)
+            if not dry_run:
+                try:
+                    self._run_git(
+                        [
+                            "git",
+                            "push",
+                            "-u",
+                            "origin",
+                            plan.branch_name,
+                        ],
+                        cwd=str(clone_dir),
+                    )
+                except subprocess.CalledProcessError as exc:
+                    stderr = _redact_token(exc.stderr or "")
+                    return TargetResult(
+                        target=target,
+                        outcome=PublishOutcome.FAILED,
+                        message=f"Push failed: {stderr}",
+                    )
 
             old_label = first_old_ref or "unset"
             if updated_count == 1:

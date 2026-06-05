@@ -33,12 +33,12 @@ from apm_cli.install.insecure_policy import (
     InsecureDependencyPolicyError,
     _allow_insecure_host_callback,
     _check_insecure_dependencies,
-    _collect_insecure_dependency_infos,  # noqa: F401
+    _collect_insecure_dependency_infos,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _format_insecure_dependency_requirements,
-    _format_insecure_dependency_warning,  # noqa: F401
+    _format_insecure_dependency_warning,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _get_insecure_dependency_url,
-    _guard_transitive_insecure_dependencies,  # noqa: F401
-    _InsecureDependencyInfo,  # noqa: F401
+    _guard_transitive_insecure_dependencies,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
+    _InsecureDependencyInfo,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
 )
 
 # Re-export MCP add/build helpers under their underscore-prefixed legacy
@@ -59,8 +59,8 @@ from apm_cli.install.package_selection import only_packages_from_validation
 # (e.g. _install_apm_dependencies) and any future test patches against
 # "apm_cli.commands.install._copy_local_package" keep working.
 from apm_cli.install.phases.local_content import (
-    _copy_local_package,  # noqa: F401
-    _has_local_apm_content,  # noqa: F401
+    _copy_local_package,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
+    _has_local_apm_content,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _project_has_root_primitives,
 )
 
@@ -72,8 +72,8 @@ from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_dep
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
 from apm_cli.install.services import (
-    _integrate_local_content,  # noqa: F401
-    _integrate_package_primitives,  # noqa: F401
+    _integrate_local_content,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
+    _integrate_package_primitives,  # noqa: F401 -- re-exported; tests import/patch from apm_cli.commands.install
 )
 
 # Re-export validation leaf helpers so that existing test patches like
@@ -84,7 +84,7 @@ from apm_cli.install.services import (
 # intercepts those calls without test changes.
 from apm_cli.install.validation import (
     _local_path_failure_reason,
-    _local_path_no_markers_hint,  # noqa: F401
+    _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
 )
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
@@ -112,11 +112,15 @@ from ..install.mcp.registry import (
 from ..install.mcp.registry import (
     validate_registry_url as _validate_registry_url,
 )
-from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success  # noqa: F401
+from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests patch commands.install._rich_success
+    _rich_echo,
+    _rich_error,
+    _rich_info,
+    _rich_success,
+)
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
-    _update_gitignore_for_apm_modules,  # noqa: F401
 )
 
 # ---------------------------------------------------------------------------
@@ -273,9 +277,7 @@ APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
 try:
     from ..deps.apm_resolver import APMDependencyResolver
-    from ..deps.github_downloader import GitHubPackageDownloader  # noqa: F401
     from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
-    from ..integration import AgentIntegrator, PromptIntegrator  # noqa: F401
     from ..integration.mcp_integrator import MCPIntegrator
     from ..models.apm_package import APMPackage, DependencyReference
 
@@ -404,26 +406,12 @@ def _resolve_package_references(
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
                     # #1326: dependency-confusion fail-closed gate.
-                    # When the resolver attaches ``CrossRepoMisconfigRisk``,
-                    # the marketplace declared a bare ``owner/repo`` on a
-                    # ``*.ghe.com`` host and the canonical falls back to
-                    # ``github.com`` -- the same syntactic form that an
-                    # attacker pre-staging the namespace on public github.com
-                    # would exploit. Refuse before any outbound validation so
-                    # no probe reaches the potentially-attacker-controlled
-                    # URL (information leak + RCE both shut at one boundary).
-                    # Escape hatch: marketplace.json author host-qualifies
-                    # ``repo:`` (either to the enterprise host for same-host
-                    # intent or to github.com for declared cross-host intent).
-                    # That prevents the sentinel from attaching at resolver
-                    # layer -- no new flag, env var, or schema field needed.
+                    # Bare ``owner/repo`` on *.ghe.com falls back to
+                    # github.com -- refuse before outbound validation so
+                    # no probe reaches a potentially attacker-controlled URL.
+                    # Escape hatch: host-qualify ``repo:`` in marketplace.json.
                     _risk = resolution.cross_repo_misconfig_risk
                     if _risk is not None:
-                        # Two explicit-host options are alternatives, not a
-                        # sequence, so they read clearer as separate bullets.
-                        # ``validation_fail`` prepends the package name; the
-                        # body below is the remediation.  Each list element is
-                        # one logical clause so individual edits stay local.
                         _lead = (
                             f"refused (dependency-confusion risk #1326): bare"
                             f" `repo: {_risk.bare_repo_field}` on enterprise"
@@ -798,7 +786,6 @@ def _handle_mcp_install(
     runtime,
     exclude,
     verbose,
-    dry_run,
     logger,
     no_policy,
     validated_registry_url,
@@ -854,14 +841,14 @@ def _handle_mcp_install(
             mcp_deps=[_preflight_dep],
             no_policy=no_policy,
             logger=logger,
-            dry_run=dry_run,
+            dry_run=logger.dry_run,
         )
     except PolicyBlockError:
         # Diagnostics already emitted by the helper + logger.
         logger.render_summary()
         sys.exit(1)
 
-    if dry_run:
+    if logger.dry_run:
         # C1: validate eagerly so dry-run rejects what real install would.
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -887,9 +874,7 @@ def _handle_mcp_install(
         force=force,
         runtime=runtime,
         exclude=exclude,
-        verbose=verbose,
         logger=logger,
-        manifest_path=mcp_manifest_path,
         apm_dir=mcp_apm_dir,
         scope=mcp_scope,
         registry_url=validated_registry_url,
@@ -903,7 +888,7 @@ def _handle_mcp_install(
 @click.option(
     "--runtime",
     help=(
-        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf)"
+        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf, intellij)"
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")
@@ -976,7 +961,7 @@ def _handle_mcp_install(
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI).",
+    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI, JetBrains Copilot).",
 )
 @click.option(
     "--ssh",
@@ -1384,9 +1369,7 @@ def install(  # noqa: PLR0913
             global_=global_,
             only=only,
             update=update,
-            use_ssh=use_ssh,
-            use_https=use_https,
-            allow_protocol_fallback=allow_protocol_fallback,
+            any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
             registry_url=validated_registry_url,
         )
 
@@ -1412,7 +1395,6 @@ def install(  # noqa: PLR0913
                 runtime=runtime,
                 exclude=exclude,
                 verbose=verbose,
-                dry_run=dry_run,
                 logger=logger,
                 no_policy=no_policy,
                 validated_registry_url=validated_registry_url,
@@ -1568,7 +1550,7 @@ def install(  # noqa: PLR0913
             skill_subset_from_cli=bool(skill_names),
         )
 
-        apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
+        apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(
             install_ctx,
             outcome,
         )
@@ -1577,6 +1559,7 @@ def install(  # noqa: PLR0913
             logger=logger,
             apm_count=apm_count,
             mcp_count=mcp_count,
+            lsp_count=lsp_count,
             apm_diagnostics=apm_diagnostics,
             force=force,
             elapsed_seconds=time.perf_counter() - install_started_at,
@@ -1657,7 +1640,7 @@ def _install_apm_packages(ctx, outcome):
             ``None`` when no explicit packages were passed).
 
     Returns:
-        Tuple of ``(apm_count, mcp_count, apm_diagnostics)``.
+        Tuple of ``(apm_count, mcp_count, lsp_count, apm_diagnostics)``.
     """
     logger = ctx.logger
 
@@ -1695,6 +1678,7 @@ def _install_apm_packages(ctx, outcome):
     # Determine what to install based on install mode
     should_install_apm = ctx.install_mode != InstallMode.MCP
     should_install_mcp = ctx.install_mode != InstallMode.APM
+    should_install_lsp = should_install_mcp
 
     # Show what will be installed if dry run
     if ctx.dry_run:
@@ -1729,7 +1713,7 @@ def _install_apm_packages(ctx, outcome):
             only_packages=ctx.only_packages,
             apm_dir=ctx.apm_dir,
         )
-        return 0, 0, None  # render_and_exit exits; this line is defensive
+        return 0, 0, 0, None  # render_and_exit exits; this line is defensive
 
     # Install APM dependencies first (if requested)
     apm_count = 0
@@ -1963,17 +1947,35 @@ def _install_apm_packages(ctx, outcome):
         # mcp_servers.  Restore the previous set so it is not lost.
         MCPIntegrator.update_lockfile(old_mcp_servers, _lock_path, mcp_configs=old_mcp_configs)
 
+    # -------------------------------------------------------------------------
+    # LSP integration (extracted to install/lsp/integration.py)
+    # -------------------------------------------------------------------------
+    from apm_cli.install.lsp import run_lsp_integration
+
+    lsp_count = run_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=_lock_path,
+        existing_lock=_existing_lock,
+        project_root=ctx.project_root,
+        user_scope=(ctx.scope is InstallScope.USER),
+        should_install=should_install_lsp,
+        logger=logger,
+        diagnostics=apm_diagnostics,
+        target_context=(mcp_apm_config, ctx.target, ctx.scope),
+    )
+
     # Local .apm/ content integration is now handled inside the
     # install pipeline (phases/integrate.py + phases/post_deps_local.py,
     # refactor F3).  The duplicate target resolution, integrator
     # initialization, and inline stale-cleanup block that lived here
     # have been removed.
 
-    return apm_count, mcp_count, apm_diagnostics
+    return apm_count, mcp_count, lsp_count, apm_diagnostics
 
 
 def _post_install_summary(
-    *, logger, apm_count, mcp_count, apm_diagnostics, force, elapsed_seconds=None
+    *, logger, apm_count, mcp_count, lsp_count=0, apm_diagnostics, force, elapsed_seconds=None
 ):
     """Thin shim forwarding to :func:`apm_cli.install.summary.render_post_install_summary`.
 
@@ -1987,6 +1989,7 @@ def _post_install_summary(
         logger=logger,
         apm_count=apm_count,
         mcp_count=mcp_count,
+        lsp_count=lsp_count,
         apm_diagnostics=apm_diagnostics,
         force=force,
         elapsed_seconds=elapsed_seconds,
@@ -2037,6 +2040,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     frozen: bool = False,
     plan_callback=None,
     refresh: bool = False,
+    lockfile_only: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -2076,5 +2080,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
         frozen=frozen,
         plan_callback=plan_callback,
         refresh=refresh,
+        lockfile_only=lockfile_only,
     )
     return InstallService().run(request)

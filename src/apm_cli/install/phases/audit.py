@@ -69,6 +69,7 @@ def run(ctx: InstallContext) -> None:
                 decision.external,
                 None,  # SARIF file is an audit-only CLI affordance
                 [project_root],
+                options_by_name=decision.options_by_name,
                 logger=logger,
             )
         except ExternalScanError as exc:

@@ -12,9 +12,9 @@ Exit codes:
 """
 
 import dataclasses
+import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 import click
 
@@ -29,7 +29,6 @@ from ..utils.console import (
     _rich_echo,
     _rich_error,
     _rich_success,
-    _rich_warning,  # noqa: F401
 )
 
 # -- Shared config --------------------------------------------------
@@ -333,7 +332,6 @@ def _preview_strip(
 
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
-    from ..policy.models import CIAuditResult  # noqa: F401
 
     console = _get_console()
 
@@ -604,11 +602,50 @@ def _audit_ci_gate(
     sys.exit(0 if ci_result.passed else 1)
 
 
+def _resolve_external_options(
+    external: tuple[str, ...],
+    external_llm: bool | None,
+    external_args: str | None,
+) -> "dict[str, object]":
+    """Resolve per-scanner :class:`ScannerOptions` from CLI + config layers.
+
+    Policy ``allow_args`` governance is applied at the install-time audit
+    phase (where org policy is already loaded), not in the interactive
+    ``apm audit`` path; the per-adapter allowlist still validates every token.
+    """
+    import shlex
+
+    from ..config import get_scanner_options
+    from ..security.external.options import resolve_scanner_options
+
+    if external_args is not None:
+        try:
+            cli_args: tuple[str, ...] | None = tuple(
+                shlex.split(external_args, posix=(os.name != "nt"))
+            )
+        except ValueError as exc:
+            raise click.UsageError(f"--external-args could not be parsed: {exc}") from exc
+    else:
+        cli_args = None
+    options_by_name: dict[str, object] = {}
+    for name in external:
+        config_llm, config_args = get_scanner_options(name)
+        options_by_name[name] = resolve_scanner_options(
+            cli_llm=external_llm,
+            cli_args=cli_args,
+            config_llm=config_llm,
+            config_args=config_args,
+            policy_allow_args=None,
+        )
+    return options_by_name
+
+
 def _run_external_scanners(
     cfg: _AuditConfig,
     external: tuple[str, ...],
     external_sarif: str | None,
     scan_paths: list[Path],
+    options_by_name: "dict[str, object] | None" = None,
 ) -> dict[str, list[ScanFinding]]:
     """Run opted-in external SARIF-native scanners and return merged findings.
 
@@ -635,7 +672,13 @@ def _run_external_scanners(
         sys.exit(2)
 
     try:
-        return run_external_scanners(external, external_sarif, scan_paths, logger=logger)
+        return run_external_scanners(
+            external,
+            external_sarif,
+            scan_paths,
+            options_by_name=options_by_name,
+            logger=logger,
+        )
     except ExternalScanError as exc:
         logger.error(str(exc))
         sys.exit(2)
@@ -650,6 +693,8 @@ def _audit_content_scan(
     no_drift: bool = False,
     external: tuple[str, ...] = (),
     external_sarif: str | None = None,
+    external_llm: bool | None = None,
+    external_args: str | None = None,
 ) -> None:
     """Handle default ``apm audit`` -- content integrity scanning.
 
@@ -710,7 +755,10 @@ def _audit_content_scan(
 
     # -- External scanners (opt-in, additive) -----------------------
     if external:
-        external_findings = _run_external_scanners(cfg, external, external_sarif, scan_paths)
+        options_by_name = _resolve_external_options(external, external_llm, external_args)
+        external_findings = _run_external_scanners(
+            cfg, external, external_sarif, scan_paths, options_by_name
+        )
         from ..security.external.runner import merge_findings
 
         merge_findings(findings_by_file, external_findings)
@@ -959,8 +1007,29 @@ def _audit_content_scan(
     default=None,
     help="SARIF file to ingest for '--external sarif'. [experimental]",
 )
+@click.option(
+    "--external-llm/--no-external-llm",
+    "external_llm",
+    default=None,
+    help=(
+        "Force LLM-powered analysis on/off for external scanners this run "
+        "(overrides config). LLM mode makes outbound API calls and needs an "
+        "API key. Requires --external. [experimental]"
+    ),
+)
+@click.option(
+    "--external-args",
+    "external_args",
+    default=None,
+    metavar="TEXT",
+    help=(
+        "Extra argv tokens for external scanners this run (shlex-split, "
+        "allowlist-validated per scanner). Overrides config args. "
+        "Requires --external. [experimental]"
+    ),
+)
 @click.pass_context
-def audit(
+def audit(  # noqa: PLR0913 -- Click handler
     ctx,
     package,
     file_path,
@@ -977,6 +1046,8 @@ def audit(
     no_drift,
     external,
     external_sarif,
+    external_llm,
+    external_args,
 ):
     """Scan deployed prompt files for hidden Unicode characters.
 
@@ -1061,8 +1132,13 @@ def audit(
         logger.error("--external cannot be combined with --strip or --dry-run")
         sys.exit(1)
     if external_sarif and not external:
-        logger.error("--external-sarif requires '--external sarif'")
-        sys.exit(1)
+        raise click.UsageError("--external-sarif requires '--external sarif'")
+    # Orphan-flag guards: scanner-config flags are meaningless without a
+    # scanner. UsageError yields exit 2 (usage error), matching --no-drift.
+    if external_llm is not None and not external:
+        raise click.UsageError("--external-llm/--no-external-llm requires '--external <name>'")
+    if external_args is not None and not external:
+        raise click.UsageError("--external-args requires '--external <name>'")
 
     # -- Content scan mode ------------------------------------------
     if policy_source:
@@ -1071,4 +1147,15 @@ def audit(
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
 
-    _audit_content_scan(cfg, package, file_path, strip, dry_run, no_drift, external, external_sarif)
+    _audit_content_scan(
+        cfg,
+        package,
+        file_path,
+        strip,
+        dry_run,
+        no_drift,
+        external,
+        external_sarif,
+        external_llm,
+        external_args,
+    )

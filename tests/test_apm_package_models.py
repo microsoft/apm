@@ -1985,3 +1985,159 @@ class TestGenericHostSubdirectoryRoundTrip:
         assert result.host == "git.example.com"
         assert result.reference == "abc123"
         assert result.is_virtual is True
+
+
+class TestMarketplaceDependencyParsing:
+    """Tests for marketplace dependency dict format: {name: X, marketplace: Y}."""
+
+    def test_parse_marketplace_dep(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "gopls-lsp", "marketplace": "claude-plugins-official"}
+        )
+        assert dep.is_marketplace is True
+        assert dep.marketplace_name == "claude-plugins-official"
+        assert dep.marketplace_plugin_name == "gopls-lsp"
+        assert dep.repo_url == "_marketplace/claude-plugins-official/gopls-lsp"
+
+    def test_marketplace_dep_unique_key(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "gopls-lsp", "marketplace": "claude-plugins-official"}
+        )
+        assert dep.get_unique_key() == "_marketplace/claude-plugins-official/gopls-lsp"
+
+    def test_marketplace_dep_missing_name(self):
+        with pytest.raises(ValueError, match="non-empty 'name' field"):
+            DependencyReference.parse_from_dict({"marketplace": "claude-plugins-official"})
+
+    def test_marketplace_dep_empty_name(self):
+        with pytest.raises(ValueError, match="non-empty 'name' field"):
+            DependencyReference.parse_from_dict(
+                {"name": "", "marketplace": "claude-plugins-official"}
+            )
+
+    def test_marketplace_dep_empty_marketplace(self):
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict({"name": "gopls-lsp", "marketplace": ""})
+
+    def test_marketplace_dep_whitespace_stripped(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "  gopls-lsp  ", "marketplace": "  my-marketplace  "}
+        )
+        assert dep.marketplace_plugin_name == "gopls-lsp"
+        assert dep.marketplace_name == "my-marketplace"
+        assert dep.repo_url == "_marketplace/my-marketplace/gopls-lsp"
+
+    def test_marketplace_dep_install_path_raises(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "gopls-lsp", "marketplace": "claude-plugins-official"}
+        )
+        from pathlib import Path
+
+        with pytest.raises(ValueError, match="unresolved marketplace dependency"):
+            dep.get_install_path(Path("/tmp/apm_modules"))
+
+    def test_marketplace_dep_invalid_name_chars(self):
+        with pytest.raises(ValueError, match="Invalid marketplace plugin name"):
+            DependencyReference.parse_from_dict(
+                {"name": "../evil", "marketplace": "my-marketplace"}
+            )
+
+    def test_marketplace_dep_invalid_marketplace_chars(self):
+        with pytest.raises(ValueError, match="Invalid marketplace name"):
+            DependencyReference.parse_from_dict(
+                {"name": "good-name", "marketplace": "bad/marketplace"}
+            )
+
+    def test_marketplace_dep_ambiguous_with_git(self):
+        with pytest.raises(ValueError, match="Ambiguous dependency"):
+            DependencyReference.parse_from_dict(
+                {
+                    "name": "test",
+                    "marketplace": "mkt",
+                    "git": "https://github.com/owner/repo.git",
+                }
+            )
+
+    def test_marketplace_dep_integer_name_rejected(self):
+        with pytest.raises(ValueError, match="non-empty 'name' field"):
+            DependencyReference.parse_from_dict({"name": 123, "marketplace": "my-marketplace"})
+
+    def test_marketplace_dep_whitespace_only_marketplace(self):
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict({"name": "test", "marketplace": "   "})
+
+    def test_marketplace_dep_ambiguous_with_path(self):
+        with pytest.raises(ValueError, match="Ambiguous dependency"):
+            DependencyReference.parse_from_dict(
+                {"name": "test", "marketplace": "mkt", "path": "some-subdir"}
+            )
+
+    def test_marketplace_dep_to_apm_yml_entry_raises(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "gopls-lsp", "marketplace": "claude-plugins-official"}
+        )
+        with pytest.raises(ValueError, match="unresolved marketplace dependency"):
+            dep.to_apm_yml_entry()
+
+    def test_marketplace_different_marketplaces_distinct_keys(self):
+        dep_a = DependencyReference.parse_from_dict(
+            {"name": "gopls-lsp", "marketplace": "marketplace-a"}
+        )
+        dep_b = DependencyReference.parse_from_dict(
+            {"name": "gopls-lsp", "marketplace": "marketplace-b"}
+        )
+        assert dep_a.get_unique_key() != dep_b.get_unique_key()
+
+    def test_marketplace_dep_with_version_spec(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "secrets-vault", "marketplace": "acme-tools", "version": "~2.1.0"}
+        )
+        assert dep.is_marketplace is True
+        assert dep.marketplace_plugin_name == "secrets-vault"
+        assert dep.marketplace_version_spec == "~2.1.0"
+
+    def test_marketplace_dep_version_spec_whitespace_stripped(self):
+        dep = DependencyReference.parse_from_dict(
+            {"name": "plugin", "marketplace": "mkt", "version": "  ^2.0  "}
+        )
+        assert dep.marketplace_version_spec == "^2.0"
+
+    def test_marketplace_dep_version_spec_empty_rejected(self):
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "version": ""}
+            )
+
+    def test_marketplace_dep_version_spec_non_string_rejected(self):
+        with pytest.raises(ValueError, match="non-empty string"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "version": 123}
+            )
+
+    def test_marketplace_dep_without_version_spec(self):
+        dep = DependencyReference.parse_from_dict({"name": "plugin", "marketplace": "mkt"})
+        assert dep.marketplace_version_spec is None
+
+    def test_marketplace_dep_unknown_keys_rejected(self):
+        with pytest.raises(ValueError, match="Unknown keys"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "ref": "v2.0"}
+            )
+
+    def test_marketplace_dep_multiple_unknown_keys_rejected(self):
+        with pytest.raises(ValueError, match="Unknown keys"):
+            DependencyReference.parse_from_dict(
+                {"name": "plugin", "marketplace": "mkt", "ref": "v2.0", "alias": "p"}
+            )
+
+    def test_git_dict_still_works(self):
+        dep = DependencyReference.parse_from_dict(
+            {"git": "https://github.com/owner/repo.git", "ref": "main"}
+        )
+        assert dep.is_marketplace is False
+        assert dep.repo_url == "owner/repo"
+
+    def test_path_dict_still_works(self):
+        dep = DependencyReference.parse_from_dict({"path": "./local/pkg"})
+        assert dep.is_marketplace is False
+        assert dep.is_local is True

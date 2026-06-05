@@ -23,7 +23,7 @@ are accepted as aliases and map to the same internal value.
 
 import warnings
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Literal, Union
 
 import click
 

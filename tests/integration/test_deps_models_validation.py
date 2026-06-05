@@ -32,49 +32,15 @@ import yaml
 # ---------------------------------------------------------------------------
 
 
-def _make_dep_ref(
-    repo_url: str = "owner/repo",
-    host: str | None = "github.com",
-    port: int | None = None,
-    reference: str | None = None,
-    is_virtual: bool = False,
-    virtual_path: str | None = None,
-    is_local: bool = False,
-    local_path: str | None = None,
-    is_insecure: bool = False,
-    ado_organization: str | None = None,
-    ado_project: str | None = None,
-    ado_repo: str | None = None,
-    alias: str | None = None,
-    is_parent_repo_inheritance: bool = False,
-    explicit_scheme: str | None = None,
-    skill_subset: list[str] | None = None,
-    artifactory_prefix: str | None = None,
-    allow_insecure: bool = False,
-) -> Any:
+def _make_dep_ref(**kwargs: Any) -> Any:
     """Build a DependencyReference without network calls."""
     from apm_cli.models.dependency.reference import DependencyReference
 
-    return DependencyReference(
-        repo_url=repo_url,
-        host=host,
-        port=port,
-        reference=reference,
-        is_virtual=is_virtual,
-        virtual_path=virtual_path,
-        is_local=is_local,
-        local_path=local_path,
-        is_insecure=is_insecure,
-        ado_organization=ado_organization,
-        ado_project=ado_project,
-        ado_repo=ado_repo,
-        alias=alias,
-        is_parent_repo_inheritance=is_parent_repo_inheritance,
-        explicit_scheme=explicit_scheme,
-        skill_subset=skill_subset,
-        artifactory_prefix=artifactory_prefix,
-        allow_insecure=allow_insecure,
-    )
+    defaults = {
+        "repo_url": "owner/repo",
+        "host": "github.com",
+    }
+    return DependencyReference(**{**defaults, **kwargs})
 
 
 def _make_downloader() -> Any:
@@ -1780,6 +1746,7 @@ class TestMaterializeInstallPath:
         lock_dep.local_path = local_pkg_rel
         lock_dep.repo_url = "_local/my-tool"
         lock_dep.resolved_commit = None
+        lock_dep.resolved_by = None
 
         path = _materialize_install_path(
             lock_dep, project_root, tmp_path / "apm_modules", cache_only=True
@@ -1802,6 +1769,7 @@ class TestMaterializeInstallPath:
         lock_dep = MagicMock()
         lock_dep.source = "local"
         lock_dep.local_path = "nonexistent/path"
+        lock_dep.resolved_by = None
 
         with pytest.raises(CacheMissError, match="local source missing"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=True)

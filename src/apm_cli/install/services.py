@@ -19,6 +19,7 @@ namespace intercepts both call paths consistently.
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
     from ..core.scope import InstallScope
     from ..install.context import InstallContext
+    from ..integration.base_integrator import BaseIntegrator
     from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -36,6 +38,23 @@ if TYPE_CHECKING:
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
+
+
+@dataclass(frozen=True)
+class IntegratorBundle:
+    """Groups the six primitive integrators passed to ``integrate_package_primitives``.
+
+    Using a bundle reduces the public argument count of
+    ``integrate_package_primitives`` below the PLR0913 threshold (≤15) while
+    keeping the integrator objects strongly typed and discoverable.
+    """
+
+    prompt: BaseIntegrator
+    agent: BaseIntegrator
+    skill: BaseIntegrator
+    instruction: BaseIntegrator
+    command: BaseIntegrator
+    hook: BaseIntegrator
 
 
 def _deployed_path_entry(
@@ -96,298 +115,12 @@ def _deployed_path_entry(
         )
 
 
-def _format_target_collapse(paths: list, verbose: bool) -> tuple:
-    """Apply the 1/2/3+ multi-target collapse rule.
-
-    Returns a tuple ``(suffix, expansion_lines)``:
-
-    * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
-    * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
-      AFTER the aggregate line when ``verbose`` is True. Empty list when
-      collapsed.
-
-    The rule:
-      1 target  -> ``<path1>``
-      2 targets -> ``<path1>, <path2>``
-      3+        -> ``N targets`` (verbose forces full enumeration)
-    """
-    deduped: list = []
-    seen: set = builtins.set()
-    for p in paths:
-        if p not in seen:
-            seen.add(p)
-            deduped.append(p)
-    if verbose and len(deduped) >= 2:
-        return "", [f"  |     -> {p}" for p in deduped]
-    if len(deduped) == 0:
-        return "", []
-    if len(deduped) == 1:
-        return deduped[0], []
-    if len(deduped) == 2:
-        return f"{deduped[0]}, {deduped[1]}", []
-    return f"{len(deduped)} targets", []
-
-
-def _log_integration_msg(msg: str, logger: "InstallLogger | None") -> None:
-    """Emit a single integration tree line via the logger (if set)."""
-    if logger:
-        logger.tree_item(msg)
-
-
-def _emit_cowork_nonsupported_warning(
-    package_info: Any,
-    package_name: str,
-    targets: Any,
-    ctx: "InstallContext | None",
-    diagnostics: Any,
-    logger: "InstallLogger | None",
-) -> None:
-    """Emit the cowork non-skill primitive warning once per install run.
-
-    Amendment 6: warns when a package contains non-skill primitives
-    (agents, prompts, instructions, hooks) while the copilot-cowork
-    target is active, since cowork only supports skills.
-    """
-    _cowork_active = any(t.name == "copilot-cowork" for t in targets)
-    if not (_cowork_active and ctx is not None and not ctx.cowork_nonsupported_warned):
-        return
-    _apm_dir = (
-        package_info.install_path / ".apm"
-        if hasattr(package_info, "install_path")
-        else None
-    )
-    if _apm_dir is None:
-        return
-    _apm_dir = Path(_apm_dir)
-    _NON_SKILL_DIRS = {
-        "agents": "agents",
-        "prompts": "prompts",
-        "instructions": "instructions",
-        "hooks": "hooks",
-    }
-    _found_types = [
-        ptype
-        for ptype, subdir in _NON_SKILL_DIRS.items()
-        if (_apm_dir / subdir).is_dir() and any((_apm_dir / subdir).iterdir())
-    ]
-    if not _found_types:
-        return
-    _pkg_label = package_name or getattr(package_info, "name", "unknown")
-    _types_str = ", ".join(sorted(builtins.set(_found_types)))
-    _warn_msg = (
-        f"copilot-cowork target only supports skills; "
-        f"non-skill primitives in {_pkg_label} "
-        f"({_types_str}) will not deploy to cowork"
-    )
-    if logger:
-        logger.warning(_warn_msg, symbol="warning")
-    diagnostics.warn(_warn_msg)
-    ctx.cowork_nonsupported_warned = True
-
-
-def _run_primitive_dispatch(
-    *,
-    package_info: Any,
-    project_root: Path,
-    targets: Any,
-    scope: Any,
-    force: bool,
-    managed_files: Any,
-    diagnostics: "DiagnosticCollector",
-    integrators: dict,
-    dispatch: Any,
-    result: dict,
-    verbose: bool,
-    logger: "InstallLogger | None",
-) -> None:
-    """Run all non-skill primitive integrators across all targets.
-
-    Iterates the dispatch table, calls each primitive's integrator for
-    every target, accumulates per-kind counters, and emits aggregated
-    tree-item log lines.  Mutates *result* in place.
-    """
-    from ..core.scope import InstallScope
-
-    deployed = result["deployed_files"]
-
-    # Aggregate per-primitive across targets so we emit ONE line per kind.
-    _per_kind: dict = {}
-
-    for _prim_name, _entry in dispatch.items():
-        if _entry.multi_target:
-            continue  # skills handled separately
-        _integrator = integrators[_prim_name]
-        _agg_files = 0
-        _agg_adopted = 0
-        _agg_paths: list = []
-        _label = _prim_name
-        for _target in targets:
-            _mapping = _target.primitives.get(_prim_name)
-            if _mapping is None:
-                continue
-            _call_kwargs: dict = {
-                "force": force,
-                "managed_files": managed_files,
-                "diagnostics": diagnostics,
-                "scope": scope,
-            }
-            if _prim_name == "hooks":
-                _call_kwargs["user_scope"] = scope is InstallScope.USER
-            _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target,
-                package_info,
-                project_root,
-                **_call_kwargs,
-            )
-            result["links_resolved"] += _int_result.links_resolved
-            for tp in _int_result.target_paths:
-                deployed.append(_deployed_path_entry(tp, project_root, targets))
-            _adopted_attr = getattr(_int_result, "files_adopted", 0)
-            _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
-            if _int_result.files_integrated <= 0 and _adopted <= 0:
-                continue
-            _agg_files += _int_result.files_integrated
-            _agg_adopted += _adopted
-            result[_entry.counter_key] += _int_result.files_integrated
-            _effective_root = _mapping.deploy_root or _target.root_dir
-            _deploy_dir = (
-                f"{_effective_root}/{_mapping.subdir}/"
-                if _mapping.subdir
-                else f"{_effective_root}/"
-            )
-            if _prim_name == "instructions" and _mapping.format_id in (
-                "cursor_rules",
-                "claude_rules",
-            ):
-                _label = "rule(s)"
-            elif _prim_name == "instructions":
-                _label = "instruction(s)"
-            elif _prim_name == "hooks":
-                if _target.hooks_config_display:
-                    _deploy_dir = _target.hooks_config_display
-                _label = "hook(s)"
-            else:
-                _label = _prim_name
-            _agg_paths.append(_deploy_dir)
-
-        if _agg_files > 0 or _agg_adopted > 0:
-            _per_kind[_prim_name] = {
-                "files": _agg_files,
-                "adopted": _agg_adopted,
-                "label": _label,
-                "paths": _agg_paths,
-            }
-
-    # Emit aggregated per-kind lines in dispatch order so output is stable.
-    for _prim_name in dispatch:
-        if _prim_name not in _per_kind:
-            continue
-        _info = _per_kind[_prim_name]
-        _suffix, _expansion = _format_target_collapse(_info["paths"], verbose)
-        _files = _info["files"]
-        _adopted = _info["adopted"]
-        if _files > 0:
-            _verb_phrase = f"{_files} {_info['label']} integrated"
-            if _adopted > 0:
-                _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
-        else:
-            _verb_phrase = f"{_adopted} {_info['label']} adopted"
-        if _expansion:
-            _log_integration_msg(f"  |-- {_verb_phrase}:", logger)
-            for line in _expansion:
-                _log_integration_msg(line, logger)
-        else:
-            _log_integration_msg(f"  |-- {_verb_phrase} -> {_suffix}", logger)
-        # Emit a one-line "next step" hint when copilot-app workflows
-        # were integrated.
-        if any(p.startswith("copilot-app/") for p in _info["paths"]) and _info["files"] > 0:
-            _log_integration_msg(
-                "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab",
-                logger,
-            )
-
-
-def _log_skill_integration_result(
-    skill_result: Any,
-    project_root: Path,
-    targets: Any,
-    verbose: bool,
-    logger: "InstallLogger | None",
-    result: dict,
-) -> None:
-    """Log and count skill integration results into *result*.
-
-    Updates ``result["skills"]`` and ``result["sub_skills"]``; emits
-    tree-item log lines for each outcome (skill created, sub-skills
-    promoted, executables deployed).  Does NOT extend
-    ``result["deployed_files"]`` -- callers handle that separately so
-    the deployed path entries from the skill result are included.
-    """
-    _skill_target_dirs: set = builtins.set()
-    for tp in skill_result.target_paths:
-        try:
-            rel = tp.relative_to(project_root)
-            if rel.parts:
-                _skill_target_dirs.add(rel.parts[0])
-        except ValueError:
-            _skill_target_dirs.add("copilot-cowork")
-    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
-    if not _skill_target_paths:
-        _skill_target_paths = ["skills/"]
-    _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, verbose)
-    if skill_result.skill_created:
-        result["skills"] += 1
-        if _skill_expansion:
-            _log_integration_msg("  |-- Skill integrated:", logger)
-            for line in _skill_expansion:
-                _log_integration_msg(line, logger)
-        else:
-            _log_integration_msg(f"  |-- Skill integrated -> {_skill_suffix}", logger)
-    if skill_result.sub_skills_promoted > 0:
-        result["sub_skills"] += skill_result.sub_skills_promoted
-        if _skill_expansion:
-            _log_integration_msg(
-                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:", logger
-            )
-            for line in _skill_expansion:
-                _log_integration_msg(line, logger)
-        else:
-            _log_integration_msg(
-                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}",
-                logger,
-            )
-    if skill_result.bin_deployed > 0:
-        _log_integration_msg(
-            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
-            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)",
-            logger,
-        )
-        _log_integration_msg(
-            "  |-- run /reload-plugins or restart Claude Code to activate", logger
-        )
-    elif skill_result.bin_skipped_reason == "project_scope":
-        _log_integration_msg(
-            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code",
-            logger,
-        )
-    elif skill_result.bin_skipped_reason == "no_claude_target":
-        _log_integration_msg(
-            "  |-- plugin ships executables; no active Claude Code skills target to receive them",
-            logger,
-        )
-
-
-def integrate_package_primitives(  # noqa: PLR0913
+def integrate_package_primitives(
     package_info: Any,
     project_root: Path,
     *,
     targets: Any,
-    prompt_integrator: Any,
-    agent_integrator: Any,
-    skill_integrator: Any,
-    instruction_integrator: Any,
-    command_integrator: Any,
-    hook_integrator: Any,
+    integrators: IntegratorBundle,
     force: bool,
     managed_files: Any,
     diagnostics: DiagnosticCollector,
@@ -417,6 +150,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     """
     from apm_cli.integration.dispatch import get_dispatch_table
 
+    from ..core.scope import InstallScope
+
     _dispatch = get_dispatch_table()
     result = {
         "prompts": 0,
@@ -438,44 +173,224 @@ def integrate_package_primitives(  # noqa: PLR0913
     # ------------------------------------------------------------------
     # Drift-replay safety guard (#drift): when ``scratch_root`` is set,
     # the caller is replaying integration into an isolated directory.
+    # We assert it exists and is NOT inside ``project_root`` to keep the
+    # read-only contract of ``apm audit --check drift`` enforceable.
+    # The ``project_root`` passed in will already point at ``scratch_root``
+    # (so all writes redirect via target.deploy_path), so this check is
+    # purely defense-in-depth against accidental misuse.
     # ------------------------------------------------------------------
     if scratch_root is not None:
         from apm_cli.utils.path_security import ensure_path_within
 
         scratch_root = Path(scratch_root).resolve()
+        # ``project_root`` is the redirect target; it must equal scratch_root
+        # OR sit inside it.  ensure_path_within(child, parent) raises if not.
         ensure_path_within(Path(project_root).resolve(), scratch_root)
 
-    # Amendment 6: cowork non-skill primitive warning (once per run)
-    _emit_cowork_nonsupported_warning(package_info, package_name, targets, ctx, diagnostics, logger)
+    # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
+    _cowork_active = any(t.name == "copilot-cowork" for t in targets)
+    if _cowork_active and ctx is not None and not ctx.cowork_nonsupported_warned:
+        _apm_dir = Path(package_info.install_path) / ".apm"
+        _NON_SKILL_DIRS = {
+            "agents": "agents",
+            "prompts": "prompts",
+            "instructions": "instructions",
+            "hooks": "hooks",
+            # Commands live under ``.apm/prompts/`` and cannot be
+            # distinguished from general prompts at directory level
+            # without inspecting frontmatter.  Omitted to avoid
+            # misleading duplicate warnings.
+        }
+        _found_types = [
+            ptype
+            for ptype, subdir in _NON_SKILL_DIRS.items()
+            if (_apm_dir / subdir).is_dir() and any((_apm_dir / subdir).iterdir())
+        ]
+        if _found_types:
+            _pkg_label = package_name or getattr(package_info, "name", "unknown")
+            _types_str = ", ".join(sorted(builtins.set(_found_types)))
+            _warn_msg = (
+                f"copilot-cowork target only supports skills; "
+                f"non-skill primitives in {_pkg_label} "
+                f"({_types_str}) will not deploy to cowork"
+            )
+            if logger:
+                logger.warning(_warn_msg, symbol="warning")
+            diagnostics.warn(_warn_msg)
+            ctx.cowork_nonsupported_warned = True
+
+    def _log_integration(msg):
+        if logger:
+            logger.tree_item(msg)
+
+    def _format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
+        """Apply the 1/2/3+ multi-target collapse rule.
+
+        Returns a tuple ``(suffix, expansion_lines)``:
+
+        * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
+        * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
+          AFTER the aggregate line when ``verbose`` is True. Empty list when
+          collapsed.
+
+        The rule:
+          1 target  -> ``<path1>``
+          2 targets -> ``<path1>, <path2>``
+          3+        -> ``N targets`` (verbose forces full enumeration)
+        """
+        deduped: list[str] = []
+        seen: set = builtins.set()
+        for p in paths:
+            if p not in seen:
+                seen.add(p)
+                deduped.append(p)
+        if verbose and len(deduped) >= 2:
+            return "", [f"  |     -> {p}" for p in deduped]
+        if len(deduped) == 0:
+            return "", []
+        if len(deduped) == 1:
+            return deduped[0], []
+        if len(deduped) == 2:
+            return f"{deduped[0]}, {deduped[1]}", []
+        return f"{len(deduped)} targets", []
 
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
     _INTEGRATOR_KWARGS = {
-        "prompts": prompt_integrator,
-        "agents": agent_integrator,
-        "commands": command_integrator,
-        "instructions": instruction_integrator,
-        "hooks": hook_integrator,
-        "skills": skill_integrator,
+        "prompts": integrators.prompt,
+        "agents": integrators.agent,
+        "commands": integrators.command,
+        "instructions": integrators.instruction,
+        "hooks": integrators.hook,
+        "skills": integrators.skill,
     }
 
-    # Run all non-skill primitive dispatching + per-kind logging
-    _run_primitive_dispatch(
-        package_info=package_info,
-        project_root=project_root,
-        targets=targets,
-        scope=scope,
-        force=force,
-        managed_files=managed_files,
-        diagnostics=diagnostics,
-        integrators=_INTEGRATOR_KWARGS,
-        dispatch=_dispatch,
-        result=result,
-        verbose=_verbose,
-        logger=logger,
-    )
+    # Aggregate per-primitive across targets so we emit ONE line per kind
+    # (per the 1/2/3+ collapse rule), not one per target.
+    # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
+    _per_kind: dict[str, dict[str, Any]] = {}
 
-    skill_result = skill_integrator.integrate_package_skill(
+    for _prim_name, _entry in _dispatch.items():
+        if _entry.multi_target:
+            continue  # skills handled separately
+        _integrator = _INTEGRATOR_KWARGS[_prim_name]
+        _agg_files = 0
+        _agg_adopted = 0
+        _agg_paths: list[str] = []
+        _label = _prim_name
+        for _target in targets:
+            _mapping = _target.primitives.get(_prim_name)
+            if _mapping is None:
+                continue
+            _call_kwargs: dict[str, Any] = {
+                "force": force,
+                "managed_files": managed_files,
+                "diagnostics": diagnostics,
+                "scope": scope,
+            }
+            # Hook integrator alone needs the scope signal: project-scope
+            # deploys keep ``command`` paths repo-relative (#1394), user-scope
+            # deploys absolutize them (#1310 / #1354).  Sibling integrators
+            # don't accept this kwarg, so include it only for hooks.
+            if _prim_name == "hooks":
+                _call_kwargs["user_scope"] = scope is InstallScope.USER
+            _int_result = getattr(_integrator, _entry.integrate_method)(
+                _target,
+                package_info,
+                project_root,
+                **_call_kwargs,
+            )
+            result["links_resolved"] += _int_result.links_resolved
+            for tp in _int_result.target_paths:
+                deployed.append(_deployed_path_entry(tp, project_root, targets))
+            _adopted_attr = getattr(_int_result, "files_adopted", 0)
+            # Coerce defensively: subclasses (e.g. HookIntegrationResult)
+            # always set this, but tests use MagicMock results which
+            # auto-attribute to MagicMock objects whose ``__int__`` is 1.
+            # Treat anything that is not a real int as 0 so we never
+            # invent fake adopt counts.
+            _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
+            # Show the per-kind line whenever ANY work happened -- either
+            # a fresh integrate or a silent adopt of pre-existing
+            # byte-identical files. Adopt-only runs (e.g. re-install
+            # after lockfile wipe) used to print nothing here, which made
+            # the install summary look like a no-op even though the
+            # lockfile WAS being repopulated. Surfacing adopt counts
+            # restores operator trust in CI.
+            if _int_result.files_integrated <= 0 and _adopted <= 0:
+                continue
+            _agg_files += _int_result.files_integrated
+            _agg_adopted += _adopted
+            # Only count fresh integrations against the package counter
+            # so totals like "3 prompts integrated" stay truthful;
+            # adopted files are surfaced separately in the per-kind
+            # line.
+            result[_entry.counter_key] += _int_result.files_integrated
+            _effective_root = _mapping.deploy_root or _target.root_dir
+            _deploy_dir = (
+                f"{_effective_root}/{_mapping.subdir}/"
+                if _mapping.subdir
+                else f"{_effective_root}/"
+            )
+            if _prim_name == "instructions" and _mapping.output_compare:
+                # Rule-dir formats (cursor/claude/windsurf) are the
+                # output_compare set; derive the label from the same flag so a
+                # new rule format needs no edit here.
+                _label = "rule(s)"
+            elif _prim_name == "instructions":
+                _label = "instruction(s)"
+            elif _prim_name == "hooks":
+                if _target.hooks_config_display:
+                    _deploy_dir = _target.hooks_config_display
+                _label = "hook(s)"
+            else:
+                _label = _prim_name
+            _agg_paths.append(_deploy_dir)
+
+        if _agg_files > 0 or _agg_adopted > 0:
+            _per_kind[_prim_name] = {
+                "files": _agg_files,
+                "adopted": _agg_adopted,
+                "label": _label,
+                "paths": _agg_paths,
+            }
+
+    # Emit aggregated per-kind lines in dispatch order so output is stable.
+    for _prim_name in _dispatch:
+        if _prim_name not in _per_kind:
+            continue
+        _info = _per_kind[_prim_name]
+        _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
+        # Build the verb + count phrase. When at least one file was
+        # freshly integrated we lead with "N X integrated"; pure-adopt
+        # runs (no fresh writes) lead with "N X adopted" so the line
+        # still appears and the count is truthful.
+        _files = _info["files"]
+        _adopted = _info["adopted"]
+        if _files > 0:
+            _verb_phrase = f"{_files} {_info['label']} integrated"
+            if _adopted > 0:
+                _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
+        else:
+            _verb_phrase = f"{_adopted} {_info['label']} adopted"
+        if _expansion:
+            _log_integration(f"  |-- {_verb_phrase}:")
+            for line in _expansion:
+                _log_integration(line)
+        else:
+            _log_integration(f"  |-- {_verb_phrase} -> {_suffix}")
+        # Emit a one-line "next step" hint when copilot-app workflows
+        # were integrated: the row lands enabled=0 and the user has to
+        # flip the toggle in the Copilot App's Workflows tab before the
+        # schedule fires. This is the "failure mode is the product"
+        # surface for project-scope ride-along installs where a
+        # contributor may not have read the integration doc.
+        if any(p.startswith("copilot-app/") for p in _info["paths"]) and _info["files"] > 0:
+            _log_integration(
+                "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab"
+            )
+
+    skill_result = integrators.skill.integrate_package_skill(
         package_info,
         project_root,
         diagnostics=diagnostics,
@@ -486,22 +401,63 @@ def integrate_package_primitives(  # noqa: PLR0913
         scope=scope,
         policy=policy,
     )
-
-    # Log skill result + update counters
-    _log_skill_integration_result(skill_result, project_root, targets, _verbose, logger, result)
-
+    _skill_target_dirs: set = builtins.set()
+    for tp in skill_result.target_paths:
+        try:
+            rel = tp.relative_to(project_root)
+            if rel.parts:
+                _skill_target_dirs.add(rel.parts[0])
+        except ValueError:
+            # Dynamic-root target (copilot-cowork) -- path is outside project tree.
+            _skill_target_dirs.add("copilot-cowork")
+    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
+    if not _skill_target_paths:
+        _skill_target_paths = ["skills/"]
+    _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
+    if skill_result.skill_created:
+        result["skills"] += 1
+        if _skill_expansion:
+            _log_integration("  |-- Skill integrated:")
+            for line in _skill_expansion:
+                _log_integration(line)
+        else:
+            _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
+    if skill_result.sub_skills_promoted > 0:
+        result["sub_skills"] += skill_result.sub_skills_promoted
+        if _skill_expansion:
+            _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:")
+            for line in _skill_expansion:
+                _log_integration(line)
+        else:
+            _log_integration(
+                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
+            )
+    if skill_result.bin_deployed > 0:
+        _log_integration(
+            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
+            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)"
+        )
+        _log_integration("  |-- run /reload-plugins or restart Claude Code to activate")
+    elif skill_result.bin_skipped_reason == "project_scope":
+        _log_integration(
+            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
+        )
+    elif skill_result.bin_skipped_reason == "no_claude_target":
+        _log_integration(
+            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
 
     # A3: warm-cache visibility. If nothing was integrated for any kind AND
     # no skill was created, emit one annotation so the user knows the dep
     # was evaluated (the [+] header above already carries the SHA).
-    _total_integrated = sum(result.get(k, 0) for k in ("prompts", "agents", "instructions", "commands", "hooks"))
+    _total_integrated = sum(_info["files"] for _info in _per_kind.values())
     _total_integrated += int(skill_result.skill_created)
     _total_integrated += int(skill_result.sub_skills_promoted)
     _total_integrated += int(skill_result.bin_deployed)
     if _total_integrated == 0:
-        _log_integration_msg("  |-- (files unchanged)", logger)
+        _log_integration("  |-- (files unchanged)")
 
     return result
 
@@ -568,12 +524,14 @@ def integrate_local_content(
         local_info,
         project_root,
         targets=targets,
-        prompt_integrator=prompt_integrator,
-        agent_integrator=agent_integrator,
-        skill_integrator=skill_integrator,
-        instruction_integrator=instruction_integrator,
-        command_integrator=command_integrator,
-        hook_integrator=hook_integrator,
+        integrators=IntegratorBundle(
+            prompt=prompt_integrator,
+            agent=agent_integrator,
+            skill=skill_integrator,
+            instruction=instruction_integrator,
+            command=command_integrator,
+            hook=hook_integrator,
+        ),
         force=force,
         managed_files=managed_files,
         diagnostics=diagnostics,

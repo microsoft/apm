@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional  # noqa: F401, UP035
 
 from .constants import CONSTITUTION_RELATIVE_PATH
 

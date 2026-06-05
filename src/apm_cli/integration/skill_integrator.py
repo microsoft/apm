@@ -5,11 +5,7 @@ import hashlib
 import re
 import shutil
 from dataclasses import dataclass, replace
-from datetime import datetime  # noqa: F401
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
-
-import frontmatter  # noqa: F401
 
 from apm_cli.integration.base_integrator import BaseIntegrator
 
@@ -290,7 +286,7 @@ def copy_skill_to_target(
     When *targets* is provided, only those targets are used.
     Otherwise falls back to ``active_targets()``.
 
-    Source SKILL.md is copied verbatim -- no metadata injection.
+    Source SKILL.md gets no metadata injection; outbound package links are rewritten.
 
     Copies:
     - SKILL.md (required)
@@ -398,6 +394,9 @@ def copy_skill_to_target(
         from apm_cli.security.gate import ignore_non_content
 
         shutil.copytree(source_path, skill_dir, ignore=ignore_non_content)
+        rewriter = SkillIntegrator()
+        rewriter.init_link_resolver(package_info, target_base)
+        rewriter._resolve_markdown_links_in_skill_bundle(source_path, skill_dir)
         deployed.append(skill_dir)
 
     return deployed
@@ -535,6 +534,31 @@ class SkillIntegrator(BaseIntegrator):
                 return False
         return True
 
+    def _resolve_markdown_links_in_skill_bundle(
+        self,
+        source_root: Path,
+        target_root: Path,
+    ) -> int:
+        """Read copied skill markdown from source and write resolved target content."""
+        links_resolved = 0
+        for target_file in target_root.rglob("*.md"):
+            if not target_file.is_file() or target_file.is_symlink():
+                continue
+            source_file = source_root / target_file.relative_to(target_root)
+            if not source_file.is_file() or source_file.is_symlink():
+                continue
+            content = source_file.read_text(encoding="utf-8")
+            resolved, count = self.resolve_links(
+                content,
+                source_file,
+                target_file,
+                preserved_source_root=source_root,
+            )
+            if count:
+                target_file.write_text(resolved, encoding="utf-8")
+                links_resolved += count
+        return links_resolved
+
     @staticmethod
     def _promote_sub_skills(
         sub_skills_dir: Path,
@@ -549,6 +573,7 @@ class SkillIntegrator(BaseIntegrator):
         project_root: Path | None = None,
         logger=None,
         name_filter: "set | None" = None,
+        link_rewriter: "SkillIntegrator | None" = None,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from .apm/skills/ to top-level skill entries.
 
@@ -655,6 +680,8 @@ class SkillIntegrator(BaseIntegrator):
             from apm_cli.security.gate import ignore_non_content
 
             shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_non_content)
+            if link_rewriter is not None:
+                link_rewriter._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
             promoted += 1
             deployed.append(target)
         return promoted, deployed
@@ -734,6 +761,7 @@ class SkillIntegrator(BaseIntegrator):
         Returns:
             tuple[int, list[Path]]: (count of promoted sub-skills, list of deployed dirs)
         """
+        self.init_link_resolver(package_info, project_root)
         package_path = package_info.install_path
         sub_skills_dir = package_path / ".apm" / "skills"
         if not sub_skills_dir.is_dir():
@@ -786,6 +814,7 @@ class SkillIntegrator(BaseIntegrator):
                 managed_files=managed_files if is_primary else None,
                 force=force,
                 project_root=project_root,
+                link_rewriter=self,
             )
             if is_primary:
                 count = n
@@ -813,8 +842,8 @@ class SkillIntegrator(BaseIntegrator):
         The skill folder name is the source folder name (e.g., ``mcp-builder``),
         validated and normalized per the agentskills.io spec.
 
-        Source SKILL.md is copied verbatim -- no metadata injection. Orphan
-        detection uses apm.lock via directory name matching instead.
+        Source SKILL.md gets no metadata injection; outbound package links are rewritten.
+        Orphan detection uses apm.lock via directory name matching instead.
 
         Copies:
         - SKILL.md (required)
@@ -831,6 +860,7 @@ class SkillIntegrator(BaseIntegrator):
         Returns:
             SkillIntegrationResult: Results of the integration operation
         """
+        self.init_link_resolver(package_info, project_root)
         package_path = package_info.install_path
 
         # Use the source folder name as the skill name
@@ -984,6 +1014,7 @@ class SkillIntegrator(BaseIntegrator):
                 )
 
             shutil.copytree(package_path, target_skill_dir, ignore=_ignore_non_content_and_apm)
+            self._resolve_markdown_links_in_skill_bundle(package_path, target_skill_dir)
             all_target_paths.append(target_skill_dir)
 
             if is_primary:
@@ -1005,6 +1036,7 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
+                link_rewriter=self,
             )
             all_target_paths.extend(sub_deployed)
 
@@ -1062,6 +1094,7 @@ class SkillIntegrator(BaseIntegrator):
         Returns:
             SkillIntegrationResult with all promoted skills.
         """
+        self.init_link_resolver(package_info, project_root)
         if targets is None:
             from apm_cli.integration.targets import active_targets
 
@@ -1112,6 +1145,7 @@ class SkillIntegrator(BaseIntegrator):
                 project_root=project_root,
                 logger=logger if is_primary else None,
                 name_filter=_name_filter,
+                link_rewriter=self,
             )
             if is_primary:
                 total_promoted = n

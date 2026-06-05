@@ -16,7 +16,6 @@ Deny/require list semantics:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)
@@ -144,6 +143,26 @@ class RegistrySourcePolicy:
 
 
 @dataclass(frozen=True)
+class ScannerGovernance:
+    """Per-scanner governance applied at install-time audit (org floor).
+
+    Restrict-only by design: policy may tighten what a user/CLI can do, but it
+    never injects argv tokens of its own.
+
+      * ``allow_args`` -- ``False`` forbids *all* extra-args passthrough for the
+        scanner (a governance kill-switch: user/CLI ``--external-args`` and the
+        ``external.<name>.args`` config are stripped to ``()``). ``None``/``True``
+        permit the (allowlist-validated) passthrough.
+
+    ``llm`` mandation is intentionally NOT modelled in v1: forcing outbound LLM
+    egress from a project-shipped ``apm-policy.yml`` would be a trust-domain
+    change, so orgs forbid LLM by not enabling it / denylisting the scanner.
+    """
+
+    allow_args: bool | None = None
+
+
+@dataclass(frozen=True)
 class AuditPolicy:
     """Rules governing the ``apm audit`` content scan, including at install time.
 
@@ -158,10 +177,17 @@ class AuditPolicy:
     ``security/external/registry.SUPPORTED_SCANNERS``) that MUST run as part of
     the install-time audit.  ``None`` = no opinion; ``()`` = explicitly none.
     Requires the ``external_scanners`` experimental flag to take effect.
+
+    ``scanners`` carries optional per-scanner governance (see
+    :class:`ScannerGovernance`) as a tuple of ``(name, governance)`` pairs to
+    stay frozen/hashable, consistent with the other tuple-typed policy fields.
+    ``None`` = no opinion. Enforced only at the install-time audit phase and
+    only while the ``external_scanners`` flag is enabled.
     """
 
     on_install: str | None = None  # None | off | warn | block
     external: tuple[str, ...] | None = None  # required external scanners at install
+    scanners: tuple[tuple[str, ScannerGovernance], ...] | None = None
 
 
 @dataclass(frozen=True)

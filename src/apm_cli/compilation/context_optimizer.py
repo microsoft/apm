@@ -7,14 +7,11 @@ following the Minimal Context Principle.
 
 import builtins
 import fnmatch
-import glob
 import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from functools import lru_cache  # noqa: F401
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 from ..output.models import (
     CompilationResults,
@@ -25,7 +22,7 @@ from ..output.models import (
     ProjectAnalysis,
 )
 from ..primitives.models import Instruction
-from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.exclude import matches_glob, should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
 from ..utils.patterns import has_top_level_comma, parse_apply_to
 
@@ -172,15 +169,35 @@ class ContextOptimizer:
         return result
 
     def _cached_glob(self, pattern: str) -> builtins.list[str]:
-        """Cache glob results to avoid repeated filesystem scans."""
+        """Return project files matching ``pattern`` (``**`` recursive), cached.
+
+        Replaces ``glob.glob(pattern, recursive=True)``, whose ``**`` follows
+        directory **symlinks** and descends excluded trees like
+        ``node_modules``/``dist``. On a pnpm project the symlinked ``.pnpm``
+        store exposes shared packages through exponentially many paths, so a
+        single ``**`` pattern made ``apm compile`` walk an effectively
+        unbounded space -- pinning one core near 100% CPU with multi-GB RSS and
+        never terminating.
+
+        Instead, filter the cached project file list (:meth:`_get_all_files`,
+        which walks once with :func:`os.walk` -- no symlink following -- and
+        prunes excluded/hidden dirs) with the shared ``**``-aware matcher
+        (:func:`apm_cli.utils.exclude.matches_glob`).
+        """
         if pattern not in self._glob_cache:
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(str(self.base_dir))  # Convert Path to string for os.chdir
-                self._glob_cache[pattern] = glob.glob(pattern, recursive=True)
-            finally:
-                os.chdir(old_cwd)
+            self._glob_cache[pattern] = self._safe_recursive_glob(pattern)
         return self._glob_cache[pattern]
+
+    def _safe_recursive_glob(self, pattern: str) -> builtins.list[str]:
+        """Symlink-safe, exclusion-aware ``glob(recursive=True)`` replacement:
+        match the cached project file list against ``pattern`` (POSIX rel paths).
+        """
+        results: builtins.list[str] = []
+        for path in self._get_all_files():
+            rel = portable_relpath(path, self.base_dir)
+            if matches_glob(rel, pattern):
+                results.append(rel)
+        return results
 
     def _get_all_files(self) -> builtins.list[Path]:
         """Get cached list of all files in project."""

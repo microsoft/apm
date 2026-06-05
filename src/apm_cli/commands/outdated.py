@@ -9,7 +9,6 @@ import logging
 import os
 import re
 import sys
-from typing import List  # noqa: F401, UP035
 
 import click
 
@@ -17,17 +16,71 @@ from ..deps.outdated_row import OutdatedRow
 
 logger = logging.getLogger(__name__)
 
+# Fallback heuristic for _resolve_tag_pattern when inference misses plain tags.
 TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+")
 
 
-def _is_tag_ref(ref: str) -> bool:
-    """Return True when *ref* looks like a semver tag (v1.2.3 or 1.2.3)."""
-    return bool(TAG_RE.match(ref)) if ref else False
+def _is_tag_ref(ref: str, package_name: str | None = None) -> bool:
+    """Return True when *ref* names a version tag (plain or patterned)."""
+    from ..marketplace.tag_pattern import is_version_tag_ref
+
+    return is_version_tag_ref(ref, package_name)
 
 
 def _strip_v(ref: str) -> str:
     """Strip leading 'v' prefix from a version string."""
     return ref[1:] if ref and ref.startswith("v") else (ref or "")
+
+
+def _package_basename(dep) -> str:
+    """Return the display name used in ``{name}`` tag patterns."""
+    if dep.marketplace_plugin_name:
+        return dep.marketplace_plugin_name
+    repo = dep.repo_url or ""
+    if not repo:
+        return ""
+    return repo.rstrip("/").split("/")[-1]
+
+
+def _resolve_tag_pattern(current_ref: str, package_name: str) -> str | None:
+    """Return the tag pattern for *current_ref*, or ``None`` if not a version tag."""
+    from ..marketplace.tag_pattern import infer_tag_pattern
+
+    inferred = infer_tag_pattern(current_ref, package_name)
+    if inferred:
+        logger.debug(
+            "Resolved tag pattern %r for %s from ref %s",
+            inferred,
+            package_name,
+            current_ref,
+        )
+        return inferred
+    if TAG_RE.match(current_ref or ""):
+        return "v{version}" if (current_ref or "").startswith("v") else "{version}"
+    return None
+
+
+def _semver_tag_candidates(tag_refs, pattern: str, package_name: str = ""):
+    """Return ``(SemVer, tag_name)`` pairs matching *pattern*, highest first."""
+    from ..marketplace.semver import SemVer, parse_semver
+    from ..marketplace.tag_pattern import build_tag_regex
+
+    tag_rx = (
+        build_tag_regex(pattern, name=package_name)
+        if "{name}" in pattern and package_name
+        else build_tag_regex(pattern)
+    )
+    candidates: list[tuple[SemVer, str]] = []
+    for remote_ref in tag_refs:
+        match = tag_rx.match(remote_ref.name)
+        if not match:
+            continue
+        version = match.group("version")
+        parsed = parse_semver(version)
+        if parsed is not None:
+            candidates.append((parsed, remote_ref.name))
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return candidates
 
 
 def _find_remote_tip(ref_name, remote_refs):
@@ -61,86 +114,7 @@ def _find_remote_tip(ref_name, remote_refs):
     return None
 
 
-def _check_tag_outdated(
-    package_name: str,
-    current_ref: str,
-    remote_refs: list,
-    verbose: bool,
-) -> OutdatedRow:
-    """Return an :class:`OutdatedRow` for a tag-pinned dependency."""
-    from ..models.dependency.types import GitReferenceType
-    from ..utils.version_checker import is_newer_version
-
-    tag_refs = [r for r in remote_refs if r.ref_type == GitReferenceType.TAG]
-    if not tag_refs:
-        return OutdatedRow(
-            package=package_name,
-            current=current_ref,
-            latest="-",
-            status="unknown",
-            source="git tags",
-        )
-
-    latest_tag = tag_refs[0].name
-    current_ver = _strip_v(current_ref)
-    latest_ver = _strip_v(latest_tag)
-
-    if is_newer_version(current_ver, latest_ver):
-        extra = [r.name for r in tag_refs[:10]] if verbose else []
-        return OutdatedRow(
-            package=package_name,
-            current=current_ref,
-            latest=latest_tag,
-            status="outdated",
-            extra_tags=extra,
-            source="git tags",
-        )
-    return OutdatedRow(
-        package=package_name,
-        current=current_ref,
-        latest=latest_tag,
-        status="up-to-date",
-        source="git tags",
-    )
-
-
-def _check_branch_outdated(
-    package_name: str,
-    current_ref: str,
-    locked_sha: str,
-    remote_refs: list,
-) -> OutdatedRow:
-    """Return an :class:`OutdatedRow` for a branch-tracked dependency."""
-    remote_tip_sha = _find_remote_tip(current_ref, remote_refs)
-
-    if not remote_tip_sha:
-        return OutdatedRow(
-            package=package_name,
-            current=current_ref or "(none)",
-            latest="-",
-            status="unknown",
-            source="git branch",
-        )
-
-    display_ref = current_ref or "(default)"
-    if locked_sha and locked_sha != remote_tip_sha:
-        return OutdatedRow(
-            package=package_name,
-            current=display_ref,
-            latest=remote_tip_sha[:8],
-            status="outdated",
-            source="git branch",
-        )
-    return OutdatedRow(
-        package=package_name,
-        current=display_ref,
-        latest=remote_tip_sha[:8],
-        status="up-to-date",
-        source="git branch",
-    )
-
-
-
+def _check_marketplace_ref(dep, verbose):
     """Check a marketplace-sourced dep against its marketplace entry.
 
     Compares the installed ref (resolved_ref or resolved_commit) against
@@ -185,14 +159,21 @@ def _check_branch_outdated(
     if not plugin:
         return None
 
+    # Determine marketplace entry's current ref
     mkt_ref = None
     mkt_version = plugin.version or ""
     if isinstance(plugin.source, dict):
         mkt_ref = plugin.source.get("ref", "")
-    # Non-dict (string) sources are relative paths, not refs; treat as missing.
-    # Also guard against empty mkt_ref and missing installed_ref in one check.
+    else:
+        # String sources are relative paths, not refs -- skip
+        return None
+
+    if not mkt_ref:
+        return None
+
+    # Determine installed ref
     installed_ref = dep.resolved_ref or dep.resolved_commit or ""
-    if not mkt_ref or not installed_ref:
+    if not installed_ref:
         return None
 
     package_name = f"{dep.marketplace_plugin_name}@{dep.discovered_via}"
@@ -237,24 +218,114 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
         return marketplace_result
 
     from ..models.dependency.reference import DependencyReference
+    from ..models.dependency.types import GitReferenceType
+    from ..utils.version_checker import is_newer_version
 
     current_ref = dep.resolved_ref or ""
     locked_sha = dep.resolved_commit or ""
     package_name = dep.get_unique_key()
 
-    # Build a DependencyReference and fetch remote refs; merge both failure modes.
+    # Build a DependencyReference to query remote refs
     try:
+        # Use parse() to correctly handle all host types (GitHub, ADO, etc.)
         full_url = f"{dep.host}/{dep.repo_url}" if dep.host else dep.repo_url
         dep_ref = DependencyReference.parse(full_url)
+    except Exception:
+        return OutdatedRow(
+            package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
+        )
+
+    # Fetch remote refs
+    try:
         remote_refs = downloader.list_remote_refs(dep_ref)
     except Exception:
         return OutdatedRow(
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    if _is_tag_ref(current_ref):
-        return _check_tag_outdated(package_name, current_ref, remote_refs, verbose)
-    return _check_branch_outdated(package_name, current_ref, locked_sha, remote_refs)
+    package_basename = _package_basename(dep)
+    tag_pattern = _resolve_tag_pattern(current_ref, package_basename)
+    is_tag = tag_pattern is not None
+
+    if is_tag:
+        tag_refs = [r for r in remote_refs if r.ref_type == GitReferenceType.TAG]
+        if not tag_refs:
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest="-",
+                status="unknown",
+                source="git tags",
+            )
+
+        from ..marketplace.tag_pattern import parse_tag_version
+
+        candidates = _semver_tag_candidates(tag_refs, tag_pattern, package_basename)
+        if not candidates:
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest="-",
+                status="unknown",
+                source="git tags",
+            )
+
+        _, latest_tag = candidates[0]
+        current_ver = parse_tag_version(
+            current_ref, tag_pattern, name=package_basename
+        ) or _strip_v(current_ref)
+        latest_ver = parse_tag_version(latest_tag, tag_pattern, name=package_basename) or _strip_v(
+            latest_tag
+        )
+
+        if is_newer_version(current_ver, latest_ver):
+            extra = [name for _, name in candidates[:10]] if verbose else []
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest=latest_tag,
+                status="outdated",
+                extra_tags=extra,
+                source="git tags",
+            )
+        else:
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest=latest_tag,
+                status="up-to-date",
+                source="git tags",
+            )
+    else:
+        remote_tip_sha = _find_remote_tip(current_ref, remote_refs)
+
+        if not remote_tip_sha:
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref or "(none)",
+                latest="-",
+                status="unknown",
+                source="git branch",
+            )
+
+        display_ref = current_ref or "(default)"
+        if locked_sha and locked_sha != remote_tip_sha:
+            latest_display = remote_tip_sha[:8]
+            return OutdatedRow(
+                package=package_name,
+                current=display_ref,
+                latest=latest_display,
+                status="outdated",
+                source="git branch",
+            )
+        else:
+            return OutdatedRow(
+                package=package_name,
+                current=display_ref,
+                latest=remote_tip_sha[:8],
+                status="up-to-date",
+                source="git branch",
+            )
 
 
 @click.command(name="outdated", help="Show outdated locked dependencies")

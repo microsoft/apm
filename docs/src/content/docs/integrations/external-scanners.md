@@ -65,6 +65,76 @@ If the CLI is not on `PATH`, APM tells you so and points you back to the
 file-based path above (`--external sarif --external-sarif <file>`), which needs
 no installation.
 
+## Configure scanner behaviour
+
+By default SkillSpector runs **offline and deterministic** (APM passes
+`--no-llm`). SkillSpector can also run an **LLM-powered** analysis that produces
+richer findings, but it needs an API key and makes outbound network calls. You
+opt into it explicitly.
+
+### LLM mode
+
+```bash
+# One run: force LLM analysis on (overrides config)
+apm audit --external skillspector --external-llm
+
+# One run: force it off
+apm audit --external skillspector --no-external-llm
+```
+
+LLM mode requires an API key in your environment (`OPENAI_API_KEY` or
+`NVIDIA_INFERENCE_KEY`). If `--external-llm` is set and no key is present, the
+scan **fails closed** with an actionable message -- APM never falls back to a
+silent offline run. When LLM mode is active APM prints a one-line egress banner
+before the scan:
+
+```
+[!] LLM analysis enabled for 'skillspector' -- outbound API calls will be made (network egress; API billing may apply)
+```
+
+The API keys are read from your own environment only when LLM mode is active;
+APM never stores them and strips them from the scanner subprocess otherwise.
+
+### Extra arguments (allowlisted)
+
+Pass extra CLI flags to the scanner with `--external-args` (a single
+shlex-split string):
+
+```bash
+apm audit --external skillspector --external-args "--model gpt-4o --severity high"
+```
+
+For safety, **only an allowlist of safe flag prefixes** is accepted (for
+SkillSpector: `--model`, `--severity`, `--threshold`, `--profile`, `--lang`,
+`--exclude`, `--include`, and similar). Any token that is not allowlisted, that
+looks like a secret (`--token`, `--api-key`, ...), or that points to a path
+outside the working directory is **rejected fail-closed** -- the scan does not
+run. `--external-args` and `--external-llm` both require `--external <name>`;
+used alone they raise a usage error.
+
+:::caution[Policy floor is install-only]
+`allow_args` restrictions in `apm-policy.yml` apply during `apm install`. A bare
+`apm audit` run does **not** load org policy, so extra-args safety relies solely
+on the adapter allowlist described above -- not the policy floor. To enforce a
+scanner kill-switch over ad-hoc developer audits, gate it in CI (see
+[Run an audit during `apm install`](#run-an-audit-during-apm-install)).
+:::
+
+### Persisted config
+
+Set personal defaults so you do not repeat the flags (both keys are gated on the
+`external-scanners` flag):
+
+```bash
+apm config set external.skillspector.llm true
+apm config set external.skillspector.args "--model gpt-4o"
+apm config get external.skillspector.llm
+apm config unset external.skillspector.args
+```
+
+CLI flags override config for that run. The JSON is stored owner-only under
+`external_scanners.<name>` in `~/.apm/config.json`.
+
 ## Run an audit during `apm install`
 
 The same machinery can run **during install**, scanning the files a package
@@ -94,7 +164,18 @@ security:
     on_install: block          # off | warn | block
     external:                  # optional: scanners that MUST run at install
       - skillspector
+    scanners:                  # optional: per-scanner governance
+      skillspector:
+        allow_args: false      # forbid extra-args passthrough (kill-switch)
 ```
+
+The optional `scanners` block lets an org **restrict** scanner behaviour. It is
+**restrict-only**: `allow_args: false` strips any user/CLI extra-args for that
+scanner at install time, locking it to a vetted invocation. Policy never *adds*
+argv tokens and never forces LLM mode on -- it can only tighten. `allow_args` is
+AND-merged across an inheritance chain (any ancestor setting `false` wins). See
+the [policy schema reference](../../reference/policy-schema/#per-scanner-governance-auditscanners)
+for the full schema.
 
 Policy is a **floor**: it can raise the effective mode but a weaker
 `--audit`/config value can never relax an org `block`. `apm install
@@ -114,6 +195,10 @@ clear, actionable message rather than silently skipping the check.
 - **Not in `--ci` yet.** Run external scanners in bare `apm audit` mode.
 - **Fail-closed.** Without the experimental flag, `--external` exits non-zero
   with an actionable message.
+- **Policy floor is an install-time control.** The `scanners.<name>.allow_args`
+  kill-switch is enforced during `apm install` (where org policy is loaded). A
+  bare `apm audit` run does not load org policy, so it relies on the adapter's
+  allowlist validation for arg safety rather than the policy floor.
 
 See the [`apm audit` reference](../../reference/cli/audit/) for the full option
 list.

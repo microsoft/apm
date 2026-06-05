@@ -6,6 +6,7 @@ from .coverage import check_primitive_coverage
 from .dispatch import PrimitiveDispatch, get_dispatch_table
 from .hook_integrator import HookIntegrator
 from .instruction_integrator import InstructionIntegrator
+from .lsp_integrator import LSPIntegrator
 from .mcp_integrator import MCPIntegrator
 from .prompt_integrator import PromptIntegrator
 from .skill_integrator import (
@@ -34,6 +35,7 @@ __all__ = [
     "HookIntegrator",
     "InstructionIntegrator",
     "IntegrationResult",
+    "LSPIntegrator",
     "MCPIntegrator",
     "PrimitiveDispatch",
     "PrimitiveMapping",

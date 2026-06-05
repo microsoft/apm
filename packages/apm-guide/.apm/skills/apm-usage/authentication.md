@@ -186,6 +186,20 @@ than a hard parse error -- but storing tokens there is still
 unsupported and committing one would leak the secret into the repo.
 Store tokens in env vars or `~/.apm/config.json` only.
 
+## External scanner LLM keys (experimental)
+
+When LLM-powered analysis is enabled for an external SARIF scanner (`apm
+audit --external <name> --external-llm`, behind `apm experimental enable
+external-scanners`), the scanner reads its own API key from your
+environment -- `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`. APM **never
+stores, prompts for, or persists** these keys; they come straight from
+your shell environment and are forwarded to the scanner subprocess only
+when LLM mode is active for that run, then stripped otherwise. If
+`--external-llm` is set and no key is present, the scan fails closed with
+an actionable error. Scanner stderr is secret-redacted before APM surfaces
+it in any error or log. Do not pass keys as scanner flags (`--external-args`
+rejects secret-looking flags) -- export them as env vars instead.
+
 ## Install validation chain
 
 `apm install <package>` validates a virtual subdirectory package (`owner/repo/path#ref`) before writing it to `apm.yml`. The chain mirrors the actual clone auth path so a credential that succeeds for `git clone` is never false-rejected by the installer:

@@ -167,3 +167,58 @@ class TestDecideForInstall:
         )
         assert decision.mode == "off"
         assert decision.external == ()
+
+
+def _policy_with_scanners(on_install, external, scanners):
+    """Policy stand-in carrying a ``scanners`` governance tuple."""
+    audit = SimpleNamespace(
+        on_install=on_install,
+        external=tuple(external),
+        scanners=tuple(scanners),
+    )
+    return SimpleNamespace(security=SimpleNamespace(audit=audit))
+
+
+class TestInstallScannerOptions:
+    """decide_for_install threads config options under the policy floor."""
+
+    def test_config_options_attached_no_governance(self, monkeypatch):
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda name: True)
+        monkeypatch.setattr("apm_cli.config.get_audit_on_install", lambda: "off")
+        monkeypatch.setattr(
+            "apm_cli.config.get_scanner_options",
+            lambda name: (True, ("--model", "gpt-4o")),
+        )
+        decision = decide_for_install(
+            _ctx(policy=_policy_with_audit("block", external=["skillspector"]))
+        )
+        opts = decision.options_by_name["skillspector"]
+        assert opts.llm is True
+        assert opts.extra_args == ("--model", "gpt-4o")
+
+    def test_allow_args_false_strips_config_args(self, monkeypatch):
+        from apm_cli.policy.schema import ScannerGovernance
+
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda name: True)
+        monkeypatch.setattr("apm_cli.config.get_audit_on_install", lambda: "off")
+        monkeypatch.setattr(
+            "apm_cli.config.get_scanner_options",
+            lambda name: (None, ("--model", "gpt-4o")),
+        )
+        policy = _policy_with_scanners(
+            "block",
+            external=["skillspector"],
+            scanners=[("skillspector", ScannerGovernance(allow_args=False))],
+        )
+        decision = decide_for_install(_ctx(policy=policy))
+        opts = decision.options_by_name["skillspector"]
+        assert opts.extra_args == ()
+
+    def test_no_options_when_mode_off(self, monkeypatch):
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda name: True)
+        monkeypatch.setattr("apm_cli.config.get_audit_on_install", lambda: "off")
+        monkeypatch.setattr("apm_cli.config.get_scanner_options", lambda name: (True, ()))
+        decision = decide_for_install(
+            _ctx(policy=_policy_with_audit("off", external=["skillspector"]))
+        )
+        assert decision.options_by_name == {}

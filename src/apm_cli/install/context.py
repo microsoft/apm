@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
+from typing import Any
 
 
 @dataclass
@@ -58,6 +58,7 @@ class InstallContext:
     allow_insecure_hosts: tuple[str, ...] = ()
 
     dry_run: bool = False
+    lockfile_only: bool = False
     force: bool = False
     verbose: bool = False
     refresh: bool = False
@@ -156,6 +157,7 @@ class InstallContext:
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     early_lockfile: Any = None  # LockFile read before pipeline phases (avoids re-read)
     direct_mcp_deps: list[Any] | None = None  # Direct MCP deps from apm.yml for policy gate
+    direct_lsp_deps: list[Any] | None = None  # Direct LSP deps from apm.yml for LSP integration
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)

@@ -1,7 +1,5 @@
 """Docker arguments processing utilities for MCP configuration."""
 
-from typing import Dict, List, Tuple  # noqa: F401, UP035
-
 
 class DockerArgsProcessor:
     """Handles Docker argument processing with deduplication."""

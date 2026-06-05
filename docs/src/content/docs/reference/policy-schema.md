@@ -162,6 +162,33 @@ experimental flag to take effect; ignored otherwise.
 |----------------------|-----------------|---------|----------------------------------------------------------------------------------|
 | `audit.on_install`   | enum or null    | `null`  | `off` / `warn` / `block`. Minimum install-time audit mode (a **floor**). `null` = no opinion. `warn` records findings; `block` halts installs on critical findings. |
 | `audit.external`     | list of strings | `null`  | External SARIF scanner names (e.g. `skillspector`) that MUST run during the install audit. A required scanner that is unavailable fails the install closed. |
+| `audit.scanners`     | mapping or null | `null`  | Per-scanner governance, keyed by scanner name. Each value accepts `allow_args` (boolean). **Restrict-only**: see below. Unknown scanner names are a warning, not an error (forward-compat). |
+
+### Per-scanner governance (`audit.scanners`)
+
+```yaml
+security:
+  audit:
+    scanners:
+      skillspector:
+        allow_args: false      # forbid extra-args passthrough at install time
+```
+
+`audit.scanners` is **restrict-only**. A policy may tighten a scanner's
+behaviour but can never expand it:
+
+- `allow_args: false` strips any user/CLI `external.<name>.args` (and
+  `--external-args`) for that scanner at install time, locking it to a vetted
+  invocation. `true` / omitted leaves the user's args in place (still
+  allowlist-validated by the adapter).
+- Policy **never contributes argv tokens** itself and **never forces LLM mode
+  on**. LLM opt-in stays a local user decision (`--external-llm` or
+  `external.<name>.llm`). This removes any project-policy argv-injection or
+  egress-coercion surface.
+
+The floor is enforced during `apm install` (where org policy is loaded). A bare
+`apm audit --external` run does not load org policy and relies on the adapter's
+allowlist validation for arg safety.
 
 `audit.on_install` is a floor: it can only raise the effective mode chosen by
 `apm install --audit` / `apm config audit-on-install`, never relax it. `apm
@@ -202,6 +229,7 @@ inherited list (see the tri-state table below).
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
 | `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
 | `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
+| `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
 | `compilation.*.enforce`     | First non-null wins (parent precedence).                                         |
 | `compilation.source_attribution` | Logical OR.                                                                 |
 

@@ -64,29 +64,7 @@ from ..install.errors import (
 )
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
-from ._helpers import UnknownPackageError, resolve_requested_packages
-
-
-def _find_apm_yml(start: Path | None = None) -> Path | None:
-    """Walk parent directories from ``start`` (or cwd) to find ``apm.yml``.
-
-    Matches the npm / cargo / poetry ergonomic: a developer running
-    ``apm update`` from a subdirectory of their project (``src/``,
-    ``docs/``, ``scripts/``) finds the manifest and operates on it,
-    rather than getting silently misrouted to the deprecated
-    self-update shim.
-
-    The walk stops at the filesystem root or when an ``apm.yml`` is
-    found, whichever comes first. Returns the absolute path to the
-    ``apm.yml`` file when found; ``None`` when no project root is
-    discoverable from ``start`` upward.
-    """
-    cwd = (start or Path.cwd()).resolve()
-    for candidate in (cwd, *cwd.parents):
-        manifest = candidate / "apm.yml"
-        if manifest.is_file():
-            return manifest
-    return None
+from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
 
 
 def _stdin_is_tty() -> bool:

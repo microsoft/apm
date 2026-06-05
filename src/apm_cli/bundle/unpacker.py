@@ -6,7 +6,6 @@ import tarfile
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
-from typing import Dict, List  # noqa: F401, UP035
 
 from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
 from ..utils.path_security import PathTraversalError, validate_path_segments

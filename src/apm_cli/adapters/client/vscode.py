@@ -6,7 +6,6 @@ https://code.visualstudio.com/docs/copilot/chat/mcp-servers
 """
 
 import json
-import os  # noqa: F401
 import re
 from pathlib import Path
 

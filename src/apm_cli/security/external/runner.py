@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from ..content_scanner import ScanFinding
 from .base import ExternalScanError
+from .options import ScannerOptions
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from collections.abc import Iterable
@@ -44,6 +45,7 @@ def run_external_scanners(
     external_sarif: str | None,
     scan_paths: list[Path],
     *,
+    options_by_name: dict[str, ScannerOptions] | None = None,
     logger=None,
 ) -> dict[str, list[ScanFinding]]:
     """Resolve, validate, run, and merge external scanners.
@@ -52,6 +54,10 @@ def run_external_scanners(
         external: Scanner names to run (e.g. ``("skillspector", "sarif")``).
         external_sarif: SARIF file path for the generic ``sarif`` adapter.
         scan_paths: Files/directories handed to each adapter's ``scan``.
+        options_by_name: Per-scanner resolved :class:`ScannerOptions`. A name
+            with no entry (or ``None``) gets ``ScannerOptions()`` (adapter
+            defaults). Callers own resolution/precedence; this module just
+            threads the result through.
         logger: Optional object with a ``progress(msg)`` method for status.
 
     Returns:
@@ -64,6 +70,7 @@ def run_external_scanners(
     """
     from .registry import resolve_scanner
 
+    options_by_name = options_by_name or {}
     merged: dict[str, list[ScanFinding]] = {}
     for name in external:
         try:
@@ -71,14 +78,21 @@ def run_external_scanners(
         except ValueError as exc:
             raise ExternalScanError(str(exc)) from exc
 
-        available, reason = scanner.is_available()
+        options = options_by_name.get(name, ScannerOptions())
+
+        available, reason = scanner.is_available(options=options)
         if not available:
             raise ExternalScanError(f"External scanner '{name}' is unavailable: {reason}")
 
         if logger is not None:
+            if options.llm:
+                logger.warning(
+                    f"LLM analysis enabled for '{name}' -- outbound API calls "
+                    f"will be made (network egress; API billing may apply)"
+                )
             logger.progress(f"Running external scanner: {name}")
         try:
-            results = scanner.scan(scan_paths)
+            results = scanner.scan(scan_paths, options=options)
         except ExternalScanError as exc:
             raise ExternalScanError(f"External scanner '{name}' failed: {exc}") from exc
         merge_findings(merged, results)

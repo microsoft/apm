@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List  # noqa: F401, UP035
+from typing import Any
 
 from .content_scanner import ScanFinding
 

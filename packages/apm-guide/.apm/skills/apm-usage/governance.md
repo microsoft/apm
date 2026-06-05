@@ -90,6 +90,39 @@ The check fires from all four call sites (`policy_gate`,
 `apm install`, `apm install <pkg>`, `apm deps update`, and
 `apm audit --ci` all enforce the same gate.
 
+## External scanner governance (experimental)
+
+Gate the behaviour of third-party SARIF scanners run by `apm audit
+--external <name>` (behind `apm experimental enable external-scanners`).
+The stance is **restrict-only**: policy can tighten scanner behaviour but
+never adds argv tokens itself and never forces LLM egress from an
+untrusted project-local policy.
+
+```yaml
+# .github/apm-policy.yml
+security:
+  audit:
+    external: [skillspector]              # scanners the org permits
+    scanners:                             # NEW, optional per-scanner governance
+      skillspector:
+        allow_args: false                 # strip all user/CLI extra-args (kill-switch)
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `scanners.<name>.allow_args` | unset (no opinion) | When `false`, all user/CLI `--external-args` and config `external.<name>.args` are stripped to an empty list before the scanner runs -- locks the scanner to its vetted invocation. AND-merged across inheritance: any ancestor setting `false` wins. |
+
+Notes:
+- Policy **never injects argv** -- only the local user contributes scanner
+  flags (via `--external-args` or `external.<name>.args`), and those are
+  allowlist-validated by the adapter.
+- `allow_args: false` is enforced at the **install-time** audit path (which
+  loads org policy). A bare `apm audit` does not load org policy, so it
+  relies on the adapter's allowlist for arg safety.
+- LLM mode is opt-in by the user only; a project-local policy cannot mandate
+  it (this avoids turning a checked-in policy file into a content-exfiltration
+  channel).
+
 ## Plugin bin/ deployment governance
 
 When a `marketplace_plugin` package ships a `bin/` directory, a global

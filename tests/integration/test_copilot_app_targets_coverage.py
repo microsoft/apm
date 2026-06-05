@@ -474,7 +474,9 @@ class TestPrimitiveMapping:
     def test_required_fields_stored(self) -> None:
         from apm_cli.integration.targets import PrimitiveMapping
 
-        pm = PrimitiveMapping(subdir="rules", extension=".md", format_id="cursor_rules")
+        pm = PrimitiveMapping(
+            subdir="rules", extension=".md", format_id="cursor_rules", output_compare=True
+        )
         assert pm.subdir == "rules"
         assert pm.extension == ".md"
         assert pm.format_id == "cursor_rules"

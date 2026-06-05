@@ -1,18 +1,13 @@
 """Professional CLI output formatters for APM compilation."""
 
-import time  # noqa: F401
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 try:
-    from io import StringIO  # noqa: F401
-
     from rich import box
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
     from rich.text import Text
-    from rich.tree import Tree  # noqa: F401
 
     RICH_AVAILABLE = True
 except ImportError:

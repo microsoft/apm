@@ -1,8 +1,8 @@
 """Tests for scope-aware MCP installation (issue #637).
 
 Verifies that ``apm install --global`` installs MCP servers to
-global-capable runtimes (Copilot CLI, Codex CLI) instead of
-blanket-skipping all MCP installation at user scope.
+global-capable runtimes (Copilot CLI, Codex CLI, JetBrains Copilot)
+instead of blanket-skipping all MCP installation at user scope.
 """
 
 import unittest
@@ -12,6 +12,7 @@ from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.cursor import CursorClientAdapter
+from apm_cli.adapters.client.intellij import IntelliJClientAdapter
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.core.scope import InstallScope
@@ -37,6 +38,11 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
     def test_codex_supports_user_scope(self):
         """Codex CLI writes to ~/.codex/ and should support user scope."""
         adapter = CodexClientAdapter()
+        self.assertTrue(adapter.supports_user_scope)
+
+    def test_intellij_supports_user_scope(self):
+        """JetBrains Copilot writes to a user config dir and supports user scope."""
+        adapter = IntelliJClientAdapter()
         self.assertTrue(adapter.supports_user_scope)
 
     def test_vscode_does_not_support_user_scope(self):
@@ -66,7 +72,7 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
 
     def test_factory_created_adapters_scope(self):
         """ClientFactory-created adapters report the correct scope support."""
-        global_runtimes = {"copilot", "codex"}
+        global_runtimes = {"copilot", "codex", "intellij"}
         workspace_runtimes = {"vscode", "cursor", "opencode"}
 
         for rt in global_runtimes:

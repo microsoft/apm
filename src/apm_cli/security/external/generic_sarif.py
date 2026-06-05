@@ -14,9 +14,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..content_scanner import ScanFinding
 from .base import ExternalScanError
+
+if TYPE_CHECKING:
+    from .options import ScannerOptions
 
 
 class GenericSarifAdapter:
@@ -34,8 +38,12 @@ class GenericSarifAdapter:
         """
         self._sarif_file = Path(sarif_file) if sarif_file is not None else None
 
-    def is_available(self) -> tuple[bool, str | None]:
-        """Available iff a readable SARIF file path was provided."""
+    def is_available(self, *, options: ScannerOptions | None = None) -> tuple[bool, str | None]:
+        """Available iff a readable SARIF file path was provided.
+
+        *options* is accepted for protocol uniformity but ignored: this
+        adapter only reads a file and has no LLM mode or argv passthrough.
+        """
         if self._sarif_file is None:
             return (
                 False,
@@ -47,11 +55,14 @@ class GenericSarifAdapter:
             return False, f"--external-sarif must be a file, not a directory: {self._sarif_file}"
         return True, None
 
-    def scan(self, paths: list[Path]) -> dict[str, list[ScanFinding]]:
+    def scan(
+        self, paths: list[Path], *, options: ScannerOptions | None = None
+    ) -> dict[str, list[ScanFinding]]:
         """Read and parse the configured SARIF file into findings.
 
-        *paths* is accepted for protocol uniformity but ignored: a
-        pre-generated SARIF file already encodes its own locations.
+        *paths* and *options* are accepted for protocol uniformity but
+        ignored: a pre-generated SARIF file already encodes its own locations
+        and this adapter has no configurable behaviour.
         """
         from .sarif_ingest import sarif_to_findings
 

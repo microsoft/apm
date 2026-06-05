@@ -54,8 +54,6 @@ parser. The supported forms:
 |---|---|---|
 | GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. |
 | Pinned ref | `owner/repo#v1.0.0` | Pin to a tag, branch, or full commit SHA. |
-| Aliased | `owner/repo@my-alias` | Install under a custom directory name. |
-| Pinned + aliased | `owner/repo#v1.0.0@my-alias` | Combine the two. |
 | FQDN shorthand | `gitlab.com/acme/repo#v2.0` | Any git host, not just github.com. |
 | Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. |
 | Virtual file | `owner/repo/prompts/review.prompt.md` | Install a single primitive file. |
@@ -64,34 +62,64 @@ parser. The supported forms:
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
-| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name> }` | Custom directory name (`alias`), nested groups, monorepo subpaths, or anything the string forms cannot express. |
+| Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). Resolved to a concrete git ref at install time. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
 | Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
 
-Object form in YAML:
+
+Object form in YAML — three mutually exclusive keys select the variant
+(`git`, `path`, or `marketplace`):
 
 ```yaml
 dependencies:
   apm:
-    # Git dep with sub-path
+    # Remote: git URL + optional sub-path, ref, alias
     - git: https://gitlab.com/acme/coding-standards.git
       path: instructions/security
       ref: v2.0
       alias: security
 
-    # Registry dep (experimental) — whole package via default registry
+    # Local: filesystem path (development only)
+    - path: ./packages/shared-skills
+
+    # Marketplace: resolved to a concrete git ref at install time
+    - name: sec-check
+      marketplace: acme-plugins
+
+    # Marketplace with version constraint (semver range)
+    - name: secrets-vault
+      marketplace: acme-plugins
+      version: "~2.1.0"
+
+    # Registry dep (experimental): whole package via default registry
     - id: acme/code-review-prompts
       version: ^2.0.0
 
-    # Registry dep — named registry, virtual sub-path
+    # Registry dep (experimental): named registry, virtual sub-path
     - registry: corp-main
       id: acme/prompt-library
       path: prompts/review.prompt.md
       version: 1.4.0
+
 ```
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
+
+:::caution[Alias migration]
+The shorthand `@alias` suffix is not supported on string references. Use
+object form instead:
+
+```yaml
+- git: https://github.com/owner/repo.git
+  path: skills/example
+  alias: my-name
+```
+
+Omit `path:` for whole-repo dependencies. Keeping aliases explicit reserves
+`@` for git usernames and future package-manager-compatible version syntax.
+:::
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
 [Registries](../../guides/registries/).
@@ -156,6 +184,20 @@ SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
 
+### Marketplace ref override
+
+When installing from a marketplace via the CLI, append `#<ref>` to
+override the marketplace entry's default `source.ref`:
+
+```bash
+apm install plugin@marketplace#v2.0.0
+```
+
+In `apm.yml`, use the `version` field in the marketplace object form.
+Semver ranges and bare versions (e.g. `~2.1.0`, `^2.0`, `2.1.0`) are
+resolved against git tags matching `{name}--v{version}` on the
+marketplace repository. The highest matching tag is used.
+
 ### Pin a semver range
 
 For git-source dependencies you can also pin a semver range as the ref.
@@ -171,12 +213,27 @@ dependencies:
     - acme/widget#1.5.x       # wildcard
 ```
 
-APM matches tags against `v{version}` and `{name}--v{version}` patterns
-(with `{version}` as a bare-tag fallback) and picks the highest tag that
-satisfies the range. The original constraint is preserved in the
+APM matches tags against `v{version}`, `{name}--v{version}`, and
+`{name}-v{version}` patterns (with `{version}` as a bare-tag fallback) and
+picks the highest tag that satisfies the range. For virtual subdirectory
+deps, `{name}` is the final path segment (for example `pkg-a` in
+`acme/mono/packages/pkg-a`). The original constraint is preserved in the
 lockfile alongside the resolved tag, so `apm install` on a fresh clone
-replays the same tag deterministically. Only `apm update` (or legacy
-`apm install --update`) or a manifest change re-resolves to a newer tag.
+replays the same tag deterministically. A malformed range-like ref is
+rejected; use a plain range such as `^1.2.0` or pin a literal tag such as
+`pkg-a-v1.2.0`. Only `apm update` (or legacy `apm install --update`) or a
+manifest change re-resolves to a newer tag.
+
+Marketplace object-form ranges use the marketplace package name in the tag
+pattern:
+
+```yaml
+dependencies:
+  apm:
+    - name: secrets-vault
+      marketplace: acme-tools
+      version: "~2.1.0"
+```
 
 ## Remove a dependency
 

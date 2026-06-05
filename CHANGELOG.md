@@ -7,107 +7,247 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `apm pack` now synthesises `homepage`, `repository`, `keywords`, and a structured
-  `author` (`{name, email?, url?}`) from `apm.yml` into `plugin.json`. All changes are
-  additive: omitting any of these fields in `apm.yml` produces no change to the output.
-  The `author` field continues to accept a plain string (backward-compatible). (closes #1621)
-- `apm install` and `apm compile` now accept `--root DIR` to redirect every
-  generated artifact -- `apm_modules/`, `apm.lock.yaml`, `.gitignore`, and
-  integrated harness files (install) or `AGENTS.md` and per-target files
-  (compile) -- under `DIR`, while `apm.yml`, `.apm/`, and local-path
-  dependencies still resolve from the current working directory. This
-  mirrors `pip install --target` and `npm install --prefix`: useful for
-  scratch builds, CI artifact staging, and read-only source trees. `DIR` is
-  created if missing (refused under `--dry-run`); the redirect is reverted
-  on every exit path so it never leaks across invocations. `--root` is
-  rejected with `--global` (install) and `--watch` (compile). Thanks to
-  @srid (juspay) for the feature and original implementation. (closes #888, #1628)
-- `apm audit` can now ingest findings from external SARIF 2.1.0 scanners
-  (e.g. NVIDIA SkillSpector or any SARIF-emitting tool) via `--external
-  <name>` and `--external-sarif <file>`, merging them into APM's own report
-  and exit codes. APM's native content scan always runs; external findings
-  are purely additive. (#1579)
-- `apm install` can now run an optional content audit over freshly deployed
-  files (native hidden-character scan plus any policy-required external
-  scanners) so prompt-injection and hidden-Unicode attacks surface before
-  the integrated context is trusted. Off by default; opt in per-invocation
-  with `apm install --audit warn|block` (or disable with `--no-audit`), set
-  a personal default with `apm config set audit-on-install warn|block`, or
-  mandate it org-wide with an `apm-policy.yml` `security.audit.on_install`
-  rule. Policy acts as a floor: it can raise the mode but a weaker
-  CLI/config value can never relax an org `block` (`--no-policy` opts out of
-  the floor for the invocation). A policy-required external scanner that is
-  not available at install time fails closed with a clear, actionable error. (#1579)
-- Both capabilities are gated behind the single `external-scanners`
-  experimental flag (`apm experimental enable external-scanners`), are
-  one-directional (APM only reads vendor SARIF), and are install-method
-  neutral -- they work with the self-contained APM binary with no `pip`
-  extra to install.
-- `apm update` now accepts `-g/--global`, positional `[PACKAGES]...`, `--force`, and `--parallel-downloads`, making it a strict superset of `apm deps update`. A single verb now covers project and user scope, per-package refresh, and collision overwrite -- all behind the same interactive plan with `--dry-run`/`--yes`. (closes #1525)
-
-### Deprecated
-
-- `apm deps update` is deprecated in favor of `apm update`, which now exposes every flag it had. It prints a one-line banner pointing to `apm update` and keeps working for one release; it will be removed in the next breaking release. (closes #1525)
-
 ### Fixed
 
-- `apm pack --check-clean` now emits a copy-pasteable recovery recipe when `marketplace.json` drifts from source: `git commit --amend --no-edit` + `git push --force-with-lease` to fold the diff into the current commit, or a follow-up commit variant. Producers get the right command at the point of failure without consulting external docs. (closes #1381)
-- `apm mcp install --help` epilog now references `apm install --help` instead of the invalid `apm install --mcp --help` flag combination that always raised a UsageError. (closes #1586)
-- Custom-port credential errors now include a ready-to-run `git credential fill` verification command and a link to the auth troubleshooting docs, so users can diagnose miskeyed helpers without guessing. (closes #799)
-- `apm install` now shows a recovery hint (`apm install --no-policy`) when the `required-packages-deployed` policy check fails, so users know how to unblock without hunting for the flag. (closes #1314)
-- `apm install -g` now deploys `instructions` primitives for the Copilot target by concatenating all `*.instructions.md` files from each installed package into `~/.copilot/copilot-instructions.md`, the single file Copilot CLI reads at user scope. Previously this primitive type was silently skipped for global installs. Each package's contribution is wrapped in an HTML provenance comment so the file is auditable and multi-package installs accumulate correctly. (closes #650)
-- `apm compile` with `compilation.agents_md.mode: managed_section` now raises a clear error when the target file does not exist, instead of a confusing "markers not found". Create the file first with the managed-section markers, or set `agents_md.mode: full` in `apm.yml` for the initial generation, then switch to `managed_section`. (closes #1593)
-- `apm compile --target copilot` (and `agents`) no longer writes instructions into `AGENTS.md` when `apm install` has already deployed them to `.github/instructions/`, eliminating duplicate context that Copilot would read from both locations. Mirrors the equivalent dedup behaviour that was already in place for the Claude path (`.claude/rules/`). (closes #1550, refs #1445)
+- `apm install` now keeps format-transformed rule files (`.claude/rules`,
+  `.cursor/rules`, `.windsurf/rules`) tracked in `managed_files` and rewrites
+  them when the source instruction changes, instead of mis-classifying them as
+  user-authored collisions and skipping them; also fixes a mislabeled
+  `windsurf_rules` entry in install output. (by @srid, closes #1662)
+### Changed
+
+- Auth credential cascade now emits debug-level logs for every fallback step,
+  making token misconfiguration diagnosable without adding noise to normal output.
+  Enable with ``apm --verbose`` or ``APM_LOG_LEVEL=DEBUG``.
+  (by @danielmeppiel, closes #935, #1664)
+
+## [0.18.0] - 2026-06-04
+
+### Added
+
+- `apm marketplace audit`: new command that flags dependencies bypassing
+  marketplace pinning, so you can catch unpinned or non-marketplace deps before
+  they ship. (by @edenfunf, #881)
+- Marketplace dependency object entries in `apm.yml` and `plugin.json` now
+  resolve to concrete git refs during install, support optional semver-style
+  `version` constraints, and fail closed when resolution errors occur. (by
+  @stbenjam, #1422)
+- LSP server management: declare language servers in `apm.yml` and `apm install`
+  wires them into Claude Code and GitHub Copilot CLI automatically. (by
+  @stbenjam, #1424)
+- `apm outdated` now recognizes monorepo `{name}-v{version}` tag naming, so
+  per-package version checks work in repositories that publish multiple packages
+  under subpath tags. (by @kevinbeier-enbw, #1504)
 
 ### Changed
 
-- `apm_cli.models` internals: package-format detection extracted into a composition model (`PackageFormatRegistry` + per-format detectors + `NormalizationPlanner`); `detect_package_type()` is now a thin facade with no user-visible behaviour change. (#1618)
-- `apm compile` no longer emits cosmetic debug comments (APM version, source-file headers, footer) in generated `CLAUDE.md` and `copilot-instructions.md` files by default. The `compilation.source_attribution` flag now defaults to `false` (was `true`), reducing token overhead for every LLM context window that reads these files. Load-bearing markers (`_COPILOT_ROOT_GENERATED_MARKER` and Build ID) are always emitted regardless of the flag. To restore the previous behaviour, set `compilation: source_attribution: true` in `apm.yml`. (closes #1341)
-- **`apm pack` bundle export now strips credential-bearing keys and secret-shaped values from `.mcp.json`** before writing the bundle's merged `.mcp.json`. Previously they were passed through verbatim; they are now removed recursively per the credential rules documented in the [`apm pack` reference](https://microsoft.github.io/apm/reference/cli/pack/#credential-stripping-claude-mcpservers). Standalone Claude `plugin.json` generation embeds the same sanitized `mcpServers` (see the corresponding Added entry). If your bundle consumers rely on those keys being present, replace them with `$ENV_VAR` references and inject the values at MCP-host startup. (#1623)
+- **BREAKING:** `apm` now rejects string-form `@alias` dependency shorthand at
+  parse time with a migration error; use the object form with `alias:` instead.
+  (#1655)
+
+### Fixed
+
+- `apm compile` now matches `applyTo` globs without following symlinks into
+  `node_modules`, avoiding spurious matches and slow traversals in projects with
+  symlinked dependencies. (by @srid, #1576)
+- `apm install` now rewrites outbound relative links inside skill bundles so the
+  links keep resolving after a skill is materialized into an agent target.
+  (closes #1625, #1657)
+- Git-source semver ranges for virtual subdirectory dependencies now match
+  per-package `{name}-v{version}` tags, derive `{name}` from the subpath, and
+  reject malformed range-like refs with an actionable manifest error. (closes
+  #1633, #1658)
+- `apm install` now preserves env-var placeholders (e.g. `${VAR}`) when writing
+  IntelliJ `mcp.json`, so configured environment references survive install
+  instead of being expanded or dropped. (closes #1656, #1659)
+
+## [0.17.0] - 2026-06-03
+
+### Added
+
+- `apm lock`: new command that resolves all dependencies and writes
+  `apm.lock.yaml` **without** deploying any files to agent targets. Mirrors
+  the lockfile-only ergonomics of `cargo generate-lockfile` and `pnpm lock`;
+  accepts `--update`, `--verbose`, `--global`, `--no-policy`, `--target`, and
+  `--parallel-downloads`. (#1639)
+- `apm find <file>`: trace a materialized file back to its contributing
+  package(s) via a reverse index over `apm.lock.yaml`. Supports `--source` and
+  `--path`; untracked paths exit 1 (a missing or corrupt lockfile exits 2),
+  each with an ASCII `[x]` message, and the command performs zero network or
+  write operations. (#1631)
+- `apm update` now accepts `-g/--global`, positional `[PACKAGES]...`,
+  `--force`, and `--parallel-downloads`, making it a strict superset of
+  `apm deps update` -- one verb covering project and user scope, per-package
+  refresh, and collision overwrite. (closes #1525, #1574)
+- `apm config set mcp-registry-url <url>` / `get` / `unset` persistently
+  configures a private MCP registry endpoint in `~/.apm/config.json`, sitting
+  between the `MCP_REGISTRY_URL` env var and the built-in default in the
+  resolution chain (CLI flag > env > config > default). Accepts `http://` or
+  `https://` only; `apm mcp search` prints a `Registry (config): <url>`
+  diagnostic when active. (closes #818, #1637)
+- `apm init` now suggests creating an `agentrc` in its Next Steps output when no
+  instructions exist, guiding new projects toward a first primitive. (#1611)
+- `apm self-update` and the version checker now respect air-gapped env vars
+  (`GITHUB_URL`, `APM_REPO`, `VERSION`), so self-update and update checks work
+  behind a mirror without reaching public GitHub. (#1615)
+- Target-aware hook event diagnostics: `apm install` now reports hook wiring
+  per target so misconfigured or unsupported hook events surface clearly
+  instead of failing silently. (#1635)
+- JetBrains users (IntelliJ IDEA, PyCharm, GoLand, WebStorm, and other IDEs)
+  can now install MCP servers with `apm install --mcp --runtime intellij
+  <package>` -- no manual `mcp.json` editing required. Auto-detected when the
+  OS-specific Copilot-for-JetBrains config directory exists; runtime `${VAR}`
+  env substitution is not supported for this target, so `--env` values are
+  written verbatim (avoid plaintext secrets). (#1636)
+- `apm install` and `apm compile` now accept `--root DIR` to redirect every
+  generated artifact (`apm_modules/`, `apm.lock.yaml`, `.gitignore`, and
+  harness/`AGENTS.md`/per-target files) under `DIR`, while `apm.yml`, `.apm/`,
+  and local-path dependencies still resolve from `$PWD` -- mirroring
+  `pip install --target` and `npm install --prefix`. `--root` is rejected with
+  `--global` (install) and `--watch` (compile). Thanks to @srid (juspay) for
+  the original implementation. (closes #888, #1628)
+- `apm pack` now generates an ecosystem-specific `plugin.json` when
+  `target:`/`targets:` includes `claude` or `copilot`, synthesised from
+  `apm.yml` identity fields so one source tree drops into a Claude Code or
+  Copilot plugin path with zero hand-editing. Claude manifests embed
+  `mcpServers` from `.mcp.json` with credential-bearing keys and secret-shaped
+  values stripped recursively; Copilot manifests omit `mcpServers`. An existing
+  `plugin.json` is preserved unless `--force` is passed. (#1623)
+- `apm pack` also synthesises `homepage`, `repository`, `keywords`, and a
+  structured `author` (`{name, email?, url?}`) from `apm.yml` into
+  `plugin.json`. All fields are additive and `author` still accepts a plain
+  string (backward-compatible). (closes #1621, #1624)
+- `apm install -g` now deploys `bin/` executables from `marketplace_plugin`
+  packages into `~/.claude/skills/<name>/bin/` and makes them executable,
+  giving Claude Code direct access to plugin-provided binaries. The
+  `bin_deploy` policy field lets administrators opt out globally
+  (`deny_all: true`) or per-package. (#1591)
+- `apm compile` with `compilation.agents_md.mode: managed_section` updates only
+  the APM-owned block between configurable markers, so teams with existing
+  `AGENTS.md` content can adopt `apm compile` without losing hand-written
+  rules. Missing or duplicate markers raise a loud error so no content is
+  silently lost. (closes #1540, #1589)
+- `apm compile --no-dedup` (alias `--force-instructions`) forces the
+  instructions section into `CLAUDE.md` even when `.claude/rules/` is already
+  populated. Claude target only; Copilot deduplication is always on. (closes
+  #1463, #1616)
+- `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and
+  `LICENSE`/`LICENCE` (case-insensitive, symlinks excluded) in the flat
+  registry archive, matching npm's bundling of standard root-level docs.
+  (#1562)
+- `install.sh` and `apm self-update` now send a conditional `Authorization`
+  header on GitHub release-lookup API calls when `GITHUB_APM_PAT`,
+  `GITHUB_TOKEN`, or `GH_TOKEN` is set, improving reliability on shared IPs and
+  corporate NAT. Anonymous fallback is preserved when no token is configured.
+  (closes #1582, #1588)
+- **Experimental (`external-scanners`):** `apm audit` can now ingest findings
+  from external SARIF 2.1.0 scanners (e.g. NVIDIA SkillSpector) via `--external
+  <name>` and `--external-sarif <file>`, merging them into APM's own report and
+  exit codes. APM's native content scan always runs; external findings are
+  purely additive. Enable with `apm experimental enable external-scanners`.
+  (#1579)
+- **Experimental (`external-scanners`):** `apm install` can run an optional
+  content audit over freshly deployed files (native hidden-character scan plus
+  any policy-required external scanners). Off by default; opt in with
+  `apm install --audit warn|block` (or `--no-audit`), set a default via
+  `apm config set audit-on-install`, or mandate it org-wide via `apm-policy.yml`
+  `security.audit.on_install`. Policy is a floor: it can raise the mode but
+  never relax an org `block` (`--no-policy` opts out per-invocation), and a
+  policy-required scanner missing at install time fails closed. (#1579)
+- **Experimental (`external-scanners`):** `apm audit` exposes a configuration
+  surface for external scanners -- `--external-llm/--no-external-llm` toggles a
+  scanner's LLM analysis and `--external-args TEXT` passes shlex-split extra
+  flags validated against a per-adapter allowlist (non-allowlisted,
+  secret-looking, or out-of-cwd args are rejected fail-closed). Persist
+  defaults with `apm config set external.<name>.{llm,args}`; orgs can restrict
+  via `security.audit.scanners.<name>.allow_args: false`. LLM mode prints an
+  egress banner, forwards `OPENAI_API_KEY`/`NVIDIA_INFERENCE_KEY` only for that
+  run, and secret-redacts scanner stderr. (#1647)
+
+### Changed
+
+- `apm compile` no longer emits cosmetic debug comments (APM version,
+  source-file headers, footer) in generated `CLAUDE.md` and
+  `copilot-instructions.md` by default: `compilation.source_attribution` now
+  defaults to `false` (was `true`), cutting token overhead in every LLM context
+  that reads these files. Load-bearing markers are always emitted; set
+  `compilation: source_attribution: true` to restore. (closes #1341, #1584)
+- `apm pack` bundle export now strips credential-bearing keys and secret-shaped
+  values from `.mcp.json` recursively before writing the bundle's merged
+  `.mcp.json`. If consumers rely on those keys, replace them with `$ENV_VAR`
+  references and inject values at MCP-host startup. (#1623)
+
+### Deprecated
+
+- `apm deps update` is deprecated in favor of `apm update`, which now exposes
+  every flag it had. It prints a one-line banner and keeps working for one
+  release; it will be removed in the next breaking release. (closes #1525,
+  #1574)
+
 ### Removed
 
-- **BREAKING:** `apm pack --marketplace-output PATH` has been removed. This flag was deprecated in v0.14 with a stderr warning and auto-translated to `--marketplace-path claude=PATH`. Use `--marketplace-path claude=PATH` to override the Claude output path. (#1318)
+- **BREAKING:** `apm pack --marketplace-output PATH` has been removed.
+  Deprecated in v0.14 with a stderr warning and auto-translated to
+  `--marketplace-path claude=PATH`; use `--marketplace-path claude=PATH` to
+  override the Claude output path. (closes #1318, #1585)
+
+### Fixed
+
+- `apm pack --check-clean` now emits a copy-pasteable recovery recipe
+  (`git commit --amend --no-edit` + `git push --force-with-lease`, or a
+  follow-up commit variant) when `marketplace.json` drifts from source, so
+  producers get the right command at the point of failure. (closes #1381,
+  #1610)
+- `apm mcp install --help` epilog now references `apm install --help` instead
+  of the invalid `apm install --mcp --help` combination that always raised a
+  UsageError. (closes #1586, #1604)
+- Custom-port credential errors now include a ready-to-run `git credential fill`
+  verification command and a link to the auth troubleshooting docs. (closes
+  #799, #1608)
+- `apm install` now shows a recovery hint (`apm install --no-policy`) when the
+  `required-packages-deployed` policy check fails, so users know how to unblock.
+  (closes #1314, #1617)
+- `apm install -g` now deploys `instructions` primitives for the Copilot target
+  by concatenating each package's `*.instructions.md` into
+  `~/.copilot/copilot-instructions.md` (the single file Copilot CLI reads at
+  user scope); previously this primitive type was silently skipped for global
+  installs. Each contribution is wrapped in an HTML provenance comment for
+  auditability. (closes #650, #1619)
+- `apm compile` with `managed_section` mode now raises a clear error when the
+  target file does not exist instead of a confusing "markers not found"; create
+  the file with markers first, or use `mode: full` for the initial generation.
+  (closes #1593, #1606)
+- `apm compile --target copilot` (and `agents`) no longer writes instructions
+  into `AGENTS.md` when `apm install` already deployed them to
+  `.github/instructions/`, eliminating duplicate context Copilot would read from
+  both locations. Mirrors the existing Claude-path dedup. (closes #1550, #1590)
+- `apm install` skips the `.gitignore` update for global-scope installs, so
+  user-scope installs no longer touch a project `.gitignore`. (#1587)
+- The primitive parser now normalizes list-valued `applyTo` and parses
+  `handoffs` in agent frontmatter, so multi-glob `applyTo` and agent handoff
+  declarations are honored instead of silently dropped. (#1629)
+- `apm compile` managed-section error messages were polished for clarity when
+  markers are missing or malformed. (#1609)
+- `apm install` now always writes `apm.lock.yaml` when resolution succeeds,
+  closing a gap where the lockfile could be skipped in some local-dependency
+  flows. (#1652)
+- **Experimental (`external-scanners`):** external SARIF ingestion now strips
+  ANSI escape codes from scanner message text and passes `--no-llm` to
+  SkillSpector by default while tolerating non-JSON stdout, hardening the
+  experimental scanner path. (#1644, #1645)
+
+### Security
+
+- `apm install -g` now deploys `marketplace_plugin` `bin/` executables with
+  user-only execute (owner +x; group and other execute bits cleared).
+  Previously-deployed files are hardened in place on reinstall, so upgrading APM
+  tightens permissions left by older versions. (#1626)
 
 ### Performance
 
 - `apm install --update` no longer re-downloads a dependency when the in-flight
   resolution callback already fetched it at the correct SHA, eliminating a
-  redundant network round-trip per up-to-date dependency in update mode.
-  (closes #551)
-
-### Added
-
-- **Stop hand-maintaining `plugin.json`.** `apm pack` now generates an
-  ecosystem-specific manifest when `target:` (or `targets:`) includes `claude`
-  or `copilot` -- synthesised from `apm.yml` identity fields on every pack, so
-  one APM source tree drops into a Claude Code plugin or a Copilot plugin path
-  with zero hand-editing. Claude manifests embed `mcpServers` from `.mcp.json`
-  with secrets stripped recursively before writing -- both credential-bearing
-  keys and secret-shaped values at any depth, per the credential set documented
-  in the [`apm pack` reference](https://microsoft.github.io/apm/reference/cli/pack/#credential-stripping-claude-mcpservers)
-  -- so a committed `plugin.json` never leaks them. Copilot
-  manifests omit `mcpServers`. An existing `plugin.json` is preserved unless
-  `--force` is passed. See the [Plugin manifests section](https://microsoft.github.io/apm/reference/cli/pack/#plugin-manifests)
-  for the full ecosystem table and credential-stripping rules. (#1623)
-- `apm install -g` now deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/` and makes them executable, giving Claude Code direct access to plugin-provided binaries. The `bin_deploy` policy field lets enterprise administrators opt out globally (`deny_all: true`) or per-package. (#1544)
-- Teams with existing `AGENTS.md` content can now adopt `apm compile` without
-  losing hand-written rules: set `compilation.agents_md.mode: managed_section`
-  in `apm.yml` to update only the APM-owned block between configurable markers.
-  Missing or duplicate markers raise a loud error so no content is silently
-  lost. (closes #1540)
-- `apm compile --no-dedup` (alias: `--force-instructions`) forces the instructions
-  section into `CLAUDE.md` even when `.claude/rules/` is already populated. Useful
-  for debugging or when both copies are intentionally wanted. Affects the Claude
-  target only; Copilot deduplication is always on and has no opt-out flag.
-  (closes #1463)
-- `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
-- `install.sh` and `apm self-update` now send a conditional `Authorization` header on GitHub release-lookup API calls when `GITHUB_APM_PAT`, `GITHUB_TOKEN`, or `GH_TOKEN` is set, improving reliability for users on shared IPs and corporate NAT that hit anonymous rate limits. Anonymous fallback is preserved when no token is configured. (closes #1582)
-
-### Security
-
-- `apm install -g` now deploys `bin/` executables from `marketplace_plugin` packages with user-only execute (owner +x; group and other execute bits are cleared). Previously-deployed files are hardened in place on reinstall, so upgrading APM automatically tightens permissions left by older versions. (#1626)
+  redundant network round-trip per up-to-date dependency. (closes #551, #1612)
 
 ## [0.16.1] - 2026-06-01
 
@@ -446,6 +586,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`apm compile -t copilot` now emits `.github/copilot-instructions.md` with zero user configuration** -- APM's first Copilot-native compile target. Global instructions in `.apm/instructions/` are assembled into the file VS Code and GitHub Copilot read automatically; switching targets cleans it up. APM dogfoods this target. (#1048)
 - **`apm marketplace add` accepts full HTTPS URLs and nested HOST/group/sub/.../REPO shorthands.** You can now paste a repository URL straight from the browser (e.g., `apm marketplace add https://github.com/acme/plugin-marketplace`) and register marketplaces hosted under nested sub-paths on GitHub Enterprise (`ghes.corp.example.com/org/team/repo`). Path-traversal sequences in the parsed segments are rejected via `validate_path_segments`. Non-GitHub hosts (GitLab, Bitbucket, etc.) are explicitly rejected at registration time with an actionable error -- this avoids forwarding GitHub credentials to unintended hosts and the silent fetch-time 404 that previously resulted; native non-GitHub support is tracked separately. (#1034, closes #1027)
 - Regression tests for `apm compile` placement of narrow `applyTo` patterns: instructions whose matches all live deep inside one subtree are now pinned to the deepest covering directory instead of being hoisted to the project root, across both selective and single-point placement strategies. Also covers the file-walk cache that skips repeated filesystem scans for the same glob. (#871)
+- **`apm marketplace audit <name>`** -- detect supply-chain risk in a marketplace with one command. It fetches each plugin's own `apm.yml` at its pinned ref and warns when transitive `dependencies.apm` entries bypass marketplace pinning. Default run is informational and exits 0; `--strict` exits non-zero on bypass warnings or unverifiable plugins, for use in CI. Complements the existing `apm marketplace doctor` environment diagnostics. (#881)
 - **`apm pack` marketplace builder hardening.** Local source paths are now emitted relative to `metadata.pluginRoot` (fixes double-prefix bug). New pass-through fields: `author`, `license`, `repository`, `keywords` (alias for `tags`). Curator-wins override semantics for `description`/`version` on remote entries. Security guards reject path traversal and absolute paths post-subtraction. (#1061)
 - **Plugin manifest schema-conformance tests.** `tests/unit/test_plugin_exporter_schema.py` validates every shape of `plugin.json` produced by `apm pack` (synthesized, authored, and authored-with-stale-keys) against the vendored official schema. Companion marketplace conformance lives in `tests/unit/marketplace/test_schema_conformance.py`. (#1061)
 - **APM now compiles and integrates to Windsurf/Cascade.** New first-class `--target windsurf` support: instructions deploy as `.windsurf/rules/` with trigger frontmatter, agents deploy as `.windsurf/skills/<name>/SKILL.md`, commands as `.windsurf/workflows/`, hooks merge into `.windsurf/hooks.json`, and MCP servers configure via `~/.codeium/windsurf/mcp_config.json`. Auto-detection, user-scope deployment, and `apm pack` all support the new target. (#1066)

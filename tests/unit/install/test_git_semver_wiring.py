@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.deps.git_semver_resolver import GitSemverResolution
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.drift import detect_ref_change
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
+from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -171,6 +172,43 @@ class TestMaybeResolveGitSemver:
             )
 
         assert resolution is fresh
+
+    def test_virtual_subdir_range_uses_subpath_package_name(self):
+        dep = DependencyReference(
+            host="github.com",
+            repo_url="acme/monorepo",
+            reference="^0.1.0",
+            source="git",
+            is_virtual=True,
+            virtual_path="packages/pkg-a",
+        )
+        rr_instance = MagicMock()
+        rr_instance.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/pkg-a-v0.1.0", sha="a" * 40),
+            RemoteRef(name="refs/tags/pkg-b-v9.9.9", sha="b" * 40),
+        ]
+
+        with patch("apm_cli.marketplace.ref_resolver.RefResolver", return_value=rr_instance):
+            resolution = _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=False,
+            )
+
+        assert isinstance(resolution, GitSemverResolution)
+        assert resolution.resolved_tag == "pkg-a-v0.1.0"
+        assert resolution.resolved_version == "0.1.0"
+        assert resolution.matched_pattern == "{name}-v{version}"
+
+    def test_prefixed_range_like_ref_raises_instead_of_literal_fallback(self):
+        dep = _make_dep_ref(reference="~pkg-a-v0.1.0")
+
+        with pytest.raises(ValueError, match="Invalid semver range"):
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=False,
+            )
 
 
 class TestDriftDetectRefChangeForSemver:

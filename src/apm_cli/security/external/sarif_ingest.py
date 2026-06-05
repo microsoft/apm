@@ -13,9 +13,14 @@ when the top-level shape is not a SARIF document at all.
 
 from __future__ import annotations
 
+import re
+
 from ..audit_report import _SEVERITY_MAP, relative_path_for_report
 from ..content_scanner import ScanFinding
 from .base import ExternalScanError
+
+# Matches ANSI SGR escape sequences (e.g. \x1b[0m, \x1b[31;1m).
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # Inverse of audit_report._SEVERITY_MAP (APM severity -> SARIF level).
 # SARIF level -> APM severity.  ``none`` and any unknown level map to "info"
@@ -70,10 +75,18 @@ def _result_location(result: dict) -> tuple[str, int, int]:
 
 
 def _result_message(result: dict) -> str:
-    """Extract a human-readable message from a SARIF result."""
+    """Extract a human-readable message from a SARIF result.
+
+    ANSI escape codes are stripped so that external scanners emitting
+    Rich-formatted text (e.g. SkillSpector) do not leak escape
+    sequences into APM's table output.
+    """
     message = result.get("message") or {}
     text = message.get("text") if isinstance(message, dict) else None
-    return text if isinstance(text, str) and text else "(no message)"
+    if not isinstance(text, str) or not text:
+        return "(no message)"
+    cleaned = _ANSI_ESCAPE_RE.sub("", text)
+    return cleaned if cleaned else "(no message)"
 
 
 def sarif_to_findings(

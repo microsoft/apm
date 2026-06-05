@@ -77,3 +77,85 @@ def test_scan_failure_wrapped(monkeypatch):
     )
     with pytest.raises(ExternalScanError, match="failed"):
         run_external_scanners(["skillspector"], None, [Path(".")])
+
+
+def test_options_by_name_none_defaults(monkeypatch):
+    """options_by_name=None resolves to a default ScannerOptions (no crash)."""
+    from apm_cli.security.external.options import ScannerOptions
+
+    scanner = MagicMock()
+    scanner.is_available.return_value = (True, "")
+    scanner.scan.return_value = {}
+    monkeypatch.setattr(
+        "apm_cli.security.external.registry.resolve_scanner",
+        lambda name, sarif_file=None: scanner,
+    )
+    run_external_scanners(["skillspector"], None, [Path(".")], options_by_name=None)
+    _, kwargs = scanner.scan.call_args
+    assert isinstance(kwargs["options"], ScannerOptions)
+    assert kwargs["options"].extra_args == ()
+
+
+def test_options_forwarded_to_scan(monkeypatch):
+    from apm_cli.security.external.options import ScannerOptions
+
+    scanner = MagicMock()
+    scanner.is_available.return_value = (True, "")
+    scanner.scan.return_value = {}
+    monkeypatch.setattr(
+        "apm_cli.security.external.registry.resolve_scanner",
+        lambda name, sarif_file=None: scanner,
+    )
+    opts = ScannerOptions(llm=True, extra_args=("--model", "x"))
+    run_external_scanners(
+        ["skillspector"],
+        None,
+        [Path(".")],
+        options_by_name={"skillspector": opts},
+    )
+    _, kwargs = scanner.scan.call_args
+    assert kwargs["options"] is opts
+
+
+def test_llm_egress_banner_emitted(monkeypatch):
+    from apm_cli.security.external.options import ScannerOptions
+
+    scanner = MagicMock()
+    scanner.is_available.return_value = (True, "")
+    scanner.scan.return_value = {}
+    monkeypatch.setattr(
+        "apm_cli.security.external.registry.resolve_scanner",
+        lambda name, sarif_file=None: scanner,
+    )
+    logger = MagicMock()
+    run_external_scanners(
+        ["skillspector"],
+        None,
+        [Path(".")],
+        logger=logger,
+        options_by_name={"skillspector": ScannerOptions(llm=True)},
+    )
+    banner_calls = [c.args[0] for c in logger.warning.call_args_list if c.args]
+    assert any("LLM analysis enabled" in msg for msg in banner_calls)
+
+
+def test_no_banner_without_llm(monkeypatch):
+    from apm_cli.security.external.options import ScannerOptions
+
+    scanner = MagicMock()
+    scanner.is_available.return_value = (True, "")
+    scanner.scan.return_value = {}
+    monkeypatch.setattr(
+        "apm_cli.security.external.registry.resolve_scanner",
+        lambda name, sarif_file=None: scanner,
+    )
+    logger = MagicMock()
+    run_external_scanners(
+        ["skillspector"],
+        None,
+        [Path(".")],
+        logger=logger,
+        options_by_name={"skillspector": ScannerOptions(llm=False)},
+    )
+    banner_calls = [c.args[0] for c in logger.warning.call_args_list if c.args]
+    assert not any("LLM analysis enabled" in msg for msg in banner_calls)

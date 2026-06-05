@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 from .models import CheckResult, CIAuditResult
 
@@ -896,61 +895,6 @@ def _check_pinned_constraints(
     )
 
 
-def _run_dep_policy_checks(
-    result: CIAuditResult,
-    deps_list: list,
-    policy: "ApmPolicy",
-    fail_fast: bool,
-    lockfile,
-    direct_dep_keys: "set | None",
-    registries: "dict | None",
-) -> bool:
-    """Run dependency + registry + pinned-constraint checks (groups 1–7b).
-
-    Appends :class:`CheckResult` entries to *result* and returns ``True``
-    when fail-fast should stop further processing.
-    """
-
-    def _run(check: CheckResult) -> bool:
-        result.checks.append(check)
-        return fail_fast and not check.passed
-
-    return bool(
-        _run(_check_dependency_allowlist(deps_list, policy.dependencies))
-        or _run(_check_dependency_denylist(deps_list, policy.dependencies))
-        or _run(_check_required_packages(deps_list, policy.dependencies))
-        or _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies))
-        or _run(_check_required_package_version(deps_list, lockfile, policy.dependencies))
-        or _run(_check_transitive_depth(lockfile, policy.dependencies))
-        or _run(_check_registry_source(deps_list, policy.registry_source, registries))
-        or _run(_check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys))
-    )
-
-
-def _run_mcp_policy_checks(
-    result: CIAuditResult,
-    mcp_list: list,
-    policy: "ApmPolicy",
-    fail_fast: bool,
-) -> bool:
-    """Run MCP checks (groups 8–11).
-
-    Appends :class:`CheckResult` entries to *result* and returns ``True``
-    when fail-fast should stop further processing.
-    """
-
-    def _run(check: CheckResult) -> bool:
-        result.checks.append(check)
-        return fail_fast and not check.passed
-
-    return bool(
-        _run(_check_mcp_allowlist(mcp_list, policy.mcp))
-        or _run(_check_mcp_denylist(mcp_list, policy.mcp))
-        or _run(_check_mcp_transport(mcp_list, policy.mcp))
-        or _run(_check_mcp_self_defined(mcp_list, policy.mcp))
-    )
-
-
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -1035,38 +979,55 @@ def run_dependency_policy_checks(
     deps_list = list(deps_to_install)
     mcp_list = list(mcp_deps) if mcp_deps is not None else []
 
-    # -- Dependency + registry + pinned-constraint checks (1-7b) ----------
-    if _run_dep_policy_checks(
-        result, deps_list, policy, fail_fast, lockfile, direct_dep_keys, registries
-    ):
+    def _run(check: CheckResult) -> bool:
+        """Append check and return True if fail-fast should stop."""
+        result.checks.append(check)
+        return fail_fast and not check.passed
+
+    # -- Dependency checks (1-6) -----------------------------------
+    if _run(_check_dependency_allowlist(deps_list, policy.dependencies)):
+        return result
+    if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
+        return result
+    if _run(_check_required_packages(deps_list, policy.dependencies)):
+        return result
+    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
+        return result
+    if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
+        return result
+    if _run(_check_transitive_depth(lockfile, policy.dependencies)):
         return result
 
-    # -- MCP checks (8-11) ------------------------------------------------
-    if mcp_deps is not None and _run_mcp_policy_checks(result, mcp_list, policy, fail_fast):
-        return result
-
-    # -- Target / compilation checks (11-13) ------------------------------
-    # Skipped when effective_target is None -- those run in a separate
-    # post-targets call (W2-target-aware).
+    # -- Registry source + pinned-constraint + MCP + tail checks -----
+    # Collect all remaining checks into a single loop so the function
+    # stays within the max-returns threshold.
+    remaining_checks: list[CheckResult] = [
+        _check_registry_source(deps_list, policy.registry_source, registries),
+        # Pinned-constraint: property check on declared refs. Cheap
+        # (O(N) string classification, no I/O) so it always runs.
+        # When direct_dep_keys is supplied, restrict to direct deps -- a
+        # transitive package with an unbounded ref in its own manifest is
+        # not actionable by the consumer (see Copilot review on #1494).
+        _check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys),
+    ]
+    # MCP checks -- when mcp_deps is None (not provided), skip entirely.
+    # When mcp_deps is an empty list (provided but no MCP deps), still
+    # run MCP checks so they report "no X configured" for completeness.
+    if mcp_deps is not None:
+        remaining_checks += [
+            _check_mcp_allowlist(mcp_list, policy.mcp),
+            _check_mcp_denylist(mcp_list, policy.mcp),
+            _check_mcp_transport(mcp_list, policy.mcp),
+            _check_mcp_self_defined(mcp_list, policy.mcp),
+        ]
+    # Target / compilation + manifest tail checks.
     if effective_target is not None:
-        # Build a minimal raw_yml dict so _check_compilation_target
-        # sees the effective (possibly CLI-overridden) target value
-        # rather than what is literally on disk.
         synthetic_yml = {"target": effective_target}
-        check = _check_compilation_target(synthetic_yml, policy.compilation)
-        result.checks.append(check)
-        if fail_fast and not check.passed:
-            return result
-
-    # -- Manifest-level explicit-includes check ---------------------------
-    # Only run when the caller supplied the manifest includes value.
-    # Dep-only seams that lack manifest context (legacy callers) skip
-    # this check; the install pipeline and ``apm audit`` wrappers both
-    # supply it.
+        remaining_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
-        check = _check_includes_explicit(manifest_includes, policy.manifest)
-        result.checks.append(check)
-        if fail_fast and not check.passed:
+        remaining_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
+    for check in remaining_checks:
+        if _run(check):
             return result
 
     # NOTE: compilation strategy, source attribution, manifest fields,
@@ -1103,11 +1064,12 @@ def run_policy_checks(
 
     result = CIAuditResult()
 
-    # Load manifest -- combined guard: return early for missing file or parse error.
+    # Load manifest
     apm_yml_path = project_root / "apm.yml"
-    manifest = None
-    if apm_yml_path.exists():
-        manifest = _parse_apm_yml_safe(apm_yml_path, result)
+    if not apm_yml_path.exists():
+        return result
+
+    manifest = _parse_apm_yml_safe(apm_yml_path, result)
     if manifest is None:
         return result
 

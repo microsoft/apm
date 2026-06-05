@@ -1,6 +1,6 @@
 ---
 title: "IDE & tool integration"
-description: "How APM deploys primitives into VS Code, Claude Code, Cursor, Codex, Gemini, OpenCode, Windsurf and other AI coding clients."
+description: "How APM deploys primitives into VS Code, Claude Code, Cursor, Codex, Gemini, OpenCode, Windsurf, JetBrains and other AI coding clients."
 sidebar:
   order: 3
 ---
@@ -22,6 +22,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
+| JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, `${env:VAR}` env substitution) |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
@@ -106,8 +107,37 @@ MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies
 - `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
 - `.gemini/settings.json` (Gemini)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
+- OS-specific `github-copilot/intellij/mcp.json` (JetBrains Copilot -- uses
+  `"servers"` key, user-scope global path):
+  - `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows)
+  - `~/Library/Application Support/github-copilot/intellij/mcp.json` (macOS)
+  - `~/.local/share/github-copilot/intellij/mcp.json` (Linux, honouring `XDG_DATA_HOME`)
 
 For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../consumer/install-mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
+
+### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
+
+GitHub Copilot for JetBrains reads MCP servers from a single user-scope
+`mcp.json` (the per-OS path above), so configuration is global rather than
+per-project. Prerequisite: install the GitHub Copilot plugin in your JetBrains
+IDE at least once so the `github-copilot/intellij/` config directory exists --
+that directory is the auto-detect signal.
+
+```bash
+# Install an MCP server into the JetBrains user-scope config
+apm install --mcp --runtime intellij <package>
+```
+
+Notes and limits:
+
+- **Auto-detect is user-scope only.** Unlike project markers such as `.cursor/`
+  or `.windsurf/`, JetBrains is detected from the global config directory, not a
+  file in your repo. It is therefore detected for every project on the machine
+  once the plugin directory exists. Use `--runtime intellij` to target it
+  explicitly regardless of auto-detect.
+- **Runtime env substitution.** JetBrains Copilot resolves `${env:VAR}` in
+  `mcp.json` at server start. APM preserves env-var placeholders as
+  `${env:VAR}` instead of writing matching host secrets into the config.
 
 ## Per-tool reference pages
 

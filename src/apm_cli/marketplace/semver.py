@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional  # noqa: F401
 
 __all__ = [
     "SemVer",
@@ -168,52 +167,12 @@ def satisfies_range(version: SemVer, range_spec: str) -> bool:
     return _satisfies_single(version, spec)
 
 
-def _satisfies_caret(version: SemVer, spec_rest: str) -> bool:
-    """Check a caret-range constraint (``^major.minor.patch``)."""
-    base = parse_semver(spec_rest)
-    if base is None:
-        return False
-    if base.major != 0:
-        # ^1.2.3 := >=1.2.3 <2.0.0
-        return version >= base and version.major == base.major
-    if base.minor != 0:
-        # ^0.2.3 := >=0.2.3 <0.3.0
-        return version >= base and version.major == 0 and version.minor == base.minor
-    # ^0.0.3 := >=0.0.3 <0.0.4
-    return (
-        version >= base
-        and version.major == 0
-        and version.minor == 0
-        and version.patch == base.patch
-    )
-
-
-def _satisfies_tilde(version: SemVer, spec_rest: str) -> bool:
-    """Check a tilde-range constraint (``~major.minor.patch``)."""
-    base = parse_semver(spec_rest)
-    if base is None:
-        return False
-    # ~1.2.3 := >=1.2.3 <1.3.0
-    return version >= base and version.major == base.major and version.minor == base.minor
-
-
-def _semver_exact_match(version: SemVer, base: SemVer) -> bool:
-    """Return True when *version* equals *base* in all semver fields."""
-    return (
-        version.major == base.major
-        and version.minor == base.minor
-        and version.patch == base.patch
-        and version.prerelease == base.prerelease
-    )
-
-
-# Dispatch table for the four simple comparison operators.
-# Each entry is (strip_chars, comparison_function).
-_COMPARISON_OPS: list[tuple[str, int, object]] = [
-    (">=", 2, lambda v, b: v >= b),
-    ("<=", 2, lambda v, b: v <= b),
-    (">", 1, lambda v, b: v > b),
-    ("<", 1, lambda v, b: v < b),
+# Comparison operators -- longest prefix first so ">=" is tested before ">".
+_CMP_OPS: list[tuple[str, object]] = [
+    (">=", lambda v, b: v >= b),
+    (">", lambda v, b: v > b),
+    ("<=", lambda v, b: v <= b),
+    ("<", lambda v, b: v < b),
 ]
 
 
@@ -223,33 +182,61 @@ def _satisfies_single(version: SemVer, spec: str) -> bool:
     if not spec:
         return True
 
+    # Caret range: ^major.minor.patch
     if spec.startswith("^"):
-        return _satisfies_caret(version, spec[1:])
+        base = parse_semver(spec[1:])
+        if base is None:
+            return False
+        if base.major != 0:
+            # ^1.2.3 := >=1.2.3 <2.0.0
+            return version >= base and version.major == base.major
+        if base.minor != 0:
+            # ^0.2.3 := >=0.2.3 <0.3.0
+            return version >= base and version.major == 0 and version.minor == base.minor
+        # ^0.0.3 := >=0.0.3 <0.0.4
+        return (
+            version >= base
+            and version.major == 0
+            and version.minor == 0
+            and version.patch == base.patch
+        )
 
+    # Tilde range: ~major.minor.patch
     if spec.startswith("~"):
-        return _satisfies_tilde(version, spec[1:])
+        base = parse_semver(spec[1:])
+        if base is None:
+            return False
+        # ~1.2.3 := >=1.2.3 <1.3.0
+        return version >= base and version.major == base.major and version.minor == base.minor
 
-    # Comparison operators dispatched via table (>=, <=, >, <).
-    for prefix, prefix_len, op_fn in _COMPARISON_OPS:  # type: ignore[assignment]
+    # Comparison operators (table-driven dispatch)
+    for prefix, cmp in _CMP_OPS:
         if spec.startswith(prefix):
-            base = parse_semver(spec[prefix_len:])
-            return base is not None and op_fn(version, base)  # type: ignore[operator]
+            base = parse_semver(spec[len(prefix) :])
+            return base is not None and cmp(version, base)
 
     # Explicit-equality operator (npm/cargo style): =1.2.3 := exact 1.2.3.
     # APM follows the node-semver grammar, so pip-style ``==X.Y.Z`` is
     # NOT recognised; users who write ``==1.2.3`` get a parse-time
     # rejection via ``is_semver_range`` (see deps/registry/semver.py).
+    # Strip the prefix so the exact-match block below handles both forms.
     if spec.startswith("=") and not spec.startswith("=="):
-        base = parse_semver(spec[1:])
-        return base is not None and _semver_exact_match(version, base)
+        spec = spec[1:]
 
     # Wildcard: 1.2.x or 1.2.*
     wildcard_match = re.match(r"^(\d+)\.(\d+)\.[xX*]$", spec)
     if wildcard_match:
-        return version.major == int(wildcard_match.group(1)) and version.minor == int(
-            wildcard_match.group(2)
-        )
+        major = int(wildcard_match.group(1))
+        minor = int(wildcard_match.group(2))
+        return version.major == major and version.minor == minor
 
-    # Exact match
+    # Exact match (also handles explicit-equality after prefix strip)
     base = parse_semver(spec)
-    return base is not None and _semver_exact_match(version, base)
+    if base is None:
+        return False
+    return (
+        version.major == base.major
+        and version.minor == base.minor
+        and version.patch == base.patch
+        and version.prerelease == base.prerelease
+    )

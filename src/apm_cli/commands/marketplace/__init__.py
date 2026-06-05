@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import logging
 import re
 import sys
 import traceback
@@ -46,9 +47,10 @@ from ...marketplace.publisher import (
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
-from ...utils.console import _rich_info, _rich_warning  # noqa: F401
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from .._helpers import _get_console, _is_interactive
+
+logger = logging.getLogger(__name__)
 
 # Restore builtins shadowed by subcommand names
 list = builtins.list
@@ -84,6 +86,8 @@ class MarketplaceGroup(click.Group):
         "init",
         "check",
         "outdated",
+        "audit",
+        "doctor",
         "publish",
         "package",
         "migrate",
@@ -112,6 +116,8 @@ class MarketplaceGroup(click.Group):
             for name in cmd_names:
                 cmd = self.get_command(ctx, name)
                 if cmd is None:
+                    continue
+                if getattr(cmd, "hidden", False):
                     continue
                 help_text = cmd.get_short_help_str(limit=150)
                 commands.append((name, help_text))
@@ -1026,15 +1032,36 @@ def _load_current_versions():
 def _extract_tag_versions(refs, entry, yml, include_prerelease):
     """Extract (SemVer, tag_name) pairs from remote refs for a package entry."""
     from ...marketplace._shared import iter_semver_tags
-    from ...marketplace.tag_pattern import build_tag_regex
+    from ...marketplace.tag_pattern import (
+        build_tag_regex,
+        infer_tag_pattern_from_refs,
+    )
+
+    def _collect(pattern: str) -> list:
+        tag_rx = (
+            build_tag_regex(pattern, name=entry.name)
+            if "{name}" in pattern
+            else build_tag_regex(pattern)
+        )
+        collected = []
+        for sv, tag_name, _ in iter_semver_tags(refs, tag_rx):
+            if sv.is_prerelease and not (include_prerelease or entry.include_prerelease):
+                continue
+            collected.append((sv, tag_name))
+        return collected
 
     pattern = entry.tag_pattern or yml.build.tag_pattern
-    tag_rx = build_tag_regex(pattern)
-    results = []
-    for sv, tag_name, _ in iter_semver_tags(refs, tag_rx):
-        if sv.is_prerelease and not (include_prerelease or entry.include_prerelease):
-            continue
-        results.append((sv, tag_name))
+    results = _collect(pattern)
+    if not results:
+        inferred = infer_tag_pattern_from_refs(refs, entry.name)
+        if inferred and inferred != pattern:
+            logger.debug(
+                "Configured tag pattern %r matched no tags for %s; inferred %r",
+                pattern,
+                entry.name,
+                inferred,
+            )
+            results = _collect(inferred)
     return results
 
 
@@ -1507,6 +1534,7 @@ def search(expression, limit, verbose):
         sys.exit(1)
 
 
+from .audit import audit  # noqa: E402
 from .check import check  # noqa: E402
 from .doctor import doctor  # noqa: E402
 from .init import init  # noqa: E402
@@ -1547,6 +1575,7 @@ __all__ = [
     "SemVer",
     "TargetResult",
     "add",
+    "audit",
     "browse",
     "check",
     "detect_config_source",
