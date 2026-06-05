@@ -889,10 +889,117 @@ class TestDownloadAdoFile:
         d = DownloadDelegate(host)
         resp = _fake_response(200, b"ok")
         host._resilient_get.return_value = resp
+        # Simulate auth_resolver.resolve() returning no token (no PAT, no bearer)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
         d.download_ado_file(self._dep(), "apm.yml")
         call_kwargs = host._resilient_get.call_args[1]
         headers = call_kwargs.get("headers", {})
         assert "Authorization" not in headers
+
+    # ------------------------------------------------------------------
+    # Regression tests for #1671: HTML sign-in page + bearer fallback
+    # ------------------------------------------------------------------
+
+    def test_html_200_response_raises_actionable_error(self) -> None:
+        """Regression #1671: ADO returns 200 + text/html when unauth; must fail-closed."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT or run 'az login'."
+        html_body = b"<!DOCTYPE html><html><head><title>Azure DevOps Services | Sign In</title></head></html>"
+        resp = _fake_response(200, html_body, headers={"Content-Type": "text/html; charset=utf-8"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            d.download_ado_file(self._dep(), "apm.yml")
+
+    def test_html_200_response_writes_no_content(self) -> None:
+        """Mutation break: HTML sign-in detection must prevent content from being returned."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        html_body = b"<html><body>Sign In</body></html>"
+        resp = _fake_response(200, html_body, headers={"Content-Type": "text/html"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        # Must raise, never return html bytes as if they were file content
+        with pytest.raises(RuntimeError):
+            result = d.download_ado_file(self._dep(), "apm.yml")
+            # If we reach here, the bug is present: HTML was returned as content
+            assert result != html_body, "Bug: HTML sign-in page returned as file content"
+
+    def test_bearer_fallback_used_when_no_pat(self) -> None:
+        """Regression #1671: bearer token from auth_resolver used when no PAT present."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = "aad-bearer-jwt"
+        ctx.auth_scheme = "bearer"
+        host.auth_resolver.resolve.return_value = ctx
+        resp = _fake_response(
+            200, b"agent content", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        result = d.download_ado_file(self._dep(), "apm.yml")
+        assert result == b"agent content"
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        assert headers.get("Authorization") == "Bearer aad-bearer-jwt"
+
+    def test_pat_path_unchanged_when_pat_present(self) -> None:
+        """PAT must remain the primary auth path; bearer is strictly the fallback."""
+        host = _make_host(ado_token="my-secret-pat")
+        resp = _fake_response(
+            200, b"file bytes", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        result = d.download_ado_file(self._dep(), "apm.yml")
+        assert result == b"file bytes"
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        # PAT is used as Basic auth, bearer is NOT used
+        assert "Authorization" in headers
+        expected_auth = base64.b64encode(b":my-secret-pat").decode()
+        assert expected_auth in headers["Authorization"]
+        # auth_resolver.resolve() must NOT be called when PAT is present
+        host.auth_resolver.resolve.assert_not_called()
+
+    def test_bearer_auth_resolver_not_called_when_pat_present(self) -> None:
+        """Mutation break: resolver.resolve() is bypassed entirely when ado_token is set."""
+        host = _make_host(ado_token="pat-value")
+        resp = _fake_response(200, b"data", headers={"Content-Type": "application/json"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        d.download_ado_file(self._dep(), "apm.yml")
+        host.auth_resolver.resolve.assert_not_called()
+
+    def test_html_detection_on_fallback_ref_response(self) -> None:
+        """HTML sign-in detection fires on the main/master fallback response too."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        fail_resp = _fake_response(404, b"")
+        html_resp = _fake_response(
+            200,
+            b"<html>Sign In</html>",
+            headers={"Content-Type": "text/html"},
+        )
+        host._resilient_get.side_effect = [fail_resp, html_resp]
+        d = DownloadDelegate(host)
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            d.download_ado_file(self._dep(), "apm.yml", ref="main")
 
 
 # ---------------------------------------------------------------------------
