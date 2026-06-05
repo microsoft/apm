@@ -930,11 +930,17 @@ class TestDownloadAdoFile:
         resp = _fake_response(200, html_body, headers={"Content-Type": "text/html"})
         host._resilient_get.return_value = resp
         d = DownloadDelegate(host)
-        # Must raise, never return html bytes as if they were file content
-        with pytest.raises(RuntimeError):
+        # Assertions are placed OUTSIDE the pytest.raises block so they execute
+        # in the non-raising path; if the guard is removed, download_ado_file
+        # returns html_body and the assert below catches the regression.
+        raised = False
+        result = None
+        try:
             result = d.download_ado_file(self._dep(), "apm.yml")
-            # If we reach here, the bug is present: HTML was returned as content
-            assert result != html_body, "Bug: HTML sign-in page returned as file content"
+        except RuntimeError:
+            raised = True
+        assert raised, "Expected RuntimeError for HTML sign-in page; guard may have been removed"
+        assert result is None, "Bug: HTML sign-in page was returned as file content"
 
     def test_bearer_fallback_used_when_no_pat(self) -> None:
         """Regression #1671: bearer token from auth_resolver used when no PAT present."""
@@ -1000,6 +1006,49 @@ class TestDownloadAdoFile:
         d = DownloadDelegate(host)
         with pytest.raises(RuntimeError, match="sign-in page"):
             d.download_ado_file(self._dep(), "apm.yml", ref="main")
+
+    def test_404_with_html_content_type_does_not_trigger_sign_in_detection(self) -> None:
+        """Regression lock: 404 response with text/html body must NOT fire the HTML sign-in guard.
+
+        ADO can return 404 pages as text/html.  _check_html_signin must only fire
+        on 200 responses so 404s fall through to raise_for_status and then to the
+        main/master ref fallback path rather than raising a misleading 'sign-in page'
+        error.  This test proves the status-code guard added in the HTML detection fix.
+        """
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        # First call: 404 with text/html (an ADO error page)
+        # Second call (fallback): 200 with real content
+        html_404 = _fake_response(
+            404, b"<html>Not Found</html>", headers={"Content-Type": "text/html"}
+        )
+        ok_resp = _fake_response(
+            200, b"file-bytes", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.side_effect = [html_404, ok_resp]
+        d = DownloadDelegate(host)
+        # Should succeed via the main->master fallback, NOT raise "sign-in page"
+        result = d.download_ado_file(self._dep(), "apm.yml", ref="main")
+        assert result == b"file-bytes"
+        assert host._resilient_get.call_count == 2
+
+    def test_bearer_fallback_skipped_when_scheme_not_bearer(self) -> None:
+        """When auth_resolver returns a non-bearer scheme, no Authorization header is injected."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = "some-token"
+        ctx.auth_scheme = "basic"  # non-bearer scheme -> must not inject as Bearer
+        host.auth_resolver.resolve.return_value = ctx
+        resp = _fake_response(200, b"content", headers={"Content-Type": "application/octet-stream"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        d.download_ado_file(self._dep(), "apm.yml")
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        assert "Authorization" not in headers
 
 
 # ---------------------------------------------------------------------------

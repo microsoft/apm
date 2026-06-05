@@ -543,10 +543,14 @@ class DownloadDelegate:
             Azure DevOps responds with HTTP 200 + text/html when auth is
             missing or insufficient instead of a 401.  Writing that HTML to
             disk produces a corrupt file (the #1671 bug).  Detect it by
-            Content-Type and raise an actionable error before any bytes are
-            returned to the caller.
+            Content-Type only on 200 responses so 404/403 error pages with
+            text/html bodies still fall through to raise_for_status and the
+            existing 404-fallback / 401-403 error paths.  Content-Type is
+            lowercased before comparison per RFC 7230 case-insensitivity.
             """
-            content_type = response.headers.get("Content-Type", "")
+            if response.status_code != 200:
+                return
+            content_type = response.headers.get("Content-Type", "").lower()
             if "text/html" in content_type:
                 error_msg = (
                     f"Azure DevOps returned a sign-in page for {dep_ref.repo_url}. "

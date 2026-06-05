@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now falls back to an AAD bearer token (via `az login`) when no
+  `ADO_APM_PAT` is configured for Azure DevOps file downloads, and fail-closes
+  when ADO returns an interactive HTML sign-in page with HTTP 200 instead of
+  writing corrupt HTML to disk. (by @danielmeppiel, closes #1671)
 - `apm install` now keeps format-transformed rule files (`.claude/rules`,
   `.cursor/rules`, `.windsurf/rules`) tracked in `managed_files` and rewrites
   them when the source instruction changes, instead of mis-classifying them as
