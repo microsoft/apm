@@ -159,16 +159,21 @@ def _check_marketplace_ref(dep, verbose):
     if not plugin:
         return None
 
-    # Determine marketplace entry's current ref and installed ref.
-    # Non-dict (string) sources are relative paths, not refs; treat as missing.
-    # The combined `if not mkt_ref or not installed_ref` guard covers:
-    # - non-dict source (mkt_ref stays None), empty ref, and missing installed ref.
+    # Determine marketplace entry's current ref
     mkt_ref = None
     mkt_version = plugin.version or ""
     if isinstance(plugin.source, dict):
         mkt_ref = plugin.source.get("ref", "")
+    else:
+        # String sources are relative paths, not refs -- skip
+        return None
+
+    if not mkt_ref:
+        return None
+
+    # Determine installed ref
     installed_ref = dep.resolved_ref or dep.resolved_commit or ""
-    if not mkt_ref or not installed_ref:
+    if not installed_ref:
         return None
 
     package_name = f"{dep.marketplace_plugin_name}@{dep.discovered_via}"
