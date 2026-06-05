@@ -886,7 +886,7 @@ def _fetch_from_repo(
     )
 
 
-def _github_http_error_message(resp: "requests.Response", repo_ref: str, api_url: str) -> str:
+def _github_http_error_message(resp: requests.Response, repo_ref: str, api_url: str) -> str:
     """Return a human-readable error message for a non-200 GitHub API response."""
     if resp.status_code == 404:
         return "404: Policy file not found"
