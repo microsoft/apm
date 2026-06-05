@@ -71,10 +71,12 @@ class MCPDependency:
         if "name" not in d:
             raise ValueError("MCP dependency dict must contain 'name'")
 
-        unknown = sorted(k for k in d if k not in _KNOWN_DICT_KEYS)
+        unknown = sorted(str(k) for k in d if k not in _KNOWN_DICT_KEYS)
         if unknown:
+            safe_name = ascii(str(d["name"]))[1:-1]
+            safe_keys = ", ".join(ascii(k)[1:-1] for k in unknown)
             _rich_warning(
-                f"MCP dependency '{d['name']}': unknown key(s) dropped: {', '.join(unknown)}",
+                f"MCP dependency '{safe_name}': unknown key(s) dropped: {safe_keys}",
                 symbol="warning",
             )
 

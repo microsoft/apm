@@ -7,6 +7,7 @@ Coverage:
 1. from_dict with unknown key -> warning naming the dropped key
 2. from_dict with only known keys -> no warning
 3. known-key parsing and resulting values are unchanged
+4. robustness: non-string dict keys do not TypeError; non-ASCII output is escaped
 """
 
 from __future__ import annotations
@@ -97,6 +98,33 @@ class TestFromDictUnknownKeyWarning:
                     "mystery": "value",
                 }
             )
+        msg = mock_warn.call_args[0][0]
+        assert all(0x20 <= ord(c) <= 0x7E for c in msg), f"non-ASCII chars in: {msg!r}"
+
+    def test_non_string_key_no_type_error(self):
+        """from_dict with a non-string (integer) dict key must not raise TypeError."""
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "server",
+                    123: "integer-key-value",
+                }
+            )
+        assert dep.name == "server"
+        mock_warn.assert_called_once()
+        msg = mock_warn.call_args[0][0]
+        assert "123" in msg
+
+    def test_non_ascii_name_warning_is_ascii_only(self):
+        """Warning message stays printable ASCII when dep name contains non-ASCII before validation."""
+        with patch(_WARN_PATH) as mock_warn:
+            with pytest.raises(ValueError):
+                MCPDependency.from_dict(
+                    {
+                        "name": "caf\xe9-server",
+                        "unknown_key": "val",
+                    }
+                )
         msg = mock_warn.call_args[0][0]
         assert all(0x20 <= ord(c) <= 0x7E for c in msg), f"non-ASCII chars in: {msg!r}"
 

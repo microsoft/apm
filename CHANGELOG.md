@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `windsurf_rules` entry in install output. (by @srid, closes #1662)
 ### Changed
 
+- `MCPDependency.from_dict()` now emits a `[!]` warning naming every unknown
+  key dropped during parsing (e.g. harness-specific fields like `oauth`) instead
+  of discarding them silently, making forward-compat config mismatches
+  diagnosable. (addresses #1670)
 - Auth credential cascade now emits debug-level logs for every fallback step,
   making token misconfiguration diagnosable without adding noise to normal output.
   Enable with ``apm --verbose`` or ``APM_LOG_LEVEL=DEBUG``.
