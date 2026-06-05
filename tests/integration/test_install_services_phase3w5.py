@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.install import services
-from apm_cli.install.services import IntegratorBundle
+from apm_cli.install.services import IntegrationOptions, IntegratorBundle
 from apm_cli.integration.base_integrator import IntegrationResult
 
 
@@ -171,9 +171,8 @@ def invoke_integrate(
             package_name=package_name,
             logger=logger,
             scope=None,
-            skill_subset=skill_subset,
             ctx=ctx,
-            scratch_root=scratch_root,
+            options=IntegrationOptions(skill_subset=skill_subset, scratch_root=scratch_root),
             integrators=IntegratorBundle(
                 prompt=integrators["prompt_integrator"],
                 agent=integrators["agent_integrator"],
@@ -937,12 +936,14 @@ class TestIntegrateLocalContent:
             result = services.integrate_local_content(
                 tmp_path,
                 targets=[],
-                prompt_integrator=MagicMock(),
-                agent_integrator=MagicMock(),
-                skill_integrator=MagicMock(),
-                instruction_integrator=MagicMock(),
-                command_integrator=MagicMock(),
-                hook_integrator=MagicMock(),
+                integrators=IntegratorBundle(
+                    prompt=MagicMock(),
+                    agent=MagicMock(),
+                    skill=MagicMock(),
+                    instruction=MagicMock(),
+                    command=MagicMock(),
+                    hook=MagicMock(),
+                ),
                 force=False,
                 managed_files=set(),
                 diagnostics=MagicMock(),
@@ -959,14 +960,16 @@ class TestIntegrateLocalContent:
         result = services.integrate_local_content(
             tmp_path,
             targets=[make_target(primitives={})],
-            prompt_integrator=MagicMock(),
-            agent_integrator=MagicMock(),
-            skill_integrator=MagicMock(
-                integrate_package_skill=MagicMock(return_value=make_skill_result())
+            integrators=IntegratorBundle(
+                prompt=MagicMock(),
+                agent=MagicMock(),
+                skill=MagicMock(
+                    integrate_package_skill=MagicMock(return_value=make_skill_result())
+                ),
+                instruction=MagicMock(),
+                command=MagicMock(),
+                hook=MagicMock(),
             ),
-            instruction_integrator=MagicMock(),
-            command_integrator=MagicMock(),
-            hook_integrator=MagicMock(),
             force=False,
             managed_files=set(),
             diagnostics=MagicMock(),

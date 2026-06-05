@@ -12,6 +12,7 @@ import pytest  # noqa: F401
 
 from apm_cli.commands.install import _has_local_apm_content, _integrate_local_content
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.install.services import IntegratorBundle
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -19,15 +20,17 @@ from apm_cli.deps.lockfile import LockFile
 
 
 def _make_integrators():
-    """Return a dict of MagicMock integrators for _integrate_local_content."""
+    """Return a dict of kwargs for _integrate_local_content using IntegratorBundle."""
     return {
         "targets": [MagicMock()],
-        "prompt_integrator": MagicMock(),
-        "agent_integrator": MagicMock(),
-        "skill_integrator": MagicMock(),
-        "instruction_integrator": MagicMock(),
-        "command_integrator": MagicMock(),
-        "hook_integrator": MagicMock(),
+        "integrators": IntegratorBundle(
+            prompt=MagicMock(),
+            agent=MagicMock(),
+            skill=MagicMock(),
+            instruction=MagicMock(),
+            command=MagicMock(),
+            hook=MagicMock(),
+        ),
         "force": False,
         "managed_files": set(),
         "diagnostics": MagicMock(),
