@@ -311,7 +311,9 @@ def _compute_cross_repo_misconfig_risk(
 
     Otherwise returns ``None``. Pure -- no logging, no side effects.
     """
-    if dep_ref is not None or not isinstance(plugin.source, dict):
+    if dep_ref is not None:
+        return None
+    if not isinstance(plugin.source, dict):
         return None
     if _coerce_dict_plugin_type(plugin.source) != "github":
         return None
@@ -387,38 +389,6 @@ def _marketplace_https_git_url(source: MarketplaceSource) -> str:
     return f"https://{source.host}/{encoded}.git"
 
 
-def _resolve_dict_source_path_and_ref(
-    src: dict,
-) -> tuple[str | None, str | None]:
-    """Extract ``(in_repo_path, ref)`` from a dict plugin source.
-
-    Helper for :func:`_extract_in_repo_path_and_ref` that handles the
-    ``github``, ``git-subdir``, and ``gitlab`` source-type branches
-    after the caller has already confirmed *src* is a ``dict``.
-    """
-    source_type = _coerce_dict_plugin_type(src)
-    ref_val = src.get("ref", "")
-    ref: str | None = ref_val.strip() if isinstance(ref_val, str) and ref_val.strip() else None
-
-    if source_type == "github":
-        path = src.get("path", "")
-        path = path.strip("/") if isinstance(path, str) else ""
-        if not path:
-            return None, ref
-        validate_path_segments(path, context="github source path")
-        return path, ref
-
-    if source_type in ("git-subdir", "gitlab"):
-        sub = (src.get("subdir", "") or src.get("path", "")) or ""
-        sub = sub.strip("/") if isinstance(sub, str) else ""
-        if not sub:
-            return None, ref
-        validate_path_segments(sub, context="git-subdir source path")
-        return sub, ref
-
-    return None, None
-
-
 def _extract_in_repo_path_and_ref(
     plugin: MarketplacePlugin, plugin_root: str = ""
 ) -> tuple[str | None, str | None]:
@@ -453,7 +423,27 @@ def _extract_in_repo_path_and_ref(
     if not isinstance(src, dict):
         return None, None
 
-    return _resolve_dict_source_path_and_ref(src)
+    source_type = _coerce_dict_plugin_type(src)
+    ref_val = src.get("ref", "")
+    ref: str | None = ref_val.strip() if isinstance(ref_val, str) and ref_val.strip() else None
+
+    if source_type == "github":
+        path = src.get("path", "")
+        path = path.strip("/") if isinstance(path, str) else ""
+        if not path:
+            return None, ref
+        validate_path_segments(path, context="github source path")
+        return path, ref
+
+    if source_type in ("git-subdir", "gitlab"):
+        sub = (src.get("subdir", "") or src.get("path", "")) or ""
+        sub = sub.strip("/") if isinstance(sub, str) else ""
+        if not sub:
+            return None, ref
+        validate_path_segments(sub, context="git-subdir source path")
+        return sub, ref
+
+    return None, None
 
 
 def _gitlab_in_marketplace_dependency_reference(

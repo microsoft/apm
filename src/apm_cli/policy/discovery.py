@@ -886,18 +886,6 @@ def _fetch_from_repo(
     )
 
 
-def _github_http_error_message(resp: requests.Response, repo_ref: str, api_url: str) -> str:
-    """Return a human-readable error message for a non-200 GitHub API response."""
-    if resp.status_code == 404:
-        return "404: Policy file not found"
-    if resp.status_code == 403:
-        return f"403: Access denied to {repo_ref}"
-    if 300 <= resp.status_code < 400:
-        location = resp.headers.get("Location", "<no Location header>")
-        return f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
-    return f"HTTP {resp.status_code} fetching policy from {repo_ref}"
-
-
 def _fetch_github_contents(
     repo_ref: str,
     file_path: str,
@@ -932,8 +920,17 @@ def _fetch_github_contents(
 
     try:
         resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
+        if resp.status_code == 404:
+            return None, "404: Policy file not found"
+        if resp.status_code == 403:
+            return None, f"403: Access denied to {repo_ref}"
+        if 300 <= resp.status_code < 400:
+            location = resp.headers.get("Location", "<no Location header>")
+            return None, (
+                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
+            )
         if resp.status_code != 200:
-            return None, _github_http_error_message(resp, repo_ref, api_url)
+            return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
 
         data = resp.json()
         if data.get("encoding") == "base64" and data.get("content"):
@@ -943,8 +940,10 @@ def _fetch_github_contents(
             return data["content"], None
         else:
             return None, f"Unexpected response format from {repo_ref}"
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-        return None, f"Error fetching policy from {repo_ref}: {e}"
+    except requests.exceptions.Timeout:
+        return None, f"Timeout fetching policy from {repo_ref}"
+    except requests.exceptions.ConnectionError:
+        return None, f"Connection error fetching policy from {repo_ref}"
     except Exception as e:
         return None, f"Error fetching policy from {repo_ref}: {e}"
 

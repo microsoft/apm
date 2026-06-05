@@ -1089,162 +1089,6 @@ class HookIntegrator(BaseIntegrator):
             files_adopted=scripts_adopted,
         )
 
-    def _load_merged_hook_config(
-        self,
-        json_path: Path,
-        target_dir: Path,
-        config: "_MergeHookConfig",
-    ) -> tuple[dict, dict, Path]:
-        """Read the target JSON config and its sidecar ownership file.
-
-        Loads *json_path* into a dict (empty on parse error) and, when
-        *config.schema_strict* is True, also loads the sidecar at
-        ``target_dir / _APM_HOOKS_SIDECAR``.  Re-injects ``_apm_source``
-        markers from the sidecar into the in-memory ``hooks`` structure so
-        that ownership data is available for idempotent upserts without
-        persisting the private field to disk.
-
-        Args:
-            json_path: Path to the merged JSON config file.
-            target_dir: Directory that contains the sidecar file.
-            config: Merge-hook config for the current target.
-
-        Returns:
-            tuple: ``(json_config, sidecar_data, sidecar_path)``
-        """
-        json_config: dict = {}
-        if json_path.exists():
-            try:
-                with open(json_path, encoding="utf-8") as f:
-                    json_config = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                json_config = {}
-
-        sidecar_path = target_dir / _APM_HOOKS_SIDECAR
-        sidecar_data: dict = {}
-        if config.schema_strict and sidecar_path.exists():
-            try:
-                with open(sidecar_path, encoding="utf-8") as f:
-                    _raw = json.load(f)
-                if isinstance(_raw, dict):
-                    sidecar_data = _raw
-                else:
-                    _log.warning(
-                        "Sidecar file %s contains non-dict JSON; treating as empty.",
-                        sidecar_path,
-                    )
-                    sidecar_data = {}
-            except (json.JSONDecodeError, OSError) as exc:
-                _log.warning("Failed to read sidecar %s: %s; treating as empty.", sidecar_path, exc)
-                sidecar_data = {}
-
-            # Re-inject _apm_source from sidecar into matching in-memory entries
-            if sidecar_data and "hooks" in json_config:
-                _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
-
-        return json_config, sidecar_data, sidecar_path
-
-    def _write_merged_hook_config(
-        self,
-        json_path: Path,
-        json_config: dict,
-        config: "_MergeHookConfig",
-        sidecar_path: Path,
-    ) -> None:
-        """Persist the merged JSON config and (when required) its sidecar.
-
-        For schema-strict targets the ``_apm_source`` metadata is extracted
-        into a separate sidecar file before the clean config is written so
-        the on-disk JSON never contains the private marker field.
-
-        Args:
-            json_path: Destination path for the config JSON.
-            json_config: Updated config dict (may contain ``_apm_source`` keys).
-            config: Merge-hook config for the current target.
-            sidecar_path: Path where the sidecar ownership file lives.
-        """
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if config.schema_strict:
-            # Build sidecar from entries that have _apm_source
-            sidecar_out: dict = {}
-            for event_name, entries_list in json_config.get("hooks", {}).items():
-                if not isinstance(entries_list, list):
-                    continue
-                owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
-                if owned:
-                    sidecar_out[event_name] = [dict(e) for e in owned]
-
-            # Strip _apm_source from entries before writing to disk
-            for entries_list in json_config.get("hooks", {}).values():
-                if isinstance(entries_list, list):
-                    for entry in entries_list:
-                        if isinstance(entry, dict):
-                            entry.pop("_apm_source", None)
-
-            # Write sidecar
-            if sidecar_out:
-                try:
-                    with open(sidecar_path, "w", encoding="utf-8") as f:
-                        json.dump(sidecar_out, f, indent=2)
-                        f.write("\n")
-                except OSError as exc:
-                    _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
-            elif sidecar_path.exists():
-                sidecar_path.unlink()
-
-        # Write the (now schema-clean) config
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(json_config, f, indent=2)
-            f.write("\n")
-
-    def _copy_hook_script_files(
-        self,
-        scripts: list,
-        project_root: Path,
-        managed_files,
-        force: bool,
-        diagnostics,
-        target_paths: list,
-    ) -> tuple[int, int]:
-        """Copy referenced script files into the project tree.
-
-        For each (source_file, target_rel) pair, attempts adoption of an
-        identical existing file before falling back to collision-checked copy.
-
-        Args:
-            scripts: List of ``(source_file, target_rel)`` tuples.
-            project_root: Project root for resolving relative target paths.
-            managed_files: Set of APM-managed relative paths (for collision checks).
-            force: Whether to overwrite non-managed conflicting files.
-            diagnostics: Optional diagnostics collector.
-            target_paths: Mutable list to extend with newly written paths.
-
-        Returns:
-            tuple[int, int]: ``(scripts_copied, scripts_adopted)``
-        """
-        scripts_copied = 0
-        scripts_adopted = 0
-        for source_file, target_rel in scripts:
-            target_script = project_root / target_rel
-            ensure_path_within(target_script, project_root)
-            if self.try_adopt_identical(target_script, source_file, target_paths):
-                scripts_adopted += 1
-                continue
-            if self.check_collision(
-                target_script,
-                target_rel,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                continue
-            target_script.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_file, target_script)
-            scripts_copied += 1
-            target_paths.append(target_script)
-        return scripts_copied, scripts_adopted
-
     # ------------------------------------------------------------------
     # Shared JSON-merge implementation for Claude / Cursor / Codex
     # ------------------------------------------------------------------
@@ -1306,6 +1150,8 @@ class HookIntegrator(BaseIntegrator):
             self._dependency_hook_sources(project_root) if heal_stale_root_source else set()
         )
         hooks_integrated = 0
+        scripts_copied = 0
+        scripts_adopted = 0
         target_paths: list[Path] = []
         # Events whose prior-owned entries have already been cleared on
         # this install run. Packages can contribute to the same event
@@ -1313,17 +1159,42 @@ class HookIntegrator(BaseIntegrator):
         # files' fresh entries aren't wiped by later iterations.
         cleared_events: set = set()
 
-        # Read existing JSON config and sidecar ownership metadata
+        # Read existing JSON config
         json_path = target_dir / config.config_filename
-        json_config, _sidecar_data, sidecar_path = self._load_merged_hook_config(
-            json_path, target_dir, config
-        )
+        json_config: dict = {}
+        if json_path.exists():
+            try:
+                with open(json_path, encoding="utf-8") as f:
+                    json_config = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                json_config = {}
+
+        # Load sidecar ownership metadata (schema-strict targets)
+        sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+        sidecar_data: dict = {}
+        if config.schema_strict and sidecar_path.exists():
+            try:
+                with open(sidecar_path, encoding="utf-8") as f:
+                    _raw = json.load(f)
+                if isinstance(_raw, dict):
+                    sidecar_data = _raw
+                else:
+                    _log.warning(
+                        "Sidecar file %s contains non-dict JSON; treating as empty.",
+                        sidecar_path,
+                    )
+                    sidecar_data = {}
+            except (json.JSONDecodeError, OSError) as exc:
+                _log.warning("Failed to read sidecar %s: %s; treating as empty.", sidecar_path, exc)
+                sidecar_data = {}
+
+            # Re-inject _apm_source from sidecar into matching in-memory entries
+            if sidecar_data and "hooks" in json_config:
+                _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
 
         if "hooks" not in json_config:
             json_config["hooks"] = {}
 
-        scripts_copied = 0
-        scripts_adopted = 0
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
             if data is None:
@@ -1485,16 +1356,63 @@ class HookIntegrator(BaseIntegrator):
                 )
 
             # Copy referenced scripts
-            _copied, _adopted = self._copy_hook_script_files(
-                scripts, project_root, managed_files, force, diagnostics, target_paths
-            )
-            scripts_copied += _copied
-            scripts_adopted += _adopted
+            for source_file, target_rel in scripts:
+                target_script = project_root / target_rel
+                ensure_path_within(target_script, project_root)
+                if self.try_adopt_identical(target_script, source_file, target_paths):
+                    scripts_adopted += 1
+                    continue
+                if self.check_collision(
+                    target_script,
+                    target_rel,
+                    managed_files,
+                    force,
+                    diagnostics=diagnostics,
+                ):
+                    continue
+                target_script.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_file, target_script)
+                scripts_copied += 1
+                target_paths.append(target_script)
 
         # Write JSON config back
         # Don't track the config file in target_paths -- it's a shared
         # file cleaned via _apm_source markers, not file-level deletion
-        self._write_merged_hook_config(json_path, json_config, config, sidecar_path)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if config.schema_strict:
+            # Build sidecar from entries that have _apm_source
+            sidecar_out: dict = {}
+            for event_name, entries_list in json_config.get("hooks", {}).items():
+                if not isinstance(entries_list, list):
+                    continue
+                owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
+                if owned:
+                    sidecar_out[event_name] = [dict(e) for e in owned]
+
+            # Strip _apm_source from entries before writing to disk
+            for entries_list in json_config.get("hooks", {}).values():
+                if isinstance(entries_list, list):
+                    for entry in entries_list:
+                        if isinstance(entry, dict):
+                            entry.pop("_apm_source", None)
+
+            # Write sidecar
+            sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+            if sidecar_out:
+                try:
+                    with open(sidecar_path, "w", encoding="utf-8") as f:
+                        json.dump(sidecar_out, f, indent=2)
+                        f.write("\n")
+                except OSError as exc:
+                    _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
+            elif sidecar_path.exists():
+                sidecar_path.unlink()
+
+        # Write the (now schema-clean) config
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(json_config, f, indent=2)
+            f.write("\n")
 
         return HookIntegrationResult(
             files_integrated=hooks_integrated,
