@@ -117,6 +117,33 @@ compiled `marketplace.json` -- that rename is the only structural
 transform `apm pack` performs. Strict schema: unknown keys raise an
 error, never silently ignored.
 
+### Deeply nested hosts: `sourceBase`
+
+If your packages live on a self-managed host whose group nesting is
+deeper than the `host.tld/owner/repo` shorthand can express (a common
+self-managed GitLab shape), declare a `sourceBase` once and write each
+`source` relative to it:
+
+```yaml
+marketplace:
+  owner:
+    name: acme-org
+  sourceBase: https://gitlab.acme.example.com/group/sub-group/team/projects
+  packages:
+    - name: my-package
+      source: my-package                  # -> .../team/projects/my-package
+      version: "^1.0.0"
+    - name: from-github
+      source: github.com/acme-org/helper  # host-prefixed: overrides the base
+      ref: v1.0.0
+```
+
+A host-less `source` composes onto `sourceBase`; a `source` that names
+its own host (the `host.tld/owner/repo` or full `https://` URL form) or
+a local `./` path overrides it and the base is ignored. Marketplaces
+without a `sourceBase` resolve exactly as before. See the
+[manifest schema](../reference/manifest-schema/) for the full rules.
+
 Add and edit packages without leaving the shell:
 
 ```bash

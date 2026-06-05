@@ -44,6 +44,8 @@ from .output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 
 __all__ = [
     "LOCAL_SOURCE_RE",
+    "RELATIVE_SOURCE_RE",
+    "SOURCE_BASE_RE",
     "SOURCE_RE",
     "MarketplaceBuild",
     "MarketplaceClaudeConfig",
@@ -100,6 +102,24 @@ LOCAL_SOURCE_RE = re.compile(r"^\./")
 _HOST_PREFIXED_SOURCE_RE = re.compile(rf"^({_HOST_PAT})/({_OWNER_REPO_PAT})$")
 # Matches ``https://host.tld/owner/repo[.git]`` and captures host + owner/repo.
 _HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(?:\.git)?$")
+
+# Single path segment (same charset as ``owner``/``repo``). Shared by the
+# ``sourceBase`` and relative-source patterns below.
+_SEGMENT = r"[A-Za-z0-9._-]+"
+
+# Marketplace-level ``sourceBase``: ``https://host.tld/<segment>(/<segment>)*``.
+# Unlike per-entry ``source`` this allows arbitrary path depth (enterprise
+# GitLab nested groups), but keeps #1288's security posture otherwise:
+# https only, FQDN host, no ``.git`` / query / fragment / port / userinfo.
+# ``..`` survives this charset, so callers MUST also run the path through
+# ``validate_path_segments`` (defense in depth).
+SOURCE_BASE_RE = re.compile(rf"^https://{_HOST_PAT}/{_SEGMENT}(?:/{_SEGMENT})*$")
+
+# A host-less relative source (``my-package``, ``a/b/c``). Only meaningful when
+# a marketplace ``sourceBase`` is declared, in which case it composes onto the
+# base. Standard 2-segment ``owner/repo`` already matches ``SOURCE_RE``; this
+# pattern additionally admits the 1-segment and 3+-segment relative forms.
+RELATIVE_SOURCE_RE = re.compile(rf"^{_SEGMENT}(?:/{_SEGMENT})*$")
 
 
 def split_host_from_source(source: str) -> tuple[str | None, str]:
@@ -224,6 +244,7 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "codex",
         "packages",
         "versioning",
+        "sourceBase",  # optional git base that relative package sources compose onto
     }
 )
 
@@ -388,6 +409,9 @@ class MarketplaceConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
     versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
+    # Optional git base (``https://host/path``) that host-less relative package
+    # sources compose onto. ``None`` preserves today's behavior exactly.
+    source_base: str | None = None
     packages: tuple[PackageEntry, ...] = ()
     output_specs: tuple[MarketplaceOutputSpec, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -433,27 +457,89 @@ def _validate_semver(version: str, *, context: str = "version") -> None:
         )
 
 
-def _validate_source(source: str, *, index: int) -> None:
+def _split_source_base(source_base: str) -> tuple[str, str]:
+    """Split a normalized ``sourceBase`` into ``(host, base_path)``.
+
+    ``source_base`` must already be validated and normalized (https scheme,
+    no trailing slash) by :func:`_validate_source_base`.
+    """
+    without_scheme = source_base[len("https://") :]
+    host, _, base_path = without_scheme.partition("/")
+    return host, base_path
+
+
+def _validate_source_base(raw: str) -> str:
+    """Validate and normalize the marketplace ``sourceBase`` field.
+
+    Inherits #1288's per-entry source security posture (https only, FQDN
+    host, no userinfo/port/query/fragment/.git) with one relaxation: the
+    path may be of arbitrary depth (enterprise GitLab nested groups). A
+    trailing ``/`` is stripped so composition is a clean ``base + "/" +
+    source``. Returns the normalized value.
+    """
+    value = raw.strip().rstrip("/")
+    # A base is a group path, not a repository -- reject a trailing ``.git``
+    # (the segment charset below would otherwise admit it).
+    if value.endswith(".git"):
+        raise MarketplaceYmlError(
+            "'marketplace.sourceBase' is a group path, not a repository; "
+            f"it must not end with '.git', got '{raw}'"
+        )
+    if not SOURCE_BASE_RE.match(value):
+        raise MarketplaceYmlError(
+            "'marketplace.sourceBase' must be an https URL of the form "
+            "'https://<host.tld>/<path>' (FQDN host, arbitrary depth; no "
+            "userinfo, port, query, fragment, or '.git' suffix), "
+            f"got '{raw}'"
+        )
+    # Defense in depth: the segment charset admits ``.``/``..``, so run the
+    # path through the sanctioned traversal guard as well.
+    _, base_path = _split_source_base(value)
+    try:
+        validate_path_segments(base_path, context="marketplace.sourceBase")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+    return value
+
+
+def _validate_source(source: str, *, index: int, source_base: str | None = None) -> None:
     """Validate ``source`` field shape and path safety.
 
     Accepts ``owner/repo``, ``host.tld/owner/repo``, ``https://host.tld/
-    owner/repo[.git]``, or ``./<path>``.
+    owner/repo[.git]``, or ``./<path>``. When *source_base* is set, also
+    accepts a host-less relative form (``my-package``, ``a/b/c``) that
+    composes onto the base. Without a base the relative form stays rejected
+    (fail-closed -- there is nothing to compose onto, and a bare name must
+    not silently route to the default host).
     """
     ctx = f"packages[{index}].source"
-    if not SOURCE_RE.match(source):
-        raise MarketplaceYmlError(
-            f"'{ctx}' must be one of "
-            f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
-            f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>', "
-            f"got '{source}'"
-        )
-    is_local = bool(LOCAL_SOURCE_RE.match(source))
-    try:
-        # Local paths legitimately start with ``.`` (current dir) and
-        # may have trailing-slash forms like ``./``.  Allow ``.`` here.
-        validate_path_segments(source, context=ctx, allow_current_dir=is_local)
-    except PathTraversalError as exc:
-        raise MarketplaceYmlError(str(exc)) from exc
+    if SOURCE_RE.match(source):
+        is_local = bool(LOCAL_SOURCE_RE.match(source))
+        try:
+            # Local paths legitimately start with ``.`` (current dir) and
+            # may have trailing-slash forms like ``./``.  Allow ``.`` here.
+            validate_path_segments(source, context=ctx, allow_current_dir=is_local)
+        except PathTraversalError as exc:
+            raise MarketplaceYmlError(str(exc)) from exc
+        return
+    if source_base is not None and RELATIVE_SOURCE_RE.match(source):
+        try:
+            validate_path_segments(source, context=ctx)
+        except PathTraversalError as exc:
+            raise MarketplaceYmlError(str(exc)) from exc
+        return
+    hint = (
+        " (or a host-less relative path like '<owner>/<repo>' that composes "
+        "onto marketplace.sourceBase)"
+        if source_base is not None
+        else " -- to use a relative path, declare 'marketplace.sourceBase'"
+    )
+    raise MarketplaceYmlError(
+        f"'{ctx}' must be one of "
+        f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
+        f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>'"
+        f"{hint}, got '{source}'"
+    )
 
 
 def _validate_tag_pattern(pattern: str, *, context: str) -> None:
@@ -700,8 +786,12 @@ def _parse_outputs(
     return tuple(outputs_list), tuple(specs_list)
 
 
-def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
-    """Parse and validate a single ``packages`` entry."""
+def _parse_package_entry(raw: Any, index: int, *, source_base: str | None = None) -> PackageEntry:
+    """Parse and validate a single ``packages`` entry.
+
+    When *source_base* is set, a host-less relative ``source`` composes onto
+    the base (see :func:`_validate_source` and the rewrite below).
+    """
     if not isinstance(raw, dict):
         raise MarketplaceYmlError(f"packages[{index}] must be a mapping")
 
@@ -710,13 +800,24 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
 
     name = _require_str(raw, "name", context=f"packages[{index}]")
     source = _require_str(raw, "source", context=f"packages[{index}]")
-    _validate_source(source, index=index)
+    _validate_source(source, index=index, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     # Detect host-prefixed source (e.g. ``host.tld/owner/repo``) and split
     # the host off so downstream consumers continue to see ``owner/repo``.
     host: str | None = None
     if not is_local:
         host, source = split_host_from_source(source)
+        # A host-less source under a declared ``sourceBase`` composes onto the
+        # base: rewrite it to the equivalent host-prefixed form so every
+        # downstream consumer (resolver, builder, output mappers) treats it
+        # exactly like a #1288 ``host.tld/owner/repo`` entry -- no special
+        # casing needed beyond this point. Host-prefixed and full-URL sources
+        # already carry their own host, so they are left untouched as
+        # per-entry overrides (the base is ignored), per the locked semantics.
+        if host is None and source_base is not None:
+            base_host, base_path = _split_source_base(source_base)
+            host = base_host
+            source = f"{base_path}/{source}"
 
     # APM-only: subdir (irrelevant for local packages but harmless)
     subdir: str | None = raw.get("subdir")
@@ -1166,6 +1267,14 @@ def _build_config(
                 )
     output_specs = tuple(final_specs_list)
 
+    # -- sourceBase (optional git base for host-less relative package sources) --
+    raw_source_base = marketplace_dict.get("sourceBase")
+    source_base: str | None = None
+    if raw_source_base is not None:
+        if not isinstance(raw_source_base, str) or not raw_source_base.strip():
+            raise MarketplaceYmlError("'marketplace.sourceBase' must be a non-empty string")
+        source_base = _validate_source_base(raw_source_base)
+
     # -- packages --
     raw_packages = marketplace_dict.get("packages")
     if raw_packages is None:
@@ -1176,7 +1285,7 @@ def _build_config(
     entries: list[PackageEntry] = []
     seen_names: dict[str, int] = {}
     for idx, raw_entry in enumerate(raw_packages):
-        entry = _parse_package_entry(raw_entry, idx)
+        entry = _parse_package_entry(raw_entry, idx, source_base=source_base)
         lower_name = entry.name.lower()
         if lower_name in seen_names:
             raise MarketplaceYmlError(
@@ -1209,6 +1318,7 @@ def _build_config(
         metadata=metadata,
         build=build,
         versioning=versioning,
+        source_base=source_base,
         packages=tuple(entries),
         output_specs=output_specs,
         warnings=tuple(warnings_sink),

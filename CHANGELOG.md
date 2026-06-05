@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm.yml` marketplace blocks accept an optional `sourceBase` field: a git base
+  (`https://host/path`, arbitrary depth) that host-less relative package `source`
+  values compose onto, enabling deeply nested enterprise GitLab group paths that
+  the `host.tld/owner/repo` shorthand cannot express. Per-entry host-prefixed and
+  full-URL sources override the base; local and base-less configs are unchanged.
+  (by @leocamello, #1519)
+
 ## [0.18.0] - 2026-06-04
 
 ### Added

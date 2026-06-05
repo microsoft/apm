@@ -22,6 +22,7 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 from ._io import atomic_write
 from .errors import MarketplaceYmlError
 from .yml_schema import (
+    RELATIVE_SOURCE_RE,
     SOURCE_RE,
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
@@ -129,23 +130,39 @@ def _find_entry_index(packages, name: str) -> int:
     raise MarketplaceYmlError(f"Package '{name}' not found")
 
 
-def _validate_source(source: str) -> None:
+def _validate_source(source: str, source_base: str | None = None) -> None:
     """Validate that *source* has one of the accepted shapes.
 
     Accepts ``owner/repo``, ``host.tld/owner/repo``, ``https://host.tld/
-    owner/repo[.git]`` (remote forms), or ``./<path>`` (local).
+    owner/repo[.git]`` (remote forms), or ``./<path>`` (local). When
+    *source_base* is set (the file declares ``marketplace.sourceBase``), a
+    host-less relative form (``my-package``, ``a/b/c``) is also accepted and
+    composes onto the base. Mirrors ``yml_schema._validate_source``.
     """
-    if not SOURCE_RE.match(source):
-        raise MarketplaceYmlError(
-            f"'source' must be one of "
-            f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
-            f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>', "
-            f"got '{source}'"
-        )
-    try:
-        validate_path_segments(source, context="source", allow_current_dir=True)
-    except PathTraversalError as exc:
-        raise MarketplaceYmlError(str(exc)) from exc
+    if SOURCE_RE.match(source):
+        try:
+            validate_path_segments(source, context="source", allow_current_dir=True)
+        except PathTraversalError as exc:
+            raise MarketplaceYmlError(str(exc)) from exc
+        return
+    if source_base is not None and RELATIVE_SOURCE_RE.match(source):
+        try:
+            validate_path_segments(source, context="source")
+        except PathTraversalError as exc:
+            raise MarketplaceYmlError(str(exc)) from exc
+        return
+    hint = (
+        " (or a host-less relative path like '<owner>/<repo>' that composes "
+        "onto marketplace.sourceBase)"
+        if source_base is not None
+        else " -- to use a relative path, declare 'marketplace.sourceBase'"
+    )
+    raise MarketplaceYmlError(
+        f"'source' must be one of "
+        f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
+        f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>'"
+        f"{hint}, got '{source}'"
+    )
 
 
 def _validate_subdir(subdir: str) -> None:
@@ -177,8 +194,14 @@ def add_plugin_entry(
 
     Returns the resolved package name.
     """
+    # --- load first so a declared sourceBase can inform source validation ---
+    data, original_text = _load_rt(yml_path)
+    container = _get_marketplace_container(data)
+    raw_base = container.get("sourceBase")
+    source_base = raw_base.strip() if isinstance(raw_base, str) and raw_base.strip() else None
+
     # --- input validation ---
-    _validate_source(source)
+    _validate_source(source, source_base=source_base)
 
     if version is not None and ref is not None:
         raise MarketplaceYmlError("Cannot specify both 'version' and 'ref' -- pick one")
@@ -188,13 +211,10 @@ def add_plugin_entry(
     if subdir is not None:
         _validate_subdir(subdir)
 
-    # Derive name from source repo if not provided.
+    # Derive name from the source's last path segment if not provided
+    # ('owner/repo' -> 'repo', 'a/b/c' -> 'c', 'my-package' -> 'my-package').
     if name is None:
-        name = source.split("/", 1)[1]
-
-    # --- load ---
-    data, original_text = _load_rt(yml_path)
-    container = _get_marketplace_container(data)
+        name = source.rstrip("/").rsplit("/", 1)[-1]
     packages = container.get("packages")
     if packages is None:
         from ruamel.yaml.comments import CommentedSeq
