@@ -7,6 +7,7 @@ paths stay stable while this module owns the full install flow.
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,26 +19,39 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
 
 
+@dataclass
+class RegistryGroupInstallContext:
+    """All call-time state for a single registry-group install pass.
+
+    Groups the per-call parameters for :func:`_install_registry_group` to
+    keep its signature within the PLR0913 (max-args) threshold while
+    preserving identical behaviour.  ``servers_to_update`` and
+    ``successful_updates`` are mutable sets that are modified in-place.
+    """
+
+    group_dep_names: list
+    group_dep_map: dict
+    group_deps: list
+    target_runtimes: list
+    stored_mcp_configs: dict
+    servers_to_update: builtins.set
+    successful_updates: builtins.set
+    project_root: Any
+    user_scope: bool
+    verbose: bool
+    console: Any
+    logger: Any
+
+
 def _install_registry_group(
+    ctx: RegistryGroupInstallContext,
     operations: Any,
-    group_dep_names: list,
-    group_dep_map: dict,
-    group_deps: list,
-    target_runtimes: list,
-    stored_mcp_configs: dict,
-    servers_to_update: builtins.set,
-    successful_updates: builtins.set,
-    project_root: Any,
-    user_scope: bool,
-    verbose: bool,
-    console: Any,
-    logger: Any,
 ) -> int:
     """Process one group of registry deps through a single ``MCPServerOperations`` instance.
 
-    All deps in ``group_deps`` share the same target registry (either the
-    default or a per-dep override URL).  ``servers_to_update`` and
-    ``successful_updates`` are mutated in-place; the function returns the
+    All deps in ``ctx.group_deps`` share the same target registry (either the
+    default or a per-dep override URL).  ``ctx.servers_to_update`` and
+    ``ctx.successful_updates`` are mutated in-place; the function returns the
     number of servers newly configured or updated in this group.
     """
     # Lazy import: only available after MCPIntegrator finishes loading.
@@ -48,74 +62,76 @@ def _install_registry_group(
     # Early validation: check all servers exist in registry (fail-fast).
     # F4 (#1116): emit a single batch heartbeat so users see the
     # registry round-trip in progress instead of silent stall.
-    logger.mcp_lookup_heartbeat(len(group_dep_names))
-    if verbose:
-        logger.verbose_detail(f"Validating {len(group_deps)} registry servers...")
-    valid_servers, invalid_servers = operations.validate_servers_exist(group_dep_names)
+    ctx.logger.mcp_lookup_heartbeat(len(ctx.group_dep_names))
+    if ctx.verbose:
+        ctx.logger.verbose_detail(f"Validating {len(ctx.group_deps)} registry servers...")
+    valid_servers, invalid_servers = operations.validate_servers_exist(ctx.group_dep_names)
 
     if invalid_servers:
-        logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
-        logger.progress("Run 'apm mcp search <query>' to find available servers")
+        ctx.logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
+        ctx.logger.progress("Run 'apm mcp search <query>' to find available servers")
         raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
 
     if valid_servers:
         servers_to_install = operations.check_servers_needing_installation(
-            target_runtimes,
+            ctx.target_runtimes,
             valid_servers,
-            project_root=project_root,
-            user_scope=user_scope,
+            project_root=ctx.project_root,
+            user_scope=ctx.user_scope,
         )
         already_configured_candidates = [
             dep for dep in valid_servers if dep not in servers_to_install
         ]
 
         # Detect config drift for "already configured" servers
-        if stored_mcp_configs and already_configured_candidates:
+        if ctx.stored_mcp_configs and already_configured_candidates:
             drifted_reg_deps = [
-                group_dep_map[n] for n in already_configured_candidates if n in group_dep_map
+                ctx.group_dep_map[n]
+                for n in already_configured_candidates
+                if n in ctx.group_dep_map
             ]
             drifted = MCPIntegrator._detect_mcp_config_drift(
                 drifted_reg_deps,
-                stored_mcp_configs,
+                ctx.stored_mcp_configs,
             )
             if drifted:
-                servers_to_update.update(drifted)
+                ctx.servers_to_update.update(drifted)
                 MCPIntegrator._append_drifted_to_install_list(servers_to_install, drifted)
         already_configured_servers = [
-            dep for dep in already_configured_candidates if dep not in servers_to_update
+            dep for dep in already_configured_candidates if dep not in ctx.servers_to_update
         ]
 
         if not servers_to_install:
-            if console:
+            if ctx.console:
                 for dep in already_configured_servers:
-                    console.print(
+                    ctx.console.print(
                         f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
                         f"[dim](already configured)[/dim]"
                     )
             else:
-                logger.success("All registry MCP servers already configured")
+                ctx.logger.success("All registry MCP servers already configured")
         else:
             if already_configured_servers:
-                if console:
+                if ctx.console:
                     for dep in already_configured_servers:
-                        console.print(
+                        ctx.console.print(
                             f"|  [green]{STATUS_SYMBOLS['check']}[/green] {dep} "
                             f"[dim](already configured)[/dim]"
                         )
                 else:
-                    logger.verbose_detail(
+                    ctx.logger.verbose_detail(
                         "Already configured registry MCP servers: "
                         f"{', '.join(already_configured_servers)}"
                     )
 
             # Batch fetch server info once
-            if verbose:
-                logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
+            if ctx.verbose:
+                ctx.logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
             server_info_cache = operations.batch_fetch_server_info(servers_to_install)
 
             # Apply overlays
             for server_name in servers_to_install:
-                dep = group_dep_map.get(server_name)
+                dep = ctx.group_dep_map.get(server_name)
                 if dep:
                     MCPIntegrator._apply_overlay(server_info_cache, dep)
 
@@ -124,7 +140,7 @@ def _install_registry_group(
                 servers_to_install, server_info_cache
             )
             for server_name in servers_to_install:
-                dep = group_dep_map.get(server_name)
+                dep = ctx.group_dep_map.get(server_name)
                 if dep and dep.env:
                     shared_env_vars.update(dep.env)
             shared_runtime_vars = operations.collect_runtime_variables(
@@ -133,53 +149,345 @@ def _install_registry_group(
 
             # Install for each target runtime
             for dep in servers_to_install:
-                is_update = dep in servers_to_update
+                is_update = dep in ctx.servers_to_update
                 action_text = "Updating" if is_update else "Configuring"
-                if console:
-                    console.print(f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep}")
-                    console.print(
+                if ctx.console:
+                    ctx.console.print(f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep}")
+                    ctx.console.print(
                         f"|     +- {action_text} for "
-                        f"{', '.join([rt.title() for rt in target_runtimes])}..."
+                        f"{', '.join([rt.title() for rt in ctx.target_runtimes])}..."
                     )
                 else:
-                    logger.progress(
-                        f"{dep}: {action_text.lower()} for {', '.join(target_runtimes)}..."
+                    ctx.logger.progress(
+                        f"{dep}: {action_text.lower()} for {', '.join(ctx.target_runtimes)}..."
                     )
 
                 any_ok = False
-                for rt in target_runtimes:
-                    if verbose:
-                        logger.verbose_detail(f"Configuring {rt}...")
+                for rt in ctx.target_runtimes:
+                    if ctx.verbose:
+                        ctx.logger.verbose_detail(f"Configuring {rt}...")
                     if MCPIntegrator._install_for_runtime(
                         rt,
                         [dep],
                         shared_env_vars,
                         server_info_cache,
                         shared_runtime_vars,
-                        project_root=project_root,
-                        user_scope=user_scope,
-                        logger=logger,
+                        project_root=ctx.project_root,
+                        user_scope=ctx.user_scope,
+                        logger=ctx.logger,
                     ):
                         any_ok = True
 
                 if any_ok:
-                    if console:
+                    if ctx.console:
                         label = "updated" if is_update else "configured"
-                        console.print(
+                        ctx.console.print(
                             f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep} -> "
-                            f"{', '.join([rt.title() for rt in target_runtimes])}"
+                            f"{', '.join([rt.title() for rt in ctx.target_runtimes])}"
                             f" [dim]({label})[/dim]"
                         )
                     configured_count += 1
                     if is_update:
-                        successful_updates.add(dep)
-                elif console:
-                    console.print(
+                        ctx.successful_updates.add(dep)
+                elif ctx.console:
+                    ctx.console.print(
                         f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep}  "
                         "-- failed for all runtimes"
                     )
                 else:
-                    logger.error(f"{dep} -- failed for all runtimes")
+                    ctx.logger.error(f"{dep} -- failed for all runtimes")
+
+    return configured_count
+
+
+def _print_mcp_install_header(console, logger, mcp_deps: list) -> None:
+    """Emit the ``+- MCP Servers (N)`` header for the install progress block.
+
+    Args:
+        console: Rich console for structured output, or None.
+        logger: Command logger used when console is unavailable.
+        mcp_deps: Full list of MCP deps (used for the count only).
+    """
+    if console:
+        try:
+            from rich.text import Text
+
+            header = Text()
+            header.append("+- MCP Servers (", style="cyan")
+            header.append(str(len(mcp_deps)), style="cyan bold")
+            header.append(")", style="cyan")
+            console.print(header)
+        except Exception:
+            logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
+    else:
+        logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
+
+
+def _detect_installed_runtimes(project_root_path: Path, is_vscode_fn) -> list[str]:
+    """Probe which MCP-capable runtimes are available on the current system.
+
+    Uses RuntimeManager/ClientFactory when available; falls back to binary
+    presence checks.  Directory-presence gates opt-in runtimes (cursor,
+    opencode, gemini, windsurf, claude).
+
+    Args:
+        project_root_path: Resolved project root directory.
+        is_vscode_fn: Callable matching the ``_is_vscode_available`` signature.
+
+    Returns:
+        list[str]: Names of runtimes detected as available.
+    """
+    try:
+        from apm_cli.factory import ClientFactory
+        from apm_cli.runtime.manager import RuntimeManager
+
+        manager = RuntimeManager()
+        installed: list[str] = []
+
+        for runtime_name in [
+            "copilot",
+            "codex",
+            "vscode",
+            "cursor",
+            "opencode",
+            "gemini",
+            "windsurf",
+            "claude",
+        ]:
+            try:
+                if runtime_name == "vscode":
+                    if is_vscode_fn(project_root=project_root_path):
+                        ClientFactory.create_client(runtime_name)
+                        installed.append(runtime_name)
+                elif runtime_name == "cursor":
+                    # Cursor is opt-in: only target when .cursor/ exists
+                    if (project_root_path / ".cursor").is_dir():
+                        ClientFactory.create_client(runtime_name)
+                        installed.append(runtime_name)
+                elif runtime_name == "opencode":
+                    # OpenCode is opt-in: only target when .opencode/ exists
+                    if (project_root_path / ".opencode").is_dir():
+                        ClientFactory.create_client(runtime_name)
+                        installed.append(runtime_name)
+                elif runtime_name == "gemini":
+                    # Gemini CLI is opt-in: only target when .gemini/ exists
+                    if (project_root_path / ".gemini").is_dir():
+                        ClientFactory.create_client(runtime_name)
+                        installed.append(runtime_name)
+                elif runtime_name == "windsurf":
+                    # Windsurf is opt-in: only target when .windsurf/ exists
+                    if (project_root_path / ".windsurf").is_dir():
+                        ClientFactory.create_client(runtime_name)
+                        installed.append(runtime_name)
+                elif runtime_name == "claude":
+                    # Claude Code is opt-in: target when .claude/ exists
+                    # in the project (project-scope writes) OR when the
+                    # `claude` binary is on PATH (user-scope writes).
+                    # The PATH check is the gate that prevents the
+                    # adapter from writing to ~/.claude.json on hosts
+                    # where Claude Code was never installed.
+                    if (project_root_path / ".claude").is_dir() or (
+                        find_runtime_binary("claude") is not None
+                    ):
+                        ClientFactory.create_client(runtime_name)
+                        installed.append(runtime_name)
+                else:  # noqa: PLR5501
+                    if manager.is_runtime_available(runtime_name):
+                        ClientFactory.create_client(runtime_name)
+                        installed.append(runtime_name)
+            except (ValueError, ImportError):
+                continue
+    except ImportError:
+        installed = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
+        # VS Code: check binary on PATH or .vscode/ directory presence
+        if is_vscode_fn(project_root=project_root_path):
+            installed.append("vscode")
+        # Cursor is directory-presence based, not binary-based
+        if (project_root_path / ".cursor").is_dir():
+            installed.append("cursor")
+        # OpenCode is directory-presence based
+        if (project_root_path / ".opencode").is_dir():
+            installed.append("opencode")
+        # Gemini CLI is directory-presence based
+        if (project_root_path / ".gemini").is_dir():
+            installed.append("gemini")
+        # Windsurf is directory-presence based
+        if (project_root_path / ".windsurf").is_dir():
+            installed.append("windsurf")
+        # Claude Code: directory-presence OR binary-on-PATH
+        if (project_root_path / ".claude").is_dir() or (find_runtime_binary("claude") is not None):
+            installed.append("claude")
+
+    return installed
+
+
+def _log_runtime_selection(
+    installed_runtimes: list,
+    script_runtimes: list,
+    target_runtimes: list,
+    console,
+    logger,
+) -> None:
+    """Emit verbose runtime-detection diagnostics for the script-runtime path.
+
+    Called only when ``verbose=True`` and ``script_runtimes`` is non-empty.
+
+    Args:
+        installed_runtimes: All runtimes detected as installed.
+        script_runtimes: Runtimes referenced in apm.yml scripts.
+        target_runtimes: Intersection of installed and script runtimes.
+        console: Rich console, or None.
+        logger: Command logger.
+    """
+    if console:
+        console.print(f"|  [cyan]{STATUS_SYMBOLS['info']}  Runtime Detection[/cyan]")
+        console.print(f"|     +- Installed: {', '.join(installed_runtimes)}")
+        console.print(f"|     +- Used in scripts: {', '.join(script_runtimes)}")
+        if target_runtimes:
+            console.print(
+                f"|     +- Target: {', '.join(target_runtimes)} (available + used in scripts)"
+            )
+        console.print("|")
+    else:
+        logger.verbose_detail(f"Installed runtimes: {', '.join(installed_runtimes)}")
+        logger.verbose_detail(f"Script runtimes: {', '.join(script_runtimes)}")
+        if target_runtimes:
+            logger.verbose_detail(f"Target runtimes: {', '.join(target_runtimes)}")
+
+
+def _install_self_defined_deps(
+    MCPIntegrator,
+    self_defined_deps: list,
+    target_runtimes: list,
+    stored_mcp_configs: dict,
+    servers_to_update: builtins.set,
+    successful_updates: builtins.set,
+    project_root,
+    user_scope: bool,
+    verbose: bool,
+    console,
+    logger,
+) -> int:
+    """Install self-defined (``registry: false``) MCP servers.
+
+    Handles drift detection, "already configured" reporting, and per-dep
+    installation across all target runtimes.  Mutates *servers_to_update*
+    and *successful_updates* in-place.
+
+    Args:
+        MCPIntegrator: The MCPIntegrator class (passed to avoid a circular
+            import at module level).
+        self_defined_deps: List of self-defined MCPDependency objects.
+        target_runtimes: Runtimes to configure.
+        stored_mcp_configs: Lockfile configs used for drift detection.
+        servers_to_update: Mutable set of drift-detected server names.
+        successful_updates: Mutable set of successfully updated server names.
+        project_root: Project root for config writes.
+        user_scope: Whether to write user-scope (global) config.
+        verbose: Emit verbose progress messages.
+        console: Rich console for structured output, or None.
+        logger: Command logger.
+
+    Returns:
+        int: Number of servers newly configured or updated in this call.
+    """
+    self_defined_names = [dep.name for dep in self_defined_deps]
+    self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
+        self_defined_names,
+        target_runtimes,
+        project_root=project_root,
+        user_scope=user_scope,
+    )
+    already_configured_candidates_sd = [
+        name for name in self_defined_names if name not in self_defined_to_install
+    ]
+
+    # Detect config drift for "already configured" self-defined servers
+    if stored_mcp_configs and already_configured_candidates_sd:
+        drifted_sd_deps = [
+            dep for dep in self_defined_deps if dep.name in already_configured_candidates_sd
+        ]
+        drifted_sd = MCPIntegrator._detect_mcp_config_drift(
+            drifted_sd_deps,
+            stored_mcp_configs,
+        )
+        if drifted_sd:
+            servers_to_update.update(drifted_sd)
+            MCPIntegrator._append_drifted_to_install_list(self_defined_to_install, drifted_sd)
+    already_configured_self_defined = [
+        name for name in already_configured_candidates_sd if name not in servers_to_update
+    ]
+
+    if already_configured_self_defined:
+        if console:
+            for name in already_configured_self_defined:
+                console.print(
+                    f"|  [green]{STATUS_SYMBOLS['check']}[/green] {name} "
+                    f"[dim](already configured)[/dim]"
+                )
+        else:
+            count = len(already_configured_self_defined)
+            logger.success(f"{count} self-defined server(s) already configured")
+            for name in already_configured_self_defined:
+                logger.verbose_detail(f"{name} already configured, skipping")
+
+    configured_count = 0
+    for dep in self_defined_deps:
+        if dep.name not in self_defined_to_install:
+            continue
+
+        is_update = dep.name in servers_to_update
+        synthetic_info = MCPIntegrator._build_self_defined_info(dep)
+        self_defined_cache = {dep.name: synthetic_info}
+        self_defined_env = dep.env or {}
+
+        transport_label = dep.transport or "stdio"
+        action_text = "Updating" if is_update else "Configuring"
+        if console:
+            console.print(
+                f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep.name} "
+                f"[dim](self-defined, {transport_label})[/dim]"
+            )
+            console.print(
+                f"|     +- {action_text} for {', '.join([rt.title() for rt in target_runtimes])}..."
+            )
+        else:
+            logger.progress(
+                f"{dep.name}: {action_text.lower()} for {', '.join(target_runtimes)}..."
+            )
+
+        any_ok = False
+        for rt in target_runtimes:
+            if verbose:
+                logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
+            if MCPIntegrator._install_for_runtime(
+                rt,
+                [dep.name],
+                self_defined_env,
+                self_defined_cache,
+                project_root=project_root,
+                user_scope=user_scope,
+                logger=logger,
+            ):
+                any_ok = True
+
+        if any_ok:
+            if console:
+                label = "updated" if is_update else "configured"
+                console.print(
+                    f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
+                    f"{', '.join([rt.title() for rt in target_runtimes])}"
+                    f" [dim]({label})[/dim]"
+                )
+            configured_count += 1
+            if is_update:
+                successful_updates.add(dep.name)
+        elif console:
+            console.print(
+                f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep.name}  -- failed for all runtimes"
+            )
+        else:
+            logger.error(f"{dep.name} -- failed for all runtimes")
 
     return configured_count
 
@@ -269,19 +577,7 @@ def run_mcp_install(
         stored_mcp_configs = {}
 
     # Start MCP section with clean header
-    if console:
-        try:
-            from rich.text import Text
-
-            header = Text()
-            header.append("+- MCP Servers (", style="cyan")
-            header.append(str(len(mcp_deps)), style="cyan bold")
-            header.append(")", style="cyan")
-            console.print(header)
-        except Exception:
-            logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
-    else:
-        logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
+    _print_mcp_install_header(console, logger, mcp_deps)
 
     # Runtime detection and multi-runtime installation
     if runtime:
@@ -303,90 +599,7 @@ def run_mcp_install(
                 apm_config = None
 
         # Step 1: Get all installed runtimes on the system
-        try:
-            from apm_cli.factory import ClientFactory
-            from apm_cli.runtime.manager import RuntimeManager
-
-            manager = RuntimeManager()
-            installed_runtimes = []
-
-            for runtime_name in [
-                "copilot",
-                "codex",
-                "vscode",
-                "cursor",
-                "opencode",
-                "gemini",
-                "windsurf",
-                "claude",
-            ]:
-                try:
-                    if runtime_name == "vscode":
-                        if _is_vscode_available(project_root=project_root_path):
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "cursor":
-                        # Cursor is opt-in: only target when .cursor/ exists
-                        if (project_root_path / ".cursor").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "opencode":
-                        # OpenCode is opt-in: only target when .opencode/ exists
-                        if (project_root_path / ".opencode").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "gemini":
-                        # Gemini CLI is opt-in: only target when .gemini/ exists
-                        if (project_root_path / ".gemini").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "windsurf":
-                        # Windsurf is opt-in: only target when .windsurf/ exists
-                        if (project_root_path / ".windsurf").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "claude":
-                        # Claude Code is opt-in: target when .claude/ exists
-                        # in the project (project-scope writes) OR when the
-                        # `claude` binary is on PATH (user-scope writes).
-                        # The PATH check is the gate that prevents the
-                        # adapter from writing to ~/.claude.json on hosts
-                        # where Claude Code was never installed.
-                        if (project_root_path / ".claude").is_dir() or (
-                            find_runtime_binary("claude") is not None
-                        ):
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    else:  # noqa: PLR5501
-                        if manager.is_runtime_available(runtime_name):
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                except (ValueError, ImportError):
-                    continue
-        except ImportError:
-            installed_runtimes = [
-                rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None
-            ]
-            # VS Code: check binary on PATH or .vscode/ directory presence
-            if _is_vscode_available(project_root=project_root_path):
-                installed_runtimes.append("vscode")
-            # Cursor is directory-presence based, not binary-based
-            if (project_root_path / ".cursor").is_dir():
-                installed_runtimes.append("cursor")
-            # OpenCode is directory-presence based
-            if (project_root_path / ".opencode").is_dir():
-                installed_runtimes.append("opencode")
-            # Gemini CLI is directory-presence based
-            if (project_root_path / ".gemini").is_dir():
-                installed_runtimes.append("gemini")
-            # Windsurf is directory-presence based
-            if (project_root_path / ".windsurf").is_dir():
-                installed_runtimes.append("windsurf")
-            # Claude Code: directory-presence OR binary-on-PATH
-            if (project_root_path / ".claude").is_dir() or (
-                find_runtime_binary("claude") is not None
-            ):
-                installed_runtimes.append("claude")
+        installed_runtimes = _detect_installed_runtimes(project_root_path, _is_vscode_available)
 
         # Step 2: Get runtimes referenced in apm.yml scripts
         script_runtimes = MCPIntegrator._detect_runtimes(
@@ -398,21 +611,9 @@ def run_mcp_install(
             target_runtimes = [rt for rt in installed_runtimes if rt in script_runtimes]
 
             if verbose:
-                if console:
-                    console.print(f"|  [cyan]{STATUS_SYMBOLS['info']}  Runtime Detection[/cyan]")
-                    console.print(f"|     +- Installed: {', '.join(installed_runtimes)}")
-                    console.print(f"|     +- Used in scripts: {', '.join(script_runtimes)}")
-                    if target_runtimes:
-                        console.print(
-                            f"|     +- Target: {', '.join(target_runtimes)} "
-                            f"(available + used in scripts)"
-                        )
-                    console.print("|")
-                else:
-                    logger.verbose_detail(f"Installed runtimes: {', '.join(installed_runtimes)}")
-                    logger.verbose_detail(f"Script runtimes: {', '.join(script_runtimes)}")
-                    if target_runtimes:
-                        logger.verbose_detail(f"Target runtimes: {', '.join(target_runtimes)}")
+                _log_runtime_selection(
+                    installed_runtimes, script_runtimes, target_runtimes, console, logger
+                )
 
             if not target_runtimes:
                 logger.warning("Scripts reference runtimes that are not installed")
@@ -516,8 +717,7 @@ def run_mcp_install(
                 ]
                 group_dep_map = {dep.name: dep for dep in group_deps_list if hasattr(dep, "name")}
                 operations = MCPServerOperations(registry_url=group_registry_url)
-                configured_count += _install_registry_group(
-                    operations=operations,
+                ctx = RegistryGroupInstallContext(
                     group_dep_names=group_dep_names,
                     group_dep_map=group_dep_map,
                     group_deps=group_deps_list,
@@ -531,6 +731,7 @@ def run_mcp_install(
                     console=console,
                     logger=logger,
                 )
+                configured_count += _install_registry_group(ctx=ctx, operations=operations)
 
         except ImportError:
             logger.warning("Registry operations not available")
@@ -539,104 +740,19 @@ def run_mcp_install(
 
     # --- Self-defined deps (registry: false) ---
     if self_defined_deps:
-        self_defined_names = [dep.name for dep in self_defined_deps]
-        self_defined_to_install = MCPIntegrator._check_self_defined_servers_needing_installation(
-            self_defined_names,
+        configured_count += _install_self_defined_deps(
+            MCPIntegrator,
+            self_defined_deps,
             target_runtimes,
-            project_root=project_root,
-            user_scope=user_scope,
+            stored_mcp_configs,
+            servers_to_update,
+            successful_updates,
+            project_root,
+            user_scope,
+            verbose,
+            console,
+            logger,
         )
-        already_configured_candidates_sd = [
-            name for name in self_defined_names if name not in self_defined_to_install
-        ]
-
-        # Detect config drift for "already configured" self-defined servers
-        if stored_mcp_configs and already_configured_candidates_sd:
-            drifted_sd_deps = [
-                dep for dep in self_defined_deps if dep.name in already_configured_candidates_sd
-            ]
-            drifted_sd = MCPIntegrator._detect_mcp_config_drift(
-                drifted_sd_deps,
-                stored_mcp_configs,
-            )
-            if drifted_sd:
-                servers_to_update.update(drifted_sd)
-                MCPIntegrator._append_drifted_to_install_list(self_defined_to_install, drifted_sd)
-        already_configured_self_defined = [
-            name for name in already_configured_candidates_sd if name not in servers_to_update
-        ]
-
-        if already_configured_self_defined:
-            if console:
-                for name in already_configured_self_defined:
-                    console.print(
-                        f"|  [green]{STATUS_SYMBOLS['check']}[/green] {name} "
-                        f"[dim](already configured)[/dim]"
-                    )
-            else:
-                count = len(already_configured_self_defined)
-                logger.success(f"{count} self-defined server(s) already configured")
-                for name in already_configured_self_defined:
-                    logger.verbose_detail(f"{name} already configured, skipping")
-
-        for dep in self_defined_deps:
-            if dep.name not in self_defined_to_install:
-                continue
-
-            is_update = dep.name in servers_to_update
-            synthetic_info = MCPIntegrator._build_self_defined_info(dep)
-            self_defined_cache = {dep.name: synthetic_info}
-            self_defined_env = dep.env or {}
-
-            transport_label = dep.transport or "stdio"
-            action_text = "Updating" if is_update else "Configuring"
-            if console:
-                console.print(
-                    f"|  [cyan]{STATUS_SYMBOLS['running']}[/cyan]  {dep.name} "
-                    f"[dim](self-defined, {transport_label})[/dim]"
-                )
-                console.print(
-                    f"|     +- {action_text} for "
-                    f"{', '.join([rt.title() for rt in target_runtimes])}..."
-                )
-            else:
-                logger.progress(
-                    f"{dep.name}: {action_text.lower()} for {', '.join(target_runtimes)}..."
-                )
-
-            any_ok = False
-            for rt in target_runtimes:
-                if verbose:
-                    logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
-                if MCPIntegrator._install_for_runtime(
-                    rt,
-                    [dep.name],
-                    self_defined_env,
-                    self_defined_cache,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                    logger=logger,
-                ):
-                    any_ok = True
-
-            if any_ok:
-                if console:
-                    label = "updated" if is_update else "configured"
-                    console.print(
-                        f"|  [green]{STATUS_SYMBOLS['check']}[/green]  {dep.name} -> "
-                        f"{', '.join([rt.title() for rt in target_runtimes])}"
-                        f" [dim]({label})[/dim]"
-                    )
-                configured_count += 1
-                if is_update:
-                    successful_updates.add(dep.name)
-            elif console:
-                console.print(
-                    f"|  [red]{STATUS_SYMBOLS['cross']}[/red]  {dep.name}  "
-                    "-- failed for all runtimes"
-                )
-            else:
-                logger.error(f"{dep.name} -- failed for all runtimes")
 
     # Close the panel
     if console:

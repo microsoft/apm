@@ -73,6 +73,30 @@ def to_hyphen_case(name: str) -> str:
     return result[:64]
 
 
+def _describe_pattern_mismatch(name: str) -> str:
+    """Return a human-readable error message for a skill name that failed the pattern check.
+
+    Called only when the caller has already established that *name* does not
+    match ``^[a-z0-9]([a-z0-9-]*[a-z0-9])?$``.
+
+    Args:
+        name: The invalid skill name.
+
+    Returns:
+        str: A descriptive error message explaining the specific violation.
+    """
+    if any(c.isupper() for c in name):
+        return "Skill name must be lowercase (no uppercase letters)"
+    if "_" in name:
+        return "Skill name cannot contain underscores (use hyphens instead)"
+    if " " in name:
+        return "Skill name cannot contain spaces (use hyphens instead)"
+    invalid_chars = set(re.findall(r"[^a-z0-9-]", name))
+    if invalid_chars:
+        return f"Skill name contains invalid characters: {', '.join(sorted(invalid_chars))}"
+    return "Skill name must be lowercase alphanumeric with hyphens only"
+
+
 def validate_skill_name(name: str) -> tuple[bool, str]:
     """Validate skill name per agentskills.io spec.
 
@@ -93,7 +117,6 @@ def validate_skill_name(name: str) -> tuple[bool, str]:
     # Check length
     if len(name) < 1:
         return (False, "Skill name cannot be empty")
-
     if len(name) > 64:
         return (False, f"Skill name must be 1-64 characters (got {len(name)})")
 
@@ -104,7 +127,6 @@ def validate_skill_name(name: str) -> tuple[bool, str]:
     # Check for leading/trailing hyphens
     if name.startswith("-"):
         return (False, "Skill name cannot start with a hyphen")
-
     if name.endswith("-"):
         return (False, "Skill name cannot end with a hyphen")
 
@@ -112,25 +134,7 @@ def validate_skill_name(name: str) -> tuple[bool, str]:
     # Pattern: must start and end with alphanumeric, with alphanumeric or hyphens in between
     pattern = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
     if not re.match(pattern, name):
-        # Determine specific error
-        if any(c.isupper() for c in name):
-            return (False, "Skill name must be lowercase (no uppercase letters)")
-
-        if "_" in name:
-            return (False, "Skill name cannot contain underscores (use hyphens instead)")
-
-        if " " in name:
-            return (False, "Skill name cannot contain spaces (use hyphens instead)")
-
-        # Check for other invalid characters
-        invalid_chars = set(re.findall(r"[^a-z0-9-]", name))
-        if invalid_chars:
-            return (
-                False,
-                f"Skill name contains invalid characters: {', '.join(sorted(invalid_chars))}",
-            )
-
-        return (False, "Skill name must be lowercase alphanumeric with hyphens only")
+        return (False, _describe_pattern_mismatch(name))
 
     return (True, "")
 

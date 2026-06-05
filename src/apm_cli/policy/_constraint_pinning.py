@@ -114,6 +114,24 @@ def _classify_range(spec: str) -> UnboundedReason | None:
     return None
 
 
+def _classify_registry_constraint(ref: str | None) -> UnboundedReason | None:
+    """Classify the constraint for a registry-sourced dependency.
+
+    Registry deps use semver ranges as their ref.  Callers must have
+    imported ``is_semver_range`` before calling this helper.
+    """
+    from apm_cli.deps.registry.semver import is_semver_range
+
+    if ref is None or not ref.strip():
+        # A registry dep without a constraint is itself unbounded.
+        return UnboundedReason.NO_REF
+    if is_semver_range(ref):
+        return _classify_range(ref)
+    # Registry resolver rejects non-semver refs at parse time, but
+    # defence-in-depth: treat anything else as a bare branch.
+    return UnboundedReason.BARE_BRANCH
+
+
 def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | None:
     """Return ``None`` if *dep*'s constraint is pinned, otherwise the reason.
 
@@ -139,14 +157,7 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
 
     # 2. Registry deps: the ref IS the semver range (or a single version).
     if source == "registry":
-        if ref is None or not ref.strip():
-            # A registry dep without a constraint is itself unbounded.
-            return UnboundedReason.NO_REF
-        if is_semver_range(ref):
-            return _classify_range(ref)
-        # Registry resolver rejects non-semver refs at parse time, but
-        # defence-in-depth: treat anything else as a bare branch.
-        return UnboundedReason.BARE_BRANCH
+        return _classify_registry_constraint(ref)
 
     # 3. Empty / missing ref.
     if ref is None or not ref.strip():
@@ -154,12 +165,8 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
 
     spec = ref.strip()
 
-    # 4. Full SHA -> deterministic pin (covers marketplace SHA-pinning too).
-    if _SHA_RE.match(spec):
-        return None
-
-    # 5. Literal v-prefixed tag -> pinned.
-    if _LITERAL_TAG_RE.match(spec):
+    # 4+5. Full SHA or literal v-prefixed tag -> deterministic pin.
+    if _SHA_RE.match(spec) or _LITERAL_TAG_RE.match(spec):
         return None
 
     # 5b. Bare wildcard tokens ('*', 'x', 'X') -- handled before the

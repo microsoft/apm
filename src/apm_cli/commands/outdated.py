@@ -61,7 +61,86 @@ def _find_remote_tip(ref_name, remote_refs):
     return None
 
 
-def _check_marketplace_ref(dep, verbose):
+def _check_tag_outdated(
+    package_name: str,
+    current_ref: str,
+    remote_refs: list,
+    verbose: bool,
+) -> OutdatedRow:
+    """Return an :class:`OutdatedRow` for a tag-pinned dependency."""
+    from ..models.dependency.types import GitReferenceType
+    from ..utils.version_checker import is_newer_version
+
+    tag_refs = [r for r in remote_refs if r.ref_type == GitReferenceType.TAG]
+    if not tag_refs:
+        return OutdatedRow(
+            package=package_name,
+            current=current_ref,
+            latest="-",
+            status="unknown",
+            source="git tags",
+        )
+
+    latest_tag = tag_refs[0].name
+    current_ver = _strip_v(current_ref)
+    latest_ver = _strip_v(latest_tag)
+
+    if is_newer_version(current_ver, latest_ver):
+        extra = [r.name for r in tag_refs[:10]] if verbose else []
+        return OutdatedRow(
+            package=package_name,
+            current=current_ref,
+            latest=latest_tag,
+            status="outdated",
+            extra_tags=extra,
+            source="git tags",
+        )
+    return OutdatedRow(
+        package=package_name,
+        current=current_ref,
+        latest=latest_tag,
+        status="up-to-date",
+        source="git tags",
+    )
+
+
+def _check_branch_outdated(
+    package_name: str,
+    current_ref: str,
+    locked_sha: str,
+    remote_refs: list,
+) -> OutdatedRow:
+    """Return an :class:`OutdatedRow` for a branch-tracked dependency."""
+    remote_tip_sha = _find_remote_tip(current_ref, remote_refs)
+
+    if not remote_tip_sha:
+        return OutdatedRow(
+            package=package_name,
+            current=current_ref or "(none)",
+            latest="-",
+            status="unknown",
+            source="git branch",
+        )
+
+    display_ref = current_ref or "(default)"
+    if locked_sha and locked_sha != remote_tip_sha:
+        return OutdatedRow(
+            package=package_name,
+            current=display_ref,
+            latest=remote_tip_sha[:8],
+            status="outdated",
+            source="git branch",
+        )
+    return OutdatedRow(
+        package=package_name,
+        current=display_ref,
+        latest=remote_tip_sha[:8],
+        status="up-to-date",
+        source="git branch",
+    )
+
+
+
     """Check a marketplace-sourced dep against its marketplace entry.
 
     Compares the installed ref (resolved_ref or resolved_commit) against
@@ -106,21 +185,14 @@ def _check_marketplace_ref(dep, verbose):
     if not plugin:
         return None
 
-    # Determine marketplace entry's current ref
     mkt_ref = None
     mkt_version = plugin.version or ""
     if isinstance(plugin.source, dict):
         mkt_ref = plugin.source.get("ref", "")
-    else:
-        # String sources are relative paths, not refs -- skip
-        return None
-
-    if not mkt_ref:
-        return None
-
-    # Determine installed ref
+    # Non-dict (string) sources are relative paths, not refs; treat as missing.
+    # Also guard against empty mkt_ref and missing installed_ref in one check.
     installed_ref = dep.resolved_ref or dep.resolved_commit or ""
-    if not installed_ref:
+    if not mkt_ref or not installed_ref:
         return None
 
     package_name = f"{dep.marketplace_plugin_name}@{dep.discovered_via}"
@@ -165,96 +237,24 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
         return marketplace_result
 
     from ..models.dependency.reference import DependencyReference
-    from ..models.dependency.types import GitReferenceType
-    from ..utils.version_checker import is_newer_version
 
     current_ref = dep.resolved_ref or ""
     locked_sha = dep.resolved_commit or ""
     package_name = dep.get_unique_key()
 
-    # Build a DependencyReference to query remote refs
+    # Build a DependencyReference and fetch remote refs; merge both failure modes.
     try:
-        # Use parse() to correctly handle all host types (GitHub, ADO, etc.)
         full_url = f"{dep.host}/{dep.repo_url}" if dep.host else dep.repo_url
         dep_ref = DependencyReference.parse(full_url)
-    except Exception:
-        return OutdatedRow(
-            package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
-        )
-
-    # Fetch remote refs
-    try:
         remote_refs = downloader.list_remote_refs(dep_ref)
     except Exception:
         return OutdatedRow(
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    is_tag = _is_tag_ref(current_ref)
-
-    if is_tag:
-        tag_refs = [r for r in remote_refs if r.ref_type == GitReferenceType.TAG]
-        if not tag_refs:
-            return OutdatedRow(
-                package=package_name,
-                current=current_ref,
-                latest="-",
-                status="unknown",
-                source="git tags",
-            )
-
-        latest_tag = tag_refs[0].name
-        current_ver = _strip_v(current_ref)
-        latest_ver = _strip_v(latest_tag)
-
-        if is_newer_version(current_ver, latest_ver):
-            extra = [r.name for r in tag_refs[:10]] if verbose else []
-            return OutdatedRow(
-                package=package_name,
-                current=current_ref,
-                latest=latest_tag,
-                status="outdated",
-                extra_tags=extra,
-                source="git tags",
-            )
-        else:
-            return OutdatedRow(
-                package=package_name,
-                current=current_ref,
-                latest=latest_tag,
-                status="up-to-date",
-                source="git tags",
-            )
-    else:
-        remote_tip_sha = _find_remote_tip(current_ref, remote_refs)
-
-        if not remote_tip_sha:
-            return OutdatedRow(
-                package=package_name,
-                current=current_ref or "(none)",
-                latest="-",
-                status="unknown",
-                source="git branch",
-            )
-
-        display_ref = current_ref or "(default)"
-        if locked_sha and locked_sha != remote_tip_sha:
-            latest_display = remote_tip_sha[:8]
-            return OutdatedRow(
-                package=package_name,
-                current=display_ref,
-                latest=latest_display,
-                status="outdated",
-                source="git branch",
-            )
-        else:
-            return OutdatedRow(
-                package=package_name,
-                current=display_ref,
-                latest=remote_tip_sha[:8],
-                status="up-to-date",
-                source="git branch",
-            )
+    if _is_tag_ref(current_ref):
+        return _check_tag_outdated(package_name, current_ref, remote_refs, verbose)
+    return _check_branch_outdated(package_name, current_ref, locked_sha, remote_refs)
 
 
 @click.command(name="outdated", help="Show outdated locked dependencies")

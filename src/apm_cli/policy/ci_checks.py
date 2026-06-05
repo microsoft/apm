@@ -525,42 +525,28 @@ def _check_drift(
     )
 
 
-# -- Aggregate runner ----------------------------------------------
-
-
-def run_baseline_checks(
+def _run_lockfile_and_integrity_checks(
+    result: CIAuditResult,
     project_root: Path,
-    *,
-    fail_fast: bool = True,
-    ci_mode: bool = False,
-) -> CIAuditResult:
-    """Run all baseline CI checks against a project directory.
+    apm_yml_path: Path,
+    manifest,
+    fail_fast: bool,
+    ci_mode: bool,
+) -> None:
+    """Run lockfile-existence and file-integrity checks, appending to *result*.
 
-    When *fail_fast* is ``True`` (default), stops after the first
-    failing check to skip expensive I/O (e.g. content integrity scan).
-    When *ci_mode* is ``True``, the ``manifest-missing`` check is a hard
-    failure (``passed=False``); otherwise it is an advisory warning only.
-    Returns :class:`CIAuditResult` with individual check results.
+    Mutates *result* in-place; returns nothing.  Early-returns when a
+    prerequisite check fails so expensive I/O steps are skipped.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from ._shared import _parse_apm_yml_safe
-
-    result = CIAuditResult()
-    apm_yml_path = project_root / "apm.yml"
-
-    # Parse manifest ONCE -- this function owns parse-error handling.
-    manifest = None
-    if apm_yml_path.exists():
-        manifest = _parse_apm_yml_safe(apm_yml_path, result)
-        if manifest is None:
-            return result
+    from ._shared import _parse_apm_yml_safe  # noqa: F401 (imported for side effects)
 
     # Check 1: Lockfile exists (manifest already parsed, pass it in)
     result.checks.append(_check_lockfile_exists(project_root, manifest))
 
     # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:
-        return result
+        return
 
     lockfile_path = get_lockfile_path(project_root)
 
@@ -584,42 +570,61 @@ def run_baseline_checks(
                         ),
                     )
                 )
-        return result
+        return
 
     lock = LockFile.read(lockfile_path)
     if lock is None:
-        return result
+        return
 
     def _run(check: CheckResult) -> bool:
         """Append check and return True if fail-fast should stop."""
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # Check 2: Ref consistency
-    if _run(_check_ref_consistency(manifest, lock)):
-        return result
-
-    # Check 3: Deployed files present
-    if _run(_check_deployed_files_present(project_root, lock)):
-        return result
-
-    # Check 4: No orphaned packages
-    if _run(_check_no_orphans(manifest, lock)):
-        return result
-
-    # Check 4.5: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock)):
-        return result
-
-    # Check 5: Config consistency (MCP)
-    if _run(_check_config_consistency(manifest, lock)):
-        return result
-
-    # Check 6: Content integrity
-    if _run(_check_content_integrity(project_root, lock)):
-        return result
+    if (
+        _run(_check_ref_consistency(manifest, lock))
+        or _run(_check_deployed_files_present(project_root, lock))
+        or _run(_check_no_orphans(manifest, lock))
+        or _run(_check_skill_subset_consistency(manifest, lock))
+        or _run(_check_config_consistency(manifest, lock))
+        or _run(_check_content_integrity(project_root, lock))
+    ):
+        return
 
     # Check 7: Includes consent (advisory; never hard-fails)
     _run(_check_includes_consent(manifest, lock))
 
+
+# -- Aggregate runner ----------------------------------------------
+
+
+def run_baseline_checks(
+    project_root: Path,
+    *,
+    fail_fast: bool = True,
+    ci_mode: bool = False,
+) -> CIAuditResult:
+    """Run all baseline CI checks against a project directory.
+
+    When *fail_fast* is ``True`` (default), stops after the first
+    failing check to skip expensive I/O (e.g. content integrity scan).
+    When *ci_mode* is ``True``, the ``manifest-missing`` check is a hard
+    failure (``passed=False``); otherwise it is an advisory warning only.
+    Returns :class:`CIAuditResult` with individual check results.
+    """
+    from ._shared import _parse_apm_yml_safe
+
+    result = CIAuditResult()
+    apm_yml_path = project_root / "apm.yml"
+
+    # Parse manifest ONCE -- this function owns parse-error handling.
+    manifest = None
+    if apm_yml_path.exists():
+        manifest = _parse_apm_yml_safe(apm_yml_path, result)
+        if manifest is None:
+            return result
+
+    _run_lockfile_and_integrity_checks(
+        result, project_root, apm_yml_path, manifest, fail_fast, ci_mode
+    )
     return result
