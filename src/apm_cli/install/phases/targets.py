@@ -325,6 +325,30 @@ def run(ctx: InstallContext) -> None:
     # App-closed case (still the common case during install).
 
     # ------------------------------------------------------------------
+    # OpenClaw target gating: explicit --target openclaw with the flag
+    # OFF must hint at the experimental enable command.
+    # ------------------------------------------------------------------
+    _user_asked_openclaw = False
+    if _explicit:
+        if isinstance(_explicit, list):
+            _user_asked_openclaw = "openclaw" in _explicit
+        else:
+            _user_asked_openclaw = _explicit == "openclaw"
+
+    if _user_asked_openclaw:
+        _openclaw_resolved = any(t.name == "openclaw" for t in _targets)
+        if not _openclaw_resolved:
+            from apm_cli.core.experimental import is_enabled as _is_flag_on
+
+            if not _is_flag_on("openclaw"):
+                if ctx.logger:
+                    ctx.logger.progress(
+                        "The 'openclaw' target requires an experimental flag. "
+                        "Run: apm experimental enable openclaw",
+                        symbol="info",
+                    )
+
+    # ------------------------------------------------------------------
     # v2 resolution (#1154): signal-based provenance and strict errors.
     # Runs AFTER the legacy resolver and cowork gates so existing
     # behavior is preserved.  The v2 resolver validates signals and
