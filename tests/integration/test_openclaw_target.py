@@ -17,11 +17,13 @@ tests/unit/install/test_install_target_copilot_cowork_e2e.py for the origin.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -151,6 +153,144 @@ class TestOpenclawParserE2E:
             "Enable hint not found in output -- targets phase may not have run.\n"
             f"Output:\n{combined}"
         )
+
+
+# ===========================================================================
+# TestOpenclawDeployE2E -- flag-ON deploy path tests
+# ===========================================================================
+
+# Bundle helpers (mirrors test_agent_skills_target.py pattern)
+
+_SKILL_NAME = "test-skill"
+_SKILL_BODY = "# Test Skill\nA skill for openclaw integration tests."
+_PLUGIN_ID = "test-openclaw-plugin"
+
+
+def _sha256(content: str) -> str:
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _make_plugin_bundle(tmp_path: Path) -> Path:
+    """Build a minimal plugin-format bundle with one skill."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir(parents=True, exist_ok=True)
+
+    (bundle / "plugin.json").write_text(
+        json.dumps({"id": _PLUGIN_ID, "name": "Test Plugin"}), encoding="utf-8"
+    )
+
+    rel = f"skills/{_SKILL_NAME}/SKILL.md"
+    skill_path = bundle / rel
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(_SKILL_BODY, encoding="utf-8")
+
+    bundle_files = {rel: _sha256(_SKILL_BODY)}
+    lock_data = {
+        "pack": {
+            "format": "plugin",
+            "target": "openclaw",
+            "bundle_files": bundle_files,
+        },
+        "dependencies": [
+            {
+                "repo_url": f"owner/{_PLUGIN_ID}",
+                "resolved_commit": "abc123",
+                "deployed_files": [rel],
+                "deployed_file_hashes": bundle_files,
+            }
+        ],
+    }
+    (bundle / "apm.lock.yaml").write_text(
+        yaml.dump(lock_data, default_flow_style=False), encoding="utf-8"
+    )
+    return bundle
+
+
+class TestOpenclawDeployE2E:
+    """Flag-ON deploy tests exercising the real install pipeline."""
+
+    def test_global_deploys_to_openclaw_skills(
+        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--target openclaw --global with flag ON deploys to ~/.openclaw/skills/."""
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"openclaw": True}})
+
+        # User-scope manifest required for -g install.
+        user_apm = fake_home / ".apm"
+        user_apm.mkdir(parents=True, exist_ok=True)
+        _write_minimal_apm_yml(user_apm)
+
+        bundle = _make_plugin_bundle(tmp_path / "src")
+
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["install", str(bundle), "--target", "openclaw", "--global"],
+            env={**_BASE_ENV},
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, (
+            f"Expected exit 0, got {result.exit_code}.\nOutput:\n{result.output}"
+        )
+
+        # Skill must land under ~/.openclaw/skills/
+        expected = fake_home / ".openclaw" / "skills" / _SKILL_NAME / "SKILL.md"
+        assert expected.is_file(), f"Expected skill at {expected}, output={result.output!r}"
+
+        # Must NOT land under ~/.agents/skills/ (negative assertion)
+        wrong_path = fake_home / ".agents" / "skills" / _SKILL_NAME / "SKILL.md"
+        assert not wrong_path.exists(), (
+            f"Skill must NOT be at {wrong_path} for openclaw --global, output={result.output!r}"
+        )
+
+    def test_project_scope_deploys_to_agents_skills(
+        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--target openclaw (project scope) deploys to .agents/skills/."""
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"openclaw": True}})
+
+        bundle = _make_plugin_bundle(tmp_path / "src")
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": []},
+                },
+                default_flow_style=False,
+            ),
+            encoding="utf-8",
+        )
+        (project / ".github").mkdir()
+
+        monkeypatch.chdir(project)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["install", str(bundle), "--target", "openclaw"],
+            env={**_BASE_ENV},
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, (
+            f"Expected exit 0, got {result.exit_code}.\nOutput:\n{result.output}"
+        )
+
+        expected = project / ".agents" / "skills" / _SKILL_NAME / "SKILL.md"
+        assert expected.is_file(), f"Expected skill at {expected}, output={result.output!r}"
 
 
 # ===========================================================================
