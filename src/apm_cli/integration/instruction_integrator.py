@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
+from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.patterns import parse_apply_to, yaml_double_quote
@@ -33,6 +34,14 @@ class InstructionIntegrator(BaseIntegrator):
     * Claude Code: ``.claude/rules/`` (``.md`` format, applyTo: -> paths:)
     * Gemini CLI: compile-only (GEMINI.md) -- no per-file rule deployment
     """
+
+    # Map format_id -> converter method.  Built once at class load time;
+    # avoids rebuilding the dict on every ``_render_instruction`` call.
+    _FORMAT_CONVERTERS: ClassVar[dict[str, str]] = {
+        "cursor_rules": "_convert_to_cursor_rules",
+        "claude_rules": "_convert_to_claude_rules",
+        "windsurf_rules": "_convert_to_windsurf_rules",
+    }
 
     def find_instruction_files(self, package_path: Path) -> list[Path]:
         """Find all .instructions.md files in a package.
@@ -69,12 +78,8 @@ class InstructionIntegrator(BaseIntegrator):
         """
         content = source.read_text(encoding="utf-8")
         if fmt in RULE_FORMATS:
-            converters = {
-                "cursor_rules": self._convert_to_cursor_rules,
-                "claude_rules": self._convert_to_claude_rules,
-                "windsurf_rules": self._convert_to_windsurf_rules,
-            }
-            content = converters[fmt](content)
+            converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
+            content = converter(content)
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
 
@@ -194,11 +199,15 @@ class InstructionIntegrator(BaseIntegrator):
                 ):
                     files_adopted += 1
                     target_paths.append(target_path)
+                    if diagnostics is not None and getattr(diagnostics, "verbose", False):
+                        _rich_echo(f"  [=] adopted-unchanged: {rel_path}", color="dim")
                     continue
                 target_path.write_text(new_content, encoding="utf-8")
                 total_links_resolved += links_resolved
                 files_integrated += 1
                 target_paths.append(target_path)
+                if diagnostics is not None and getattr(diagnostics, "verbose", False):
+                    _rich_echo(f"  [*] rewritten: {rel_path}", color="dim")
                 continue
 
             skip, adopted = self._check_adopt_or_skip(
