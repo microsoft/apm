@@ -1583,3 +1583,60 @@ class TestWindsurfRulesIntegration:
         )
         assert forced.files_integrated == 1
         assert forced.files_adopted == 0
+
+    def test_verbose_breadcrumb_rewrite_vs_adopt(self):
+        """adopt-vs-rewrite breadcrumbs are emitted only under verbose diagnostics.
+
+        When diagnostics.verbose is True:
+        - a rewrite emits a '[*] rewritten:' line
+        - a subsequent adopt emits a '[=] adopted-unchanged:' line
+        When diagnostics.verbose is False, neither line is emitted.
+        """
+        from unittest.mock import patch
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Python")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+
+        diag_verbose = DiagnosticCollector(verbose=True)
+        captured: list[str] = []
+
+        def _fake_echo(msg, **_kw):
+            captured.append(msg)
+
+        # First deploy (rewrite): verbose breadcrumb must appear.
+        with patch("apm_cli.integration.instruction_integrator._rich_echo", side_effect=_fake_echo):
+            result = self.integrator.integrate_instructions_for_target(
+                windsurf, pkg_info, self.project_root, diagnostics=diag_verbose
+            )
+        assert result.files_integrated == 1
+        assert any("[*] rewritten:" in m for m in captured), f"no rewrite breadcrumb in {captured}"
+
+        # Second deploy (adopt, byte-identical): verbose breadcrumb must appear.
+        captured.clear()
+        with patch("apm_cli.integration.instruction_integrator._rich_echo", side_effect=_fake_echo):
+            adopt = self.integrator.integrate_instructions_for_target(
+                windsurf, pkg_info, self.project_root, diagnostics=diag_verbose
+            )
+        assert adopt.files_adopted == 1
+        assert any("[=] adopted-unchanged:" in m for m in captured), (
+            f"no adopt breadcrumb in {captured}"
+        )
+
+        # Non-verbose diagnostics: no breadcrumb lines at all.
+        captured.clear()
+        diag_quiet = DiagnosticCollector(verbose=False)
+        with patch("apm_cli.integration.instruction_integrator._rich_echo", side_effect=_fake_echo):
+            self.integrator.integrate_instructions_for_target(
+                windsurf, pkg_info, self.project_root, diagnostics=diag_quiet
+            )
+        assert not captured, f"unexpected output under quiet diagnostics: {captured}"
