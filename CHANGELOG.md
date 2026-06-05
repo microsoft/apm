@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Auth credential cascade now emits debug-level logs for every fallback step,
-  making token misconfiguration diagnosable without adding noise to normal output. (#935)
+  making token misconfiguration diagnosable without adding noise to normal output.
+  Enable with ``apm --verbose`` or ``APM_LOG_LEVEL=DEBUG``.
+  (by @danielmeppiel, closes #935, #1664)
 
 ## [0.18.0] - 2026-06-04
 

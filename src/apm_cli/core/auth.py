@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import threading
 from collections.abc import Callable
@@ -50,6 +51,60 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Secret redaction -- applied by SecretRedactionFilter to all debug records
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a secret value follows.  Covers:
+#   token=VALUE, Authorization: Bearer VALUE, Authorization: Basic VALUE,
+#   URL credentials (https://user:pass@host), and bare bearer strings.
+_SECRET_RE = re.compile(
+    r"(?:"
+    r"(?:token|password|secret|authorization|bearer)"  # keyword prefix
+    r"(?:\s*[:=]\s*|\s+)"  # separator
+    r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"  # value (>= 4 chars)
+    r"|"
+    r"://[^:@/\s]+:[^:@/\s]+@"  # URL user:pass@
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _redact_secrets(text: str) -> str:
+    """Replace obvious credential patterns in ``text`` with ``[REDACTED]``.
+
+    Called by :class:`SecretRedactionFilter` before log records are emitted.
+    Also safe to call directly in tests.  Preserves text that contains no
+    secret patterns so non-sensitive messages are returned verbatim.
+    """
+    return _SECRET_RE.sub("[REDACTED]", text)
+
+
+class SecretRedactionFilter(logging.Filter):
+    """Logging filter that redacts secret patterns from all emitted log records.
+
+    Install on the ``apm_cli`` logger (or a sub-logger) when debug logging is
+    enabled so that exception messages carrying HTTP client error strings --
+    which some libraries embed auth headers or token values in -- do not leak
+    credentials into the debug stream.
+
+    Usage::
+
+        logging.getLogger("apm_cli").addFilter(SecretRedactionFilter())
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            redacted = _redact_secrets(msg)
+            if redacted != msg:
+                record.msg = redacted
+                record.args = ()
+        except Exception:
+            pass
+        return True
+
 
 _PORT_CREDENTIAL_DOCS_URL = (
     "https://microsoft.github.io/apm/getting-started/authentication/"
@@ -474,6 +529,7 @@ class AuthResolver:
             except AzureCliBearerError as bearer_exc:
                 # az CLI bearer acquisition failed (not logged in, token expired, etc.).
                 # Fall through to the original PAT error.
+                # Safe: str() emits message only, not stderr attribute.
                 logger.debug(
                     "ADO bearer acquisition failed for %s; falling through to PAT error: %s",
                     host_info.display_name,
@@ -483,9 +539,10 @@ class AuthResolver:
                 # The operation callable may raise any exception type; broad catch is
                 # required because we cannot restrict the caller API without a behavior
                 # change (Case 4: bearer op itself failed after PAT rejection).
+                # Use %r so the exception type is visible in the debug record.
                 logger.debug(
                     "ADO bearer fallback operation raised for %s; re-raising original PAT"
-                    " exception: %s",
+                    " exception: %r",
                     host_info.display_name,
                     bearer_op_exc,
                 )
@@ -498,9 +555,9 @@ class AuthResolver:
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
-                # without restricting the caller API.
+                # without restricting the caller API.  Use %r so the type is visible.
                 logger.debug(
-                    "Auth-only operation failed for ghe_cloud host %s: %s",
+                    "Auth-only operation failed for ghe_cloud host %s: %r",
                     host_info.display_name,
                     exc,
                 )
@@ -513,9 +570,9 @@ class AuthResolver:
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
-                # without restricting the caller API.
+                # without restricting the caller API.  Use %r so the type is visible.
                 logger.debug(
-                    "Auth-only operation failed for ado host %s; trying bearer fallback: %s",
+                    "Auth-only operation failed for ado host %s; trying bearer fallback: %r",
                     host_info.display_name,
                     exc,
                 )
@@ -528,9 +585,9 @@ class AuthResolver:
                 return operation(None, git_env)
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
-                # without restricting the caller API.
+                # without restricting the caller API.  Use %r so the type is visible.
                 logger.debug(
-                    "Unauthenticated access failed for %s; will retry with token: %s",
+                    "Unauthenticated access failed for %s; will retry with token: %r",
                     host_info.display_name,
                     exc,
                 )
@@ -541,7 +598,7 @@ class AuthResolver:
                     except Exception as retry_exc:
                         # operation is caller-provided; broad catch required.
                         logger.debug(
-                            "Authenticated retry also failed for %s: %s",
+                            "Authenticated retry also failed for %s: %r",
                             host_info.display_name,
                             retry_exc,
                         )
@@ -557,9 +614,9 @@ class AuthResolver:
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
-                # without restricting the caller API.
+                # without restricting the caller API.  Use %r so the type is visible.
                 logger.debug(
-                    "Authenticated access failed for %s; will retry unauthenticated: %s",
+                    "Authenticated access failed for %s; will retry unauthenticated: %r",
                     host_info.display_name,
                     exc,
                 )
@@ -570,7 +627,7 @@ class AuthResolver:
                     except Exception as unauth_exc:
                         # operation is caller-provided; broad catch required.
                         logger.debug(
-                            "Unauthenticated retry also failed for %s: %s",
+                            "Unauthenticated retry also failed for %s: %r",
                             host_info.display_name,
                             unauth_exc,
                         )

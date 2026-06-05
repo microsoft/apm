@@ -1511,3 +1511,103 @@ class TestCredentialFallbackOrderRegressionTrap:
 
         full_log = " ".join(r.message for r in caplog.records)
         assert sentinel not in full_log, "Credential values must not appear in debug log output"
+
+    def test_ado_attempts_bearer_before_raising(self):
+        """ADO: when PAT fails with auth signal, bearer MUST be attempted before raising.
+
+        Regression trap -- if the _try_ado_bearer_fallback() call is removed from the
+        ADO branch of try_with_fallback, this test fails because get_bearer_token() is
+        never called and the original PAT exception propagates without the bearer attempt.
+        """
+        from apm_cli.core.azure_cli import AzureCliBearerError
+
+        bearer_calls = []
+
+        with patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True):
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_cls:
+                mock_provider = mock_cls.return_value
+                mock_provider.is_available.return_value = True
+
+                def _get_bearer():
+                    bearer_calls.append(1)
+                    raise AzureCliBearerError("no az login")
+
+                mock_provider.get_bearer_token.side_effect = _get_bearer
+
+                resolver = AuthResolver()
+
+                def ado_op(token, env):
+                    raise RuntimeError("401 unauthorized")
+
+                with pytest.raises(RuntimeError, match="401 unauthorized"):
+                    resolver.try_with_fallback("dev.azure.com", ado_op)
+
+        assert bearer_calls, (
+            "ADO bearer must be attempted before re-raising original PAT error; "
+            "cascade order changed (regression trap #935)"
+        )
+
+    def test_ghe_cloud_never_falls_back_to_unauth(self):
+        """ghe_cloud: unauthenticated fallback must NEVER be attempted.
+
+        GitHub Enterprise Cloud has no public repos; passing None as the token
+        would expose a useless attempt and violate the auth-only contract.
+        This regression trap verifies that `None` is never sent to the operation
+        callable for a ghe_cloud host, even when the authenticated attempt fails.
+        """
+        tokens_seen = []
+
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghe-pat"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+
+                def op_capture(token, env):
+                    tokens_seen.append(token)
+                    raise RuntimeError("ghe_cloud op always fails")
+
+                with pytest.raises(RuntimeError):
+                    resolver.try_with_fallback("contoso.ghe.com", op_capture)
+
+        assert None not in tokens_seen, (
+            "ghe_cloud must never fall back to unauthenticated (None token) access; "
+            "contract violated (regression trap #935)"
+        )
+        assert tokens_seen, "Operation was never called -- test is mis-wired"
+
+    def test_token_in_exception_message_is_redacted(self, caplog):
+        """A secret pattern embedded in an exception message must be stripped from debug output.
+
+        Supply-chain hardening (#935): HTTP client libraries sometimes embed auth
+        headers or token values in their exception messages.  SecretRedactionFilter
+        must intercept those before they reach any log handler.
+        """
+        from apm_cli.core.auth import SecretRedactionFilter
+
+        sentinel = "ghp_EMBEDDED_SECRET_IN_EXC_99999"
+        auth_logger = logging.getLogger("apm_cli.core.auth")
+        redaction_filter = SecretRedactionFilter()
+        auth_logger.addFilter(redaction_filter)
+
+        try:
+            with patch.dict(os.environ, {"GITHUB_APM_PAT": "safe-outer-token"}, clear=True):
+                with patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value=None
+                ):
+                    resolver = AuthResolver()
+
+                    def op_embed_secret(token, env):
+                        if token is not None:
+                            # Simulates an HTTP library embedding a bearer token in
+                            # the exception message (the real supply-chain risk).
+                            raise RuntimeError(f"Bearer {sentinel} was rejected by server")
+                        return "ok"
+
+                    with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                        resolver.try_with_fallback("github.com", op_embed_secret, path="owner/repo")
+        finally:
+            auth_logger.removeFilter(redaction_filter)
+
+        full_log = " ".join(r.message for r in caplog.records)
+        assert sentinel not in full_log, (
+            "Secret embedded in exception message must be redacted by SecretRedactionFilter"
+        )

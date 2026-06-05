@@ -4,6 +4,7 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 """
 
 import ctypes
+import logging
 import os
 import sys
 import warnings
@@ -61,6 +62,48 @@ _CLI_EPILOG = (
 )
 
 
+def _configure_logging(verbose: bool = False) -> None:
+    """Configure stdlib logging for the ``apm_cli`` package.
+
+    Two mechanisms activate debug-level output (either is sufficient):
+
+    * ``--verbose`` / ``-v`` flag on the ``apm`` command.
+    * ``APM_LOG_LEVEL=DEBUG`` environment variable (accepts any stdlib
+      level name: DEBUG, INFO, WARNING, ERROR, CRITICAL).
+
+    When neither is set the ``apm_cli`` logger defaults to WARNING so
+    routine runs stay silent.  A :class:`~apm_cli.core.auth.SecretRedactionFilter`
+    is always installed on the ``apm_cli`` logger to strip token-bearing
+    exception strings from debug records regardless of which mechanism
+    activated debug mode.
+    """
+    env_level_str = os.environ.get("APM_LOG_LEVEL", "").strip().upper()
+    env_level: int | None = (
+        getattr(logging, env_level_str, None) if env_level_str.isalpha() else None
+    )
+
+    if verbose:
+        level = logging.DEBUG
+    elif env_level is not None:
+        level = env_level
+    else:
+        level = logging.WARNING
+
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)s %(name)s %(message)s",
+        stream=sys.stderr,
+    )
+    apm_logger = logging.getLogger("apm_cli")
+    apm_logger.setLevel(level)
+
+    # Install secret-redaction filter (idempotent: skip if already present).
+    from apm_cli.core.auth import SecretRedactionFilter
+
+    if not any(isinstance(f, SecretRedactionFilter) for f in apm_logger.filters):
+        apm_logger.addFilter(SecretRedactionFilter())
+
+
 @click.group(
     help="Agent Package Manager (APM): The package manager for AI-Native Development",
     epilog=_CLI_EPILOG,
@@ -73,10 +116,22 @@ _CLI_EPILOG = (
     is_eager=True,
     help="Show version and exit.",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    default=False,
+    help="Enable debug-level logging (equivalent to APM_LOG_LEVEL=DEBUG).",
+)
 @click.pass_context
-def cli(ctx):
+def cli(ctx, verbose: bool) -> None:
     """Main entry point for the APM CLI."""
     ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
+
+    if verbose:
+        # Upgrade to DEBUG when the flag is set; env-var path runs in main().
+        _configure_logging(verbose=True)
 
     # Suppress only the agents-target deprecation warning so CLI users see
     # the formatted logger.warning() in the install phase, not a double print.
@@ -267,6 +322,7 @@ def _configure_encoding() -> None:
 
 def main():
     """Main entry point for the CLI."""
+    _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
     try:
         cli(obj={})
