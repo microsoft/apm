@@ -62,10 +62,14 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 
-`agent-skills`, `copilot-cowork`, `copilot-app`, and `openclaw` are never
-auto-detected. Select them explicitly with `--target`, or list them in
-a project's `apm.yml` `targets:` field so contributors running plain
-`apm install` pick them up automatically.
+`agent-skills` is never auto-detected but is a canonical target: select it
+with `--target` or list it in a project's `apm.yml` `targets:` field so
+contributors running plain `apm install` pick it up automatically.
+
+`copilot-cowork`, `copilot-app`, and `openclaw` are experimental targets
+that require `apm experimental enable <name>` before use. They are selected
+with `--target` only and cannot be listed in `apm.yml` (the canonical
+targets validator will reject them).
 
 ## copilot
 
