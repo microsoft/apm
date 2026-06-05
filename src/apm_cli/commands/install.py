@@ -102,6 +102,7 @@ from ..install.mcp.registry import (
     validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,  # noqa: F401
     validate_registry_url as _validate_registry_url,
 )
+from ..install.mcp.spec import MCPRequestSpec as _MCPRequestSpec
 from ..utils.console import (  # noqa: F401
     _rich_echo,
     _rich_error,
@@ -587,20 +588,22 @@ def install(  # noqa: PLR0913
         validated_registry_url = _validate_registry_url(registry_url)
 
         _validate_mcp_conflicts(
-            mcp_name=mcp_name,
+            spec=_MCPRequestSpec(
+                mcp_name=mcp_name,
+                transport=transport,
+                url=url,
+                mcp_version=mcp_version,
+                command_argv=command_argv,
+                registry_url=validated_registry_url,
+            ),
             packages=packages,
             pre_dash_packages=pre_dash_packages,
-            transport=transport,
-            url=url,
             env=env_pairs,
             headers=header_pairs,
-            mcp_version=mcp_version,
-            command_argv=command_argv,
             global_=global_,
             only=only,
             update=update,
             any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
-            registry_url=validated_registry_url,
         )
 
         # Normalize --skill: '*' means all (same as absent). Reject with --mcp.

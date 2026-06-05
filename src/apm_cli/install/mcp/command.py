@@ -18,6 +18,7 @@ import click
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
 from .registry import registry_env_override
+from .spec import MCPRequestSpec
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
 
@@ -37,13 +38,9 @@ except ImportError:
 
 def run_mcp_install(
     *,
-    mcp_name: str,
-    transport: str | None,
-    url: str | None,
+    spec: MCPRequestSpec,
     env_pairs: Sequence[str] | None,
     header_pairs: Sequence[str] | None,
-    mcp_version: str | None,
-    command_argv: Sequence[str] | None,
     dev: bool,
     force: bool,
     runtime: str | None,
@@ -51,12 +48,18 @@ def run_mcp_install(
     logger,
     apm_dir: Path,
     scope: str | None,
-    registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
     ``manifest_path`` is derived from ``apm_dir`` (``apm_dir / 'apm.yml'``)."""
     from ...constants import APM_YML_FILENAME
+
+    mcp_name = spec.mcp_name
+    transport = spec.transport
+    url = spec.url
+    mcp_version = spec.mcp_version
+    command_argv = spec.command_argv
+    registry_url = spec.registry_url
 
     manifest_path = apm_dir / APM_YML_FILENAME
     verbose = logger.verbose

@@ -340,7 +340,7 @@ def _install_apm_packages(ctx, outcome):
     # -------------------------------------------------------------------------
     # LSP integration (extracted to install/lsp/integration.py)
     # -------------------------------------------------------------------------
-    from apm_cli.install.lsp import run_lsp_integration
+    from apm_cli.install.lsp import LSPIntegrationContext, run_lsp_integration
 
     lsp_count = run_lsp_integration(
         apm_package=apm_package,
@@ -348,11 +348,13 @@ def _install_apm_packages(ctx, outcome):
         lock_path=_lock_path,
         existing_lock=_existing_lock,
         project_root=ctx.project_root,
-        user_scope=(ctx.scope is InstallScope.USER),
-        should_install=should_install_lsp,
         logger=logger,
         diagnostics=apm_diagnostics,
-        target_context=(mcp_apm_config, ctx.target, ctx.scope),
+        ctx=LSPIntegrationContext(
+            user_scope=(ctx.scope is InstallScope.USER),
+            should_install=should_install_lsp,
+            target_context=(mcp_apm_config, ctx.target, ctx.scope),
+        ),
     )
 
     # Local .apm/ content integration is now handled inside the

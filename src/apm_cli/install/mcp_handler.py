@@ -43,6 +43,7 @@ def _handle_mcp_install(
     from apm_cli.install.mcp.registry import (
         validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,
     )
+    from apm_cli.install.mcp.spec import MCPRequestSpec
 
     transport = mcp_conn.transport
     url = mcp_conn.url
@@ -116,13 +117,16 @@ def _handle_mcp_install(
         logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {mcp_manifest_path}")
         return
     _m._run_mcp_install(
-        mcp_name=mcp_name,
-        transport=transport,
-        url=url,
+        spec=MCPRequestSpec(
+            mcp_name=mcp_name,
+            transport=transport,
+            url=url,
+            mcp_version=mcp_version,
+            command_argv=command_argv,
+            registry_url=validated_registry_url,
+        ),
         env_pairs=env_pairs,
         header_pairs=header_pairs,
-        mcp_version=mcp_version,
-        command_argv=command_argv,
         dev=dev,
         force=force,
         runtime=runtime,
@@ -130,5 +134,4 @@ def _handle_mcp_install(
         logger=logger,
         apm_dir=mcp_apm_dir,
         scope=mcp_scope,
-        registry_url=validated_registry_url,
     )

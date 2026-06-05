@@ -614,6 +614,7 @@ class TestRunMcpInstall:
 
     def test_skipped_status_returns_early(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install
+        from apm_cli.install.mcp.spec import MCPRequestSpec
 
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
@@ -632,13 +633,15 @@ class TestRunMcpInstall:
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
         ):
             run_mcp_install(
-                mcp_name="my-server",
-                transport=None,
-                url=None,
+                spec=MCPRequestSpec(
+                    mcp_name="my-server",
+                    transport=None,
+                    url=None,
+                    mcp_version=None,
+                    command_argv=None,
+                ),
                 env_pairs=None,
                 header_pairs=None,
-                mcp_version=None,
-                command_argv=None,
                 dev=False,
                 force=False,
                 runtime=None,
@@ -653,6 +656,7 @@ class TestRunMcpInstall:
 
     def test_added_string_entry_no_deps_available(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install
+        from apm_cli.install.mcp.spec import MCPRequestSpec
 
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
@@ -672,13 +676,15 @@ class TestRunMcpInstall:
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", False),
         ):
             run_mcp_install(
-                mcp_name="registry-server",
-                transport=None,
-                url=None,
+                spec=MCPRequestSpec(
+                    mcp_name="registry-server",
+                    transport=None,
+                    url=None,
+                    mcp_version=None,
+                    command_argv=None,
+                ),
                 env_pairs=None,
                 header_pairs=None,
-                mcp_version=None,
-                command_argv=None,
                 dev=False,
                 force=False,
                 runtime=None,
@@ -693,6 +699,7 @@ class TestRunMcpInstall:
 
     def test_replaced_dict_entry_no_deps_available(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install
+        from apm_cli.install.mcp.spec import MCPRequestSpec
 
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
@@ -717,13 +724,15 @@ class TestRunMcpInstall:
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", False),
         ):
             run_mcp_install(
-                mcp_name="my-srv",
-                transport="http",
-                url="http://localhost:8000",
+                spec=MCPRequestSpec(
+                    mcp_name="my-srv",
+                    transport="http",
+                    url="http://localhost:8000",
+                    mcp_version=None,
+                    command_argv=None,
+                ),
                 env_pairs=None,
                 header_pairs=None,
-                mcp_version=None,
-                command_argv=None,
                 dev=False,
                 force=True,
                 runtime=None,
@@ -740,6 +749,7 @@ class TestRunMcpInstall:
         import click
 
         from apm_cli.install.mcp.command import run_mcp_install
+        from apm_cli.install.mcp.spec import MCPRequestSpec
 
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
@@ -755,13 +765,15 @@ class TestRunMcpInstall:
         ):
             with pytest.raises(click.UsageError, match=r"bad entry"):
                 run_mcp_install(
-                    mcp_name="bad-srv",
-                    transport=None,
-                    url=None,
+                    spec=MCPRequestSpec(
+                        mcp_name="bad-srv",
+                        transport=None,
+                        url=None,
+                        mcp_version=None,
+                        command_argv=None,
+                    ),
                     env_pairs=None,
                     header_pairs=None,
-                    mcp_version=None,
-                    command_argv=None,
                     dev=False,
                     force=False,
                     runtime=None,
@@ -775,6 +787,7 @@ class TestRunMcpInstall:
         import click
 
         from apm_cli.install.mcp.command import run_mcp_install
+        from apm_cli.install.mcp.spec import MCPRequestSpec
 
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
@@ -810,13 +823,15 @@ class TestRunMcpInstall:
             mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
             with pytest.raises(click.ClickException, match=r"MCP integration failed"):
                 run_mcp_install(
-                    mcp_name="fail-srv",
-                    transport="http",
-                    url="http://x",
+                    spec=MCPRequestSpec(
+                        mcp_name="fail-srv",
+                        transport="http",
+                        url="http://x",
+                        mcp_version=None,
+                        command_argv=None,
+                    ),
                     env_pairs=None,
                     header_pairs=None,
-                    mcp_version=None,
-                    command_argv=None,
                     dev=False,
                     force=False,
                     runtime=None,
@@ -828,6 +843,7 @@ class TestRunMcpInstall:
 
     def test_mcp_integrator_success_updates_lockfile(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install
+        from apm_cli.install.mcp.spec import MCPRequestSpec
 
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
@@ -866,13 +882,15 @@ class TestRunMcpInstall:
             mock_ctx.return_value.__enter__ = MagicMock(return_value=None)
             mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
             run_mcp_install(
-                mcp_name="ok-srv",
-                transport="http",
-                url="http://ok",
+                spec=MCPRequestSpec(
+                    mcp_name="ok-srv",
+                    transport="http",
+                    url="http://ok",
+                    mcp_version=None,
+                    command_argv=None,
+                ),
                 env_pairs=None,
                 header_pairs=None,
-                mcp_version=None,
-                command_argv=None,
                 dev=False,
                 force=False,
                 runtime=None,
