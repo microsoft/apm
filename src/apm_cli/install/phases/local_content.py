@@ -87,13 +87,13 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path) -> None:
+def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path, _visited=None) -> None:
     """Recursively copy *src* into *dst*, dereferencing in-package symlinks.
 
     For every entry in *src*:
 
     * Regular file  -> ``shutil.copy2`` to *dst*.
-    * Symlink       -> resolve atomically, validate that the resolved target
+    * Symlink       -> resolve per-file, validate that the resolved target
                        stays within *pkg_root* via ``ensure_path_within``,
                        then ``shutil.copy2`` the resolved content (or recurse
                        for symlinked directories).  A symlink whose resolved
@@ -102,14 +102,22 @@ def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path) -> 
                        immediately, aborting the copy.
     * Directory     -> recurse.
 
-    This achieves TOCTOU safety because every symlink undergoes an atomic
-    resolve -> validate -> copy2 sequence rather than a bulk copytree that
-    resolves and copies in separate passes.  The containment check is
-    performed against ``pkg_root`` (the top-level package directory passed
-    to ``_copy_local_package``) so that symlinks that cross sub-directory
-    boundaries but remain inside the package are accepted, while any symlink
-    that escapes the package boundary is rejected with a hard failure.
+    Each symlink undergoes a per-file resolve -> validate -> copy2 sequence
+    rather than a bulk copytree that resolves and copies in separate passes,
+    so the containment check fires before any filesystem write for that entry.
+    The containment check is performed against ``pkg_root`` (the top-level
+    package directory passed to ``_copy_local_package``) so that symlinks
+    that cross sub-directory boundaries but remain inside the package are
+    accepted, while any symlink that escapes the package boundary is rejected
+    with a hard failure.
+
+    The ``_visited`` set tracks resolved directory paths already entered.
+    Circular directory-symlink chains (A -> B -> A) are detected deterministically
+    without relying on the OS ELOOP limit (which is platform-dependent).
     """
+    if _visited is None:
+        _visited = set()
+
     dst.mkdir(parents=True, exist_ok=True)
 
     for entry in sorted(src.iterdir()):
@@ -120,7 +128,7 @@ def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path) -> 
                 resolved = entry.resolve(strict=True)
             except OSError as exc:
                 raise PathTraversalError(
-                    f"[x] Symlink '{entry}' has a broken or unresolvable target: {exc}. "
+                    f"Symlink '{entry}' has a broken or unresolvable target: {exc}. "
                     f"Local install aborted."
                 ) from exc
 
@@ -128,18 +136,29 @@ def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path) -> 
                 ensure_path_within(resolved, pkg_root)
             except PathTraversalError as _exc:
                 raise PathTraversalError(
-                    f"[x] Symlink '{entry}' resolves to '{resolved}', which escapes "
+                    f"Symlink '{entry}' resolves to '{resolved}', which escapes "
                     f"the package root '{pkg_root}'. "
-                    f"Only in-package symlinks are dereferenced. Local install aborted."
+                    f"Only in-package symlinks are dereferenced. "
+                    f"Remove the symlink or replace it with a real file copy. "
+                    f"Local install aborted."
                 ) from _exc
 
             if resolved.is_dir():
-                _copy_tree_dereferencing_validated(resolved, dst_entry, pkg_root)
+                if resolved in _visited:
+                    raise PathTraversalError(
+                        f"Circular symlink detected: '{entry}' resolves to '{resolved}', "
+                        f"which was already visited during this install. "
+                        f"Local install aborted."
+                    )
+                _copy_tree_dereferencing_validated(
+                    resolved, dst_entry, pkg_root, _visited | {resolved}
+                )
+                shutil.copystat(resolved, dst_entry)
             else:
                 shutil.copy2(resolved, dst_entry)
-            shutil.copystat(entry, dst_entry)
+                shutil.copystat(resolved, dst_entry)
         elif entry.is_dir():
-            _copy_tree_dereferencing_validated(entry, dst_entry, pkg_root)
+            _copy_tree_dereferencing_validated(entry, dst_entry, pkg_root, _visited)
             shutil.copystat(entry, dst_entry)
         else:
             shutil.copy2(entry, dst_entry)
@@ -236,10 +255,17 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
         apm_modules_dir = install_path.parent.parent  # _local/<name> -> apm_modules
         safe_rmtree(install_path, apm_modules_dir)
 
-    # Dereference in-package symlinks atomically (fix for #1668).
+    # Dereference in-package symlinks per-file (fix for #1668).
     # Each symlink is resolved -> validated within `local` -> copied as a real
     # file, matching the behavior of the remote install path which uses
     # robust_copytree with symlinks=False.  Symlinks that escape the package
     # root raise PathTraversalError immediately (hard-fail, not warn-and-skip).
-    _copy_tree_dereferencing_validated(local, install_path, local)
+    # On any PathTraversalError, clean up install_path to prevent dangling
+    # partial-copy content from a malicious package.
+    try:
+        _copy_tree_dereferencing_validated(local, install_path, local)
+    except PathTraversalError:
+        if install_path.exists():
+            safe_rmtree(install_path, install_path.parent.parent)
+        raise
     return install_path

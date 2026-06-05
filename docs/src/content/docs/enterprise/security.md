@@ -224,7 +224,9 @@ A path must pass all three checks. Failure on any check prevents the file from b
 
 ### Symlink handling
 
-Symlinks are handled with a strict containment policy:
+Symlinks are rejected in most APM operations; the only context where in-package
+symlinks are followed is local-path install, under a per-symlink containment
+check (see below):
 
 - **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
@@ -244,18 +246,20 @@ materialize all content as real files during git checkout.
 
 **Threat model.** A symlink inside a local package could point to a file
 outside the package root, giving a malicious package a path-traversal vector.
-APM prevents this with a per-symlink containment check:
+APM prevents this with a per-symlink containment check (see also
+[Path traversal prevention](#path-traversal-prevention)):
 
-1. Each symlink is resolved atomically (resolve -> validate -> copy).
+1. Each symlink is resolved per-file (resolve -> validate -> copy2) before any
+   filesystem write for that entry.
 2. The resolved target is verified to remain inside the package root using
-   `ensure_path_within()` (#596 containment helper).
+   the `ensure_path_within()` containment helper.
 3. If the resolved target escapes the package root, APM **hard-fails the
    install** with a `PathTraversalError` and a human-readable message naming
    the offending link.  No warn-and-skip; no silent follow.
 4. Only symlinks that resolve within the package root are dereferenced and
    copied as regular files.  External symlinks are never followed.
-
-This prevents symlink-based attacks that could escape allowed directories or cause APM to read or write outside the project root.
+5. Circular directory-symlink chains are detected deterministically with an
+   explicit visited-set guard, independent of OS-level ELOOP limits.
 
 ### Collision detection
 

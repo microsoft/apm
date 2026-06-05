@@ -260,3 +260,121 @@ class TestNonSymlinkFilesUnchanged:
         )
 
         assert result == install_path
+
+
+class TestBrokenSymlink:
+    """Error path: a broken/dangling symlink must hard-fail with a clear error."""
+
+    def test_broken_symlink_raises_path_traversal_error(self, tmp_path: Path) -> None:
+        """_copy_local_package raises PathTraversalError for a dangling symlink.
+
+        A symlink whose target does not exist should fail resolve(strict=True)
+        and be caught as a PathTraversalError with a message naming the link
+        and the reason (broken/unresolvable target).
+        """
+        from apm_cli.install.phases.local_content import _copy_local_package
+
+        pkg_root = tmp_path / "pkg"
+        pkg_root.mkdir()
+        _make_valid_package(pkg_root)
+
+        refs = pkg_root / ".apm" / "skills" / "demo-skill" / "references"
+        nonexistent = tmp_path / "does-not-exist.md"
+        _try_symlink(refs / "broken.md", nonexistent)
+
+        install_path = tmp_path / "apm_modules" / "_local" / "test-pkg"
+        dep_ref = _make_dep_ref(str(pkg_root))
+
+        with pytest.raises(PathTraversalError, match=r"(?i)(broken|unresolvable)"):
+            _copy_local_package(
+                dep_ref,
+                install_path,
+                tmp_path,
+                project_root=tmp_path,
+                logger=NullCommandLogger(),
+            )
+
+
+class TestSymlinkToDirectory:
+    """In-package symlink-to-directory: the resolved directory tree is copied as real files."""
+
+    def test_in_package_symlink_to_directory_materialized(self, tmp_path: Path) -> None:
+        """A symlink pointing to a subdirectory within the package is recursively copied.
+
+        The dest must be a real directory tree (not a symlink) containing
+        the resolved directory's contents as regular files.
+        """
+        from apm_cli.install.phases.local_content import _copy_local_package
+
+        pkg_root = tmp_path / "pkg"
+        pkg_root.mkdir()
+        _make_valid_package(pkg_root)
+
+        shared = pkg_root / ".apm" / "shared"
+        shared.mkdir(parents=True)
+        (shared / "common.md").write_text("# Common\n", encoding="utf-8")
+        (shared / "extra.md").write_text("# Extra\n", encoding="utf-8")
+
+        refs = pkg_root / ".apm" / "skills" / "demo-skill" / "references"
+        _try_symlink(refs / "shared-dir", shared)
+
+        install_path = tmp_path / "apm_modules" / "_local" / "test-pkg"
+        dep_ref = _make_dep_ref(str(pkg_root))
+
+        result = _copy_local_package(
+            dep_ref,
+            install_path,
+            tmp_path,
+            project_root=tmp_path,
+            logger=NullCommandLogger(),
+        )
+
+        assert result is not None, "_copy_local_package should succeed for in-package dir symlink"
+
+        staged_dir = result / ".apm" / "skills" / "demo-skill" / "references" / "shared-dir"
+        assert staged_dir.is_dir(), "Staged path must be a real directory, not a symlink"
+        assert not staged_dir.is_symlink(), "Staged path must not be a symlink"
+        assert (staged_dir / "common.md").read_text(encoding="utf-8") == "# Common\n"
+        assert (staged_dir / "extra.md").read_text(encoding="utf-8") == "# Extra\n"
+
+
+class TestCircularSymlink:
+    """Circular directory symlinks must be detected and hard-fail the install."""
+
+    def test_circular_directory_symlinks_raise_path_traversal_error(self, tmp_path: Path) -> None:
+        """_copy_local_package raises PathTraversalError for circular dir symlinks.
+
+        If a symlink-to-directory creates a cycle (dir_a -> dir_b, dir_b -> dir_a)
+        the visited-set guard must detect this and abort before hitting any
+        OS recursion limit.
+        """
+        from apm_cli.install.phases.local_content import _copy_local_package
+
+        pkg_root = tmp_path / "pkg"
+        pkg_root.mkdir()
+        _make_valid_package(pkg_root)
+
+        dir_a = pkg_root / ".apm" / "dir_a"
+        dir_a.mkdir(parents=True)
+        (dir_a / "file.md").write_text("# A\n", encoding="utf-8")
+
+        dir_b = pkg_root / ".apm" / "dir_b"
+        dir_b.mkdir(parents=True)
+        (dir_b / "file.md").write_text("# B\n", encoding="utf-8")
+
+        # Create a symlink from dir_a/link_to_b -> dir_b (in-package, not escaping)
+        # Then from dir_b/link_to_a -> dir_a (creates cycle)
+        _try_symlink(dir_a / "link_to_b", dir_b)
+        _try_symlink(dir_b / "link_to_a", dir_a)
+
+        install_path = tmp_path / "apm_modules" / "_local" / "test-pkg"
+        dep_ref = _make_dep_ref(str(pkg_root))
+
+        with pytest.raises(PathTraversalError, match=r"(?i)(circular|visited)"):
+            _copy_local_package(
+                dep_ref,
+                install_path,
+                tmp_path,
+                project_root=tmp_path,
+                logger=NullCommandLogger(),
+            )
