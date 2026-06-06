@@ -221,7 +221,7 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
             data = load_yaml(apm_yml_path)
             if isinstance(data, dict):
                 existing_manifest = data
-        except Exception:
+        except (OSError, yaml.YAMLError):
             pass  # Best-effort; fall back to plugin-only metadata
 
     # Generate apm.yml from plugin metadata, merging with existing manifest
@@ -807,9 +807,10 @@ def _generate_apm_yml(
         str: YAML content for apm.yml.
     """
     apm_package: dict[str, Any] = {
-        "name": manifest.get("name"),
-        "version": manifest.get("version", "0.0.0"),
-        "description": manifest.get("description", ""),
+        "name": manifest.get("name") or (existing_manifest or {}).get("name"),
+        "version": manifest.get("version") or (existing_manifest or {}).get("version", "0.0.0"),
+        "description": manifest.get("description")
+        or (existing_manifest or {}).get("description", ""),
     }
 
     # author: spec defines it as {name, email, url} object; accept string too
@@ -819,10 +820,13 @@ def _generate_apm_yml(
             apm_package["author"] = author.get("name", "")
         else:
             apm_package["author"] = str(author)
+    elif existing_manifest and "author" in existing_manifest:
+        apm_package["author"] = existing_manifest["author"]
 
     for field in ("license", "repository", "homepage", "tags"):
-        if field in manifest:
-            apm_package[field] = manifest[field]
+        value = manifest.get(field) or (existing_manifest or {}).get(field)
+        if value is not None:
+            apm_package[field] = value
 
     # --- Dependency merging (#1666) ---
     # Start from the existing manifest's dependencies so they are not
@@ -882,9 +886,9 @@ def _generate_apm_yml(
 
 
 def _union_dep_list(
-    merged: dict[str, list],
+    merged: dict[str, list[Any]],
     key: str,
-    new_entries: list,
+    new_entries: list[Any],
 ) -> None:
     """Append *new_entries* into ``merged[key]`` without duplicates.
 
