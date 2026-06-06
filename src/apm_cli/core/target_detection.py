@@ -278,6 +278,33 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
     return target in ("vscode", "all")
 
 
+def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
+    """Check if instruction dedup is safe for AGENTS.md.
+
+    Returns True only when every target that reads AGENTS.md also reads
+    ``.github/instructions/`` -- meaning instructions can safely be omitted
+    from AGENTS.md without losing context for any consumer.
+
+    Today only Copilot (vscode) reads both locations.  Codex, OpenCode,
+    Windsurf, and Gemini rely on AGENTS.md as their sole instruction source
+    and must always receive instruction content (issue #1678).
+
+    Args:
+        target: The detected or configured target.  May be a string or a
+            frozenset of compiler families for multi-target lists.
+
+    Returns:
+        bool: True if instructions can be omitted from AGENTS.md.
+    """
+    if isinstance(target, frozenset):
+        # Mixed targets: only safe when the sole agents-family consumer is
+        # vscode.  A frozenset with "agents" means non-Copilot targets
+        # (codex, opencode, windsurf) also consume AGENTS.md.
+        return target == frozenset({"vscode"})
+    # Single-string targets: only "vscode" reads .github/instructions/.
+    return target == "vscode"
+
+
 def get_target_description(target: UserTargetType) -> str:
     """Get a human-readable description of what will be generated for a target.
 
