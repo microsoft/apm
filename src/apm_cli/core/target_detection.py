@@ -297,9 +297,11 @@ def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
         bool: True if instructions can be omitted from AGENTS.md.
     """
     if isinstance(target, frozenset):
-        # Mixed targets: only safe when the sole agents-family consumer is
-        # vscode.  A frozenset with "agents" means non-Copilot targets
-        # (codex, opencode, windsurf) also consume AGENTS.md.
+        # Conservative policy: only dedup when the target set is exactly
+        # {"vscode"} (Copilot alone).  Any additional family -- including
+        # "agents" -- means at least one consumer that does not read
+        # .github/instructions/ may be present, so we keep instructions
+        # in AGENTS.md to be safe.
         return target == frozenset({"vscode"})
     # Single-string targets: only "vscode" reads .github/instructions/.
     return target == "vscode"

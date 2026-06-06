@@ -214,12 +214,12 @@ class TestAgentsMdInstructionDedup:
         # Check via the distributed config that skip_instructions was NOT set
         # by verifying instruction content appears in the output
         agents_md = tmp_path / "AGENTS.md"
-        if agents_md.exists():
-            body = agents_md.read_text(encoding="utf-8")
-            assert "Use type hints" in body, (
-                "Codex target must include instructions in AGENTS.md even when "
-                ".github/instructions/ exists. Got:\n" + body
-            )
+        assert agents_md.exists(), "AGENTS.md must be generated for codex target"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "Codex target must include instructions in AGENTS.md even when "
+            ".github/instructions/ exists. Got:\n" + body
+        )
 
     def test_copilot_only_deduplicates_instructions(self, project_with_github_instructions):
         """Copilot (vscode) reads both locations -- dedup should fire."""
@@ -229,10 +229,13 @@ class TestAgentsMdInstructionDedup:
 
         result = compiler._compile_distributed(config, primitives)
 
-        # With dedup active, the distributed compiler should have received
-        # skip_instructions=True. We verify this through the dry_run result
-        # which will contain fewer content entries when instructions are skipped.
+        # With dedup active, the compiled content should not contain the
+        # instruction text because it is already in .github/instructions/.
         assert result.success
+        assert "Use type hints" not in result.content, (
+            "Copilot-only dedup should omit instructions from AGENTS.md "
+            "when .github/instructions/ is populated"
+        )
 
     def test_multi_target_copilot_codex_preserves_instructions(
         self, project_with_github_instructions
@@ -249,11 +252,11 @@ class TestAgentsMdInstructionDedup:
         compiler._compile_distributed(config, primitives)
 
         agents_md = tmp_path / "AGENTS.md"
-        if agents_md.exists():
-            body = agents_md.read_text(encoding="utf-8")
-            assert "Use type hints" in body, (
-                "Mixed copilot+codex target must include instructions in AGENTS.md. Got:\n" + body
-            )
+        assert agents_md.exists(), "AGENTS.md must be generated for mixed copilot+codex target"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "Mixed copilot+codex target must include instructions in AGENTS.md. Got:\n" + body
+        )
 
     def test_no_dedup_flag_overrides_agents_md_dedup(self, project_with_github_instructions):
         """--no-dedup on vscode target must include instructions despite dedup
@@ -269,11 +272,11 @@ class TestAgentsMdInstructionDedup:
         compiler._compile_distributed(config, primitives)
 
         agents_md = tmp_path / "AGENTS.md"
-        if agents_md.exists():
-            body = agents_md.read_text(encoding="utf-8")
-            assert "Use type hints" in body, (
-                "--no-dedup must force instructions into AGENTS.md. Got:\n" + body
-            )
+        assert agents_md.exists(), "AGENTS.md must be generated with --no-dedup"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "--no-dedup must force instructions into AGENTS.md. Got:\n" + body
+        )
 
     def test_all_target_preserves_instructions(self, project_with_github_instructions):
         """target='all' includes Codex -- must NOT dedup."""
@@ -284,8 +287,8 @@ class TestAgentsMdInstructionDedup:
         compiler._compile_distributed(config, primitives)
 
         agents_md = tmp_path / "AGENTS.md"
-        if agents_md.exists():
-            body = agents_md.read_text(encoding="utf-8")
-            assert "Use type hints" in body, (
-                "target='all' must include instructions in AGENTS.md. Got:\n" + body
-            )
+        assert agents_md.exists(), "AGENTS.md must be generated for target='all'"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "target='all' must include instructions in AGENTS.md. Got:\n" + body
+        )
