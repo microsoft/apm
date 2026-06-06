@@ -197,6 +197,37 @@ def _find_extracted_root(extract_dir: Path) -> Path | None:
     return None
 
 
+def _extract_archive_safely(path: Path, temp_dir: Path) -> bool:
+    """Extract a tarball to *temp_dir* after validating all members.
+
+    Returns ``True`` on success, ``False`` when any member is unsafe or
+    when extraction itself fails.
+    """
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            for member in tar.getmembers():
+                if member.issym() or member.islnk():
+                    return False
+                name = member.name
+                if (
+                    name.startswith("/")
+                    or PureWindowsPath(name).drive
+                    or PureWindowsPath(name).is_absolute()
+                ):
+                    return False
+                try:
+                    validate_path_segments(name, context="tar member")
+                except PathTraversalError:
+                    return False
+            if sys.version_info >= (3, 12):
+                tar.extractall(temp_dir, filter="data")
+            else:
+                tar.extractall(temp_dir)  # noqa: S202 -- validated above
+    except (tarfile.TarError, OSError):
+        return False
+    return True
+
+
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     """Probe *path*; return :class:`LocalBundleInfo` or ``None``.
 
@@ -220,40 +251,7 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
 
     if path.is_file() and _looks_like_archive(path):
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
-        try:
-            with tarfile.open(path, "r:gz") as tar:
-                # Reject member symlinks/hardlinks and absolute / parent paths
-                # for safety (analogous to the pack-side filter).  Using
-                # ``validate_path_segments`` normalises backslashes and
-                # percent-decoding, and ``PureWindowsPath`` catches drive-letter
-                # absolute forms (e.g. ``C:/foo``) that ``startswith('/')`` misses.
-                for member in tar.getmembers():
-                    if member.issym() or member.islnk():
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    name = member.name
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    try:
-                        validate_path_segments(name, context="tar member")
-                    except PathTraversalError:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                # tarfile.extractall(filter="data") requires Python 3.12+.
-                # The repo declares requires-python = ">=3.10", so on 3.10/3.11
-                # we extract without the filter.  The pre-extraction validation
-                # above is the primary gate (rejects symlinks, absolute paths,
-                # and any '..' segment), not filter="data".
-                if sys.version_info >= (3, 12):
-                    tar.extractall(temp_dir, filter="data")
-                else:
-                    tar.extractall(temp_dir)  # noqa: S202 -- validated above
-        except (tarfile.TarError, OSError):
+        if not _extract_archive_safely(path, temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         bundle_root = _find_extracted_root(temp_dir)

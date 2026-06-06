@@ -62,6 +62,11 @@ def build_reverse_index(lockfile: LockFile) -> dict[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _ref_with_url(repo_url: str, ref: str) -> str:
+    """Return ``repo_url@ref`` when *repo_url* is non-empty, else *ref*."""
+    return f"{repo_url}@{ref}" if repo_url else ref
+
+
 def _format_origin(dep: LockedDependency) -> str:
     """Return a human-readable ASCII origin string for *dep*.
 
@@ -78,20 +83,11 @@ def _format_origin(dep: LockedDependency) -> str:
     if dep.source == "local" and dep.local_path:
         return dep.local_path
     if dep.resolved_ref:
-        ref_part = dep.resolved_ref
-        if dep.repo_url:
-            return f"{dep.repo_url}@{ref_part}"
-        return ref_part
+        return _ref_with_url(dep.repo_url, dep.resolved_ref)
     if dep.resolved_tag:
-        tag_part = dep.resolved_tag
-        if dep.repo_url:
-            return f"{dep.repo_url}@{tag_part}"
-        return tag_part
+        return _ref_with_url(dep.repo_url, dep.resolved_tag)
     if dep.resolved_commit:
-        commit = dep.resolved_commit[:12]
-        if dep.repo_url:
-            return f"{dep.repo_url}@{commit}"
-        return commit
+        return _ref_with_url(dep.repo_url, dep.resolved_commit[:12])
     return dep.repo_url
 
 
