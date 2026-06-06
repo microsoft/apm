@@ -498,8 +498,16 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     if not isinstance(data, dict):
         return {}
     # Unwrap the { "lspServers": { ... } } envelope when present.
+    # Only unwrap when the inner value looks like a server *map* (all values
+    # are dicts).  A flat-format server literally named "lspServers" would
+    # have scalar values like "command", so the all-dicts check avoids
+    # mis-detecting it as an envelope.
     lsp_inner = data.get("lspServers")
-    if isinstance(lsp_inner, dict):
+    if (
+        isinstance(lsp_inner, dict)
+        and lsp_inner
+        and all(isinstance(v, dict) for v in lsp_inner.values())
+    ):
         return dict(lsp_inner)
     return dict(data)
 

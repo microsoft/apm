@@ -82,6 +82,27 @@ class TestReadLspJson:
         assert "pyright" in result
         assert result["pyright"]["command"] == "pyright-langserver"
 
+    def test_flat_server_named_lspservers_not_unwrapped(self, tmp_path):
+        """A flat-format server literally named 'lspServers' must not be mis-detected as an envelope."""
+        lsp_file = tmp_path / ".lsp.json"
+        lsp_file.write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "command": "my-lsp",
+                        "extensionToLanguage": {".py": "python"},
+                    }
+                }
+            )
+        )
+
+        import logging
+
+        result = _read_lsp_json(lsp_file, logging.getLogger("test"))
+        # Should keep "lspServers" as a server name, not unwrap it
+        assert "lspServers" in result
+        assert result["lspServers"]["command"] == "my-lsp"
+
 
 # ===========================================================================
 # _extract_lsp_servers
