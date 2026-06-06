@@ -479,9 +479,7 @@ class UnifiedLinkResolver:
           ``..`` chains, etc.).
         * Path computation raises (broken filesystem, encoding, ...).
         """
-        if ctx.package_root is None:
-            return None
-        if not ctx.package_root.is_dir():
+        if ctx.package_root is None or not ctx.package_root.is_dir():
             return None
 
         path_part, suffix = self._split_link_target(link_path)
@@ -492,10 +490,6 @@ class UnifiedLinkResolver:
             source_dir = (
                 ctx.source_file.parent if ctx.source_file.is_file() else ctx.source_location
             )
-        except OSError:
-            return None
-
-        try:
             candidate = (source_dir / path_part).resolve()
         except (OSError, ValueError):
             return None
