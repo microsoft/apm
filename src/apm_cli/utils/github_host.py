@@ -187,7 +187,9 @@ def is_github_hostname(hostname: str | None) -> bool:
     if h.endswith(".ghe.com"):
         return True
     # GHES: GITHUB_HOST env var points to a custom GitHub Enterprise Server.
-    ghes_host = os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+    # Use the same normalization as AuthResolver.classify_host() (.lower()
+    # only, no .split("/")[0]) so both stages agree on which env values match.
+    ghes_host = os.environ.get("GITHUB_HOST", "").lower()
     return bool(
         ghes_host
         and ghes_host == h
