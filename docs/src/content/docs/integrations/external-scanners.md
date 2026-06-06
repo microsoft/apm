@@ -49,7 +49,8 @@ apm audit --external sarif --external-sarif report.sarif
 
 External findings merge into APM's report and drive the exit code using the
 same severity scale (SARIF `error` -> critical -> exit **1**, `warning` ->
-exit **2**, `note` -> info, non-gating).
+exit **2**, `note` -> info, non-gating). Configuration and infrastructure
+errors (feature not enabled, scanner not found, malformed SARIF) exit **3**.
 
 ## Invoke a scanner CLI on PATH
 
@@ -61,9 +62,15 @@ executable is resolvable on your `PATH`:
 apm audit --external skillspector
 ```
 
-If the CLI is not on `PATH`, APM tells you so and points you back to the
-file-based path above (`--external sarif --external-sarif <file>`), which needs
-no installation.
+If the CLI is not on `PATH`, APM tells you so and suggests an install command:
+
+```bash
+uv tool install "skillspector @ git+https://github.com/NVIDIA/SkillSpector.git" --python 3.13
+# or: pip install "skillspector @ git+https://github.com/NVIDIA/SkillSpector.git"
+```
+
+SkillSpector requires **Python >= 3.12**. If neither works, use the
+file-based path above (`--external sarif --external-sarif <file>`).
 
 ## Configure scanner behaviour
 
@@ -193,8 +200,8 @@ clear, actionable message rather than silently skipping the check.
   scanners only *add* findings; they never replace or relax APM's own checks.
 - **Repeatable.** Pass `--external` more than once to combine scanners.
 - **Not in `--ci` yet.** Run external scanners in bare `apm audit` mode.
-- **Fail-closed.** Without the experimental flag, `--external` exits non-zero
-  with an actionable message.
+- **Fail-closed.** Without the experimental flag, `--external` exits with
+  code **3** and an actionable message.
 - **Policy floor is an install-time control.** The `scanners.<name>.allow_args`
   kill-switch is enforced during `apm install` (where org policy is loaded). A
   bare `apm audit` run does not load org policy, so it relies on the adapter's
