@@ -94,16 +94,16 @@ ignore = [
 # High initial thresholds set just above current codebase maximums.
 # Prevents new code from exceeding the worst existing violations.
 # Tighten these over time via dedicated refactoring PRs.
-# Stage 1 thresholds (PR #1464, issue #1077).
-# Roadmap: Stage 2 targets max-complexity<=20, max-branches<=25 (McCabe standard).
-max-statements = 200   # Stage 1 (was 275)
-max-args = 15          # Stage 1 (was 18)
-max-branches = 60      # Stage 1 (was 115)
-max-returns = 12       # Stage 1 (was 18)
+# Stage 2 thresholds (issue #1078). Stage 1 (#1077/#1464) values shown for history.
+# A future stage may tighten further toward the McCabe standard (<=20 complexity).
+max-statements = 120   # Stage 2 (Stage 1 was 200)
+max-args = 12          # Stage 2 (Stage 1 was 15)
+max-branches = 40      # Stage 2 (Stage 1 was 60)
+max-returns = 8        # Stage 2 (Stage 1 was 12)
 
 [tool.ruff.lint.mccabe]
-# Stage 1 (was 100). Stage 2 target: <=20 (McCabe industry standard).
-max-complexity = 50
+# Stage 2 (issue #1078). Stage 1 was 50. A future stage may target <=20.
+max-complexity = 35
 
 [tool.ruff.lint.per-file-ignores]
 # Subprocess calls are intentional in a CLI tool

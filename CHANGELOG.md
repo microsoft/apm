@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   making token misconfiguration diagnosable without adding noise to normal output.
   Enable with ``apm --verbose`` or ``APM_LOG_LEVEL=DEBUG``.
   (by @danielmeppiel, closes #935, #1664)
+- Tightened Stage 2 code-complexity thresholds (`max-statements` 120,
+  `max-branches` 40, `max-complexity` 35, `max-args` 12, `max-returns` 8) and
+  lowered the source file-length guardrail to 800 lines, splitting the remaining
+  oversized `policy/` and `marketplace/` modules into focused submodules with no
+  behaviour change. (#1681)
 
 ## [0.18.0] - 2026-06-04
 
