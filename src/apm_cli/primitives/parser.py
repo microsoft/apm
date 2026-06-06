@@ -221,6 +221,30 @@ def _parse_context(
     )
 
 
+_PRIMITIVE_SUFFIXES = (
+    ".chatmode.md",
+    ".instructions.md",
+    ".context.md",
+    ".memory.md",
+    ".agent.md",
+    ".md",
+)
+
+_STRUCTURED_SUBDIRS = frozenset({"chatmodes", "instructions", "context", "memory", "agents"})
+
+
+def _strip_file_ext(basename: str) -> str:
+    """Strip the primitive double-extension from a basename, returning the stem.
+
+    Tries each known suffix in priority order; returns *basename* unchanged when
+    no suffix matches (so callers can detect "no strip happened").
+    """
+    for suffix in _PRIMITIVE_SUFFIXES:
+        if basename.endswith(suffix):
+            return basename[: -len(suffix)]
+    return basename
+
+
 def _extract_primitive_name(file_path: Path) -> str:
     """Extract primitive name from file path based on naming conventions.
 
@@ -230,57 +254,23 @@ def _extract_primitive_name(file_path: Path) -> str:
     Returns:
         str: Extracted primitive name.
     """
-    # Normalize path
     path_parts = file_path.parts
 
-    # Check if it's in a structured directory (.apm/ or .github/)
+    # Structured directory (.apm/ or .github/): strip double extension directly.
     if ".apm" in path_parts or ".github" in path_parts:
         try:
-            # Find the base directory index
-            if ".apm" in path_parts:
-                base_idx = path_parts.index(".apm")
-            else:
-                base_idx = path_parts.index(".github")
-
-            # For structured directories like .apm/chatmodes/name.chatmode.md
-            if base_idx + 2 < len(path_parts) and path_parts[base_idx + 1] in [
-                "chatmodes",
-                "instructions",
-                "context",
-                "memory",
-                "agents",
-            ]:
-                basename = file_path.name
-                # Remove the double extension (.chatmode.md, .instructions.md, .agent.md, etc.)
-                if basename.endswith(".chatmode.md"):
-                    return basename.replace(".chatmode.md", "")
-                elif basename.endswith(".instructions.md"):
-                    return basename.replace(".instructions.md", "")
-                elif basename.endswith(".context.md"):
-                    return basename.replace(".context.md", "")
-                elif basename.endswith(".memory.md"):
-                    return basename.replace(".memory.md", "")
-                elif basename.endswith(".agent.md"):
-                    return basename.replace(".agent.md", "")
-                elif basename.endswith(".md"):
-                    return basename.replace(".md", "")
+            base_idx = (
+                path_parts.index(".apm") if ".apm" in path_parts else path_parts.index(".github")
+            )
+            if base_idx + 2 < len(path_parts) and path_parts[base_idx + 1] in _STRUCTURED_SUBDIRS:
+                return _strip_file_ext(file_path.name)
         except (ValueError, IndexError):
             pass
 
-    # Fallback: extract from filename
-    basename = file_path.name
-    if basename.endswith(".chatmode.md"):
-        return basename.replace(".chatmode.md", "")
-    elif basename.endswith(".instructions.md"):
-        return basename.replace(".instructions.md", "")
-    elif basename.endswith(".context.md"):
-        return basename.replace(".context.md", "")
-    elif basename.endswith(".memory.md"):
-        return basename.replace(".memory.md", "")
-    elif basename.endswith(".md"):
-        return basename.replace(".md", "")
-
-    # Final fallback: use filename without extension
+    # Fallback: strip extension if recognised; otherwise use pathlib stem.
+    stripped = _strip_file_ext(file_path.name)
+    if stripped != file_path.name:
+        return stripped
     return file_path.stem
 
 

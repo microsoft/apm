@@ -103,7 +103,63 @@ UserTargetType = Literal[
 ]
 
 
-def detect_target(  # noqa: PLR0911
+# Maps an explicit/config target name to its internal canonical TargetType.
+# copilot/vscode/agents are aliases that all collapse to "vscode". "minimal"
+# is intentionally absent: an explicit/config "minimal" falls through to
+# folder auto-detection, matching the historical behaviour of the priority
+# chains this table replaced.
+_NAME_TO_CANONICAL: dict[str, TargetType] = {
+    "copilot": "vscode",
+    "vscode": "vscode",
+    "agents": "vscode",
+    "claude": "claude",
+    "cursor": "cursor",
+    "opencode": "opencode",
+    "codex": "codex",
+    "gemini": "gemini",
+    "windsurf": "windsurf",
+    "agent-skills": "agent-skills",
+    "all": "all",
+}
+
+# Ordered folder probes for Priority-3 auto-detection. Each entry pairs an
+# existence test with the label used in the reason string and the canonical
+# target a lone match resolves to. ".github"/".claude" use exists() (file or
+# dir) for backwards compatibility; the newer integrations require a real dir.
+_FOLDER_PROBES: tuple[tuple[str, bool, str, TargetType], ...] = (
+    (".github", False, ".github/", "vscode"),
+    (".claude", False, ".claude/", "claude"),
+    (".cursor", True, ".cursor/", "cursor"),
+    (".opencode", True, ".opencode/", "opencode"),
+    (".codex", True, ".codex/", "codex"),
+    (".gemini", True, ".gemini/", "gemini"),
+    (".windsurf", True, ".windsurf/", "windsurf"),
+)
+
+
+def _detect_from_folders(project_root: Path) -> tuple[TargetType, str]:
+    """Resolve a target from the integration folders present under *project_root*.
+
+    Two or more folders -> ``"all"``; exactly one -> that folder's target;
+    none -> ``"minimal"``. Folder order in :data:`_FOLDER_PROBES` is the
+    tie-break that never triggers for the single-match case but fixes the
+    label ordering in the multi-match reason string.
+    """
+    detected = [
+        (label, canonical)
+        for name, require_dir, label, canonical in _FOLDER_PROBES
+        if ((project_root / name).is_dir() if require_dir else (project_root / name).exists())
+    ]
+    if len(detected) >= 2:
+        labels = " and ".join(label for label, _ in detected)
+        return "all", f"detected {labels} folders"
+    if detected:
+        label, canonical = detected[0]
+        return canonical, f"detected {label} folder"
+    return "minimal", REASON_NO_TARGET_FOLDER
+
+
+def detect_target(
     project_root: Path,
     explicit_target: str | None = None,
     config_target: str | None = None,
@@ -120,90 +176,27 @@ def detect_target(  # noqa: PLR0911
         - target: The detected target type
         - reason: Human-readable explanation for the choice
     """
-    # Priority 1: Explicit --target flag
+    # Normalise: callers may pass a list when apm.yml has ``targets: [...]``.
+    # _NAME_TO_CANONICAL requires a hashable key; extract the first element.
+    if isinstance(explicit_target, list):
+        explicit_target = explicit_target[0] if explicit_target else None
+    if isinstance(config_target, list):
+        config_target = config_target[0] if config_target else None
+
+    # Priority 1: explicit --target flag (always wins when recognised).
     if explicit_target:
-        if explicit_target in ("copilot", "vscode", "agents"):
-            return "vscode", "explicit --target flag"
-        elif explicit_target == "claude":
-            return "claude", "explicit --target flag"
-        elif explicit_target == "cursor":
-            return "cursor", "explicit --target flag"
-        elif explicit_target == "opencode":
-            return "opencode", "explicit --target flag"
-        elif explicit_target == "codex":
-            return "codex", "explicit --target flag"
-        elif explicit_target == "gemini":
-            return "gemini", "explicit --target flag"
-        elif explicit_target == "windsurf":
-            return "windsurf", "explicit --target flag"
-        elif explicit_target == "agent-skills":
-            return "agent-skills", "explicit --target flag"
-        elif explicit_target == "all":
-            return "all", "explicit --target flag"
+        canonical = _NAME_TO_CANONICAL.get(explicit_target)
+        if canonical is not None:
+            return canonical, "explicit --target flag"
 
-    # Priority 2: apm.yml target setting
+    # Priority 2: apm.yml target setting.
     if config_target:
-        if config_target in ("copilot", "vscode", "agents"):
-            return "vscode", "apm.yml target"
-        elif config_target == "claude":
-            return "claude", "apm.yml target"
-        elif config_target == "cursor":
-            return "cursor", "apm.yml target"
-        elif config_target == "opencode":
-            return "opencode", "apm.yml target"
-        elif config_target == "codex":
-            return "codex", "apm.yml target"
-        elif config_target == "gemini":
-            return "gemini", "apm.yml target"
-        elif config_target == "windsurf":
-            return "windsurf", "apm.yml target"
-        elif config_target == "agent-skills":
-            return "agent-skills", "apm.yml target"
-        elif config_target == "all":
-            return "all", "apm.yml target"
+        canonical = _NAME_TO_CANONICAL.get(config_target)
+        if canonical is not None:
+            return canonical, "apm.yml target"
 
-    # Priority 3: Auto-detect from existing folders
-    github_exists = (project_root / ".github").exists()
-    claude_exists = (project_root / ".claude").exists()
-    cursor_exists = (project_root / ".cursor").is_dir()
-    opencode_exists = (project_root / ".opencode").is_dir()
-    codex_exists = (project_root / ".codex").is_dir()
-    gemini_exists = (project_root / ".gemini").is_dir()
-    windsurf_exists = (project_root / ".windsurf").is_dir()
-    detected = []
-    if github_exists:
-        detected.append(".github/")
-    if claude_exists:
-        detected.append(".claude/")
-    if cursor_exists:
-        detected.append(".cursor/")
-    if opencode_exists:
-        detected.append(".opencode/")
-    if codex_exists:
-        detected.append(".codex/")
-    if gemini_exists:
-        detected.append(".gemini/")
-    if windsurf_exists:
-        detected.append(".windsurf/")
-
-    if len(detected) >= 2:
-        return "all", f"detected {' and '.join(detected)} folders"
-    elif github_exists:
-        return "vscode", "detected .github/ folder"
-    elif claude_exists:
-        return "claude", "detected .claude/ folder"
-    elif cursor_exists:
-        return "cursor", "detected .cursor/ folder"
-    elif opencode_exists:
-        return "opencode", "detected .opencode/ folder"
-    elif codex_exists:
-        return "codex", "detected .codex/ folder"
-    elif gemini_exists:
-        return "gemini", "detected .gemini/ folder"
-    elif windsurf_exists:
-        return "windsurf", "detected .windsurf/ folder"
-    else:
-        return "minimal", REASON_NO_TARGET_FOLDER
+    # Priority 3: auto-detect from existing integration folders.
+    return _detect_from_folders(project_root)
 
 
 def should_compile_agents_md(target: CompileTargetType) -> bool:
