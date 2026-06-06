@@ -35,6 +35,11 @@ from git import Repo
 
 from ..utils.git_sparse import apply_sparse_cone
 
+# Rule A re-export: implementation lives in bare_cache_msg to keep this
+# module under the file-length guardrail; names remain resolvable here.
+from .bare_cache_msg import CloneFailureContext as CloneFailureContext
+from .bare_cache_msg import build_clone_failure_message as build_clone_failure_message
+
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
 
@@ -717,89 +722,3 @@ def clone_with_fallback(
         verbose_callback=verbose_callback,
     )
     return repo_holder[0]
-
-
-def build_clone_failure_message(
-    *,
-    repo_url_base: str,
-    plan: Any,
-    dep_ref: DependencyReference | None,
-    dep_host: str | None,
-    is_ado: bool,
-    is_generic: bool,
-    has_ado_token: bool,
-    has_token: bool,
-    auth_resolver: Any,
-    configured_github_host: str,
-    default_host_fn: Callable[[], str],
-    last_error: Exception | None,
-    sanitize_git_error: Callable[[str], str],
-) -> str:
-    """Build the aggregate ``RuntimeError`` message for a failed transport plan.
-
-    Extracted from :meth:`GitHubPackageDownloader._execute_transport_plan`
-    to keep that module under the file-length guardrail. Pure formatting:
-    no I/O, no clone attempts.
-    """
-    if plan.strict and len(plan.attempts) >= 1:
-        tried = plan.attempts[0].label
-        error_msg = f"Failed to clone repository {repo_url_base} via {tried}. "
-        if plan.fallback_hint:
-            error_msg += plan.fallback_hint + " "
-    else:
-        error_msg = f"Failed to clone repository {repo_url_base} using all available methods. "
-    if is_ado and not has_ado_token:
-        host = dep_host or "dev.azure.com"
-        error_msg += auth_resolver.build_error_context(
-            host,
-            "clone",
-            org=dep_ref.ado_organization if dep_ref else None,
-            port=dep_ref.port if dep_ref else None,
-            dep_url=dep_ref.repo_url if dep_ref else None,
-        )
-    elif is_generic:
-        if dep_host:
-            host_info = auth_resolver.classify_host(
-                dep_host,
-                port=dep_ref.port if dep_ref else None,
-            )
-            host_name = host_info.display_name
-        else:
-            host_name = "the target host"
-        error_msg += (
-            f"For private repositories on {host_name}, configure SSH keys or a git credential helper. "
-            f"APM delegates authentication to git for non-GitHub/ADO hosts."
-        )
-    elif (
-        configured_github_host
-        and dep_host
-        and dep_host == configured_github_host
-        and configured_github_host != "github.com"
-    ):
-        suggested = f"github.com/{repo_url_base}"
-        if dep_ref and dep_ref.virtual_path:
-            suggested += f"/{dep_ref.virtual_path}"
-        error_msg += (
-            f"GITHUB_HOST is set to '{configured_github_host}', so shorthand dependencies "
-            f"(without a hostname) resolve against that host. "
-            f"If this package lives on a different server (e.g., github.com), "
-            f"use the full hostname in apm.yml: {suggested}"
-        )
-    elif not has_token:
-        host = dep_host or default_host_fn()
-        org = dep_ref.repo_url.split("/")[0] if dep_ref and dep_ref.repo_url else None
-        error_msg += auth_resolver.build_error_context(
-            host,
-            "clone",
-            org=org,
-            port=dep_ref.port if dep_ref else None,
-            dep_url=dep_ref.repo_url if dep_ref else None,
-        )
-    else:
-        error_msg += "Please check repository access permissions and authentication setup."
-
-    if last_error:
-        sanitized_error = sanitize_git_error(str(last_error))
-        error_msg += f" Last error: {sanitized_error}"
-
-    return error_msg

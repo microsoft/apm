@@ -682,13 +682,13 @@ class LockFile:
             return False
         if self.lsp_configs != other.lsp_configs:
             return False
-        if sorted(self.local_deployed_files) != sorted(other.local_deployed_files):
-            return False
         # Issue #887: include hash dict in equivalence so post-install
         # hash updates persist even when the file list is unchanged.
-        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):  # noqa: SIM103
-            return False
-        return True
+        # Combine the last two comparisons into a single return to keep
+        # PLR0911 (too many return statements) satisfied.
+        return sorted(self.local_deployed_files) == sorted(other.local_deployed_files) and dict(
+            self.local_deployed_file_hashes
+        ) == dict(other.local_deployed_file_hashes)
 
     @classmethod
     def installed_paths_for_project(cls, project_root: Path) -> list[str]:
