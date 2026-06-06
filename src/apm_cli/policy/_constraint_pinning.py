@@ -114,6 +114,24 @@ def _classify_range(spec: str) -> UnboundedReason | None:
     return None
 
 
+def _classify_registry_ref(
+    ref: str | None,
+    is_semver_range,
+) -> UnboundedReason | None:
+    """Classify an unbounded reason for a registry dependency's constraint.
+
+    Extracted from :func:`classify_unbounded_reason` to reduce that
+    function's return count below the PLR0911 threshold.
+    """
+    if ref is None or not ref.strip():
+        return UnboundedReason.NO_REF
+    if is_semver_range(ref):
+        return _classify_range(ref)
+    # Registry resolver rejects non-semver refs at parse time, but
+    # defence-in-depth: treat anything else as a bare branch.
+    return UnboundedReason.BARE_BRANCH
+
+
 def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | None:
     """Return ``None`` if *dep*'s constraint is pinned, otherwise the reason.
 
@@ -139,14 +157,7 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
 
     # 2. Registry deps: the ref IS the semver range (or a single version).
     if source == "registry":
-        if ref is None or not ref.strip():
-            # A registry dep without a constraint is itself unbounded.
-            return UnboundedReason.NO_REF
-        if is_semver_range(ref):
-            return _classify_range(ref)
-        # Registry resolver rejects non-semver refs at parse time, but
-        # defence-in-depth: treat anything else as a bare branch.
-        return UnboundedReason.BARE_BRANCH
+        return _classify_registry_ref(ref, is_semver_range)
 
     # 3. Empty / missing ref.
     if ref is None or not ref.strip():

@@ -176,38 +176,46 @@ _CMP_OPS: list[tuple[str, object]] = [
 ]
 
 
+def _satisfies_caret(version: SemVer, spec: str) -> bool:
+    """Check a caret (``^``) range constraint."""
+    base = parse_semver(spec)
+    if base is None:
+        return False
+    if base.major != 0:
+        # ^1.2.3 := >=1.2.3 <2.0.0
+        return version >= base and version.major == base.major
+    if base.minor != 0:
+        # ^0.2.3 := >=0.2.3 <0.3.0
+        return version >= base and version.major == 0 and version.minor == base.minor
+    # ^0.0.3 := >=0.0.3 <0.0.4
+    return (
+        version >= base
+        and version.major == 0
+        and version.minor == 0
+        and version.patch == base.patch
+    )
+
+
 def _satisfies_single(version: SemVer, spec: str) -> bool:
     """Check a single constraint."""
     spec = spec.strip()
     if not spec:
         return True
 
-    # Caret range: ^major.minor.patch
+    # Caret range: ^major.minor.patch  (delegated to keep return count low)
     if spec.startswith("^"):
-        base = parse_semver(spec[1:])
-        if base is None:
-            return False
-        if base.major != 0:
-            # ^1.2.3 := >=1.2.3 <2.0.0
-            return version >= base and version.major == base.major
-        if base.minor != 0:
-            # ^0.2.3 := >=0.2.3 <0.3.0
-            return version >= base and version.major == 0 and version.minor == base.minor
-        # ^0.0.3 := >=0.0.3 <0.0.4
-        return (
-            version >= base
-            and version.major == 0
-            and version.minor == 0
-            and version.patch == base.patch
-        )
+        return _satisfies_caret(version, spec[1:])
 
     # Tilde range: ~major.minor.patch
     if spec.startswith("~"):
         base = parse_semver(spec[1:])
-        if base is None:
-            return False
         # ~1.2.3 := >=1.2.3 <1.3.0
-        return version >= base and version.major == base.major and version.minor == base.minor
+        return (
+            base is not None
+            and version >= base
+            and version.major == base.major
+            and version.minor == base.minor
+        )
 
     # Comparison operators (table-driven dispatch)
     for prefix, cmp in _CMP_OPS:
@@ -232,9 +240,7 @@ def _satisfies_single(version: SemVer, spec: str) -> bool:
 
     # Exact match (also handles explicit-equality after prefix strip)
     base = parse_semver(spec)
-    if base is None:
-        return False
-    return (
+    return base is not None and (
         version.major == base.major
         and version.minor == base.minor
         and version.patch == base.patch

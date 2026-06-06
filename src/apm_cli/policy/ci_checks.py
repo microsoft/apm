@@ -595,29 +595,19 @@ def run_baseline_checks(
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # Check 2: Ref consistency
-    if _run(_check_ref_consistency(manifest, lock)):
-        return result
-
-    # Check 3: Deployed files present
-    if _run(_check_deployed_files_present(project_root, lock)):
-        return result
-
-    # Check 4: No orphaned packages
-    if _run(_check_no_orphans(manifest, lock)):
-        return result
-
-    # Check 4.5: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock)):
-        return result
-
-    # Check 5: Config consistency (MCP)
-    if _run(_check_config_consistency(manifest, lock)):
-        return result
-
-    # Check 6: Content integrity
-    if _run(_check_content_integrity(project_root, lock)):
-        return result
+    # Checks 2-6: ordered sequence; stop on first failure when fail_fast.
+    # Lambdas ensure lazy evaluation so expensive checks (content integrity)
+    # are skipped when an earlier check fails in fail_fast mode.
+    for _check_fn in [
+        lambda: _check_ref_consistency(manifest, lock),  # 2
+        lambda: _check_deployed_files_present(project_root, lock),  # 3
+        lambda: _check_no_orphans(manifest, lock),  # 4
+        lambda: _check_skill_subset_consistency(manifest, lock),  # 4.5
+        lambda: _check_config_consistency(manifest, lock),  # 5
+        lambda: _check_content_integrity(project_root, lock),  # 6
+    ]:
+        if _run(_check_fn()):
+            return result
 
     # Check 7: Includes consent (advisory; never hard-fails)
     _run(_check_includes_consent(manifest, lock))
