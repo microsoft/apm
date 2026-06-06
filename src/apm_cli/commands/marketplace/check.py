@@ -8,6 +8,7 @@ import traceback
 import click
 
 from ...core.command_logger import CommandLogger
+from ...marketplace.auth_helpers import resolve_token_for_host
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
 from ...marketplace.ref_resolver import RefResolver
 from ...marketplace.semver import satisfies_range
@@ -40,15 +41,44 @@ def check(offline, verbose):
             symbol="info",
         )
 
-    resolver = RefResolver(offline=offline)
+    # One resolver per effective host. A package whose ``source`` named a
+    # non-default host -- a #1288 host-prefixed entry, or a relative entry
+    # composed onto ``marketplace.sourceBase`` -- carries that host on
+    # ``entry.host``; it must be resolved with a host-bound resolver and the
+    # host's token (e.g. GITLAB_APM_PAT), exactly like ``apm pack`` does.
+    # Default-host entries (``entry.host is None``) keep today's behaviour:
+    # a bare ``RefResolver(offline=...)`` with ambient credentials.
+    resolvers: dict[str | None, RefResolver] = {}
+
+    def _resolver_for(host: str | None) -> RefResolver:
+        if host not in resolvers:
+            if host is None:
+                resolvers[host] = RefResolver(offline=offline)
+            else:
+                token = resolve_token_for_host(host, offline=offline)
+                resolvers[host] = RefResolver(offline=offline, host=host, token=token)
+        return resolvers[host]
+
     results = []
     failure_count = 0
 
     try:
         for entry in yml.packages:
+            # Local-path packages skip git resolution entirely.
+            if entry.is_local:
+                results.append(
+                    _CheckResult(
+                        name=entry.name,
+                        reachable=True,
+                        version_found=True,
+                        ref_ok=True,
+                        error="",
+                    )
+                )
+                continue
             try:
-                # Attempt to resolve each entry
-                refs = resolver.list_remote_refs(entry.source)
+                # Attempt to resolve each entry against its effective host.
+                refs = _resolver_for(entry.host).list_remote_refs(entry.source)
 
                 # Check version/ref resolution
                 ref_ok = False
@@ -152,4 +182,5 @@ def check(offline, verbose):
             logger.success(f"All {total} entries OK", symbol="check")
 
     finally:
-        resolver.close()
+        for resolver in resolvers.values():
+            resolver.close()

@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full-URL sources override the base; local and base-less configs are unchanged.
   (by @leocamello, #1519)
 
+### Fixed
+
+- `apm marketplace check` now resolves each package against its effective host
+  with that host's token (matching `apm pack`), instead of always probing the
+  default host with no token. Entries on a non-default host -- a
+  `host.tld/owner/repo` shorthand or a relative source composed onto
+  `marketplace.sourceBase` -- now validate correctly, and local `./` packages
+  skip the network entirely. (by @leocamello, #1519)
+
 ## [0.18.0] - 2026-06-04
 
 ### Added
