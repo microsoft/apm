@@ -482,8 +482,13 @@ def _read_lsp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> 
 def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     """Parse a JSON file and return the LSP servers mapping.
 
-    Unlike .mcp.json which has a wrapper key, .lsp.json uses server names
-    as top-level keys directly.
+    Accepts two formats:
+    - Flat: top-level keys are server names (e.g. ``{"pyright": {...}}``).
+    - Wrapped: a ``"lspServers"`` envelope wraps the servers
+      (e.g. ``{"lspServers": {"pyright": {...}}}``).
+
+    The wrapped format is standard in Copilot ``.github/lsp.json`` and
+    Claude ``~/.claude.json``.  Plugins may ship either variant.
     """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -492,6 +497,10 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
         return {}
     if not isinstance(data, dict):
         return {}
+    # Unwrap the { "lspServers": { ... } } envelope when present.
+    lsp_inner = data.get("lspServers")
+    if isinstance(lsp_inner, dict):
+        return dict(lsp_inner)
     return dict(data)
 
 

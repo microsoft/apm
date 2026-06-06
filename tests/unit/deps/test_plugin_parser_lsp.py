@@ -48,6 +48,40 @@ class TestReadLspJson:
         result = _read_lsp_json(lsp_file, logging.getLogger("test"))
         assert result == {}
 
+    def test_unwraps_lsp_servers_envelope(self, tmp_path):
+        """A .lsp.json using { "lspServers": { ... } } is unwrapped."""
+        lsp_file = tmp_path / ".lsp.json"
+        lsp_file.write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "my-lsp": {
+                            "command": "my-lsp-bin",
+                            "extensionToLanguage": {".ext": "mylang"},
+                        }
+                    }
+                }
+            )
+        )
+
+        import logging
+
+        result = _read_lsp_json(lsp_file, logging.getLogger("test"))
+        assert "my-lsp" in result
+        assert result["my-lsp"]["command"] == "my-lsp-bin"
+        assert "lspServers" not in result
+
+    def test_flat_format_still_works(self, tmp_path):
+        """Flat format (server names as top-level keys) is unchanged."""
+        lsp_file = tmp_path / ".lsp.json"
+        lsp_file.write_text(json.dumps({"pyright": {"command": "pyright-langserver"}}))
+
+        import logging
+
+        result = _read_lsp_json(lsp_file, logging.getLogger("test"))
+        assert "pyright" in result
+        assert result["pyright"]["command"] == "pyright-langserver"
+
 
 # ===========================================================================
 # _extract_lsp_servers
@@ -93,6 +127,29 @@ class TestExtractLspServers:
         manifest = {}  # No lspServers key
         result = _extract_lsp_servers(tmp_path, manifest)
         assert "ts-lsp" in result
+
+    def test_auto_discovery_with_lsp_servers_wrapper(self, tmp_path):
+        """Auto-discovered .lsp.json using the { "lspServers": ... } envelope."""
+        lsp_json = tmp_path / ".lsp.json"
+        lsp_json.write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "my-lsp-server": {
+                            "command": "my-lsp",
+                            "args": ["--stdio"],
+                            "extensionToLanguage": {".ext": "mylang"},
+                        }
+                    }
+                }
+            )
+        )
+
+        manifest = {}  # No lspServers key -- triggers auto-discovery
+        result = _extract_lsp_servers(tmp_path, manifest)
+        assert "my-lsp-server" in result
+        assert result["my-lsp-server"]["command"] == "my-lsp"
+        assert "lspServers" not in result
 
     def test_no_lsp_servers_no_file_returns_empty(self, tmp_path):
         result = _extract_lsp_servers(tmp_path, {})
@@ -211,3 +268,25 @@ class TestLspServersToApmDeps:
         assert d["startupTimeout"] == 5000
         assert d["restartOnCrash"] is True
         assert d["maxRestarts"] == 3
+
+    def test_wrapped_lsp_json_produces_valid_deps(self, tmp_path):
+        """End-to-end: .lsp.json with lspServers wrapper yields valid deps."""
+        lsp_json = tmp_path / ".lsp.json"
+        lsp_json.write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "my-lsp-server": {
+                            "command": "my-lsp",
+                            "args": ["--stdio"],
+                            "extensionToLanguage": {".ext": "mylang"},
+                        }
+                    }
+                }
+            )
+        )
+        servers = _extract_lsp_servers(tmp_path, {})
+        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        assert len(deps) == 1
+        assert deps[0]["name"] == "my-lsp-server"
+        assert deps[0]["command"] == "my-lsp"
