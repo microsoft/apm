@@ -248,21 +248,132 @@ def test_non_copilot_target_is_noop(tmp_path: Path, enable_canvas):
     assert not (project / ".claude" / "extensions").exists()
 
 
-def test_user_scope_is_noop(tmp_path: Path, enable_canvas):
+def test_user_scope_first_party_blocked(tmp_path: Path, enable_canvas, monkeypatch):
+    """First-party canvases are refused at user scope (untracked -> would leak)."""
     from apm_cli.core.scope import InstallScope
 
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
     pkg = tmp_path / "pkg"
     _make_canvas(pkg)
-    project = tmp_path / "proj"
-    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    diags = DiagnosticCollector()
     result = CanvasIntegrator().integrate_canvases_for_target(
-        _copilot(),
+        _copilot().for_scope(user_scope=True),
         _pkg_info(pkg),
-        project,
+        home,
         scope=InstallScope.USER,
         is_first_party=True,
+        trust_canvas=True,
+        diagnostics=diags,
     )
     assert result.files_integrated == 0
+    assert not (home / ".copilot" / "extensions").exists()
+    messages = " ".join(d.message for d in diags._diagnostics)
+    assert "first-party" in messages
+
+
+def test_user_scope_dependency_deploys_with_trust(tmp_path: Path, enable_canvas, monkeypatch):
+    """A dependency canvas deploys to ~/.copilot/extensions at user scope."""
+    from apm_cli.core.scope import InstallScope
+
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
+    pkg = tmp_path / "pkg"
+    _make_canvas(pkg, "widget")
+    home = tmp_path / "home"
+    home.mkdir()
+    result = CanvasIntegrator().integrate_canvases_for_target(
+        _copilot().for_scope(user_scope=True),
+        _pkg_info(pkg),
+        home,
+        scope=InstallScope.USER,
+        is_first_party=False,
+        trust_canvas=True,
+        package_name="acme/widgets",
+    )
+    assert result.files_integrated == 1
+    assert (home / ".copilot" / "extensions" / "widget" / "extension.mjs").is_file()
+    assert _deployed_rel(result, home) == {
+        ".copilot/extensions/widget/extension.mjs",
+        ".copilot/extensions/widget/helper.js",
+    }
+
+
+def test_user_scope_dependency_requires_trust(tmp_path: Path, enable_canvas, monkeypatch):
+    """A dependency canvas at user scope is blocked without the trust flag."""
+    from apm_cli.core.scope import InstallScope
+
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
+    pkg = tmp_path / "pkg"
+    _make_canvas(pkg, "widget")
+    home = tmp_path / "home"
+    home.mkdir()
+    diags = DiagnosticCollector()
+    result = CanvasIntegrator().integrate_canvases_for_target(
+        _copilot().for_scope(user_scope=True),
+        _pkg_info(pkg),
+        home,
+        scope=InstallScope.USER,
+        is_first_party=False,
+        trust_canvas=False,
+        package_name="acme/widgets",
+        diagnostics=diags,
+    )
+    assert result.files_integrated == 0
+    assert not (home / ".copilot" / "extensions").exists()
+    messages = " ".join(d.message for d in diags._diagnostics)
+    assert "--trust-canvas-extensions" in messages
+
+
+def test_user_scope_nondefault_copilot_home_blocked(tmp_path: Path, enable_canvas, monkeypatch):
+    """A non-default $COPILOT_HOME refuses global canvas install."""
+    from apm_cli.core.scope import InstallScope
+
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "custom-copilot"))
+    pkg = tmp_path / "pkg"
+    _make_canvas(pkg, "widget")
+    home = tmp_path / "home"
+    home.mkdir()
+    diags = DiagnosticCollector()
+    result = CanvasIntegrator().integrate_canvases_for_target(
+        _copilot().for_scope(user_scope=True),
+        _pkg_info(pkg),
+        home,
+        scope=InstallScope.USER,
+        is_first_party=False,
+        trust_canvas=True,
+        package_name="acme/widgets",
+        diagnostics=diags,
+    )
+    assert result.files_integrated == 0
+    messages = " ".join(d.message for d in diags._diagnostics)
+    assert "COPILOT_HOME" in messages
+
+
+def test_user_scope_sync_prunes_dependency_canvas(tmp_path: Path, enable_canvas, monkeypatch):
+    """Uninstall sync removes a user-scope canvas via the lockfile path bucket."""
+    from apm_cli.core.scope import InstallScope
+
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
+    pkg = tmp_path / "pkg"
+    _make_canvas(pkg, "widget")
+    home = tmp_path / "home"
+    home.mkdir()
+    user_target = _copilot().for_scope(user_scope=True)
+    result = CanvasIntegrator().integrate_canvases_for_target(
+        user_target,
+        _pkg_info(pkg),
+        home,
+        scope=InstallScope.USER,
+        is_first_party=False,
+        trust_canvas=True,
+        package_name="acme/widgets",
+    )
+    managed = {Path(p).relative_to(home).as_posix() for p in result.target_paths}
+    assert managed  # sanity: something was deployed
+    stats = CanvasIntegrator().sync_for_target(user_target, None, home, managed_files=managed)
+    assert stats["files_removed"] == len(managed)
+    assert not (home / ".copilot" / "extensions" / "widget").exists()
 
 
 # ---------------------------------------------------------------------------

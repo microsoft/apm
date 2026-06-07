@@ -16,9 +16,16 @@ Two independent gates protect this surface:
   first-party (root/local) ``.apm/extensions/`` deploys freely once the
   experimental flag is on.
 
-The integrator is deliberately Copilot-only and project-scope-only for the
-MVP: the canvas ``PrimitiveMapping`` lives solely on the ``copilot`` target
-and user scope is unsupported.
+The integrator is Copilot-only.  At **project scope** a canvas deploys to
+``.github/extensions/<name>/``.  At **user scope** (``apm install --global``)
+a *dependency-provided* canvas deploys to ``~/.copilot/extensions/<name>/`` so
+it is available in every Copilot session; the canvas ``PrimitiveMapping`` lives
+solely on the ``copilot`` target.  Global canvas install is intentionally
+limited for the MVP: only dependency-provided canvases are supported (so the
+dependency lockfile tracks them and uninstall can prune them), the operator
+must always pass ``--trust-canvas-extensions`` (the blast radius is the whole
+account), and only the default ``~/.copilot`` location is honored (a custom
+``$COPILOT_HOME`` is refused).
 """
 
 from __future__ import annotations
@@ -154,10 +161,20 @@ class CanvasIntegrator(BaseIntegrator):
     ) -> IntegrationResult:
         """Deploy canvas bundles for a single *target* (copilot only).
 
-        Returns an empty result (no-op) when the experimental flag is off,
-        the target is not copilot, the mapping is absent, or the scope is
-        user-level.  Dependency-provided canvases require *trust_canvas*;
-        first-party canvases deploy whenever the flag is on.
+        Returns an empty result (no-op) when the experimental flag is off, the
+        target is not copilot, or the mapping is absent.
+
+        Trust model:
+
+        * **Project scope** -- a dependency-provided canvas requires
+          *trust_canvas*; a first-party (root/local) canvas deploys freely
+          once the flag is on.
+        * **User scope** (``--global``) -- only *dependency-provided* canvases
+          deploy, and they ALWAYS require *trust_canvas* (full-account blast
+          radius). First-party user-scope canvases are refused because the
+          user-scope lockfile pipeline does not track them, so uninstall could
+          not prune the executable bundle. A non-default ``$COPILOT_HOME`` is
+          also refused (APM deploys global canvases to ``~/.copilot`` only).
         """
         empty = IntegrationResult(0, 0, 0, [])
 
@@ -168,22 +185,41 @@ class CanvasIntegrator(BaseIntegrator):
         if mapping is None or target.name != "copilot":
             return empty
 
-        from apm_cli.core.scope import InstallScope
-
-        if scope is InstallScope.USER:
-            # User-scope canvas deployment is unsupported in the MVP.  The
-            # copilot profile already filters the mapping at user scope, so
-            # this is belt-and-braces against any path that keeps it.
-            return empty
-
         bundles = self.find_canvas_bundles(Path(package_info.install_path))
         if not bundles:
             return empty
 
-        # Trust gate: a dependency's canvas is arbitrary executable Node
-        # code.  Block it unless the operator opted in.  First-party
-        # (root/local) canvases are the author's own and deploy freely.
-        if not (is_first_party or trust_canvas):
+        from apm_cli.core.scope import InstallScope
+
+        is_user = scope is InstallScope.USER
+        if is_user:
+            if self._copilot_home_is_nondefault():
+                self._warn(
+                    diagnostics,
+                    "Skipping global canvas install: APM deploys global canvases to "
+                    "~/.copilot/extensions only, but a non-default $COPILOT_HOME is set. "
+                    "Install the canvas at project scope, or unset $COPILOT_HOME.",
+                    package_name,
+                )
+                return empty
+            if is_first_party:
+                self._warn(
+                    diagnostics,
+                    "Skipping global canvas install for first-party '.apm/extensions/': "
+                    "global (user-scope) canvases are only supported when provided by a "
+                    "dependency package so APM can track and later remove them. Package "
+                    "the canvas and install it as a dependency with --global.",
+                    package_name,
+                )
+                return empty
+
+        # Trust gate: a canvas is arbitrary executable Node code. At user scope
+        # every canvas is dependency-provided (first-party is refused above) and
+        # the blast radius is the whole account, so trust is always required. At
+        # project scope a first-party canvas is the author's own and deploys
+        # freely.
+        needs_trust = is_user or not is_first_party
+        if needs_trust and not trust_canvas:
             self._emit_trust_block(
                 bundles, package_name, project_root, mapping, target, diagnostics
             )
@@ -422,6 +458,26 @@ class CanvasIntegrator(BaseIntegrator):
             ),
             package=pkg,
         )
+
+    @staticmethod
+    def _copilot_home_is_nondefault() -> bool:
+        """Return True when ``$COPILOT_HOME`` points somewhere other than ~/.copilot.
+
+        APM deploys global canvases to ``~/.copilot/extensions`` (home-relative
+        so the lockfile records a clean, prunable path).  A custom
+        ``$COPILOT_HOME`` would make Copilot scan a different directory and
+        would also break the home-relative lockfile encoding, so global canvas
+        install is refused in that case for the MVP.  An unset (or empty)
+        ``$COPILOT_HOME`` resolves to the default and is allowed.
+        """
+        import os
+
+        env = os.environ.get("COPILOT_HOME", "").strip()
+        if not env:
+            return False
+        resolved = Path(env).expanduser().resolve(strict=False)
+        default = (Path.home() / ".copilot").resolve(strict=False)
+        return resolved != default
 
     @staticmethod
     def _warn(diagnostics, message: str, package_name: str) -> None:

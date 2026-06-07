@@ -477,7 +477,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".copilot",
-        unsupported_user_primitives=("canvas",),
         user_primitive_overrides={
             "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
         },

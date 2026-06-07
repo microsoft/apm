@@ -160,6 +160,15 @@ dependency-provided canvases by default**: the consumer must pass
 package being installed deploys once the flag is on; dependency canvases always
 require the trust flag.
 
+At **project scope** a canvas deploys to `.github/extensions/<name>/`. With
+`--global`, a **dependency-provided** canvas deploys to
+`~/.copilot/extensions/<name>/` so it is available in every Copilot session;
+global install always requires `--trust-canvas-extensions` (full-account blast
+radius), supports only the default `~/.copilot` location (a non-default
+`$COPILOT_HOME` is refused), and does not deploy first-party root canvases
+(package them as a dependency instead). `apm uninstall --global` prunes the
+global canvas.
+
 The trust gate is enforced on every install path -- normal install, offline
 bundle install (`apm install <bundle>`), and `apm unpack` -- so a vendored
 bundle cannot smuggle an executable canvas past trust. The flag is a

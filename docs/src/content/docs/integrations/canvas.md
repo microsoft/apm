@@ -10,16 +10,17 @@ sidebar:
 
 :::caution[Experimental]
 This feature is behind the `canvas` experimental flag and is off by default.
-It is **Copilot-only** and **project-scope** for now, and the CLI surface may
-change. Enable it explicitly before use.
+It is **Copilot-only**, and the CLI surface may change. Enable it explicitly
+before use.
 :::
 
 A **canvas** is a GitHub Copilot CLI extension: a directory bundle whose entry
 file is `extension.mjs` (executable Node.js), plus any sibling assets it needs.
-Copilot CLI discovers canvases only in immediate subdirectories of
-`.github/extensions/<name>/` (project scope). APM lets a package carry a canvas
-under `.apm/extensions/<name>/` and deploys it to `.github/extensions/<name>/`
-at install time so the canvas is available in your Copilot session.
+Copilot CLI discovers canvases in immediate subdirectories of
+`.github/extensions/<name>/` (project scope) and
+`~/.copilot/extensions/<name>/` (user scope). APM lets a package carry a canvas
+under `.apm/extensions/<name>/` and deploys it to the matching location at
+install time so the canvas is available in your Copilot session.
 
 Canvases are typically produced by the `create-canvas` skill. This page covers
 how to ship one through an APM package.
@@ -91,6 +92,32 @@ opt-in flag. The same gate is enforced on offline bundle install
 (`apm install <bundle>`) and on `apm unpack`, so a vendored bundle cannot
 smuggle an executable canvas past trust.
 
+## Install globally (user scope)
+
+To make a canvas available in **every** Copilot session, install it globally so
+it lands in `~/.copilot/extensions/<name>/`:
+
+```bash
+apm install <package> --global --trust-canvas-extensions
+```
+
+Global canvas install is intentionally limited in this experimental release:
+
+- **Dependency-provided only.** Only a canvas shipped by a package you install
+  (the `--global` flow always treats the canvas as dependency-provided) deploys
+  globally, so APM records it in the user lockfile and `apm uninstall --global`
+  can prune it. A first-party root `.apm/extensions/` canvas is **not** deployed
+  at user scope -- package it and install it as a dependency instead.
+- **Trust is always required.** A global canvas has full-account blast radius,
+  so `--trust-canvas-extensions` is mandatory even though the project-scope
+  first-party path does not need it.
+- **Default `~/.copilot` only.** If `$COPILOT_HOME` is set to a non-default
+  location, APM refuses the global canvas install rather than deploy to a path
+  Copilot will not scan.
+
+`apm uninstall --global <package>` removes the deployed
+`~/.copilot/extensions/<name>/` files and prunes the empty directories.
+
 ## Pack and uninstall
 
 `apm pack` preserves `.apm/extensions/` in the bundle, so a packed package keeps
@@ -102,8 +129,10 @@ experimental flag, so a previously-installed canvas can always be removed.
 
 - **Copilot-only.** A canvas is a Copilot CLI construct. Other targets
   (`--target claude`, `cursor`, etc.) never receive it.
-- **Project-scope only.** User-scope deployment to `~/.copilot/extensions/` is
-  not supported in this experimental release.
+- **Global install is dependency-only.** User-scope (`--global`) deployment to
+  `~/.copilot/extensions/` supports dependency-provided canvases (always
+  requiring `--trust-canvas-extensions`) and the default `~/.copilot` location
+  only; first-party root canvases deploy at project scope only.
 - **No compile/list surfacing yet.** Canvases are not yet shown by
   `apm list`/`apm compile`; they are deployed at install only.
 

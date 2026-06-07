@@ -923,7 +923,7 @@ def _handle_mcp_install(
 @click.option(
     "--trust-canvas-extensions",
     is_flag=True,
-    help="[experimental] Deploy canvas extensions provided by dependencies. Canvas extensions are executable Node code and are blocked by default; this flag opts in. Requires the 'canvas' experimental feature.",
+    help="[experimental] Deploy canvas extensions provided by dependencies. Canvas extensions are executable Node code and are blocked by default; this flag opts in. With --global the canvas deploys to ~/.copilot/extensions and the flag is always required. Requires the 'canvas' experimental feature.",
 )
 @click.option(
     "--parallel-downloads",
