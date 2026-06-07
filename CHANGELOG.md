@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   faithfully reflects on-disk content across Copilot, Claude, and Gemini
   targets (including OS-specific `windows`/`linux`/`osx` hook keys). (by
   @harshitlarl, closes #316)
+- Experimental, Copilot-only `canvas` primitive: `.apm/extensions/<name>/extension.mjs` deploys to `.github/extensions/<name>/` on `apm install`/`apm pack`, gated by `apm experimental enable canvas` + `--trust-canvas-extensions` for dependencies. (by @sergio-sisternes-epam, #1689)
 
 ### Fixed
 
