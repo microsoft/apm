@@ -767,8 +767,9 @@ def _audit_content_scan(
 
     # --format json/sarif/markdown is incompatible with --strip / --dry-run
     if effective_format != "text" and (strip or dry_run):
-        logger.error(f"--format {effective_format} cannot be combined with --strip or --dry-run")
-        sys.exit(1)
+        raise click.UsageError(
+            f"--format {effective_format} cannot be combined with --strip or --dry-run"
+        )
 
     if file_path:
         # -- File mode: scan a single arbitrary file --
@@ -1169,17 +1170,17 @@ def audit(  # noqa: PLR0913 -- Click handler
         if verbose:
             logger.warning("--verbose has no effect in --ci mode (output is structured)")
         if strip or dry_run or file_path or package:
-            logger.error("--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE")
-            sys.exit(1)
+            raise click.UsageError(
+                "--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE"
+            )
         if output_format == "markdown":
             logger.error("--ci does not support --format markdown. Use json or sarif.")
             sys.exit(1)
         if external:
-            logger.error(
+            raise click.UsageError(
                 "--ci does not support --external scanners yet. "
                 "Run external scanners in bare 'apm audit' mode."
             )
-            sys.exit(1)
 
         _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast, no_drift)
         return  # _audit_ci_gate calls sys.exit; return guards against fall-through
@@ -1188,8 +1189,7 @@ def audit(  # noqa: PLR0913 -- Click handler
     # They cannot be combined with --strip/--dry-run (APM only knows how to
     # strip the Unicode characters its own scanner detects).
     if external and (strip or dry_run):
-        logger.error("--external cannot be combined with --strip or --dry-run")
-        sys.exit(1)
+        raise click.UsageError("--external cannot be combined with --strip or --dry-run")
     if external_sarif and not external:
         raise click.UsageError("--external-sarif requires '--external sarif'")
     # Orphan-flag guards: scanner-config flags are meaningless without a

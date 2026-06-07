@@ -294,14 +294,15 @@ class TestAuditContentScan:
         assert exc.value.code == 0
 
     def test_format_json_incompatible_with_strip(self, tmp_path):
+        import click
+
         from apm_cli.commands.audit import _audit_content_scan
 
         f = tmp_path / "f.md"
         f.write_text("x\n", encoding="utf-8")
         cfg = self._make_cfg(tmp_path, output_format="json")
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(click.UsageError, match=r"cannot be combined"):
             _audit_content_scan(cfg, package=None, file_path=str(f), strip=True, dry_run=False)
-        assert exc.value.code == 1
 
     def test_text_format_with_output_path_errors(self, tmp_path):
         from apm_cli.commands.audit import _audit_content_scan
