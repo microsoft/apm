@@ -22,6 +22,7 @@ class UnpackResult:
     skipped_count: int = 0
     security_warnings: int = 0
     security_critical: int = 0
+    canvas_blocked: int = 0
     pack_meta: dict = field(default_factory=dict)
 
 
@@ -31,6 +32,7 @@ def unpack_bundle(
     skip_verify: bool = False,
     dry_run: bool = False,
     force: bool = False,
+    trust_canvas: bool = False,
 ) -> UnpackResult:
     """Extract and apply an APM bundle to a project directory.
 
@@ -44,6 +46,10 @@ def unpack_bundle(
         skip_verify: If *True*, skip completeness verification against the lockfile.
         dry_run: If *True*, resolve the file list but write nothing to disk.
         force: If *True*, deploy even when critical hidden characters are found.
+        trust_canvas: If *True*, allow executable canvas extension files
+            (``.github/extensions/<name>/extension.mjs``) to be unpacked.
+            Defaults to *False* (fail closed) so a vendored bundle cannot
+            smuggle executable canvas code past the trust gate.
 
     Returns:
         :class:`UnpackResult` describing what was (or would be) extracted.
@@ -146,6 +152,28 @@ def unpack_bundle(
             if dep_files:
                 dep_file_map[dep_key] = dep_files
 
+        # Security + feature gate: canvas extensions are executable Node
+        # bundles (``extension.mjs``).  ``apm unpack`` copies deployed files
+        # verbatim WITHOUT routing through ``CanvasIntegrator``, so neither
+        # the experimental feature flag nor its trust gate would otherwise
+        # apply.  Require BOTH gates -- the ``canvas`` experimental flag ON
+        # (feature availability) AND ``trust_canvas`` (executable-code trust)
+        # -- before unpacking canvas paths.  Fail closed: drop them when
+        # either gate is missing.
+        canvas_blocked = 0
+        from ..core.experimental import is_enabled
+        from ..integration.canvas_integrator import is_canvas_bundle_path
+
+        if not (is_enabled("canvas") and trust_canvas):
+            _blocked = {f for f in unique_files if is_canvas_bundle_path(f)}
+            if _blocked:
+                canvas_blocked = len(_blocked)
+                unique_files = [f for f in unique_files if f not in _blocked]
+                for _k in list(dep_file_map):
+                    dep_file_map[_k] = [f for f in dep_file_map[_k] if f not in _blocked]
+                    if not dep_file_map[_k]:
+                        del dep_file_map[_k]
+
         # 3. Verify completeness
         verified = True
         if not skip_verify:
@@ -194,6 +222,7 @@ def unpack_bundle(
                 dependency_files=dep_file_map,
                 security_warnings=security_warnings,
                 security_critical=security_critical,
+                canvas_blocked=canvas_blocked,
                 pack_meta=pack_meta,
             )
 
@@ -237,6 +266,7 @@ def unpack_bundle(
             skipped_count=skipped,
             security_warnings=security_warnings,
             security_critical=security_critical,
+            canvas_blocked=canvas_blocked,
             pack_meta=pack_meta,
         )
     finally:

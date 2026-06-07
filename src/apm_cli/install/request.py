@@ -63,6 +63,12 @@ class InstallRequest:
     # --refresh only forces re-resolution without discarding orphans.
     refresh: bool = False
 
+    # --trust-canvas-extensions: opt in to deploying canvas extensions
+    # shipped by dependencies.  Canvas extensions are executable Node code,
+    # so dependency-provided ones are blocked by default; first-party
+    # (root/local) canvases always deploy once the experimental flag is on.
+    trust_canvas: bool = False
+
     # Plan-gate hook: if set, run_install_pipeline invokes this callable
     # AFTER resolve completes and BEFORE downloads begin, passing the
     # computed UpdatePlan.  The callable returns True to proceed or

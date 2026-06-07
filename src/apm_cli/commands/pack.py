@@ -667,9 +667,17 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
     default=False,
     help="Deploy despite critical hidden-character findings.",
 )
+@click.option(
+    "--trust-canvas-extensions",
+    is_flag=True,
+    default=False,
+    help="Deploy executable canvas extensions (.github/extensions/) from the bundle.",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
-def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
+def unpack_cmd(
+    ctx, bundle_path, output, skip_verify, dry_run, force, trust_canvas_extensions, verbose
+):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
     logger.warning(
@@ -685,10 +693,29 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             skip_verify=skip_verify,
             dry_run=dry_run,
             force=force,
+            trust_canvas=trust_canvas_extensions,
         )
 
         # Surface bundle metadata and warn on target mismatch
         _log_bundle_meta(result, Path(output), logger)
+
+        if result.canvas_blocked > 0:
+            from apm_cli.core.experimental import is_enabled
+
+            if is_enabled("canvas"):
+                logger.warning(
+                    f"Blocked {result.canvas_blocked} canvas extension file(s): canvas "
+                    "extensions are executable code and are not unpacked by default. "
+                    "Re-run with '--trust-canvas-extensions' to deploy them to "
+                    ".github/extensions/."
+                )
+            else:
+                logger.warning(
+                    f"Blocked {result.canvas_blocked} canvas extension file(s): canvas "
+                    "extensions are an experimental feature and are disabled. Enable "
+                    "them with 'apm experimental enable canvas' (then re-run with "
+                    "'--trust-canvas-extensions' to deploy executable canvas code)."
+                )
 
         if dry_run:
             logger.dry_run_notice("No files written")

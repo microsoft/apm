@@ -103,6 +103,12 @@ def _collect_apm_components(apm_dir: Path) -> list[tuple[Path, str]]:
     # commands/ -> commands/
     _collect_recursive(apm_dir / "commands", "commands", components)
 
+    # extensions/ -> extensions/ (canvas extensions, experimental Copilot-only).
+    # Preserved verbatim so an offline bundle can carry a canvas; the files are
+    # inert until the consumer enables the ``canvas`` experimental flag AND
+    # passes ``--trust-canvas-extensions`` at install time.
+    _collect_recursive(apm_dir / "extensions", "extensions", components)
+
     return components
 
 
@@ -113,7 +119,7 @@ def _collect_root_plugin_components(project_root: Path) -> list[tuple[Path, str]
     ``skills/``, etc. at the repo root) have their files picked up here.
     """
     components: list[tuple[Path, str]] = []
-    for dir_name in ("agents", "skills", "commands", "instructions"):
+    for dir_name in ("agents", "skills", "commands", "instructions", "extensions"):
         _collect_recursive(project_root / dir_name, dir_name, components)
     return components
 

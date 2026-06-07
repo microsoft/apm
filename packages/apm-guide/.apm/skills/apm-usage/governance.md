@@ -150,6 +150,23 @@ Deployed executables are placed on Claude Code's `PATH` and invoked
 without further confirmation, so use this field to opt out in
 environments where plugin executables are not trusted by default.
 
+## Canvas extension trust (experimental)
+
+Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
+extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
+Because a canvas from a dependency is arbitrary executable code, APM **blocks
+dependency-provided canvases by default**: the consumer must pass
+`--trust-canvas-extensions` to deploy them. A first-party canvas in the root
+package being installed deploys once the flag is on; dependency canvases always
+require the trust flag.
+
+The trust gate is enforced on every install path -- normal install, offline
+bundle install (`apm install <bundle>`), and `apm unpack` -- so a vendored
+bundle cannot smuggle an executable canvas past trust. The flag is a
+feature-availability toggle, not a security gate; the trust requirement holds
+regardless of the flag. An enterprise policy field for canvas trust is a
+deferred follow-up and is not part of this experimental release.
+
 ## Local content governance
 
 The `includes:` field in `apm.yml` controls which local `.apm/` content the

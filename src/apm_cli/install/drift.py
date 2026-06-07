@@ -586,6 +586,25 @@ def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
     return ""
 
 
+def _canvas_deploy_prefixes(targets) -> set[str]:
+    """Return ``root/subdir/`` prefixes for every target carrying a canvas mapping.
+
+    Used to exclude canvas extension deploy paths from drift comparison
+    (the replay deliberately does not re-integrate canvases).
+    """
+    prefixes: set[str] = set()
+    for target in targets or []:
+        mapping = getattr(target, "primitives", {}).get("canvas")
+        if mapping is None:
+            continue
+        effective_root = mapping.deploy_root or target.root_dir
+        if mapping.subdir:
+            prefixes.add(f"{effective_root}/{mapping.subdir}/")
+        else:
+            prefixes.add(f"{effective_root}/")
+    return prefixes
+
+
 def diff_scratch_against_project(
     scratch_root: Path,
     project_root: Path,
@@ -610,6 +629,21 @@ def diff_scratch_against_project(
     scratch_files = _walk_managed(scratch_root, governed)
     project_files = _walk_managed(project_root, governed)
     tracked = _collect_tracked_files(lockfile)
+
+    # Canvas extensions are executable bundles that the drift replay does
+    # not re-integrate (their integrator is intentionally omitted from the
+    # replay bundle). Exclude their deploy prefixes from BOTH trees so a
+    # deployed canvas is never mis-reported as orphaned/unintegrated. Full
+    # canvas drift detection is a deferred follow-up.
+    _canvas_prefixes = _canvas_deploy_prefixes(targets)
+    if _canvas_prefixes:
+
+        def _is_canvas(rel: str) -> bool:
+            norm = rel.replace("\\", "/")
+            return any(norm.startswith(p) for p in _canvas_prefixes)
+
+        scratch_files = {r: p for r, p in scratch_files.items() if not _is_canvas(r)}
+        project_files = {r: p for r, p in project_files.items() if not _is_canvas(r)}
 
     findings: list[DriftFinding] = []
 
