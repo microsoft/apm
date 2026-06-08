@@ -306,6 +306,17 @@ class TestUserLocalInstall:
             assert _run_prepare_parent(target, home=home) == 0
             assert Path(home, ".local", "lib").is_dir()
 
+    def test_prepare_parent_falls_back_when_parent_unwritable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            protected = Path(tmp, "protected")
+            protected.mkdir()
+            protected.chmod(0o555)
+            try:
+                target = str(protected / "lib" / "apm")
+                assert _run_prepare_parent(target, home=os.path.join(tmp, "home")) == 1
+            finally:
+                protected.chmod(0o755)
+
 
 class TestReportedIncident:
     """The exact command from issue #1690's reproduction must be blocked."""
