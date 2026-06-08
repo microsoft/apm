@@ -115,6 +115,32 @@ def _deployed_path_entry(
         )
 
 
+def _log_hook_display_payloads(
+    payloads: list,
+    verbose: bool,
+    log_fn: Any,
+    logger: Any,
+) -> None:
+    """Emit per-hook-file action summaries for the hook transparency feature.
+
+    Uses post-path-rewrite data from display_payloads, so the output
+    faithfully reflects what was written to disk and will be executed.
+    """
+    for _payload in payloads:
+        _src = _payload.get("source_hook_file", "hook file")
+        _actions = _payload.get("actions", [])
+        if _actions:
+            for _act in _actions:
+                log_fn(f"  |   {_act['event']}: {_act['summary']} ({_src})")
+        else:
+            log_fn(f"  |   Hook file integrated: {_src}")
+        if verbose and logger is not None:
+            _out_path = _payload.get("output_path", "")
+            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
+            for _jline in _payload.get("rendered_json", "").splitlines():
+                logger.verbose_detail(f"  |     {_jline}")
+
+
 def integrate_package_primitives(
     package_info: Any,
     project_root: Path,
@@ -344,9 +370,9 @@ def integrate_package_primitives(
                 if _target.hooks_config_display:
                     _deploy_dir = _target.hooks_config_display
                 _label = "hook(s)"
-                _payloads = getattr(_int_result, "display_payloads", None)
-                if isinstance(_payloads, list):
-                    _agg_hook_payloads.extend(_payloads)
+                _agg_hook_payloads.extend(
+                    p for p in getattr(_int_result, "display_payloads", []) or []
+                )
             else:
                 _label = _prim_name
             _agg_paths.append(_deploy_dir)
@@ -391,19 +417,12 @@ def integrate_package_primitives(
             _hook_verbose = _verbose or (
                 bool(getattr(logger, "verbose", False)) if logger is not None else False
             )
-            for _payload in _info.get("hook_payloads", []):
-                _src = _payload.get("source_hook_file", "hook file")
-                _actions = _payload.get("actions", [])
-                if _actions:
-                    for _act in _actions:
-                        _log_integration(f"  |   {_act['event']}: {_act['summary']} ({_src})")
-                else:
-                    _log_integration(f"  |   Hook file integrated: {_src}")
-                if _hook_verbose and logger is not None:
-                    _out_path = _payload.get("output_path", "")
-                    logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
-                    for _jline in _payload.get("rendered_json", "").splitlines():
-                        logger.verbose_detail(f"  |     {_jline}")
+            _log_hook_display_payloads(
+                _info.get("hook_payloads", []),
+                _hook_verbose,
+                _log_integration,
+                logger,
+            )
         # Emit a one-line "next step" hint when copilot-app workflows
         # were integrated: the row lands enabled=0 and the user has to
         # flip the toggle in the Copilot App's Workflows tab before the

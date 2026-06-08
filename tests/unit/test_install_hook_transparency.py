@@ -100,12 +100,12 @@ def test_display_payloads_reflect_rewritten_paths_vscode(tmp_path):
     integrator = HookIntegrator()
 
     result = integrator.integrate_package_hooks(
-        None,  # target (uses default root_dir)
         package_info,
         tmp_path,
         force=False,
         managed_files=set(),
         diagnostics=None,
+        target=None,
     )
 
     assert result.files_integrated == 1
@@ -122,7 +122,7 @@ def test_display_payloads_reflect_rewritten_paths_vscode(tmp_path):
     assert ".github" in action["summary"]
 
     # Verify rendered_json reflects what was written to disk
-    target_file = tmp_path / ".github" / "hooks" / "anthropics-hookify-hooks.json"
+    target_file = tmp_path / ".github" / "hooks" / "hookify-hooks.json"
     assert target_file.exists()
     on_disk = json.loads(target_file.read_text())
     payload_json = json.loads(payload["rendered_json"])
@@ -150,13 +150,13 @@ def test_display_payloads_reflect_rewritten_paths_claude(tmp_path):
     assert len(result.display_payloads) >= 1
 
     payload = result.display_payloads[0]
-    payload_json = json.loads(payload["rendered_json"])
 
     # The rewritten data must not contain the template variable
     rendered_str = payload["rendered_json"]
     assert "${CLAUDE_PLUGIN_ROOT}" not in rendered_str
 
     # The path in the rendered JSON must reference the .claude subtree
+    payload_json = json.loads(rendered_str)
     rendered_commands = [
         v
         for hook_list in payload_json.get("hooks", {}).values()
@@ -180,12 +180,12 @@ def test_display_payloads_empty_when_no_hooks_integrated(tmp_path):
     integrator = HookIntegrator()
 
     result = integrator.integrate_package_hooks(
-        None,
         package_info,
         tmp_path,
         force=False,
         managed_files=set(),
         diagnostics=None,
+        target=None,
     )
 
     assert result.files_integrated == 0
@@ -199,12 +199,12 @@ def test_iter_hook_entries_matches_what_build_display_payload_shows(tmp_path):
     integrator = HookIntegrator()
 
     result = integrator.integrate_package_hooks(
-        None,
         package_info,
         tmp_path,
         force=False,
         managed_files=set(),
         diagnostics=None,
+        target=None,
     )
 
     assert result.files_integrated == 1
