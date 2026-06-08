@@ -46,6 +46,7 @@ _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 # list-form ``argv`` so there is no shell-expansion vector.
 _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
+_REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
 def _path_segment_pattern(is_ado_host: bool) -> str:
@@ -511,9 +512,9 @@ class DependencyReference:
         retired the ``@`` separator to avoid the npm/go/cargo ``@version``
         collision). The dedicated SSH parsers handle ``@`` in ``ssh://`` URLs
         and SCP shorthand (``<user>@host:path``) as userinfo, not aliases; this
-        guard fires for the remaining cases like
-        ``owner/repo[/sub][#ref]@alias``, which would otherwise silently leak
-        the alias into ``virtual_path`` or ``reference``.
+        guard rejects ``@`` in the pre-fragment shorthand portion and keeps the
+        retired ``#ref@alias`` shape rejected, while version-style tag suffixes
+        such as ``owner/repo#package@v1.0.1`` remain valid literal refs.
         """
         stripped = dependency_str.strip()
         if "@" not in stripped:
@@ -522,6 +523,11 @@ class DependencyReference:
             return
         if SCP_LIKE_RE.match(stripped):
             return
+        shorthand_part, _, ref_part = stripped.partition("#")
+        if "@" not in shorthand_part:
+            _, _, ref_suffix = ref_part.rpartition("@")
+            if _REF_VERSION_SUFFIX_RE.fullmatch(ref_suffix):
+                return
         preview = "".join(ch if 32 <= ord(ch) <= 126 else "?" for ch in stripped)
         if len(preview) > 160:
             preview = f"{preview[:157]}..."
