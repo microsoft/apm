@@ -165,9 +165,7 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(summary.installed[0], "new-server")
 
         # Verify adapter was called only for new server
-        mock_adapter.configure_mcp_server.assert_called_once_with(
-            "new-server", server_name="new-server"
-        )
+        mock_adapter.configure_mcp_server.assert_called_once_with("new-server")
 
     @patch("apm_cli.core.safe_installer.ClientFactory")
     @patch("apm_cli.core.safe_installer.MCPConflictDetector")

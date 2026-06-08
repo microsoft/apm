@@ -119,10 +119,10 @@ class SafeMCPInstaller:
                     kwargs["server_info_cache"] = server_info_cache
                 if runtime_vars is not None:
                     kwargs["runtime_vars"] = runtime_vars
+                if server_ref.startswith("@") and server_ref.count("/") == 1:
+                    kwargs["server_name"] = server_ref
 
-                result = self.adapter.configure_mcp_server(
-                    server_ref, server_name=server_ref, **kwargs
-                )
+                result = self.adapter.configure_mcp_server(server_ref, **kwargs)
 
                 if result:
                     summary.add_installed(server_ref)

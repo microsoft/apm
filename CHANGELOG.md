@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now preserves scoped MCP package config keys such as
+  `@playwright/mcp` across Claude, Codex, and Copilot harness configs instead
+  of truncating them to `mcp`. (#1699)
 - `apm install` now keeps format-transformed rule files (`.claude/rules`,
   `.cursor/rules`, `.windsurf/rules`) tracked in `managed_files` and rewrites
   them when the source instruction changes, instead of mis-classifying them as

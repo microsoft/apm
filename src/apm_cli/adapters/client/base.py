@@ -637,8 +637,9 @@ class MCPClientAdapter(ABC):
         """Return the configuration key to use for *server_url*/*server_name*.
 
         The caller-supplied *server_name* takes precedence. If it is absent,
-        preserve npm-style scoped names such as ``@scope/name`` while keeping
-        the historical ``owner/repo -> repo`` fallback for registry paths.
+        preserve npm-style scoped names such as ``@scope/name`` (one slash by
+        npm convention) while keeping the historical ``owner/repo -> repo``
+        fallback for registry paths.
 
         Args:
             server_url: Registry reference used as fallback source.

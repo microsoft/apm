@@ -53,8 +53,8 @@ def test_two_scoped_server_names_do_not_collide(adapter_cls, raw_stdio_servers):
     assert captured_keys == ["@playwright/mcp", "@other/mcp"]
 
 
-def test_safe_installer_passes_declared_server_name_to_adapter():
-    """Installer must preserve the apm.yml dependency name as server_name."""
+def test_safe_installer_passes_scoped_server_name_to_adapter():
+    """Installer must preserve scoped dependency names as server_name."""
     mock_adapter = Mock()
     mock_adapter.configure_mcp_server.return_value = True
     mock_conflict_detector = Mock()
@@ -74,3 +74,24 @@ def test_safe_installer_passes_declared_server_name_to_adapter():
     mock_adapter.configure_mcp_server.assert_called_once_with(
         "@playwright/mcp", server_name="@playwright/mcp"
     )
+
+
+def test_safe_installer_keeps_owner_repo_fallback_available():
+    """Installer must not override owner/repo basename fallback keys."""
+    mock_adapter = Mock()
+    mock_adapter.configure_mcp_server.return_value = True
+    mock_conflict_detector = Mock()
+    mock_conflict_detector.check_server_exists.return_value = False
+
+    with (
+        patch("apm_cli.core.safe_installer.ClientFactory.create_client") as mock_factory,
+        patch("apm_cli.core.safe_installer.MCPConflictDetector") as mock_detector_class,
+    ):
+        mock_factory.return_value = mock_adapter
+        mock_detector_class.return_value = mock_conflict_detector
+        installer = SafeMCPInstaller("copilot")
+
+    summary = installer.install_servers(["microsoft/azure-devops-mcp"])
+
+    assert summary.installed == ["microsoft/azure-devops-mcp"]
+    mock_adapter.configure_mcp_server.assert_called_once_with("microsoft/azure-devops-mcp")
