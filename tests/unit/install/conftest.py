@@ -9,6 +9,7 @@ to a Python dependency chain they don't exercise.
 We override the two autouse fixtures with no-ops so this test file can
 run in any environment that has bash + pytest, no Python build needed.
 """
+
 from __future__ import annotations
 
 import pytest

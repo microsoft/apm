@@ -314,7 +314,7 @@ fi
 
 # Create temporary directory
 TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Download binary
 echo -e "${YELLOW}Downloading APM...${NC}"
@@ -502,6 +502,9 @@ APM_LIB_DIR="${APM_LIB_DIR:-$(dirname "$APM_INSTALL_DIR")/lib/apm}"
 # Extract with:  sed -n '/^# INSTALL_SAFETY_BEGIN/,/^# INSTALL_SAFETY_END/p' install.sh
 apm_lib_dir_validate() {
     _apm_lib_dir="$1"
+    while [ "$_apm_lib_dir" != "/" ] && [ "${_apm_lib_dir%/}" != "$_apm_lib_dir" ]; do
+        _apm_lib_dir="${_apm_lib_dir%/}"
+    done
 
     # 1. Absolute-path guard: must be absolute
     case "$_apm_lib_dir" in
@@ -511,7 +514,7 @@ apm_lib_dir_validate() {
 
     # 2. Suffix guard: must end with /apm or /lib/apm
     case "$_apm_lib_dir" in
-        */apm|*/lib/apm) ;;
+        */apm) ;;
         *) return 12 ;;
     esac
 
@@ -556,6 +559,14 @@ APM_BLOCKLIST_EOF
 
     return 0
 }
+
+apm_prepare_lib_parent() {
+    _apm_parent_dir="$(dirname "$1")"
+    if mkdir -p "$_apm_parent_dir" 2>/dev/null && [ -w "$_apm_parent_dir" ]; then
+        return 0
+    fi
+    return 1
+}
 # INSTALL_SAFETY_END -- extracted for testability; do not remove markers.
 
 _rc=0
@@ -574,9 +585,23 @@ if [ "$_rc" -ne 0 ]; then
     exit 1
 fi
 
+# Prepare the parent directory once so user-local installs do not fall into sudo
+# just because the derived lib parent (for example, $HOME/.local/lib) is absent.
+if apm_prepare_lib_parent "$APM_LIB_DIR"; then
+    APM_LIB_USE_SUDO=0
+else
+    APM_LIB_USE_SUDO=1
+fi
+
 # Remove any existing installation (safety-validated above)
 if [ -d "$APM_LIB_DIR" ]; then
-    if [ -w "$(dirname "$APM_LIB_DIR")" ]; then
+    _rc=0
+    apm_lib_dir_validate "$APM_LIB_DIR" || _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        echo -e "${RED}Error: APM_LIB_DIR became unsafe before removal; refusing to delete.${NC}"
+        exit 1
+    fi
+    if [ "$APM_LIB_USE_SUDO" -eq 0 ]; then
         rm -rf "$APM_LIB_DIR"
     else
         sudo rm -rf "$APM_LIB_DIR"
@@ -584,12 +609,14 @@ if [ -d "$APM_LIB_DIR" ]; then
 fi
 
 # Create installation directory
-if [ -w "$(dirname "$APM_LIB_DIR")" ]; then
+if [ "$APM_LIB_USE_SUDO" -eq 0 ]; then
     mkdir -p "$APM_LIB_DIR"
     cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
+    touch "$APM_LIB_DIR/.apm-installed"
 else
     sudo mkdir -p "$APM_LIB_DIR"
     sudo cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
+    sudo touch "$APM_LIB_DIR/.apm-installed"
 fi
 
 # Create symlink pointing to the actual binary

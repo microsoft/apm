@@ -17,6 +17,7 @@ Note: the test file does not import any production Python code. It treats
 ``install.sh`` as a shell source so the function-under-test is the same code
 that runs in production.
 """
+
 from __future__ import annotations
 
 import os
@@ -63,6 +64,27 @@ def _run_validator(lib_dir: str, home: str | None = None) -> int:
     driver = f"""
 {_VALIDATOR_SRC}
 apm_lib_dir_validate "$1"
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = subprocess.run(
+            ["bash", "-c", driver, "--", lib_dir],
+            input="",
+            capture_output=True,
+            text=True,
+            env={**os.environ, "HOME": home},
+            cwd=tmp,
+            timeout=10,
+        )
+    return proc.returncode
+
+
+def _run_prepare_parent(lib_dir: str, home: str | None = None) -> int:
+    """Return the parent-preparation helper exit code for ``lib_dir``."""
+    if home is None:
+        home = "/home/safe-user"
+    driver = f"""
+{_VALIDATOR_SRC}
+apm_prepare_lib_parent "$1"
 """
     with tempfile.TemporaryDirectory() as tmp:
         proc = subprocess.run(
@@ -141,6 +163,23 @@ class TestSuffixGuard:
 
 
 class TestBlocklistGuard:
+    @pytest.mark.parametrize(
+        "broad_path",
+        [
+            "/home/safe-user",
+            "/home/safe-user/.local",
+            "/home/safe-user/.local/share",
+            "/home/safe-user/.config",
+            "/usr",
+            "/usr/local",
+            "/opt",
+            "/tmp",
+            "/",
+        ],
+    )
+    def test_rejects_broad_paths(self, broad_path: str):
+        assert _run_validator(broad_path, home="/home/safe-user") != 0
+
     def test_accepts_safe_user_local(self):
         # Default user-local install path from the Quickstart docs.
         assert _run_validator("/home/safe-user/.local/lib/apm") == 0
@@ -255,6 +294,17 @@ class TestMarkerFileGuard:
 # ---------------------------------------------------------------------------
 # End-to-end scenarios
 # ---------------------------------------------------------------------------
+
+
+class TestUserLocalInstall:
+    def test_prepare_parent_creates_missing_user_local_lib_without_sudo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            os.makedirs(os.path.join(home, ".local"))
+            target = os.path.join(home, ".local", "lib", "apm")
+
+            assert _run_prepare_parent(target, home=home) == 0
+            assert Path(home, ".local", "lib").is_dir()
 
 
 class TestReportedIncident:
