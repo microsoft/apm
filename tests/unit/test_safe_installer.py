@@ -40,7 +40,9 @@ class TestSafeMCPInstaller(unittest.TestCase):
         self.assertEqual(summary.installed[0], "github")
 
         # Verify adapter was called
-        self.mock_adapter.configure_mcp_server.assert_called_once_with("github")
+        self.mock_adapter.configure_mcp_server.assert_called_once_with(
+            "github", server_name="github"
+        )
 
     def test_skip_existing_server(self):
         """Test skipping server that already exists."""
@@ -99,10 +101,10 @@ class TestSafeMCPInstaller(unittest.TestCase):
         def mock_check_exists(server_ref):
             return server_ref == "existing-server"
 
-        def mock_configure(server_ref):
+        def mock_configure(server_ref, **kwargs):
             if server_ref == "failing-server":
                 raise Exception("Configuration failed")
-            return server_ref == "new-server"
+            return server_ref == "new-server" and kwargs == {"server_name": server_ref}
 
         self.mock_conflict_detector.check_server_exists.side_effect = mock_check_exists
         self.mock_adapter.configure_mcp_server.side_effect = mock_configure
