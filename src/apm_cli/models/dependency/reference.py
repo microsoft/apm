@@ -512,11 +512,12 @@ class DependencyReference:
         collision). The dedicated SSH parsers handle ``@`` in ``ssh://`` URLs
         and SCP shorthand (``<user>@host:path``) as userinfo, not aliases; this
         guard fires for the remaining cases like
-        ``owner/repo[/sub][#ref]@alias``, which would otherwise silently leak
+        ``owner/repo[/sub]@alias[#ref]``, which would otherwise silently leak
         the alias into ``virtual_path`` or ``reference``.
         """
         stripped = dependency_str.strip()
-        if "@" not in stripped:
+        shorthand_part = stripped.partition("#")[0]
+        if "@" not in shorthand_part:
             return
         if stripped.lower().startswith(("https://", "http://", "ssh://")):
             return
