@@ -103,3 +103,7 @@ class TestLiteralTagRegressionTrap:
     def test_shorthand_alias_before_ref_fragment_is_still_rejected(self) -> None:
         with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
             DependencyReference.parse("owner/repo@alias")
+
+    def test_subpath_shorthand_alias_before_ref_fragment_is_still_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo/subpath@alias#main")

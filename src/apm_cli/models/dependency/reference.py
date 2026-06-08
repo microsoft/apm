@@ -511,9 +511,10 @@ class DependencyReference:
         retired the ``@`` separator to avoid the npm/go/cargo ``@version``
         collision). The dedicated SSH parsers handle ``@`` in ``ssh://`` URLs
         and SCP shorthand (``<user>@host:path``) as userinfo, not aliases; this
-        guard fires for the remaining cases like
-        ``owner/repo[/sub]@alias[#ref]``, which would otherwise silently leak
-        the alias into ``virtual_path`` or ``reference``.
+        guard only inspects the pre-fragment shorthand portion, so refs like
+        ``owner/repo#package@v1.0.1`` stay valid while cases like
+        ``owner/repo[/sub]@alias[#ref]`` are rejected before the alias can leak
+        into ``virtual_path`` or ``reference``.
         """
         stripped = dependency_str.strip()
         shorthand_part = stripped.partition("#")[0]
