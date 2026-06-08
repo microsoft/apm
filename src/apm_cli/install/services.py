@@ -131,7 +131,7 @@ def _log_hook_display_payloads(
         _actions = _payload.get("actions", [])
         if _actions:
             for _act in _actions:
-                log_fn(f"  |   {_act['event']}: {_act['summary']} ({_src})")
+                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
         else:
             log_fn(f"  |   Hook file integrated: {_src}")
         if verbose and logger is not None:
