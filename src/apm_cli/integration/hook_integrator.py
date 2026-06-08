@@ -450,14 +450,18 @@ class HookIntegrator(BaseIntegrator):
         """
         actions = []
         for event_name, entry in self._iter_hook_entries(rewritten):
-            actions.append({
-                "event": event_name,
-                "summary": self._summarize_command(entry),
-            })
+            actions.append(
+                {
+                    "event": event_name,
+                    "summary": self._summarize_command(entry),
+                }
+            )
         return {
             "target_label": target_label,
             "output_path": output_path,
-            "source_hook_file": source_hook_file.name if hasattr(source_hook_file, "name") else str(source_hook_file),
+            "source_hook_file": source_hook_file.name
+            if hasattr(source_hook_file, "name")
+            else str(source_hook_file),
             "actions": actions,
             "rendered_json": json.dumps(rewritten, indent=2, sort_keys=True),
         }

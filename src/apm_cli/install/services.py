@@ -396,16 +396,12 @@ def integrate_package_primitives(
                 _actions = _payload.get("actions", [])
                 if _actions:
                     for _act in _actions:
-                        _log_integration(
-                            f"  |   {_act['event']}: {_act['summary']} ({_src})"
-                        )
+                        _log_integration(f"  |   {_act['event']}: {_act['summary']} ({_src})")
                 else:
                     _log_integration(f"  |   Hook file integrated: {_src}")
                 if _hook_verbose and logger is not None:
                     _out_path = _payload.get("output_path", "")
-                    logger.verbose_detail(
-                        f"  |   Hook JSON ({_src} -> {_out_path}):"
-                    )
+                    logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
                     for _jline in _payload.get("rendered_json", "").splitlines():
                         logger.verbose_detail(f"  |     {_jline}")
         # Emit a one-line "next step" hint when copilot-app workflows

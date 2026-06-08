@@ -8,9 +8,6 @@ pre-rewrite paths would give false assurance.
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
-
-import pytest
 
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.models.apm_package import APMPackage, PackageInfo
@@ -59,13 +56,7 @@ class TestIterHookEntries:
         assert entries == [("PreToolUse", {"command": "echo hi"})]
 
     def test_nested_hooks(self):
-        payload = {
-            "hooks": {
-                "PostToolUse": [
-                    {"hooks": [{"command": "python3 run.py"}]}
-                ]
-            }
-        }
+        payload = {"hooks": {"PostToolUse": [{"hooks": [{"command": "python3 run.py"}]}]}}
         entries = HookIntegrator._iter_hook_entries(payload)
         assert entries == [("PostToolUse", {"command": "python3 run.py"})]
 
@@ -79,7 +70,9 @@ class TestIterHookEntries:
 
 class TestSummarizeCommand:
     def test_path_token_extracted(self):
-        summary = HookIntegrator._summarize_command({"command": "python3 .github/hooks/scripts/x.py"})
+        summary = HookIntegrator._summarize_command(
+            {"command": "python3 .github/hooks/scripts/x.py"}
+        )
         assert summary == "runs .github/hooks/scripts/x.py"
 
     def test_no_path_falls_back_to_command(self):
