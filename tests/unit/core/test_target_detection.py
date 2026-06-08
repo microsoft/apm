@@ -905,7 +905,7 @@ class TestCoworkParserLayer:
         This locks the constant so that adding a new experimental target
         requires an intentional test update.
         """
-        assert frozenset({"copilot-cowork", "copilot-app"}) == EXPERIMENTAL_TARGETS
+        assert frozenset({"copilot-cowork", "copilot-app", "openclaw"}) == EXPERIMENTAL_TARGETS
 
     # -- Case 7: "all" expansion does NOT include "copilot-cowork" ---------------
 

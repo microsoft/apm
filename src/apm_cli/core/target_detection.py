@@ -329,6 +329,7 @@ def get_target_description(target: UserTargetType) -> str:
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
+        "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -349,7 +350,7 @@ ALL_CANONICAL_TARGETS = frozenset(
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork", "copilot-app"})
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork", "copilot-app", "openclaw"})
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
 #: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
