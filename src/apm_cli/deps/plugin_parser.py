@@ -508,6 +508,7 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
         and lsp_inner
         and all(isinstance(v, dict) for v in lsp_inner.values())
     ):
+        logger.debug("Unwrapped lspServers envelope in %s", path)
         return dict(lsp_inner)
     return dict(data)
 
