@@ -23,8 +23,9 @@ import os
 import re
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INSTALL_SH = REPO_ROOT / "install.sh"
@@ -39,10 +40,12 @@ def _load_validator():
     no tmp dirs, no real installation side effects.
     """
     text = INSTALL_SH.read_text(encoding="utf-8")
-    match = SENTINEL_END.search(text)
-    assert match is not None, "INSTALL_SAFETY_END sentinel missing in install.sh"
-    start = SENTINEL_BEGIN.search(text).end()
-    end = match.start()
+    match_end = SENTINEL_END.search(text)
+    assert match_end is not None, "INSTALL_SAFETY_END sentinel missing in install.sh"
+    match_begin = SENTINEL_BEGIN.search(text)
+    assert match_begin is not None, "INSTALL_SAFETY_BEGIN sentinel missing in install.sh"
+    start = match_begin.end()
+    end = match_end.start()
     block = text[start:end]
     return block
 
@@ -288,4 +291,4 @@ class TestSentinelInvariants:
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__, "-v"])

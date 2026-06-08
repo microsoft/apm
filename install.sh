@@ -501,32 +501,30 @@ APM_LIB_DIR="${APM_LIB_DIR:-$(dirname "$APM_INSTALL_DIR")/lib/apm}"
 # Extracted for testability; do not remove the begin/end markers.
 # Extract with:  sed -n '/^# INSTALL_SAFETY_BEGIN/,/^# INSTALL_SAFETY_END/p' install.sh
 apm_lib_dir_validate() {
-    local _lib_dir="$1"
+    _apm_lib_dir="$1"
 
     # 1. Absolute-path guard: must be absolute
-    case "$_lib_dir" in
+    case "$_apm_lib_dir" in
         /*) ;;
         *) return 11 ;;
     esac
 
     # 2. Suffix guard: must end with /apm or /lib/apm
-    case "$_lib_dir" in
+    case "$_apm_lib_dir" in
         */apm|*/lib/apm) ;;
         *) return 12 ;;
     esac
 
     # 3. Blocklist guard: reject known shared/broad parent directories
     #    (resolved to real path where available, to catch symlink bypasses)
-    local _lib_dir_real
-    _lib_dir_real="$(readlink -f "$_lib_dir" 2>/dev/null || realpath "$_lib_dir" 2>/dev/null || echo "$_lib_dir")"
+    _apm_lib_dir_real="$(readlink -f "$_apm_lib_dir" 2>/dev/null || realpath "$_apm_lib_dir" 2>/dev/null || echo "$_apm_lib_dir")"
 
-    local _safe=true
-    while IFS= read -r _dir; do
-        [ -z "$_dir" ] && continue
-        local _dir_real
-        _dir_real="$(readlink -f "$_dir" 2>/dev/null || realpath "$_dir" 2>/dev/null || echo "$_dir")"
-        if [ "$_lib_dir_real" = "$_dir_real" ]; then
-            _safe=false
+    _apm_safe=true
+    while IFS= read -r _apm_dir; do
+        [ -z "$_apm_dir" ] && continue
+        _apm_dir_real="$(readlink -f "$_apm_dir" 2>/dev/null || realpath "$_apm_dir" 2>/dev/null || echo "$_apm_dir")"
+        if [ "$_apm_lib_dir_real" = "$_apm_dir_real" ]; then
+            _apm_safe=false
             break
         fi
     done <<APM_BLOCKLIST_EOF
@@ -541,17 +539,17 @@ $HOME/.config
 /
 APM_BLOCKLIST_EOF
 
-    if [ "$_safe" != "true" ]; then
+    if [ "$_apm_safe" != "true" ]; then
         return 13
     fi
 
     # 4. Marker-file guard: for existing non-empty directories,
     #    require evidence of a prior APM installation before deleting.
-    if [ -d "$_lib_dir" ] && [ "$(ls -A "$_lib_dir" 2>/dev/null)" ]; then
-        if [ ! -f "$_lib_dir/apm" ] \
-            && [ ! -f "$_lib_dir/apm.cmd" ] \
-            && [ ! -f "$_lib_dir/VERSION" ] \
-            && [ ! -f "$_lib_dir/.apm-installed" ]; then
+    if [ -d "$_apm_lib_dir" ] && [ "$(ls -A "$_apm_lib_dir" 2>/dev/null)" ]; then
+        if [ ! -f "$_apm_lib_dir/apm" ] \
+            && [ ! -f "$_apm_lib_dir/apm.cmd" ] \
+            && [ ! -f "$_apm_lib_dir/VERSION" ] \
+            && [ ! -f "$_apm_lib_dir/.apm-installed" ]; then
             return 14
         fi
     fi
@@ -560,8 +558,9 @@ APM_BLOCKLIST_EOF
 }
 # INSTALL_SAFETY_END -- extracted for testability; do not remove markers.
 
-if ! apm_lib_dir_validate "$APM_LIB_DIR"; then
-    _rc=$?
+_rc=0
+apm_lib_dir_validate "$APM_LIB_DIR" || _rc=$?
+if [ "$_rc" -ne 0 ]; then
     echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${RED}║  REFUSING: APM_LIB_DIR=\"$APM_LIB_DIR\"${NC}"
     echo -e "${RED}╠══════════════════════════════════════════════════════════════╣${NC}"
