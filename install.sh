@@ -494,7 +494,88 @@ echo -e "${YELLOW}Installing APM CLI to $APM_INSTALL_DIR...${NC}"
 # APM installation directory (for the complete bundle)
 APM_LIB_DIR="${APM_LIB_DIR:-$(dirname "$APM_INSTALL_DIR")/lib/apm}"
 
-# Remove any existing installation
+# --- APM_LIB_DIR safety validation ---
+# Prevent accidental data loss when APM_LIB_DIR is set to a broad/shared path.
+# Four guards: absolute path, suffix, blocklist, marker file.
+# INSTALL_SAFETY_BEGIN
+# Extracted for testability; do not remove the begin/end markers.
+# Extract with:  sed -n '/^# INSTALL_SAFETY_BEGIN/,/^# INSTALL_SAFETY_END/p' install.sh
+apm_lib_dir_validate() {
+    local _lib_dir="$1"
+
+    # 1. Absolute-path guard: must be absolute
+    case "$_lib_dir" in
+        /*) ;;
+        *) return 11 ;;
+    esac
+
+    # 2. Suffix guard: must end with /apm or /lib/apm
+    case "$_lib_dir" in
+        */apm|*/lib/apm) ;;
+        *) return 12 ;;
+    esac
+
+    # 3. Blocklist guard: reject known shared/broad parent directories
+    #    (resolved to real path where available, to catch symlink bypasses)
+    local _lib_dir_real
+    _lib_dir_real="$(readlink -f "$_lib_dir" 2>/dev/null || realpath "$_lib_dir" 2>/dev/null || echo "$_lib_dir")"
+
+    local _safe=true
+    while IFS= read -r _dir; do
+        [ -z "$_dir" ] && continue
+        local _dir_real
+        _dir_real="$(readlink -f "$_dir" 2>/dev/null || realpath "$_dir" 2>/dev/null || echo "$_dir")"
+        if [ "$_lib_dir_real" = "$_dir_real" ]; then
+            _safe=false
+            break
+        fi
+    done <<APM_BLOCKLIST_EOF
+$HOME
+$HOME/.local
+$HOME/.local/share
+$HOME/.config
+/usr
+/usr/local
+/opt
+/tmp
+/
+APM_BLOCKLIST_EOF
+
+    if [ "$_safe" != "true" ]; then
+        return 13
+    fi
+
+    # 4. Marker-file guard: for existing non-empty directories,
+    #    require evidence of a prior APM installation before deleting.
+    if [ -d "$_lib_dir" ] && [ "$(ls -A "$_lib_dir" 2>/dev/null)" ]; then
+        if [ ! -f "$_lib_dir/apm" ] \
+            && [ ! -f "$_lib_dir/apm.cmd" ] \
+            && [ ! -f "$_lib_dir/VERSION" ] \
+            && [ ! -f "$_lib_dir/.apm-installed" ]; then
+            return 14
+        fi
+    fi
+
+    return 0
+}
+# INSTALL_SAFETY_END -- extracted for testability; do not remove markers.
+
+if ! apm_lib_dir_validate "$APM_LIB_DIR"; then
+    _rc=$?
+    echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║  REFUSING: APM_LIB_DIR=\"$APM_LIB_DIR\"${NC}"
+    echo -e "${RED}╠══════════════════════════════════════════════════════════════╣${NC}"
+    case $_rc in
+        11) echo -e "${RED}║  APM_LIB_DIR must be an absolute path.${NC}\n${RED}║  Relative paths are not accepted for safety.${NC}" ;;
+        12) echo -e "${RED}║  APM_LIB_DIR must end with /apm or /lib/apm.${NC}\n${RED}║  This prevents accidental deletion of non-APM data.${NC}\n${RED}║  Example: APM_LIB_DIR=\$HOME/.local/lib/apm${NC}" ;;
+        13) echo -e "${RED}║  This path is a shared system directory. Installing here${NC}\n${RED}║  would delete non-APM data.${NC}\n${RED}║  Use a dedicated APM directory (e.g. /usr/local/lib/apm).${NC}" ;;
+        14) echo -e "${RED}║  This directory exists but does not appear to be a${NC}\n${RED}║  previous APM installation. Refusing to delete it.${NC}\n${RED}║  If you are sure, remove it manually first:${NC}\n${RED}║    rm -rf \"$APM_LIB_DIR\"${NC}" ;;
+    esac
+    echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
+    exit 1
+fi
+
+# Remove any existing installation (safety-validated above)
 if [ -d "$APM_LIB_DIR" ]; then
     if [ -w "$(dirname "$APM_LIB_DIR")" ]; then
         rm -rf "$APM_LIB_DIR"
