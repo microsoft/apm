@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm publish` auto-pack now produces a `.zip` archive (ZIP\_DEFLATED) instead of `.tar.gz`, aligning with the de facto standard used by Anthropic Claude, OpenAI, and Google Gemini agent platforms. The `--tarball` option is renamed to `--zip`. Output filename: `{name}-{version}.zip`.
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
+- `apm install` now surfaces per-event hook action summaries as it integrates
+  hook primitives, with the fully rewritten hook JSON shown under `--verbose`,
+  so you can audit exactly what each hook runs at install time. The summary is
+  built from the post-rewrite data actually written to disk and executed -- it
+  faithfully reflects on-disk content across Copilot, Claude, and Gemini
+  targets (including OS-specific `windows`/`linux`/`osx` hook keys). (by
+  @harshitlarl, closes #316)
 
 ### Fixed
 
