@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now splits FQDN monorepo subpath shorthand on GitHub
+  Enterprise Server hosts. With `GITHUB_HOST` set, a dependency string like
+  `ghe.example.com/org/repo/packages/skill` resolves to `git: org/repo` plus
+  `path: packages/skill` instead of embedding the whole subpath into the clone
+  URL. (by @sergio-sisternes-epam, closes #1673)
 - `apm install` now keeps format-transformed rule files (`.claude/rules`,
   `.cursor/rules`, `.windsurf/rules`) tracked in `managed_files` and rewrites
   them when the source instruction changes, instead of mis-classifying them as
