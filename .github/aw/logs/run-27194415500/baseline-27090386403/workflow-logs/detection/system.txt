@@ -1,9 +1,0 @@
-2026-06-07T11:20:33.1440000Z Evaluating detection.if
-2026-06-07T11:20:33.1440000Z Evaluating: (always() && (needs.agent.result != 'skipped') && (((needs.agent.outputs.output_types != '') || (needs.agent.outputs.has_patch == 'true'))))
-2026-06-07T11:20:33.1440000Z Expanded: (true && ('success' != 'skipped') && (('add_comment,remove_labels' != '') || (needs.agent.outputs.has_patch == 'true')))
-2026-06-07T11:20:33.1440000Z Result: true
-2026-06-07T11:20:33.1440000Z Requested labels: ubuntu-latest
-2026-06-07T11:20:33.1440000Z Job defined at: microsoft/apm/.github/workflows/pr-review-panel.lock.yml@refs/heads/main
-2026-06-07T11:20:33.1440000Z Waiting for a runner to pick up this job...
-2026-06-07T11:20:38.1510000Z Job is waiting for a hosted runner to come online.
-2026-06-07T11:20:38.1510000Z Job is about to start running on the hosted runner: GitHub Actions 1039417745

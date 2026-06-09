@@ -1,9 +1,0 @@
-2026-06-06T22:57:15.7450000Z Requested labels: ubuntu-slim
-2026-06-06T22:57:15.7450000Z Job defined at: microsoft/apm/.github/workflows/pr-review-panel.lock.yml@refs/heads/main
-2026-06-06T22:57:15.7450000Z Waiting for a runner to pick up this job...
-2026-06-06T22:57:15.7450000Z Evaluating activation.if
-2026-06-06T22:57:15.7450000Z Evaluating: (success() && (((needs.pre_activation.outputs.activated == 'true') && (((github.event_name == 'workflow_dispatch') || (github.event.label.name == 'panel-review'))))))
-2026-06-06T22:57:15.7450000Z Expanded: (true && (('true' == 'true') && (('pull_request_target' == 'workflow_dispatch') || ('panel-review' == 'panel-review'))))
-2026-06-06T22:57:15.7450000Z Result: true
-2026-06-06T22:57:33.3620000Z Job is about to start running on the hosted runner: GitHub Actions 1039392978
-2026-06-06T22:57:33.3610000Z Job is waiting for a hosted runner to come online.

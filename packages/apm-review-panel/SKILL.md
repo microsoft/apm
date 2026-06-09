@@ -58,6 +58,20 @@ surfaces findings; the maintainer and the PR author decide ship.
 - **Single-emission discipline.** Exactly one comment per panel run,
   rendered from `assets/recommendation-template.md` after all subagents
   return.
+- **Synchronous fan-out -- never spawn-and-forget.** Every `task` spawn
+  (each panelist AND the CEO synthesizer) is BLOCKING. The orchestrator
+  MUST wait for each task to return its JSON before moving on, and MUST
+  NOT end its turn while any subagent is still running. Panelist and CEO
+  returns are LOAD-BEARING: the final comment cannot be rendered without
+  them. Spawning the CEO (or a panelist) in a fire-and-forget background
+  mode and then ending the turn is the documented cause of the "No Safe
+  Outputs Generated" failure -- the agent exits with
+  `agent_output = {"items":[]}`, the safe-output detection job is
+  skipped, the `add-comment` job never runs, and the panel silently
+  posts nothing. The turn ends ONLY after step 7 has emitted the comment
+  and step 8 has swept the labels. If the run genuinely cannot produce a
+  comment (e.g. a fatal upstream error), emit an explicit `noop` rather
+  than exiting empty.
 
 ## Agent roster
 
@@ -254,7 +268,11 @@ every mandatory persona always runs. Routing is a CEO synthesis hint.
 ## Execution checklist
 
 Work through these steps in order. Do not skip ahead. Do not emit any
-output to the PR before step 6.
+output to the PR before step 6. Every `task` spawn below is BLOCKING:
+wait for the subagent to return before continuing, and never end your
+turn while a panelist or the CEO synthesizer is still running. The turn
+ends only after the comment (step 7) and label sweep (step 8) are
+emitted.
 
 1. **Read PR context** (the orchestrating workflow already fetched it
    via `gh pr view` / `gh pr diff`). Identify changed files for the
@@ -310,7 +328,11 @@ output to the PR before step 6.
 
 5. **Spawn the CEO synthesizer task.** Pass the full set of validated
    panelist JSON returns to a `task` invocation that loads
-   `../../agents/apm-ceo.agent.md`. The prompt MUST:
+   `../../agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
+   for its JSON return -- do NOT spawn it in fire-and-forget background
+   mode and do NOT end your turn while it runs. Its return is required
+   to render the comment; ending the turn here is the exact cause of the
+   "No Safe Outputs Generated" failure. The prompt MUST:
    - Provide all panelist returns as structured input.
    - Ask for: headline, arbitration prose, principle alignment (only
      applicable principles), curated recommended_followups (prioritized
@@ -379,6 +401,15 @@ output to the PR before step 6.
    sweeping all three on every run is safe and self-healing. NO
    verdict labels are applied.
 
+9. **Confirm emission before ending the turn.** Do not finish until the
+   `safe-outputs.add-comment` from step 7 has actually been emitted. A
+   panel run that ends with zero safe outputs (empty `agent_output`) is
+   a FAILURE, not a success -- the safe-output detection job is skipped
+   and the comment is never posted. If, after all subagents have
+   returned, you somehow cannot render a comment, emit an explicit
+   `noop` so the run records an intentional no-action rather than a
+   silent empty result.
+
 ## Output contract (non-negotiable)
 
 - Exactly ONE comment per panel run, rendered from
@@ -440,6 +471,16 @@ output to the PR before step 6.
   each `.agent.md` plus the `safe-outputs.add-comment.max: 2`
   fail-soft. If a subagent ever tries to post a comment, the cap
   catches it.
+- **Empty-safe-output failure (background spawn-and-forget).** The
+  single most common way this panel "succeeds" yet posts nothing is the
+  orchestrator spawning the CEO synthesizer (or a panelist) as a
+  background task and then ending its turn while that task is still
+  running. The harness exits with `agent_output = {"items":[]}`, gh-aw
+  skips the safe-output detection job, the `add-comment` job never runs,
+  and the workflow opens a "No Safe Outputs Generated" failure issue.
+  Every `task` spawn MUST be awaited to completion, and the turn MUST
+  NOT end before step 7 emits the comment. See the "Synchronous fan-out"
+  architecture invariant and step 9.
 - **No verdict-label reset workflow.** The previous regime had a
   companion workflow `pr-panel-label-reset.yml` that stripped verdict
   labels on every push. The advisory regime has no verdict labels to

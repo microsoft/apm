@@ -1,1 +1,0 @@
-{"id":"drift-install-flag","page_template":"docs/src/content/docs/reference/cli/install.md","seeded_drift":"The `apm install --bypass-policy` flag disables policy enforcement entirely.","section":"Flags","rationale":"No such flag exists. The judge should rule UNSUPPORTED or CONTRADICTED.","must_catch":true,"expected_verdicts_acceptable":["UNSUPPORTED","CONTRADICTED"]}
