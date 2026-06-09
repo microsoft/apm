@@ -34,13 +34,23 @@ SENTINEL_BEGIN = re.compile(r"^# INSTALL_SAFETY_BEGIN", re.MULTILINE)
 SENTINEL_END = re.compile(r"^# INSTALL_SAFETY_END", re.MULTILINE)
 
 
+def _read_install_sh() -> str:
+    """Read install.sh in a shell-safe form across platforms.
+
+    GitHub Actions on Windows can check out files with CRLF line endings. Bash
+    treats stray carriage returns in the sourced function block as syntax
+    errors, so normalize them before extracting or asserting on the script.
+    """
+    return INSTALL_SH.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _load_validator():
     """Extract the apm_lib_dir_validate() block from install.sh and return the
     source text of the function plus a small driver wrapper. Tests source the
     result into a fresh shell to invoke the function in isolation -- no network
     and no real installation side effects.
     """
-    text = INSTALL_SH.read_text(encoding="utf-8")
+    text = _read_install_sh()
     match_end = SENTINEL_END.search(text)
     assert match_end is not None, "INSTALL_SAFETY_END sentinel missing in install.sh"
     match_begin = SENTINEL_BEGIN.search(text)
@@ -340,11 +350,11 @@ class TestSentinelInvariants:
     """
 
     def test_begin_sentinel_present(self):
-        text = INSTALL_SH.read_text(encoding="utf-8")
+        text = _read_install_sh()
         assert SENTINEL_BEGIN.search(text) is not None
 
     def test_end_sentinel_present(self):
-        text = INSTALL_SH.read_text(encoding="utf-8")
+        text = _read_install_sh()
         assert SENTINEL_END.search(text) is not None
 
     def test_function_defined_in_extracted_block(self):
