@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import shutil
+import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -407,6 +408,7 @@ def export_plugin_bundle(
     output_dir: Path,
     target: str | None = None,
     archive: bool = False,
+    archive_format: str = "zip",
     dry_run: bool = False,
     force: bool = False,
     logger=None,
@@ -420,7 +422,8 @@ def export_plugin_bundle(
         project_root: Root of the project containing ``apm.yml``.
         output_dir: Parent directory for the generated bundle.
         target: Unused for plugin format (reserved for future use).
-        archive: If True, produce a ``.zip`` and remove the directory.
+        archive: If True, produce a ``.zip`` (or ``.tar.gz`` when *archive_format* is ``"tar.gz"``) and remove the directory.
+        archive_format: Archive format when *archive* is True -- ``"zip"`` (default) or ``"tar.gz"``.
         dry_run: If True, resolve the file list without writing to disk.
         force: On collision, last writer wins instead of first.
 
@@ -645,13 +648,28 @@ def export_plugin_bundle(
 
     # 15. Archive if requested
     if archive:
-        archive_path = output_dir / f"{bundle_dir.name}.zip"
-        ensure_path_within(archive_path, output_dir)
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for fp in sorted(bundle_dir.rglob("*")):
-                if fp.is_symlink() or not fp.is_file():
-                    continue  # reject symlinks injected after write
-                zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
+        if archive_format not in ("zip", "tar.gz"):
+            raise ValueError(
+                f"Unknown archive_format: {archive_format!r}. Must be 'zip' or 'tar.gz'."
+            )
+        if archive_format == "tar.gz":
+            archive_path = output_dir / f"{bundle_dir.name}.tar.gz"
+            ensure_path_within(archive_path, output_dir)
+            with tarfile.open(archive_path, "w:gz") as tf:
+                for fp in sorted(bundle_dir.rglob("*")):
+                    if fp.is_symlink() or not fp.is_file():
+                        continue
+                    tf.add(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
+        else:
+            archive_path = output_dir / f"{bundle_dir.name}.zip"
+            ensure_path_within(archive_path, output_dir)
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for fp in sorted(bundle_dir.rglob("*")):
+                    if fp.is_symlink() or not fp.is_file():
+                        continue  # reject symlinks injected after write
+                    zf.write(
+                        fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}"
+                    )
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 

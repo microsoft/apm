@@ -1094,7 +1094,7 @@ def _handle_mcp_install(
     metavar="ALIAS",
     help=(
         "Override the log/display label when installing a local bundle "
-        "(directory or .tar.gz produced by 'apm pack'). Only valid for "
+        "(directory, .zip, or .tar.gz produced by 'apm pack'). Only valid for "
         "local-bundle installs; passing --as without a local bundle path is rejected."
     ),
 )
@@ -1170,7 +1170,8 @@ def install(  # noqa: PLR0913
         apm install --mcp api --url https://example.com/mcp    # MCP remote
         apm install --mcp fetch -- npx -y @mcp/server-fetch    # MCP stdio
         apm install ./build/my-bundle           # Deploy a local bundle (directory)
-        apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
+        apm install ./my-bundle.zip             # Deploy a local bundle (archive)
+        apm install ./my-bundle.tar.gz          # Deploy a local bundle (legacy archive)
         apm install ./bundle --as custom-name   # Local bundle with custom log label
 
     Environment variables:
@@ -1288,15 +1289,14 @@ def install(  # noqa: PLR0913
                 # success path.  See issue #1207 D3.
                 summary_rendered = True
                 return
-            # IM7: path exists but isn't a recognised bundle.  For tarball
-            # extensions (.tar.gz / .tgz) the user clearly meant a bundle
-            # artifact, so raise a targeted UsageError instead of falling
-            # through to the registry path (which would try to clone).
+            # IM7: path exists but isn't a recognised bundle.  For archive
+            # extensions (.zip / .tar.gz / .tgz) raise a targeted UsageError
+            # instead of falling through to the registry clone path.
             # For bare directories we still fall through, because
             # ``apm install ./packages/source-pkg`` is a supported local-path
             # install that goes through the dependency-resolver pipeline.
             _suffix = _probe.name.lower()
-            if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
+            if _probe.is_file() and _suffix.endswith((".zip", ".tar.gz", ".tgz")):
                 # Distinguish legacy --format apm bundles (apm.lock.yaml
                 # present, plugin.json absent) from arbitrary tarballs so
                 # the error message guides the user to the right next step.
@@ -1320,7 +1320,7 @@ def install(  # noqa: PLR0913
         # silently ignoring it.
         if alias:
             raise click.UsageError(
-                "--as requires a local bundle path (directory or .tar.gz "
+                "--as requires a local bundle path (directory, .zip, or .tar.gz "
                 "produced by 'apm pack'). It has no effect on registry installs."
             )
         # HACK(#852): surface --verbose to deeper auth layers via env var until

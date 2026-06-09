@@ -43,6 +43,9 @@ from ..utils.path_security import (
     validate_path_segments,
 )
 
+_MAX_ZIP_ENTRIES = 10_000
+_MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024  # 512 MB
+
 
 @dataclass(frozen=True)
 class LocalBundleInfo:
@@ -132,7 +135,7 @@ def _build_info(bundle_dir: Path, *, is_archive: bool, temp_dir: Path | None) ->
     )
 
 
-def _looks_like_archive(path: Path) -> bool:
+def _looks_like_tarball(path: Path) -> bool:
     name = path.name.lower()
     return name.endswith(".tar.gz") or name.endswith(".tgz")
 
@@ -145,7 +148,7 @@ def _looks_like_legacy_apm_bundle(path: Path) -> bool:
     checks for the signal, and cleans up.  Returns ``False`` on any I/O
     error (caller should fall through to the generic error message).
     """
-    if not (path.is_file() and _looks_like_archive(path)):
+    if not (path.is_file() and _looks_like_tarball(path)):
         return False
     tmp = Path(tempfile.mkdtemp(prefix="apm-legacy-probe-"))
     try:
@@ -209,7 +212,15 @@ def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
     temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
     try:
         with zipfile.ZipFile(path, "r") as zf:
-            for member in zf.infolist():
+            members = zf.infolist()
+            # ZIP bomb guard: reject suspiciously large or deep archives
+            if len(members) > _MAX_ZIP_ENTRIES:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+            if sum(m.file_size for m in members) > _MAX_ZIP_UNCOMPRESSED:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+            for member in members:
                 name = member.filename
                 if (
                     name.startswith("/")
@@ -263,7 +274,7 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     if path.is_file() and path.name.lower().endswith(".zip"):
         return _extract_zip_bundle(path)
 
-    if path.is_file() and _looks_like_archive(path):
+    if path.is_file() and _looks_like_tarball(path):
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
         try:
             with tarfile.open(path, "r:gz") as tar:

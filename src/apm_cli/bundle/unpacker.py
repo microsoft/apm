@@ -11,6 +11,9 @@ from pathlib import Path, PureWindowsPath
 from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
 from ..utils.path_security import PathTraversalError, validate_path_segments
 
+_MAX_ZIP_ENTRIES = 10_000
+_MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024  # 512 MB
+
 
 @dataclass
 class UnpackResult:
@@ -63,8 +66,21 @@ def unpack_bundle(
         cleanup_temp = True
         try:
             with zipfile.ZipFile(bundle_path, "r") as zf:
+                members = zf.infolist()
+                # ZIP bomb guard: reject suspiciously large or deep archives
+                if len(members) > _MAX_ZIP_ENTRIES:
+                    raise ValueError(
+                        f"ZIP archive has {len(members)} entries (limit {_MAX_ZIP_ENTRIES})"
+                    )
+                total_size = sum(m.file_size for m in members)
+                if total_size > _MAX_ZIP_UNCOMPRESSED:
+                    raise ValueError(
+                        f"ZIP archive uncompressed size"
+                        f" {total_size // (1024 * 1024)} MB exceeds"
+                        f" limit of {_MAX_ZIP_UNCOMPRESSED // (1024 * 1024)} MB"
+                    )
                 # Security: prevent path traversal and symlink entries
-                for member in zf.infolist():
+                for member in members:
                     name = member.filename
                     if (
                         name.startswith("/")

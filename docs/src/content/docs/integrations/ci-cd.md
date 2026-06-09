@@ -177,7 +177,7 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 
 ### Pack in CI (build once)
 
-`apm-action@v1` with `pack: true` emits an APM-format bundle (`--format apm --archive`) so downstream jobs can restore it via `tar xzf` or the action's restore mode.
+`apm-action@v1` with `pack: true` emits an APM-format bundle (`--format apm --archive`) so downstream jobs can restore it via `unzip` or the action's restore mode.
 
 ```yaml
 - uses: microsoft/apm-action@v1
@@ -186,7 +186,7 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 - uses: actions/upload-artifact@v4
   with:
     name: agent-config
-    path: build/*.tar.gz
+    path: build/*.zip
 ```
 
 ### Pack as standalone plugin
@@ -208,7 +208,7 @@ The APM bundle layout below assumes the upstream job ran `apm-action@v1` with `p
 - uses: actions/download-artifact@v4
   with:
     name: agent-config
-- run: tar xzf build/*.tar.gz -C ./
+- run: unzip -o build/*.zip -d ./
 ```
 
 Or use the apm-action restore mode to unpack a bundle directly:
@@ -216,7 +216,7 @@ Or use the apm-action restore mode to unpack a bundle directly:
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
-    bundle: ./agent-config.tar.gz
+    bundle: ./agent-config.zip
 ```
 
 See the [Pack a bundle guide](../../producer/pack-a-bundle/) for the full workflow.

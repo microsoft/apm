@@ -8,8 +8,9 @@ this is the only security-critical check on the install path.
 Two archive formats are supported, dispatched by Content-Type from
 ``RegistryClient.download_archive``:
 
-- ``application/gzip`` — gzipped tar (default APM ``apm pack`` output)
-- ``application/zip``  — zip archive (Anthropic / open-claude-skills format)
+- ``application/zip``  -- zip archive (default; produced by ``apm pack --archive``
+  and ``apm publish``)
+- ``application/gzip`` -- gzipped tar (legacy; packages published before the zip default)
 
 The ``extract_archive`` dispatcher picks the right path and applies the same
 security gates to both: no absolute paths, no path traversal, no symlinks or

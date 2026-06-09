@@ -26,7 +26,7 @@ Pack distributable artifacts from your APM project.
 
 Reads apm.yml to decide what to produce:
 
-  dependencies: block  ->  bundle (directory or .zip)
+  dependencies: block  ->  bundle (directory or archive; see --archive and --archive-format)
   marketplace: block   ->  selected marketplace artifacts
   target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
   both blocks present  ->  bundle plus selected marketplace artifacts
@@ -168,7 +168,19 @@ def _parse_marketplace_filter(
     "--archive",
     is_flag=True,
     default=False,
-    help="Produce a .zip archive instead of a directory.",
+    help="Produce a .zip archive instead of a directory (use --archive-format tar.gz for legacy CI pipelines).",
+)
+@click.option(
+    "--archive-format",
+    "archive_format",
+    type=click.Choice(["zip", "tar.gz"]),
+    default="zip",
+    show_default=True,
+    help=(
+        "Archive format when --archive is set. "
+        "'zip' (default) is Claude Code and plugin-host compatible and matches apm publish output. "
+        "'tar.gz' preserves the previous default for CI pipelines that rely on it."
+    ),
 )
 @click.option(
     "-o",
@@ -267,6 +279,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     fmt,
     target,
     archive,
+    archive_format,
     output,
     dry_run,
     force,
@@ -286,6 +299,16 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         set_console_stderr(True)
 
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
+
+    # Error when --archive-format is explicitly set but --archive is not.
+    if (
+        not archive
+        and ctx.get_parameter_source("archive_format") is click.core.ParameterSource.COMMANDLINE
+    ):
+        raise click.UsageError(
+            f"--archive-format has no effect without --archive;"
+            f" add --archive to produce a .{archive_format} archive."
+        )
 
     # -- Parse --marketplace-path overrides --
     path_overrides_result = _parse_path_overrides(marketplace_path_overrides, ctx, json_output)
@@ -324,6 +347,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         bundle_format=fmt,
         bundle_target=effective_target,
         bundle_archive=archive,
+        bundle_archive_format=archive_format,
         bundle_output=Path(output),
         bundle_force=force,
         marketplace_offline=offline,

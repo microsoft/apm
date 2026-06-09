@@ -49,9 +49,9 @@ Source: `src/apm_cli/commands/audit.py`.
 ### bundle
 
 A local-install artifact produced by `apm pack`. Either a directory or a
-`.tar.gz` containing `plugin.json` at the root and (in current versions)
-an embedded `apm.lock.yaml` with per-file SHA-256 hashes. Installed via
-`apm install <path-or-tarball>`.
+`.zip` (or legacy `.tar.gz`) containing `plugin.json` at the root and (in
+current versions) an embedded `apm.lock.yaml` with per-file SHA-256 hashes.
+Installed via `apm install <path-or-archive>`.
 
 NOT a package source repository. A bundle is the packed, hash-verified
 output of one; you ship bundles, you author packages.

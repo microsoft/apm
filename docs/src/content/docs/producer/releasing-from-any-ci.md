@@ -21,14 +21,14 @@ VERSION="${VERSION:?VERSION must be set, e.g. v1.2.3}"
 
 apm pack --check-versions --check-clean --json > pack-report.json
 
-for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+for f in build/*.zip .claude-plugin/marketplace.json; do
   [ -f "$f" ] || continue
   sha256sum "$f" > "${f}.sha256"
 done
 
 gh release create "$VERSION" \
-  build/*.tar.gz \
-  build/*.tar.gz.sha256 \
+  build/*.zip \
+  build/*.zip.sha256 \
   .claude-plugin/marketplace.json \
   .claude-plugin/marketplace.json.sha256 \
   --title "$VERSION" \
@@ -96,12 +96,12 @@ you need to customise any step.
       - run: pip install apm-cli
       - run: |
           apm pack --check-versions --check-clean --json > pack-report.json
-          for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+          for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
           done
           gh release create "${GITHUB_REF_NAME}" \
-            build/*.tar.gz build/*.tar.gz.sha256 \
+            build/*.zip build/*.zip.sha256 \
             .claude-plugin/marketplace.json* \
             --title "${GITHUB_REF_NAME}" --notes-file CHANGELOG.md
         env:
@@ -120,13 +120,13 @@ release:
     - pip install apm-cli
     - apm pack --check-versions --check-clean --json > pack-report.json
     - |
-      for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+      for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
         sha256sum "$f" > "${f}.sha256"
       done
     - |
       glab release create "$CI_COMMIT_TAG" \
-        build/*.tar.gz build/*.tar.gz.sha256 \
+        build/*.zip build/*.zip.sha256 \
         .claude-plugin/marketplace.json* \
         --notes-file CHANGELOG.md
 ```
@@ -143,12 +143,12 @@ pipeline {
         sh '''
           pip install apm-cli
           apm pack --check-versions --check-clean --json > pack-report.json
-          for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+          for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
           done
           gh release create "${TAG_NAME}" \
-            build/*.tar.gz build/*.tar.gz.sha256 \
+            build/*.zip build/*.zip.sha256 \
             .claude-plugin/marketplace.json* \
             --notes-file CHANGELOG.md
         '''
@@ -171,13 +171,13 @@ steps:
   - script: pip install apm-cli
   - script: apm pack --check-versions --check-clean --json > pack-report.json
   - script: |
-      for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+      for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
         sha256sum "$f" > "${f}.sha256"
       done
   - script: |
       gh release create "$(Build.SourceBranchName)" \
-        build/*.tar.gz build/*.tar.gz.sha256 \
+        build/*.zip build/*.zip.sha256 \
         .claude-plugin/marketplace.json* \
         --notes-file CHANGELOG.md
     env:

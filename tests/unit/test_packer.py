@@ -214,10 +214,36 @@ class TestPackBundle:
         assert result.bundle_path.exists()
         # The directory should be cleaned up
         assert not (out / "test-pkg-1.0.0").exists()
-        # Archive is valid
+        # Archive is valid zip (magic bytes PK\x03\x04) -- not gzip
+        assert zipfile.is_zipfile(result.bundle_path)
+        assert result.bundle_path.read_bytes()[:2] != b"\x1f\x8b", "must not be gzip"
         with zipfile.ZipFile(result.bundle_path, "r") as zf:
             names = zf.namelist()
             assert any("a.md" in n for n in names)
+
+    def test_pack_archive_tar_gz(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, archive=True, archive_format="tar.gz")
+
+        assert result.bundle_path.name == "test-pkg-1.0.0.tar.gz"
+        assert result.bundle_path.exists()
+        assert not (out / "test-pkg-1.0.0").exists()
+        import tarfile
+
+        with tarfile.open(result.bundle_path, "r:gz") as tf:
+            names = tf.getnames()
+            assert any("a.md" in n for n in names)
+
+    def test_pack_archive_invalid_format_raises(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        with pytest.raises(ValueError, match="Unknown archive_format"):
+            pack_bundle(project, out, archive=True, archive_format="bz2")
 
     def test_pack_custom_output_dir(self, tmp_path):
         deployed = [".github/agents/a.md"]

@@ -4,7 +4,8 @@ description: Build a plugin-format bundle from your .apm/ source so others can d
 ---
 
 A bundle is the artifact you hand to a consumer when you do not want to publish
-to a registry. It is a directory (or `.tar.gz` of one) containing a
+to a registry. It is a directory (or archive -- `.zip` by default, `.tar.gz` via
+`--archive-format tar.gz`) containing a
 `plugin.json`, your primitive folders, and an embedded `apm.lock.yaml` that
 pins every file by SHA-256. Build it with one command from a project that has
 `.apm/` and `apm.yml`:
@@ -42,12 +43,13 @@ $ apm pack
 [i] Share with: apm install build/my-pkg
 ```
 
-Add `--archive` to get a single `.tar.gz` instead of a directory; use `-o` to
-change the output location (default `./build`).
+Add `--archive` to get a single archive (`.zip` by default; use `--archive-format tar.gz`
+for legacy CI pipelines) instead of a directory; use `-o` to change the output location
+(default `./build`).
 
 ```bash
 apm pack --archive -o ./dist
-# -> ./dist/my-pkg-<version>.tar.gz
+# -> ./dist/my-pkg-<version>.zip
 ```
 
 ## The plugin.json contract
@@ -109,8 +111,8 @@ Three common ways to hand off a bundle:
 - **Directory + git.** Commit `build/<pkg>/` to a release branch or a separate
   artifacts repo. Consumers `git clone` and run `apm install ./build/<pkg>`.
 - **Archive + GitHub release.** `apm pack --archive` then upload the
-  `.tar.gz` as a release asset. Consumers download and run
-  `apm install ./<pkg>-<version>.tar.gz`.
+  `.zip` as a release asset. Consumers download and run
+  `apm install ./<pkg>-<version>.zip`.
 - **Marketplace entry.** If your project also has a `marketplace:` block in
   `apm.yml`, `apm pack` builds `marketplace.json` alongside the bundle. See
   [Publish to a marketplace](./publish-to-a-marketplace/).

@@ -493,6 +493,30 @@ class TestPackCmdFlags:
         result = CliRunner().invoke(pack_cmd, ["--format", "invalid"])
         assert result.exit_code != 0
 
+    def test_archive_format_zip_accepted(self, tmp_path: Path, monkeypatch) -> None:
+        (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--dry-run", "--archive", "--archive-format", "zip"])
+        assert "Invalid value for '--archive-format'" not in (result.output or "")
+        assert result.exit_code in (0, 1)
+
+    def test_archive_format_tar_gz_accepted(self, tmp_path: Path, monkeypatch) -> None:
+        (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--dry-run", "--archive", "--archive-format", "tar.gz"]
+        )
+        assert "Invalid value for '--archive-format'" not in (result.output or "")
+        assert result.exit_code in (0, 1)
+
+    def test_archive_format_invalid_choice_fails(self) -> None:
+        """Click rejects unknown archive format values before the command runs."""
+        result = CliRunner().invoke(pack_cmd, ["--archive", "--archive-format", "bz2"])
+        assert result.exit_code != 0
+        assert (
+            "invalid" in (result.output or "").lower() or "error" in (result.output or "").lower()
+        )
+
     def test_deprecated_target_flag_emits_warning(self, tmp_path: Path, monkeypatch) -> None:
         (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -529,6 +553,22 @@ class TestPackCmdFlags:
         data = _json.loads(result.output)
         for key in ("ok", "dry_run", "warnings", "errors", "marketplace", "bundle"):
             assert key in data, f"Missing key '{key}' in JSON envelope"
+
+    def test_archive_format_without_archive_is_usage_error(self) -> None:
+        """--archive-format without --archive must exit with a UsageError."""
+        result = CliRunner().invoke(pack_cmd, ["--archive-format", "tar.gz"])
+        assert result.exit_code != 0
+        assert "no effect without --archive" in (result.output or "")
+
+    def test_archive_format_default_without_archive_is_ok(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Omitting --archive-format entirely (default) without --archive is fine."""
+        (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--dry-run"])
+        # Not a UsageError; exit code from normal pack logic
+        assert "no effect without --archive" not in (result.output or "")
 
 
 # ===========================================================================

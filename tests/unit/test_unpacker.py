@@ -579,3 +579,30 @@ class TestUnpackZipSecurity:
         output.mkdir()
         with pytest.raises(ValueError, match="symlink"):
             unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_bomb_too_many_entries_rejected(self, tmp_path, monkeypatch):
+        """ZIP with more entries than _MAX_ZIP_ENTRIES is rejected before extraction."""
+        from apm_cli.bundle import unpacker
+
+        monkeypatch.setattr(unpacker, "_MAX_ZIP_ENTRIES", 3)
+        zip_path = tmp_path / "bomb_entries.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for i in range(4):
+                zf.writestr(f"file_{i}.txt", "x")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="entries"):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_bomb_uncompressed_size_rejected(self, tmp_path, monkeypatch):
+        """ZIP whose total uncompressed size exceeds _MAX_ZIP_UNCOMPRESSED is rejected."""
+        from apm_cli.bundle import unpacker
+
+        monkeypatch.setattr(unpacker, "_MAX_ZIP_UNCOMPRESSED", 50)
+        zip_path = tmp_path / "bomb_size.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("big.txt", "x" * 51)
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="uncompressed size"):
+            unpack_bundle(zip_path, output_dir=output)
