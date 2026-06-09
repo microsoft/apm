@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them when the source instruction changes, instead of mis-classifying them as
   user-authored collisions and skipping them; also fixes a mislabeled
   `windsurf_rules` entry in install output. (by @srid, closes #1662)
+- `apm install` no longer rewrites `apm.lock.yaml` when a project combines a
+  remote APM dependency with unchanged local `.apm/instructions` content.
+  (by @danielmeppiel, closes #1702)
+
 ### Changed
 
 - `MCPDependency.from_dict()` now emits a `[!]` warning naming every unknown
