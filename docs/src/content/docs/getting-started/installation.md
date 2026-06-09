@@ -89,7 +89,7 @@ jobs:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `APM_INSTALL_DIR` | `/usr/local/bin` (Unix) / `%LOCALAPPDATA%\Programs\apm\bin` (Windows) | Directory for the `apm` symlink / `apm.cmd` shim |
-| `APM_LIB_DIR` | `$(dirname APM_INSTALL_DIR)/lib/apm` | *(Unix only)* Directory for the full binary bundle |
+| `APM_LIB_DIR` | `$(dirname APM_INSTALL_DIR)/lib/apm` | *(Unix only)* Directory for the full binary bundle. Must end with `/apm` (for example, `/lib/apm`). The installer rejects shared directories (e.g. `$HOME/.local/share`) to prevent accidental data loss. |
 | `GITHUB_URL` | `https://github.com` | Base GitHub URL (asset downloads **and** API host: `api.github.com` on github.com, `{GITHUB_URL}/api/v3` on GHES). Must be `https://`. |
 | `APM_REPO` | `microsoft/apm` | Repository as `owner/name` |
 | `VERSION` | *(latest)* | Pin a release tag (skips the **releases/latest** HTTP API). Must look like `v1.2.3` or `1.2.3`. |
@@ -215,6 +215,12 @@ Use `sudo` for system-wide installation, or install to a user-writable directory
 ```bash
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 ```
+
+> **Important:** The installer validates `APM_LIB_DIR` before writing any files.
+> See the `APM_LIB_DIR` row above for path rules. The installer also refuses to
+> delete an existing non-empty `APM_LIB_DIR` unless it looks like a prior APM
+> install. When you set `APM_INSTALL_DIR=$HOME/.local/bin`, the derived lib path
+> (`$HOME/.local/lib/apm`) is safe and does not require sudo.
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 

@@ -684,6 +684,31 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_dir=".agents",
         generated_files=(),
     ),
+    # OpenClaw -- experimental, skills-only target for the OpenClaw agent
+    # runtime (github.com/openclaw/openclaw).  OpenClaw reads SKILL.md
+    # directories from several locations; APM deploys to:
+    #   project scope: <workspace>/.agents/skills/ (agentskills.io standard,
+    #                  OpenClaw priority-2 load path)
+    #   user scope:    ~/.openclaw/skills/ (OpenClaw managed dir, priority-4)
+    # At project scope the output is identical to the agent-skills target;
+    # the --global user path is the distinguishing capability.
+    # Ref: https://docs.openclaw.ai/tools/skills
+    "openclaw": TargetProfile(
+        name="openclaw",
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".openclaw",
+        requires_flag="openclaw",
+    ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via

@@ -7,8 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm publish` auto-pack now produces a `.zip` archive (ZIP\_DEFLATED) instead of `.tar.gz`, aligning with the de facto standard used by Anthropic Claude, OpenAI, and Google Gemini agent platforms. The `--tarball` option is renamed to `--zip`. Output filename: `{name}-{version}.zip`.
+- `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
+
 ### Fixed
 
+- `apm install` now falls back to an AAD bearer token (via `az login`) when no
+  `ADO_APM_PAT` is configured for Azure DevOps file downloads, and fail-closes
+  when ADO returns an interactive HTML sign-in page with HTTP 200 instead of
+  writing corrupt HTML to disk. (by @danielmeppiel, closes #1671)
+- `apm install` now splits FQDN monorepo subpath shorthand on GitHub
+  Enterprise Server hosts. With `GITHUB_HOST` set, a dependency string like
+  `ghe.example.com/org/repo/packages/skill` resolves to `git: org/repo` plus
+  `path: packages/skill` instead of embedding the whole subpath into the clone
+  URL. (by @sergio-sisternes-epam, closes #1673)
+- `apm install` now preserves transitive dependencies declared in `apm.yml`
+  when installing dual-format packages (those colocating `plugin.json` with
+  `apm.yml`) from the marketplace or a remote subdirectory, instead of silently
+  dropping them when the synthesized manifest overwrote the file. A malformed
+  existing `apm.yml` now also surfaces a warning instead of failing silently.
+  (by @sergio-sisternes-epam, closes #1666)
+- `apm install` now preserves scoped MCP package config keys such as
+  `@playwright/mcp` across Claude, Codex, and Copilot harness configs instead
+  of truncating them to `mcp`. (#1699)
+- `apm install` now accepts marketplace git-subdir refs with package-version
+  tags such as `package@v1.0.1` inside the `#ref` fragment while still
+  rejecting retired string-form `@alias` shorthand. (closes #1696, #1698)
 - `apm install` now keeps format-transformed rule files (`.claude/rules`,
   `.cursor/rules`, `.windsurf/rules`) tracked in `managed_files` and rewrites
   them when the source instruction changes, instead of mis-classifying them as
@@ -21,9 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package directories are detected deterministically. Previously, in-package
   symlinks were silently dropped by the downstream deploy filter. (by
   @danielmeppiel, closes #1668)
+- `apm install` no longer rewrites `apm.lock.yaml` when a project combines a
+  remote APM dependency with unchanged local `.apm/instructions` content.
+  (by @danielmeppiel, closes #1702)
 
 ### Changed
 
+- `MCPDependency.from_dict()` now emits a `[!]` warning naming every unknown
+  key dropped during parsing (e.g. harness-specific fields like `oauth`) instead
+  of discarding them silently, making forward-compat config mismatches
+  diagnosable. (addresses #1670)
 - Auth credential cascade now emits debug-level logs for every fallback step,
   making token misconfiguration diagnosable without adding noise to normal output.
   Enable with ``apm --verbose`` or ``APM_LOG_LEVEL=DEBUG``.

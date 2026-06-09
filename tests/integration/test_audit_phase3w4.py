@@ -153,6 +153,7 @@ class TestRenderFindingsTable:
         f.line = 1
         f.column = 5
         f.codepoint = "U+200B"
+        f.category = "zero-width"
         f.description = "zero-width space"
         return f
 
@@ -424,12 +425,13 @@ class TestAuditContentScan:
         assert any("dry-run" in c.lower() for c in progress_calls)
 
     def test_format_json_exits_non_zero_for_format_plus_strip(self, tmp_path):
+        import click
+
         from apm_cli.commands.audit import _audit_content_scan
 
         cfg = self._make_cfg(tmp_path, output_format="json")
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(click.UsageError, match=r"cannot be combined"):
             _audit_content_scan(cfg, package=None, file_path=None, strip=True, dry_run=False)
-        assert exc_info.value.code == 1
 
     def test_text_format_with_output_path_errors(self, tmp_path):
         """text format + --output is an error."""

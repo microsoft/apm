@@ -556,6 +556,25 @@ class SkillIntegrator(BaseIntegrator):
         return links_resolved
 
     @staticmethod
+    def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
+        """Return promotion filter tokens for --skill subset values."""
+        if not skill_subset:
+            return None
+
+        name_filter: set[str] = set()
+        for skill_name in skill_subset:
+            raw_name = str(skill_name).strip()
+            if not raw_name:
+                continue
+            normalized_path = raw_name.replace("\\", "/")
+            leaf_name = Path(normalized_path).name
+            name_filter.add(raw_name)
+            name_filter.add(normalized_path)
+            if leaf_name:
+                name_filter.add(leaf_name)
+        return name_filter or None
+
+    @staticmethod
     def _promote_sub_skills(
         sub_skills_dir: Path,
         target_skills_root: Path,
@@ -568,7 +587,7 @@ class SkillIntegrator(BaseIntegrator):
         force: bool = False,
         project_root: Path | None = None,
         logger=None,
-        name_filter: "set | None" = None,
+        name_filter: set[str] | None = None,
         link_rewriter: "SkillIntegrator | None" = None,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from .apm/skills/ to top-level skill entries.
@@ -616,7 +635,7 @@ class SkillIntegrator(BaseIntegrator):
             target = target_skills_root / sub_name
             rel_path = f"{rel_prefix}/{sub_name}"
             if target.exists():
-                # Content-identical → skip entirely (no copy, no warning)
+                # Content-identical: skip entirely (no copy, no warning)
                 if SkillIntegrator.is_skill_dir_identical_to_source(sub_skill_path, target):
                     promoted += 1
                     deployed.append(target)
@@ -630,7 +649,7 @@ class SkillIntegrator(BaseIntegrator):
                 is_self_overwrite = prev_owner is not None and prev_owner == parent_name
 
                 if managed_files is not None and not is_managed and not is_self_overwrite:
-                    # User-authored skill — respect force flag
+                    # User-authored skill: respect force flag
                     if not force:
                         if diagnostics is not None:
                             diagnostics.skip(rel_path, package=parent_name)
@@ -649,7 +668,7 @@ class SkillIntegrator(BaseIntegrator):
                                 )
                             except ImportError:
                                 pass
-                        continue  # SKIP — protect user content
+                        continue  # SKIP: protect user content
 
                 if warn and not is_self_overwrite:
                     if diagnostics is not None:
@@ -741,6 +760,7 @@ class SkillIntegrator(BaseIntegrator):
         force: bool = False,
         logger=None,
         targets=None,
+        skill_subset=None,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from a package that is NOT itself a skill.
 
@@ -753,6 +773,7 @@ class SkillIntegrator(BaseIntegrator):
             package_info: PackageInfo object with package metadata.
             project_root: Root directory of the project.
             targets: Optional explicit list of TargetProfile objects.
+            skill_subset: Optional tuple of skill names or paths to install (None = all).
 
         Returns:
             tuple[int, list[Path]]: (count of promoted sub-skills, list of deployed dirs)
@@ -770,6 +791,7 @@ class SkillIntegrator(BaseIntegrator):
 
         parent_name = package_path.name
         owned_by = self._build_skill_ownership_map(project_root)
+        name_filter = self._skill_subset_name_filter(skill_subset)
         count = 0
         all_deployed: list[Path] = []
         seen_skill_dirs: set[Path] = set()
@@ -810,6 +832,7 @@ class SkillIntegrator(BaseIntegrator):
                 managed_files=managed_files if is_primary else None,
                 force=force,
                 project_root=project_root,
+                name_filter=name_filter,
                 link_rewriter=self,
             )
             if is_primary:
@@ -1104,8 +1127,8 @@ class SkillIntegrator(BaseIntegrator):
         any_created = False
         seen_skill_dirs: set[Path] = set()
 
-        # Convert skill_subset tuple to a set for O(1) lookup
-        _name_filter = set(skill_subset) if skill_subset else None
+        # Convert skill_subset tuple to promotion filter tokens for O(1) lookup.
+        _name_filter = self._skill_subset_name_filter(skill_subset)
 
         for idx, target in enumerate(targets):
             if not target.supports("skills"):
@@ -1189,6 +1212,7 @@ class SkillIntegrator(BaseIntegrator):
             package_info: PackageInfo object with package metadata
             project_root: Root directory of the project
             targets: Optional explicit list of TargetProfile objects.
+            skill_subset: Optional tuple of skill names or paths to install (None = all).
 
         Returns:
             SkillIntegrationResult: Results of the integration operation
@@ -1207,6 +1231,7 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 logger=logger,
                 targets=targets,
+                skill_subset=skill_subset,
             )
             return SkillIntegrationResult(
                 skill_created=False,
@@ -1311,6 +1336,7 @@ class SkillIntegrator(BaseIntegrator):
             force=force,
             logger=logger,
             targets=targets,
+            skill_subset=skill_subset,
         )
         return self._merge_bin_paths(
             SkillIntegrationResult(
@@ -1637,7 +1663,7 @@ class SkillIntegrator(BaseIntegrator):
                 if ".." in rel_path:
                     continue
 
-                # ── Cowork:// paths ──────────────────────────────────
+                # Cowork:// paths
                 from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
                 if rel_path.startswith(COWORK_URI_SCHEME):
