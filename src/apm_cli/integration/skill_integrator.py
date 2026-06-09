@@ -556,7 +556,7 @@ class SkillIntegrator(BaseIntegrator):
         return links_resolved
 
     @staticmethod
-    def _skill_subset_name_filter(skill_subset) -> set[str] | None:
+    def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
         """Return promotion filter tokens for --skill subset values."""
         if not skill_subset:
             return None
