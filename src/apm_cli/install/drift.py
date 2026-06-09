@@ -533,21 +533,26 @@ _INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 def _governed_root_dirs(targets) -> set[str]:
     """Return the set of top-level managed directory names to walk.
 
-    Deliberately limited to each target's top-level ``root_dir`` (plus
-    ``.apm``). Per-primitive ``deploy_root`` overrides (e.g. the ``copilot``
-    target routing ``skills`` to ``.agents``) are intentionally NOT walked
-    here: the drift replay does not faithfully reproduce the deploy-time
-    cross-primitive link rewrite for skill bundles, so walking ``.agents/``
-    would surface byte-identical skills as false-positive drift. Skill
-    content drift is instead covered by the per-file content-integrity gate
-    (``apm audit --ci --no-drift``); see issue #1716 and the deferred
-    replay-link-rewrite follow-up.
+    Includes each target's top-level ``root_dir`` (plus ``.apm``) AND every
+    per-primitive ``deploy_root`` override (e.g. the ``copilot`` target routing
+    ``skills`` to ``.agents``). Walking the deploy roots is what lets the drift
+    differ compare committed skill bundles under ``.agents/skills/`` against the
+    replay, closing the gap where deployed skill content could silently diverge
+    from source (issue #1716). The replay reproduces the deploy-time link
+    rewrite faithfully, so byte-identical skills do not surface as false drift.
+    Only the first path segment is kept so nested deploy roots collapse to a
+    single walk root.
     """
     roots: set[str] = {".apm"}
     for t in targets or []:
         root = getattr(t, "root_dir", None)
         if root:
             roots.add(str(root).split("/", 1)[0])
+        primitives = getattr(t, "primitives", None) or {}
+        for mapping in primitives.values():
+            deploy_root = getattr(mapping, "deploy_root", None)
+            if deploy_root:
+                roots.add(str(deploy_root).split("/", 1)[0])
     return roots
 
 

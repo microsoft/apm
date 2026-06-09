@@ -427,14 +427,14 @@ local_deployed_files:
 - .github/instructions/python.instructions.md
 - .github/instructions/tests.instructions.md
 local_deployed_file_hashes:
-  .agents/skills/apm-spec-guardian/SKILL.md: sha256:72239a2347c0e36ac8a8a774f658e066e37d1823a0bf54d58096a044425fd1ee
+  .agents/skills/apm-spec-guardian/SKILL.md: sha256:5e2b98792b458ca946d3bfc06a1e0c661f9a0dc05a4606602eb71d7d8afae4dd
   .agents/skills/apm-spec-guardian/assets/comment-template.md: sha256:8f5703aa98d1036d2418ffa45eac9d0270504dac33f3e9b1892884a9d48da1a6
   .agents/skills/apm-spec-guardian/assets/linter-checklist.md: sha256:4b71113da805c5504b4d74029f3113402044bc7e5c48abd010c0b8df3f18938b
   .agents/skills/apm-spec-guardian/assets/panelist-return-schema.json: sha256:bb66b270394c386665c6b93d83befe05ce9f8206abf8d656079c29d65729fefd
   .agents/skills/apm-spec-guardian/assets/synthesizer-return-schema.json: sha256:e6e2771f2fe8578e72d12e51edcc3817717f8a0bbef66d8a8a5c556f0dce06d7
-  .agents/skills/apm-strategy/SKILL.md: sha256:a529560f4229bd45fc240d7e31f08ed6baa4a7176e5ef664665b1ff039405b43
-  .agents/skills/auth/SKILL.md: sha256:ddca1dcf2be047ba68c3f700c0b4d59cd88bf2b9f44ee50879f59742173250cc
-  .agents/skills/cli-logging-ux/SKILL.md: sha256:892879f075ab74ebf6e361e804f8d66a6041ea7e5a11640193c71fffa8cbe51b
+  .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
+  .agents/skills/auth/SKILL.md: sha256:bf1039cb63dbb968d50dbf4a9e4ceec9a4c30e40e8dd666d404f1c39eda55bc0
+  .agents/skills/cli-logging-ux/SKILL.md: sha256:b04d5282a9f21b33c75ac98c41c7eab7e562eafea8c89bbb5732d9956958fe7c
   .agents/skills/cut-release/SKILL.md: sha256:07c15054e54679c07c5798ccad9b4348399beb8de3aac11bc1002ad1c07b6b9a
   .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:b78d605f1bb17b042681b678e07a6431209ae11934ea320e0b573da313649743
   .agents/skills/cut-release/assets/pr-body-template.md: sha256:8034ad7d64a1f2a9e8677d332ffa1ebbf19071f3b30ba6ecdda660c82bb11917
@@ -443,8 +443,8 @@ local_deployed_file_hashes:
   .agents/skills/cut-release/scripts/bump-version.sh: sha256:bc382b5024f415998a3d66689a36596f0458e0a3c79370e96705477a5672a1d4
   .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:4aaacc7f61ca85be9776e921d02a67112569b370d31b581d045e0c3dc941a071
   .agents/skills/cut-release/scripts/verify-lint-mirror.sh: sha256:ab3f4a9ebc8f2b8c357c4cf81e0ada3be093cfc94c06703805d56c87f6fd7ecc
-  .agents/skills/devx-ux/SKILL.md: sha256:7b8ce1ca7a1a43cafbf32ff2dc01e023f4720c4900f932209116b495ea999fe8
-  .agents/skills/docs-corpus-audit/SKILL.md: sha256:8eabe182ebd6dbde1eb2a98a46db33c2fa12312e5da00c11ee30c2299d61194f
+  .agents/skills/devx-ux/SKILL.md: sha256:e66de2f844eebbfccf641b1a6fdf0ff9bb8c476364bda87266ce47f7ebfa7e5a
+  .agents/skills/docs-corpus-audit/SKILL.md: sha256:d20498ee8c1a38553303e23fc2f184c59fab624d1f701839f00dc7b291db3afb
   .agents/skills/docs-corpus-audit/assets/panelist-return-schema.json: sha256:720e2d7a7a51b23bda19feff90072c64dc5322916218f1030e4fd9e388b34f4b
   .agents/skills/docs-corpus-audit/assets/subagent-prompt-template.md: sha256:19799c05fae7873c02d6183294ebf6e5f29372bc393a19f1d400f5ed36251760
   .agents/skills/docs-corpus-audit/evals/README.md: sha256:6cd4924f82e8192f3b0c76aaa086ee6da5055f9f807dda9252842b0b59fb4c8f
@@ -635,16 +635,16 @@ local_deployed_file_hashes:
   .agents/skills/docs-impact-architect/SKILL.md: sha256:3bc13d5ac9e59b094573565ef5fd07cdbf355b6ba64235e399e2f72b2ba587c6
   .agents/skills/docs-impact-classifier/SKILL.md: sha256:3540bb7062835ba254d971be636a60763448aa6b7e0dd1b7624d959c9495e6c2
   .agents/skills/docs-impact-localizer/SKILL.md: sha256:1a46fb1da757ace60ed4bd80a308136a4c0e7ecd62447f1581a51664993dbe0e
-  .agents/skills/docs-sync/SKILL.md: sha256:b535912a50121370ecf5a6b4458f3725a87f665405d0705d0ec519bc27125600
+  .agents/skills/docs-sync/SKILL.md: sha256:2214d7ce6770f3e8cfe53a3b7de6efccceb5810db3e78da79de7a970a4be23bd
   .agents/skills/docs-sync/assets/advisory-comment-template.md: sha256:9abbd82239925a85a2b2c08d84130259044660c8114245b7e939d4c761c0053e
   .agents/skills/docs-sync/assets/classifier-return-schema.json: sha256:9e9fda0c39bfe684f367f4c89e69814d43a23e68c18a3603e9d212659c1a8689
   .agents/skills/docs-sync/assets/panelist-return-schema.json: sha256:6e661b1042e8475e15fcc943a290891f041509a903dfa770a6e0ef4bc793326d
   .agents/skills/docs-sync/evals/README.md: sha256:7dbf5dfa89e78f7d5a3214b01bb5fabfee59c2979827c2a0c72f008fa9c69de5
   .agents/skills/docs-sync/evals/content-evals.json: sha256:31a8b26677f84337775b81971145e12d327c6b65dfc21b2c6f5b886462410dc2
   .agents/skills/docs-sync/evals/trigger-evals.json: sha256:b0da21a8a6e588676247a9a15d792ef6596389f16ae100f83fa423ee47992501
-  .agents/skills/oss-growth/SKILL.md: sha256:692be91a6704ff2e428e851f33b1f340ee9aa42beafabf62c2108cace7dae674
-  .agents/skills/python-architecture/SKILL.md: sha256:acb858a97de695f98fba01af588f317a86833cc98c3405d6c5eea0d063f00021
-  .agents/skills/supply-chain-security/SKILL.md: sha256:60e87189fc9ebea724a1b9b7cf2c6c5c11458ae3c3c67d7a9ede6d0377177095
+  .agents/skills/oss-growth/SKILL.md: sha256:90b5d0369032de850f2255910f4cf5caafb7d60f07bda8a2146d394bfa459918
+  .agents/skills/python-architecture/SKILL.md: sha256:e4a209765072f75cee6dc5fbe95d9924055e2c5d59c804c8075f887795c83fa9
+  .agents/skills/supply-chain-security/SKILL.md: sha256:55ef10cd0f6b68e0db5a435a79851c055eab74d93fd552c6626df631deb51df4
   .github/agents/agentic-workflows.agent.md: sha256:d1ea2d038e2af8be11d6c95b3213b03b9777fae46f0438efa95d5a803e6c3765
   .github/agents/apm-ceo.agent.md: sha256:484da64428ea46a6183dffd3f30c9fc5fc5c747639c0c79e55be69dba0899323
   .github/agents/apm-primitives-architect.agent.md: sha256:6c01eab74ba18d70f21d45010d636cc6535d63cee81da12e61898d8036e0b028
