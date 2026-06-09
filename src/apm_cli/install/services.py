@@ -146,12 +146,7 @@ def _log_hook_display_payloads(
 
 
 def _label_and_deploy_dir(prim_name: str, mapping, target, deploy_dir: str) -> tuple[str, str]:
-    """Return the ``(label, deploy_dir)`` for a per-kind integration line.
-
-    Pulled out of ``integrate_package_primitives`` to keep that function's
-    cyclomatic complexity under the repo ceiling. The hooks branch may
-    rewrite *deploy_dir* to the harness's settings-file display path.
-    """
+    """Return ``(label, deploy_dir)`` for a per-kind integration line."""
     if prim_name == "instructions" and mapping.output_compare:
         # Rule-dir formats (cursor/claude/windsurf) are the output_compare
         # set; derive the label from the same flag so a new rule format
@@ -169,11 +164,7 @@ def _label_and_deploy_dir(prim_name: str, mapping, target, deploy_dir: str) -> t
 
 
 def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None:
-    """Emit per-primitive "next step" hints after an integration line.
-
-    Kept out of ``integrate_package_primitives`` to hold that function's
-    cyclomatic complexity under the repo ceiling.
-    """
+    """Emit per-primitive 'next step' hints after an integration line."""
     # copilot-app workflows arrive disabled: the row lands enabled=0 and the
     # user must flip the toggle in the Copilot App's Workflows tab before the
     # schedule fires.
