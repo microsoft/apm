@@ -310,7 +310,10 @@ class TestSkillSpectorAdapter:
 
         monkeypatch.setattr(mod.shutil, "which", lambda _name: None)
         ok, reason = mod.SkillSpectorAdapter().is_available()
-        assert ok is False and "PATH" in reason and "pip" not in reason
+        assert ok is False
+        assert "PATH" in reason
+        assert "Python >= 3.12" in reason
+        assert "uv tool install" in reason
 
     def test_available_when_binary_present(self, monkeypatch) -> None:
         import apm_cli.security.external.skillspector as mod

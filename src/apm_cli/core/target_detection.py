@@ -27,6 +27,9 @@ from typing import Literal, Union
 
 import click
 
+from ._target_detection_helpers import _target_error as _target_error
+from ._target_detection_helpers import format_provenance as format_provenance
+
 
 class AgentsTargetDeprecationWarning(DeprecationWarning):
     """Raised when the legacy ``--target agents`` alias is used.
@@ -271,6 +274,35 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
     return target in ("vscode", "all")
 
 
+def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
+    """Check if instruction dedup is safe for AGENTS.md.
+
+    Returns True only when every target that reads AGENTS.md also reads
+    ``.github/instructions/`` -- meaning instructions can safely be omitted
+    from AGENTS.md without losing context for any consumer.
+
+    Today only Copilot (vscode) reads both locations.  Codex, OpenCode,
+    Windsurf, and Gemini rely on AGENTS.md as their sole instruction source
+    and must always receive instruction content (issue #1678).
+
+    Args:
+        target: The detected or configured target.  May be a string or a
+            frozenset of compiler families for multi-target lists.
+
+    Returns:
+        bool: True if instructions can be omitted from AGENTS.md.
+    """
+    if isinstance(target, frozenset):
+        # Conservative policy: only dedup when the target set is exactly
+        # {"vscode"} (Copilot alone).  Any additional family -- including
+        # "agents" -- means at least one consumer that does not read
+        # .github/instructions/ may be present, so we keep instructions
+        # in AGENTS.md to be safe.
+        return target == frozenset({"vscode"})
+    # Single-string targets: only "vscode" reads .github/instructions/.
+    return target == "vscode"
+
+
 def get_target_description(target: UserTargetType) -> str:
     """Get a human-readable description of what will be generated for a target.
 
@@ -293,6 +325,7 @@ def get_target_description(target: UserTargetType) -> str:
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
+        "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -313,7 +346,7 @@ ALL_CANONICAL_TARGETS = frozenset(
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork", "copilot-app"})
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork", "copilot-app", "openclaw"})
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
 #: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
@@ -531,13 +564,6 @@ def parse_target_field(
     if len(result) == 1:
         return result[0]
     return result
-
-
-def _target_error(message: str, source_path: Path | None) -> str:
-    """Format a target validation error, naming the source file when known."""
-    if source_path is not None:
-        return f"Invalid 'target' in {source_path}: {message}"
-    return f"Invalid target: {message}"
 
 
 class TargetParamType(click.ParamType):
@@ -759,16 +785,3 @@ def expand_all_targets(
         raise NoHarnessError(render_no_harness_error(project_root))
 
     return combined
-
-
-def format_provenance(resolved: ResolvedTargets) -> str:
-    """Format provenance line for CLI output.
-
-    Returns the message portion (without the [i] prefix, since
-    _rich_info adds it).
-
-    # Double-space between target list and metadata is intentional and
-    # canonical. Test assertions match this exact spacing. Do not collapse.
-    """
-    targets_csv = ", ".join(resolved.targets)
-    return f"Targets: {targets_csv}  (source: {resolved.source})"

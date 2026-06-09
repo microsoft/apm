@@ -28,6 +28,7 @@ _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 # list-form ``argv`` so there is no shell-expansion vector.
 _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
+_REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
 

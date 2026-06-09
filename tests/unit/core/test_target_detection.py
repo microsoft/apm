@@ -10,6 +10,7 @@ from apm_cli.core.target_detection import (
     EXPERIMENTAL_TARGETS,
     VALID_TARGET_VALUES,
     TargetParamType,
+    can_dedup_agents_md_instructions,
     detect_target,
     get_target_description,
     normalize_target_list,
@@ -904,7 +905,7 @@ class TestCoworkParserLayer:
         This locks the constant so that adding a new experimental target
         requires an intentional test update.
         """
-        assert frozenset({"copilot-cowork", "copilot-app"}) == EXPERIMENTAL_TARGETS
+        assert frozenset({"copilot-cowork", "copilot-app", "openclaw"}) == EXPERIMENTAL_TARGETS
 
     # -- Case 7: "all" expansion does NOT include "copilot-cowork" ---------------
 
@@ -933,3 +934,101 @@ class TestCoworkParserLayer:
             match="Unknown target",
         ):
             self.tp.convert("nonsense", None, None)
+
+
+# ---------------------------------------------------------------------------
+# can_dedup_agents_md_instructions (issue #1678)
+# ---------------------------------------------------------------------------
+
+
+class TestCanDedupAgentsMdInstructions:
+    """Only vscode-only targets allow instruction dedup from AGENTS.md."""
+
+    @pytest.mark.parametrize(
+        ("target", "expected"),
+        [
+            # Copilot reads both AGENTS.md and .github/instructions/ -- safe to dedup.
+            ("vscode", True),
+            # Non-Copilot targets only read AGENTS.md -- must NOT dedup.
+            ("codex", False),
+            ("opencode", False),
+            ("windsurf", False),
+            ("gemini", False),
+            ("all", False),
+            ("minimal", False),
+            ("claude", False),
+            ("cursor", False),
+            # Multi-target frozensets.
+            (frozenset({"vscode"}), True),
+            (frozenset({"vscode", "agents"}), False),
+            (frozenset({"vscode", "claude"}), False),
+            (frozenset({"agents"}), False),
+            (frozenset({"vscode", "claude", "agents"}), False),
+        ],
+        ids=[
+            "vscode-str",
+            "codex-str",
+            "opencode-str",
+            "windsurf-str",
+            "gemini-str",
+            "all-str",
+            "minimal-str",
+            "claude-str",
+            "cursor-str",
+            "frozenset-vscode-only",
+            "frozenset-vscode-agents",
+            "frozenset-vscode-claude",
+            "frozenset-agents-only",
+            "frozenset-vscode-claude-agents",
+        ],
+    )
+    def test_dedup_decision(self, target, expected):
+        """can_dedup_agents_md_instructions returns expected value per target."""
+        assert can_dedup_agents_md_instructions(target) is expected
+
+
+# ---------------------------------------------------------------------------
+# _resolve_compile_target regression tests (issue #1678)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveCompileTargetMixedTargets:
+    """_resolve_compile_target must preserve frozenset for mixed targets."""
+
+    @staticmethod
+    def _resolve(targets):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        return _resolve_compile_target(targets)
+
+    def test_copilot_only_list_collapses_to_vscode(self):
+        """[copilot] collapses to bare 'vscode' string."""
+        assert self._resolve(["copilot"]) == "vscode"
+
+    def test_copilot_codex_keeps_frozenset(self):
+        """[copilot, codex] must NOT collapse -- Codex info must survive."""
+        result = self._resolve(["copilot", "codex"])
+        assert isinstance(result, frozenset)
+        assert "vscode" in result
+        assert "agents" in result
+
+    def test_copilot_opencode_keeps_frozenset(self):
+        """[copilot, opencode] must NOT collapse."""
+        result = self._resolve(["copilot", "opencode"])
+        assert isinstance(result, frozenset)
+
+    def test_copilot_windsurf_keeps_frozenset(self):
+        """[copilot, windsurf] must NOT collapse."""
+        result = self._resolve(["copilot", "windsurf"])
+        assert isinstance(result, frozenset)
+
+    def test_codex_single_string(self):
+        """Single codex target stays a bare string."""
+        assert self._resolve(["codex"]) == "codex"
+
+    def test_copilot_claude_keeps_frozenset(self):
+        """[copilot, claude] produces a frozenset with vscode and claude families."""
+        result = self._resolve(["copilot", "claude"])
+        assert isinstance(result, frozenset)
+        assert "vscode" in result
+        assert "claude" in result

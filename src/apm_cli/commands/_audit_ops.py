@@ -10,6 +10,7 @@ No module-level import of ``audit`` here to avoid circular imports; each
 function does a function-level ``from apm_cli.commands import audit as _a``.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -207,8 +208,9 @@ def _audit_content_scan(
         effective_format = detect_format_from_extension(Path(cfg.output_path))
 
     if effective_format != "text" and (strip or dry_run):
-        logger.error(f"--format {effective_format} cannot be combined with --strip or --dry-run")
-        sys.exit(1)
+        raise click.UsageError(
+            f"--format {effective_format} cannot be combined with --strip or --dry-run"
+        )
 
     if file_path:
         findings_by_file, files_scanned = _a._scan_single_file(Path(file_path), logger)
@@ -370,3 +372,95 @@ def _audit_content_scan(
             click.echo(serialize_report(report))
 
     sys.exit(exit_code)
+
+
+# ---------------------------------------------------------------------------
+# _resolve_external_options / _run_external_scanners
+# ---------------------------------------------------------------------------
+# Extracted from audit.py to keep it under 800 lines.  Both are re-exported
+# from audit.py so ``apm_cli.commands.audit._resolve_external_options`` and
+# ``apm_cli.commands.audit._run_external_scanners`` remain patchable by tests.
+# _audit_content_scan calls them via ``_a.<name>`` (routing through the
+# original audit module), so test monkey-patches still take effect.
+
+
+def _resolve_external_options(
+    external: tuple[str, ...],
+    external_llm: bool | None,
+    external_args: str | None,
+) -> "dict[str, object]":
+    """Resolve per-scanner ScannerOptions from CLI + config layers.
+
+    Policy ``allow_args`` governance is applied at the install-time audit
+    phase (where org policy is already loaded), not in the interactive
+    ``apm audit`` path; the per-adapter allowlist still validates every token.
+    """
+    import shlex
+
+    from ..config import get_scanner_options
+    from ..security.external.options import resolve_scanner_options
+
+    if external_args is not None:
+        try:
+            cli_args: tuple[str, ...] | None = tuple(
+                shlex.split(external_args, posix=(os.name != "nt"))
+            )
+        except ValueError as exc:
+            raise click.UsageError(f"--external-args could not be parsed: {exc}") from exc
+    else:
+        cli_args = None
+    options_by_name: dict[str, object] = {}
+    for name in external:
+        config_llm, config_args = get_scanner_options(name)
+        options_by_name[name] = resolve_scanner_options(
+            cli_llm=external_llm,
+            cli_args=cli_args,
+            config_llm=config_llm,
+            config_args=config_args,
+            policy_allow_args=None,
+        )
+    return options_by_name
+
+
+def _run_external_scanners(
+    cfg,
+    external: tuple[str, ...],
+    external_sarif: str | None,
+    scan_paths: list[Path],
+    options_by_name: "dict[str, object] | None" = None,
+) -> "dict[str, list]":
+    """Run opted-in external SARIF-native scanners and return merged findings.
+
+    Fail-closed: the ``external_scanners`` experimental flag must be enabled
+    (exit 2 otherwise) and each adapter must be available (exit 2 otherwise).
+    APM's own content scan is never weakened -- external findings are purely
+    additive.  The resolve/validate/run/merge loop is shared with the
+    install-time audit phase via
+    :func:`apm_cli.security.external.runner.run_external_scanners`.
+    """
+    from ..security.external.base import ExternalScanError
+    from ..security.external.gate import (
+        ExternalScannersFeatureDisabledError,
+        require_external_scanners_enabled,
+    )
+    from ..security.external.runner import run_external_scanners
+
+    logger = cfg.logger
+
+    try:
+        require_external_scanners_enabled("Ingesting external scanners with --external")
+    except ExternalScannersFeatureDisabledError as exc:
+        logger.error(str(exc))
+        sys.exit(3)
+
+    try:
+        return run_external_scanners(
+            external,
+            external_sarif,
+            scan_paths,
+            options_by_name=options_by_name,
+            logger=logger,
+        )
+    except ExternalScanError as exc:
+        logger.error(str(exc))
+        sys.exit(3)

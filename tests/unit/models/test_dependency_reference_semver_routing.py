@@ -8,6 +8,8 @@ existing literal-routing behaviour.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -89,3 +91,19 @@ class TestLiteralTagRegressionTrap:
         dep = DependencyReference.parse("acme/some-skills#1.2.3")
         assert dep.reference == "1.2.3"
         assert dep.ref_kind == "semver"
+
+    def test_subpath_tag_with_at_v_separator_parses_as_literal_ref(self) -> None:
+        dep = DependencyReference.parse("owner/repo/packages/somepackage#somepackage@v1.0.1")
+
+        assert dep.repo_url == "owner/repo"
+        assert dep.virtual_path == "packages/somepackage"
+        assert dep.reference == "somepackage@v1.0.1"
+        assert dep.ref_kind == "literal"
+
+    def test_shorthand_alias_before_ref_fragment_is_still_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo@alias")
+
+    def test_subpath_shorthand_alias_before_ref_fragment_is_still_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo/subpath@alias#main")

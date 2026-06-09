@@ -197,13 +197,25 @@ def _resolve_list_target(target_list, KNOWN_TARGETS):
             families.add("agents")
 
     if len(families) >= 2:
-        return "vscode" if families == {"vscode", "agents"} else frozenset(families)
-    if "claude" in families:
-        return "claude"
-    if "gemini" in families:
-        return "gemini"
-    if "vscode" in families:
-        return "vscode"
+        # Collapse {"vscode","agents"} to bare "vscode" ONLY when the
+        # original target list contains no non-Copilot agents-family
+        # targets (e.g. codex, opencode, windsurf).  When mixed targets
+        # like [copilot, codex] are requested, keep the frozenset so
+        # downstream dedup logic knows non-Copilot targets also consume
+        # AGENTS.md (issue #1678).
+        if families == {"vscode", "agents"}:
+            _vscode_names = {"copilot", "vscode", "agents"}
+            has_non_vscode_agents = any(
+                name in target_set
+                for name, profile in KNOWN_TARGETS.items()
+                if profile.compile_family == "agents" and name not in _vscode_names
+            )
+            if not has_non_vscode_agents:
+                return "vscode"
+        return frozenset(families)
+    for fam in ("claude", "gemini", "vscode"):
+        if fam in families:
+            return fam
     for name, profile in KNOWN_TARGETS.items():
         if profile.compile_family == "agents" and name in target_set:
             return name

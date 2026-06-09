@@ -48,6 +48,9 @@ from ._reference_util import (
     _RANGE_PREFIX_RE as _RANGE_PREFIX_RE,
 )
 from ._reference_util import (
+    _REF_VERSION_SUFFIX_RE as _REF_VERSION_SUFFIX_RE,
+)
+from ._reference_util import (
     InvalidSemverRangeError as InvalidSemverRangeError,
 )
 from ._reference_util import (
@@ -501,9 +504,9 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
         retired the ``@`` separator to avoid the npm/go/cargo ``@version``
         collision). The dedicated SSH parsers handle ``@`` in ``ssh://`` URLs
         and SCP shorthand (``<user>@host:path``) as userinfo, not aliases; this
-        guard fires for the remaining cases like
-        ``owner/repo[/sub][#ref]@alias``, which would otherwise silently leak
-        the alias into ``virtual_path`` or ``reference``.
+        guard rejects ``@`` in the pre-fragment shorthand portion and keeps the
+        retired ``#ref@alias`` shape rejected, while version-style tag suffixes
+        such as ``owner/repo#package@v1.0.1`` remain valid literal refs.
         """
         stripped = dependency_str.strip()
         if "@" not in stripped:
@@ -512,6 +515,11 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
             return
         if SCP_LIKE_RE.match(stripped):
             return
+        shorthand_part, _, ref_part = stripped.partition("#")
+        if "@" not in shorthand_part:
+            _, _, ref_suffix = ref_part.rpartition("@")
+            if _REF_VERSION_SUFFIX_RE.fullmatch(ref_suffix):
+                return
         preview = "".join(ch if 32 <= ord(ch) <= 126 else "?" for ch in stripped)
         if len(preview) > 160:
             preview = f"{preview[:157]}..."
