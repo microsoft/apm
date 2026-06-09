@@ -7,35 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-06-09
+
 ### Added
 
-- `apm publish` auto-pack now produces a `.zip` archive (ZIP\_DEFLATED) instead of `.tar.gz`, aligning with the de facto standard used by Anthropic Claude, OpenAI, and Google Gemini agent platforms. The `--tarball` option is renamed to `--zip`. Output filename: `{name}-{version}.zip`.
-- `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
+- `apm install <package> --target openclaw` adds OpenClaw as a new experimental
+  skills consumer target (opt in via `apm experimental enable openclaw`). Skills
+  deploy to `.agents/skills/<name>/SKILL.md` (project) or
+  `~/.openclaw/skills/<name>/SKILL.md` (global). (by @sergio-sisternes-epam, #1677)
+- `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source. (by @nadav-y, #1695)
 - `apm install` now surfaces per-event hook action summaries as it integrates
   hook primitives, with the fully rewritten hook JSON shown under `--verbose`,
   so you can audit exactly what each hook runs at install time. The summary is
   built from the post-rewrite data actually written to disk and executed -- it
   faithfully reflects on-disk content across Copilot, Claude, and Gemini
   targets (including OS-specific `windows`/`linux`/`osx` hook keys). (by
-  @harshitlarl, closes #316)
+  @harshitlarl, closes #316, #1700)
+
+### Changed
+
+- **BREAKING:** `apm publish` auto-pack now produces a `.zip` archive (ZIP\_DEFLATED) instead of `.tar.gz`, aligning with the de facto standard used by Anthropic Claude, OpenAI, and Google Gemini agent platforms. The `--tarball` option is renamed to `--zip`. Output filename: `{name}-{version}.zip`. (by @nadav-y, #1695)
+- `MCPDependency.from_dict()` now emits a `[!]` warning naming every unknown
+  key dropped during parsing (e.g. harness-specific fields like `oauth`) instead
+  of discarding them silently, making forward-compat config mismatches
+  diagnosable. (#1674)
+- Auth credential cascade now emits debug-level logs for every fallback step,
+  making token misconfiguration diagnosable without adding noise to normal output.
+  Enable with ``apm --verbose`` or ``APM_LOG_LEVEL=DEBUG``.
+  (by @danielmeppiel, closes #935, #1664)
 
 ### Fixed
 
 - `apm install` now falls back to an AAD bearer token (via `az login`) when no
   `ADO_APM_PAT` is configured for Azure DevOps file downloads, and fail-closes
   when ADO returns an interactive HTML sign-in page with HTTP 200 instead of
-  writing corrupt HTML to disk. (by @danielmeppiel, closes #1671)
+  writing corrupt HTML to disk. (by @danielmeppiel, closes #1671, #1675)
 - `apm install` now splits FQDN monorepo subpath shorthand on GitHub
   Enterprise Server hosts. With `GITHUB_HOST` set, a dependency string like
   `ghe.example.com/org/repo/packages/skill` resolves to `git: org/repo` plus
   `path: packages/skill` instead of embedding the whole subpath into the clone
-  URL. (by @sergio-sisternes-epam, closes #1673)
+  URL. (by @sergio-sisternes-epam, closes #1673, #1684)
+- `apm compile` now keeps instruction content in `AGENTS.md` for non-Copilot
+  targets (Codex, OpenCode, Windsurf) instead of suppressing it whenever
+  `.github/instructions/` contains `.md` files, so those targets no longer lose
+  their instructions. (by @sergio-sisternes-epam, closes #1678, #1685)
+- `apm install` now unwraps the `{ "lspServers": { ... } }` envelope in plugin
+  `.lsp.json` files instead of silently skipping them with a misleading
+  validation error. (by @sergio-sisternes-epam, closes #1683, #1686)
 - `apm install` now preserves transitive dependencies declared in `apm.yml`
   when installing dual-format packages (those colocating `plugin.json` with
   `apm.yml`) from the marketplace or a remote subdirectory, instead of silently
   dropping them when the synthesized manifest overwrote the file. A malformed
   existing `apm.yml` now also surfaces a warning instead of failing silently.
-  (by @sergio-sisternes-epam, closes #1666)
+  (by @sergio-sisternes-epam, closes #1666, #1687)
+- `apm audit` external skill-scanner UX is clearer, with improved messaging and
+  error handling around external scanners. (by @sergio-sisternes-epam, #1692)
+- `install.sh` now validates `APM_LIB_DIR` before running `rm -rf`, preventing
+  data loss when the override points at a directory holding unrelated
+  application data. (by @dohwi, closes #1690, #1694)
 - `apm install` now preserves scoped MCP package config keys such as
   `@playwright/mcp` across Claude, Codex, and Copilot harness configs instead
   of truncating them to `mcp`. (#1699)
@@ -46,28 +75,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.cursor/rules`, `.windsurf/rules`) tracked in `managed_files` and rewrites
   them when the source instruction changes, instead of mis-classifying them as
   user-authored collisions and skipping them; also fixes a mislabeled
-  `windsurf_rules` entry in install output. (by @srid, closes #1662)
+  `windsurf_rules` entry in install output. (by @srid, closes #1662, #1665)
 - `apm install <local-path>` now dereferences in-package symlinks into regular
   files so that local and remote installs produce consistent output. Symlinks
   whose resolved target escapes the package root hard-fail with a
   `PathTraversalError`; circular directory-symlink chains and unreadable
   package directories are detected deterministically. Previously, in-package
   symlinks were silently dropped by the downstream deploy filter. (by
-  @danielmeppiel, closes #1668)
+  @danielmeppiel, closes #1668, #1676)
+- `apm install --skill <name>` is now honored for non-package skill-collection
+  installs (plugin-manifest collections), promoting only the selected skills
+  instead of the entire set; both leaf names and nested manifest paths are
+  accepted. (by @danielmeppiel, closes #1707, #1709)
 - `apm install` no longer rewrites `apm.lock.yaml` when a project combines a
   remote APM dependency with unchanged local `.apm/instructions` content.
-  (by @danielmeppiel, closes #1702)
-
-### Changed
-
-- `MCPDependency.from_dict()` now emits a `[!]` warning naming every unknown
-  key dropped during parsing (e.g. harness-specific fields like `oauth`) instead
-  of discarding them silently, making forward-compat config mismatches
-  diagnosable. (addresses #1670)
-- Auth credential cascade now emits debug-level logs for every fallback step,
-  making token misconfiguration diagnosable without adding noise to normal output.
-  Enable with ``apm --verbose`` or ``APM_LOG_LEVEL=DEBUG``.
-  (by @danielmeppiel, closes #935, #1664)
+  (by @danielmeppiel, closes #1702, #1710)
 
 ## [0.18.0] - 2026-06-04
 
