@@ -26,7 +26,7 @@ Pack distributable artifacts from your APM project.
 
 Reads apm.yml to decide what to produce:
 
-  dependencies: block  ->  bundle (directory or .tar.gz)
+  dependencies: block  ->  bundle (directory or .zip)
   marketplace: block   ->  selected marketplace artifacts
   target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
   both blocks present  ->  bundle plus selected marketplace artifacts
@@ -168,7 +168,7 @@ def _parse_marketplace_filter(
     "--archive",
     is_flag=True,
     default=False,
-    help="Produce a .tar.gz archive instead of a directory.",
+    help="Produce a .zip archive instead of a directory.",
 )
 @click.option(
     "-o",

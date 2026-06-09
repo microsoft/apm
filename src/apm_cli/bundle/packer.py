@@ -1,7 +1,7 @@
 """Bundle packer  -- creates self-contained APM bundles from the resolved dependency tree."""
 
 import shutil
-import tarfile
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,7 +41,7 @@ def pack_bundle(
         target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, a list of
             target strings (e.g. ``["claude", "vscode"]``), or *None*
             (auto-detect from apm.yml / project structure).
-        archive: If *True*, produce a ``.tar.gz`` and remove the directory.
+        archive: If *True*, produce a ``.zip`` and remove the directory.
         dry_run: If *True*, resolve the file list but write nothing to disk.
         force: On collision (plugin format), last writer wins.
 
@@ -270,9 +270,12 @@ def pack_bundle(
 
     # 10. Archive if requested
     if archive:
-        archive_path = output_dir / f"{pkg_name}-{pkg_version}.tar.gz"
-        with tarfile.open(archive_path, "w:gz") as tar:
-            tar.add(bundle_dir, arcname=bundle_dir.name)
+        archive_path = output_dir / f"{pkg_name}-{pkg_version}.zip"
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for fp in sorted(bundle_dir.rglob("*")):
+                if fp.is_symlink() or not fp.is_file():
+                    continue
+                zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 

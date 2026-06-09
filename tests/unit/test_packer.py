@@ -1,7 +1,7 @@
 """Unit tests for apm_cli.bundle.packer."""
 
 import os
-import tarfile
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -210,13 +210,13 @@ class TestPackBundle:
 
         result = pack_bundle(project, out, archive=True)
 
-        assert result.bundle_path.name == "test-pkg-1.0.0.tar.gz"
+        assert result.bundle_path.name == "test-pkg-1.0.0.zip"
         assert result.bundle_path.exists()
         # The directory should be cleaned up
         assert not (out / "test-pkg-1.0.0").exists()
         # Archive is valid
-        with tarfile.open(result.bundle_path, "r:gz") as tar:
-            names = tar.getnames()
+        with zipfile.ZipFile(result.bundle_path, "r") as zf:
+            names = zf.namelist()
             assert any("a.md" in n for n in names)
 
     def test_pack_custom_output_dir(self, tmp_path):

@@ -4,6 +4,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
@@ -39,7 +40,7 @@ def unpack_bundle(
     file has the same name as a bundle file, the bundle file wins (overwrite).
 
     Args:
-        bundle_path: Path to a ``.tar.gz`` archive or an unpacked bundle directory.
+        bundle_path: Path to a ``.zip`` (or legacy ``.tar.gz``) archive, or an unpacked bundle directory.
         output_dir: Target project directory to copy files into.
         skip_verify: If *True*, skip completeness verification against the lockfile.
         dry_run: If *True*, resolve the file list but write nothing to disk.
@@ -55,7 +56,44 @@ def unpack_bundle(
     """
     # 1. If archive, extract to temp dir
     cleanup_temp = False
-    if bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
+    if bundle_path.is_file() and bundle_path.name.endswith(".zip"):
+        from ..config import get_apm_temp_dir
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
+        cleanup_temp = True
+        try:
+            with zipfile.ZipFile(bundle_path, "r") as zf:
+                # Security: prevent path traversal and symlink entries
+                for member in zf.infolist():
+                    name = member.filename
+                    if (
+                        name.startswith("/")
+                        or PureWindowsPath(name).drive
+                        or PureWindowsPath(name).is_absolute()
+                    ):
+                        raise ValueError(f"Refusing to extract path-traversal entry: {name}")
+                    try:
+                        validate_path_segments(name, context="zip member")
+                    except PathTraversalError:
+                        raise ValueError(
+                            f"Refusing to extract path-traversal entry: {name}"
+                        ) from None
+                    # Detect Unix symlinks stored in zip external_attr
+                    if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise ValueError(f"Refusing to extract symlink: {name}")
+                zf.extractall(temp_dir)  # noqa: S202
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+
+        # Locate inner directory (the archive wraps a single top-level dir)
+        children = list(temp_dir.iterdir())
+        if len(children) == 1 and children[0].is_dir():  # noqa: SIM108
+            source_dir = children[0]
+        else:
+            source_dir = temp_dir
+    elif bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
+        # Legacy .tar.gz support (backward compat)
         from ..config import get_apm_temp_dir
 
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))

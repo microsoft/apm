@@ -1,7 +1,7 @@
 """Local-bundle detection, integrity verification, and target-mismatch checks.
 
 This module powers ``apm install <local-bundle-path>`` (issue #1098).  A local
-bundle is a directory or ``.tar.gz`` produced by ``apm pack`` -- it contains a
+bundle is a directory, ``.zip``, or ``.tar.gz`` produced by ``apm pack`` -- it contains a
 ``plugin.json`` at its root and (for bundles produced by recent versions of
 APM) an ``apm.lock.yaml`` carrying the per-file SHA-256 manifest under
 ``pack.bundle_files``.
@@ -30,6 +30,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -58,7 +59,7 @@ class LocalBundleInfo:
             the lockfile).
         pack_targets: Targets the bundle was packed for, derived from
             ``lockfile["pack"]["target"]``.  Empty list when unknown.
-        is_archive: ``True`` when the source path was a ``.tar.gz``.
+        is_archive: ``True`` when the source path was a ``.zip`` or ``.tar.gz``.
         temp_dir: Extraction directory for tarballs (caller must clean up).
             ``None`` for directory bundles.
     """
@@ -197,16 +198,57 @@ def _find_extracted_root(extract_dir: Path) -> Path | None:
     return None
 
 
+def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
+    """Extract a ``.zip`` bundle to a temp dir and return :class:`LocalBundleInfo`.
+
+    Applies the same security checks as the tar.gz branch: rejects absolute
+    paths, path-traversal segments, and Unix symlink entries detected via
+    ``external_attr``.  Returns ``None`` on any validation failure or I/O
+    error so the caller can fall through to a generic error message.
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            for member in zf.infolist():
+                name = member.filename
+                if (
+                    name.startswith("/")
+                    or PureWindowsPath(name).drive
+                    or PureWindowsPath(name).is_absolute()
+                ):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return None
+                try:
+                    validate_path_segments(name, context="zip member")
+                except PathTraversalError:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return None
+                # Detect Unix symlinks stored in zip external_attr
+                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return None
+            zf.extractall(temp_dir)  # noqa: S202 -- validated above
+    except (zipfile.BadZipFile, OSError):
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
+    bundle_root = _find_extracted_root(temp_dir)
+    if bundle_root is None:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
+    return _build_info(bundle_root, is_archive=True, temp_dir=temp_dir)
+
+
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     """Probe *path*; return :class:`LocalBundleInfo` or ``None``.
 
     A path qualifies when it is either:
 
     - A directory containing ``plugin.json`` at its root, OR
+    - A ``.zip`` archive whose extracted root contains ``plugin.json``, OR
     - A ``.tar.gz`` / ``.tgz`` archive whose extracted root contains
       ``plugin.json``.
 
-    Tarballs are extracted to a fresh temporary directory; the caller is
+    Archives are extracted to a fresh temporary directory; the caller is
     responsible for cleaning ``info.temp_dir`` after the install completes.
     """
     path = Path(path)
@@ -217,6 +259,9 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         if not (path / "plugin.json").is_file():
             return None
         return _build_info(path, is_archive=False, temp_dir=None)
+
+    if path.is_file() and path.name.lower().endswith(".zip"):
+        return _extract_zip_bundle(path)
 
     if path.is_file() and _looks_like_archive(path):
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))

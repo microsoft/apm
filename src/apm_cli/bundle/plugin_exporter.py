@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 import shutil
-import tarfile
+import zipfile
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -420,7 +420,7 @@ def export_plugin_bundle(
         project_root: Root of the project containing ``apm.yml``.
         output_dir: Parent directory for the generated bundle.
         target: Unused for plugin format (reserved for future use).
-        archive: If True, produce a ``.tar.gz`` and remove the directory.
+        archive: If True, produce a ``.zip`` and remove the directory.
         dry_run: If True, resolve the file list without writing to disk.
         force: On collision, last writer wins instead of first.
 
@@ -645,16 +645,13 @@ def export_plugin_bundle(
 
     # 15. Archive if requested
     if archive:
-        archive_path = output_dir / f"{bundle_dir.name}.tar.gz"
+        archive_path = output_dir / f"{bundle_dir.name}.zip"
         ensure_path_within(archive_path, output_dir)
-        with tarfile.open(archive_path, "w:gz") as tar:
-
-            def _tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-                if info.issym() or info.islnk():
-                    return None  # reject symlinks injected after write
-                return info
-
-            tar.add(bundle_dir, arcname=bundle_dir.name, filter=_tar_filter)
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for fp in sorted(bundle_dir.rglob("*")):
+                if fp.is_symlink() or not fp.is_file():
+                    continue  # reject symlinks injected after write
+                zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 
