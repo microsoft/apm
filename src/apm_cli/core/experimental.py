@@ -107,6 +107,16 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "See https://microsoft.github.io/apm/integrations/external-scanners/"
         ),
     ),
+    "openclaw": ExperimentalFlag(
+        name="openclaw",
+        description="Deploy skills to OpenClaw agent runtime directories.",
+        default=False,
+        hint=(
+            "Use '--target openclaw' to deploy skills to your project, "
+            "or '--target openclaw --global' for your personal OpenClaw "
+            "skills at ~/.openclaw/skills/."
+        ),
+    ),
 }
 
 

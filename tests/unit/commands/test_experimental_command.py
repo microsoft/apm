@@ -144,16 +144,16 @@ class TestEnableCommand:
         # hint line must follow success
         assert "apm --version" in result.output
 
-    def test_enable_already_enabled_emits_warning_not_success(self, runner: CliRunner) -> None:
-        """Enabling an already-enabled flag emits warning [!], not a false success."""
+    def test_enable_already_enabled_emits_info_not_success(self, runner: CliRunner) -> None:
+        """Enabling an already-enabled flag emits info [i], not a false success."""
         from apm_cli.commands.experimental import experimental
 
         # First enable succeeds
         runner.invoke(experimental, ["enable", "verbose-version"])
-        # Second enable should be idempotent warning
+        # Second enable should be idempotent info
         result = runner.invoke(experimental, ["enable", "verbose-version"])
         assert result.exit_code == 0
-        assert "[!]" in result.output
+        assert "[i]" in result.output
         assert "already enabled" in result.output
         assert "[+] Enabled" not in result.output
 
@@ -202,14 +202,14 @@ class TestDisableCommand:
         assert result.exit_code == 0
         assert "[+] Disabled experimental feature: verbose-version" in result.output
 
-    def test_disable_already_disabled_emits_warning_not_success(self, runner: CliRunner) -> None:
-        """Disabling an already-disabled flag emits warning [!], not a false success."""
+    def test_disable_already_disabled_emits_info_not_success(self, runner: CliRunner) -> None:
+        """Disabling an already-disabled flag emits info [i], not a false success."""
         from apm_cli.commands.experimental import experimental
 
-        # Flag is disabled by default -- second disable should be idempotent warning
+        # Flag is disabled by default -- second disable should be idempotent info
         result = runner.invoke(experimental, ["disable", "verbose-version"])
         assert result.exit_code == 0
-        assert "[!]" in result.output
+        assert "[i]" in result.output
         assert "already disabled" in result.output
         assert "[+] Disabled" not in result.output
 

@@ -183,6 +183,7 @@ The default audit replays the install pipeline into a scratch tree and diffs the
 | `0` | Clean, info-only findings, drift-only (advisory) in bare audit, or successful `--strip`. |
 | `1` | Critical findings detected. |
 | `2` | Warning-only findings, or usage error (mutually exclusive flags). |
+| `3` | Configuration or infrastructure error (feature not enabled, scanner not found, malformed SARIF). |
 
 ### CI gate mode (`--ci`)
 

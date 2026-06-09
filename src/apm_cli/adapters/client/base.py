@@ -633,22 +633,25 @@ class MCPClientAdapter(ABC):
         return server_info
 
     @staticmethod
-    def _determine_config_key(server_url: str, server_name: str) -> str:
+    def _determine_config_key(server_url: str, server_name: str | None) -> str:
         """Return the configuration key to use for *server_url*/*server_name*.
 
-        The caller-supplied *server_name* takes precedence; if empty the last
-        path segment of *server_url* is used as a fallback, which mirrors the
-        convention ``owner/repo -> repo``.
+        The caller-supplied *server_name* takes precedence. If it is absent,
+        preserve npm-style scoped names such as ``@scope/name`` (one slash by
+        npm convention) while keeping the historical ``owner/repo -> repo``
+        fallback for registry paths.
 
         Args:
             server_url: Registry reference used as fallback source.
-            server_name: Explicit caller-supplied name (may be empty string).
+            server_name: Explicit caller-supplied name, if any.
 
         Returns:
             Non-empty configuration key string.
         """
         if server_name:
             return server_name
+        if server_url.startswith("@") and server_url.count("/") == 1:
+            return server_url
         if "/" in server_url:
             return server_url.split("/")[-1]
         return server_url

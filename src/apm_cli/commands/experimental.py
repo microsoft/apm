@@ -244,7 +244,7 @@ def enable_flag(ctx, name: str, verbose: bool):
     from ..core.experimental import is_enabled
 
     if is_enabled(normalised):
-        logger.warning(f"{display_name(normalised)} is already enabled.")
+        logger.progress(f"{display_name(normalised)} is already enabled.")
         return
 
     flag = _enable_flag(normalised)
@@ -274,7 +274,7 @@ def disable_flag(ctx, name: str, verbose: bool):
     from ..core.experimental import is_enabled
 
     if not is_enabled(normalised):
-        logger.warning(f"{display_name(normalised)} is already disabled.")
+        logger.progress(f"{display_name(normalised)} is already disabled.")
         return
 
     _disable_flag(normalised)
