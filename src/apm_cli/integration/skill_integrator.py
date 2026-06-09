@@ -158,21 +158,7 @@ class SkillIntegrator(BaseIntegrator):
     @staticmethod
     def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
         """Return promotion filter tokens for --skill subset values."""
-        if not skill_subset:
-            return None
-
-        name_filter: set[str] = set()
-        for skill_name in skill_subset:
-            raw_name = str(skill_name).strip()
-            if not raw_name:
-                continue
-            normalized_path = raw_name.replace("\\", "/")
-            leaf_name = Path(normalized_path).name
-            name_filter.add(raw_name)
-            name_filter.add(normalized_path)
-            if leaf_name:
-                name_filter.add(leaf_name)
-        return name_filter or None
+        return _skill_deploy._skill_subset_name_filter(skill_subset)
 
     @staticmethod
     def _promote_sub_skills(
