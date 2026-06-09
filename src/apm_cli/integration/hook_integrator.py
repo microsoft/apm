@@ -48,6 +48,7 @@ import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.console import _rich_warning
@@ -66,6 +67,9 @@ from .hook_merge import (
     _warn_empty_hook_file,
     _write_merged_config,
 )
+from .hook_merge import (
+    _parse_hook_json as _parse_hook_json_impl,
+)
 from .hook_transforms import (
     _APM_HOOKS_SIDECAR,
     _HOOK_EVENT_MAP,
@@ -80,9 +84,18 @@ from .hook_transforms import (
 # The ``X as X`` form marks them as intentional public re-exports (PEP 484).
 # ---------------------------------------------------------------------------
 from .hook_transforms import _HOOK_EVENT_EXPECTED_CASING as _HOOK_EVENT_EXPECTED_CASING
+from .hook_transforms import (
+    _build_display_payload as _build_display_payload_impl,
+)
 from .hook_transforms import _copilot_keys_to_gemini as _copilot_keys_to_gemini
 from .hook_transforms import _detect_event_casing as _detect_event_casing
+from .hook_transforms import (
+    _iter_hook_entries as _iter_hook_entries_impl,
+)
 from .hook_transforms import _reinject_apm_source_from_sidecar as _reinject_apm_source_from_sidecar
+from .hook_transforms import (
+    _summarize_command as _summarize_command_impl,
+)
 from .hook_transforms import _to_gemini_hook_entries as _to_gemini_hook_entries
 
 _log = logging.getLogger(__name__)
@@ -224,6 +237,26 @@ class HookIntegrator(BaseIntegrator):
     # Hook file discovery
     # ---------------------------------------------------------------------------
 
+    @staticmethod
+    def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
+        """Flatten hook payloads into (event_name, entry_dict) pairs."""
+        return _iter_hook_entries_impl(payload)
+
+    @staticmethod
+    def _summarize_command(entry: dict) -> str:
+        """Return a human-readable summary for a single hook command entry."""
+        return _summarize_command_impl(entry)
+
+    def _build_display_payload(
+        self,
+        target_label: str,
+        output_path: str,
+        source_hook_file: Any,
+        rewritten: dict,
+    ) -> dict:
+        """Build CLI display metadata for an integrated hook file."""
+        return _build_display_payload_impl(target_label, output_path, source_hook_file, rewritten)
+
     def find_hook_files(self, package_path: Path) -> list[Path]:
         """Find all hook JSON files in a package.
 
@@ -267,50 +300,10 @@ class HookIntegrator(BaseIntegrator):
     def _parse_hook_json(self, hook_file: Path) -> dict | None:
         """Parse a hook JSON file and return the data dict.
 
-        Accepts both the wrapped format (``{"hooks": {EventName: [...]}}``)
-        and the "naked" Claude-settings hooks-slice format
-        (``{EventName: [...], ...}`` with no outer ``"hooks":`` wrap).
-        The naked shape is what Claude Code accepts inside its own
-        ``settings.json`` and is a common authoring pattern -- silently
-        dropping it produced the empty merge reported in microsoft/apm#1499.
-
-        Args:
-            hook_file: Path to the hook JSON file
-
-        Returns:
-            Optional[Dict]: Parsed JSON dict (always wrapped), or None if invalid
+        Accepts both the wrapped format and the naked Claude-settings
+        hooks-slice format.  See ``hook_merge._parse_hook_json`` for details.
         """
-        try:
-            with open(hook_file, encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                return None
-            # Normalise naked-format files (no outer "hooks" key but
-            # every top-level value is a list of matcher entries) into
-            # the wrapped shape downstream code expects.  Only promote
-            # when ALL values look like hook entry arrays -- a stray
-            # scalar (e.g. "description") would mean this is malformed
-            # rather than naked, so leave it alone.
-            if "hooks" not in data and data and all(isinstance(v, list) for v in data.values()):
-                _log.debug(
-                    "Promoted naked-format hook file %s (top-level event keys: %s) to wrapped shape",
-                    hook_file,
-                    sorted(data.keys()),
-                )
-                data = {"hooks": data}
-            # Fail closed on malformed shapes where "hooks" is present but not
-            # a dict (e.g. {"hooks": []}).  Downstream code calls .items() on
-            # this value and would otherwise raise AttributeError mid-merge.
-            if "hooks" in data and not isinstance(data["hooks"], dict):
-                _log.warning(
-                    "Skipping malformed hook file %s: 'hooks' must be a dict, got %s",
-                    hook_file,
-                    type(data["hooks"]).__name__,
-                )
-                return None
-            return data
-        except (json.JSONDecodeError, OSError):
-            return None
+        return _parse_hook_json_impl(hook_file)
 
     # ---------------------------------------------------------------------------
     # Script copy helper
@@ -396,6 +389,7 @@ class HookIntegrator(BaseIntegrator):
         scripts_copied = 0
         scripts_adopted = 0
         target_paths: list[Path] = []
+        display_payloads: list = []
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
@@ -432,6 +426,14 @@ class HookIntegrator(BaseIntegrator):
 
             hooks_integrated += 1
             target_paths.append(target_path)
+            display_payloads.append(
+                self._build_display_payload(
+                    f"{root_dir}/hooks/",
+                    target_filename,
+                    hook_file,
+                    rewritten,
+                )
+            )
 
             sc, sa = self._copy_hook_scripts(
                 scripts, project_root, target_paths, managed_files, force, diagnostics
@@ -446,6 +448,7 @@ class HookIntegrator(BaseIntegrator):
             target_paths=target_paths,
             scripts_copied=scripts_copied,
             files_adopted=scripts_adopted,
+            display_payloads=display_payloads,
         )
 
     # ------------------------------------------------------------------
@@ -501,6 +504,12 @@ class HookIntegrator(BaseIntegrator):
         scripts_copied = 0
         scripts_adopted = 0
         target_paths: list[Path] = []
+        display_payloads: list = []
+        # Per-file display metadata is captured during the merge loop but
+        # the payloads are BUILT after the JSON config is finalized (Gemini
+        # transform applied, schema-strict _apm_source stripped) so that
+        # rendered_json reflects the actual on-disk/executed content.
+        pending_display: list = []
         cleared_events: set = set()
 
         json_path = target_dir / config.config_filename
@@ -526,6 +535,7 @@ class HookIntegrator(BaseIntegrator):
             event_map = _HOOK_EVENT_MAP.get(config.target_key, {})
             _emit_hook_event_diagnostics(list(hooks.keys()), config.target_key, event_map)
 
+            file_event_entries: dict = {}
             appended = _merge_hook_file_entries(
                 json_config,
                 hooks,
@@ -535,10 +545,19 @@ class HookIntegrator(BaseIntegrator):
                 cleared_events,
                 heal_stale_root_source=heal_stale,
                 dependency_sources=dep_sources,
+                capture_entries=file_event_entries,
             )
 
             if appended:
                 hooks_integrated += 1
+                pending_display.append(
+                    (
+                        config.config_filename,
+                        config.config_filename,
+                        hook_file,
+                        file_event_entries,
+                    )
+                )
             else:
                 _warn_empty_hook_file(hook_file, config.target_key)
 
@@ -551,6 +570,20 @@ class HookIntegrator(BaseIntegrator):
         json_path.parent.mkdir(parents=True, exist_ok=True)
         _write_merged_config(json_path, sidecar_path, json_config, config.schema_strict)
 
+        # Build display payloads from the finalized entry objects (post
+        # Gemini transform and post schema-strict _apm_source strip) so the
+        # CLI summary and rendered_json faithfully reflect what is written
+        # to disk and executed -- not the pre-transform per-file data.
+        for _label, _path, _hook_file, _file_event_entries in pending_display:
+            display_payloads.append(
+                self._build_display_payload(
+                    _label,
+                    _path,
+                    _hook_file,
+                    {"hooks": _file_event_entries},
+                )
+            )
+
         return HookIntegrationResult(
             files_integrated=hooks_integrated,
             files_updated=0,
@@ -558,11 +591,8 @@ class HookIntegrator(BaseIntegrator):
             target_paths=target_paths,
             scripts_copied=scripts_copied,
             files_adopted=scripts_adopted,
+            display_payloads=display_payloads,
         )
-
-    # ------------------------------------------------------------------
-    # DEPRECATED per-target methods -- delegate to _integrate_merged_hooks
-    # ------------------------------------------------------------------
 
     def integrate_package_hooks_claude(
         self,

@@ -11,6 +11,7 @@ import logging
 import re
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -512,3 +513,89 @@ def _rewrite_hooks_data(
     unique_scripts = [(src, tgt) for tgt, src in seen_targets.items()]
 
     return rewritten, unique_scripts
+
+
+# ---------------------------------------------------------------------------
+# Hook transparency helpers (display payload construction)
+# ---------------------------------------------------------------------------
+
+
+def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
+    """Flatten hook payloads into (event_name, entry_dict) pairs."""
+    entries: list[tuple[str, dict]] = []
+    hooks = payload.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return entries
+    for event_name, matchers in hooks.items():
+        if not isinstance(matchers, list):
+            continue
+        for matcher in matchers:
+            if not isinstance(matcher, dict):
+                continue
+            for key in _HOOK_COMMAND_KEYS:
+                value = matcher.get(key)
+                if isinstance(value, str):
+                    entries.append((event_name, {key: value}))
+            nested_hooks = matcher.get("hooks", [])
+            if not isinstance(nested_hooks, list):
+                continue
+            for hook in nested_hooks:
+                if not isinstance(hook, dict):
+                    continue
+                for key in _HOOK_COMMAND_KEYS:
+                    value = hook.get(key)
+                    if isinstance(value, str):
+                        entries.append((event_name, {key: value}))
+    return entries
+
+
+def _summarize_command(entry: dict) -> str:
+    """Return a human-readable summary for a single hook command entry."""
+    command = ""
+    for key in _HOOK_COMMAND_KEYS:
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            command = value.strip()
+            break
+    if not command:
+        return "runs hook command"
+    # Collapse any internal whitespace (including embedded newlines) so
+    # the summary is always single-line. A hook command containing a
+    # newline must not break install-log formatting or enable
+    # log-spoofing. Addresses Copilot inline on hook_integrator.py.
+    command = " ".join(command.split())
+    for token in command.split():
+        cleaned = token.strip("\"'")
+        if "/" in cleaned or cleaned.startswith("."):
+            return f"runs {cleaned}"
+    return f"runs {command}"
+
+
+def _build_display_payload(
+    target_label: str,
+    output_path: str,
+    source_hook_file: Any,
+    rewritten: dict,
+) -> dict:
+    """Build CLI display metadata for an integrated hook file.
+
+    Uses post-path-rewrite data (the 'rewritten' dict) so the summary
+    faithfully reflects what is actually written to disk and executed.
+    """
+    actions = []
+    for event_name, entry in _iter_hook_entries(rewritten):
+        actions.append(
+            {
+                "event": event_name,
+                "summary": _summarize_command(entry),
+            }
+        )
+    return {
+        "target_label": target_label,
+        "output_path": output_path,
+        "source_hook_file": source_hook_file.name
+        if hasattr(source_hook_file, "name")
+        else str(source_hook_file),
+        "actions": actions,
+        "rendered_json": json.dumps(rewritten, indent=2, sort_keys=True),
+    }

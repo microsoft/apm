@@ -112,6 +112,37 @@ def _warn_cowork_nonsupported(
 
 
 # ---------------------------------------------------------------------------
+# _log_hook_display_payloads
+# ---------------------------------------------------------------------------
+
+
+def _log_hook_display_payloads(
+    payloads: list,
+    verbose: bool,
+    log_fn: Any,
+    logger: Any,
+) -> None:
+    """Emit per-hook-file action summaries for the hook transparency feature.
+
+    Uses post-path-rewrite data from display_payloads, so the output
+    faithfully reflects what was written to disk and will be executed.
+    """
+    for _payload in payloads:
+        _src = _payload.get("source_hook_file", "hook file")
+        _actions = _payload.get("actions", [])
+        if _actions:
+            for _act in _actions:
+                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
+        else:
+            log_fn(f"  |   Hook file integrated: {_src}")
+        if verbose and logger is not None:
+            _out_path = _payload.get("output_path", "")
+            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
+            for _jline in _payload.get("rendered_json", "").splitlines():
+                logger.verbose_detail(f"  |     {_jline}")
+
+
+# ---------------------------------------------------------------------------
 # _log_per_kind_results
 # ---------------------------------------------------------------------------
 
@@ -152,6 +183,14 @@ def _log_per_kind_results(
         if any(p.startswith("copilot-app/") for p in _info["paths"]) and _files > 0:
             logger.tree_item(
                 "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab"
+            )
+        if _prim_name == "hooks" and _files > 0:
+            _hook_verbose = verbose or bool(getattr(logger, "verbose", False))
+            _log_hook_display_payloads(
+                _info.get("hook_payloads", []),
+                _hook_verbose,
+                logger.tree_item,
+                logger,
             )
 
 

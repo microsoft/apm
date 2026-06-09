@@ -400,6 +400,7 @@ def _merge_hook_file_entries(
     *,
     heal_stale_root_source: bool,
     dependency_sources: set,
+    capture_entries: dict | None = None,
 ) -> bool:
     """Merge hook entries from one hook file into json_config["hooks"].
 
@@ -458,6 +459,10 @@ def _merge_hook_file_entries(
             json_config["hooks"][event_name]
         )
         entries_appended = True
+        if capture_entries is not None:
+            capture_entries.setdefault(event_name, []).extend(
+                e for e in entries if isinstance(e, dict)
+            )
 
     return entries_appended
 
@@ -594,6 +599,56 @@ def _write_merged_config(
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(json_config, f, indent=2)
         f.write("\n")
+
+
+# ---------------------------------------------------------------------------
+# Hook JSON parsing
+# ---------------------------------------------------------------------------
+
+
+def _parse_hook_json(hook_file: Path) -> dict | None:
+    """Parse a hook JSON file and return the data dict.
+
+    Accepts both the wrapped format (``{"hooks": {EventName: [...]}}``)
+    and the "naked" Claude-settings hooks-slice format
+    (``{EventName: [...], ...}`` with no outer ``"hooks":`` wrap).
+    The naked shape is what Claude Code accepts inside its own
+    ``settings.json`` and is a common authoring pattern -- silently
+    dropping it produced the empty merge reported in microsoft/apm#1499.
+
+    Returns the parsed dict (always wrapped), or None if invalid.
+    """
+    try:
+        with open(hook_file, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return None
+        # Normalise naked-format files (no outer "hooks" key but
+        # every top-level value is a list of matcher entries) into
+        # the wrapped shape downstream code expects.  Only promote
+        # when ALL values look like hook entry arrays -- a stray
+        # scalar (e.g. "description") would mean this is malformed
+        # rather than naked, so leave it alone.
+        if "hooks" not in data and data and all(isinstance(v, list) for v in data.values()):
+            _log.debug(
+                "Promoted naked-format hook file %s (top-level event keys: %s) to wrapped shape",
+                hook_file,
+                sorted(data.keys()),
+            )
+            data = {"hooks": data}
+        # Fail closed on malformed shapes where "hooks" is present but not
+        # a dict (e.g. {"hooks": []}).  Downstream code calls .items() on
+        # this value and would otherwise raise AttributeError mid-merge.
+        if "hooks" in data and not isinstance(data["hooks"], dict):
+            _log.warning(
+                "Skipping malformed hook file %s: 'hooks' must be a dict, got %s",
+                hook_file,
+                type(data["hooks"]).__name__,
+            )
+            return None
+        return data
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 # ---------------------------------------------------------------------------

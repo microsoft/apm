@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ..integration.base_integrator import BaseIntegrator
     from ..utils.diagnostics import DiagnosticCollector
 
+from .services_integrate import _log_hook_display_payloads as _log_hook_display_payloads
 from .services_integrate import (
     _log_per_kind_results,
     _log_skill_result,
@@ -244,6 +245,7 @@ def integrate_package_primitives(
         _agg_files = 0
         _agg_adopted = 0
         _agg_paths: list[str] = []
+        _agg_hook_payloads: list = []
         _label = _prim_name
         for _target in targets:
             _mapping = _target.primitives.get(_prim_name)
@@ -297,6 +299,9 @@ def integrate_package_primitives(
                 if _target.hooks_config_display:
                     _deploy_dir = _target.hooks_config_display
                 _label = "hook(s)"
+                _agg_hook_payloads.extend(
+                    p for p in getattr(_int_result, "display_payloads", []) or []
+                )
             else:
                 _label = _prim_name
             _agg_paths.append(_deploy_dir)
@@ -307,6 +312,7 @@ def integrate_package_primitives(
                 "adopted": _agg_adopted,
                 "label": _label,
                 "paths": _agg_paths,
+                "hook_payloads": _agg_hook_payloads,
             }
 
     _log_per_kind_results(_per_kind, _dispatch, _verbose, logger)

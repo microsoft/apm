@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm publish` auto-pack now produces a `.zip` archive (ZIP\_DEFLATED) instead of `.tar.gz`, aligning with the de facto standard used by Anthropic Claude, OpenAI, and Google Gemini agent platforms. The `--tarball` option is renamed to `--zip`. Output filename: `{name}-{version}.zip`.
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
+- `apm install` now surfaces per-event hook action summaries as it integrates
+  hook primitives, with the fully rewritten hook JSON shown under `--verbose`,
+  so you can audit exactly what each hook runs at install time. The summary is
+  built from the post-rewrite data actually written to disk and executed -- it
+  faithfully reflects on-disk content across Copilot, Claude, and Gemini
+  targets (including OS-specific `windows`/`linux`/`osx` hook keys). (by
+  @harshitlarl, closes #316)
 
 ### Fixed
 
@@ -40,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them when the source instruction changes, instead of mis-classifying them as
   user-authored collisions and skipping them; also fixes a mislabeled
   `windsurf_rules` entry in install output. (by @srid, closes #1662)
+- `apm install <local-path>` now dereferences in-package symlinks into regular
+  files so that local and remote installs produce consistent output. Symlinks
+  whose resolved target escapes the package root hard-fail with a
+  `PathTraversalError`; circular directory-symlink chains and unreadable
+  package directories are detected deterministically. Previously, in-package
+  symlinks were silently dropped by the downstream deploy filter. (by
+  @danielmeppiel, closes #1668)
+- `apm install` no longer rewrites `apm.lock.yaml` when a project combines a
+  remote APM dependency with unchanged local `.apm/instructions` content.
+  (by @danielmeppiel, closes #1702)
+
 ### Changed
 
 - `MCPDependency.from_dict()` now emits a `[!]` warning naming every unknown

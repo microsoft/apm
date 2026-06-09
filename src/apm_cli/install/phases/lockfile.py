@@ -115,6 +115,7 @@ class LockfileBuilder:
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
             self._preserve_existing_mcp_state(lockfile)
+            self._preserve_existing_local_state(lockfile)
 
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
@@ -209,6 +210,23 @@ class LockfileBuilder:
                     "MCP state unchanged -- carrying forward "
                     f"{len(lockfile.mcp_servers)} server(s), "
                     f"{len(lockfile.mcp_configs)} config(s)"
+                )
+
+    def _preserve_existing_local_state(self, lockfile: LockFile) -> None:
+        """Keep local fields until post_deps_local reconciles content hashes."""
+        if self.ctx.existing_lockfile:
+            lockfile.local_deployed_files = list(self.ctx.existing_lockfile.local_deployed_files)
+            lockfile.local_deployed_file_hashes = copy.deepcopy(
+                self.ctx.existing_lockfile.local_deployed_file_hashes
+            )
+            if "." in self.ctx.existing_lockfile.dependencies:
+                lockfile.dependencies["."] = copy.deepcopy(
+                    self.ctx.existing_lockfile.dependencies["."]
+                )
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "Carrying forward local .apm state pending hash reconciliation: "
+                    f"{len(lockfile.local_deployed_files)} file(s)"
                 )
 
     def _write_if_changed(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> None:

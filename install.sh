@@ -27,10 +27,10 @@ GITHUB_URL="${GITHUB_URL:-https://github.com}"
 
 # Banner
 echo -e "${BLUE}"
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                         APM Installer                        ║"
-echo "║              The NPM for AI-Native Development               ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
+echo "+--------------------------------------------------------------+"
+echo "|                         APM Installer                        |"
+echo "|              The NPM for AI-Native Development               |"
+echo "+--------------------------------------------------------------+"
 echo -e "${NC}"
 
 # Platform detection
@@ -314,7 +314,7 @@ fi
 
 # Create temporary directory
 TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Download binary
 echo -e "${YELLOW}Downloading APM...${NC}"
@@ -494,9 +494,114 @@ echo -e "${YELLOW}Installing APM CLI to $APM_INSTALL_DIR...${NC}"
 # APM installation directory (for the complete bundle)
 APM_LIB_DIR="${APM_LIB_DIR:-$(dirname "$APM_INSTALL_DIR")/lib/apm}"
 
-# Remove any existing installation
+# --- APM_LIB_DIR safety validation ---
+# Prevent accidental data loss when APM_LIB_DIR is set to a broad/shared path.
+# Four guards: absolute path, suffix, blocklist, marker file.
+# INSTALL_SAFETY_BEGIN
+# Extracted for testability; do not remove the begin/end markers.
+# Extract with:  sed -n '/^# INSTALL_SAFETY_BEGIN/,/^# INSTALL_SAFETY_END/p' install.sh
+apm_lib_dir_validate() {
+    _apm_lib_dir="$1"
+    while [ "$_apm_lib_dir" != "/" ] && [ "${_apm_lib_dir%/}" != "$_apm_lib_dir" ]; do
+        _apm_lib_dir="${_apm_lib_dir%/}"
+    done
+
+    # 1. Absolute-path guard: must be absolute
+    case "$_apm_lib_dir" in
+        /*) ;;
+        *) return 11 ;;
+    esac
+
+    # 2. Suffix guard: must end with /apm (for example, /lib/apm)
+    case "$_apm_lib_dir" in
+        */apm) ;;
+        *) return 12 ;;
+    esac
+
+    # 3. Blocklist guard: reject known shared/broad parent directories
+    #    (resolved to real path where available, to catch symlink bypasses)
+    _apm_lib_dir_real="$(readlink -f "$_apm_lib_dir" 2>/dev/null || realpath "$_apm_lib_dir" 2>/dev/null || echo "$_apm_lib_dir")"
+
+    _apm_safe=true
+    while IFS= read -r _apm_dir; do
+        [ -z "$_apm_dir" ] && continue
+        _apm_dir_real="$(readlink -f "$_apm_dir" 2>/dev/null || realpath "$_apm_dir" 2>/dev/null || echo "$_apm_dir")"
+        if [ "$_apm_lib_dir_real" = "$_apm_dir_real" ]; then
+            _apm_safe=false
+            break
+        fi
+    done <<APM_BLOCKLIST_EOF
+$HOME
+$HOME/.local
+$HOME/.local/share
+$HOME/.config
+/usr
+/usr/local
+/opt
+/tmp
+/
+APM_BLOCKLIST_EOF
+
+    if [ "$_apm_safe" != "true" ]; then
+        return 13
+    fi
+
+    # 4. Marker-file guard: for existing non-empty directories,
+    #    require evidence of a prior APM installation before deleting.
+    if [ -d "$_apm_lib_dir" ] && [ "$(ls -A "$_apm_lib_dir" 2>/dev/null)" ]; then
+        if [ ! -f "$_apm_lib_dir/apm" ] \
+            && [ ! -f "$_apm_lib_dir/apm.cmd" ] \
+            && [ ! -f "$_apm_lib_dir/VERSION" ] \
+            && [ ! -f "$_apm_lib_dir/.apm-installed" ]; then
+            return 14
+        fi
+    fi
+
+    return 0
+}
+
+apm_prepare_lib_parent() {
+    _apm_parent_dir="$(dirname "$1")"
+    if mkdir -p "$_apm_parent_dir" 2>/dev/null && [ -w "$_apm_parent_dir" ]; then
+        return 0
+    fi
+    return 1
+}
+# INSTALL_SAFETY_END -- extracted for testability; do not remove markers.
+
+_rc=0
+apm_lib_dir_validate "$APM_LIB_DIR" || _rc=$?
+if [ "$_rc" -ne 0 ]; then
+    echo -e "${RED}+--------------------------------------------------------------+${NC}"
+    echo -e "${RED}|  REFUSING: APM_LIB_DIR=\"$APM_LIB_DIR\"${NC}"
+    echo -e "${RED}+--------------------------------------------------------------+${NC}"
+    case $_rc in
+        11) echo -e "${RED}|  APM_LIB_DIR must be an absolute path.${NC}\n${RED}|  Relative paths are not accepted for safety.${NC}" ;;
+        12) echo -e "${RED}|  APM_LIB_DIR must end with /apm.${NC}\n${RED}|  This prevents accidental deletion of non-APM data.${NC}\n${RED}|  Example: APM_LIB_DIR=\$HOME/.local/lib/apm${NC}" ;;
+        13) echo -e "${RED}|  This path is a shared system directory. Installing here${NC}\n${RED}|  would delete non-APM data.${NC}\n${RED}|  Use a dedicated APM directory (e.g. /usr/local/lib/apm).${NC}" ;;
+        14) echo -e "${RED}|  This directory exists but does not appear to be a${NC}\n${RED}|  previous APM installation. Refusing to delete it.${NC}\n${RED}|  If you are sure, remove it manually first:${NC}\n${RED}|    rm -rf \"$APM_LIB_DIR\"${NC}" ;;
+    esac
+    echo -e "${RED}+--------------------------------------------------------------+${NC}"
+    exit 1
+fi
+
+# Prepare the parent directory once so user-local installs do not fall into sudo
+# just because the derived lib parent (for example, $HOME/.local/lib) is absent.
+if apm_prepare_lib_parent "$APM_LIB_DIR"; then
+    APM_LIB_USE_SUDO=0
+else
+    APM_LIB_USE_SUDO=1
+fi
+
+# Remove any existing installation (safety-validated above)
 if [ -d "$APM_LIB_DIR" ]; then
-    if [ -w "$(dirname "$APM_LIB_DIR")" ]; then
+    _rc=0
+    apm_lib_dir_validate "$APM_LIB_DIR" || _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        echo -e "${RED}Error: APM_LIB_DIR became unsafe before removal; refusing to delete.${NC}"
+        exit 1
+    fi
+    if [ "$APM_LIB_USE_SUDO" -eq 0 ]; then
         rm -rf "$APM_LIB_DIR"
     else
         sudo rm -rf "$APM_LIB_DIR"
@@ -504,12 +609,14 @@ if [ -d "$APM_LIB_DIR" ]; then
 fi
 
 # Create installation directory
-if [ -w "$(dirname "$APM_LIB_DIR")" ]; then
+if [ "$APM_LIB_USE_SUDO" -eq 0 ]; then
     mkdir -p "$APM_LIB_DIR"
     cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
+    touch "$APM_LIB_DIR/.apm-installed"
 else
     sudo mkdir -p "$APM_LIB_DIR"
     sudo cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
+    sudo touch "$APM_LIB_DIR/.apm-installed"
 fi
 
 # Create symlink pointing to the actual binary

@@ -584,8 +584,17 @@ class TestCopyLocalPackage:
         assert (install_path / "data.txt").read_text() == "updated"
 
     def test_copy_preserves_symlinks_without_following(self, tmp_path):
-        """Symlinks in local packages should be preserved, not followed."""
+        """Symlinks escaping the package root must hard-fail (not be silently preserved).
+
+        Before #1668: shutil.copytree with symlinks=True preserved the link in
+        apm_modules/ -- an escaping link was inert there but could still confuse
+        consumers.  After #1668: any symlink whose resolved target escapes the
+        package root raises PathTraversalError immediately.  This test was
+        previously asserting the old (preserved-as-symlink) behavior; it is
+        updated to assert the correct hard-fail behavior.
+        """
         from apm_cli.commands.install import _copy_local_package
+        from apm_cli.utils.path_security import PathTraversalError
 
         # Create a secret file outside the package
         secret_dir = tmp_path / "secret"
@@ -609,14 +618,10 @@ class TestCopyLocalPackage:
         dep_ref.local_path = str(local_pkg)
         install_path = tmp_path / "apm_modules" / "_local" / "evil-pkg"
 
-        result = _copy_local_package(
-            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
-        )
-        assert result is not None
-
-        # The symlink should be preserved as a symlink, NOT followed
-        link = install_path / "escape"
-        assert link.is_symlink(), "Symlink was followed instead of preserved"
+        with pytest.raises(PathTraversalError, match=r"(?i)escape|outside|traversal"):
+            _copy_local_package(
+                dep_ref, install_path, tmp_path, project_root=tmp_path, logger=NullCommandLogger()
+            )
 
 
 # ===========================================================================
