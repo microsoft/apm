@@ -1593,8 +1593,10 @@ class TestResolveCompileTarget:
         # Combined with claude/gemini -> frozenset of families
         assert _resolve_compile_target(["windsurf", "claude"]) == frozenset({"agents", "claude"})
         assert _resolve_compile_target(["windsurf", "gemini"]) == frozenset({"agents", "gemini"})
-        # Combined with copilot/vscode -> 'vscode' wins (which already includes agents)
-        assert _resolve_compile_target(["windsurf", "copilot"]) == "vscode"
+        # Combined with copilot/vscode -> frozenset preserved because windsurf
+        # is a non-Copilot agents-family target that needs instructions in
+        # AGENTS.md (issue #1678 -- dedup must not fire for mixed targets).
+        assert _resolve_compile_target(["windsurf", "copilot"]) == frozenset({"agents", "vscode"})
 
     def test_list_cursor_and_claude_returns_agents_claude_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target

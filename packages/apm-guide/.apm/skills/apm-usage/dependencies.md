@@ -379,7 +379,8 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
 uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
 uses `fileExtensions` on disk; manifests continue to use
-`extensionToLanguage`.
+`extensionToLanguage`. Plugin `.lsp.json` files may use either a flat
+server map or a `{ "lspServers": { ... } }` envelope.
 
 ## Version pinning
 

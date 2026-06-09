@@ -172,6 +172,12 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     pass-through files (.mcp.json, .lsp.json, settings.json) into .apm/,
     then generates apm.yml.
 
+    When an existing ``apm.yml`` is present (dual-format packages that ship
+    both ``plugin.json`` and ``apm.yml``), resolution-critical blocks --
+    ``dependencies``, ``devDependencies``, ``registries``, ``targets``,
+    ``includes``, ``scripts`` -- are preserved and merged with any plugin-
+    derived dependencies so transitive resolution is not broken (#1666).
+
     Args:
         plugin_path: Path to the plugin directory.
         manifest: Plugin metadata dict (only `name` is required; all other
@@ -204,9 +210,29 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
         if lsp_deps:
             manifest["_lsp_deps"] = lsp_deps
 
-    # Generate apm.yml from plugin metadata
-    apm_yml_content = _generate_apm_yml(manifest)
+    # Load existing apm.yml as base so resolution-critical blocks are not
+    # discarded when the synthesized manifest overwrites the file (#1666).
     apm_yml_path = plugin_path / "apm.yml"
+    existing_manifest: dict[str, Any] | None = None
+    if apm_yml_path.exists():
+        try:
+            from ..utils.yaml_io import load_yaml
+
+            data = load_yaml(apm_yml_path)
+            if isinstance(data, dict):
+                existing_manifest = data
+        except (OSError, yaml.YAMLError) as exc:
+            # Best-effort: fall back to plugin-only metadata. Surface a
+            # warning so a malformed apm.yml does not silently re-introduce
+            # the #1666 symptom (transitive deps dropped with no diagnostic).
+            _surface_warning(
+                f"Could not load existing apm.yml for merge; transitive "
+                f"dependencies may not be preserved: {exc}",
+                _logger,
+            )
+
+    # Generate apm.yml from plugin metadata, merging with existing manifest
+    apm_yml_content = _generate_apm_yml(manifest, existing_manifest=existing_manifest)
 
     with open(apm_yml_path, "w", encoding="utf-8") as f:
         f.write(apm_yml_content)
@@ -482,8 +508,13 @@ def _read_lsp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> 
 def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     """Parse a JSON file and return the LSP servers mapping.
 
-    Unlike .mcp.json which has a wrapper key, .lsp.json uses server names
-    as top-level keys directly.
+    Accepts two formats:
+    - Flat: top-level keys are server names (e.g. ``{"pyright": {...}}``).
+    - Wrapped: a ``"lspServers"`` envelope wraps the servers
+      (e.g. ``{"lspServers": {"pyright": {...}}}``).
+
+    The wrapped format is standard in Copilot ``.github/lsp.json`` and
+    Claude ``~/.claude.json``.  Plugins may ship either variant.
     """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -492,6 +523,19 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
         return {}
     if not isinstance(data, dict):
         return {}
+    # Unwrap the { "lspServers": { ... } } envelope when present.
+    # Only unwrap when the inner value looks like a server *map* (all values
+    # are dicts).  A flat-format server literally named "lspServers" would
+    # have scalar values like "command", so the all-dicts check avoids
+    # mis-detecting it as an envelope.
+    lsp_inner = data.get("lspServers")
+    if (
+        isinstance(lsp_inner, dict)
+        and lsp_inner
+        and all(isinstance(v, dict) for v in lsp_inner.values())
+    ):
+        logger.debug("Unwrapped lspServers envelope in %s", path)
+        return dict(lsp_inner)
     return dict(data)
 
 
@@ -770,19 +814,28 @@ def _map_plugin_artifacts(
                 shutil.copy2(source_file, dst)
 
 
-def _generate_apm_yml(manifest: dict[str, Any]) -> str:
+def _generate_apm_yml(
+    manifest: dict[str, Any],
+    existing_manifest: dict[str, Any] | None = None,
+) -> str:
     """Generate apm.yml content from plugin metadata.
+
+    When *existing_manifest* is provided (from a pre-existing ``apm.yml``),
+    resolution-critical blocks are preserved so transitive dependency
+    resolution is not broken for dual-format packages (#1666).
 
     Args:
         manifest: Plugin metadata dict.
+        existing_manifest: Pre-existing ``apm.yml`` data, or ``None``.
 
     Returns:
         str: YAML content for apm.yml.
     """
     apm_package: dict[str, Any] = {
-        "name": manifest.get("name"),
-        "version": manifest.get("version", "0.0.0"),
-        "description": manifest.get("description", ""),
+        "name": manifest.get("name") or (existing_manifest or {}).get("name"),
+        "version": manifest.get("version") or (existing_manifest or {}).get("version", "0.0.0"),
+        "description": manifest.get("description")
+        or (existing_manifest or {}).get("description", ""),
     }
 
     # author: spec defines it as {name, email, url} object; accept string too
@@ -792,23 +845,61 @@ def _generate_apm_yml(manifest: dict[str, Any]) -> str:
             apm_package["author"] = author.get("name", "")
         else:
             apm_package["author"] = str(author)
+    elif existing_manifest and "author" in existing_manifest:
+        apm_package["author"] = existing_manifest["author"]
 
     for field in ("license", "repository", "homepage", "tags"):
-        if field in manifest:
-            apm_package[field] = manifest[field]
+        value = manifest.get(field) or (existing_manifest or {}).get(field)
+        if value is not None:
+            apm_package[field] = value
 
-    if manifest.get("dependencies"):
-        apm_package["dependencies"] = {"apm": manifest["dependencies"]}
+    # --- Dependency merging (#1666) ---
+    # Start from the existing manifest's dependencies so they are not
+    # discarded, then layer in any plugin-derived dependencies.
+    merged_deps: dict[str, Any] = {}
+    if existing_manifest:
+        existing_deps = existing_manifest.get("dependencies")
+        if isinstance(existing_deps, dict):
+            for key, val in existing_deps.items():
+                if isinstance(val, list):
+                    merged_deps[key] = list(val)
+
+    plugin_deps = manifest.get("dependencies")
+    if plugin_deps:
+        if isinstance(plugin_deps, list):
+            _union_dep_list(merged_deps, "apm", plugin_deps)
+        else:
+            # Plugin.json may declare deps as a dict (name -> version).
+            # Preserve the original shape under dependencies.apm.
+            merged_deps.setdefault("apm", plugin_deps)
 
     # Inject MCP deps extracted from plugin mcpServers / .mcp.json
     mcp_deps = manifest.get("_mcp_deps")
     if mcp_deps:
-        apm_package.setdefault("dependencies", {})["mcp"] = mcp_deps
+        _union_dep_list(merged_deps, "mcp", mcp_deps)
 
     # Inject LSP deps extracted from plugin lspServers / .lsp.json
     lsp_deps = manifest.get("_lsp_deps")
     if lsp_deps:
-        apm_package.setdefault("dependencies", {})["lsp"] = lsp_deps
+        _union_dep_list(merged_deps, "lsp", lsp_deps)
+
+    if merged_deps:
+        apm_package["dependencies"] = merged_deps
+
+    # Preserve other resolution-critical blocks from the existing manifest
+    # so registries, targets, scripts, devDependencies and includes are
+    # not silently discarded (#1666).
+    if existing_manifest:
+        for key in (
+            "devDependencies",
+            "registries",
+            "target",
+            "targets",
+            "includes",
+            "scripts",
+        ):
+            if key in existing_manifest and key not in apm_package:
+                apm_package[key] = existing_manifest[key]
 
     # Install behavior is driven by file presence (SKILL.md, etc.), not this
     # field.  Default to hybrid so the standard pipeline handles all components.
@@ -817,6 +908,23 @@ def _generate_apm_yml(manifest: dict[str, Any]) -> str:
     from ..utils.yaml_io import yaml_to_str
 
     return yaml_to_str(apm_package)
+
+
+def _union_dep_list(
+    merged: dict[str, list[Any]],
+    key: str,
+    new_entries: list[Any],
+) -> None:
+    """Append *new_entries* into ``merged[key]`` without duplicates.
+
+    Both string entries and dict entries (e.g. ``{git: parent, path: ...}``)
+    are handled.  Equality is checked with ``==`` which works correctly for
+    both types.
+    """
+    existing = merged.setdefault(key, [])
+    for entry in new_entries:
+        if entry not in existing:
+            existing.append(entry)
 
 
 def synthesize_plugin_json_from_apm_yml(apm_yml_path: Path) -> dict:

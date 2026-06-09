@@ -103,6 +103,39 @@ def _has_actionable_findings(
     )
 
 
+def _finding_source(finding: ScanFinding) -> str:
+    """Derive the scanner source from a finding's category prefix."""
+    if "/" in finding.category:
+        prefix = finding.category.split("/", 1)[0]
+        if prefix != "apm":
+            return prefix
+    return "apm"
+
+
+def _has_external_findings(rows: list[ScanFinding]) -> bool:
+    """Return True if any finding originates from an external scanner."""
+    return any(_finding_source(f) != "apm" for f in rows)
+
+
+def _source_counts(rows: list[ScanFinding]) -> dict[str, int]:
+    """Count findings by source for the table title."""
+    counts: dict[str, int] = {}
+    for f in rows:
+        src = _finding_source(f)
+        counts[src] = counts.get(src, 0) + 1
+    return counts
+
+
+def _findings_title(rows: list[ScanFinding], has_external: bool) -> str:
+    """Build the findings table title, with per-source counts when mixed."""
+    base = f"{STATUS_SYMBOLS['search']} Audit Findings"
+    if not has_external:
+        return f"{STATUS_SYMBOLS['search']} Content Scan Findings"
+    counts = _source_counts(rows)
+    parts = [f"{src}: {n}" for src, n in sorted(counts.items())]
+    return f"{base}  ({', '.join(parts)})"
+
+
 def _render_findings_table(
     findings_by_file: dict[str, list[ScanFinding]],
     verbose: bool = False,
@@ -124,6 +157,9 @@ def _render_findings_table(
     if not rows:
         return
 
+    has_external = _has_external_findings(rows)
+    title = _findings_title(rows, has_external)
+
     if console:
         try:
             from rich.table import Table
@@ -131,14 +167,19 @@ def _render_findings_table(
             from ..security.audit_report import relative_path_for_report
 
             table = Table(
-                title=f"{STATUS_SYMBOLS['search']} Content Scan Findings",
+                title=title,
                 show_header=True,
                 header_style="bold cyan",
             )
             table.add_column("Severity", style="bold", width=10)
+            if has_external:
+                table.add_column("Source", style="cyan", width=14)
             table.add_column("File", style="white")
             table.add_column("Location", style="dim", width=10)
-            table.add_column("Codepoint", style="bold white", width=10)
+            if has_external:
+                table.add_column("Category", style="bold white")
+            else:
+                table.add_column("Codepoint", style="bold white", width=10)
             table.add_column("Description", style="white")
 
             sev_styles = {
@@ -147,12 +188,26 @@ def _render_findings_table(
                 "info": "dim",
             }
             for f in rows:
+                category_or_codepoint = (
+                    f.category.split("/", 1)[1]
+                    if has_external and "/" in f.category
+                    else f.category
+                    if has_external
+                    else f.codepoint
+                )
+                row_cells = [f.severity.upper()]
+                if has_external:
+                    row_cells.append(_finding_source(f))
+                row_cells.extend(
+                    [
+                        relative_path_for_report(f.file),
+                        f"{f.line}:{f.column}",
+                        category_or_codepoint,
+                        f.description,
+                    ]
+                )
                 table.add_row(
-                    f.severity.upper(),
-                    relative_path_for_report(f.file),
-                    f"{f.line}:{f.column}",
-                    f.codepoint,
-                    f.description,
+                    *row_cells,
                     style=sev_styles.get(f.severity, "white"),
                 )
             console.print()
@@ -163,18 +218,17 @@ def _render_findings_table(
 
     # Fallback: plain text
     _rich_echo("")
-    _rich_echo(
-        f"{STATUS_SYMBOLS['search']} Content Scan Findings",
-        color="cyan",
-        bold=True,
-    )
+    _rich_echo(title, color="cyan", bold=True)
     for f in rows:
         sev_label = f.severity.upper()
         color = (
             "red" if f.severity == "critical" else ("yellow" if f.severity == "warning" else "dim")
         )
+        source_part = f" [{_finding_source(f)}]" if has_external else ""
+        detail = f.category if has_external else f.codepoint
         _rich_echo(
-            f"  {sev_label:<10} {f.file} {f.line}:{f.column}  {f.codepoint}  {f.description}",
+            f"  {sev_label:<10}{source_part} {f.file} {f.line}:{f.column}  {detail}  "
+            f"{f.description}",
             color=color,
         )
 
@@ -669,7 +723,7 @@ def _run_external_scanners(
         require_external_scanners_enabled("Ingesting external scanners with --external")
     except ExternalScannersFeatureDisabledError as exc:
         logger.error(str(exc))
-        sys.exit(2)
+        sys.exit(3)
 
     try:
         return run_external_scanners(
@@ -681,7 +735,7 @@ def _run_external_scanners(
         )
     except ExternalScanError as exc:
         logger.error(str(exc))
-        sys.exit(2)
+        sys.exit(3)
 
 
 def _audit_content_scan(
@@ -713,8 +767,9 @@ def _audit_content_scan(
 
     # --format json/sarif/markdown is incompatible with --strip / --dry-run
     if effective_format != "text" and (strip or dry_run):
-        logger.error(f"--format {effective_format} cannot be combined with --strip or --dry-run")
-        sys.exit(1)
+        raise click.UsageError(
+            f"--format {effective_format} cannot be combined with --strip or --dry-run"
+        )
 
     if file_path:
         # -- File mode: scan a single arbitrary file --
@@ -997,6 +1052,7 @@ def _audit_content_scan(
     help=(
         "Ingest findings from an external SARIF-native scanner "
         "(repeatable). Names: skillspector, sarif. "
+        "Not supported with --ci. "
         "Requires 'apm experimental enable external-scanners'. [experimental]"
     ),
 )
@@ -1070,6 +1126,8 @@ def audit(  # noqa: PLR0913 -- Click handler
            (including drift in --ci mode)
         2  Warning-only findings (suspicious but not critical), or
            usage error (mutually exclusive flags)
+        3  Configuration or infrastructure error (experimental feature
+           disabled, external scanner not installed or unavailable)
 
     \b
     Examples:
@@ -1084,6 +1142,8 @@ def audit(  # noqa: PLR0913 -- Click handler
         apm audit --ci -f json         # JSON CI report
         apm audit --ci -f sarif        # SARIF for GitHub Code Scanning
         apm audit -o report.sarif      # Write SARIF to file
+        apm audit --external skillspector                    # SkillSpector
+        apm audit --external sarif --external-sarif r.sarif  # Any SARIF
     """
     project_root = Path.cwd()
     logger = CommandLogger("audit", verbose=verbose)
@@ -1110,17 +1170,17 @@ def audit(  # noqa: PLR0913 -- Click handler
         if verbose:
             logger.warning("--verbose has no effect in --ci mode (output is structured)")
         if strip or dry_run or file_path or package:
-            logger.error("--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE")
-            sys.exit(1)
+            raise click.UsageError(
+                "--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE"
+            )
         if output_format == "markdown":
             logger.error("--ci does not support --format markdown. Use json or sarif.")
             sys.exit(1)
         if external:
-            logger.error(
+            raise click.UsageError(
                 "--ci does not support --external scanners yet. "
                 "Run external scanners in bare 'apm audit' mode."
             )
-            sys.exit(1)
 
         _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast, no_drift)
         return  # _audit_ci_gate calls sys.exit; return guards against fall-through
@@ -1129,8 +1189,7 @@ def audit(  # noqa: PLR0913 -- Click handler
     # They cannot be combined with --strip/--dry-run (APM only knows how to
     # strip the Unicode characters its own scanner detects).
     if external and (strip or dry_run):
-        logger.error("--external cannot be combined with --strip or --dry-run")
-        sys.exit(1)
+        raise click.UsageError("--external cannot be combined with --strip or --dry-run")
     if external_sarif and not external:
         raise click.UsageError("--external-sarif requires '--external sarif'")
     # Orphan-flag guards: scanner-config flags are meaningless without a
