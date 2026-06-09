@@ -27,10 +27,10 @@ GITHUB_URL="${GITHUB_URL:-https://github.com}"
 
 # Banner
 echo -e "${BLUE}"
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                         APM Installer                        ║"
-echo "║              The NPM for AI-Native Development               ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
+echo "+--------------------------------------------------------------+"
+echo "|                         APM Installer                        |"
+echo "|              The NPM for AI-Native Development               |"
+echo "+--------------------------------------------------------------+"
 echo -e "${NC}"
 
 # Platform detection
@@ -572,16 +572,16 @@ apm_prepare_lib_parent() {
 _rc=0
 apm_lib_dir_validate "$APM_LIB_DIR" || _rc=$?
 if [ "$_rc" -ne 0 ]; then
-    echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║  REFUSING: APM_LIB_DIR=\"$APM_LIB_DIR\"${NC}"
-    echo -e "${RED}╠══════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${RED}+--------------------------------------------------------------+${NC}"
+    echo -e "${RED}|  REFUSING: APM_LIB_DIR=\"$APM_LIB_DIR\"${NC}"
+    echo -e "${RED}+--------------------------------------------------------------+${NC}"
     case $_rc in
-        11) echo -e "${RED}║  APM_LIB_DIR must be an absolute path.${NC}\n${RED}║  Relative paths are not accepted for safety.${NC}" ;;
-        12) echo -e "${RED}║  APM_LIB_DIR must end with /apm.${NC}\n${RED}║  This prevents accidental deletion of non-APM data.${NC}\n${RED}║  Example: APM_LIB_DIR=\$HOME/.local/lib/apm${NC}" ;;
-        13) echo -e "${RED}║  This path is a shared system directory. Installing here${NC}\n${RED}║  would delete non-APM data.${NC}\n${RED}║  Use a dedicated APM directory (e.g. /usr/local/lib/apm).${NC}" ;;
-        14) echo -e "${RED}║  This directory exists but does not appear to be a${NC}\n${RED}║  previous APM installation. Refusing to delete it.${NC}\n${RED}║  If you are sure, remove it manually first:${NC}\n${RED}║    rm -rf \"$APM_LIB_DIR\"${NC}" ;;
+        11) echo -e "${RED}|  APM_LIB_DIR must be an absolute path.${NC}\n${RED}|  Relative paths are not accepted for safety.${NC}" ;;
+        12) echo -e "${RED}|  APM_LIB_DIR must end with /apm.${NC}\n${RED}|  This prevents accidental deletion of non-APM data.${NC}\n${RED}|  Example: APM_LIB_DIR=\$HOME/.local/lib/apm${NC}" ;;
+        13) echo -e "${RED}|  This path is a shared system directory. Installing here${NC}\n${RED}|  would delete non-APM data.${NC}\n${RED}|  Use a dedicated APM directory (e.g. /usr/local/lib/apm).${NC}" ;;
+        14) echo -e "${RED}|  This directory exists but does not appear to be a${NC}\n${RED}|  previous APM installation. Refusing to delete it.${NC}\n${RED}|  If you are sure, remove it manually first:${NC}\n${RED}|    rm -rf \"$APM_LIB_DIR\"${NC}" ;;
     esac
-    echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${RED}+--------------------------------------------------------------+${NC}"
     exit 1
 fi
 

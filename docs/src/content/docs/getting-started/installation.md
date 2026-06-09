@@ -217,12 +217,10 @@ curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 ```
 
 > **Important:** The installer validates `APM_LIB_DIR` before writing any files.
-> It must end with `/apm` (for example, `/lib/apm`) and must not be a shared system directory
-> (such as `$HOME/.local/share`, `/usr`, `/tmp`, or `/`). Setting
-> `APM_LIB_DIR` to a broad path will be rejected to prevent accidental data loss.
-> The installer also refuses to delete an existing non-empty `APM_LIB_DIR` unless
-> it looks like a prior APM install. When you set `APM_INSTALL_DIR=$HOME/.local/bin`,
-> the derived lib path (`$HOME/.local/lib/apm`) is safe and does not require sudo.
+> See the `APM_LIB_DIR` row above for path rules. The installer also refuses to
+> delete an existing non-empty `APM_LIB_DIR` unless it looks like a prior APM
+> install. When you set `APM_INSTALL_DIR=$HOME/.local/bin`, the derived lib path
+> (`$HOME/.local/lib/apm`) is safe and does not require sudo.
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 

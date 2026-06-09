@@ -37,8 +37,8 @@ SENTINEL_END = re.compile(r"^# INSTALL_SAFETY_END", re.MULTILINE)
 def _load_validator():
     """Extract the apm_lib_dir_validate() block from install.sh and return the
     source text of the function plus a small driver wrapper. Tests source the
-    result into a fresh shell to invoke the function in isolation -- no network,
-    no tmp dirs, no real installation side effects.
+    result into a fresh shell to invoke the function in isolation -- no network
+    and no real installation side effects.
     """
     text = INSTALL_SH.read_text(encoding="utf-8")
     match_end = SENTINEL_END.search(text)
