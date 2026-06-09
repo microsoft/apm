@@ -71,7 +71,8 @@ apm install
 ```
 
 The `--skill` flag is repeatable. Your selection is written to `apm.yml` and
-`apm.lock.yaml` so the exact subset is reproducible on every machine.
+`apm.lock.yaml` so the exact subset is reproducible on every machine. For
+plugin manifest collections, pass either the skill name or the manifest path.
 
 ```bash
 # Pick two skills, then reset to all
@@ -105,7 +106,7 @@ skill collection layout reference.
 :::caution[Behavior change]
 Skills for **Copilot, Cursor, OpenCode, Codex, and Gemini** now deploy to `.agents/skills/` by default instead of per-client directories (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). This matches the `.agents/` discovery path documented by all five clients and eliminates redundant copies when targeting multiple clients.
 
-**Claude is unchanged** — its skills continue to deploy to `.claude/skills/`.
+**Claude is unchanged** - its skills continue to deploy to `.claude/skills/`.
 
 To restore the previous per-client layout, pass `--legacy-skill-paths` to any command, or set the `APM_LEGACY_SKILL_PATHS=1` environment variable.
 :::
@@ -117,12 +118,12 @@ When you upgrade APM and run `apm install`, the tool automatically detects legac
 **What happens:**
 - Old per-client skill files are deleted after the new `.agents/skills/` files are written
 - The lockfile is updated to reflect the new paths
-- The migration is idempotent — running `apm install` again is a no-op
+- The migration is idempotent - running `apm install` again is a no-op
 - Foreign / hand-authored skills outside the lockfile are never touched
 
 **What does NOT migrate:**
-- `.claude/skills/` — Claude is not part of the convergence
-- `.codex/skills/` — Codex was already on `.agents/skills/` before this change
+- `.claude/skills/` - Claude is not part of the convergence
+- `.codex/skills/` - Codex was already on `.agents/skills/` before this change
 - Any file not tracked in `apm.lock.yaml`
 
 **If a collision is detected** (e.g., a foreign file already exists at the destination `.agents/skills/` path with different content), the migration aborts entirely with a clear error. Use `--legacy-skill-paths` to skip migration and keep per-client paths.

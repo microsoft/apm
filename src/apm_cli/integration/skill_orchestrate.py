@@ -59,6 +59,7 @@ def integrate_package_skill(
             force=context.force,
             logger=context.logger,
             targets=context.targets,
+            skill_subset=context.skill_subset,
         )
         return _skipped_result(context.result_cls, sub_count, sub_deployed)
 
@@ -130,6 +131,7 @@ def integrate_package_skill(
         force=context.force,
         logger=context.logger,
         targets=context.targets,
+        skill_subset=context.skill_subset,
     )
     result = _skipped_result(context.result_cls, sub_count, sub_deployed)
     return link_rewriter._merge_bin_paths(result, bin_paths, bin_skip_reason)

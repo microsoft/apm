@@ -394,6 +394,24 @@ def _target_skills_root(target: Any, project_root: Path) -> Path:
     return project_root / effective_root / "skills"
 
 
+def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
+    """Return promotion filter tokens for --skill subset values."""
+    if not skill_subset:
+        return None
+    name_filter: set[str] = set()
+    for skill_name in skill_subset:
+        raw_name = str(skill_name).strip()
+        if not raw_name:
+            continue
+        normalized_path = raw_name.replace("\\", "/")
+        leaf_name = Path(normalized_path).name
+        name_filter.add(raw_name)
+        name_filter.add(normalized_path)
+        if leaf_name:
+            name_filter.add(leaf_name)
+    return name_filter or None
+
+
 def _promote_sub_skills_standalone(
     link_rewriter: Any,
     package_info: Any,
@@ -404,6 +422,7 @@ def _promote_sub_skills_standalone(
     force: bool = False,
     logger: Any = None,
     targets: Any = None,
+    skill_subset: Any = None,
 ) -> tuple[int, list[Path]]:
     """Promote sub-skills from a package that is not itself a skill."""
     link_rewriter.init_link_resolver(package_info, project_root)
@@ -418,6 +437,7 @@ def _promote_sub_skills_standalone(
 
     parent_name = package_path.name
     owned_by, _ = link_rewriter._build_ownership_maps(project_root)
+    name_filter = _skill_subset_name_filter(skill_subset)
     count = 0
     all_deployed: list[Path] = []
     seen_skill_dirs: set[Path] = set()
@@ -446,6 +466,7 @@ def _promote_sub_skills_standalone(
             managed_files=managed_files if is_primary else None,
             force=force,
             project_root=project_root,
+            name_filter=name_filter,
             link_rewriter=link_rewriter,
         )
         if is_primary:
@@ -739,7 +760,7 @@ def _integrate_skill_bundle(
         force=force,
         project_root=project_root,
         logger=logger,
-        name_filter=set(skill_subset) if skill_subset else None,
+        name_filter=_skill_subset_name_filter(skill_subset),
         link_rewriter=link_rewriter,
         seen_skill_dirs=set(),
     )

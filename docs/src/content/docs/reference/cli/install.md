@@ -80,7 +80,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 
 | Flag | Default | Description |
 |---|---|---|
-| `--skill NAME` | all | Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is persisted to `apm.yml` and `apm.lock.yaml`. Use `--skill '*'` to reset and install all. |
+| `--skill NAME` | all | Install only named skill(s) from a skill collection (`SKILL_BUNDLE` or plugin manifest). Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. The selection is persisted to `apm.yml` and `apm.lock.yaml`. Use `--skill '*'` to reset and install all. |
 | `--as ALIAS` | bundle id | Override the log/display label for a local-bundle install. Only valid with a single local-bundle `PACKAGE_REF`. |
 
 ### MCP server entry (use only with `--mcp`)

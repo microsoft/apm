@@ -156,6 +156,25 @@ class SkillIntegrator(BaseIntegrator):
         shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_non_content)
 
     @staticmethod
+    def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
+        """Return promotion filter tokens for --skill subset values."""
+        if not skill_subset:
+            return None
+
+        name_filter: set[str] = set()
+        for skill_name in skill_subset:
+            raw_name = str(skill_name).strip()
+            if not raw_name:
+                continue
+            normalized_path = raw_name.replace("\\", "/")
+            leaf_name = Path(normalized_path).name
+            name_filter.add(raw_name)
+            name_filter.add(normalized_path)
+            if leaf_name:
+                name_filter.add(leaf_name)
+        return name_filter or None
+
+    @staticmethod
     def _promote_sub_skills(
         sub_skills_dir: Path,
         target_skills_root: Path,
@@ -213,6 +232,7 @@ class SkillIntegrator(BaseIntegrator):
         force: bool = False,
         logger: Any = None,
         targets: Any = None,
+        skill_subset: Any = None,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from a package that is not itself a skill."""
         return _skill_deploy._promote_sub_skills_standalone(
@@ -224,6 +244,7 @@ class SkillIntegrator(BaseIntegrator):
             force=force,
             logger=logger,
             targets=targets,
+            skill_subset=skill_subset,
         )
 
     def _integrate_native_skill(
