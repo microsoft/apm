@@ -87,7 +87,9 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path, _visited=None) -> None:
+def _copy_tree_dereferencing_validated(
+    src: Path, dst: Path, pkg_root: Path, *, _visited: set[Path] | None = None
+) -> None:
     """Recursively copy *src* into *dst*, dereferencing in-package symlinks.
 
     For every entry in *src*:
@@ -128,7 +130,9 @@ def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path, _vi
         entries = sorted(src.iterdir())
     except OSError as exc:
         raise PathTraversalError(
-            f"Cannot read package directory '{src}': {exc}. Local install aborted."
+            f"Cannot read package directory '{src}': {exc}. "
+            f"Check that the package directory has read permissions. "
+            f"Local install aborted."
         ) from exc
 
     for entry in entries:
@@ -140,6 +144,7 @@ def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path, _vi
             except OSError as exc:
                 raise PathTraversalError(
                     f"Symlink '{entry}' has a broken or unresolvable target: {exc}. "
+                    f"Remove the dangling symlink or restore its target. "
                     f"Local install aborted."
                 ) from exc
 
@@ -159,17 +164,17 @@ def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path, _vi
                     raise PathTraversalError(
                         f"Circular symlink detected: '{entry}' resolves to '{resolved}', "
                         f"which was already visited during this install. "
+                        f"Break the cycle by replacing one symlink with a real directory copy. "
                         f"Local install aborted."
                     )
                 _copy_tree_dereferencing_validated(
-                    resolved, dst_entry, pkg_root, _visited | {resolved}
+                    resolved, dst_entry, pkg_root, _visited=_visited | {resolved}
                 )
                 shutil.copystat(resolved, dst_entry)
             else:
                 shutil.copy2(resolved, dst_entry)
-                shutil.copystat(resolved, dst_entry)
         elif entry.is_dir():
-            _copy_tree_dereferencing_validated(entry, dst_entry, pkg_root, _visited)
+            _copy_tree_dereferencing_validated(entry, dst_entry, pkg_root, _visited=_visited)
             shutil.copystat(entry, dst_entry)
         else:
             shutil.copy2(entry, dst_entry)

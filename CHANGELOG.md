@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package directories are detected deterministically. Previously, in-package
   symlinks were silently dropped by the downstream deploy filter. (by
   @danielmeppiel, closes #1668)
+
 ### Changed
 
 - Auth credential cascade now emits debug-level logs for every fallback step,

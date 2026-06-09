@@ -241,26 +241,28 @@ check (see below):
 
 When installing a local-path dependency (`apm install /path/to/pkg`), APM
 dereferences in-package symlinks so that the staged copy in `apm_modules/`
-contains only regular files -- matching the behavior of remote installs, which
-materialize all content as real files during git checkout.
+contains regular files, giving local and remote installs the same deployed
+output for in-package shared references.
 
 **Threat model.** A symlink inside a local package could point to a file
 outside the package root, giving a malicious package a path-traversal vector.
 APM prevents this with a per-symlink containment check (see also
 [Path traversal prevention](#path-traversal-prevention)):
 
-1. Each symlink is resolved per-file (resolve -> validate -> copy2) before any
-   filesystem write for that entry.
+1. Each symlink is resolved per-file (resolve -> validate -> copy2) before that
+   symlink target is copied into the staging tree.
 2. The resolved target is verified to remain inside the package root using
    the `ensure_path_within()` containment helper.
-3. If the resolved target escapes the package root, APM **hard-fails the
+3. If a symlink is broken or unresolvable, APM **hard-fails the install** with a
+   `PathTraversalError` instead of staging a dangling reference.
+4. If the resolved target escapes the package root, APM **hard-fails the
    install** with a `PathTraversalError` and a human-readable message naming
-   the offending link.  No warn-and-skip; no silent follow.
-4. Only symlinks that resolve within the package root are dereferenced and
-   copied as regular files.  External symlinks are never followed.
-5. Circular directory-symlink chains are detected deterministically with an
+   the offending link. No warn-and-skip; no silent follow.
+5. Only symlinks that resolve within the package root are dereferenced and
+   copied as regular files. External symlinks are never followed.
+6. Circular directory-symlink chains are detected deterministically with an
    explicit visited-set guard, independent of OS-level ELOOP limits.
-6. An unreadable package directory (e.g. a `PermissionError` while listing its
+7. An unreadable package directory (e.g. a `PermissionError` while listing its
    entries) hard-fails the install with a `PathTraversalError` rather than
    leaking a bare OS error up the install stack.
 
