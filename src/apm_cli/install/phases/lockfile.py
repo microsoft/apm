@@ -225,7 +225,7 @@ class LockfileBuilder:
                 )
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(
-                    "Local .apm state unchanged -- carrying forward "
+                    "Carrying forward local .apm state pending hash reconciliation: "
                     f"{len(lockfile.local_deployed_files)} file(s)"
                 )
 
