@@ -91,7 +91,7 @@ Behind `apm experimental enable registries`. Pushes a package version to a REST-
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm publish` | Auto-pack a flat registry archive (`apm.yml` + `.apm/` + `README.md`/`CHANGELOG.md`/`LICENSE` when present) and upload to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Different layout from `apm pack` (no `plugin.json` wrapper). | `--registry NAME` (required when multiple registries are configured), `--package OWNER/REPO` (**required** - registry package identity, e.g. `acme/my-skill`), `--tarball PATH` (skip auto-pack and upload a pre-built `.tar.gz`), `--dry-run`, `-v`/`--verbose` |
+| `apm publish` | Auto-pack a flat registry zip archive (`apm.yml` + `.apm/` + `README.md`/`CHANGELOG.md`/`LICENSE` when present) and upload to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`. Different layout from `apm pack` (no `plugin.json` wrapper). | `--registry NAME` (required when multiple registries are configured), `--package OWNER/REPO` (**required** — registry package identity, e.g. `acme/my-skill`), `--zip PATH` (skip auto-pack and upload a pre-built `.zip`), `--dry-run`, `-v`/`--verbose` |
 
 Examples:
 
@@ -103,8 +103,8 @@ apm publish
 apm publish --registry corp-main --dry-run -v
 apm publish --registry corp-main
 
-# Publish a pre-built tarball (skill-only or custom layout)
-apm publish --tarball ./build/my-package-1.0.0.tar.gz --registry corp-main
+# Publish a pre-built zip (skill-only or custom layout)
+apm publish --zip ./build/my-package-1.0.0.zip --registry corp-main
 
 # Specify registry package identity (required)
 apm publish --package acme/my-package --registry corp-main
