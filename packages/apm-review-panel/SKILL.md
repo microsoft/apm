@@ -63,9 +63,12 @@ surfaces findings; the maintainer and the PR author decide ship.
   MUST wait for each task to return its JSON before moving on, and MUST
   NOT end its turn while any subagent is still running. Panelist and CEO
   returns are LOAD-BEARING: the final comment cannot be rendered without
-  them. Spawning the CEO (or a panelist) in a fire-and-forget background
-  mode and then ending the turn is the documented cause of the "No Safe
-  Outputs Generated" failure -- the agent exits with
+  them. Concretely: invoke the `task` tool in its synchronous mode and
+  read the return value; do NOT use the tool's background/async mode
+  (the variant that returns an `agent_id` immediately and runs the
+  subagent detached) for any panelist or the CEO. Spawning the CEO (or a
+  panelist) detached and then ending the turn is the documented cause of
+  the "No Safe Outputs Generated" failure -- the agent exits with
   `agent_output = {"items":[]}`, the safe-output detection job is
   skipped, the `add-comment` job never runs, and the panel silently
   posts nothing. The turn ends ONLY after step 7 has emitted the comment
@@ -401,12 +404,17 @@ emitted.
    sweeping all three on every run is safe and self-healing. NO
    verdict labels are applied.
 
-9. **Confirm emission before ending the turn.** Do not finish until the
-   `safe-outputs.add-comment` from step 7 has actually been emitted. A
-   panel run that ends with zero safe outputs (empty `agent_output`) is
-   a FAILURE, not a success -- the safe-output detection job is skipped
-   and the comment is never posted. If, after all subagents have
-   returned, you somehow cannot render a comment, emit an explicit
+9. **Confirm emission before ending the turn.** Before you finish,
+   verify that step 7 actually issued the `safe-outputs.add-comment`
+   call (the comment is the run's only required output; the
+   `remove-labels` sweep alone is not sufficient). Confirm by checking
+   that you invoked the `add-comment` safe-output tool in this turn and
+   that it did not error -- if you cannot point to that call, the comment
+   was not emitted and the run will fail as "No Safe Outputs Generated".
+   A panel run that ends with zero safe outputs (empty `agent_output`)
+   is a FAILURE, not a success -- the safe-output detection job is
+   skipped and the comment is never posted. If, after all subagents have
+   returned, you genuinely cannot render a comment, emit an explicit
    `noop` so the run records an intentional no-action rather than a
    silent empty result.
 
