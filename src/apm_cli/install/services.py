@@ -146,6 +146,39 @@ def _deployed_path_entry(
         )
 
 
+def _skill_bundle_file_entries(
+    skill_dir: Path,
+    project_root: Path,
+    targets: Any,
+) -> list[str]:
+    """Return per-file lockfile entries for a deployed skill bundle directory.
+
+    A skill is deployed as a directory (e.g. ``.agents/skills/<s>``). Recording
+    only the directory leaves its contents unhashed, so skill content drift
+    escapes ``content-integrity`` (the ``apm audit --ci --no-drift`` gate).
+    This expands the bundle into per-file entries (``SKILL.md``, ``assets/``,
+    ``scripts/``) so ``compute_deployed_hashes`` hashes them. The directory
+    entry itself is recorded by the caller and intentionally excluded here.
+
+    Mocked or file-shaped ``target_paths`` (used in unit tests) are not real
+    directories on disk and yield an empty list, so callers pass them through
+    unchanged.
+    """
+    try:
+        if not (skill_dir.is_dir() and not skill_dir.is_symlink()):
+            return []
+    except OSError:
+        return []
+    entries: list[str] = []
+    for bundle_file in sorted(skill_dir.rglob("*")):
+        try:
+            if bundle_file.is_file() and not bundle_file.is_symlink():
+                entries.append(_deployed_path_entry(bundle_file, project_root, targets))
+        except OSError:
+            continue
+    return entries
+
+
 def integrate_package_primitives(
     package_info: Any,
     project_root: Path,

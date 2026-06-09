@@ -133,16 +133,34 @@ class LockfileBuilder:
     # -- private helpers (verbatim from original inline block) ----------
 
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
-        for dep_key, dep_files in self.ctx.package_deployed_files.items():
-            if dep_key in lockfile.dependencies:
-                lockfile.dependencies[dep_key].deployed_files = dep_files
-                # Hash the files as they exist on disk AFTER stale
-                # cleanup so the recorded hashes match what is now
-                # deployed (provenance for the next install's stale
-                # cleanup).
-                lockfile.dependencies[dep_key].deployed_file_hashes = compute_deployed_hashes(
-                    dep_files, self.ctx.project_root
-                )
+        """Attach per-dependency deployed-file manifests, unioning targets.
+
+        Reconciliation is **target-scoped**, mirroring the symmetry that
+        on-disk stale cleanup already has (``phases/cleanup.py``). Entries a
+        prior install recorded for OTHER targets are preserved rather than
+        clobbered, so a multi-target deploy keeps every target's files in the
+        committed lockfile and they stay covered by the audit gates (issue
+        #1716). See :mod:`apm_cli.install.manifest_reconcile`.
+        """
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        existing = self.ctx.existing_lockfile
+        for dep_key, locked_dep in lockfile.dependencies.items():
+            current = list(self.ctx.package_deployed_files.get(dep_key, []))
+            current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
+            prev = existing.get_dependency(dep_key) if existing is not None else None
+            prior_files = prev.deployed_files if prev is not None else []
+            prior_hashes = prev.deployed_file_hashes if prev is not None else {}
+            files, hashes = union_preserving(
+                current, current_hashes, prior_files, prior_hashes, self.ctx.targets
+            )
+            if not files:
+                # Nothing this install governs and nothing to carry forward;
+                # leave deployed_files untouched so the whole-dep
+                # _merge_existing path can preserve it intact.
+                continue
+            locked_dep.deployed_files = files
+            locked_dep.deployed_file_hashes = hashes
 
     def _attach_package_types(self, lockfile: LockFile) -> None:
         for dep_key, pkg_type in self.ctx.package_types.items():

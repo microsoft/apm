@@ -34,13 +34,59 @@ SENTINEL_BEGIN = re.compile(r"^# INSTALL_SAFETY_BEGIN", re.MULTILINE)
 SENTINEL_END = re.compile(r"^# INSTALL_SAFETY_END", re.MULTILINE)
 
 
+def _usable_bash() -> bool:
+    """Return True only when a real POSIX bash is invocable.
+
+    install.sh is the Unix installer (Windows uses install.ps1), and these
+    tests shell out to ``bash`` to exercise its safety validator. On
+    ``windows-latest`` GitHub runners the ambient ``bash`` on PATH is the WSL
+    stub (``C:\\Windows\\System32\\bash.exe``); with no distribution installed
+    it exits non-zero for every invocation, which would otherwise make every
+    bash-dependent test here fail with a uniform exit code rather than skip.
+    Probe with a trivial POSIX command and treat anything unexpected as "no
+    usable bash" so the suite skips instead of failing on such platforms.
+    """
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", "printf ok"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and proc.stdout.strip() == "ok"
+
+
+_BASH_USABLE = _usable_bash()
+
+requires_bash = pytest.mark.skipif(
+    not _BASH_USABLE,
+    reason="POSIX bash unavailable (e.g. Windows WSL stub); install.sh is the Unix installer",
+)
+
+# Prevent Git Bash (MSYS2) from rewriting POSIX-looking arguments such as
+# /usr/local/lib/apm into Windows paths when a real bash is present.
+_BASH_ENV_EXTRA = {"MSYS_NO_PATHCONV": "1", "MSYS2_ARG_CONV_EXCL": "*"}
+
+
+def _read_install_sh() -> str:
+    """Read install.sh in a shell-safe form across platforms.
+
+    GitHub Actions on Windows can check out files with CRLF line endings. Bash
+    treats stray carriage returns in the sourced function block as syntax
+    errors, so normalize them before extracting or asserting on the script.
+    """
+    return INSTALL_SH.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _load_validator():
     """Extract the apm_lib_dir_validate() block from install.sh and return the
     source text of the function plus a small driver wrapper. Tests source the
     result into a fresh shell to invoke the function in isolation -- no network
     and no real installation side effects.
     """
-    text = INSTALL_SH.read_text(encoding="utf-8")
+    text = _read_install_sh()
     match_end = SENTINEL_END.search(text)
     assert match_end is not None, "INSTALL_SAFETY_END sentinel missing in install.sh"
     match_begin = SENTINEL_BEGIN.search(text)
@@ -71,7 +117,7 @@ apm_lib_dir_validate "$1"
             input="",
             capture_output=True,
             text=True,
-            env={**os.environ, "HOME": home},
+            env={**os.environ, "HOME": home, **_BASH_ENV_EXTRA},
             cwd=tmp,
             timeout=10,
         )
@@ -92,7 +138,7 @@ apm_prepare_lib_parent "$1"
             input="",
             capture_output=True,
             text=True,
-            env={**os.environ, "HOME": home},
+            env={**os.environ, "HOME": home, **_BASH_ENV_EXTRA},
             cwd=tmp,
             timeout=10,
         )
@@ -104,6 +150,7 @@ apm_prepare_lib_parent "$1"
 # ---------------------------------------------------------------------------
 
 
+@requires_bash
 class TestAbsolutePathGuard:
     def test_accepts_unix_absolute(self):
         assert _run_validator("/usr/local/lib/apm") == 0
@@ -123,6 +170,7 @@ class TestAbsolutePathGuard:
 # ---------------------------------------------------------------------------
 
 
+@requires_bash
 class TestSuffixGuard:
     def test_accepts_apm_suffix(self):
         assert _run_validator("/opt/apm") == 0
@@ -162,6 +210,7 @@ class TestSuffixGuard:
 # ---------------------------------------------------------------------------
 
 
+@requires_bash
 class TestBlocklistGuard:
     @pytest.mark.parametrize(
         "broad_path",
@@ -234,6 +283,7 @@ class TestBlocklistGuard:
 # ---------------------------------------------------------------------------
 
 
+@requires_bash
 class TestMarkerFileGuard:
     """Guard 4 only fires when the directory exists and is non-empty. The
     Python harness stages directories under a tempdir and calls the validator
@@ -296,6 +346,7 @@ class TestMarkerFileGuard:
 # ---------------------------------------------------------------------------
 
 
+@requires_bash
 class TestUserLocalInstall:
     def test_prepare_parent_creates_missing_user_local_lib_without_sudo(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -318,6 +369,7 @@ class TestUserLocalInstall:
                 protected.chmod(0o755)
 
 
+@requires_bash
 class TestReportedIncident:
     """The exact command from issue #1690's reproduction must be blocked."""
 
@@ -340,11 +392,11 @@ class TestSentinelInvariants:
     """
 
     def test_begin_sentinel_present(self):
-        text = INSTALL_SH.read_text(encoding="utf-8")
+        text = _read_install_sh()
         assert SENTINEL_BEGIN.search(text) is not None
 
     def test_end_sentinel_present(self):
-        text = INSTALL_SH.read_text(encoding="utf-8")
+        text = _read_install_sh()
         assert SENTINEL_END.search(text) is not None
 
     def test_function_defined_in_extracted_block(self):

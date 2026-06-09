@@ -20,6 +20,7 @@ from apm_cli.install.drift import (
     CheckLogger,
     DriftFinding,
     ReplayConfig,
+    _governed_root_dirs,
     _normalize_line_endings,
     _strip_bom,
     _strip_build_id,
@@ -227,6 +228,69 @@ def test_diff_engine_100kb_inline_cap(tmp_path):
     assert len(findings) == 1
     assert findings[0].kind == "modified"
     assert "too large for inline diff" in findings[0].inline_diff
+
+
+# ---------------------------------------------------------------------------
+# Governed roots: per-primitive deploy_root walking (issue #1716)
+# ---------------------------------------------------------------------------
+
+
+def _target_with_skill_deploy_root(root_dir: str = ".github", deploy_root: str = ".agents"):
+    """Build a minimal TargetProfile-like stub for governed-root tests."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        root_dir=root_dir,
+        primitives={"skills": SimpleNamespace(deploy_root=deploy_root)},
+    )
+
+
+def test_governed_root_dirs_includes_primitive_deploy_root():
+    """The differ must walk per-primitive deploy roots (copilot skills ->
+    .agents), not only the target's top-level root_dir -- otherwise committed
+    .agents/skills/ content escapes drift detection (issue #1716)."""
+    roots = _governed_root_dirs([_target_with_skill_deploy_root()])
+    assert ".apm" in roots
+    assert ".github" in roots
+    assert ".agents" in roots
+
+
+def test_governed_root_dirs_collapses_nested_deploy_root_to_first_segment():
+    roots = _governed_root_dirs([_target_with_skill_deploy_root(deploy_root=".agents/nested")])
+    assert ".agents" in roots
+    assert ".agents/nested" not in roots
+
+
+def test_diff_engine_walks_skill_deploy_root_detects_drift(tmp_path):
+    """Trap B (drift): a committed skill under the deploy_root that diverges
+    from the replay must be flagged. Fails before the deploy_root walk is
+    added because .agents is never compared."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".agents/skills/demo/SKILL.md"
+    _write(scratch / rel, b"fresh replay content\n")
+    _write(project / rel, b"stale committed content\n")
+    targets = [_target_with_skill_deploy_root()]
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets)
+    assert len(findings) == 1
+    assert findings[0].kind == "modified"
+    assert findings[0].path == rel
+
+
+def test_diff_engine_skill_deploy_root_clean_when_identical(tmp_path):
+    """No false-positive drift when the committed skill matches the replay
+    byte-for-byte under the deploy_root."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".agents/skills/demo/SKILL.md"
+    same = b"identical bytes\n"
+    _write(scratch / rel, same)
+    _write(project / rel, same)
+    targets = [_target_with_skill_deploy_root()]
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets)
+    assert findings == []
 
 
 # ---------------------------------------------------------------------------

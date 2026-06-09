@@ -212,7 +212,7 @@ def _log_skill_result(
     Mutates *result* in-place (``skills``, ``sub_skills``, ``deployed_files``
     keys) and emits tree-item log lines via *logger*.
     """
-    from apm_cli.install.services import _deployed_path_entry
+    from apm_cli.install.services import _deployed_path_entry, _skill_bundle_file_entries
 
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -267,6 +267,13 @@ def _log_skill_result(
 
     for tp in skill_result.target_paths:
         result["deployed_files"].append(_deployed_path_entry(tp, project_root, targets))
+        # #1716: also record the bundle's contained files so per-file
+        # content hashes cover SKILL.md / assets / scripts. The directory
+        # entry above is retained (cleanup's directory-rejection gate and
+        # the manifest dir-exclusion contract depend on it); the file
+        # entries give ``content-integrity`` its per-file coverage so skill
+        # drift is caught under ``apm audit --ci --no-drift``.
+        result["deployed_files"].extend(_skill_bundle_file_entries(tp, project_root, targets))
 
 
 # ---------------------------------------------------------------------------
