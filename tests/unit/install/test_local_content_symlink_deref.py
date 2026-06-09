@@ -378,3 +378,28 @@ class TestCircularSymlink:
                 project_root=tmp_path,
                 logger=NullCommandLogger(),
             )
+
+
+class TestUnreadableDirectory:
+    """An unreadable package directory must hard-fail with a clear error."""
+
+    def test_permission_error_on_iterdir_raises_path_traversal_error(self, tmp_path: Path) -> None:
+        """_copy_tree_dereferencing_validated wraps iterdir OSError.
+
+        If the package directory cannot be listed (e.g. PermissionError), the
+        copy must abort with a clear PathTraversalError rather than leaking a
+        bare OSError up the install stack.
+        """
+        from unittest.mock import patch
+
+        from apm_cli.install.phases.local_content import (
+            _copy_tree_dereferencing_validated,
+        )
+
+        pkg_root = tmp_path / "pkg"
+        pkg_root.mkdir()
+        dst = tmp_path / "dst"
+
+        with patch.object(Path, "iterdir", side_effect=PermissionError("Permission denied")):
+            with pytest.raises(PathTraversalError, match=r"Cannot read package directory"):
+                _copy_tree_dereferencing_validated(pkg_root, dst, pkg_root)

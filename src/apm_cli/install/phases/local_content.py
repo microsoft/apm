@@ -114,13 +114,24 @@ def _copy_tree_dereferencing_validated(src: Path, dst: Path, pkg_root: Path, _vi
     The ``_visited`` set tracks resolved directory paths already entered.
     Circular directory-symlink chains (A -> B -> A) are detected deterministically
     without relying on the OS ELOOP limit (which is platform-dependent).
+
+    A directory that cannot be listed (e.g. ``PermissionError`` from
+    ``iterdir``) hard-fails the install with a :class:`PathTraversalError`
+    rather than leaking a bare ``OSError`` up the install stack.
     """
     if _visited is None:
         _visited = set()
 
     dst.mkdir(parents=True, exist_ok=True)
 
-    for entry in sorted(src.iterdir()):
+    try:
+        entries = sorted(src.iterdir())
+    except OSError as exc:
+        raise PathTraversalError(
+            f"Cannot read package directory '{src}': {exc}. Local install aborted."
+        ) from exc
+
+    for entry in entries:
         dst_entry = dst / entry.name
 
         if entry.is_symlink():

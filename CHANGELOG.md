@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install <local-path>` now dereferences in-package symlinks into regular
   files so that local and remote installs produce consistent output. Symlinks
   whose resolved target escapes the package root hard-fail with a
-  `PathTraversalError`; circular directory-symlink chains are detected
-  deterministically. Previously, in-package symlinks were silently dropped by
-  the downstream deploy filter. (by @danielmeppiel, closes #1668)
+  `PathTraversalError`; circular directory-symlink chains and unreadable
+  package directories are detected deterministically. Previously, in-package
+  symlinks were silently dropped by the downstream deploy filter. (by
+  @danielmeppiel, closes #1668)
 ### Changed
 
 - Auth credential cascade now emits debug-level logs for every fallback step,

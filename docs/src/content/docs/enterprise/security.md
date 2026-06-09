@@ -260,6 +260,9 @@ APM prevents this with a per-symlink containment check (see also
    copied as regular files.  External symlinks are never followed.
 5. Circular directory-symlink chains are detected deterministically with an
    explicit visited-set guard, independent of OS-level ELOOP limits.
+6. An unreadable package directory (e.g. a `PermissionError` while listing its
+   entries) hard-fails the install with a `PathTraversalError` rather than
+   leaking a bare OS error up the install stack.
 
 ### Collision detection
 
