@@ -1,0 +1,32 @@
+{
+  "engine_id": "copilot",
+  "engine_name": "GitHub Copilot CLI",
+  "model": "claude-sonnet-4.6",
+  "version": "1.0.52",
+  "agent_version": "1.0.52",
+  "workflow_name": "PR Review Panel",
+  "experimental": false,
+  "supports_tools_allowlist": true,
+  "run_id": 27194375787,
+  "run_number": 510,
+  "run_attempt": "1",
+  "repository": "microsoft/apm",
+  "ref": "refs/heads/main",
+  "sha": "c66c5d2747336528b3e302d73e2ab1c7959921fc",
+  "actor": "danielmeppiel",
+  "event_name": "pull_request_target",
+  "target_repo": "",
+  "staged": false,
+  "allowed_domains": [
+    "defaults",
+    "github"
+  ],
+  "firewall_enabled": true,
+  "awf_version": "v0.25.55",
+  "awmg_version": "",
+  "steps": {
+    "firewall": "squid"
+  },
+  "created_at": "2026-06-09T08:43:08.362Z",
+  "cli_version": "v0.76.1"
+}

@@ -1,0 +1,79 @@
+{
+  "entries": {
+    "actions/create-github-app-token@v3.1.1": {
+      "repo": "actions/create-github-app-token",
+      "version": "v3.1.1",
+      "sha": "1b10c78c7865c340bc4f6099eb2f838309f1e8c3"
+    },
+    "actions/download-artifact@v8.0.1": {
+      "repo": "actions/download-artifact",
+      "version": "v8.0.1",
+      "sha": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    },
+    "actions/github-script@v8": {
+      "repo": "actions/github-script",
+      "version": "v8",
+      "sha": "ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    },
+    "actions/github-script@v9": {
+      "repo": "actions/github-script",
+      "version": "v9",
+      "sha": "373c709c69115d41ff229c7e5df9f8788daa9553"
+    },
+    "actions/github-script@v9.0.0": {
+      "repo": "actions/github-script",
+      "version": "v9.0.0",
+      "sha": "3a2844b7e9c422d3c10d287c895573f7108da1b3"
+    },
+    "actions/upload-artifact@v7": {
+      "repo": "actions/upload-artifact",
+      "version": "v7",
+      "sha": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    },
+    "github/gh-aw-actions/setup-cli@v0.76.1": {
+      "repo": "github/gh-aw-actions/setup-cli",
+      "version": "v0.76.1",
+      "sha": "46d564922b082d0db93244972e8005ea6904ee5f"
+    },
+    "github/gh-aw-actions/setup@v0.76.1": {
+      "repo": "github/gh-aw-actions/setup",
+      "version": "v0.76.1",
+      "sha": "46d564922b082d0db93244972e8005ea6904ee5f"
+    },
+    "github/gh-aw/actions/setup@v0.50.6": {
+      "repo": "github/gh-aw/actions/setup",
+      "version": "v0.50.6",
+      "sha": "fa00c211a1435b633eb568b1b41a203486ec760d"
+    },
+    "github/gh-aw/actions/setup@v0.52.1": {
+      "repo": "github/gh-aw/actions/setup",
+      "version": "v0.52.1",
+      "sha": "a86e657586e4ac5f549a790628971ec02f6a4a8f"
+    },
+    "microsoft/apm-action@v1.4.2": {
+      "repo": "microsoft/apm-action",
+      "version": "v1.4.2",
+      "sha": "9fe9337ef58b5e620e0113071ceb47a6a8a232f7"
+    },
+    "microsoft/apm-action@v1.5.0": {
+      "repo": "microsoft/apm-action",
+      "version": "v1.5.0",
+      "sha": "454b8a1d279376a47df8bb8d525ec076ca0fcef7"
+    },
+    "microsoft/apm-action@v1.6.0": {
+      "repo": "microsoft/apm-action",
+      "version": "v1.6.0",
+      "sha": "275e67418e97c26025852c7e91730cf4c11baf30"
+    },
+    "microsoft/apm-action@v1.7.1": {
+      "repo": "microsoft/apm-action",
+      "version": "v1.7.1",
+      "sha": "7a2f0d8b990341b4efb453d982d3df46b65e343b"
+    },
+    "microsoft/apm-action@v1.7.2": {
+      "repo": "microsoft/apm-action",
+      "version": "v1.7.2",
+      "sha": "b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd"
+    }
+  }
+}

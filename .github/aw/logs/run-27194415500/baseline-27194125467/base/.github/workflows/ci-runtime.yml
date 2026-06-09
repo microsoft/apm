@@ -1,0 +1,90 @@
+name: Runtime Inference Tests
+
+env:
+  PYTHON_VERSION: '3.12'
+
+on:
+  schedule:
+    # Daily at 05:00 UTC — standalone schedule, no dependency on build-release.yml
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/apm_cli/commands/run.py'
+      - 'src/apm_cli/runtime/**'
+      - 'scripts/runtime/**'
+      - 'scripts/test-release-validation.sh'
+      - 'tests/integration/test_runtime_smoke.py'
+
+permissions:
+  contents: read
+
+jobs:
+  # Live inference smoke tests — isolated from the release pipeline to avoid
+  # false-negative failures from external API flakiness (14.9% per-release risk).
+  # Runs nightly, on manual dispatch, and when runtime code changes.
+  live-inference-smoke:
+    name: Live Inference Smoke (Linux x86_64)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      models: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra build
+
+      - name: Build binary
+        run: |
+          chmod +x scripts/build-binary.sh
+          uv run ./scripts/build-binary.sh
+
+      - name: Setup binary
+        run: |
+          chmod +x ./dist/apm-linux-x86_64/apm
+          ln -s "$(pwd)/dist/apm-linux-x86_64/apm" "$(pwd)/apm"
+          echo "$(pwd)" >> $GITHUB_PATH
+
+      - name: Run smoke tests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+        run: uv run pytest tests/integration/test_runtime_smoke.py -v
+
+      - name: Run inference validation
+        env:
+          APM_RUN_INFERENCE_TESTS: "1"
+          APM_E2E_TESTS: "1"
+          GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+        run: |
+          chmod +x scripts/test-release-validation.sh
+          ./scripts/test-release-validation.sh
+        timeout-minutes: 20
+
+      - name: Annotate result
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "::notice::✅ Runtime inference tests passed"
+          else
+            echo "::warning::⚠️ Runtime inference tests failed — this does not block releases"
+          fi

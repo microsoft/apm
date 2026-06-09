@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "fire-01",
+      "query": "sweep the bug queue and drive everything to a mergeable state",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Primary phrase from description."
+    },
+    {
+      "id": "fire-02",
+      "query": "triage these bugs #123 #456 #789 and shepherd whatever already has a PR",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Explicit issue-list batch + shepherd verb."
+    },
+    {
+      "id": "fire-03",
+      "query": "shepherd in-flight community PRs through to merge this week",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Verbatim indirect trigger from description."
+    },
+    {
+      "id": "fire-04",
+      "query": "work down the bug backlog -- what's actually broken on main?",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Two verbatim indirect triggers combined."
+    },
+    {
+      "id": "fire-05",
+      "query": "batch-fix these issues: #221, #222, #223, #224",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Batch-fix verb on issue list."
+    },
+    {
+      "id": "fire-06",
+      "query": "process the bug backlog and dispatch fix sessions where no PR exists",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Process + dispatch + PR-detection language."
+    },
+    {
+      "id": "fire-07",
+      "query": "weekly sweep of community-reported bugs -- triage in parallel and report",
+      "expected": "fire",
+      "split": "val",
+      "notes": "New indirect trigger added in v2."
+    },
+    {
+      "id": "fire-08",
+      "query": "shepherd all bug-flagged issues this quarter, do them in parallel",
+      "expected": "fire",
+      "split": "val",
+      "notes": "New indirect trigger added in v2; distinguishes from single-PR review."
+    },
+    {
+      "id": "fire-09",
+      "query": "find legit bugs in the open issues and triage them in one pass",
+      "expected": "fire",
+      "split": "val",
+      "notes": "New indirect trigger added in v2."
+    },
+    {
+      "id": "fire-10",
+      "query": "drive these in-flight PRs to merge: #1410, #1422, #1431",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Explicit in-flight PR list -- batch shepherding shape."
+    },
+    {
+      "id": "no-fire-01",
+      "query": "review my PR -- it's #1432, give me a full panel pass",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Single PR -> apm-review-panel directly, NOT batch-bug-shepherd."
+    },
+    {
+      "id": "no-fire-02",
+      "query": "panel-review this PR and post the recommendation",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Single-PR panel call -> apm-review-panel."
+    },
+    {
+      "id": "no-fire-03",
+      "query": "investigate one bug in detail and tell me the root cause",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Single-bug deep dive, NOT batch outer-loop."
+    },
+    {
+      "id": "no-fire-04",
+      "query": "draft a PR body for the auth refactor branch",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "PR description work -> pr-description-skill."
+    },
+    {
+      "id": "no-fire-05",
+      "query": "open an issue describing the crash I just saw",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Issue creation, not batch triage."
+    },
+    {
+      "id": "no-fire-06",
+      "query": "write a release note for v0.13.0",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Release-note work."
+    },
+    {
+      "id": "no-fire-07",
+      "query": "explain this code path to me, I don't get the resolver flow",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Code explanation, not batch work."
+    },
+    {
+      "id": "no-fire-08",
+      "query": "update the docs site to mention the new copilot-app target",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Docs work, not bug shepherding."
+    },
+    {
+      "id": "no-fire-09",
+      "query": "add a flag to the CLI for verbose audit output",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Feature work, not bug-queue work."
+    },
+    {
+      "id": "no-fire-10",
+      "query": "design a new feature for marketplace versioning",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Design work, not batch triage."
+    },
+    {
+      "id": "no-fire-11",
+      "query": "fold the panel recommendations into PR #1234",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR fold-in -> apm-review-panel completion flow, NOT batch outer-loop. Guards against dispatch mis-fire after the fold-in invariant was added."
+    },
+    {
+      "id": "no-fire-12",
+      "query": "fold the followups into this one PR",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR phrasing using the new fold-in vocabulary; must not fire batch-bug-shepherd."
+    },
+    {
+      "id": "no-fire-13",
+      "query": "apply the panel recommendations to PR #998 and close it out",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Single-PR completion phrasing; remains apm-review-panel territory."
+    },
+    {
+      "id": "fire-11",
+      "query": "double-check none of the PRs we just marked ready went stale on main",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Mid-saga continuation of a bbs run; the new Phase 5 mergeability gate is the right home. The phrasing is plural ('the PRs') and references prior batch state ('we just marked ready'); routes to bbs."
+    },
+    {
+      "id": "no-fire-14",
+      "query": "rebase my branch onto main and resolve conflicts",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-branch git operation; routes to manual git, not bbs. Guards against the new 'rebase' vocabulary leaking out of the batch context."
+    },
+    {
+      "id": "no-fire-15",
+      "query": "this single PR has merge conflicts now, can you rebase it?",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Single-PR conflict resolution; routes to a one-off conflict-resolution session, not bbs outer loop."
+    },
+    {
+      "id": "fire-12",
+      "query": "sweep the bug queue but make sure we don't ship anything off-strategy",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Batch sweep with explicit strategic-alignment hint; routes to bbs Phase 1.5 gate."
+    },
+    {
+      "id": "fire-13",
+      "query": "triage open bugs and have the CEO persona check each against principles before we fix anything",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Names the Phase 1.5 mechanism (CEO persona vs PRINCIPLES.md) inside a batch context."
+    },
+    {
+      "id": "no-fire-16",
+      "query": "review my draft of PRINCIPLES.md and tell me if the rejection clauses are sharp enough",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Document-authoring on PRINCIPLES.md routes to doc-writer / apm-ceo direct, NOT bbs. Guards against the new 'PRINCIPLES.md' vocabulary leaking out of batch context."
+    }
+  ]
+}

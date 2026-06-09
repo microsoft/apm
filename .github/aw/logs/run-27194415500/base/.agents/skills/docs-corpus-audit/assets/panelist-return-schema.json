@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "docs-corpus-audit per-scope verifier return schema",
+  "description": "Schema for the JSON returned by each per-scope verifier+editor subagent. Mirrors the docs-sync panelist-return-schema. The orchestrator validates every wave-agent return against this; malformed JSON triggers re-dispatch.",
+  "type": "object",
+  "required": ["agent", "pages", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "agent": {
+      "type": "string",
+      "description": "Scope identifier the orchestrator assigned (e.g., 'wave2-scope-cli-ref')."
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["page", "claims_checked", "grounded", "drifted", "edits_applied", "verdict"],
+        "additionalProperties": false,
+        "properties": {
+          "page": {"type": "string", "description": "Absolute path to the page."},
+          "claims_checked": {"type": "integer", "minimum": 0},
+          "grounded": {"type": "integer", "minimum": 0},
+          "drifted": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["claim", "evidence", "fix"],
+              "properties": {
+                "claim": {"type": "string"},
+                "evidence": {"type": "string", "description": "Deterministic source proving the claim is wrong (command output, file:line)."},
+                "fix": {"type": "string", "description": "Surgical patch description (1-3 lines)."}
+              }
+            }
+          },
+          "unverifiable": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["claim", "reason"],
+              "properties": {
+                "claim": {"type": "string"},
+                "reason": {"type": "string"}
+              }
+            }
+          },
+          "edits_applied": {"type": "integer", "minimum": 0},
+          "verdict": {"enum": ["CLEAN", "MINOR_DRIFT", "MAJOR_DRIFT"]}
+        }
+      }
+    },
+    "summary": {"type": "string"},
+    "open_questions": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

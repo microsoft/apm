@@ -1,0 +1,144 @@
+﻿2026-06-09T08:40:20.3572152Z Current runner version: '2.334.0'
+2026-06-09T08:40:20.3633571Z ##[group]Runner Image Provisioner
+2026-06-09T08:40:20.3634439Z Hosted Compute Agent
+2026-06-09T08:40:20.3635097Z Version: 20260520.533
+2026-06-09T08:40:20.3635695Z Commit: 189110e25284a9812c124fd27b339e2fb4f2f9db
+2026-06-09T08:40:20.3636377Z Build Date: 2026-05-20T17:44:04Z
+2026-06-09T08:40:20.3637100Z Worker ID: {6534b2f0-8cd1-4179-835b-f5f4bf134a25}
+2026-06-09T08:40:20.3637784Z Azure Region: eastus
+2026-06-09T08:40:20.3638374Z ##[endgroup]
+2026-06-09T08:40:20.3650702Z ##[group]VM Image
+2026-06-09T08:40:20.3651403Z - OS: Linux (x64)
+2026-06-09T08:40:20.3651981Z - Source: Docker
+2026-06-09T08:40:20.3652499Z - Name: ubuntu:24.04
+2026-06-09T08:40:20.3653093Z - Version: 20260526.57.1
+2026-06-09T08:40:20.3653665Z ##[endgroup]
+2026-06-09T08:40:20.3654658Z ##[group]GITHUB_TOKEN Permissions
+2026-06-09T08:40:20.3656887Z Metadata: read
+2026-06-09T08:40:20.3657528Z ##[endgroup]
+2026-06-09T08:40:20.3670817Z Secret source: Actions
+2026-06-09T08:40:20.3671762Z Prepare workflow directory
+2026-06-09T08:40:20.5132438Z Prepare all required actions
+2026-06-09T08:40:20.5218315Z Getting action download info
+2026-06-09T08:40:20.9155121Z Download action repository 'actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3' (SHA:1b10c78c7865c340bc4f6099eb2f838309f1e8c3)
+2026-06-09T08:40:21.1834848Z Download action repository 'microsoft/apm-action@b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd' (SHA:b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd)
+2026-06-09T08:40:21.7157287Z Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+2026-06-09T08:40:22.0679120Z Complete job name: apm (default, default, 0, microsoft/apm#main, false)
+2026-06-09T08:40:22.1274373Z ##[group]Run # Derive GH_HOST from GITHUB_SERVER_URL so the gh CLI targets the correct
+2026-06-09T08:40:22.1275534Z [36;1m# Derive GH_HOST from GITHUB_SERVER_URL so the gh CLI targets the correct[0m
+2026-06-09T08:40:22.1276502Z [36;1m# GitHub instance (GHES/GHEC). On github.com this is a harmless no-op.[0m
+2026-06-09T08:40:22.1277316Z [36;1mGH_HOST="${GITHUB_SERVER_URL#https://}"[0m
+2026-06-09T08:40:22.1277920Z [36;1mGH_HOST="${GH_HOST#http://}"[0m
+2026-06-09T08:40:22.1278526Z [36;1mecho "GH_HOST=${GH_HOST}" >> "$GITHUB_ENV"[0m
+2026-06-09T08:40:22.1288518Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-09T08:40:22.1290003Z env:
+2026-06-09T08:40:22.1290446Z   AW_APM_APPS: 
+2026-06-09T08:40:22.1290884Z   AW_APM_LEGACY_APP_ID: 
+2026-06-09T08:40:22.1291379Z   AW_APM_LEGACY_PRIVATE_KEY: 
+2026-06-09T08:40:22.1291876Z ##[endgroup]
+2026-06-09T08:40:22.1679986Z ##[group]Run DEPS=$(echo "$AW_PKG" | jq -r '.[] | "- " + .')
+2026-06-09T08:40:22.1680826Z [36;1mDEPS=$(echo "$AW_PKG" | jq -r '.[] | "- " + .')[0m
+2026-06-09T08:40:22.1681425Z [36;1m{[0m
+2026-06-09T08:40:22.1681845Z [36;1m  echo "deps<<APMDEPS"[0m
+2026-06-09T08:40:22.1682363Z [36;1m  printf '%s\n' "$DEPS"[0m
+2026-06-09T08:40:22.1683002Z [36;1m  echo "APMDEPS"[0m
+2026-06-09T08:40:22.1683505Z [36;1m} >> "$GITHUB_OUTPUT"[0m
+2026-06-09T08:40:22.1688082Z shell: /usr/bin/bash -e {0}
+2026-06-09T08:40:22.1688565Z env:
+2026-06-09T08:40:22.1689354Z   AW_APM_APPS: 
+2026-06-09T08:40:22.1689801Z   AW_APM_LEGACY_APP_ID: 
+2026-06-09T08:40:22.1690277Z   AW_APM_LEGACY_PRIVATE_KEY: 
+2026-06-09T08:40:22.1690761Z   GH_HOST: github.com
+2026-06-09T08:40:22.1691221Z   AW_PKG: [
+  "microsoft/apm#main"
+]
+2026-06-09T08:40:22.1691737Z ##[endgroup]
+2026-06-09T08:40:22.2034427Z ##[group]Run microsoft/apm-action@b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd
+2026-06-09T08:40:22.2035253Z with:
+2026-06-09T08:40:22.2035654Z   archive: true
+2026-06-09T08:40:22.2036124Z   dependencies: - microsoft/apm#main
+2026-06-09T08:40:22.2036660Z   isolated: true
+2026-06-09T08:40:22.2037072Z   pack: true
+2026-06-09T08:40:22.2037474Z   target: copilot
+2026-06-09T08:40:22.2037948Z   working-directory: /tmp/gh-aw/apm-workspace
+2026-06-09T08:40:22.2038534Z   apm-version: 0.12.4
+2026-06-09T08:40:22.2039505Z   compile: false
+2026-06-09T08:40:22.2044248Z   github-token: ***
+2026-06-09T08:40:22.2044709Z   setup-only: false
+2026-06-09T08:40:22.2045131Z env:
+2026-06-09T08:40:22.2045518Z   AW_APM_APPS: 
+2026-06-09T08:40:22.2045948Z   AW_APM_LEGACY_APP_ID: 
+2026-06-09T08:40:22.2046427Z   AW_APM_LEGACY_PRIVATE_KEY: 
+2026-06-09T08:40:22.2047409Z   GH_HOST: github.com
+2026-06-09T08:40:22.2052016Z   GITHUB_TOKEN: ***
+2026-06-09T08:40:22.2052639Z ##[endgroup]
+2026-06-09T08:40:22.7687813Z Working directory: /tmp/gh-aw/apm-workspace
+2026-06-09T08:40:22.7700313Z Installing APM (version: 0.12.4)...
+2026-06-09T08:40:22.7736164Z Downloading APM 0.12.4 from https://github.com/microsoft/apm/releases/download/v0.12.4/apm-linux-x86_64.tar.gz
+2026-06-09T08:40:23.6911248Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/388fae05-10dc-42e5-8e1b-5d890d1029cc -f /home/runner/work/_temp/3066a800-030c-4068-8eed-91a964eda4ff
+2026-06-09T08:40:23.6913808Z [command]/opt/hostedtoolcache/apm/0.12.4/x64/apm --version
+2026-06-09T08:40:24.6917105Z Agent Package Manager (APM) CLI version 0.12.4 (6aceef7)
+2026-06-09T08:40:24.6918380Z APM 0.12.4 installed successfully
+2026-06-09T08:40:24.6920302Z No .github/ directory found — nothing to clear
+2026-06-09T08:40:24.6921269Z Generated apm.yml with 1 dependencies (isolated mode) (target: copilot)
+2026-06-09T08:40:24.6922466Z [command]/opt/hostedtoolcache/apm/0.12.4/x64/apm install
+2026-06-09T08:40:25.0266786Z [!] A new version of APM is available: 0.18.0 (current: 0.12.4)
+2026-06-09T08:40:25.0273082Z Run apm update to upgrade
+2026-06-09T08:40:25.0275629Z 
+2026-06-09T08:40:25.0291300Z [>] Installing dependencies from apm.yml...
+2026-06-09T08:40:25.0410915Z [>] Resolving microsoft/apm...
+2026-06-09T08:40:34.8375691Z Refusing to install local_path dependency './packages/apm-issue-autopilot' 
+2026-06-09T08:40:34.8378121Z declared by remote package 'apm': remote packages cannot reference paths on the 
+2026-06-09T08:40:34.8412458Z consumer filesystem. Publish the dependency as a standalone package and 
+2026-06-09T08:40:34.8413842Z reference it via owner/repo or marketplace handle.
+2026-06-09T08:40:34.8415094Z Refusing to install local_path dependency './packages/batch-bug-shepherd' 
+2026-06-09T08:40:34.8417808Z declared by remote package 'apm': remote packages cannot reference paths on the 
+2026-06-09T08:40:34.8419796Z consumer filesystem. Publish the dependency as a standalone package and 
+2026-06-09T08:40:34.8421436Z reference it via owner/repo or marketplace handle.
+2026-06-09T08:40:34.8547720Z [i] Targets: copilot  (source: apm.yml)
+2026-06-09T08:40:36.8576032Z   [+] microsoft/apm #main @c66c5d27
+2026-06-09T08:40:45.3416050Z   |-- 20 agents integrated -> .github/agents/
+2026-06-09T08:40:45.3422965Z   |-- 9 instruction(s) integrated -> .github/instructions/
+2026-06-09T08:40:45.3793470Z   |-- 15 skill(s) integrated -> .agents/skills/
+2026-06-09T08:40:45.3814749Z [i] Added apm_modules/ to .gitignore
+2026-06-09T08:40:45.4074448Z 
+2026-06-09T08:40:45.4083225Z [*] Installed 1 APM dependency in 20.4s.
+2026-06-09T08:40:45.5252219Z Primitives deployed to: /tmp/gh-aw/apm-workspace/.github
+2026-06-09T08:40:45.5253192Z APM: 29 primitives deployed (9 instructions, 20 agents)
+2026-06-09T08:40:45.5254651Z   instructions/: changelog.instructions.md, cicd.instructions.md, cli.instructions.md, doc-sync.instructions.md, encoding.instructions.md, integrators.instructions.md, linting.instructions.md, python.instructions.md, tests.instructions.md
+2026-06-09T08:40:45.5258182Z   agents/: agentic-workflows.agent.md, apm-ceo.agent.md, apm-primitives-architect.agent.md, auth-expert.agent.md, cdo.agent.md, cli-logging-expert.agent.md, devx-ux-expert.agent.md, doc-analyser.agent.md, doc-writer.agent.md, editorial-owner.agent.md, oss-growth-hacker.agent.md, performance-expert.agent.md, python-architect.agent.md, spec-editor-synthesizer.agent.md, spec-oci-editor.agent.md, spec-pkgmgr-editor.agent.md, spec-swagger-editor.agent.md, spec-tag-architect.agent.md, supply-chain-security-expert.agent.md, test-coverage-expert.agent.md
+2026-06-09T08:40:45.5411561Z Running: apm pack -o /tmp/gh-aw/apm-workspace/build --format apm --target copilot --archive
+2026-06-09T08:40:45.5412608Z [command]/opt/hostedtoolcache/apm/0.12.4/x64/apm pack -o /tmp/gh-aw/apm-workspace/build --format apm --target copilot --archive
+2026-06-09T08:40:46.3200958Z [*] Packed 29 file(s) -> 
+2026-06-09T08:40:46.3201979Z /tmp/gh-aw/apm-workspace/build/inline-workflow-1.0.0.tar.gz
+2026-06-09T08:40:46.4251979Z Bundle produced: /tmp/gh-aw/apm-workspace/build/inline-workflow-1.0.0.tar.gz
+2026-06-09T08:40:46.4257621Z APM action completed successfully
+2026-06-09T08:40:46.7890588Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+2026-06-09T08:40:46.7891180Z with:
+2026-06-09T08:40:46.7891430Z   name: apm-default
+2026-06-09T08:40:46.7891838Z   path: /tmp/gh-aw/apm-workspace/build/inline-workflow-1.0.0.tar.gz
+2026-06-09T08:40:46.7892260Z   retention-days: 1
+2026-06-09T08:40:46.7892551Z   if-no-files-found: warn
+2026-06-09T08:40:46.7892872Z   compression-level: 6
+2026-06-09T08:40:46.7893142Z   overwrite: false
+2026-06-09T08:40:46.7893405Z   include-hidden-files: false
+2026-06-09T08:40:46.7893692Z   archive: true
+2026-06-09T08:40:46.7893932Z env:
+2026-06-09T08:40:46.7894164Z   AW_APM_APPS: 
+2026-06-09T08:40:46.7894422Z   AW_APM_LEGACY_APP_ID: 
+2026-06-09T08:40:46.7894702Z   AW_APM_LEGACY_PRIVATE_KEY: 
+2026-06-09T08:40:46.7894995Z   GH_HOST: github.com
+2026-06-09T08:40:46.7895245Z ##[endgroup]
+2026-06-09T08:40:48.4500735Z With the provided path, there will be 1 file uploaded
+2026-06-09T08:40:48.4514718Z Artifact name is valid!
+2026-06-09T08:40:48.4516754Z Root directory input is valid!
+2026-06-09T08:40:48.6084429Z Uploading artifact: apm-default.zip
+2026-06-09T08:40:48.6246790Z Beginning upload of artifact content to blob storage
+2026-06-09T08:40:48.7845848Z Uploaded bytes 62379
+2026-06-09T08:40:48.8048545Z Finished uploading artifact content to blob storage!
+2026-06-09T08:40:48.8052386Z SHA256 digest of uploaded artifact is c955bdb80dc57d80f647f2fc837fc927afeb20f05ee85ef15361073a1f8d6d8f
+2026-06-09T08:40:48.8054138Z Finalizing artifact upload
+2026-06-09T08:40:48.9704831Z Artifact apm-default successfully finalized. Artifact ID 7502666928
+2026-06-09T08:40:48.9706445Z Artifact apm-default has been successfully uploaded! Final size is 62379 bytes. Artifact ID is 7502666928
+2026-06-09T08:40:48.9712492Z Artifact download URL: https://github.com/microsoft/apm/actions/runs/27194125467/artifacts/7502666928
+2026-06-09T08:40:48.9890333Z Cleaning up orphan processes

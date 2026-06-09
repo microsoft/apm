@@ -1,0 +1,61 @@
+name: Spec conformance
+
+# Enforces the OpenAPM v0.1 spec-vs-implementation 4-way bind:
+#   spec body anchors == requirements manifest == Appendix C rows == pytest req markers
+# Then runs the conformance suite, regenerates CONFORMANCE.{json,md},
+# and gates on a clean git diff so contributors must commit any
+# regeneration.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/src/content/docs/specs/**'
+      - 'tests/fixtures/spec-conformance/**'
+      - 'tests/spec_conformance/**'
+      - 'src/apm_cli/**'
+      - 'pyproject.toml'
+      - 'CONFORMANCE.md'
+      - 'CONFORMANCE.json'
+      - 'CONTRIBUTING.md'
+      - '.github/workflows/spec-conformance.yml'
+  merge_group:
+    branches: [ main ]
+    types: [ checks_requested ]
+
+permissions:
+  contents: read
+
+jobs:
+  spec-conformance:
+    name: Spec conformance gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Orphan check (anchors == manifest == Appendix C == markers)
+        run: uv run --extra dev python -m tests.spec_conformance.orphan_check
+
+      - name: Mode B detector (silent-extension gate on critical paths)
+        env:
+          BASE_REF: origin/${{ github.event.pull_request.base.ref || 'main' }}
+          GH_PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash tests/spec_conformance/mode_b_detector.sh
+
+      - name: Conformance test suite
+        run: |
+          uv run --extra dev pytest tests/spec_conformance \
+            -p no:randomly \
+            --no-header \
+            -q
+
+      - name: Regenerate CONFORMANCE.{json,md}
+        run: uv run --extra dev python -m tests.spec_conformance.gen_statement
+
+      - name: Gate on clean diff (regenerated artifacts MUST be committed)
+        run: |
+          git diff --exit-code CONFORMANCE.json CONFORMANCE.md \
+            || (echo "::error::CONFORMANCE.{json,md} are stale. Run \
+            'uv run --extra dev python -m tests.spec_conformance.gen_statement' \
+            and commit the result." && exit 1)
