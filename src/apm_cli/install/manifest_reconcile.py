@@ -25,8 +25,13 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def install_governance(targets) -> tuple[set[str], set[str]]:
+if TYPE_CHECKING:
+    from apm_cli.integration.targets import TargetProfile
+
+
+def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]]:
     """Return ``(file_roots, uri_schemes)`` governed by *targets*.
 
     ``file_roots`` is the set of top-level managed directory names -- each
@@ -77,11 +82,11 @@ def is_governed_by_install(path: str, file_roots: set[str], uri_schemes: set[str
 
 
 def union_preserving(
-    current_files,
-    current_hashes,
-    prior_files,
-    prior_hashes,
-    targets,
+    current_files: list[str],
+    current_hashes: dict[str, str],
+    prior_files: list[str],
+    prior_hashes: dict[str, str],
+    targets: list[TargetProfile],
 ) -> tuple[list[str], dict[str, str]]:
     """Union the current install's manifest with preserved other-target entries.
 

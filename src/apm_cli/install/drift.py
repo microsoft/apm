@@ -41,6 +41,7 @@ from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.integration.targets import TargetProfile
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +531,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 _INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 
 
-def _governed_root_dirs(targets) -> set[str]:
+def _governed_root_dirs(targets: list[TargetProfile]) -> set[str]:
     """Return the set of top-level managed directory names to walk.
 
     Includes each target's top-level ``root_dir`` (plus ``.apm``) AND every
