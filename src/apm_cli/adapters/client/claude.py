@@ -239,12 +239,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry")
                 return False
 
-            if server_name:
-                config_key = server_name
-            elif "/" in server_url:
-                config_key = server_url.split("/")[-1]
-            else:
-                config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             ok = self.update_config({config_key: server_config})

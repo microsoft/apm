@@ -168,17 +168,36 @@ def maybe_raise_bare_fqdn_github_gitlab_conflict(raw: str) -> None:
 def is_github_hostname(hostname: str | None) -> bool:
     """Return True if hostname should be treated as GitHub (cloud or enterprise).
 
-    Accepts 'github.com' and hosts that end with '.ghe.com'.
+    Accepts ``github.com``, hosts that end with ``.ghe.com``, and any custom
+    GitHub Enterprise Server host configured via the ``GITHUB_HOST`` env var.
 
-    Note: This is primarily for internal hostname classification.
-    APM accepts any Git host via FQDN syntax without validation.
+    The ``GITHUB_HOST`` check mirrors the GHES detection in
+    :meth:`~apm_cli.core.auth.AuthResolver.classify_host` so that parse-time
+    host classification (used by ``_detect_virtual_package`` and
+    ``_resolve_shorthand_to_parsed_url``) agrees with install-time auth
+    routing.  Without this, FQDN shorthand with subpaths (e.g.
+    ``ghe.example.com/org/repo/packages/skill``) embeds the subpath into the
+    git URL instead of splitting into ``git:`` + ``path:``.
     """
     if not hostname:
         return False
     h = hostname.lower()
     if h == "github.com":
         return True
-    return bool(h.endswith(".ghe.com"))
+    if h.endswith(".ghe.com"):
+        return True
+    # GHES: GITHUB_HOST env var points to a custom GitHub Enterprise Server.
+    # Use the same normalization as AuthResolver.classify_host() (.lower()
+    # only, no .split("/")[0]) so both stages agree on which env values match.
+    ghes_host = os.environ.get("GITHUB_HOST", "").lower()
+    return bool(
+        ghes_host
+        and ghes_host == h
+        and ghes_host not in {"github.com", "gitlab.com"}
+        and not ghes_host.endswith(".ghe.com")
+        and not is_azure_devops_hostname(ghes_host)
+        and is_valid_fqdn(ghes_host)
+    )
 
 
 def is_supported_git_host(hostname: str | None) -> bool:

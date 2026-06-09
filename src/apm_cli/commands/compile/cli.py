@@ -234,10 +234,21 @@ def _resolve_compile_target(target):
                 families.add("agents")
 
         if len(families) >= 2:
-            # Single-target copilot collapses {"vscode","agents"} to bare
-            # "vscode" for routing parity with single-string -t copilot.
+            # Collapse {"vscode","agents"} to bare "vscode" ONLY when the
+            # original target list contains no non-Copilot agents-family
+            # targets (e.g. codex, opencode, windsurf).  When mixed targets
+            # like [copilot, codex] are requested, keep the frozenset so
+            # downstream dedup logic knows non-Copilot targets also consume
+            # AGENTS.md (issue #1678).
             if families == {"vscode", "agents"}:
-                return "vscode"
+                _vscode_names = {"copilot", "vscode", "agents"}
+                has_non_vscode_agents = any(
+                    name in target_set
+                    for name, profile in KNOWN_TARGETS.items()
+                    if profile.compile_family == "agents" and name not in _vscode_names
+                )
+                if not has_non_vscode_agents:
+                    return "vscode"
             return frozenset(families)
         if "claude" in families:
             return "claude"

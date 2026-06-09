@@ -13,6 +13,7 @@ from typing import Any, Callable  # noqa: UP035
 
 from ..core.target_detection import (
     CompileTargetType,
+    can_dedup_agents_md_instructions,
     should_compile_agents_md,
     should_compile_claude_md,
     should_compile_copilot_instructions_md,
@@ -445,18 +446,34 @@ class AgentsCompiler:
         # Copilot, which reads both locations). Mirrors the .claude/rules/ check
         # on the Claude path (issue #1445); shared helper keeps the detection
         # logic in one place (R0801 guard).
-        skip_instructions = _detect_deployed_instructions(
-            self.base_dir / ".github" / "instructions",
-            self.base_dir,
-            lambda msg: self._log("warning", msg),
-        )
-        if skip_instructions:
+        #
+        # Target-aware: only dedup when EVERY AGENTS.md consumer also reads
+        # .github/instructions/. Codex, OpenCode, Windsurf rely solely on
+        # AGENTS.md for instructions, so dedup must not fire for those
+        # targets (issue #1678).
+        # --no-dedup / --force-instructions lets users opt out entirely.
+        if config.no_dedup:
+            skip_instructions = False
             self._log(
                 "progress",
-                "Instructions already in .github/instructions/ -- omitting from"
-                " AGENTS.md to avoid duplicate context",
+                "Including instructions in AGENTS.md (--no-dedup overrides deduplication)",
                 symbol="info",
             )
+        elif not can_dedup_agents_md_instructions(config.target):
+            skip_instructions = False
+        else:
+            skip_instructions = _detect_deployed_instructions(
+                self.base_dir / ".github" / "instructions",
+                self.base_dir,
+                lambda msg: self._log("warning", msg),
+            )
+            if skip_instructions:
+                self._log(
+                    "progress",
+                    "Instructions already in .github/instructions/ -- omitting from"
+                    " AGENTS.md to avoid duplicate context",
+                    symbol="info",
+                )
 
         # Prepare configuration for distributed compilation
         distributed_config = {
