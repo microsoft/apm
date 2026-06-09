@@ -38,6 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit` now detects drift and tampering in committed deployed skill
+  bundles under `.agents/skills/**`. The lockfile integrity manifest is now
+  target-complete (per-file `deployed_files` + `deployed_file_hashes` for every
+  committed file-based deploy target, not just one), the drift differ walks each
+  primitive's `deploy_root`, and the `apm-self-check` CI job runs the drift gate
+  (dropped `--no-drift`). Previously a multi-target deploy left the manifest
+  single-target, so deployed skill content could silently diverge from its
+  `packages/**` / `.apm/**` source with every gate staying green. (by
+  @danielmeppiel, closes #1716)
 - `apm install` now falls back to an AAD bearer token (via `az login`) when no
   `ADO_APM_PAT` is configured for Azure DevOps file downloads, and fail-closes
   when ADO returns an interactive HTML sign-in page with HTTP 200 instead of

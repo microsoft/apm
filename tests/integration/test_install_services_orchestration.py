@@ -582,6 +582,35 @@ class TestIntegratePackagePrimitives:
 
         assert result["deployed_files"] == [".claude/skills/demo/SKILL.md"]
 
+    def test_deployed_files_expand_skill_dir_to_contained_files(self, tmp_path: Path) -> None:
+        # #1716 regression trap: a deployed skill DIRECTORY must also record
+        # its contained files so per-file content hashes
+        # (compute_deployed_hashes -> content-integrity) cover
+        # SKILL.md / assets / scripts. Without the expansion, skills are
+        # dir-only entries and skill content drift escapes the documented
+        # ``apm audit --ci --no-drift`` gate.
+        skill_dir = tmp_path / ".agents" / "skills" / "demo"
+        (skill_dir / "assets").mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# demo skill\n")
+        (skill_dir / "assets" / "schema.json").write_text("{}\n")
+
+        result, _, _, _ = invoke_integrate(
+            tmp_path,
+            targets=[make_target(primitives={})],
+            skill_result=make_skill_result(
+                target_paths=[skill_dir],
+                skill_created=True,
+            ),
+        )
+
+        df = result["deployed_files"]
+        # Directory entry retained (cleanup's directory-rejection gate +
+        # manifest dir-exclusion contract depend on it).
+        assert ".agents/skills/demo" in df
+        # Per-file entries added -> content-integrity coverage.
+        assert ".agents/skills/demo/SKILL.md" in df
+        assert ".agents/skills/demo/assets/schema.json" in df
+
     def test_two_target_paths_are_collapsed_on_one_line(self, tmp_path: Path) -> None:
         targets = [
             make_target(name="claude", root_dir=".claude", primitives={"prompts": make_mapping()}),

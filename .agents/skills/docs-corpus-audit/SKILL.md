@@ -45,10 +45,10 @@ These two skills share substrate. Be explicit:
 | Shared resource | Owner | Both use |
 |---|---|---|
 | `.apm/docs-index.yml` (corpus map) | docs-sync | yes |
-| [doc-writer](../../agents/doc-writer.agent.md) persona | shared | yes (per-page edits) |
-| [python-architect](../../agents/python-architect.agent.md) persona | shared | yes (S7 verification) |
-| [editorial-owner](../../agents/editorial-owner.agent.md) persona | shared | optional (voice pass at scale) |
-| [cdo](../../agents/cdo.agent.md) persona | shared | yes (final synthesis) |
+| [doc-writer](../../../.apm/agents/doc-writer.agent.md) persona | shared | yes (per-page edits) |
+| [python-architect](../../../.apm/agents/python-architect.agent.md) persona | shared | yes (S7 verification) |
+| [editorial-owner](../../../.apm/agents/editorial-owner.agent.md) persona | shared | optional (voice pass at scale) |
+| [cdo](../../../.apm/agents/cdo.agent.md) persona | shared | yes (final synthesis) |
 | `assets/panelist-return-schema.json` | docs-sync (mirrored) | yes |
 
 **Trigger boundary (avoid DISPATCH COLLISION):**
@@ -96,11 +96,11 @@ verifier" role; that's R3 EXTRACT in reverse.
 
 | Role | Persona | Always active? |
 |---|---|---|
-| Per-scope verifier+editor | [python-architect](../../agents/python-architect.agent.md) (S7) and [doc-writer](../../agents/doc-writer.agent.md) (edits), bundled into one subagent prompt per scope | Yes -- one per page scope, parallel fan-out |
+| Per-scope verifier+editor | [python-architect](../../../.apm/agents/python-architect.agent.md) (S7) and [doc-writer](../../../.apm/agents/doc-writer.agent.md) (edits), bundled into one subagent prompt per scope | Yes -- one per page scope, parallel fan-out |
 | Cross-corpus post-pass | orchestrator (deterministic greps via `scripts/scan-cross-corpus-drift.sh`) | Yes -- once after waves return |
 | Alignment-loop checker | orchestrator (deterministic re-grep + targeted re-dispatch) | Yes -- once after post-pass |
-| Voice pass (optional) | [editorial-owner](../../agents/editorial-owner.agent.md) | Only when >20 edits to keep tone coherent |
-| Final synthesis | [cdo](../../agents/cdo.agent.md) | Once, for the PR summary comment |
+| Voice pass (optional) | [editorial-owner](../../../.apm/agents/editorial-owner.agent.md) | Only when >20 edits to keep tone coherent |
+| Final synthesis | [cdo](../../../.apm/agents/cdo.agent.md) | Once, for the PR summary comment |
 
 The per-scope subagent prompt that composes `python-architect` +
 `doc-writer` is in `assets/subagent-prompt-template.md` -- the

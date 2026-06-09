@@ -115,6 +115,39 @@ def _deployed_path_entry(
         )
 
 
+def _skill_bundle_file_entries(
+    skill_dir: Path,
+    project_root: Path,
+    targets: Any,
+) -> list[str]:
+    """Return per-file lockfile entries for a deployed skill bundle directory.
+
+    A skill is deployed as a directory (e.g. ``.agents/skills/<s>``). Recording
+    only the directory leaves its contents unhashed, so skill content drift
+    escapes ``content-integrity`` (the ``apm audit --ci --no-drift`` gate).
+    This expands the bundle into per-file entries (``SKILL.md``, ``assets/``,
+    ``scripts/``) so ``compute_deployed_hashes`` hashes them. The directory
+    entry itself is recorded by the caller and intentionally excluded here.
+
+    Mocked or file-shaped ``target_paths`` (used in unit tests) are not real
+    directories on disk and yield an empty list, so callers pass them through
+    unchanged.
+    """
+    try:
+        if not (skill_dir.is_dir() and not skill_dir.is_symlink()):
+            return []
+    except OSError:
+        return []
+    entries: list[str] = []
+    for bundle_file in sorted(skill_dir.rglob("*")):
+        try:
+            if bundle_file.is_file() and not bundle_file.is_symlink():
+                entries.append(_deployed_path_entry(bundle_file, project_root, targets))
+        except OSError:
+            continue
+    return entries
+
+
 def _log_hook_display_payloads(
     payloads: list,
     verbose: bool,
@@ -492,6 +525,13 @@ def integrate_package_primitives(
         )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
+        # #1716: also record the bundle's contained files so per-file
+        # content hashes cover SKILL.md / assets / scripts. The directory
+        # entry above is retained (cleanup's directory-rejection gate and
+        # the manifest dir-exclusion contract depend on it); the file
+        # entries give ``content-integrity`` its per-file coverage so skill
+        # drift is caught under ``apm audit --ci --no-drift``.
+        deployed.extend(_skill_bundle_file_entries(tp, project_root, targets))
 
     # A3: warm-cache visibility. If nothing was integrated for any kind AND
     # no skill was created, emit one annotation so the user knows the dep
