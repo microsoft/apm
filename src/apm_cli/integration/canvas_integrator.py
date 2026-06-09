@@ -110,14 +110,18 @@ class CanvasIntegrator(BaseIntegrator):
 
         A bundle is an *immediate* subdirectory of ``.apm/extensions/`` that
         contains an ``extension.mjs`` entry file.  Symlinked bundle
-        directories are rejected for safety.
+        directories and the base ``extensions/`` directory itself are
+        rejected for safety; resolved paths must stay within *package_path*.
         """
         base = package_path / ".apm" / "extensions"
-        if not base.is_dir():
+        if not base.is_dir() or base.is_symlink():
             return []
+        resolved_root = package_path.resolve()
         bundles: list[Path] = []
         for child in sorted(base.iterdir()):
             if child.is_symlink() or not child.is_dir():
+                continue
+            if not child.resolve().is_relative_to(resolved_root):
                 continue
             marker = child / CANVAS_MARKER
             if marker.is_file() and not marker.is_symlink():
@@ -292,6 +296,7 @@ class CanvasIntegrator(BaseIntegrator):
                 project_root / rel
                 for rel in managed_files
                 if rel.replace("\\", "/").startswith(prefix)
+                and BaseIntegrator.validate_deploy_path(rel, project_root, targets=[target])
             ]
             BaseIntegrator.cleanup_empty_parents(
                 removed_paths, stop_at=project_root / effective_root
