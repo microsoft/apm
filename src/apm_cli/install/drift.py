@@ -531,7 +531,18 @@ _INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 
 
 def _governed_root_dirs(targets) -> set[str]:
-    """Return the set of top-level managed directory names to walk."""
+    """Return the set of top-level managed directory names to walk.
+
+    Deliberately limited to each target's top-level ``root_dir`` (plus
+    ``.apm``). Per-primitive ``deploy_root`` overrides (e.g. the ``copilot``
+    target routing ``skills`` to ``.agents``) are intentionally NOT walked
+    here: the drift replay does not faithfully reproduce the deploy-time
+    cross-primitive link rewrite for skill bundles, so walking ``.agents/``
+    would surface byte-identical skills as false-positive drift. Skill
+    content drift is instead covered by the per-file content-integrity gate
+    (``apm audit --ci --no-drift``); see issue #1716 and the deferred
+    replay-link-rewrite follow-up.
+    """
     roots: set[str] = {".apm"}
     for t in targets or []:
         root = getattr(t, "root_dir", None)
