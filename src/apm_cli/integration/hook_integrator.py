@@ -403,7 +403,7 @@ class HookIntegrator(BaseIntegrator):
             for matcher in matchers:
                 if not isinstance(matcher, dict):
                     continue
-                for key in ("command", "bash", "powershell"):
+                for key in HookIntegrator.HOOK_COMMAND_KEYS:
                     value = matcher.get(key)
                     if isinstance(value, str):
                         entries.append((event_name, {key: value}))
@@ -413,7 +413,7 @@ class HookIntegrator(BaseIntegrator):
                 for hook in nested_hooks:
                     if not isinstance(hook, dict):
                         continue
-                    for key in ("command", "bash", "powershell"):
+                    for key in HookIntegrator.HOOK_COMMAND_KEYS:
                         value = hook.get(key)
                         if isinstance(value, str):
                             entries.append((event_name, {key: value}))
@@ -423,13 +423,18 @@ class HookIntegrator(BaseIntegrator):
     def _summarize_command(entry: dict) -> str:
         """Return a human-readable summary for a single hook command entry."""
         command = ""
-        for key in ("command", "bash", "powershell"):
+        for key in HookIntegrator.HOOK_COMMAND_KEYS:
             value = entry.get(key)
             if isinstance(value, str) and value.strip():
                 command = value.strip()
                 break
         if not command:
             return "runs hook command"
+        # Collapse any internal whitespace (including embedded newlines) so
+        # the summary is always single-line. A hook command containing a
+        # newline must not break install-log formatting or enable
+        # log-spoofing. Addresses Copilot inline on hook_integrator.py.
+        command = " ".join(command.split())
         for token in command.split():
             cleaned = token.strip("\"'")
             if "/" in cleaned or cleaned.startswith("."):
@@ -1241,6 +1246,11 @@ class HookIntegrator(BaseIntegrator):
         scripts_adopted = 0
         target_paths: list[Path] = []
         display_payloads: list = []
+        # Per-file display metadata is captured during the merge loop but
+        # the payloads are BUILT after the JSON config is finalized (Gemini
+        # transform applied, schema-strict _apm_source stripped) so that
+        # rendered_json reflects the actual on-disk/executed content.
+        pending_display: list = []
         # Events whose prior-owned entries have already been cleared on
         # this install run. Packages can contribute to the same event
         # from multiple hook files -- we must only strip once so earlier
@@ -1311,6 +1321,7 @@ class HookIntegrator(BaseIntegrator):
                 reverse_map.setdefault(norm_name, set()).add(source_name)
 
             entries_appended_for_file = False
+            file_event_entries: dict = {}
             for raw_event_name, entries in hooks.items():
                 if not isinstance(entries, list) or not entries:
                     continue
@@ -1418,15 +1429,24 @@ class HookIntegrator(BaseIntegrator):
                         deduped.append(entry)
                 json_config["hooks"][event_name] = deduped
                 entries_appended_for_file = True
+                # Capture the actual entry objects this file contributed to
+                # the merged config. They are the same dict references that
+                # the schema-strict strip mutates in place below, so building
+                # the display payload from them after finalization yields
+                # rendered_json that matches the on-disk/executed content
+                # (Gemini-transformed, _apm_source stripped where required).
+                file_event_entries.setdefault(event_name, []).extend(
+                    e for e in entries if isinstance(e, dict)
+                )
 
             if entries_appended_for_file:
                 hooks_integrated += 1
-                display_payloads.append(
-                    self._build_display_payload(
+                pending_display.append(
+                    (
                         config.config_filename,
                         config.config_filename,
                         hook_file,
-                        rewritten,
+                        file_event_entries,
                     )
                 )
             else:
@@ -1504,6 +1524,20 @@ class HookIntegrator(BaseIntegrator):
                     _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
             elif sidecar_path.exists():
                 sidecar_path.unlink()
+
+        # Build display payloads from the finalized entry objects (post
+        # Gemini transform and post schema-strict _apm_source strip) so the
+        # CLI summary and rendered_json faithfully reflect what is written
+        # to disk and executed -- not the pre-transform per-file data.
+        for _label, _path, _hook_file, _file_event_entries in pending_display:
+            display_payloads.append(
+                self._build_display_payload(
+                    _label,
+                    _path,
+                    _hook_file,
+                    {"hooks": _file_event_entries},
+                )
+            )
 
         # Write the (now schema-clean) config
         with open(json_path, "w", encoding="utf-8") as f:
