@@ -136,10 +136,9 @@ def preview(ctx, script_name, param, verbose):
                 # Show original and compiled commands in panels
                 _rich_panel(command, title=" Original command", style="blue")
 
-                # Auto-compile prompts to show what would be executed
-                # _auto_compile_prompts returns (compiled_command, prompt_files, runtime_content);
-                # preview only needs the first two values.
-                compiled_command, compiled_prompt_files, _ = script_runner._auto_compile_prompts(
+                # Auto-compile prompts to show what would be executed.
+                # preview only needs the command and compiled prompt file list.
+                compiled_command, compiled_prompt_files, *_ = script_runner._auto_compile_prompts(
                     command, params
                 )
 
@@ -179,7 +178,7 @@ def preview(ctx, script_name, param, verbose):
                 logger.progress("Original command:")
                 click.echo(f"  {command}")
 
-                compiled_command, compiled_prompt_files, _ = script_runner._auto_compile_prompts(
+                compiled_command, compiled_prompt_files, *_ = script_runner._auto_compile_prompts(
                     command, params
                 )
 
