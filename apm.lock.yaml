@@ -1,6 +1,6 @@
 lockfile_version: '1'
-generated_at: '2026-06-09T16:13:13.873738+00:00'
-apm_version: 0.18.0
+generated_at: '2026-06-09T20:09:37.099937+00:00'
+apm_version: 0.19.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
   package_type: apm_package
@@ -230,7 +230,7 @@ dependencies:
   - .agents/skills/apm-review-panel/evals/render_eval.py
   - .agents/skills/apm-review-panel/evals/trigger-evals.json
   deployed_file_hashes:
-    .agents/skills/apm-review-panel/SKILL.md: sha256:fe6a731933ce17d1bafd230817415994b16b0ca4a6743dd80cd1c90a45328af5
+    .agents/skills/apm-review-panel/SKILL.md: sha256:fc63e25479c5c2066f317b5b0e430738bd8a67054a2ae6934fbe5b3d281fa10a
     .agents/skills/apm-review-panel/apm.yml: sha256:80c403c4d3c59a91bb27b85650e21a466e9cd0cbc28e92bf0f3e53c6ea71cb2c
     .agents/skills/apm-review-panel/assets/ceo-return-schema.json: sha256:d8707211968efb0471d083f880d5353d66a0eda84635e803a930f60c91837468
     .agents/skills/apm-review-panel/assets/panelist-return-schema.json: sha256:e3cf2ae17e93dd934f2659ed77d2640ea9601fbe8698f63ba800edf046691f99
