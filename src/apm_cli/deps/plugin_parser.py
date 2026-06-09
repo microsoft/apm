@@ -221,8 +221,15 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
             data = load_yaml(apm_yml_path)
             if isinstance(data, dict):
                 existing_manifest = data
-        except (OSError, yaml.YAMLError):
-            pass  # Best-effort; fall back to plugin-only metadata
+        except (OSError, yaml.YAMLError) as exc:
+            # Best-effort: fall back to plugin-only metadata. Surface a
+            # warning so a malformed apm.yml does not silently re-introduce
+            # the #1666 symptom (transitive deps dropped with no diagnostic).
+            _surface_warning(
+                f"Could not load existing apm.yml for merge; transitive "
+                f"dependencies may not be preserved: {exc}",
+                _logger,
+            )
 
     # Generate apm.yml from plugin metadata, merging with existing manifest
     apm_yml_content = _generate_apm_yml(manifest, existing_manifest=existing_manifest)

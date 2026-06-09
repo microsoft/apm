@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now preserves transitive dependencies declared in `apm.yml`
+  when installing dual-format packages (those colocating `plugin.json` with
+  `apm.yml`) from the marketplace or a remote subdirectory, instead of silently
+  dropping them when the synthesized manifest overwrote the file. A malformed
+  existing `apm.yml` now also surfaces a warning instead of failing silently.
+  (by @sergio-sisternes-epam, closes #1666)
 - `apm install` now preserves scoped MCP package config keys such as
   `@playwright/mcp` across Claude, Codex, and Copilot harness configs instead
   of truncating them to `mcp`. (#1699)

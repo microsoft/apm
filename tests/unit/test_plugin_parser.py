@@ -1383,3 +1383,31 @@ class TestSynthesizePreservesExistingManifest:
         assert len(apm_deps) >= 1, (
             f"Transitive deps lost after validation; got {len(apm_deps)} apm deps"
         )
+
+    def test_malformed_apm_yml_fallback_surfaces_warning(self, tmp_path):
+        """A malformed existing apm.yml must not fail silently (#1666 trap).
+
+        When the existing apm.yml cannot be parsed, synthesis falls back to
+        plugin-only metadata -- which drops any transitive deps the file may
+        have declared. That data loss must be surfaced to the user via
+        ``_surface_warning`` rather than swallowed, otherwise the malformed
+        file re-creates the exact #1666 symptom with zero diagnostic output.
+        """
+        from unittest.mock import patch
+
+        # Write syntactically invalid YAML (unbalanced bracket triggers a
+        # yaml.YAMLError inside load_yaml).
+        (tmp_path / "apm.yml").write_text("name: bad\ndependencies: [unterminated\n")
+        self._write_plugin_json(tmp_path, {"name": "bad-pkg", "version": "1.0.0"})
+
+        with patch("apm_cli.deps.plugin_parser._surface_warning") as mock_warn:
+            synthesize_apm_yml_from_plugin(tmp_path, {"name": "bad-pkg", "version": "1.0.0"})
+
+        assert mock_warn.called, "Malformed apm.yml fallback did not surface a warning"
+        warning_text = " ".join(str(call.args[0]) for call in mock_warn.call_args_list)
+        assert "apm.yml" in warning_text
+        assert "transitive" in warning_text.lower()
+
+        # Fallback still produces a usable apm.yml from plugin metadata.
+        result = self._read_apm_yml(tmp_path)
+        assert result["name"] == "bad-pkg"
