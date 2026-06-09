@@ -160,3 +160,135 @@ class TestNoDedupSkipsDeduplicationLogic:
             "With no_dedup=True, instructions section must be present in CLAUDE.md "
             "even when .claude/rules/ is pre-populated. Got:\n" + body
         )
+
+
+# ---------------------------------------------------------------------------
+# AGENTS.md instruction dedup regression tests (issue #1678)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentsMdInstructionDedup:
+    """Regression tests: AGENTS.md dedup must be target-aware."""
+
+    @pytest.fixture
+    def project_with_github_instructions(self, tmp_path):
+        """Project with .github/instructions/ populated + primitives."""
+        # Pre-populate .github/instructions/ so dedup would normally fire
+        instr_dir = tmp_path / ".github" / "instructions"
+        instr_dir.mkdir(parents=True)
+        (instr_dir / "style.md").write_text("# Style\nUse type hints.\n", encoding="utf-8")
+
+        # Create primitives
+        (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0\n", encoding="utf-8")
+        apm_instr_dir = tmp_path / ".apm" / "instructions"
+        apm_instr_dir.mkdir(parents=True)
+        (apm_instr_dir / "style.instructions.md").write_text(
+            "---\ndescription: Style rule\napplyTo: '**/*.py'\n---\n# Style\nUse type hints.\n",
+            encoding="utf-8",
+        )
+
+        instruction = Instruction(
+            name="style",
+            file_path=tmp_path / ".apm/instructions/style.instructions.md",
+            description="Style rule",
+            apply_to="**/*.py",
+            content="Use type hints.",
+            author="test",
+            source="local",
+        )
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(instruction)
+        return tmp_path, primitives
+
+    def test_codex_target_preserves_instructions(self, project_with_github_instructions):
+        """Codex does not read .github/instructions/ -- AGENTS.md must keep
+        instruction content (issue #1678 regression)."""
+        tmp_path, primitives = project_with_github_instructions
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target="codex", dry_run=False)
+
+        result = compiler._compile_distributed(config, primitives)
+
+        # Instructions must be present in the generated AGENTS.md content
+        assert result.success
+        # Check via the distributed config that skip_instructions was NOT set
+        # by verifying instruction content appears in the output
+        agents_md = tmp_path / "AGENTS.md"
+        assert agents_md.exists(), "AGENTS.md must be generated for codex target"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "Codex target must include instructions in AGENTS.md even when "
+            ".github/instructions/ exists. Got:\n" + body
+        )
+
+    def test_copilot_only_deduplicates_instructions(self, project_with_github_instructions):
+        """Copilot (vscode) reads both locations -- dedup should fire."""
+        tmp_path, primitives = project_with_github_instructions
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target="vscode", dry_run=True)
+
+        result = compiler._compile_distributed(config, primitives)
+
+        # With dedup active, the compiled content should not contain the
+        # instruction text because it is already in .github/instructions/.
+        assert result.success
+        assert "Use type hints" not in result.content, (
+            "Copilot-only dedup should omit instructions from AGENTS.md "
+            "when .github/instructions/ is populated"
+        )
+
+    def test_multi_target_copilot_codex_preserves_instructions(
+        self, project_with_github_instructions
+    ):
+        """[copilot, codex] -> frozenset: must NOT dedup because Codex needs
+        instructions in AGENTS.md."""
+        tmp_path, primitives = project_with_github_instructions
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target=frozenset({"vscode", "agents"}),
+            dry_run=False,
+        )
+
+        compiler._compile_distributed(config, primitives)
+
+        agents_md = tmp_path / "AGENTS.md"
+        assert agents_md.exists(), "AGENTS.md must be generated for mixed copilot+codex target"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "Mixed copilot+codex target must include instructions in AGENTS.md. Got:\n" + body
+        )
+
+    def test_no_dedup_flag_overrides_agents_md_dedup(self, project_with_github_instructions):
+        """--no-dedup on vscode target must include instructions despite dedup
+        conditions being met."""
+        tmp_path, primitives = project_with_github_instructions
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="vscode",
+            no_dedup=True,
+            dry_run=False,
+        )
+
+        compiler._compile_distributed(config, primitives)
+
+        agents_md = tmp_path / "AGENTS.md"
+        assert agents_md.exists(), "AGENTS.md must be generated with --no-dedup"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "--no-dedup must force instructions into AGENTS.md. Got:\n" + body
+        )
+
+    def test_all_target_preserves_instructions(self, project_with_github_instructions):
+        """target='all' includes Codex -- must NOT dedup."""
+        tmp_path, primitives = project_with_github_instructions
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target="all", dry_run=False)
+
+        compiler._compile_distributed(config, primitives)
+
+        agents_md = tmp_path / "AGENTS.md"
+        assert agents_md.exists(), "AGENTS.md must be generated for target='all'"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "target='all' must include instructions in AGENTS.md. Got:\n" + body
+        )
