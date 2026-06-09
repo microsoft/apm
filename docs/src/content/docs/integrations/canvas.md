@@ -63,7 +63,7 @@ is **atomic**: every file in the bundle is planned and validated first, and any
 unmanaged local collision skips the whole bundle (use `apm install --force` to
 overwrite) so you never end up with a half-updated executable extension.
 
-After a canvas deploys, reload your Copilot session (`/clear`) or restart it --
+After a canvas deploys, start a new Copilot CLI session (exit and relaunch) --
 Copilot CLI discovers extensions at session start, so a freshly-deployed canvas
 is not picked up mid-session.
 
@@ -135,7 +135,9 @@ experimental flag, so a previously-installed canvas can always be removed.
   only; first-party root canvases deploy at project scope only.
 - **No compile/list surfacing yet.** Canvases are not yet shown by
   `apm list`/`apm compile`; they are deployed at install only.
+- **No policy-file control yet.** Canvas trust is controlled only by the
+  `--trust-canvas-extensions` CLI flag; governing it via `apm-policy.yml` is
+  planned but not part of this experimental release.
 
 See the [primitives and targets](/apm/concepts/primitives-and-targets/) matrix
-for where the canvas primitive sits, and the
-[security model](/apm/enterprise/security/) for the trust rationale.
+for where the canvas primitive sits.

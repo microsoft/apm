@@ -31,6 +31,7 @@ Extraction is **additive-only**: only files listed in the bundle's lockfile are 
 | `--skip-verify` | off | Skip the bundle completeness check against the bundle's `apm.lock.yaml`. Useful for partial bundles. |
 | `--dry-run` | off | List files that would be unpacked without writing anything. |
 | `--force` | off | Deploy despite critical hidden-character findings from the security scan. Use only after independent verification. |
+| `--trust-canvas-extensions` | off | Trust executable canvas extensions (`extension.mjs`) in the bundle. Without this, canvas files are stripped during extraction. Requires the `canvas` experimental flag. |
 | `--verbose`, `-v` | off | Show per-file paths and full diagnostic context. |
 
 ## Examples

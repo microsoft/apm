@@ -66,7 +66,7 @@ class InstallRequest:
     # --trust-canvas-extensions: opt in to deploying canvas extensions
     # shipped by dependencies.  Canvas extensions are executable Node code,
     # so dependency-provided ones are blocked by default; first-party
-    # (root/local) canvases always deploy once the experimental flag is on.
+    # (root project .apm/) canvases always deploy once the experimental flag is on.
     trust_canvas: bool = False
 
     # Plan-gate hook: if set, run_install_pipeline invokes this callable

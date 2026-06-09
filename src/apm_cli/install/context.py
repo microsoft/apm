@@ -64,7 +64,7 @@ class InstallContext:
     refresh: bool = False
     dev: bool = False
     # --trust-canvas-extensions: opt in to deploying dependency-provided
-    # canvas extensions (executable Node code). First-party (root/local)
+    # canvas extensions (executable Node code). First-party (root project .apm/)
     # canvases deploy without this; only dependency canvases are gated.
     trust_canvas: bool = False
     only_packages: list[str] | None = None

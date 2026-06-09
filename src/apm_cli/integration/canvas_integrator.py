@@ -343,7 +343,9 @@ class CanvasIntegrator(BaseIntegrator):
             )
             return "skipped"
 
-        planned = self._plan_bundle_files(bundle, canvas_root, project_root, diagnostics, name)
+        planned = self._plan_bundle_files(
+            bundle, canvas_root, project_root, diagnostics, name, package_name
+        )
         if planned is None:
             return "skipped"
         if not planned:
@@ -396,6 +398,16 @@ class CanvasIntegrator(BaseIntegrator):
 
         for src, dest, _rel in planned:
             dest.parent.mkdir(parents=True, exist_ok=True)
+            # Guard: reject dest if it is a symlink (TOCTOU defence --
+            # a symlink could redirect shutil.copyfile to an arbitrary
+            # location outside the project root).
+            if dest.exists() and dest.is_symlink():
+                self._warn(
+                    diagnostics,
+                    f"Skipping canvas '{name}' -- destination {_rel} is a symlink.",
+                    package_name,
+                )
+                return "skipped"
             shutil.copyfile(src, dest)
             target_paths.append(dest)
         return "integrated"
@@ -407,6 +419,7 @@ class CanvasIntegrator(BaseIntegrator):
         project_root: Path,
         diagnostics,
         name: str,
+        package_name: str = "",
     ) -> list[tuple[Path, Path, str]] | None:
         """Walk *bundle* and return ``(src, dest, rel)`` triples to copy.
 
@@ -461,7 +474,7 @@ class CanvasIntegrator(BaseIntegrator):
                 f"deployed from dependencies by default. Re-run with "
                 f"'--trust-canvas-extensions' to deploy them to {deploy_dir}."
             ),
-            package=pkg,
+            package=package_name or "",
         )
 
     @staticmethod
