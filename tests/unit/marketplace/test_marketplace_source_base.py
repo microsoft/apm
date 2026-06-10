@@ -120,6 +120,32 @@ class TestSourceBaseSchema:
                 """,
             )
 
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "team.tools/owner/repo/extra",
+            "gitlab.example.com/owner/repo/extra",
+        ],
+    )
+    def test_rejects_relative_source_with_fqdn_first_segment_when_source_base_is_set(
+        self, tmp_path: Path, source: str
+    ) -> None:
+        # A value with a FQDN-like first segment that forms neither a valid
+        # owner/repo nor host/owner/repo override shape is rejected even with
+        # sourceBase set, rather than being silently composed onto the base:
+        # that disambiguation avoids a confused-deputy footgun
+        # (manifest-schema.md Section 7.5).
+        with pytest.raises(MarketplaceYmlError, match="must be one of"):
+            _load_config(
+                tmp_path,
+                "https://gitlab.example.com/platform/marketplaces",
+                f"""
+                - name: tool
+                  source: {source}
+                  ref: {_SHA}
+                """,
+            )
+
 
 class TestSourceBaseBuildComposition:
     def test_composes_relative_source_onto_base_for_resolution_and_output(

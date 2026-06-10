@@ -469,6 +469,11 @@ def _validate_source_value(
     """Validate a package ``source`` field shape and path safety."""
     matches_existing_shape = bool(SOURCE_RE.match(source))
     if not matches_existing_shape:
+        # The source matched no supported shape. If its first segment looks
+        # like a FQDN it is trying to name a host but does not form a valid
+        # host-prefixed override (host/owner/repo) -- reject it rather than
+        # silently compose it onto ``sourceBase`` (confused-deputy footgun,
+        # documented in manifest-schema.md Section 7.5).
         first_segment = source.split("/", 1)[0]
         looks_like_unsupported_host_override = "/" in source and bool(
             re.fullmatch(_HOST_PAT, first_segment)
