@@ -15,6 +15,7 @@ See also: ``apm approve`` / ``apm deny`` CLI commands.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -175,20 +176,32 @@ def scan_package_executables(
     """
     key = build_approval_key(package_name, package_version)
 
-    # 1. Hooks: .apm/hooks/*.json
+    # 1. Hooks: .apm/hooks/ (any file -- .json, .sh, etc.)
     hook_dir = install_path / ".apm" / "hooks"
     hook_files: list[Path] = []
     if hook_dir.is_dir():
-        hook_files = sorted(hook_dir.glob("*.json"))
+        hook_files = sorted(
+            f for f in hook_dir.iterdir() if f.is_file() and not f.name.startswith(".")
+        )
     hook_details = [f.name for f in hook_files]
 
-    # 2. Bin executables: bin/
-    bin_dir = install_path / "bin"
+    # 2. Bin executables: top-level bin/ AND .apm/skills/*/bin/
     bin_files: list[Path] = []
-    if bin_dir.is_dir():
-        bin_files = sorted(
-            f for f in bin_dir.iterdir() if f.is_file() and not f.name.startswith(".")
-        )
+    for bin_dir in [install_path / "bin"]:
+        if bin_dir.is_dir():
+            bin_files.extend(
+                f for f in bin_dir.iterdir() if f.is_file() and not f.name.startswith(".")
+            )
+    # Also scan skill-level bin/ directories
+    apm_skills = install_path / ".apm" / "skills"
+    if apm_skills.is_dir():
+        for skill_dir in apm_skills.iterdir():
+            skill_bin = skill_dir / "bin"
+            if skill_bin.is_dir():
+                bin_files.extend(
+                    f for f in skill_bin.iterdir() if f.is_file() and not f.name.startswith(".")
+                )
+    bin_files = sorted(set(bin_files))
     bin_details = [f.name for f in bin_files]
 
     # 3. MCP servers: parse from apm.yml dependencies.mcp
@@ -234,7 +247,9 @@ def scan_package_executables(
 
 
 def _is_interactive() -> bool:
-    """Return True when stdin is a TTY (not piped or in CI)."""
+    """Return True when stdin is a TTY and not suppressed by env vars."""
+    if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI"):
+        return False
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 

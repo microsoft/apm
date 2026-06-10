@@ -215,28 +215,33 @@ def _scan_installed_packages(manifest: Path) -> list:
     if not apm_modules.is_dir():
         return results
 
-    for pkg_dir in sorted(apm_modules.iterdir()):
-        if not pkg_dir.is_dir() or pkg_dir.name.startswith("."):
-            continue
-        # Try to get package identity from apm.yml
-        pkg_yml = pkg_dir / "apm.yml"
-        name = pkg_dir.name
-        version = ""
-        if pkg_yml.is_file():
-            try:
-                from ..utils.yaml_io import load_yaml
+    def _scan_dir(base: Path) -> None:
+        for pkg_dir in sorted(base.iterdir()):
+            if not pkg_dir.is_dir() or pkg_dir.name.startswith("."):
+                continue
+            # Recurse into _local/ (local path dependencies)
+            if pkg_dir.name == "_local":
+                _scan_dir(pkg_dir)
+                continue
+            pkg_yml = pkg_dir / "apm.yml"
+            name = pkg_dir.name
+            version = ""
+            if pkg_yml.is_file():
+                try:
+                    from ..utils.yaml_io import load_yaml
 
-                data = load_yaml(pkg_yml)
-                if isinstance(data, dict):
-                    name = data.get("name", name)
-                    version = str(data.get("version", ""))
-            except Exception:
-                pass
+                    data = load_yaml(pkg_yml)
+                    if isinstance(data, dict):
+                        name = data.get("name", name)
+                        version = str(data.get("version", ""))
+                except Exception:
+                    pass
 
-        decl = scan_package_executables(pkg_dir, name, version)
-        if decl.has_executables:
-            results.append(decl)
+            decl = scan_package_executables(pkg_dir, name, version)
+            if decl.has_executables:
+                results.append(decl)
 
+    _scan_dir(apm_modules)
     return results
 
 

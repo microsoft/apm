@@ -39,12 +39,28 @@ def check_executable_approval(
     from apm_cli.security.executables import (
         EXEC_TYPE_BIN,
         EXEC_TYPE_HOOKS,
+        build_approval_key,
         is_package_approved,
     )
 
+    # Build candidate keys: the dep-ref canonical key AND the name#version
+    # fallback so that approvals stored under either format are honoured.
     pkg_key = resolve_package_key(package_info, package_name)
-    hooks_ok = is_package_approved(allow_executables, pkg_key, EXEC_TYPE_HOOKS)
-    bin_ok = is_package_approved(allow_executables, pkg_key, EXEC_TYPE_BIN)
+    candidate_keys = [pkg_key]
+
+    # Add name#version fallback when it differs from the primary key.
+    _pkg = getattr(package_info, "package", None)
+    if _pkg:
+        _name = getattr(_pkg, "name", package_name) or package_name
+        _ver = getattr(_pkg, "version", "") or ""
+        alt_key = build_approval_key(_name, _ver)
+        if alt_key != pkg_key:
+            candidate_keys.append(alt_key)
+
+    hooks_ok = any(
+        is_package_approved(allow_executables, k, EXEC_TYPE_HOOKS) for k in candidate_keys
+    )
+    bin_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_BIN) for k in candidate_keys)
 
     # Track blocked packages for the post-loop approval prompt.
     if ctx is not None and (not hooks_ok or not bin_ok):

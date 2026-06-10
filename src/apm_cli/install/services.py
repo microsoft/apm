@@ -207,6 +207,22 @@ def _resolve_package_key(package_info: Any, package_name: str) -> str:
     return resolve_package_key(package_info, package_name)
 
 
+def _log_hooks_skip(package_name, package_info, targets, logger) -> None:
+    """Warn about skipped hooks only when the package actually ships them."""
+    # Check whether the package itself ships hook files (.apm/hooks/*.json
+    # or .apm/hooks/*.sh), not whether the target supports hooks.
+    hooks_dir = Path(package_info.install_path) / ".apm" / "hooks"
+    if not hooks_dir.is_dir() or not any(hooks_dir.iterdir()):
+        return
+    _pkg_label = package_name or getattr(package_info, "name", "unknown")
+    if logger:
+        logger.warning(
+            f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {_pkg_label}' to approve.",
+            symbol="warning",
+        )
+
+
 def integrate_package_primitives(
     package_info: Any,
     project_root: Path,
@@ -378,13 +394,7 @@ def integrate_package_primitives(
             continue  # skills handled separately
         # Executable approval gate: skip hooks if not approved.
         if _prim_name == "hooks" and not _hooks_approved:
-            _pkg_label = package_name or getattr(package_info, "name", "unknown")
-            if logger:
-                logger.warning(
-                    f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
-                    f"Run 'apm approve {_pkg_label}' to approve.",
-                    symbol="warning",
-                )
+            _log_hooks_skip(package_name, package_info, targets, logger)
             continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         _agg_files = 0
