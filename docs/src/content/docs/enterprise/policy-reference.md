@@ -40,7 +40,7 @@ mcp:
 
 compilation:
   target:
-    allow: []                   # copilot | claude | cursor | opencode | codex | gemini | vscode | windsurf | agent-skills | all
+    allow: []                   # copilot | claude | cursor | opencode | codex | gemini | vscode | windsurf | kiro | agent-skills | all
     enforce: null               # Enforce specific target (must be present in list)
   strategy:
     enforce: null               # distributed | single-file

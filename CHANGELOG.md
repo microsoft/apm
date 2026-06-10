@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Kiro IDE is now a first-class install target: APM deploys steering, skills,
+  hooks, and MCP config to the documented `.kiro/` layout. (closes #702)
+
 ## [0.19.0] - 2026-06-09
 
 ### Added

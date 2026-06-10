@@ -26,11 +26,12 @@ see [Primitive types](./primitive-types/).
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
+| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, and Codex by default (see [Skills convergence](#skills-convergence)
-below). Claude and Windsurf keep target-native skill directories.
+below). Claude, Windsurf, and Kiro keep target-native skill directories.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
 Copilot desktop App), and `openclaw` (OpenClaw agent runtime) are
@@ -61,6 +62,7 @@ list before `compile` or `install`.
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
+| kiro     | `.kiro/` directory                            |
 
 `agent-skills` is never auto-detected but is a canonical target: select it
 with `--target` or list it in a project's `apm.yml` `targets:` field so
@@ -172,6 +174,21 @@ Windsurf / Cascade.
 - **Agents.** Not deployed. Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so a separate agents primitive would collide with skills on the same path. Ship personas as skills under `.apm/skills/<name>/SKILL.md` instead.
 - **User scope.** Partial. `instructions` is excluded at user scope; Windsurf stores global memory in a single `~/.codeium/windsurf/memories/global_rules.md` file with a different format.
 
+## kiro
+
+Kiro IDE.
+
+- **Detection.** `.kiro/` directory.
+- **Deploy directory.** `.kiro/` (project and user scope).
+- **Supported primitives.** instructions, skills, hooks, mcp.
+- **File conventions.**
+  - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
+  - skills: `.kiro/skills/<name>/SKILL.md`
+  - hooks: one JSON file per hook under `.kiro/hooks/`
+  - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
+- **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
+- **Scope.** This is the documented Kiro IDE layout only. Kiro CLI differences are tracked separately and are not part of this target.
+
 ## agent-skills
 
 Cross-client shared skills directory.
@@ -209,7 +226,7 @@ To restore the pre-convergence per-target layout (skills land under each target'
 
 MCP is not a `TargetProfile` primitive; it is wired by a separate
 integrator that writes per-client config files (e.g.
-`.vscode/mcp.json`, `.cursor/mcp.json`, `.claude.json`) for every
+`.vscode/mcp.json`, `.cursor/mcp.json`, `.claude.json`, `.kiro/settings/mcp.json`) for every
 target in the active set that has an MCP client adapter. Active set
 follows the same `--target` > `targets:` > auto-detect chain as
 `apm install`: a runtime with an adapter but outside the active set

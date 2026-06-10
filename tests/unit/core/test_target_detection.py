@@ -81,6 +81,16 @@ class TestDetectTarget:
         assert target == "all"
         assert reason == "explicit --target flag"
 
+    def test_explicit_target_kiro_wins(self, tmp_path):
+        """Explicit --target kiro always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="kiro",
+        )
+
+        assert target == "kiro"
+        assert reason == "explicit --target flag"
+
     def test_config_target_copilot(self, tmp_path):
         """Config target copilot maps to vscode."""
         target, reason = detect_target(
@@ -164,6 +174,19 @@ class TestDetectTarget:
 
         assert target == "all"
         assert ".github/" in reason and ".claude/" in reason
+
+    def test_auto_detect_kiro_only(self, tmp_path):
+        """Auto-detect kiro when only .kiro/ exists."""
+        (tmp_path / ".kiro").mkdir()
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "kiro"
+        assert "detected .kiro/ folder" in reason
 
     def test_auto_detect_neither_folder(self, tmp_path):
         """Auto-detect minimal when neither folder exists."""

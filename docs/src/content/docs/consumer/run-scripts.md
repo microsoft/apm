@@ -35,7 +35,7 @@ scripts:
 
 Each value is a literal shell command. The canonical pattern is shelling
 out to a runtime CLI -- `copilot`, `claude`, `codex`, `cursor-agent`,
-`gemini`, `opencode`, `windsurf`, or `llm` -- with a prompt file argument.
+`gemini`, `opencode`, `windsurf`, `kiro`, or `llm` -- with a prompt file argument.
 APM does not bundle these runtimes; you install them yourself and APM
 invokes whichever the script names.
 

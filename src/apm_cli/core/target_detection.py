@@ -1,7 +1,7 @@
 """Target detection for auto-selecting compilation and integration targets.
 
 This module implements the auto-detection pattern for determining which agent
-targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini) should be used
+targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Kiro) should be used
 based on existing project structure and configuration.
 
 Detection priority (highest to lowest):
@@ -58,6 +58,7 @@ TargetType = Literal[
     "codex",
     "gemini",
     "windsurf",
+    "kiro",
     "agent-skills",
     "all",
     "minimal",
@@ -97,6 +98,7 @@ UserTargetType = Literal[
     "codex",
     "gemini",
     "windsurf",
+    "kiro",
     "agent-skills",
     "all",
     "minimal",
@@ -136,6 +138,8 @@ def detect_target(  # noqa: PLR0911
             return "gemini", "explicit --target flag"
         elif explicit_target == "windsurf":
             return "windsurf", "explicit --target flag"
+        elif explicit_target == "kiro":
+            return "kiro", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
@@ -157,6 +161,8 @@ def detect_target(  # noqa: PLR0911
             return "gemini", "apm.yml target"
         elif config_target == "windsurf":
             return "windsurf", "apm.yml target"
+        elif config_target == "kiro":
+            return "kiro", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
         elif config_target == "all":
@@ -170,6 +176,7 @@ def detect_target(  # noqa: PLR0911
     codex_exists = (project_root / ".codex").is_dir()
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
+    kiro_exists = (project_root / ".kiro").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -185,6 +192,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".gemini/")
     if windsurf_exists:
         detected.append(".windsurf/")
+    if kiro_exists:
+        detected.append(".kiro/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -202,6 +211,8 @@ def detect_target(  # noqa: PLR0911
         return "gemini", "detected .gemini/ folder"
     elif windsurf_exists:
         return "windsurf", "detected .windsurf/ folder"
+    elif kiro_exists:
+        return "kiro", "detected .kiro/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -221,7 +232,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "agents" in target or "gemini" in target
-    return target in ("vscode", "opencode", "codex", "gemini", "windsurf", "all", "minimal")
+    return target in ("vscode", "opencode", "codex", "gemini", "windsurf", "kiro", "all", "minimal")
 
 
 def should_compile_claude_md(target: CompileTargetType) -> bool:
@@ -328,9 +339,10 @@ def get_target_description(target: UserTargetType) -> str:
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
+        "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -343,7 +355,7 @@ def get_target_description(target: UserTargetType) -> str:
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
 ALL_CANONICAL_TARGETS = frozenset(
-    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf"}
+    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "kiro"}
 )
 
 #: Targets that the parser must accept but that are gated at runtime by
@@ -662,6 +674,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("gemini", "file", "GEMINI.md"),
     ("opencode", "dir", ".opencode"),
     ("windsurf", "dir", ".windsurf"),
+    ("kiro", "dir", ".kiro"),
 ]
 
 # Ordered list of targets for display (excludes agent-skills meta-target).
@@ -673,6 +686,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "gemini",
     "opencode",
     "windsurf",
+    "kiro",
 ]
 
 # Canonical deploy directories for each target.
@@ -684,6 +698,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "gemini": ".gemini/",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
+    "kiro": ".kiro/",
 }
 
 # The primary (lowest-friction) signal for each target, used in
@@ -696,6 +711,7 @@ CANONICAL_SIGNAL: dict[str, str] = {
     "gemini": "GEMINI.md",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
+    "kiro": ".kiro/",
 }
 
 

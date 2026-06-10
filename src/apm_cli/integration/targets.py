@@ -21,7 +21,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-RULE_FORMATS: frozenset[str] = frozenset({"cursor_rules", "claude_rules", "windsurf_rules"})
+RULE_FORMATS: frozenset[str] = frozenset(
+    {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering"}
+)
 """Canonical set of format-transforming rule ``format_id``s.
 
 Single home for "which instruction formats transform their source on
@@ -64,7 +66,7 @@ class PrimitiveMapping:
     rendered *output* rather than the source bytes.
 
     This is the single source of truth for the rule-dir formats
-    (``cursor_rules``, ``claude_rules``, ``windsurf_rules``).  When ``True``:
+    (``cursor_rules``, ``claude_rules``, ``windsurf_rules``, ``kiro_steering``).  When ``True``:
 
     * The deployed file is never byte-identical to its source, so a
       source-based adopt always misses (apm#1662).  The integrator instead
@@ -553,6 +555,34 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         unsupported_user_primitives=("instructions",),
         compile_family="agents",
         hooks_config_display=".cursor/hooks.json",
+    ),
+    # Kiro IDE -- spec-driven development editor.
+    # Steering files use Kiro frontmatter under .kiro/steering/.
+    # Skills use the open Agent Skills SKILL.md layout under .kiro/skills/.
+    # Hooks are individual JSON files under .kiro/hooks/.
+    # MCP config lives at .kiro/settings/mcp.json and ~/.kiro/settings/mcp.json.
+    # Kiro CLI config divergence is intentionally out of scope for this v1 target.
+    # Ref: https://kiro.dev/docs/steering/
+    # Ref: https://kiro.dev/docs/skills/
+    # Ref: https://kiro.dev/docs/hooks/
+    "kiro": TargetProfile(
+        name="kiro",
+        root_dir=".kiro",
+        primitives={
+            "instructions": PrimitiveMapping(
+                "steering",
+                ".md",
+                "kiro_steering",
+                output_compare=True,
+            ),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "kiro_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".kiro",
+        compile_family="agents",
     ),
     # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
     # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.

@@ -209,7 +209,7 @@ team-skills/
 `apm install` resolves which harness directories to populate using a strict
 priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
 filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.github/copilot-instructions.md`,
-`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`). The example layout
+`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). The example layout
 above shows `.github/` because `.github/copilot-instructions.md` exists in the
 project; if you also have `.claude/`, `.cursor/`, `.opencode/`, or `.gemini/`, those
 directories get populated too. With no signal at all, `apm install` exits with

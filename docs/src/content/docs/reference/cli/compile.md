@@ -35,7 +35,7 @@ for the full reach map.
 `.github/instructions/*.instructions.md` (with their `applyTo:`
 frontmatter) that `apm install` already deploys. Compile is
 **recommended for every other target** (`claude`, `cursor`, `codex`,
-`gemini`, `opencode`, `windsurf`), which load instructions through a
+`gemini`, `opencode`, `windsurf`, `kiro`), which load instructions through a
 root context file or harness-specific rules folder that compile
 generates.
 
@@ -44,7 +44,7 @@ Resolution order for which targets to compile:
 1. `--target` / `--all` on the command line
 2. `targets:` field in `apm.yml`
 3. Auto-detection from existing folders (`.github/`, `.claude/`,
-   `.codex/`, `.gemini/`, `.windsurf/`)
+   `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`)
 
 Use [`apm targets`](../targets/) to preview what auto-detection
 resolves to before compiling.
@@ -59,7 +59,7 @@ written. Critical findings cause the command to exit non-zero. See
 
 | Flag | Description |
 |------|-------------|
-| `-t, --target VALUE` | Target(s) to compile. Comma-separated. Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `agent-skills`, `all`. |
+| `-t, --target VALUE` | Target(s) to compile. Comma-separated. Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `agent-skills`, `all`. |
 | `--all` | Compile for all canonical targets. Equivalent to `--target all` and mutually exclusive with `--target`. Preferred form. |
 
 `vscode` and `agents` are accepted as deprecated aliases for `copilot`
@@ -199,6 +199,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `opencode` | `AGENTS.md` |
 | `gemini` | `AGENTS.md`, `GEMINI.md` |
 | `windsurf` | `AGENTS.md` |
+| `kiro` | `AGENTS.md` |
 | `agent-skills` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 

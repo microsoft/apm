@@ -165,6 +165,7 @@ class TestTargetProfileUserScope:
             "codex",
             "gemini",
             "windsurf",
+            "kiro",
             "copilot-cowork",
             "copilot-app",
             "agent-skills",
@@ -193,6 +194,10 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["opencode"].user_supported == "partial"
         assert KNOWN_TARGETS["opencode"].user_root_dir == ".config/opencode"
         assert "hooks" in KNOWN_TARGETS["opencode"].unsupported_user_primitives
+
+    def test_kiro_is_supported_at_user_scope(self):
+        assert KNOWN_TARGETS["kiro"].user_supported is True
+        assert KNOWN_TARGETS["kiro"].user_root_dir == ".kiro"
 
     def test_copilot_user_root_dir(self):
         assert KNOWN_TARGETS["copilot"].user_root_dir == ".copilot"

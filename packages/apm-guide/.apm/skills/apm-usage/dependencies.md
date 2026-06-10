@@ -314,6 +314,7 @@ dependencies:
         #                            from host env at server-start (no plaintext on disk).
         #                            VS Code and JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
+        #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime

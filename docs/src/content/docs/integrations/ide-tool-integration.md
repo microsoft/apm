@@ -22,6 +22,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
+| Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
 | JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, `${env:VAR}` env substitution) |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
@@ -59,7 +60,7 @@ Each primitive type maps to a target-specific slot:
 .apm/prompts/        ->   per target: prompt files / commands
 .apm/agents/         ->   per target: agent definitions (or skill conversion)
 .apm/skills/         ->   per target: skills directory (Claude, Codex, OpenCode, .agents)
-.apm/hooks/          ->   per target: lifecycle hooks (Claude only today)
+.apm/hooks/          ->   per target: lifecycle hooks / tool hooks
 mcp: in apm.yml      ->   per target: .mcp.json / settings.json / equivalent
 ```
 
@@ -107,6 +108,7 @@ MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies
 - `opencode.json` at the repo root when `.opencode/` exists (OpenCode)
 - `.gemini/settings.json` (Gemini)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
+- `.kiro/settings/mcp.json` and `~/.kiro/settings/mcp.json` (Kiro IDE)
 - OS-specific `github-copilot/intellij/mcp.json` (JetBrains Copilot -- uses
   `"servers"` key, user-scope global path):
   - `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows)
@@ -114,6 +116,18 @@ MCP servers declared in `apm.yml` (under `dependencies.mcp:` or `devDependencies
   - `~/.local/share/github-copilot/intellij/mcp.json` (Linux, honouring `XDG_DATA_HOME`)
 
 For server installation patterns, registry resolution, and trust model, see [MCP servers guide](../consumer/install-mcp-servers/) and [`apm mcp`](../reference/cli/mcp/).
+
+### Kiro IDE
+
+Kiro reads project configuration from `.kiro/`. APM maps instructions to
+`.kiro/steering/` and converts `applyTo:` scoping into Kiro steering
+frontmatter (`inclusion: fileMatch`); unscoped instructions become
+`inclusion: always`. Skills are copied verbatim to `.kiro/skills/`, hooks
+become one JSON file per hook in `.kiro/hooks/`, and MCP servers are written
+to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for `--global`.
+
+This target covers the documented Kiro IDE layout. Kiro CLI configuration
+differences are tracked separately.
 
 ### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
 

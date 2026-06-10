@@ -184,6 +184,53 @@ def _install_registry_group(
     return configured_count
 
 
+_MCP_RUNTIME_ORDER = (
+    "copilot",
+    "codex",
+    "vscode",
+    "cursor",
+    "opencode",
+    "gemini",
+    "windsurf",
+    "kiro",
+    "claude",
+    "intellij",
+)
+
+_DIRECTORY_OPT_IN_RUNTIMES = {
+    "cursor": ".cursor",
+    "opencode": ".opencode",
+    "gemini": ".gemini",
+    "windsurf": ".windsurf",
+    "kiro": ".kiro",
+}
+
+
+def _is_runtime_available_for_mcp(
+    runtime_name: str,
+    project_root_path: Path,
+    *,
+    user_scope: bool,
+    manager: Any,
+) -> bool:
+    """Return True when *runtime_name* should receive MCP config writes."""
+    from apm_cli.integration.mcp_integrator import _is_vscode_available
+
+    if runtime_name == "vscode":
+        return _is_vscode_available(project_root=project_root_path)
+    if runtime_name == "kiro" and user_scope:
+        return True
+    if runtime_name in _DIRECTORY_OPT_IN_RUNTIMES:
+        return (project_root_path / _DIRECTORY_OPT_IN_RUNTIMES[runtime_name]).is_dir()
+    if runtime_name == "claude":
+        return (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None
+    if runtime_name == "intellij":
+        from apm_cli.adapters.client.intellij import _intellij_config_dir
+
+        return _intellij_config_dir().is_dir()
+    return manager.is_runtime_available(runtime_name)
+
+
 def _resolve_target_runtimes(
     runtime: str | None,
     exclude: str | None,
@@ -202,10 +249,7 @@ def _resolve_target_runtimes(
     when the caller should immediately return 0 (e.g. all runtimes excluded,
     no user-scope-capable runtimes available).
     """
-    from apm_cli.integration.mcp_integrator import (
-        MCPIntegrator,
-        _is_vscode_available,
-    )
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
 
     if runtime:
         # Single runtime mode - skip auto-discovery entirely.
@@ -232,72 +276,25 @@ def _resolve_target_runtimes(
             manager = RuntimeManager()
             installed_runtimes: list[str] = []
 
-            for runtime_name in [
-                "copilot",
-                "codex",
-                "vscode",
-                "cursor",
-                "opencode",
-                "gemini",
-                "windsurf",
-                "claude",
-                "intellij",
-            ]:
+            for runtime_name in _MCP_RUNTIME_ORDER:
                 try:
-                    if runtime_name == "vscode":
-                        if _is_vscode_available(project_root=project_root_path):
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "cursor":
-                        # Cursor is opt-in: only target when .cursor/ exists
-                        if (project_root_path / ".cursor").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "opencode":
-                        # OpenCode is opt-in: only target when .opencode/ exists
-                        if (project_root_path / ".opencode").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "gemini":
-                        # Gemini CLI is opt-in: only target when .gemini/ exists
-                        if (project_root_path / ".gemini").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "windsurf":
-                        # Windsurf is opt-in: only target when .windsurf/ exists
-                        if (project_root_path / ".windsurf").is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "claude":
-                        # Claude Code is opt-in: target when .claude/ exists
-                        # in the project (project-scope writes) OR when the
-                        # `claude` binary is on PATH (user-scope writes).
-                        # The PATH check is the gate that prevents the
-                        # adapter from writing to ~/.claude.json on hosts
-                        # where Claude Code was never installed.
-                        if (project_root_path / ".claude").is_dir() or (
-                            find_runtime_binary("claude") is not None
-                        ):
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    elif runtime_name == "intellij":
-                        # JetBrains Copilot is opt-in: target when the
-                        # user-scope config directory already exists.  This
-                        # directory is created by the JetBrains Copilot
-                        # plugin on first run, so its presence reliably
-                        # signals that the plugin is installed.
-                        from apm_cli.adapters.client.intellij import _intellij_config_dir
-
-                        if _intellij_config_dir().is_dir():
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
-                    else:  # noqa: PLR5501
-                        if manager.is_runtime_available(runtime_name):
-                            ClientFactory.create_client(runtime_name)
-                            installed_runtimes.append(runtime_name)
+                    if _is_runtime_available_for_mcp(
+                        runtime_name,
+                        project_root_path,
+                        user_scope=user_scope,
+                        manager=manager,
+                    ):
+                        ClientFactory.create_client(
+                            runtime_name,
+                            project_root=project_root_path,
+                            user_scope=user_scope,
+                        )
+                        installed_runtimes.append(runtime_name)
                 except (ValueError, ImportError):
                     continue
         except ImportError:
+            from apm_cli.integration.mcp_integrator import _is_vscode_available
+
             installed_runtimes = [
                 rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None
             ]
@@ -316,6 +313,9 @@ def _resolve_target_runtimes(
             # Windsurf is directory-presence based
             if (project_root_path / ".windsurf").is_dir():
                 installed_runtimes.append("windsurf")
+            # Kiro is directory-presence based at project scope, always valid at user scope
+            if user_scope or (project_root_path / ".kiro").is_dir():
+                installed_runtimes.append("kiro")
             # Claude Code: directory-presence OR binary-on-PATH
             if (project_root_path / ".claude").is_dir() or (
                 find_runtime_binary("claude") is not None

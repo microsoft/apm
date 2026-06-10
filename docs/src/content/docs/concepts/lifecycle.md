@@ -30,7 +30,7 @@ Scaffolds a new APM project in the current directory.
 
 `apm init` writes an `apm.yml` manifest with sensible defaults for `name`, `author`, and `description`, plus empty dependency and script blocks. It records selected targets in `targets:`; author `.apm/` primitives yourself and run `apm install` or `apm compile` to create target output directories.
 
-Targets are picked in priority order. An explicit `--target copilot,claude` flag wins. Otherwise an interactive checklist runs. Otherwise APM scans the working tree for signal directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`) and pre-checks every harness it finds. With `-y` and no flag, all detected harnesses are written into `apm.yml`. See [primitives and targets](/apm/concepts/primitives-and-targets/) for what each target actually receives.
+Targets are picked in priority order. An explicit `--target copilot,claude` flag wins. Otherwise an interactive checklist runs. Otherwise APM scans the working tree for signal directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`) and pre-checks every harness it finds. With `-y` and no flag, all detected harnesses are written into `apm.yml`. See [primitives and targets](/apm/concepts/primitives-and-targets/) for what each target actually receives.
 
 **Common surprises**
 

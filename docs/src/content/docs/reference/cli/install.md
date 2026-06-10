@@ -46,11 +46,11 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 | Flag | Default | Description |
 |---|---|---|
-| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `intellij`, `agent-skills`, `all`; experimental `copilot-cowork` and `copilot-app` are also accepted when enabled. `all` expands to every harness above except `agent-skills`; combine `all,agent-skills` for both. Highest precedence in the chain `--target` > `apm.yml targets:` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
+| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `intellij`, `agent-skills`, `all`; experimental `copilot-cowork` and `copilot-app` are also accepted when enabled. `all` expands to every harness above except `agent-skills`; combine `all,agent-skills` for both. Highest precedence in the chain `--target` > `apm.yml targets:` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
 | `--runtime VALUE` | unset | Legacy alias for `--target` (single value only). Still accepted; prefer `--target`. |
 | `--exclude VALUE` | unset | Skip a single runtime that auto-detect or `targets:` would otherwise enable. |
 | `--only apm\|mcp` | both | Install only APM packages or only MCP servers. |
-| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes (Copilot CLI, Codex CLI, JetBrains Copilot). |
+| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes (Copilot CLI, Codex CLI, Gemini CLI, Kiro, JetBrains Copilot). |
 | `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 ### Policy and trust
@@ -199,7 +199,7 @@ apm install owner/skill-bundle --skill '*'   # reset to all skills
 
 - **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** suppress general install errors -- any error reported in the diagnostic summary still exits `1` (matches `npm` / `pip` / `cargo`). It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate findings, prefer `apm audit --strip`. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
 - **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
-- **MCP env-var passthrough.** Copilot CLI translates `${env:VAR}` and `<VAR>` to `${VAR}` in `~/.copilot/mcp-config.json`. JetBrains Copilot preserves env references as `${env:VAR}` in `github-copilot/intellij/mcp.json`. Plaintext secrets are never written to disk for these runtime-resolved targets; legacy targets resolve placeholders at install time.
+- **MCP env-var passthrough.** Copilot CLI and Kiro translate `${env:VAR}` and `<VAR>` to `${VAR}` in their MCP configs. JetBrains Copilot preserves env references as `${env:VAR}` in `github-copilot/intellij/mcp.json`. Plaintext secrets are never written to disk for these runtime-resolved targets; legacy targets resolve placeholders at install time.
 
 ### Install from a private registry (experimental)
 

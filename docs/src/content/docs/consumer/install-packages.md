@@ -81,7 +81,7 @@ The pipeline is deterministic. Each phase must pass before the next runs.
    `--force`.
 4. **Integrate.** Write primitives into each target harness's native
    directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`,
-   `.codex/`, `.gemini/`, `.windsurf/`) and the cross-tool
+   `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`) and the cross-tool
    `.agents/skills/` directory.
 5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
    hashes, and the resolved dependency set.
@@ -105,7 +105,7 @@ them. Detection priority:
 1. `--target <slug>` flag (highest).
 2. The `targets:` field in `apm.yml`.
 3. Auto-detect: any harness directory (`.github/`, `.claude/`,
-   `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`)
+   `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`)
    that already exists in the workspace.
 4. Fallback: minimal output to `AGENTS.md` only.
 
@@ -122,7 +122,7 @@ targets:
 For the full reach map of which primitive lands where on each
 harness, see [Primitives and targets](../../concepts/primitives-and-targets/).
 
-Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), and Windsurf (`.windsurf/rules/`) is automatic and idempotent -- re-running `apm install` adopts unchanged rules without rewriting them.
+Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf (`.windsurf/rules/`), and Kiro (`.kiro/steering/`) is automatic and idempotent -- re-running `apm install` adopts unchanged rules without rewriting them.
 
 ## Transitive dependencies and the lockfile
 

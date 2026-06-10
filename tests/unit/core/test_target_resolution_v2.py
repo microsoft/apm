@@ -102,6 +102,11 @@ def test_signal_whitelist_gemini_md_is_signal(tmp_path):
     assert "gemini" in _signal_targets(tmp_path)
 
 
+def test_signal_whitelist_kiro_dir_is_signal(tmp_path):
+    (tmp_path / ".kiro").mkdir()
+    assert "kiro" in _signal_targets(tmp_path)
+
+
 def test_signal_whitelist_cursorrules_is_signal(tmp_path):
     _touch(tmp_path / ".cursorrules", "# Cursor\n")
     assert "cursor" in _signal_targets(tmp_path)

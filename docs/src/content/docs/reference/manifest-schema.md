@@ -124,11 +124,11 @@ Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm ini
 | **Type** | `string` or `list<string>` |
 | **Required** | OPTIONAL |
 | **Default** | Auto-detect from folder presence (see below). |
-| **Allowed values** | `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `all` |
+| **Allowed values** | `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `all` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
-When `target:` is omitted, a conforming resolver SHOULD auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `windsurf` if `.windsurf/` exists, `all` if multiple are present, `minimal` if none. Auto-detection applies only when `target:` is unset; once set, the field is authoritative.
+When `target:` is omitted, a conforming resolver SHOULD auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `windsurf` if `.windsurf/` exists, `kiro` if `.kiro/` exists, `all` if multiple are present, `minimal` if none. Auto-detection applies only when `target:` is unset; once set, the field is authoritative.
 
 ```yaml
 # Single target
@@ -158,6 +158,7 @@ A plural alias `targets:` (YAML list only) is also accepted and takes precedence
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
+| `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
 | `all` | All targets. Cannot be combined with other values in a list. |
 | `minimal` | `AGENTS.md` only at project root. **Auto-detected only**: this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |
 
@@ -531,7 +532,7 @@ dependencies:
 
 Values in `headers` and `env` may contain three placeholder syntaxes. APM resolves them per-target so secrets stay out of generated config files where possible.
 
-| Syntax | Source | VS Code | JetBrains Copilot | Copilot CLI | Codex / Gemini / Cursor |
+| Syntax | Source | VS Code | JetBrains Copilot | Copilot CLI / Kiro | Codex / Gemini / Cursor |
 |---|---|---|---|---|---|
 | `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Translated to `${env:VAR}` | Native; passed through verbatim | Resolved at install time from env (or interactive prompt) |
 | `${env:VAR}` | host environment | Native; passed through verbatim | Native; passed through verbatim | Translated to `${VAR}` | Resolved at install time from env (or interactive prompt) |
@@ -540,7 +541,7 @@ Values in `headers` and `env` may contain three placeholder syntaxes. APM resolv
 
 - **VS Code** has native `${env:VAR}` and `${input:VAR}` interpolation, so APM emits placeholders rather than baking secrets into `mcp.json`. Bare `${VAR}` is normalized to `${env:VAR}` for you.
 - **JetBrains Copilot** has native `${env:VAR}` interpolation in `mcp.json`; APM normalizes `${VAR}` and legacy `<VAR>` to `${env:VAR}`.
-- **Copilot CLI** has native `${VAR}` interpolation in `~/.copilot/mcp-config.json`; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
+- **Copilot CLI and Kiro** have native `${VAR}` interpolation in their MCP config files; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
 - **Codex, Gemini, and Cursor** have no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
 - **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
 - **Registry-backed servers** - APM auto-generates input prompts from registry metadata for `${input:...}`.

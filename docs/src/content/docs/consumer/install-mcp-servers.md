@@ -85,6 +85,7 @@ writes a runtime-specific MCP config file. The schemas differ; the
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
+| Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 
 ## How `targets:` gates which configs get written
 
@@ -122,7 +123,7 @@ declare one in `apm.yml`. (#1335)
 `apm install -g --mcp NAME` is a deliberate carve-out: it routes the
 write to each runtime's user-scope MCP config (Copilot CLI to
 `~/.copilot/mcp-config.json`, Codex CLI to `~/.codex/config.toml`,
-Gemini CLI to `~/.gemini/settings.json`) and does not consult the
+Gemini CLI to `~/.gemini/settings.json`, Kiro to `~/.kiro/settings/mcp.json`) and does not consult the
 project-scope `targets:` whitelist -- user-scope writes are by
 definition not project-bound. Workspace-only runtimes (VS Code,
 Cursor, OpenCode) are skipped at user scope.
