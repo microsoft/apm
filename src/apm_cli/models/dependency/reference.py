@@ -264,6 +264,22 @@ class DependencyReference:
     # First path segment after host that often starts in-repo virtual layout (GitLab heuristic).
     _GITLAB_VIRTUAL_ROOT_SEGMENTS = frozenset({"prompts", "instructions", "collections"})
 
+    # Known APM primitive directory names. Used to detect a subpath accidentally
+    # embedded inside an explicit git URL form (SCP/ssh://https://), which git
+    # would later reject with a cryptic "not a valid repository name" error.
+    _APM_PRIMITIVE_DIRS: frozenset = frozenset(
+        {
+            "skills",
+            "agents",
+            "prompts",
+            "instructions",
+            "chatmodes",
+            "collections",
+            "contexts",
+            "memory",
+        }
+    )
+
     def is_artifactory(self) -> bool:
         """Check if this reference points to a JFrog Artifactory VCS repository."""
         return self.artifactory_prefix is not None
@@ -706,6 +722,57 @@ class DependencyReference:
         normalized = "/".join(segments)
         validate_path_segments(normalized, context="path")
         return normalized
+
+    @staticmethod
+    def _check_no_embedded_subpath(url: str) -> None:
+        """Guard: reject a subpath embedded in an explicit git URL form (#872).
+
+        Detects when a user writes, e.g.:
+            git: git@github.com:org/repo/skills/hello-world.git
+
+        Such URLs cause git to fail later with a cryptic
+        ``fatal: '...' does not appear to be a git repository`` message.
+        This guard fires early and points at the supported ``path:`` key.
+
+        The heuristic: for SCP (``git@host:path``), ``ssh://``, or
+        ``https://``/``http://`` URL forms, if any non-last path segment
+        matches a known APM primitive directory name (skills, agents, prompts,
+        etc.), the URL encodes a subpath that belongs in the ``path:`` key.
+
+        GitLab subgroups and Azure DevOps org/project paths do not use APM
+        primitive names (skills, agents, prompts, ...) as segment labels, so
+        the check produces no false positives for those legitimate forms.
+        """
+        raw = url.strip()
+
+        if SCP_LIKE_RE.match(raw):
+            colon_idx = raw.index(":")
+            path_part = raw[colon_idx + 1 :]
+        elif raw.lower().startswith(("ssh://", "https://", "http://")):
+            path_part = urllib.parse.urlparse(raw).path
+        else:
+            return  # bare shorthand or other form -- not in scope
+
+        # Strip fragment and query string, then remove trailing .git suffix
+        path_part = path_part.split("#")[0].split("?")[0]
+        if path_part.endswith(".git"):
+            path_part = path_part[:-4]
+
+        segments = [s for s in path_part.replace("\\", "/").split("/") if s]
+        if len(segments) < 3:
+            return  # too few segments to contain an interior primitive name
+
+        # If any non-last segment is a known APM primitive directory, the URL
+        # encodes a subpath that should be the `path:` key instead.
+        for seg in segments[:-1]:
+            if seg in DependencyReference._APM_PRIMITIVE_DIRS:
+                raise ValueError(
+                    "[x] A subpath cannot be embedded in a git URL. "
+                    "Use the `path:` key instead: "
+                    "`git: <repo-url>` + `path: <primitive>/<name>` "
+                    "(or the shorthand `org/repo/<primitive>/<name>`). "
+                    f"Got: {raw!r}"
+                )
 
     @classmethod
     def parse_from_dict(cls, entry: dict) -> "DependencyReference":
@@ -1931,6 +1998,11 @@ class DependencyReference:
         cls._reject_shorthand_alias(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
+
+        # Guard: detect a subpath embedded in an explicit git URL form (#872).
+        # Fires before virtual-package detection so the user gets an actionable
+        # error rather than a cryptic downstream git failure.
+        cls._check_no_embedded_subpath(dependency_str)
 
         # Phase 1: detect virtual packages
         is_virtual_package, virtual_path, validated_host = cls._detect_virtual_package(
