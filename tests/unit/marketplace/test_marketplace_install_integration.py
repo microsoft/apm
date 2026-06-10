@@ -2,6 +2,7 @@
 
 import json
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 from apm_cli.marketplace.models import MarketplacePlugin, MarketplaceSource
 from apm_cli.marketplace.resolver import (
@@ -53,11 +54,19 @@ class TestValidationOutcomeProvenance:
                 "owner/repo": {
                     "discovered_via": "acme-tools",
                     "marketplace_plugin_name": "security-checks",
+                    "source_url": "https://catalog.example.com/marketplace.json",
+                    "source_digest": "sha256:" + "a" * 64,
                 }
             },
         )
         assert outcome.marketplace_provenance is not None
         assert "owner/repo" in outcome.marketplace_provenance
+        source_url = urlparse(outcome.marketplace_provenance["owner/repo"]["source_url"])
+        assert (source_url.scheme, source_url.hostname, source_url.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
 
     def test_outcome_no_provenance(self):
         from apm_cli.core.command_logger import _ValidationOutcome
@@ -114,6 +123,40 @@ class TestInstallExitCodeOnAllFailed:
         mock_validate.assert_called_once()
 
 
+class TestMarketplaceResolutionProvenance:
+    """Resolver carries marketplace source provenance to install validation."""
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_resolution_includes_manifest_source_url_and_digest(self, mock_get_source, mock_fetch):
+        from apm_cli.marketplace.models import MarketplaceManifest
+        from apm_cli.marketplace.resolver import resolve_marketplace_plugin
+
+        mock_get_source.return_value = MarketplaceSource(
+            name="catalog",
+            url="https://catalog.example.com/marketplace.json",
+            path="",
+        )
+        mock_fetch.return_value = MarketplaceManifest(
+            name="catalog",
+            plugins=(
+                MarketplacePlugin(name="tool", source={"type": "github", "repo": "acme/tool"}),
+            ),
+            source_url="https://catalog.example.com/marketplace.json",
+            source_digest="sha256:" + "d" * 64,
+        )
+
+        resolution = resolve_marketplace_plugin("tool", "catalog")
+
+        resolved_source = urlparse(resolution.source_url)
+        assert (resolved_source.scheme, resolved_source.hostname, resolved_source.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        assert resolution.source_digest == "sha256:" + "d" * 64
+
+
 class TestInstallMarketplaceGitLabMonorepoWiring:
     """Install uses resolver ``dependency_reference`` for GitLab-class monorepo plugins."""
 
@@ -142,6 +185,8 @@ class TestInstallMarketplaceGitLabMonorepoWiring:
             canonical=canonical,
             plugin=plugin,
             dependency_reference=dep_ref,
+            source_url="https://catalog.example.com/marketplace.json",
+            source_digest="sha256:" + "e" * 64,
         )
 
         apm_yml = tmp_path / "apm.yml"
@@ -164,6 +209,17 @@ class TestInstallMarketplaceGitLabMonorepoWiring:
         identity = dep_ref.get_identity()
         assert identity in outcome.marketplace_provenance
         assert outcome.marketplace_provenance[identity]["discovered_via"] == "apm-reg"
+        provenance_source_url = urlparse(outcome.marketplace_provenance[identity]["source_url"])
+        assert (
+            provenance_source_url.scheme,
+            provenance_source_url.hostname,
+            provenance_source_url.path,
+        ) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        assert outcome.marketplace_provenance[identity]["source_digest"] == "sha256:" + "e" * 64
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install._rich_success")

@@ -265,6 +265,115 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_git_url_fragment_sets_ref_and_canonical_url(self, mock_detect, mock_fetch, runner):
+        """Anthropic git URL shape accepts #ref and stores the URL without the fragment."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "https://gitlab.com/acme/team/plugin-marketplace.git#v1.2.3"],
+        )
+
+        assert result.exit_code == 0, result.output
+        probe_source = mock_detect.call_args[0][0]
+        final_source = mock_fetch.call_args[0][0]
+        assert probe_source.url == "https://gitlab.com/acme/team/plugin-marketplace.git"
+        assert probe_source.ref == "v1.2.3"
+        assert final_source.url == "https://gitlab.com/acme/team/plugin-marketplace.git"
+        assert final_source.ref == "v1.2.3"
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_unpinned_git_url_warns_about_mutable_ref(self, mock_detect, mock_fetch, runner):
+        """Git URL sources without #ref get an actionable pinning warning."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
+
+        result = runner.invoke(
+            marketplace, ["add", "https://gitlab.com/acme/team/plugin-marketplace.git"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Pin this git marketplace" in result.output
+        assert "#v1.0.0" in result.output
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    def test_add_local_marketplace_json_file(self, mock_add, runner, tmp_path):
+        """Local file sources register through apm marketplace add."""
+        from apm_cli.commands.marketplace import marketplace
+
+        manifest = tmp_path / "marketplace.json"
+        manifest.write_text(
+            '{"name":"local-catalog","plugins":[{"name":"tool","repository":"acme/tool"}]}'
+        )
+
+        result = runner.invoke(marketplace, ["add", str(manifest), "--name", "local-catalog"])
+
+        assert result.exit_code == 0, result.output
+        registered = mock_add.call_args[0][0]
+        assert registered.name == "local-catalog"
+        assert registered.path == ""
+        assert registered.kind == "local"
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    def test_add_remote_marketplace_json_url_fetches_directly(self, mock_add, runner, monkeypatch):
+        """Remote marketplace.json URLs are direct JSON sources, not git repositories."""
+        from apm_cli.commands.marketplace import marketplace
+
+        class Response:
+            status_code = 200
+            url = "https://catalog.example.com/marketplace.json"
+            content = b'{"name":"catalog","plugins":[{"name":"tool","repository":"acme/tool"}]}'
+
+            def __init__(self):
+                self.headers = {"ETag": "abc"}
+
+            def raise_for_status(self):
+                return None
+
+        requests_seen: list[str] = []
+
+        def fake_get(url, headers=None, timeout=None):
+            requests_seen.append(url)
+            return Response()
+
+        monkeypatch.setattr("apm_cli.marketplace.client.requests.get", fake_get)
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "https://catalog.example.com/marketplace.json", "--name", "catalog"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(requests_seen) == 1
+        requested = urlparse(requests_seen[0])
+        assert (requested.scheme, requested.hostname, requested.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        registered = mock_add.call_args[0][0]
+        assert registered.name == "catalog"
+        registered_url = urlparse(registered.url)
+        assert (registered_url.scheme, registered_url.hostname, registered_url.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        assert registered.path == ""
+        assert registered.kind == "url"
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
     def test_add_strips_dot_git_suffix(self, mock_detect, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 

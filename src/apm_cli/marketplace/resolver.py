@@ -105,10 +105,24 @@ class MarketplacePluginResolution:
     plugin: MarketplacePlugin
     dependency_reference: DependencyReference | None = None
     cross_repo_misconfig_risk: CrossRepoMisconfigRisk | None = None
+    source_url: str = ""
+    source_digest: str = ""
 
     def __iter__(self) -> Iterator[str | MarketplacePlugin]:
         yield self.canonical
         yield self.plugin
+
+    def provenance(self, marketplace_name: str, plugin_name: str) -> dict[str, str]:
+        """Return lockfile provenance for this resolved marketplace plugin."""
+        data = {
+            "discovered_via": marketplace_name,
+            "marketplace_plugin_name": plugin_name,
+        }
+        if self.source_url:
+            data["source_url"] = self.source_url
+        if self.source_digest:
+            data["source_digest"] = self.source_digest
+        return data
 
 
 def _normalize_owner_repo_slug(repo: str) -> str:
@@ -789,6 +803,8 @@ def resolve_marketplace_plugin(
             plugin=plugin,
             dependency_reference=None,
             cross_repo_misconfig_risk=None,
+            source_url=manifest.source_url,
+            source_digest=manifest.source_digest,
         )
 
     canonical = resolve_plugin_source(
@@ -950,4 +966,6 @@ def resolve_marketplace_plugin(
         plugin=plugin,
         dependency_reference=dep_ref,
         cross_repo_misconfig_risk=cross_repo_misconfig_risk,
+        source_url=manifest.source_url,
+        source_digest=manifest.source_digest,
     )

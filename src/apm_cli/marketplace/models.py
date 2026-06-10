@@ -139,13 +139,13 @@ class MarketplaceSource:
             # that pass only name=... will fail later when something tries to use it.
 
         # Backfill legacy mirror fields from URL when caller used URL-only signature.
-        if self.url and not self.owner and not self.repo:
+        if self.url and self.path != "" and not self.owner and not self.repo:
             o, r = _extract_owner_repo_from_url(self.url)
             if o:
                 object.__setattr__(self, "owner", o)
             if r:
                 object.__setattr__(self, "repo", r)
-        if self.url and self.host == "github.com":
+        if self.url and self.path != "" and self.host == "github.com":
             h = _extract_host_from_url(self.url)
             if h:
                 object.__setattr__(self, "host", h)
@@ -153,17 +153,31 @@ class MarketplaceSource:
     # -- derived properties --------------------------------------------------
 
     @property
+    def is_remote_manifest_url(self) -> bool:
+        """Return True for direct remote marketplace.json URL sources."""
+        if not self.url or self.path != "":
+            return False
+        try:
+            parsed = urlsplit(self.url)
+        except ValueError:
+            return False
+        return parsed.scheme.lower() == "https" and bool(parsed.hostname)
+
+    @property
     def kind(self) -> str:
-        """Derived source kind: ``local`` | ``github`` | ``gitlab`` | ``git``.
+        """Derived source kind: ``local`` | ``url`` | ``github`` | ``gitlab`` | ``git``.
 
         Classification:
         - Local filesystem path or ``file://`` URI -> ``local``
+        - Direct remote marketplace.json URL (``path == ""``) -> ``url``
         - Host classified by AuthResolver as github/ghe_cloud/ghes -> ``github``
         - Host classified as gitlab -> ``gitlab``
         - Anything else (ado, generic, ssh to non-classified host) -> ``git``
         """
         if not self.url or _looks_like_local_path(self.url):
             return "local"
+        if self.is_remote_manifest_url:
+            return "url"
         host = _extract_host_from_url(self.url)
         if not host:
             return "git"
@@ -193,6 +207,8 @@ class MarketplaceSource:
         k = self.kind
         if k in ("github", "gitlab") and self.owner and self.repo:
             return f"{self.owner}/{self.repo}"
+        if k == "url":
+            return self.url
         if k == "local":
             lp = self.local_path
             home = os.path.expanduser("~")
@@ -295,6 +311,8 @@ class MarketplaceManifest:
     owner_name: str = ""
     description: str = ""
     plugin_root: str = ""  # metadata.pluginRoot - base path for bare-name sources
+    source_url: str = ""
+    source_digest: str = ""
 
     def find_plugin(self, plugin_name: str) -> MarketplacePlugin | None:
         """Find a plugin by exact name (case-insensitive)."""
@@ -417,7 +435,13 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
     )
 
 
-def parse_marketplace_json(data: dict[str, Any], source_name: str = "") -> MarketplaceManifest:
+def parse_marketplace_json(
+    data: dict[str, Any],
+    source_name: str = "",
+    *,
+    source_url: str = "",
+    source_digest: str = "",
+) -> MarketplaceManifest:
     """Parse a marketplace.json dict into a ``MarketplaceManifest``.
 
     Accepts both Copilot CLI and Claude Code marketplace formats.
@@ -426,6 +450,8 @@ def parse_marketplace_json(data: dict[str, Any], source_name: str = "") -> Marke
     Args:
         data: Parsed JSON content of marketplace.json.
         source_name: Display name of the marketplace (for provenance).
+        source_url: Canonical marketplace source URL for lockfile provenance.
+        source_digest: SHA-256 digest of the fetched marketplace.json bytes.
 
     Returns:
         MarketplaceManifest: Parsed manifest with valid plugin entries.
@@ -468,4 +494,6 @@ def parse_marketplace_json(data: dict[str, Any], source_name: str = "") -> Marke
         owner_name=owner_name,
         description=description,
         plugin_root=plugin_root,
+        source_url=source_url,
+        source_digest=source_digest,
     )

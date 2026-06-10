@@ -168,6 +168,99 @@ class TestFetchMarketplace:
         with pytest.raises(MarketplaceFetchError):
             client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=mock_resolver)
 
+    def test_fetch_remote_marketplace_url_records_digest_and_etag(self, monkeypatch):
+        source = MarketplaceSource(
+            name="catalog",
+            url="https://catalog.example.com/marketplace.json",
+            path="",
+        )
+        raw = b'{"name":"catalog","plugins":[{"name":"tool","repository":"acme/tool"}]}'
+
+        class Response:
+            status_code = 200
+            url = "https://catalog.example.com/marketplace.json"
+            content = raw
+
+            def __init__(self):
+                self.headers = {
+                    "ETag": "etag-1",
+                    "Last-Modified": "Mon, 01 Jan 2024 00:00:00 GMT",
+                }
+
+            def raise_for_status(self):
+                return None
+
+        seen_headers: list[dict] = []
+
+        def fake_get(url, headers=None, timeout=None):
+            parsed = urlparse(url)
+            assert (parsed.scheme, parsed.hostname, parsed.path) == (
+                "https",
+                "catalog.example.com",
+                "/marketplace.json",
+            )
+            seen_headers.append(headers or {})
+            return Response()
+
+        monkeypatch.setattr(client_mod.requests, "get", fake_get)
+
+        manifest = client_mod.fetch_marketplace(source, force_refresh=True)
+
+        parsed_source_url = urlparse(manifest.source_url)
+        assert (parsed_source_url.scheme, parsed_source_url.hostname, parsed_source_url.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        assert manifest.source_digest.startswith("sha256:")
+        assert len(manifest.source_digest) == len("sha256:") + 64
+        assert seen_headers == [{"User-Agent": "apm-cli"}]
+        meta = client_mod._read_stale_meta(client_mod._cache_key(source))
+        assert meta["etag"] == "etag-1"
+        assert meta["index_digest"] == manifest.source_digest
+
+    def test_fetch_remote_marketplace_url_sends_conditional_headers(self, monkeypatch):
+        source = MarketplaceSource(
+            name="catalog",
+            url="https://catalog.example.com/marketplace.json",
+            path="",
+        )
+        cached = {"name": "catalog", "plugins": []}
+        cache_key = client_mod._cache_key(source)
+        client_mod._write_cache(
+            cache_key,
+            cached,
+            index_digest="sha256:" + "a" * 64,
+            etag="etag-1",
+            last_modified="Mon, 01 Jan 2024 00:00:00 GMT",
+        )
+
+        seen_headers: list[dict] = []
+
+        class Response:
+            status_code = 304
+            url = "https://catalog.example.com/marketplace.json"
+            content = b""
+
+            def __init__(self):
+                self.headers = {}
+
+            def raise_for_status(self):
+                return None
+
+        def fake_get(url, headers=None, timeout=None):
+            seen_headers.append(headers or {})
+            return Response()
+
+        monkeypatch.setattr(client_mod.requests, "get", fake_get)
+
+        manifest = client_mod.fetch_marketplace(source, force_refresh=True)
+
+        assert manifest.name == "catalog"
+        assert manifest.source_digest == "sha256:" + "a" * 64
+        assert seen_headers[0]["If-None-Match"] == "etag-1"
+        assert seen_headers[0]["If-Modified-Since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
+
 
 class TestAutoDetectPath:
     """Auto-detect marketplace.json location in a repo."""

@@ -13,6 +13,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import click
 import yaml
@@ -524,19 +525,28 @@ def add(source, name, ref, branch, host, verbose):
         from ...marketplace.registry import add_marketplace
         from ...utils.github_host import is_valid_fqdn
 
+        source_arg, fragment_ref = _split_source_fragment_ref(source)
+
         # --ref / --branch reconciliation. --branch stays as a hidden alias
-        # for one release so legacy invocations keep working; passing both
-        # is a hard error so we never silently pick one.
+        # for one release so legacy invocations keep working; passing multiple
+        # ref sources is a hard error so we never silently pick one.
+        explicit_ref = ref is not None or branch is not None
         if ref is not None and branch is not None:
             logger.error(
                 "--ref and --branch are mutually exclusive. Use --ref (--branch is a deprecated alias).",
                 symbol="error",
             )
             sys.exit(1)
-        effective_ref = ref if ref is not None else (branch if branch is not None else "main")
+        if fragment_ref and explicit_ref:
+            logger.error(
+                "Do not combine a git URL #ref with --ref or --branch. Use one ref source.",
+                symbol="error",
+            )
+            sys.exit(1)
+        effective_ref = fragment_ref or ref or branch or "main"
 
         try:
-            url, kind, resolved_host = _parse_marketplace_source(source, host)
+            url, kind, resolved_host = _parse_marketplace_source(source_arg, host)
         except PathTraversalError:
             logger.error(
                 f"Invalid source '{source}': contains a path-traversal sequence. "
@@ -557,6 +567,8 @@ def add(source, name, ref, branch, host, verbose):
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
         # / SSH / local-path inputs the host is already embedded; warn that
         # --host is being ignored rather than silently overriding.
+        is_direct_url = _is_remote_marketplace_json_url(url)
+
         if host is not None and kind == "local":
             logger.warning(
                 "--host is ignored when SOURCE is a local filesystem path.",
@@ -566,7 +578,7 @@ def add(source, name, ref, branch, host, verbose):
             host is not None
             and host.strip().lower() != (resolved_host or "").lower()
             and kind in ("git", "github", "gitlab")
-            and (source.startswith(("https://", "git@", "file://")))
+            and (source_arg.startswith(("https://", "git@", "file://")))
         ):
             logger.warning(
                 "--host is ignored when SOURCE is a full URL.",
@@ -607,8 +619,18 @@ def add(source, name, ref, branch, host, verbose):
 
         # Surface progress before the slow probe + fetch (5-30s for generic-git)
         # so the user sees activity instead of staring at a blank terminal.
-        provisional_label = name or _default_alias_from_url(url)
+        provisional_label = name or (
+            _default_alias_from_remote_url(url) if is_direct_url else _default_alias_from_url(url)
+        )
         logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
+        if _should_warn_unpinned_git_url(
+            source_arg, kind, is_direct_url, fragment_ref, explicit_ref
+        ):
+            logger.warning(
+                "Pin this git marketplace with a #ref (for example, "
+                f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates.",
+                symbol="warning",
+            )
 
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- _auto_detect_path only consults url/ref/path/kind.
@@ -616,9 +638,13 @@ def add(source, name, ref, branch, host, verbose):
         probe_source = MarketplaceSource(
             name=probe_name,
             url=url,
-            ref=effective_ref,
+            ref="" if is_direct_url else effective_ref,
+            path="" if is_direct_url else "marketplace.json",
         )
-        detected_path = _auto_detect_path(probe_source)
+        if is_direct_url or _local_source_points_to_file(probe_source):
+            detected_path = ""
+        else:
+            detected_path = _auto_detect_path(probe_source)
 
         if detected_path is None:
             logger.error(
@@ -632,7 +658,7 @@ def add(source, name, ref, branch, host, verbose):
         fetch_source = MarketplaceSource(
             name=probe_name,
             url=url,
-            ref=effective_ref,
+            ref="" if is_direct_url else effective_ref,
             path=detected_path,
         )
         manifest = fetch_marketplace(fetch_source, force_refresh=True)
@@ -663,15 +689,16 @@ def add(source, name, ref, branch, host, verbose):
         )
 
         logger.verbose_detail(f"    Source: {fetch_source.display_source}")
-        logger.verbose_detail(f"    Kind: {kind}")
-        logger.verbose_detail(f"    Ref: {effective_ref}")
+        logger.verbose_detail(f"    Kind: {fetch_source.kind}")
+        if not is_direct_url:
+            logger.verbose_detail(f"    Ref: {effective_ref}")
         logger.verbose_detail(f"    Detected path: {detected_path}")
         logger.verbose_detail(f"    Alias source: {alias_source}")
 
         final_source = MarketplaceSource(
             name=display_name,
             url=url,
-            ref=effective_ref,
+            ref="" if is_direct_url else effective_ref,
             path=detected_path,
         )
         add_marketplace(final_source)
@@ -694,6 +721,61 @@ def add(source, name, ref, branch, host, verbose):
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
+
+def _split_source_fragment_ref(source: str) -> tuple[str, str]:
+    """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
+    raw = (source or "").strip()
+    if not raw.lower().startswith("https://"):
+        return raw, ""
+    parsed = urlsplit(raw)
+    if not parsed.fragment:
+        return raw, ""
+    clean_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+    return clean_url, parsed.fragment
+
+
+def _is_remote_marketplace_json_url(url: str) -> bool:
+    """Return True when *url* names a hosted marketplace.json document."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    path = (parsed.path or "").rstrip("/")
+    return parsed.scheme.lower() == "https" and path.endswith("/marketplace.json")
+
+
+def _should_warn_unpinned_git_url(
+    source: str,
+    kind: str,
+    is_direct_url: bool,
+    fragment_ref: str,
+    explicit_ref: bool,
+) -> bool:
+    """Return True when a git URL source uses the implicit mutable default ref."""
+    if is_direct_url or fragment_ref or explicit_ref:
+        return False
+    return source.lower().startswith("https://") and kind in {"github", "gitlab", "git"}
+
+
+def _local_source_points_to_file(source) -> bool:
+    """Return True when a local marketplace source points directly to a file."""
+    if source.kind != "local":
+        return False
+    try:
+        return Path(source.local_path).expanduser().is_file()
+    except OSError:
+        return False
+
+
+def _default_alias_from_remote_url(url: str) -> str:
+    """Derive a stable default alias for a direct remote marketplace.json URL."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return "marketplace"
+    host = (parsed.hostname or "marketplace").lower()
+    return host.split(":", 1)[0]
 
 
 def _default_alias_from_url(url: str) -> str:
@@ -850,7 +932,7 @@ def update(name, verbose):
         if name:
             source = get_marketplace_by_name(name)
             logger.start(f"Refreshing marketplace '{name}'...", symbol="gear")
-            clear_marketplace_cache(name, host=source.host)
+            clear_marketplace_cache(source=source)
             manifest = fetch_marketplace(source, force_refresh=True)
             logger.success(
                 f"Marketplace '{name}' updated ({len(manifest.plugins)} plugins)",
@@ -864,7 +946,7 @@ def update(name, verbose):
             logger.start(f"Refreshing {len(sources)} marketplace(s)...", symbol="gear")
             for s in sources:
                 try:
-                    clear_marketplace_cache(s.name, host=s.host)
+                    clear_marketplace_cache(source=s)
                     manifest = fetch_marketplace(s, force_refresh=True)
                     logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
                 except Exception as exc:
@@ -910,7 +992,7 @@ def remove(name, yes, verbose):
                 return
 
         remove_marketplace(name)
-        clear_marketplace_cache(name, host=source.host)
+        clear_marketplace_cache(source=source)
         logger.success(f"Marketplace '{name}' removed", symbol="check")
 
     except Exception as e:

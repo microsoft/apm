@@ -52,6 +52,8 @@ class LockedDependency:
     is_dev: bool = False  # True for devDependencies
     discovered_via: str | None = None  # Marketplace name (provenance)
     marketplace_plugin_name: str | None = None  # Plugin name in marketplace
+    source_url: str | None = None  # Canonical marketplace source URL
+    source_digest: str | None = None  # sha256 digest of the marketplace manifest
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
@@ -127,6 +129,10 @@ class LockedDependency:
             result["discovered_via"] = self.discovered_via
         if self.marketplace_plugin_name:
             result["marketplace_plugin_name"] = self.marketplace_plugin_name
+        if self.source_url:
+            result["source_url"] = self.source_url
+        if self.source_digest:
+            result["source_digest"] = self.source_digest
         if self.is_insecure:
             result["is_insecure"] = True
         if self.allow_insecure:
@@ -202,6 +208,8 @@ class LockedDependency:
             "is_dev",
             "discovered_via",
             "marketplace_plugin_name",
+            "source_url",
+            "source_digest",
             "is_insecure",
             "allow_insecure",
             "skill_subset",
@@ -236,6 +244,8 @@ class LockedDependency:
             is_dev=data.get("is_dev", False),
             discovered_via=data.get("discovered_via"),
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
+            source_url=data.get("source_url"),
+            source_digest=data.get("source_digest"),
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
