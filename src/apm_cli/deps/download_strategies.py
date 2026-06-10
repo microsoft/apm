@@ -29,6 +29,7 @@ from ..utils.github_host import (
     default_host,
     is_github_hostname,
 )
+from .git_file_transport import fetch_file_via_git_sparse
 from .host_backends import backend_for
 
 # ---------------------------------------------------------------------------
@@ -630,7 +631,17 @@ class DownloadDelegate:
         ref: str = "main",
         verbose_callback=None,
     ) -> bytes:
-        """Download a file via GitLab REST v4 ``repository/files/.../raw``."""
+        """Download a GitLab file: git-transport-first, REST API as fallback.
+
+        Primary path (the 410-killer): extracts the file via git sparse/
+        partial checkout (blob:none + cone sparse-checkout) so SSH keys and
+        system git credentials are sufficient -- no REST API token needed.
+
+        Fallback (thin GITLAB_PAT path): if the git transport fails (e.g.
+        SSH not available, network restriction), the existing GitLab REST v4
+        ``repository/files/.../raw`` endpoint is tried with the GITLAB_APM_PAT
+        / GITLAB_TOKEN credential, mirroring the ADO_APM_PAT pattern.
+        """
         host = dep_ref.host or default_host()
         host_info = self._host.auth_resolver.classify_host(
             host,
@@ -641,6 +652,23 @@ class DownloadDelegate:
         if not project_path:
             raise RuntimeError("Missing repository path for GitLab file download")
 
+        # -- Primary: git sparse/partial checkout (works even when API is 410) --
+        try:
+            git_env = {**os.environ, **(self._host.git_env or {})}
+            content = fetch_file_via_git_sparse(
+                dep_ref,
+                file_path,
+                ref,
+                build_repo_url_fn=self._host._build_repo_url,
+                git_env=git_env,
+            )
+            if verbose_callback:
+                verbose_callback(f"Downloaded file via git: {host}/{dep_ref.repo_url}/{file_path}")
+            return content
+        except Exception as git_err:
+            _debug(f"git transport failed for {host}/{dep_ref.repo_url}/{file_path}: {git_err}")
+
+        # -- Fallback: GitLab REST v4 API (requires GITLAB_APM_PAT / GITLAB_TOKEN) --
         org = project_path.split("/")[0]
         file_ctx = self._host.auth_resolver.resolve(
             host,

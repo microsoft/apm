@@ -134,6 +134,13 @@ the HTTP file-read path. If a private host fails with 401/403, use a whole-repo
 git dependency for full clone auth support, or choose the supported HTTP backend
 signal (`type: gitlab` for GitLab-compatible hosts, `GITHUB_HOST` for GHES).
 
+**GitLab `path:` fetch transport:** when a dependency's source is a GitLab
+repo (SaaS or self-hosted), APM fetches the `path:`-specified file via git
+sparse/partial checkout (the same transport used for the clone) rather than
+the REST API. This works with existing SSH keys and git credential helpers, and
+is the fix for self-hosted GitLab instances where the API returns 410 (disabled).
+If git transport fails, APM falls back to the REST API using `GITLAB_APM_PAT`.
+
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
 
