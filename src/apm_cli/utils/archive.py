@@ -49,7 +49,12 @@ def _check_archive_member(member_path: str) -> None:
 def _detect_archive_format(content_type: str, url: str) -> str:
     """Return ``tar.gz`` or ``zip`` from Content-Type or URL extension."""
     media_type = content_type.lower().split(";", 1)[0].strip()
-    if media_type in {"application/gzip", "application/x-gzip", "application/x-tar"}:
+    if media_type == "application/x-tar":
+        raise ArchiveError(
+            "Uncompressed tar archives are not supported; "
+            "only gzip-compressed tarballs (.tar.gz) and zip archives are supported"
+        )
+    if media_type in {"application/gzip", "application/x-gzip"}:
         return "tar.gz"
     if media_type in {"application/zip", "application/x-zip-compressed"}:
         return "zip"
@@ -148,9 +153,10 @@ def download_and_extract_archive(url: str, dest_dir: str) -> list[str]:
     final_url = getattr(response, "url", url)
     if isinstance(final_url, str) and urlparse(final_url).scheme.lower() != "https":
         raise ArchiveError(f"Redirect to non-HTTPS URL rejected: {final_url!r}")
+    detection_url = final_url if isinstance(final_url, str) and final_url else url
 
     Path(dest_dir).mkdir(parents=True, exist_ok=True)
-    archive_format = _detect_archive_format(response.headers.get("Content-Type", ""), url)
+    archive_format = _detect_archive_format(response.headers.get("Content-Type", ""), detection_url)
     if archive_format == "tar.gz":
         return _extract_tar_gz(response.content, dest_dir)
     return _extract_zip(response.content, dest_dir)

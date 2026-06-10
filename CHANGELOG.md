@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
 - `apm marketplace add` now accepts Anthropic-compatible git URL `#ref`, local
   file, and hosted `marketplace.json` sources, recording hosted JSON provenance
-  in the lockfile. (closes #676)
+  in the lockfile (closes #676). (#1739)
 
 ## [0.19.0] - 2026-06-09
 

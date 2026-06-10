@@ -99,7 +99,7 @@ URL auth is tracked separately.
 
 For generic-git marketplaces, `marketplace.json` is fetched via a
 sparse-cone clone (only the manifest path is downloaded); APM does
-not forward `GITHUB_APM_PAT` or `GITLAB_APM_TOKEN` to non-GitHub /
+not forward `GITHUB_APM_PAT` or `GITLAB_APM_PAT` to non-GitHub /
 non-GitLab hosts. Authentication falls through to the host's local git
 credential helper when one is configured. See
 [Authentication](../authentication/).

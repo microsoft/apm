@@ -9,7 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.archive import ArchiveError, _extract_tar_gz, _extract_zip
+from apm_cli.utils import archive as archive_mod
+from apm_cli.utils.archive import (
+    ArchiveError,
+    _detect_archive_format,
+    _extract_tar_gz,
+    _extract_zip,
+    download_and_extract_archive,
+)
 
 
 def _zip_bytes(entries: dict[str, bytes]) -> bytes:
@@ -28,6 +35,35 @@ def _tar_gz_bytes(entries: dict[str, bytes]) -> bytes:
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
     return buf.getvalue()
+
+
+def test_detect_archive_format_rejects_uncompressed_tar() -> None:
+    with pytest.raises(ArchiveError, match=r"gzip-compressed tarballs"):
+        _detect_archive_format("application/x-tar", "https://example.test/archive.tar")
+
+
+def test_download_and_extract_archive_uses_redirect_url_for_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Response:
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": ""}
+            self.content = _zip_bytes({"plugin/SKILL.md": b"content"})
+            self.url = "https://cdn.example.test/plugin.zip"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(_url: str, **_kwargs: object) -> Response:
+        return Response()
+
+    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+
+    out = tmp_path / "out"
+    extracted = download_and_extract_archive("https://example.test/download", str(out))
+
+    assert extracted == ["plugin/SKILL.md"]
+    assert (out / "plugin" / "SKILL.md").read_text() == "content"
 
 
 def test_extract_zip_rejects_path_traversal(tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ import re
 import sys
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
 import click
@@ -50,6 +51,9 @@ from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from .._helpers import _get_console, _is_interactive
+
+if TYPE_CHECKING:
+    from ...marketplace.models import MarketplaceSource
 
 logger = logging.getLogger(__name__)
 
@@ -758,7 +762,7 @@ def _should_warn_unpinned_git_url(
     return source.lower().startswith("https://") and kind in {"github", "gitlab", "git"}
 
 
-def _local_source_points_to_file(source) -> bool:
+def _local_source_points_to_file(source: MarketplaceSource) -> bool:
     """Return True when a local marketplace source points directly to a file."""
     if source.kind != "local":
         return False
